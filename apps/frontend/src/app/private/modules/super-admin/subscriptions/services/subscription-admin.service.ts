@@ -26,6 +26,9 @@ import {
   DunningStatsResponse,
   ActivateStorePlanDto,
   ActivateStorePlanResult,
+  ActivatePlanOptions,
+  ActivatePlanPreview,
+  ActivatePlanPreviewRequest,
 } from '../interfaces/subscription-admin.interface';
 
 export interface ApiResponse<T> {
@@ -365,6 +368,28 @@ export class SubscriptionAdminService {
       `${this.apiUrl}/superadmin/subscriptions/stores/${storeId}/activate-plan`,
       body,
     );
+  }
+
+  /** Opciones (grupos/ciclos) y suscripción actual para el modal "Activar plan". */
+  getActivatePlanOptions(storeId: number): Observable<ActivatePlanOptions> {
+    return this.http
+      .get<ApiResponse<ActivatePlanOptions>>(
+        `${this.apiUrl}/superadmin/subscriptions/stores/${storeId}/activate-plan/options`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Vista previa (sin efectos) de la activación de un plan. */
+  previewActivatePlan(
+    storeId: number,
+    body: ActivatePlanPreviewRequest,
+  ): Observable<ActivatePlanPreview> {
+    return this.http
+      .post<ApiResponse<ActivatePlanPreview>>(
+        `${this.apiUrl}/superadmin/subscriptions/stores/${storeId}/activate-plan/preview`,
+        body,
+      )
+      .pipe(map((res) => res.data));
   }
 
   getPlans(query?: { page?: number; limit?: number; search?: string; is_active?: boolean }): Observable<PaginatedResponse<SubscriptionPlan>> {

@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { CreditNoteBalanceService } from '../credit-notes/credit-note-balance.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import {
@@ -702,6 +703,7 @@ export class InvoiceFlowService {
     private readonly fiscalDocument: FiscalDocumentValidator,
     private readonly technicalKeyVault: TechnicalKeyVaultService,
     private readonly invoice_number_generator: InvoiceNumberGenerator,
+    private readonly creditNoteBalance: CreditNoteBalanceService,
     // Opcional: sólo lo necesita el bloque del emisor de `validate-draft`. Los
     // specs que construyen el servicio con `new` sin él siguen funcionando (el
     // bloque del emisor se omite).
@@ -1150,6 +1152,14 @@ export class InvoiceFlowService {
     invoice: any,
     data: Prisma.invoicesUpdateManyMutationInput,
   ) {
+    if (invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note') {
+      return this.creditNoteBalance.transition(
+        invoice.id,
+        data,
+        INVOICE_INCLUDE,
+        'none',
+      );
+    }
     // Non-contract invoices retain the established scoped update path; only
     // contract-backed acceptance needs the cross-row atomic transition.
     if (invoice.contract_id == null) {
@@ -1863,6 +1873,16 @@ export class InvoiceFlowService {
       );
     }
 
+    // Legacy numberless notes must be source-resolvable before consuming a new
+    // consecutive. The balance service owns persisted-source reconstruction;
+    // it caps credit notes and validates debit-note source precision without a cap.
+    if (
+      !invoice.invoice_number &&
+      (invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note')
+    ) {
+      await this.creditNoteBalance.assertNoteBeforeNumbering(id);
+    }
+
     // A.1 CP-facturacion-fixes — THE numbering point. Numberless drafts (automatic
     // order-driven creation) get their consecutive HERE: after the cheap gates
     // (period, lines, identity) and before fiscal prevalidation, which measures the
@@ -1906,11 +1926,13 @@ export class InvoiceFlowService {
     // real y quemó un consecutivo autorizado que no se recupera.
     await this.assertFiscalDocumentEmittable(invoice);
 
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: { status: 'validated' },
-      include: INVOICE_INCLUDE,
-    });
+    const updated = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
+      ? await this.creditNoteBalance.reserveValidation(id, INVOICE_INCLUDE)
+      : await this.prisma.invoices.update({
+          where: { id },
+          data: { status: 'validated' },
+          include: INVOICE_INCLUDE,
+        });
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) validated`);
     return updated;
@@ -4621,10 +4643,16 @@ export class InvoiceFlowService {
         },
       );
     }
+    const dian_configuration_id = await this.resolveTransmissionConfigId(invoice);
+    if (invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note') {
+      // Keep the parent lock/transaction wholly before fiscal-ledger writes and
+      // provider I/O; timeout/retry evidence must retain the durable reservation.
+      await this.creditNoteBalance.ensureForSend(id);
+    }
     const transmission = await this.fiscal_ledger.ensureInvoiceTransmission({
       invoice,
       provider_data,
-      dian_configuration_id: await this.resolveTransmissionConfigId(invoice),
+      dian_configuration_id,
       user_id: this.getContext().user_id,
     });
 
@@ -4810,9 +4838,7 @@ export class InvoiceFlowService {
         provider_response.cuds ||
         provider_response.cune;
       await this.fiscal_ledger.markRejected(transmission.id, provider_response);
-      const rejected = await this.prisma.invoices.update({
-        where: { id },
-        data: {
+      const rejectedData: Prisma.invoicesUpdateManyMutationInput = {
           status: 'rejected',
           send_status: 'sent_error',
           transmission_status: 'rejected',
@@ -4829,9 +4855,20 @@ export class InvoiceFlowService {
               ? { errors: this.extractRuleRejections(provider_response) }
               : {}),
           },
-        },
-        include: INVOICE_INCLUDE,
-      });
+        };
+      const rejected = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
+        ? await this.creditNoteBalance.transition(
+            id,
+            rejectedData,
+            INVOICE_INCLUDE,
+            'definitive_rejection',
+            invoice.status,
+          )
+        : await this.prisma.invoices.update({
+            where: { id },
+            data: rejectedData,
+            include: INVOICE_INCLUDE,
+          });
 
       // EL MOTIVO REAL, NO SOLO EL HECHO. La DIAN nombra la regla que se violó
       // («Valor del CUFE no está calculado correctamente») y esa frase es la única
@@ -4954,6 +4991,9 @@ export class InvoiceFlowService {
     // A repeated fiscal confirmation repairs only the contract projection;
     // it must not re-run accounting, withholding, or event side effects.
     if (invoice.status === 'accepted') {
+      if (invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note') {
+        return this.persistAcceptedInvoiceAndContract(invoice, { status: 'accepted' });
+      }
       await markContractFiscalAcceptance(this.prisma, invoice);
       return invoice;
     }
@@ -5107,6 +5147,9 @@ export class InvoiceFlowService {
   async accept(id: number) {
     const invoice = await this.getInvoice(id);
     if (invoice.status === 'accepted') {
+      if (invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note') {
+        return this.persistAcceptedInvoiceAndContract(invoice, { status: 'accepted' });
+      }
       await markContractFiscalAcceptance(this.prisma, invoice);
       return invoice;
     }
@@ -5212,14 +5255,23 @@ export class InvoiceFlowService {
       'reject',
     );
 
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: {
+    const rejectData: Prisma.invoicesUpdateManyMutationInput = {
         status: 'rejected',
         send_status: 'sent_error',
-      },
-      include: INVOICE_INCLUDE,
-    });
+      };
+    const updated = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
+      ? await this.creditNoteBalance.transition(
+          id,
+          rejectData,
+          INVOICE_INCLUDE,
+          'none',
+          invoice.status,
+        )
+      : await this.prisma.invoices.update({
+          where: { id },
+          data: rejectData,
+          include: INVOICE_INCLUDE,
+        });
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) rejected`);
     return updated;
@@ -5257,11 +5309,19 @@ export class InvoiceFlowService {
       'cancel',
     );
 
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: { status: 'cancelled' },
-      include: INVOICE_INCLUDE,
-    });
+    const updated = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
+      ? await this.creditNoteBalance.transition(
+          id,
+          { status: 'cancelled' },
+          INVOICE_INCLUDE,
+          'pretransmission_cancel',
+          invoice.status,
+        )
+      : await this.prisma.invoices.update({
+          where: { id },
+          data: { status: 'cancelled' },
+          include: INVOICE_INCLUDE,
+        });
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) cancelled`);
     return updated;
@@ -5323,11 +5383,19 @@ export class InvoiceFlowService {
       'void',
     );
 
-    const updated = await this.prisma.invoices.update({
-      where: { id },
-      data: { status: 'voided' },
-      include: INVOICE_INCLUDE,
-    });
+    const updated = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
+      ? await this.creditNoteBalance.transition(
+          id,
+          { status: 'voided' },
+          INVOICE_INCLUDE,
+          'pretransmission_cancel',
+          invoice.status,
+        )
+      : await this.prisma.invoices.update({
+          where: { id },
+          data: { status: 'voided' },
+          include: INVOICE_INCLUDE,
+        });
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) voided`);
     return updated;

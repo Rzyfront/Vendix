@@ -30,18 +30,18 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
       @if (label()) {
-        <div class="label-with-tooltip">
+        <div [class]="labelClasses + ' label-with-tooltip'">
           <label [for]="textareaId" [class]="labelClasses">
             <span>{{ label() }}</span>
             @if (required()) {
-              <span class="text-[var(--color-text-primary)] ml-1" aria-hidden="true">*</span>
+              <span class="text-[var(--color-destructive)] ml-1" aria-hidden="true">*</span>
             }
           </label>
           @if (tooltipText()) {
             <app-tooltip [content]="tooltipText()" position="top">
               <button
                 type="button"
-                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
+                class="help-icon"
                 [attr.aria-label]="'Ayuda para ' + label()"
               >
                 <app-icon name="help-circle" [size]="14"></app-icon>
@@ -74,7 +74,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
         <!-- Helper text -->
         @if (helperText() && !getValidationError()) {
           <p
-            class="mt-2 text-sm text-[var(--color-text-primary)]"
+            class="mt-2 text-sm text-[var(--color-text-secondary)]"
             >
             {{ helperText() }}
           </p>
@@ -85,7 +85,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
           <p
             [id]="errorId"
             role="alert"
-            class="mt-2 text-sm text-[var(--color-text-primary)]"
+            class="mt-2 text-sm text-[var(--color-destructive)]"
             >
             {{ getValidationError() }}
           </p>
@@ -113,7 +113,12 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     }
 
     .help-icon {
-      color: var(--color-text-primary);
+      padding: 0;
+      border: 0;
+      background: none;
+      font: inherit;
+      line-height: 0;
+      color: var(--color-text-muted);
       cursor: help;
       position: relative;
       display: inline-flex;
@@ -121,7 +126,7 @@ import { TooltipComponent } from '../tooltip/tooltip.component';
     }
 
     .help-icon:hover {
-      color: var(--color-text-primary);
+      color: var(--color-primary);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -190,7 +195,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
-        'text-[var(--color-text-primary)]',
+        'text-[var(--color-text-muted)]',
         this.customLabelClass(),
       ]
         .filter(Boolean)
@@ -215,7 +220,7 @@ export class TextareaComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'placeholder:text-[var(--color-text-primary)]',
+      'placeholder:text-text-muted',
     ];
 
     const control = this.control();

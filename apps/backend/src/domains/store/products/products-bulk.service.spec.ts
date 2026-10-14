@@ -441,10 +441,10 @@ describe('ProductsBulkService', () => {
     });
 
     it('should respect maximum batch size limit', async () => {
-      // MAX_BATCH_SIZE = 1000. El tope no es cosmético: cada fila abre su propia
+      // MAX_BATCH_SIZE = 10000. El tope no es cosmético: cada fila abre su propia
       // transacción en ProductsService, así que un lote sin techo agota el pool
       // de conexiones antes de terminar.
-      const largeBatch = Array.from({ length: 1001 }, (_, i) => ({
+      const largeBatch = Array.from({ length: 10001 }, (_, i) => ({
         name: `Product ${i + 1}`,
         base_price: 99.99,
         sku: `PROD-${i + 1}`,
@@ -916,6 +916,62 @@ describe('ProductsBulkService', () => {
       expect((row as any).base_price).toBeUndefined();
       expect((row as any).__cell_errors).toBeUndefined();
     });
+  });
+
+  describe('analyzeProducts — volumen (tope 10.000, lecturas agrupadas)', () => {
+    const buildCsv = (n: number) =>
+      Buffer.from(
+        '\uFEFF' +
+          [
+            'Nombre,SKU,Precio Venta',
+            ...Array.from({ length: n }, (_, i) => `P${i},S-${i},${i + 1}`),
+          ].join('\n'),
+        'utf-8',
+      );
+    const readCalls = () =>
+      [
+        mockPrismaService.products.findMany,
+        mockPrismaService.products.findFirst,
+        mockPrismaService.product_variants.findMany,
+        mockPrismaService.brands.findMany,
+        mockPrismaService.brands.findFirst,
+        mockPrismaService.categories.findMany,
+        mockPrismaService.categories.findFirst,
+        mockPrismaService.units_of_measure.findMany,
+        mockPrismaService.product_price_tier_assignments.findMany,
+      ].reduce((acc, fn) => acc + fn.mock.calls.length, 0);
+
+    const run = async (n: number) => {
+      jest.clearAllMocks();
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+      mockPrismaService.brands.findMany.mockResolvedValue([]);
+      mockPrismaService.categories.findMany.mockResolvedValue([]);
+      mockPrismaService.units_of_measure.findMany.mockResolvedValue([]);
+      mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+        [],
+      );
+      const started = Date.now();
+      const result = await service.analyzeProducts(buildCsv(n), 1);
+      return { result, calls: readCalls(), ms: Date.now() - started };
+    };
+
+    it('el número de lecturas a BD no crece con N (10 vs 1000 vs 10000 filas)', async () => {
+      const small = await run(10);
+      const mid = await run(1000);
+      const big = await run(10000);
+      expect(big.result.products).toHaveLength(10000);
+      expect(small.calls).toBeGreaterThan(0);
+      expect(mid.calls).toBe(small.calls);
+      expect(big.calls).toBe(small.calls);
+      expect(big.ms).toBeLessThan(30000);
+    }, 60000);
+
+    it('rechaza 10.001 filas', async () => {
+      await expect(
+        service.analyzeProducts(buildCsv(10001), 1),
+      ).rejects.toThrow();
+    }, 60000);
   });
 
   describe('analyzeProducts — precio (QUI-846)', () => {

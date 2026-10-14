@@ -27,6 +27,12 @@ describe('InvoiceFlowService RADIAN acceptance guard', () => {
       {} as never,
       {} as never,
       {} as never,
+      {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } as never,
     );
 
     await expect(service.send(5)).rejects.toMatchObject({ errorCode: 'INVOICING_STATUS_002' });

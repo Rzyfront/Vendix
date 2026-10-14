@@ -20,6 +20,12 @@ import type {
     NewItemConflictRequestItem,
     NewItemConflictsResponse,
 } from '../pop/interfaces/pop-cost-preview.interface';
+import type {
+    ReceiveAsyncResponse,
+    ReceiveJobStatus,
+    ResolvePurchaseOrderLinesRequest,
+    ResolvePurchaseOrderLinesResponse,
+} from '../pop/interfaces/pop-order.interface';
 
 @Injectable({
     providedIn: 'root',
@@ -102,6 +108,29 @@ export class PurchaseOrdersService {
             .pipe(catchError(this.handleError));
     }
 
+    /**
+     * Recepción en segundo plano para más de 100 líneas (hasta 10.000):
+     * responde 202 con `job_id`; el avance se lee con `getReceiveJob`.
+     */
+    receiveAsync(
+        id: number,
+        items: ReceivePurchaseOrderItemDto[],
+        notes?: string
+    ): Observable<ApiResponse<ReceiveAsyncResponse>> {
+        const body: { items: ReceivePurchaseOrderItemDto[]; notes?: string } = { items };
+        if (notes) body.notes = notes;
+        return this.http
+            .patch<ApiResponse<ReceiveAsyncResponse>>(`${this.api_url}/${id}/receive/async`, body)
+            .pipe(catchError(this.handleError));
+    }
+
+    /** Estado y progreso del job de recepción (poll). */
+    getReceiveJob(jobId: string): Observable<ApiResponse<ReceiveJobStatus>> {
+        return this.http
+            .get<ApiResponse<ReceiveJobStatus>>(`${this.api_url}/receive-jobs/${encodeURIComponent(jobId)}`)
+            .pipe(catchError(this.handleError));
+    }
+
     // ============================================================
     // Payment Plan Configuration (QUI-647)
     // ============================================================
@@ -147,6 +176,18 @@ export class PurchaseOrdersService {
     getCostPreview(data: CostPreviewRequest): Observable<ApiResponse<CostPreviewResponse>> {
         return this.http
             .post<ApiResponse<CostPreviewResponse>>(`${this.api_url}/cost-preview`, data)
+            .pipe(catchError(this.handleError));
+    }
+
+    /**
+     * Resuelve (encuentra o crea) producto/variante de hasta 100 líneas nuevas
+     * fuera de la transacción de la OC. Idempotente por SKU.
+     */
+    resolveLines(
+        body: ResolvePurchaseOrderLinesRequest,
+    ): Observable<ApiResponse<ResolvePurchaseOrderLinesResponse>> {
+        return this.http
+            .post<ApiResponse<ResolvePurchaseOrderLinesResponse>>(`${this.api_url}/resolve-lines`, body)
             .pipe(catchError(this.handleError));
     }
 

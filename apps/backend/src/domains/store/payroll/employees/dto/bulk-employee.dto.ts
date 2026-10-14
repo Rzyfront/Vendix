@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsBoolean,
   IsNumber,
+  IsInt,
   IsArray,
   ValidateNested,
   IsNotEmpty,
@@ -160,6 +161,40 @@ export class BulkEmployeeUploadResultDto {
   users_created: number;
   users_linked: number;
   results: BulkEmployeeItemResultDto[];
+}
+
+/** Tope de filas por pagina al confirmar una sesion de carga masiva. */
+export const MAX_BULK_EMPLOYEE_UPLOAD_PAGE = 100;
+
+/**
+ * Body de `POST store/payroll/employees/bulk/upload-session`. Sin
+ * `offset`/`limit` se confirma el archivo completo (modo legacy); con alguno
+ * se procesa solo la pagina `[offset, offset + limit)`.
+ */
+export class BulkEmployeeUploadSessionDto {
+  @IsString()
+  @IsNotEmpty()
+  session_id: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_BULK_EMPLOYEE_UPLOAD_PAGE)
+  limit?: number;
+}
+
+export class BulkEmployeeUploadSessionResultDto extends BulkEmployeeUploadResultDto {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
 }
 
 export class BulkEmployeeAnalysisItemDto {

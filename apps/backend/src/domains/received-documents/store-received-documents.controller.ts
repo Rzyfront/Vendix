@@ -115,8 +115,11 @@ export class StoreReceivedDocumentsController {
     if (query.store_id !== undefined) {
       throw new BadRequestException('La tienda se resuelve desde el contexto autenticado.');
     }
-    const context = await this.contexts.resolveStore();
-    const result = await this.documents.list(context, { ...query, store_id: undefined });
+    const inboxRequested = query.sort === 'inbox' || query.inbox_state !== undefined ||
+      query.legal_status !== undefined || query.document_type !== undefined;
+    const result = inboxRequested
+      ? await this.documents.listInbox(await this.contexts.resolveStoreRead(), { ...query, store_id: undefined })
+      : await this.documents.list(await this.contexts.resolveStore(), { ...query, store_id: undefined });
     return this.responses.paginated(
       result.data,
       result.total,
@@ -124,6 +127,20 @@ export class StoreReceivedDocumentsController {
       result.limit,
       'Documentos recibidos obtenidos',
     );
+  }
+
+  @Get('summary')
+  @Permissions('invoicing:received:read')
+  async inboxSummary(@Query() query: ReceivedDocumentQueryDto) {
+    this.rejectStoreOverride(query.store_id);
+    return this.responses.success(await this.documents.inboxSummary(await this.contexts.resolveStoreRead(), query));
+  }
+
+  @Get('reception-status')
+  @Permissions('invoicing:received:read')
+  async receptionStatus(@Query() query: ReceivedDocumentContextQueryDto) {
+    this.rejectStoreOverride(query.store_id);
+    return this.responses.success(await this.documents.receptionStatus(await this.contexts.resolveStoreRead()));
   }
 
   @Post('scan')
@@ -228,9 +245,9 @@ export class StoreReceivedDocumentsController {
   @Get(':id')
   @Permissions('invoicing:received:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const context = await this.contexts.resolveStore();
+    const context = await this.contexts.resolveStoreRead();
     return this.responses.success(
-      await this.documents.findOne(context, id),
+      await this.documents.findOneInbox(context, id),
       'Documento recibido obtenido',
     );
   }

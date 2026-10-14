@@ -5,16 +5,15 @@ import {
   IsOptional,
   IsIn,
   IsArray,
+  ArrayMinSize,
   ValidateNested,
+  ValidateIf,
   IsDateString,
   MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import {
-  CreateInvoiceItemDto,
-  CreateInvoiceTaxDto,
-} from '../../dto/create-invoice.dto';
+import { CreateInvoiceNoteItemDto } from './create-invoice-note-item.dto';
 import {
   DIAN_CREDIT_NOTE_CONCEPTS,
   DIAN_CREDIT_NOTE_CONCEPT_LABELS,
@@ -107,7 +106,7 @@ export class CreateCreditNoteDto {
    *   · El refund debe pertenecer a la orden de la factura que se corrige.
    *   · No se combina con `items` explícitos: guiada o manual, no mezcla.
    */
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsInt({
     message:
       'refund_id debe ser un número entero: los ids de reembolso no tienen fracciones.',
@@ -176,17 +175,40 @@ export class CreateCreditNoteDto {
    * las líneas de la factura que corrige, que es el caso más común (anulación)
    * y el único que la UI ofrece hoy.
    */
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceItemDto)
-  items?: CreateInvoiceItemDto[];
+  @Type(() => CreateInvoiceNoteItemDto)
+  items?: CreateInvoiceNoteItemDto[];
 
-  @IsOptional()
+  /**
+   * Explicit provenance for refund-derived lines. This map is accepted only
+   * for refund-guided credit notes; it never accepts tax or price snapshots.
+   */
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceTaxDto)
-  taxes?: CreateInvoiceTaxDto[];
+  @Type(() => RefundNoteItemSourceDto)
+  refund_item_sources?: RefundNoteItemSourceDto[];
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsInt()
+  @Min(1)
+  shipping_source_invoice_item_id?: number;
+}
+
+export class RefundNoteItemSourceDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  refund_item_id!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  source_invoice_item_id!: number;
 }
 
 export class CreateDebitNoteDto {
@@ -261,15 +283,10 @@ export class CreateDebitNoteDto {
    * las líneas de la factura que corrige, que es el caso más común (anulación)
    * y el único que la UI ofrece hoy.
    */
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceItemDto)
-  items?: CreateInvoiceItemDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceTaxDto)
-  taxes?: CreateInvoiceTaxDto[];
+  @Type(() => CreateInvoiceNoteItemDto)
+  items?: CreateInvoiceNoteItemDto[];
 }

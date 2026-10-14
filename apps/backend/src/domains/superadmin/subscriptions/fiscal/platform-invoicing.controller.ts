@@ -124,6 +124,10 @@ class ListPlatformInvoicesQueryDto {
   q?: string;
 
   @IsOptional()
+  @IsIn(['overdue', 'pending', 'partial', 'paid'])
+  collection_status?: 'overdue' | 'pending' | 'partial' | 'paid';
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -192,6 +196,7 @@ export class PlatformInvoicingController {
       status: query.status ?? null,
       documentType: query.document_type ?? null,
       q: query.q ?? null,
+      collectionStatus: query.collection_status ?? null,
       page: query.page ?? 1,
       limit: query.limit ?? 25,
     });

@@ -46,6 +46,10 @@ export interface DianNoteConcept {
   hint: string;
 }
 
+/** Neutral guide: describe the event, without implying a tax treatment. */
+export const NOTE_CONCEPT_GUIDANCE =
+  'Elige el concepto que describa el hecho económico y explica qué ocurrió. La clasificación y las tarifas de los tributos de origen no se editan en este formulario; para corregir un dato tributario, usa el flujo separado de anulación y emisión que corresponda.';
+
 /**
  * Conceptos de NOTA CRÉDITO. Fuente: `ConceptoNotaCredito-2.1.gc`.
  *

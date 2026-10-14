@@ -226,10 +226,6 @@ export class ButtonComponent {
       'focus:outline-none',
       'focus:ring-2',
       'focus:ring-offset-2',
-      'focus-visible:outline',
-      'focus-visible:outline-2',
-      'focus-visible:outline-offset-2',
-      'focus-visible:outline-[var(--color-text-primary)]',
       'disabled:opacity-40',
       'disabled:cursor-not-allowed',
       'active:scale-[0.97]',
@@ -272,7 +268,7 @@ export class ButtonComponent {
       ],
       outline: [
         'btn-outline-border',
-        'text-[var(--color-text-primary)]',
+        'text-[var(--color-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-secondary': [

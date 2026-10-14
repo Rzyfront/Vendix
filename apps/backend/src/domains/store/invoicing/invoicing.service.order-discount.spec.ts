@@ -338,6 +338,15 @@ describe('InvoicingService.createFromOrder — descuento de orden e impuesto de 
       expect(lines[0]).toContain(
         '<cbc:LineExtensionAmount currencyID="COP">95951.41</cbc:LineExtensionAmount>',
       );
+      // FBE02/FBE05: ID consecutivo y factor (4048,59 / 100000 × 100 = 4,04),
+      // ambos ANTES de Amount (orden del content model).
+      expect(lines[0]).toContain('<cbc:ID>1</cbc:ID><cbc:ChargeIndicator>');
+      expect(lines[0]).toContain(
+        '<cbc:MultiplierFactorNumeric>4.04</cbc:MultiplierFactorNumeric>',
+      );
+      expect(
+        lines[0].indexOf('<cbc:MultiplierFactorNumeric>'),
+      ).toBeLessThan(lines[0].indexOf('<cbc:Amount currencyID="COP">4048.59'));
       expect(lines[0]).toContain(
         '<cbc:Amount currencyID="COP">4048.59</cbc:Amount>',
       );

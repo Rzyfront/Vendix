@@ -44,12 +44,14 @@ import {
   CreatePlatformInvoiceDto,
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
+  RegisterPlatformInvoicePaymentDto,
   RetrySubscriptionFiscalDto,
   SubscriptionFiscalQueryDto,
   UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 
 /** Accepted by the resolution scanner; anything else is rejected before the AI. */
 const SCAN_ALLOWED_MIME_TYPES = [
@@ -69,6 +71,7 @@ export class SubscriptionFiscalController {
     private readonly responseService: ResponseService,
     private readonly resolutionScanner: ResolutionScannerService,
     private readonly aiScanJobService: AiScanJobService,
+    private readonly paymentsService: PlatformInvoicePaymentsService,
   ) {}
 
   @Get('status')
@@ -459,6 +462,44 @@ export class SubscriptionFiscalController {
       throw new NotFoundException('Platform invoice not found');
     }
     return this.responseService.success(data, 'Platform invoice detail retrieved');
+  }
+
+  /** Pagos registrados de una factura de plataforma (más reciente primero). */
+  @Get('platform-invoices/:id/payments')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'List payments of a platform invoice' })
+  async listPlatformInvoicePayments(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const detail = await this.fiscalService.getPlatformInvoiceDetail(id);
+    if (!detail) {
+      throw new NotFoundException('Platform invoice not found');
+    }
+    return this.responseService.success(
+      detail.invoice.payments,
+      'Platform invoice payments retrieved',
+    );
+  }
+
+  /** Registra el cobro de una factura de plataforma (cartera). */
+  @Post('platform-invoices/:id/payments')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Register a payment against a platform invoice' })
+  async registerPlatformInvoicePayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegisterPlatformInvoicePaymentDto,
+  ): Promise<any> {
+    // El detalle valida entidad contable + organización de plataforma: un id
+    // ajeno responde 404 antes de tocar cartera.
+    const existing = await this.fiscalService.getPlatformInvoiceDetail(id);
+    if (!existing) {
+      throw new NotFoundException('Platform invoice not found');
+    }
+    const userId = RequestContextService.getUserId() ?? null;
+    await this.paymentsService.registerPayment(id, dto, userId);
+    const data = await this.fiscalService.getPlatformInvoiceDetail(id);
+    return this.responseService.success(data, 'Platform invoice payment registered');
   }
 
   /**

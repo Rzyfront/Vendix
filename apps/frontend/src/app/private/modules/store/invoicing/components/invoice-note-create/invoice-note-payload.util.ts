@@ -1,39 +1,20 @@
-/**
- * CÓMO SE ARMA EL CUERPO DE UNA NOTA CRÉDITO O DÉBITO.
- *
- * Aparte del componente a propósito: es aritmética fiscal, y la aritmética
- * fiscal se lee y se prueba mejor sin un template alrededor.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * LAS DOS FORMAS DE NOTA, Y POR QUÉ LA PARCIAL YA NO MANDA SUS IMPUESTOS
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * **Nota TOTAL** — no se manda `items` ni `taxes`. El backend copia las
- * líneas de la factura y también sus impuestos. Es el camino que funciona
- * entero y el que hay que preferir siempre que la corrección sea por el
- * documento completo.
- *
- * **Nota PARCIAL** — se manda SOLO `items`, nunca `taxes` (F-073). Mandar el
- * desglose desde el navegador activaba el camino explícito del DTO con
- * floats, y la nota podía diferir de la factura en centavos. Los impuestos
- * los deriva el servidor por el kernel (`derivePartialNoteLinesViaKernel`
- * en `credit-notes.service.ts`): la cuota persistida ES `trunc(base × tasa)`
- * por construcción y la cabecera suma lo derivado, nunca el reclamo del
- * cliente. Quien necesite un desglose distinto al derivado usa el camino
- * explícito del DTO a propósito, no este formulario.
- */
-
 import {
   CreateCreditNoteDto,
-  CreateInvoiceItemDto,
+  CreateInvoiceNoteItemDto,
   Invoice,
   InvoiceItem,
+  InvoiceNoteContextLine,
 } from '../../interfaces/invoice.interface';
 
 /** Una línea de la factura con la cantidad que el usuario decidió corregir. */
 export interface NoteLineSelection {
   item: InvoiceItem;
   quantity: number;
+  unit_price?: number;
+  discount_amount?: number;
+  discount_overridden?: boolean;
+  unit_code?: string;
+  context?: InvoiceNoteContextLine;
 }
 
 export interface NoteTotals {
@@ -86,15 +67,8 @@ export function lineTaxRate(item: InvoiceItem): number {
   return round2((tax / base) * 100);
 }
 
-/**
- * Los importes de una selección parcial, prorrateados por cantidad.
- *
- * El factor se aplica al DESCUENTO y al IMPUESTO, no solo a la cantidad:
- * devolver 2 de 5 unidades devuelve 2/5 del descuento de esa línea y 2/5 de su
- * IVA. Prorratear la cantidad y arrastrar el descuento entero produciría una
- * nota que descuenta más de lo que factura.
- */
-export function scaleLine(item: InvoiceItem, quantity: number): {
+/** UI-only estimate; server response remains authoritative. */
+export function estimateLine(selection: NoteLineSelection): {
   quantity: number;
   unit_price: number;
   discount_amount: number;
@@ -102,14 +76,43 @@ export function scaleLine(item: InvoiceItem, quantity: number): {
   base: number;
   total: number;
 } {
+  const { item, context } = selection;
+  const quantity = selection.quantity;
   const originalQty = num(item.quantity);
   const qty = Math.max(0, Number(quantity) || 0);
   const factor = originalQty > 0 ? qty / originalQty : 0;
+  const unit_price = selection.unit_price ?? num(item.unit_price);
+  const priceUnitQuantity = num(context?.price_unit_quantity ?? item.price_unit_quantity) || 1;
+  // An explicit discount replaces the effective captured source allowance.
+  const discount_amount = round2(
+    selection.discount_amount ?? num(context?.discount_amount ?? item.discount_amount) * factor,
+  );
+  const lineValue = round2((qty * unit_price) / priceUnitQuantity - discount_amount);
+  let tax_amount: number;
+  let base: number;
+  let total: number;
 
-  const unit_price = num(item.unit_price);
-  const discount_amount = round2(num(item.discount_amount) * factor);
-  const tax_amount = round2(num(item.tax_amount) * factor);
-  const base = round2(qty * unit_price - discount_amount);
+  if (context) {
+    const inclusiveRate = context.taxes
+      .filter((tax) => tax.is_inclusive)
+      .reduce((sum, tax) => sum + taxFactor(num(tax.tax_rate), tax.rate_basis), 0);
+    base = context.is_inclusive && inclusiveRate > 0
+      ? round2(lineValue / (1 + inclusiveRate))
+      : lineValue;
+    tax_amount = round2(context.taxes.reduce((sum, tax) => {
+      const rate = taxFactor(num(tax.tax_rate), tax.rate_basis);
+      return sum + base * rate;
+    }, 0));
+    const exclusiveTax = round2(context.taxes
+      .filter((tax) => !tax.is_inclusive)
+      .reduce((sum, tax) => sum + base * taxFactor(num(tax.tax_rate), tax.rate_basis), 0));
+    total = round2(lineValue + exclusiveTax);
+  } else {
+    // Legacy invoices without note context can only use their captured tax amount.
+    tax_amount = round2(num(item.tax_amount) * factor);
+    base = lineValue;
+    total = round2(base + tax_amount);
+  }
 
   return {
     quantity: qty,
@@ -117,48 +120,52 @@ export function scaleLine(item: InvoiceItem, quantity: number): {
     discount_amount,
     tax_amount,
     base,
-    total: round2(base + tax_amount),
+    total,
   };
 }
 
-/** Totales de la nota, con la MISMA fórmula que `credit-notes.service.ts:183-188`. */
+function taxFactor(rate: number, basis: InvoiceNoteContextLine['taxes'][number]['rate_basis']): number {
+  if (basis === 'per_mil') return rate / 1000;
+  if (basis === 'fraction') return rate;
+  return rate / 100;
+}
+
 export function noteTotals(selections: NoteLineSelection[]): NoteTotals {
   let subtotal = 0;
   let discount = 0;
   let tax = 0;
+  let total = 0;
   for (const selection of selections) {
-    const scaled = scaleLine(selection.item, selection.quantity);
-    subtotal += scaled.quantity * scaled.unit_price;
+    const scaled = estimateLine(selection);
+    const priceUnitQuantity = num(selection.context?.price_unit_quantity ?? selection.item.price_unit_quantity) || 1;
+    subtotal += (scaled.quantity * scaled.unit_price) / priceUnitQuantity;
     discount += scaled.discount_amount;
     tax += scaled.tax_amount;
+    total += scaled.total;
   }
   subtotal = round2(subtotal);
   discount = round2(discount);
   tax = round2(tax);
-  return { subtotal, discount, tax, total: round2(subtotal - discount + tax) };
+  return { subtotal, discount, tax, total: round2(total) };
 }
 
-/**
- * Las líneas, en el formato que valida `CreateInvoiceItemDto`.
- *
- * `description` es obligatoria y `@IsNotEmpty` corre DESPUÉS de un `trim`, así
- * que una línea cuyo `description` esté vacío pero tenga `product_name` usa el
- * nombre del producto en vez de mandar un blanco que el backend rechazaría con
- * un 400 poco explicable.
- */
+/** Minimal writable payload: source and editable commercial values only. */
 export function buildNoteItems(
   selections: NoteLineSelection[],
-): CreateInvoiceItemDto[] {
-  return selections.map(({ item, quantity }) => {
-    const scaled = scaleLine(item, quantity);
-    const description = (item.description || item.product_name || '').trim();
+): CreateInvoiceNoteItemDto[] {
+  return selections.map((selection) => {
+    const { item } = selection;
+    const scaled = estimateLine(selection);
     return {
-      ...(item.product_id ? { product_id: item.product_id } : {}),
-      description: description || 'Línea de la factura corregida',
+      source_invoice_item_id: selection.context?.source_invoice_item_id ?? item.id,
       quantity: scaled.quantity,
       unit_price: scaled.unit_price,
-      discount_amount: scaled.discount_amount,
-      tax_amount: scaled.tax_amount,
+      ...((selection.discount_overridden ?? (selection.discount_amount !== undefined))
+        ? { discount_amount: scaled.discount_amount }
+        : {}),
+      ...((selection.unit_code ?? selection.context?.unit_code ?? item.unit_code)
+        ? { unit_code: selection.unit_code ?? selection.context?.unit_code ?? item.unit_code! }
+        : {}),
     };
   });
 }
@@ -294,12 +301,7 @@ export function buildNotePayload(params: {
     return base;
   }
 
-  // Parcial: SOLO `items`, nunca `taxes` (F-073 round 2). Los impuestos los
-  // deriva el servidor por el kernel (`derivePartialNoteLinesViaKernel`):
-  // mandar el desglose del navegador activaría el camino explícito con
-  // floats (`scaleLine` sin divisor) y la nota podría diferir de la factura
-  // en centavos. Quien necesite un desglose distinto al derivado usa el
-  // camino explícito del DTO a propósito, no este formulario.
+  // Partial note lines carry only source + editable commercial values. The server derives all fiscal fields.
   return {
     ...base,
     items: buildNoteItems(selections),

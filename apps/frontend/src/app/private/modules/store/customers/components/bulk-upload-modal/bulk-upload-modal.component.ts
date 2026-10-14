@@ -1,5 +1,7 @@
 import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
+import { runChunked, ChunkProgress, MAX_BULK_RECORDS } from '../../../../../../shared/utils/run-chunked';
 // `import type` deja el namespace disponible para las anotaciones sin meter
 // los 7,2 MB de xlsx en el chunk: el runtime llega por `await import('xlsx')`
 // dentro del handler, que es el unico momento en que hay un archivo que leer.
@@ -91,7 +93,7 @@ import {
               ></app-icon>
               <p class="text-gray-900 font-medium">Arrastra tu archivo Excel (.xlsx) aquí</p>
               <p class="text-gray-500 text-sm mt-1">o haz clic para seleccionar</p>
-              <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 1000 clientes por archivo</p>
+              <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 10.000 clientes por archivo</p>
             </div>
           }
           @if (isProcessingFile()) {
@@ -200,7 +202,30 @@ import {
             <div class="flex flex-col items-center justify-center py-8 gap-3">
               <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
               <p class="text-sm text-gray-900 font-medium">Procesando {{ parsedData()?.length }} clientes...</p>
-              <p class="text-xs text-gray-500">Esto puede tomar unos segundos</p>
+              @if (uploadProgress().total > 0) {
+                <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+                  <div class="flex items-center justify-between text-[11px] text-gray-600">
+                    <span>Guardando {{ uploadProgress().processed }} de {{ uploadProgress().total }}</span>
+                    <span class="font-semibold text-primary">{{ progressPercent() }}%</span>
+                  </div>
+                  <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                    <div
+                      class="h-full rounded-full bg-primary transition-all"
+                      [style.width.%]="progressPercent()"
+                    ></div>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+          <!-- Lote fallido: resumen parcial + reintento -->
+          @if (!isUploading() && failedAt() !== null) {
+            <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 text-yellow-800 text-sm flex items-center justify-between gap-3">
+              <span>Se guardaron {{ uploadProgress().processed }} de {{ uploadProgress().total }}. El envío se interrumpió en la fila {{ failedAt()! + 1 }} de la lista.</span>
+              <app-button variant="primary" size="sm" (clicked)="retryUpload()">
+                Reintentar desde la fila {{ failedAt()! + 1 }}
+              </app-button>
             </div>
           }
 
@@ -362,6 +387,15 @@ export class CustomerBulkUploadModalComponent {
   parsedData = signal<any[] | null>(null);
   uploadResults = signal<any>(null);
   warnings = signal<string[]>([]);
+  uploadProgress = signal<{ processed: number; total: number }>({ processed: 0, total: 0 });
+  failedAt = signal<number | null>(null);
+  readonly progressPercent = computed(() => {
+    const p = this.uploadProgress();
+    return p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
+  });
+  private uploadSub: Subscription | null = null;
+  private payload: Record<string, any>[] = [];
+  private accumulated: any = null;
 
   // ¿La respuesta tiene forma de resultado de carga masiva (con conteos o results[])?
   // Distingue una respuesta real (éxito total o parcial) de un payload de error de
@@ -427,6 +461,8 @@ export class CustomerBulkUploadModalComponent {
   }
 
   onCancel() {
+    this.uploadSub?.unsubscribe();
+    this.uploadSub = null;
     this.isOpenChange.emit(false);
     this.resetState();
   }
@@ -440,6 +476,10 @@ export class CustomerBulkUploadModalComponent {
     this.uploadResults.set(null);
     this.parsedData.set(null);
     this.warnings.set([]);
+    this.uploadProgress.set({ processed: 0, total: 0 });
+    this.failedAt.set(null);
+    this.payload = [];
+    this.accumulated = null;
   }
 
   goToStep(step: number) {
@@ -585,8 +625,8 @@ export class CustomerBulkUploadModalComponent {
           return;
         }
 
-        if (customers.length > 1000) {
-          this.toastService.error(`El archivo excede el límite de 1000 clientes (tiene ${customers.length}).`);
+        if (customers.length > MAX_BULK_RECORDS) {
+          this.toastService.error(`El archivo excede el límite de 10.000 clientes (tiene ${customers.length}).`);
           return;
         }
 
@@ -626,32 +666,61 @@ export class CustomerBulkUploadModalComponent {
       return sanitized;
     });
 
-    this.customersService.uploadBulkCustomersJson(sanitizedData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response: any) => {
-        this.isUploading.set(false);
-        const data = response.data || response;
-        this.uploadResults.set(data);
+    this.payload = sanitizedData;
+    this.accumulated = { success: true, total_processed: 0, successful: 0, failed: 0, results: [] };
+    this.failedAt.set(null);
+    this.uploadProgress.set({ processed: 0, total: sanitizedData.length });
+    this.runUpload(0);
+  }
 
-        if (data.failed > 0 || !data.success) {
+  retryUpload() {
+    const offset = this.failedAt();
+    if (offset === null || this.isUploading()) return;
+    this.failedAt.set(null);
+    this.uploadError.set(null);
+    this.isUploading.set(true);
+    this.runUpload(offset);
+  }
+
+  // Envía payload.slice(base) en lotes de 100 (en serie) y acumula resultados.
+  private runUpload(base: number) {
+    const items = this.payload.slice(base);
+    const acc = this.accumulated;
+    let lastCount = 0;
+    this.uploadSub?.unsubscribe();
+    this.uploadSub = runChunked(items, (chunk) =>
+      this.customersService.uploadBulkCustomersJson(chunk),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((p: ChunkProgress<any>) => {
+        // Acumula solo los lotes nuevos de este progreso
+        for (const r of p.results.slice(lastCount)) {
+          const d = r?.data || r;
+          acc.successful += d?.successful || 0;
+          acc.failed += d?.failed || 0;
+          acc.total_processed += d?.total_processed || 0;
+          if (Array.isArray(d?.results)) acc.results.push(...d.results);
+        }
+        lastCount = p.results.length;
+        this.uploadProgress.set({ processed: base + p.processed, total: this.payload.length });
+        this.uploadResults.set({ ...acc, results: [...acc.results] });
+        if (!p.done) return;
+
+        this.isUploading.set(false);
+        if (p.failedAt !== undefined) {
+          const err: any = p.error;
+          this.failedAt.set(base + p.failedAt);
+          this.uploadError.set(err?.error?.message || 'Error en la carga masiva');
+          this.toastService.error(
+            `Se guardaron ${base + p.processed} de ${this.payload.length}. Puedes reintentar.`,
+          );
+        } else if (acc.failed > 0) {
           this.toastService.warning('La carga se completó con algunos errores.');
         } else {
-          this.toastService.success(`${data.successful} clientes cargados exitosamente`);
+          this.toastService.success(`${acc.successful} clientes cargados exitosamente`);
           this.uploadComplete.emit();
         }
-      },
-      error: (error: any) => {
-        this.isUploading.set(false);
-        this.uploadError.set(error?.error?.message || 'Error en la carga masiva');
-
-        if (error?.error?.details) {
-          this.uploadResults.set(error.error.details);
-        } else if (error?.error?.data) {
-          this.uploadResults.set(error.error.data);
-        }
-
-        this.toastService.error('Error en la carga masiva');
-      },
-    });
+      });
   }
 
   getCustomerLabel(result: any, index: number): string {

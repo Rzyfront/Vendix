@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseIntPipe,
   Post,
@@ -14,8 +15,9 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { UserRole } from '../../../auth/enums/user-role.enum';
-import { ActivateStorePlanDto } from '../dto';
+import { ActivateStorePlanDto, ActivateStorePlanPreviewDto } from '../dto';
 import { StorePlanActivationService } from '../services/store-plan-activation.service';
+import { StorePlanActivationCatalogService } from '../services/store-plan-activation-catalog.service';
 
 /**
  * Activación manual de un plan SaaS a una tienda por el superadmin (pago por
@@ -28,6 +30,7 @@ import { StorePlanActivationService } from '../services/store-plan-activation.se
 export class StorePlanActivationController {
   constructor(
     private readonly activationService: StorePlanActivationService,
+    private readonly catalogService: StorePlanActivationCatalogService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -48,5 +51,29 @@ export class StorePlanActivationController {
       user?.user_id ?? 0,
     );
     return this.responseService.success(result, 'Plan activado');
+  }
+
+  @Get(':storeId/activate-plan/options')
+  @Permissions('superadmin:subscriptions:update')
+  @ApiOperation({
+    summary:
+      'Catálogo de planes (todos los ciclos) y estado actual para activar un plan',
+  })
+  async getOptions(@Param('storeId', ParseIntPipe) storeId: number) {
+    const result = await this.catalogService.getOptions(storeId);
+    return this.responseService.success(result);
+  }
+
+  @Post(':storeId/activate-plan/preview')
+  @Permissions('superadmin:subscriptions:update')
+  @ApiOperation({
+    summary: 'Cotiza una activación de plan sin efectos (preview)',
+  })
+  async previewActivation(
+    @Param('storeId', ParseIntPipe) storeId: number,
+    @Body() dto: ActivateStorePlanPreviewDto,
+  ) {
+    const result = await this.catalogService.preview(storeId, dto);
+    return this.responseService.success(result);
   }
 }

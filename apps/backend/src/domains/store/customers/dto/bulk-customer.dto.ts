@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -71,9 +72,15 @@ export class BulkCustomerItemDto {
   row_number?: number;
 }
 
+/** Tope por request: el cliente envía de a 100; el total por archivo (10.000) lo gobierna el servicio. */
+export const MAX_BULK_CUSTOMER_UPLOAD_PAGE = 100;
+
 export class BulkCustomerUploadDto {
   @ApiProperty({ type: [BulkCustomerItemDto] })
   @IsArray()
+  @ArrayMaxSize(MAX_BULK_CUSTOMER_UPLOAD_PAGE, {
+    message: `Cada envío admite máximo ${MAX_BULK_CUSTOMER_UPLOAD_PAGE} clientes; el total por archivo es de 10.000`,
+  })
   @ValidateNested({ each: true })
   @Type(() => BulkCustomerItemDto)
   customers: BulkCustomerItemDto[];

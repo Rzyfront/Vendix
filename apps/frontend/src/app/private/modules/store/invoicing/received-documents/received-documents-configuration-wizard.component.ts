@@ -71,21 +71,21 @@ const RECEPTION_STEPS: StepsLineItem[] = [
       (cancel)="onClose()"
     >
       @if (!scopeEligible()) {
-        <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-primary" role="note">{{ scopeBlockMessage() }}</p>
+        <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary" role="note">{{ scopeBlockMessage() }}</p>
       } @else if (!canRead()) {
         <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-primary" role="note">No tienes permiso para consultar la configuración de recepción de documentos de esta tienda.</p>
       } @else {
         @if (readinessLoading()) {
-          <p class="text-sm text-text-primary" role="status">Consultando el estado fiscal…</p>
+          <p class="text-sm text-text-secondary" role="status">Consultando el estado fiscal…</p>
         } @else if (readinessError()) {
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-text-primary" role="alert">
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error" role="alert">
             <span>{{ readinessError() }}</span>
-            <app-button customClasses="min-h-11" variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
+            <app-button variant="outline" size="sm" (clicked)="loadReadiness()">Reintentar</app-button>
           </div>
         } @else if (!receptionActive()) {
           <div class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">
             <p>Primero activa la configuración DIAN y la facturación electrónica de tu tienda</p>
-            <a routerLink="/admin/invoicing/dian-config" (click)="close()" class="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg px-3 font-medium underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]">Ir a configuración DIAN</a>
+            <a routerLink="/admin/invoicing/dian-config" (click)="close()" class="mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 font-medium text-primary underline focus:outline-none focus:ring-2 focus:ring-primary/50">Ir a configuración DIAN</a>
           </div>
         } @else {
         <div class="space-y-4">
@@ -95,37 +95,37 @@ const RECEPTION_STEPS: StepsLineItem[] = [
             <div class="flex items-start gap-2">
               <h2 id="reception-dian-step" class="text-base font-semibold text-text-primary">Configuración DIAN propia de facturación</h2>
               <app-tooltip content="Se consulta solo la habilitación de facturación de la entidad fiscal actual. El estado guardado y la preparación para producción son señales diferentes.">
-                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre la configuración DIAN propia"><app-icon name="info" [size]="16" /></button>
+                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre la configuración DIAN propia"><app-icon name="info" [size]="16" /></button>
               </app-tooltip>
             </div>
 
             @if (invoicingAxis(); as axis) {
                 <div class="grid gap-3 sm:grid-cols-2">
                   <app-card [responsive]="true" [responsivePadding]="true">
-                    <p class="text-xs font-medium uppercase tracking-wide text-text-primary">Software DIAN</p>
+                    <p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Software DIAN</p>
                     @if (safeSoftwareId()) {
                       <app-input size="lg" label="Identificador de software" [formControl]="softwareIdControl" [readonly]="true" tooltipText="Identificador informado por DIAN para el software propio. No se muestran PIN, contraseña ni huellas del certificado." />
                     } @else {
-                      <p class="mt-1 text-sm text-text-primary">{{ axis.config_id === null ? 'Sin configuración guardada' : 'No disponible en la consulta actual' }}</p>
+                      <p class="mt-1 text-sm text-text-secondary">{{ axis.config_id === null ? 'Sin configuración guardada' : 'No disponible en la consulta actual' }}</p>
                     }
                   </app-card>
                   <app-card [responsive]="true" [responsivePadding]="true">
-                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-primary">Certificado</p><app-tooltip content="Solo se muestra si existe un certificado registrado y su fecha de vencimiento; nunca se revela la clave del archivo ni su huella."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre certificado DIAN"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
+                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Certificado</p><app-tooltip content="Solo se muestra si existe un certificado registrado y su fecha de vencimiento; nunca se revela la clave del archivo ni su huella."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre certificado DIAN"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
                     <p class="mt-1 text-sm text-text-primary">{{ hasCertificate() ? 'Registrado' : 'Pendiente' }}</p>
-                    @if (certificateExpiry(); as expiry) { <p class="mt-1 text-xs text-text-primary">Vence: {{ formatDate(expiry) }}</p> }
+                    @if (certificateExpiry(); as expiry) { <p class="mt-1 text-xs text-text-secondary">Vence: {{ formatDate(expiry) }}</p> }
                   </app-card>
                   <app-card [responsive]="true" [responsivePadding]="true">
-                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-primary">Habilitación DIAN</p><app-tooltip content="Este es el estado reportado por DIAN y el checklist de preparación del backend; guardar una configuración no cambia por sí solo la habilitación."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre estado de habilitación"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
+                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Habilitación DIAN</p><app-tooltip content="Este es el estado reportado por DIAN y el checklist de preparación del backend; guardar una configuración no cambia por sí solo la habilitación."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre estado de habilitación"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
                     <p class="mt-1 text-sm text-text-primary">{{ enablementLabel(axis) }}</p>
-                    <p class="mt-1 text-xs text-text-primary">Checklist de producción: {{ axis.readiness?.ready ? 'completo según la consulta' : 'con requisitos pendientes o sin informe' }}</p>
+                    <p class="mt-1 text-xs text-text-secondary">Checklist de producción: {{ axis.readiness?.ready ? 'completo según la consulta' : 'con requisitos pendientes o sin informe' }}</p>
                   </app-card>
                   <app-card [responsive]="true" [responsivePadding]="true">
-                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-primary">Ambiente</p><app-tooltip content="Pruebas no equivale a producción. El ambiente reportado se lee de la configuración DIAN actual."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre ambiente DIAN"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
+                    <div class="flex items-center gap-1"><p class="text-xs font-medium uppercase tracking-wide text-text-secondary">Ambiente</p><app-tooltip content="Pruebas no equivale a producción. El ambiente reportado se lee de la configuración DIAN actual."><button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre ambiente DIAN"><app-icon name="info" [size]="14" /></button></app-tooltip></div>
                     <p class="mt-1 text-sm text-text-primary">{{ environmentLabel(axis.environment) }}</p>
                   </app-card>
                 </div>
               } @else {
-                <div class="rounded-lg border border-border bg-surface p-3 text-sm text-text-primary" role="status">No se encontró un eje DIAN de facturación para esta entidad fiscal.</div>
+                <div class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary" role="status">No se encontró un eje DIAN de facturación para esta entidad fiscal.</div>
               }
               <div class="rounded-lg border border-warning/40 bg-warning-light p-3 text-sm text-text-primary" role="note">
                 Guardar datos no significa que DIAN haya habilitado la recepción ni que Vendix descargue documentos desde DIAN. La importación disponible es manual desde la bandeja.
@@ -136,7 +136,7 @@ const RECEPTION_STEPS: StepsLineItem[] = [
             <div class="flex items-start gap-2">
               <h2 id="reception-events-step" class="text-base font-semibold text-text-primary">Habilitación del comprador y eventos</h2>
               <app-tooltip content="Consultar los requisitos pendientes no transmite eventos. La solicitud pasa a revisión, pero no significa aprobación de la DIAN.">
-                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre eventos del comprador"><app-icon name="info" [size]="16" /></button>
+                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre eventos del comprador"><app-icon name="info" [size]="16" /></button>
               </app-tooltip>
             </div>
             <app-received-buyer-event-activation
@@ -152,16 +152,16 @@ const RECEPTION_STEPS: StepsLineItem[] = [
             <div class="flex items-start gap-2">
               <h2 id="reception-operation-step" class="text-base font-semibold text-text-primary">Operación de la bandeja</h2>
               <app-tooltip content="La importación manual agrega evidencia para revisión; no valida autenticidad DIAN ni acepta legalmente el documento.">
-                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre operación de la bandeja"><app-icon name="info" [size]="16" /></button>
+                <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-secondary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Ayuda sobre operación de la bandeja"><app-icon name="info" [size]="16" /></button>
               </app-tooltip>
             </div>
-            <p class="text-sm text-text-primary">La recepción automática desde DIAN no está implementada. Descarga el XML por el canal que corresponda e impórtalo manualmente; después revisa, concilia y consulta los eventos disponibles.</p>
+            <p class="text-sm text-text-secondary">La recepción automática desde DIAN no está implementada. Descarga el XML por el canal que corresponda e impórtalo manualmente; después revisa, concilia y consulta los eventos disponibles.</p>
             <div class="flex flex-col gap-2 sm:flex-row">
-              <a routerLink="/admin/invoicing/received-documents" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]">
+              <a routerLink="/admin/invoicing/received-documents" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/50">
                 <app-icon name="inbox" [size]="16" /> Abrir bandeja e importar XML manualmente
               </a>
             </div>
-            <p class="text-sm text-text-primary">En la bandeja, revisa evidencia, concilia los documentos e inspecciona los eventos disponibles. “Listo” no significa aceptación DIAN.</p>
+            <p class="text-sm text-text-secondary">En la bandeja, revisa evidencia, concilia los documentos e inspecciona los eventos disponibles. “Listo” no significa aceptación DIAN.</p>
           </section>
         }
       </div>
@@ -169,12 +169,12 @@ const RECEPTION_STEPS: StepsLineItem[] = [
       }
 
       <div slot="footer" class="flex flex-col-reverse justify-between gap-2 sm:flex-row sm:items-center">
-        <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
+        <app-button variant="outline" size="md" [disabled]="busy()" (clicked)="close()">Cerrar</app-button>
         @if (receptionActive()) {
           <div class="flex flex-col-reverse gap-2 sm:flex-row">
-            <app-button customClasses="min-h-11" variant="outline" size="md" [disabled]="step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
+            <app-button variant="outline" size="md" [disabled]="step() === 0 || busy()" (clicked)="previousStep()">Anterior</app-button>
             @if (step() < steps.length - 1) {
-              <app-button customClasses="min-h-11" variant="primary" size="md" [disabled]="busy()" (clicked)="nextStep()">Continuar</app-button>
+              <app-button variant="primary" size="md" [disabled]="busy()" (clicked)="nextStep()">Continuar</app-button>
             }
           </div>
         }

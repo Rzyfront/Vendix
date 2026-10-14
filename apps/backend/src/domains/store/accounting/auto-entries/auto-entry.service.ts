@@ -1227,6 +1227,7 @@ export class AutoEntryService {
       'credit_note.accepted': 'auto_return',
       'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
+      'platform_invoice.payment_received': 'auto_payment',
       'financial_account.payment_revenue': 'auto_payment',
       'financial_account.payment_receivable': 'auto_payment',
       'expense.approved': 'auto_expense',
@@ -3826,6 +3827,85 @@ export class AutoEntryService {
       store_id: data.store_id,      description: `Expense approved #${data.expense_id}`,
       lines,
       user_id: data.user_id,
+    });
+  }
+
+
+  /**
+   * platform_invoice.payment_received: DR Caja/Bancos → CR Cuentas por Cobrar.
+   * Cobro (total o parcial) de una factura de PLATAFORMA emitida a crédito: el
+   * asiento `invoice.accepted` dejó DR 1305; cada cobro cierra esa CxC.
+   * `source_id` = id de la evidencia del pago (un asiento por cobro; los
+   * abonos parciales NO colisionan). Sin `store_id`: corre a nivel de
+   * organización con la entidad contable del payload. Fecha = `paid_at`
+   * ancla en medianoche UTC del día calendario (misma convención que
+   * `resolveEntryDate`, TZ Bogotá).
+   */
+  async onPlatformInvoicePaymentReceived(data: {
+    organization_id: number;
+    accounting_entity_id: number;
+    evidence_id: number;
+    transmission_id?: number;
+    document_number: string;
+    amount: number;
+    payment_method: string;
+    paid_at: string;
+    reference?: string | null;
+    user_id?: number | null;
+  }) {
+    const source_type = 'platform_invoice.payment_received';
+    const existing = await this.prisma
+      .withoutScope()
+      .accounting_entries.findFirst({
+        where: {
+          organization_id: data.organization_id,
+          source_type,
+          source_id: data.evidence_id,
+          accounting_entity_id: data.accounting_entity_id,
+        },
+      });
+    if (existing) {
+      this.logger.warn(
+        `Auto-entry ${source_type}#${data.evidence_id} already exists; skipping duplicate`,
+      );
+      return existing;
+    }
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(data.paid_at ?? '');
+    const entry_date = match
+      ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+      : undefined;
+
+    const cash_bank_key = this.resolveCashBankKey(data.payment_method);
+    const ref = data.reference ? ` (${data.reference})` : '';
+    const label = `Cobro factura ${data.document_number}${ref}`;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        label,
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'payment.received.accounts_receivable',
+        `Recaudo CxC ${label}`,
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type,
+      source_id: data.evidence_id,
+      organization_id: data.organization_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date,
+      description: label,
+      lines,
+      user_id: data.user_id ?? undefined,
     });
   }
 

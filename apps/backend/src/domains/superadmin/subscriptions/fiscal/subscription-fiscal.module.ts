@@ -61,6 +61,7 @@ import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
 import { PlatformDianEventsService } from './platform-dian-events.service';
 import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
+import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 
 @Module({
   imports: [
@@ -141,6 +142,8 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     // hasta C.5.5 (wrapper org-scoped sobre InvoicePdfBuilder del riel
     // tienda, con S3 key prefix 'platform/' en vez de 'stores/'). Ver ADR-8.
     PlatformInvoicePdfService,
+    // Cartera: cobros de facturas de plataforma + evento contable.
+    PlatformInvoicePaymentsService,
   ],
   exports: [SubscriptionFiscalService],
 })

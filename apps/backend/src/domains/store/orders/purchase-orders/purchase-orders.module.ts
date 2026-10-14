@@ -10,6 +10,8 @@ import { InvoiceScannerService } from './invoice-scanner.service';
 import { PaymentReceiptScanProcessor } from './payment-receipt-scan.processor';
 import { InvoiceRevalidateProcessor } from './invoice-revalidate.processor';
 import { InvoiceScanProcessor } from './invoice-scan.processor';
+import { PurchaseOrderReceiveProcessor } from './purchase-order-receive.processor';
+import { PurchaseOrderReceiveQueueService } from './purchase-order-receive-queue.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InventoryModule } from '../../inventory/inventory.module';
@@ -37,6 +39,8 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     BullModule.registerQueue({ name: 'invoice-revalidate' }),
     // Escaneo IA async de facturas de compra (202 + job_id + poll con IDOR).
     BullModule.registerQueue({ name: 'invoice-scan' }),
+    // Recepción asíncrona por lotes de 100 de OC grandes (202 + job_id + poll).
+    BullModule.registerQueue({ name: 'purchase-order-receive' }),
   ],
   controllers: [PurchaseOrdersController],
   providers: [
@@ -46,8 +50,10 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     PaymentReceiptScanProcessor,
     InvoiceRevalidateProcessor,
     InvoiceScanProcessor,
+    PurchaseOrderReceiveQueueService,
+    PurchaseOrderReceiveProcessor,
   ],
-  exports: [PurchaseOrdersService],
+  exports: [PurchaseOrdersService, PurchaseOrderReceiveQueueService],
 })
 export class PurchaseOrdersModule implements OnModuleInit {
   constructor(

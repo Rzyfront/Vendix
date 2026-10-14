@@ -22,13 +22,27 @@ describe('TooltipComponent accessible identity and styling source guards', () =>
     expect(source).not.toContain('if (this.visible() === undefined) this.escapeDismissed.set(false);');
   });
 
-  it('guards SSR viewport access and respects reduced motion with tokenized shadow colors', () => {
+  it('guards SSR viewport access, cleans described-by and cancels pending timers', () => {
     expect(source).toContain("if (typeof window === 'undefined') return;");
+    expect(source).toContain('this.removeDescribedBy();\n      if (this.showTimeout)');
+    expect(source).toContain('clearTimeout(this.showTimeout);');
+    expect(source).toContain('cancelAnimationFrame(this.positionFrame);');
+  });
+
+  it('resets Escape dismissal on hover and focus reentry', () => {
+    expect(source).toMatch(/onMouseEnter\(event: MouseEvent\)[\s\S]*?this\.escapeDismissed\.set\(false\);/);
+    expect(source).toMatch(/onFocusIn\(event: FocusEvent\)[\s\S]*?this\.escapeDismissed\.set\(false\);/);
+  });
+
+  it('respects reduced motion while preserving the original normal and AI tooltip colors', () => {
     expect(source).toContain('@media (prefers-reduced-motion: reduce)');
     expect(source).toContain('animation: none;');
-    expect(source).toContain('color-mix(in srgb, var(--color-neutral-900, #111827)');
-    expect(source).toContain('color-mix(in srgb, var(--color-surface, #fff)');
-    expect(source).toContain('var(--color-text-primary, #111827)');
-    expect(source).toContain('this.removeDescribedBy();\n      if (this.showTimeout)');
+    expect(source).toContain('transition: none;');
+    expect(source).toContain('drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15))');
+    expect(source).toContain('rgba(255, 255, 255, 0.1) 0%');
+    expect(source).toContain('rgba(var(--color-primary-rgb), 0.85) 0%');
+    expect(source).toContain('rgba(var(--color-primary-rgb), 0.95) 50%');
+    expect(source).toContain('color: white;');
+    expect(source).toContain('border: 1px solid rgba(255, 255, 255, 0.2);');
   });
 });

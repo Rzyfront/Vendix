@@ -15,6 +15,7 @@ import { SuperAdminCertificatesPendingController } from './dian-config/dian-conf
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
+import { CreditNoteBalanceService } from './credit-notes/credit-note-balance.service';
 import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
@@ -47,6 +48,7 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
+import { StoreDocumentEmailReceptionController } from '../../received-documents/store-document-email-reception.controller';
 import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
 import { StoreDocumentReceptionConnectionsController } from '../../received-documents/store-document-reception-connections.controller';
 
@@ -92,6 +94,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // The nested `connections` collection must precede the parent
     // `received-documents/:id` route for the same Express registration-order reason.
     StoreDocumentReceptionConnectionsController,
+    StoreDocumentEmailReceptionController,
     StoreReceivedDocumentsController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
@@ -113,6 +116,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,
+    CreditNoteBalanceService,
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,

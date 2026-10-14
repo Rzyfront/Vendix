@@ -603,6 +603,59 @@ describe('DispatchNoteEventsListener — handleReceived → recepción de OC por
     expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
   });
 
+  it('(r1) 100 líneas => receive() síncrono, sin job ni po_receive_job_id; 101 => encola y devuelve po_receive_job_id sin llamar receive()', async () => {
+    const poQueue = {
+      enqueueReceive: jest
+        .fn()
+        .mockResolvedValue({ job_id: 'J1', total_lines: 101, batches_total: 2 }),
+    };
+    listener = new DispatchNoteEventsListener(
+      prismaMock as unknown as StorePrismaService,
+      stockLevelManagerMock as unknown as StockLevelManager,
+      orderStockCommitMock as unknown as OrderStockCommitService,
+      undefined,
+      undefined,
+      purchaseOrdersMock as unknown as PurchaseOrdersService,
+      undefined,
+      undefined,
+      undefined,
+      poQueue as any,
+    );
+    const mkNote = (n: number) => {
+      for (let i = 1; i <= n; i++) prismaMock.purchase_order_items.rows.push(poLine(1000 + i, i));
+      return buildPoReceiptNote(
+        Array.from({ length: n }, (_, i) =>
+          buildItem({
+            id: 5000 + i,
+            product_id: i + 1,
+            purchase_order_item_id: 1001 + i,
+            dispatched_quantity: 1,
+          }),
+        ),
+      );
+    };
+
+    const note100 = mkNote(100);
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(note100);
+    const r100 = await listener.handleReceived(receivedEvent(note100));
+    expect(r100).toBeUndefined();
+    expect(purchaseOrdersMock.receive).toHaveBeenCalledTimes(1);
+    expect(poQueue.enqueueReceive).not.toHaveBeenCalled();
+
+    prismaMock.purchase_order_items.rows.length = 0;
+    purchaseOrdersMock.receive.mockClear();
+    const note101 = mkNote(101);
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(note101);
+    const r101 = await listener.handleReceived(receivedEvent(note101));
+    expect(r101).toEqual({ po_receive_job_id: 'J1' });
+    expect(purchaseOrdersMock.receive).not.toHaveBeenCalled();
+    expect(poQueue.enqueueReceive).toHaveBeenCalledTimes(1);
+    const [poId, input] = poQueue.enqueueReceive.mock.calls[0];
+    expect(poId).toBe(PO_ID);
+    expect(input.items).toHaveLength(101);
+    expect(input.notes).toBe(RECEIPT_NOTES);
+  });
+
   it('(g) dos líneas de OC del MISMO producto/variante se reciben independientes (no colapsan en la primera)', async () => {
     prismaMock.purchase_order_items.rows.push(
       poLine(601, 9, 3),

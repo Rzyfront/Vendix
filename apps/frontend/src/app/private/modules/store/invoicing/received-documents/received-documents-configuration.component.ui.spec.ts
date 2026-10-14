@@ -1,11 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-const component = readFileSync(join(__dirname, 'received-documents-configuration.component.ts'), 'utf8');
-const wizard = readFileSync(join(__dirname, 'received-documents-configuration-wizard.component.ts'), 'utf8');
-const activation = readFileSync(join(__dirname, 'received-buyer-event-activation.component.ts'), 'utf8');
-const activationTemplate = readFileSync(join(__dirname, 'received-buyer-event-activation.component.html'), 'utf8');
-const dianWizard = readFileSync(join(__dirname, '../components/dian-config/dian-config-wizard.component.ts'), 'utf8');
+import component from './received-documents-configuration.component.ts?source' with { loader: 'text' };
+import wizard from './received-documents-configuration-wizard.component.ts?source' with { loader: 'text' };
+import activation from './received-buyer-event-activation.component.ts?source' with { loader: 'text' };
+import activationTemplate from './received-buyer-event-activation.component.html?source' with { loader: 'text' };
+import connections from './document-reception-connections.component.ts?source' with { loader: 'text' };
+import emailWizard from './received-email-reception-wizard.component.ts?source' with { loader: 'text' };
+import page from './received-documents-page.component.ts?source' with { loader: 'text' };
+import facade from './received-documents-inbox.facade.ts?source' with { loader: 'text' };
+import form from './received-document-form.component.ts?source' with { loader: 'text' };
+import backendEmail from '../../../../../../../../backend/src/domains/received-documents/interfaces/document-email-reception.interface.ts?source' with { loader: 'text' };
+import orgConfig from '../../../organization/invoicing/pages/dian-config/org-dian-config.component.ts?source' with { loader: 'text' };
+import { RECEIVED_EMAIL_REASON_CODES, type ReceivedEmailReasonCode } from './received-email-reception.interface';
+import { isReceivedDocumentSafeNotice, isValidReceivedReceptionHealth } from './received-documents.interface';
 
 describe('received documents configuration UI source guards (static, not E2E)', () => {
   it('preserves the organization configuration surface for its existing consumer', () => {
@@ -14,7 +19,7 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(component).toContain("'organization:invoicing:received'");
   });
 
-  it('uses a model-backed modal and preserves scope/read permission boundaries', () => {
+  it('preserves scope/read boundaries in the detached legacy wrapper', () => {
     expect(wizard).toContain('readonly isOpen = model(false)');
     expect(wizard).toContain("readonly scopeEligible = computed(() => this.scope() === 'store' && this.scopeReady() && !this.isSuperAdmin())");
     expect(wizard).toContain('@if (!scopeEligible())');
@@ -34,13 +39,13 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).toContain('this.readinessRequest?.unsubscribe()');
   });
 
-  it('shows separate loading, retryable error, blocked gate, and active reception states', () => {
+  it('preserves validation and real activation checks in the detached legacy wrapper', () => {
     expect(wizard).toContain('Consultando el estado fiscal…');
     expect(wizard).toContain('role="alert"');
     expect(wizard).toContain('(clicked)="loadReadiness()">Reintentar');
     expect(wizard).toContain('Primero activa la configuración DIAN y la facturación electrónica de tu tienda');
     expect(wizard).toContain('routerLink="/admin/invoicing/dian-config" (click)="close()"');
-    expect(wizard).toContain('min-h-11 items-center justify-center rounded-lg px-3 font-medium underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]');
+    expect(wizard).toContain('items-center justify-center rounded-lg px-3 py-2 font-medium text-primary underline focus:outline-none focus:ring-2 focus:ring-primary/50');
     expect(wizard).toContain("axis.environment === 'production'");
     expect(wizard).toContain("axis.enablement_status === 'enabled'");
     expect(wizard).toContain('config?.id === axis.config_id');
@@ -76,12 +81,9 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).not.toContain('?.data ?? response');
   });
 
-  it('keeps secondary-surface status badges legible with primary foregrounds', () => {
-    expect(activationTemplate).toContain('bg-surface-secondary px-2.5 py-1 text-xs font-medium text-text-primary">{{ stateLabel() }}');
-    expect(activationTemplate).toContain('bg-surface-secondary px-2 py-1 text-xs font-semibold text-text-primary">No solicitado');
-    expect(dianWizard).toContain('bg-[var(--color-surface-secondary)] text-text-primary">');
-    expect(dianWizard).toContain("not_started: 'bg-[var(--color-surface-secondary)] text-text-primary'");
-    expect(dianWizard).toContain("return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-primary'");
+  it('retains original muted status badges and variant colors without global foreground overrides', () => {
+    expect(activationTemplate).toContain('bg-surface-secondary px-2.5 py-1 text-xs font-medium text-text-secondary">{{ stateLabel() }}');
+    expect(activationTemplate).toContain('bg-surface-secondary px-2 py-1 text-xs font-semibold text-text-secondary">No solicitado');
   });
 
   it('removes embedded DIAN editing and only blocks modal closure for buyer-event submission', () => {
@@ -97,32 +99,49 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     expect(wizard).not.toContain('wizard.loadingAuditLogs()');
   });
 
-  it('uses three non-clickable steps only after the DIAN configuration is active', () => {
-    expect(wizard).toContain("{ label: 'DIAN propia' }");
-    expect(wizard).toContain("{ label: 'Eventos' }");
-    expect(wizard).toContain("{ label: 'Operación' }");
-    expect(wizard).toContain('[clickable]="false"');
-    expect(wizard).toContain("axis.configuration_type === 'invoicing'");
-    expect(wizard).toContain('getFiscalReadiness()');
-    expect(wizard).toContain('getDianConfigById(configId)');
-    expect(wizard).toContain('software_id');
-    expect(wizard).toContain('tooltipText="Identificador informado por DIAN');
-    expect(wizard).toContain('hasCertificate()');
-    expect(wizard).toContain('@if (certificateExpiry(); as expiry)');
-    expect(wizard).toContain('formatDate(expiry)');
-    expect(wizard).toContain('environmentLabel(axis.environment)');
-    expect(wizard).toContain('DIAN_ENABLEMENT_STATUS_LABELS[axis.enablement_status]');
-    expect(wizard).toContain('if (Number.isNaN(date.getTime())) return \'Fecha no disponible\';');
-    expect(wizard).toContain('formatDateOnlyUTC(date)');
-    expect(wizard).toContain('Guardar datos no significa que DIAN haya habilitado');
-    expect(wizard).toContain('La recepción automática desde DIAN no está implementada');
-    expect(wizard).not.toContain('DocumentReceptionConnectionsComponent');
-    expect(wizard).not.toMatch(/imap|webhook|provider.?secret|artificial intelligence|AiPaywall/i);
-    expect(wizard).not.toContain('software_pin_encrypted');
-    expect(wizard).not.toContain('certificate_password_encrypted');
-    expect(wizard).not.toContain('certificate_s3_key }}</');
-    expect(wizard).not.toContain("view: 'review'");
-    expect(wizard).not.toMatch(/<span[^>]*tabindex="0"[^>]*><app-icon name="info"/);
+  it('separates provider channels from the inbox and keeps its fiscal context on navigation', () => {
+    expect(component).toContain('Proveedor API');
+    expect(component).toContain('Webhook firmado');
+    expect(component).toContain('routerLink="/admin/invoicing/received-documents" [queryParams]="receptionQuery()"');
+    expect(component).toContain('Abrir buzón');
+    expect(component).toContain("store_id: this.scope() === 'organization' ? this.selectedStoreId() : null");
+    expect(component).toContain('requires_operational_store');
+    expect(component).toContain('Seleccionar tienda operativa');
+    expect(component).toContain('La importación manual de XML y el historial siguen disponibles');
+    expect(component).not.toContain('received-documents-configuration-wizard');
+    expect(component).not.toContain('software_pin_encrypted');
+    expect(component).not.toContain('certificate_password_encrypted');
+    expect(orgConfig).toContain('[selectedStoreId]="requiresStoreSelector() ? selectedStoreId() : null"');
+    expect(orgConfig).toContain('Number.isSafeInteger(parsedStoreId)');
+  });
+
+  it('reads safe health with cancellation and generation guards without a false inactive fallback', () => {
+    expect(component).toContain('this.api.getReceptionStatus(this.scope()');
+    expect(component).toContain('this.healthRequest?.unsubscribe()');
+    expect(component).toContain('this.generation++');
+    expect(component).toContain('if (generation !== this.generation) return;');
+    expect(component).toContain('takeUntilDestroyed(this.destroyRef)');
+    expect(component).toContain('this.auth.userStore()?.id');
+    expect(component).toContain('this.auth.userOrganization()?.id');
+    expect(component).toContain('healthLoading()');
+    expect(component).toContain('healthError(); as message');
+    expect(component).toContain('!this.isValidHealth(response.data)');
+    expect(component).not.toContain('!response.success');
+    expect(component).toContain('La respuesta de salud de recepción no tiene un formato válido.');
+    expect(component).not.toContain('?.data ?? response');
+  });
+
+  it('gates only administrative connections by real DIAN health and exact permissions', () => {
+    expect(component).toContain('!this.readOnly() && !this.isSuperAdmin() && this.scopeReady() && this.canRead()');
+    expect(component).toContain('this.health()?.dian_active === true');
+    expect(component).toContain('!this.healthLoading() && !this.healthError()');
+    expect(component).toContain('this.auth.hasPermission(`${this.permissionPrefix()}:connections:configure`)');
+    expect(component).toContain('if (!this.canConfigureConnections()) return;');
+    expect(component).toContain('@if (canConfigureConnections() && connectionsOpen())');
+    expect(component).toContain('Solicita a una persona con permiso de configuración DIAN');
+    expect(component).toContain('No se consultan credenciales desde esta vista.');
+    expect(connections).toContain(':received:connections:sync`');
+    expect(connections).toContain('!this.canSync()');
   });
 
   it('keeps buyer-event review inline without a nested modal and preserves permission/CAS/pagination contracts', () => {
@@ -168,27 +187,145 @@ describe('received documents configuration UI source guards (static, not E2E)', 
     const alertTags = [...activationTemplate.matchAll(/<div\b(?=[^>]*\brole="alert")[^>]*>/g)].map(([tag]) => tag);
     expect((alertTags)?.length).toBe(3);
     for (const tag of alertTags) {
-      expect(tag).toContain('text-text-primary');
-      expect(tag).not.toMatch(/\btext-error\b/);
+      expect(tag).toMatch(/\btext-error\b/);
     }
-    expect(activationTemplate).toContain('bg-success-light px-2 py-1 text-xs font-semibold text-text-primary">Listo');
-    expect(activationTemplate).toContain('bg-warning-light px-2 py-1 text-xs font-semibold text-text-primary">Bloqueado');
-    expect(activationTemplate).toContain('text-xs text-text-primary">Se muestran hasta 100 configuraciones.');
-    expect(activationTemplate).toContain('font-medium text-text-primary underline" routerLink="/admin/invoicing/dian-config"');
-    expect(activationTemplate).toContain('font-medium text-text-primary underline" routerLink="/admin/fiscal"');
-    expect(activationTemplate).not.toContain('text-sm text-error" role="alert"');
-    expect(activationTemplate).not.toContain('font-medium text-primary underline');
+    expect(activationTemplate).toContain('bg-success-light px-2 py-1 text-xs font-semibold text-success">Listo');
+    expect(activationTemplate).toContain('bg-warning-light px-2 py-1 text-xs font-semibold text-warning">Bloqueado');
+    expect(activationTemplate).toContain('text-xs text-warning">Se muestran hasta 100 configuraciones.');
+    expect(activationTemplate).toContain('font-medium text-primary underline" routerLink="/admin/invoicing/dian-config"');
+    expect(activationTemplate).toContain('font-medium text-primary underline" routerLink="/admin/fiscal"');
     expect(activationTemplate).toContain('No se transmiten eventos a la DIAN desde esta pantalla.');
     expect(activation).toContain('Pagination exception: evidence is returned as a server-paginated page');
     expect(activationTemplate).not.toContain('event 034');
   });
 
-  it('keeps buttons in the reception and buyer-event activation at accessible touch height', () => {
+  it('uses existing shared button sizes without imposed touch-height overrides', () => {
     for (const source of [wizard, activationTemplate]) {
-      const buttonTags = source.match(/<app-button\b/g) ?? [];
-      const sizedButtonTags = source.match(/<app-button\b[^>]*\bcustomClasses="[^"]*\bmin-h-11\b[^"]*"/g) ?? [];
-      expect(buttonTags.length).toBeGreaterThan(0);
-      expect((sizedButtonTags)?.length).toBe(buttonTags.length);
+      expect(source).toContain('<app-button');
+      expect(source).not.toContain('customClasses="min-h-11"');
     }
+  });
+});
+
+
+describe('email reception P0.9 integration source/contract guards (not browser QA)', () => {
+  it('matches all 32 backend reasons without importing backend runtime into frontend', () => {
+    const body = backendEmail.match(/DOCUMENT_EMAIL_REASON_CODES = \[([\s\S]*?)\] as const/)?.[1] ?? '';
+    const codes: ReceivedEmailReasonCode[] = [...body.matchAll(/'([A-Z_]+)'/g)].map((match) => {
+      const code = RECEIVED_EMAIL_REASON_CODES.find((allowed) => allowed === match[1]);
+      if (code === undefined) throw new Error(`Unknown backend email reason: ${match[1]}`);
+      return code;
+    });
+    expect(codes.length).toBe(32);
+    expect([...RECEIVED_EMAIL_REASON_CODES]).toEqual(codes);
+  });
+  it('opens only a store pilot with operational configuration permission, independent of fiscal editing', () => {
+    expect(page).toContain("this.scope === 'store' && this.canRead()");
+    expect(page).toContain("this.auth.hasPermission('invoicing:received:connections:configure')");
+    expect(page).toContain('this.inbox.health()?.email?.pilot_available === true');
+    expect(page).toContain('this.inbox.health()?.dian_active !== true) return;');
+    expect(page).not.toContain('canWriteFiscalInStore');
+    expect(component).toContain('Integraciones avanzadas (para desarrolladores)');
+    expect(component).toContain('<details');
+    expect(component).not.toContain('<details open');
+  });
+  it('keeps private alias reads cancellable and tied to configure/context, never read-only aliases', () => {
+    expect(page).toContain('this.addressRequest?.unsubscribe()');
+    expect(page).toContain('generation !== this.addressGeneration || key !== this.emailAddressContextKey()');
+    expect(page).toContain('!this.emailAvailable() || !this.canConfigureEmail()');
+    expect(page).toContain('this.addressSnapshotKey() === this.emailAddressContextKey()');
+    expect(facade).toContain('if (!isValidReceivedReceptionHealth(value)) throw new Error');
+    expect(facade).toContain('this.health.set(health.value)');
+  });
+  it('buffers inbox membership during wizard and keeps it open after the first valid invoice', () => {
+    expect(page).toContain('(protectedChange)="emailWizardProtected.set($event)"');
+    expect(page).toContain('this.manualFormOpen() || this.emailWizardOpen() || this.emailWizardProtected() || this.listFocused()');
+    const completed = page.match(/onEmailCompleted\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(completed).toContain('this.inbox.refreshAfterMutation()');
+    expect(completed).not.toContain('emailWizardOpen.set(false)');
+  });
+  it('uses only readonly stores lookup then the existing authenticated switch, never organization email mutations', () => {
+    expect(orgConfig).toContain("this.auth.hasPermission('organization:stores:read')");
+    expect(orgConfig).toContain('this.operationalStores.getStores({ limit: 200 })');
+    expect(orgConfig).toContain('generation !== this.receptionStoresGeneration || key !== this.receptionStoreContext()');
+    expect(orgConfig).toContain("this.environmentSwitch.performEnvironmentSwitch('STORE_ADMIN', slug)");
+    expect(orgConfig).toContain('if (!success)');
+    expect(orgConfig).not.toContain('ReceivedEmailReceptionService');
+    expect(orgConfig).not.toContain("new CustomEvent('switchEnvironment'");
+  });
+  it('handles a hidden-store duplicate before any document id or navigation', () => {
+    expect(isReceivedDocumentSafeNotice({ outcome: 'duplicate_other_store', created: false, message: 'Registrado en otra tienda.' })).toBe(true);
+    expect(page).toContain('if (isReceivedDocumentSafeNotice(response.data))');
+    const submit = form.match(/next: \(response\) => \{([\s\S]*?)\n      \},/)?.[1] ?? '';
+    expect(submit.indexOf('isReceivedDocumentSafeNotice(response.data)')).toBeLessThan(submit.indexOf('response.data.id'));
+    expect(submit).toContain('this.duplicateNotice.emit()');
+    expect(submit).toContain('return;');
+  });
+  it('uses 44px wizard button targets locally without touching shared buttons', () => {
+    const buttons = [...emailWizard.matchAll(/<app-button\b[^>]*>/g)].map(([tag]) => tag);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) expect(button).toContain('customClasses="min-h-11"');
+    expect(emailWizard).toContain('RECEIVED_EMAIL_DIAN_BADGE');
+  });
+  it('fails closed on malformed additive email health while preserving legacy channels and four counters', () => {
+    const legacy = { dian_active: true, configured: false, active_connections: 0, channels: ['api_poll', 'webhook'],
+      last_received_at: null, last_synced_at: null, next_sync_at: null, last_run: null, error_code: null, requires_operational_store: false };
+    const email = { pilot_available: true, configured: true, enabled: true, active_inboxes: 1, state: 'waiting',
+      first_valid_received_at: null, last_email_at: null, last_valid_received_at: null, last_error_code: null, not_processed_count: 0 };
+    expect(isValidReceivedReceptionHealth(legacy)).toBe(true);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email })).toBe(true);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email: { ...email, pilot_available: 'true' } })).toBe(false);
+    expect(isValidReceivedReceptionHealth({ ...legacy, email: { ...email, last_error_code: 'UNKNOWN_CODE' } })).toBe(false);
+    expect(isValidReceivedReceptionHealth({ ...legacy, channels: ['email'], email })).toBe(false);
+    expect((page.match(/<app-stats /g) ?? []).length).toBe(4);
+  });
+});
+
+
+describe('email reception pause and address rotation source guards (static, not browser QA)', () => {
+  it('offers configured pause/resume and address change only through the current pilot configure gate', () => {
+    expect(emailWizard).toContain('Pausar recepción');
+    expect(emailWizard).toContain('Reanudar recepción');
+    expect(emailWizard).toContain('Cambiar tu correo de facturas');
+    expect(emailWizard).toContain("this.status()?.pilot_available === true && this.snapshotKey() === this.liveKey()");
+    expect(emailWizard).toContain('this.mayConfigure() && this.canRead() && !this.busy()');
+    expect(emailWizard).toContain('configuration?.configured === true && !!configuration.address');
+    expect(emailWizard).toContain('Number.isSafeInteger(configuration.version)');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: false })');
+    expect(emailWizard).toContain('this.api.update({ expected_version: version, enabled: true })');
+    expect(emailWizard).toContain('if (!this.mayManageAddress() || this.rotateConfirmationOpen()');
+  });
+
+  it('requires local confirmation and the captured CAS version, clearing plaintext before the rotate request', () => {
+    expect(emailWizard).toContain('La dirección anterior dejará de recibir nuevos correos. Actualiza Gmail, Outlook y tus proveedores. Los documentos ya recibidos se conservan');
+    expect(emailWizard).toContain('readonly rotateConfirmationOpen = signal(false)');
+    expect(emailWizard).toContain('this.rotateVersion = this.configurationForContext()!.version; this.rotateKey = this.liveKey()');
+    expect(emailWizard).toContain('this.rotateKey !== this.liveKey()');
+    expect(emailWizard).toContain('this.rotateVersion !== this.configurationForContext()?.version');
+    expect(emailWizard).toContain('this.api.rotateAddress({ expected_version: expectedVersion, confirmed: true })');
+    const confirm = emailWizard.match(/confirmRotate\(\): void \{([\s\S]*?)\n  refresh\(\)/)?.[1] ?? '';
+    expect(confirm.indexOf('this.clearCodeTimer(); this.gmailCode.set(null)')).toBeGreaterThan(-1);
+    expect(confirm.indexOf('this.gmailCode.set(null)')).toBeLessThan(confirm.indexOf('this.api.rotateAddress('));
+    expect(confirm).toContain("() => { this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = ''; this.step.set(0); this.provider.set(null); }");
+    expect(emailWizard).toContain("!this.rotateConfirmationOpen() && provider === 'gmail'");
+  });
+
+  it('keeps nested confirmation protected, cancellable on context close and persistent on mutation failure', () => {
+    expect(emailWizard).toContain('<app-modal [(isOpen)]="rotateConfirmationOpen"');
+    expect(emailWizard).toContain('[canClose]="canCloseModal" (cancel)="closeRotateConfirmation()"');
+    expect(emailWizard).toContain('[disabled]="busy()" (clicked)="closeRotateConfirmation()">Cancelar');
+    expect(emailWizard).toContain('[loading]="busy()" (clicked)="confirmRotate()">Cambiar dirección');
+    expect(emailWizard).toContain('if (this.busy()) return;');
+    expect(emailWizard).toContain('this.closeRotateConfirmation(); this.isOpen.set(false)');
+    const invalidation = emailWizard.match(/private invalidate\(\): void \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+    expect(invalidation).toContain("this.rotateConfirmationOpen.set(false); this.rotateVersion = null; this.rotateKey = '';");
+    const mutation = emailWizard.match(/private mutate\([\s\S]*?\n  private copy/)?.[0] ?? '';
+    expect(mutation).toContain('onSuccess?: () => void');
+    expect(mutation.indexOf('this.configuration.set(configuration)')).toBeLessThan(mutation.indexOf('onSuccess?.()'));
+    expect(mutation).toContain('this.mutationError.set(failure)');
+    const refresh = emailWizard.match(/refresh\(\): void \{([\s\S]*?)\n  copyAddress/)?.[1] ?? '';
+    expect(refresh).not.toContain('this.mutationError.set(null)');
+    expect(emailWizard).toContain('Conservamos la última dirección consultada');
+    expect(mutation).not.toContain('this.completed.emit()');
   });
 });

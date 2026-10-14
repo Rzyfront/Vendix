@@ -60,7 +60,7 @@ export class OrgInvoicingComponent {
       },
       {
         id: 'received-documents',
-        label: 'Documentos recibidos',
+        label: 'Buzón de facturas',
         icon: 'inbox',
         variant: active === 'received-documents' ? 'primary' : 'outline',
       },

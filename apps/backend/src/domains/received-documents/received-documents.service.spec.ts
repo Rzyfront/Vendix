@@ -1,8 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { NormalizedReceivedDocument, ReceivedDocumentTax } from './interfaces/received-document.interface';
+import { NormalizedReceivedDocument, PreparedEmailDocument, PreparedEmailEvidence, ReceivedDocumentTax } from './interfaces/received-document.interface';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentStorageService } from './services/received-document-storage.service';
 import { ReceivedDocumentParserService } from './services/received-document-parser.service';
+import { DocumentReceptionIngestService } from './services/document-reception-ingest.service';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import type { S3Service } from '../../common/services/s3.service';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const context: ReceivedDocumentsContext = {
   organization_id: 2,
@@ -55,11 +60,15 @@ function makeHarness() {
     $queryRaw: jest.fn().mockResolvedValue([{ id: 50 }]),
     received_documents: {
       findFirst: jest.fn(async ({ where }: any) => where?.idempotency_key
-        ? createdDocs.get(where.idempotency_key) ?? null
+        ? [...createdDocs.entries()].find(([key, row]) =>
+          (key === where.idempotency_key || row.idempotency_key === where.idempotency_key) &&
+          (row.organization_id == null || row.organization_id === where.organization_id) &&
+          (row.accounting_entity_id == null || row.accounting_entity_id === where.accounting_entity_id) &&
+          (where.store_id == null || row.store_id === where.store_id))?.[1] ?? null
         : [...createdDocs.values()].find((row) => row.id === where?.id) ?? null),
       create: jest.fn(async ({ data }: any) => {
         const row = { id: nextId++, ...data };
-        createdDocs.set(data.idempotency_key, row);
+        createdDocs.set(`${data.accounting_entity_id}:${data.idempotency_key}`, row);
         return row;
       }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -121,6 +130,14 @@ function makeHarness() {
     },
   };
   const parser: any = { parse: jest.fn(() => normalized()) };
+  parser.parseDetailed = jest.fn((xml: string) => {
+    const parsed = parser.parse(xml);
+    return { normalized: parsed, commercial_xml: xml, application_responses: [], fiscal: {
+      root: 'Invoice', profile_execution_id: null, document_type_code: null,
+      uuid: { value: parsed.document_key ?? null, scheme_id: null, scheme_name: null },
+      receiver_company_id: { value: parsed.receiver_tax_id, scheme_name: null, scheme_id: null },
+    } };
+  });
   const storage: any = {
     upload: jest.fn(async (_ctx: any, _id: number, file: any) => ({
       file_key: 'organizations/2/fiscal-entities/8/received-documents/50/key',
@@ -139,6 +156,65 @@ function makeHarness() {
 const xmlFile = () => ({
   buffer: Buffer.from('<Invoice/>'), originalname: 'factura.xml', mimetype: 'application/xml', size: 10,
 }) as Express.Multer.File;
+
+function emailEvidence(bytes: Buffer, role: PreparedEmailEvidence['role'] = 'commercial', filename = 'invoice.xml', mime_type = 'application/xml'): PreparedEmailEvidence {
+  return { bytes, role, filename, mime_type, sha256: require('crypto').createHash('sha256').update(bytes).digest('hex') };
+}
+
+function preparedEmail(overrides: Partial<PreparedEmailDocument> = {}): PreparedEmailDocument {
+  const commercial = '<?xml version="1.0" encoding="UTF-8"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>';
+  return {
+    parsed: {
+      normalized: normalized(), commercial_xml: commercial, application_responses: [],
+      fiscal: { root: 'Invoice', profile_execution_id: '1', document_type_code: '01',
+        uuid: { value: 'a'.repeat(96), scheme_id: '1', scheme_name: 'CUFE-SHA384' },
+        receiver_company_id: { value: '800123456', scheme_name: '31', scheme_id: null } },
+    },
+    evidence: [emailEvidence(Buffer.from(commercial))], email_message_id: 101,
+    warnings: ['DIAN_RECEIPT_MISSING'],
+    receipt_evidence: { included: false, reference_matches: false, response_code: null },
+    ...overrides,
+  };
+}
+
+function makeEmailHarness() {
+  const h = makeHarness();
+  const files = new Map<string, any>();
+  const findDocument = ({ where }: any) => [...h.createdDocs.values()].find((row) =>
+    (where.id == null || row.id === where.id) && row.organization_id === where.organization_id &&
+    row.accounting_entity_id === where.accounting_entity_id && (where.store_id == null || row.store_id === where.store_id) &&
+    (where.idempotency_key == null || row.idempotency_key === where.idempotency_key)) ?? null;
+  h.tx.received_documents.findFirst.mockImplementation(async (args: any) => findDocument(args));
+  h.prisma.received_documents.findFirst.mockImplementation(async (args: any) => {
+    const row = findDocument(args);
+    return row ? { ...row, files: [...files.values()], items: [], taxes: [], links: [], events: [] } : null;
+  });
+  const update = async ({ where, data }: any) => {
+    const row = findDocument({ where });
+    if (!row || (typeof where.processing_status === 'string' && row.processing_status !== where.processing_status) ||
+        (where.processing_status?.in && !where.processing_status.in.includes(row.processing_status))) return { count: 0 };
+    Object.assign(row, data);
+    return { count: 1 };
+  };
+  h.tx.received_documents.updateMany.mockImplementation(update);
+  h.prisma.received_documents.updateMany.mockImplementation(update);
+  const findFile = async ({ where }: any) => [...files.values()].find((file) => file.document_id === where.document_id && file.sha256 === where.sha256) ?? null;
+  h.prisma.received_document_files.findFirst.mockImplementation(findFile);
+  h.tx.received_document_files.findFirst.mockImplementation(findFile);
+  h.tx.received_document_files.create.mockImplementation(async ({ data }: any) => {
+    const file = { id: files.size + 1, ...data };
+    files.set(`${data.document_id}:${data.sha256}`, file);
+    return file;
+  });
+  h.tx.received_document_files.findMany.mockImplementation(async ({ where }: any) => [...files.values()].filter((file) =>
+    file.document_id === where.document_id && (!where.sha256?.in || where.sha256.in.includes(file.sha256))));
+  const uploadEvidence = jest.fn(async (_ctx: unknown, id: number, original: PreparedEmailEvidence) => ({
+    file_key: `organizations/2/fiscal-entities/8/received-documents/${id}/${original.sha256}-${original.filename}`,
+    file_name: original.filename, mime_type: original.mime_type, file_size: original.bytes.length, sha256: original.sha256,
+  }));
+  Object.assign(h.storage, { uploadEvidence });
+  return { ...h, files, uploadEvidence };
+}
 
 describe('ReceivedDocumentsService tenant-safe persistence', () => {
   it('exposes the existing active fiscal/store scope validation to adjacent configuration services', async () => {
@@ -222,11 +298,143 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     const h = makeHarness();
     const first = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
     expect(first.created).toBe(true);
+    if (first.outcome === 'duplicate_other_store') throw new Error('Expected a visible document');
     expect(first.document).toMatchObject({ id: 50 });
     const duplicate = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
     expect(duplicate.created).toBe(false);
+    if (duplicate.outcome === 'duplicate_other_store') throw new Error('Expected a visible duplicate');
     expect(duplicate.document).toMatchObject({ id: 50 });
     expect(h.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('deduplicates fiscal identity across stores without exposing or reading the other store (organization=%s)', async (isOrganization) => {
+    const h = makeHarness();
+    await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    h.storage.upload.mockClear();
+    h.storage.download.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    h.prisma.received_document_files.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    const outcome = await h.service.importXmlWithOutcome({ ...context, store_id: 4, is_organization: isOrganization }, xmlFile(), 'api');
+
+    expect(outcome).toEqual({
+      outcome: 'duplicate_other_store', created: false,
+      message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    expect(h.tx.received_documents.findFirst).toHaveBeenLastCalledWith({
+      where: { organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}` },
+    });
+    expect(h.tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('does not merge matching document keys from separate fiscal entities', async () => {
+    const h = makeHarness();
+    const first = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    h.baseClient.accounting_entities.findFirst.mockResolvedValueOnce({
+      id: 9, organization_id: 2, store_id: 4, tax_id: '800123456', is_active: true,
+    });
+    h.baseClient.store_settings.findFirst.mockResolvedValueOnce({ settings: { fiscal_data: { nit: '800123456' } } });
+    const second = await h.service.importXmlWithOutcome({ ...context, store_id: 4, accounting_entity_id: 9 }, xmlFile(), 'api');
+    expect(first.outcome).toBe('created');
+    expect(second.outcome).toBe('created');
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(2);
+    expect([...h.createdDocs.values()]).toMatchObject([
+      { id: 50, accounting_entity_id: 8, store_id: 3 },
+      { id: 51, accounting_entity_id: 9, store_id: 4 },
+    ]);
+  });
+
+  it.each([false, true])('returns a safe P2002 winner outcome and still rejects conflicting facts (conflict=%s)', async (conflict) => {
+    const h = makeHarness();
+    h.tx.received_documents.create.mockRejectedValueOnce({ code: 'P2002', meta: { target: ['accounting_entity_id', 'idempotency_key'] } });
+    const winner = {
+      id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      raw_payload: { normalized: normalized(conflict ? { total_amount: '120.00' } : {}) },
+      files: [{ id: 123, file_key: 'private-file-key' }],
+    };
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce(winner);
+    const read = jest.spyOn(h.service, 'findOne');
+    const result = h.service.importXmlWithOutcome({ ...context, store_id: 4 }, xmlFile(), 'api');
+    if (conflict) await expect(result).rejects.toBeInstanceOf(ConflictException);
+    else await expect(result).resolves.toEqual({
+      outcome: 'duplicate_other_store', created: false,
+      message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledTimes(1);
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledWith({
+      where: { organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}` },
+    });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('rejects conflicting cross-store facts before storage or a scoped document read', async () => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    h.parser.parse.mockReturnValueOnce(normalized({ total_amount: '120.00' }));
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    await expect(h.service.importXmlWithOutcome({ ...context, store_id: 4 }, xmlFile(), 'api'))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['processing', 'error'])('preserves the safe manual/XML notice for a hidden legacy duplicate in %s', async (processingStatus) => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    const dto = manualDto({ invoice_number: 'FV-1', document_key: 'a'.repeat(96), due_date: '2026-10-30' });
+    [...h.createdDocs.values()][0].processing_status = processingStatus;
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    const read = jest.spyOn(h.service, 'findOne');
+    const expected = { outcome: 'duplicate_other_store', created: false, message: 'Esta factura ya fue recibida en otra tienda de tu empresa.' };
+    await expect(h.service.importXml({ ...context, store_id: 4 }, xmlFile())).resolves.toEqual(expected);
+    const manual = makeHarness();
+    await manual.service.createManual(context, dto);
+    [...manual.createdDocs.values()][0].processing_status = processingStatus;
+    manual.prisma.received_documents.findFirst.mockClear();
+    const manualRead = jest.spyOn(manual.service, 'findOne');
+    await expect(manual.service.createManual({ ...context, store_id: 4 }, dto)).resolves.toEqual(expected);
+    expect(manual.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(manual.storage.upload).not.toHaveBeenCalled();
+    expect(manual.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(manualRead).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['api', 'automated'] as const)('counts the cross-store duplicate safely for %s ingestion without hidden document IDs', async (source) => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    h.storage.upload.mockClear();
+    h.prisma.received_documents.findFirst.mockClear();
+    await expect(ingest.ingest({ ...context, store_id: 4 }, {
+      version: 1, next_cursor: 'next', documents: [{
+        external_id: 'provider-1', file_name: 'factura.xml', mime_type: 'application/xml', content: xmlFile().buffer,
+      }],
+    }, source)).resolves.toEqual({
+      received_count: 0, duplicate_count: 1, error_count: 0,
+      document_ids: [], error_codes: [], next_cursor: 'next',
+    });
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
   });
 
   it('uses canonical RUT NIT rather than a different accounting entity projection', async () => {
@@ -1016,5 +1224,388 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     await expect(h.service.replaceFromExtraction(context, 50, normalized())).rejects.toBeInstanceOf(ConflictException);
     expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
     expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReceivedDocumentsService prepared email evidence', () => {
+  it.each(['manual', 'api'])('preserves real POS20 XML classification on legacy %s import without inventing email transport', async (source) => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    const result = await h.service.importXmlWithOutcome(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File, source);
+    expect(result.outcome).toBe('created');
+    const row = [...h.createdDocs.values()][0];
+    expect(row.metadata).toEqual({ source_format: 'ubl_xml', fiscal_document_type_code: '20' });
+    expect(row.source_channel).toBe(source);
+    expect(row.raw_payload.normalized.document_type).toBe('invoice');
+    expect(h.parser.parse).not.toHaveBeenCalled();
+    if (result.outcome === 'duplicate_other_store') throw new Error('Expected an imported document');
+    expect(result.document).toMatchObject({ fiscal_document_type_code: '20', email_transport_received: false, email_reception: null });
+    expect(row.dian_validation_status).toBe('not_checked');
+    expect(row.processing_status).toBe('ready');
+  });
+
+  it('rejects FEV01 email against a legacy XML POS20 classification before attaching evidence or changing history', async () => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    await h.service.importXml(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File);
+    const row = [...h.createdDocs.values()][0];
+    const incoming = preparedEmail();
+    incoming.parsed.normalized = JSON.parse(JSON.stringify(row.raw_payload.normalized));
+    incoming.parsed.fiscal.uuid.value = incoming.parsed.normalized.document_key!;
+    const preserved = JSON.stringify(row);
+    h.prisma.received_documents.findFirst.mockClear();
+    await expect(h.service.ingestPreparedEmail(context, incoming)).rejects.toBeInstanceOf(ConflictException);
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(JSON.stringify(row)).toBe(preserved);
+  });
+
+  it('does not apply strict email environment preflight to legacy XML import', async () => {
+    const h = makeEmailHarness();
+    const xml = readFileSync(join(__dirname, '__fixtures__/email/pos-20.xml'), 'utf8').replace('<cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>', '<cbc:ProfileExecutionID>2</cbc:ProfileExecutionID>');
+    h.parser.parseDetailed.mockImplementation((text: string) => new ReceivedDocumentParserService().parseDetailed(text));
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: { fiscal_data: { nit: '800765432' } } });
+    const bytes = Buffer.from(xml);
+    await expect(h.service.importXml(context, { buffer: bytes, originalname: 'pos.xml', mimetype: 'application/xml', size: bytes.length } as Express.Multer.File)).resolves.toMatchObject({ fiscal_document_type_code: '20' });
+  });
+
+  it('creates processing and only finalizes ready after every exact evidence hash is durable', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    const pdf = emailEvidence(Buffer.from('%PDF-1.7\nrepresentation'), 'representation', 'invoice.pdf', 'application/pdf');
+    prepared.evidence.push(pdf);
+    const guard = jest.fn().mockResolvedValue(undefined);
+    const outcome = await h.service.ingestPreparedEmail(context, prepared, guard);
+    expect(outcome.outcome).toBe('created');
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      source_channel: 'email', processing_status: 'processing', created_by: context.actor_id,
+      metadata: expect.objectContaining({ source_format: 'email', email_reception: expect.objectContaining({ message_id: 101, document_type_code: '01' }) }),
+    }) }));
+    const row = [...h.createdDocs.values()][0];
+    expect(row.processing_status).toBe('ready');
+    expect(row.metadata.originals_checkpoint).toEqual(prepared.evidence.map(({ sha256 }) => ({ sha256, stored: true })));
+    expect([...h.files.values()].map(({ sha256, role }) => ({ sha256, role }))).toEqual(prepared.evidence.map(({ sha256, role }) => ({ sha256, role })));
+    expect(h.parser.parse).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    const mutations = [h.tx.received_documents.create, h.tx.received_document_items.create,
+      h.tx.received_document_taxes.createMany, h.tx.received_document_events.create,
+      h.uploadEvidence, h.tx.received_document_files.create, h.tx.received_document_events.upsert,
+      h.tx.received_documents.updateMany].flatMap((mock) => mock.mock.invocationCallOrder).sort((a, b) => a - b);
+    expect(guard).toHaveBeenCalledTimes(mutations.length);
+    mutations.forEach((order, index) => {
+      expect(guard.mock.invocationCallOrder[index]).toBeLessThan(order);
+      if (index > 0) expect(guard.mock.invocationCallOrder[index]).toBeGreaterThan(mutations[index - 1]);
+    });
+  });
+
+  it('retries only missing evidence after a failure following the first upload, with no early ready', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    prepared.evidence.push(emailEvidence(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]), 'zip', 'invoice.zip', 'application/zip'));
+    const upload = h.uploadEvidence.getMockImplementation()!;
+    h.uploadEvidence.mockImplementationOnce(upload).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(h.service.ingestPreparedEmail(context, prepared)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    const row = [...h.createdDocs.values()][0];
+    expect(row.processing_status).toBe('error');
+    expect(h.files.size).toBe(1);
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ processing_status: 'ready' }) }));
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    const recovered = await h.service.ingestPreparedEmail(context, prepared);
+    expect(recovered.outcome).toBe('duplicate');
+    expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
+    expect(h.uploadEvidence).toHaveBeenCalledTimes(3);
+    expect(h.uploadEvidence).toHaveBeenNthCalledWith(3, expect.any(Object), row.id, prepared.evidence[1]);
+    expect(h.files.size).toBe(2);
+    expect(row.processing_status).toBe('ready');
+    expect(row.metadata.originals_checkpoint.every(({ stored }: any) => stored)).toBe(true);
+  });
+
+  it('does not declare ready merely because the upload returned when a manifest file row is not durable', async () => {
+    const h = makeEmailHarness();
+    h.tx.received_document_files.create.mockResolvedValueOnce({ id: 1 });
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect([...h.createdDocs.values()][0].processing_status).toBe('error');
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each(['processing', 'error'])('rejects email intake of a hidden %s canonical document before storage or detail', async (processingStatus) => {
+    const h = makeEmailHarness();
+    const hidden = { id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      processing_status: processingStatus, idempotency_key: `key:${'a'.repeat(96)}`, raw_payload: { normalized: normalized() },
+      metadata: { source_format: 'email', originals_checkpoint: [{ stored: false }] },
+      files: [{ id: 123, file_key: 'private-original-key', file_name: 'private-original-name' }] };
+    h.createdDocs.set(`key:${'a'.repeat(96)}`, hidden);
+    const guard = jest.fn();
+    const read = jest.spyOn(h.service, 'findOne');
+    const before = JSON.stringify(hidden);
+    const failure = await h.service.ingestPreparedEmail({ ...context, store_id: 4 }, preparedEmail(), guard).catch((error) => error);
+    expect(failure).toBeInstanceOf(ServiceUnavailableException);
+    expect(failure.getResponse()).toEqual({ statusCode: 503, error: 'Service Unavailable',
+      message: 'La recepción no está disponible temporalmente. Intenta nuevamente más tarde.' });
+    expect(JSON.stringify(hidden)).toBe(before);
+    expect(guard).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.create).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.tx.received_document_files.findMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['processing', 'error', 'ready'])('applies email hidden-ready policy to the P2002 winner in %s', async (processingStatus) => {
+    const h = makeEmailHarness();
+    h.tx.received_documents.create.mockRejectedValueOnce({ code: 'P2002', meta: { target: ['accounting_entity_id', 'idempotency_key'] } });
+    const winner = { id: 77, organization_id: 2, accounting_entity_id: 8, store_id: 3,
+      processing_status: processingStatus, idempotency_key: `key:${'a'.repeat(96)}`, raw_payload: { normalized: normalized() },
+      metadata: { source_format: 'email' }, files: [{ id: 123, file_key: 'private-original-key' }] };
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce(winner);
+    const read = jest.spyOn(h.service, 'findOne');
+    const outcome = h.service.ingestPreparedEmail({ ...context, store_id: 4 }, preparedEmail());
+    if (processingStatus === 'ready') await expect(outcome).resolves.toEqual({
+      outcome: 'duplicate_other_store', created: false, message: 'Esta factura ya fue recibida en otra tienda de tu empresa.',
+    });
+    else {
+      const failure = await outcome.catch((error) => error);
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(failure.getResponse()).toEqual({ statusCode: 503, error: 'Service Unavailable',
+        message: 'La recepción no está disponible temporalmente. Intenta nuevamente más tarde.' });
+    }
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledWith({ where: {
+      organization_id: 2, accounting_entity_id: 8, idempotency_key: `key:${'a'.repeat(96)}`,
+    } });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+    expect(h.storage.download).not.toHaveBeenCalled();
+    expect(h.tx.received_document_files.findMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_document_files.findFirst).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('returns a hidden cross-store duplicate before storage, document detail, guard mutation or IDs', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    await h.service.ingestPreparedEmail(context, prepared);
+    expect([...h.createdDocs.values()][0].processing_status).toBe('ready');
+    h.uploadEvidence.mockClear(); h.prisma.received_documents.findFirst.mockClear();
+    const guard = jest.fn();
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    await expect(ingest.ingestPreparedEmail({ ...context, store_id: 4 }, prepared, guard)).resolves.toEqual({
+      received_count: 0, duplicate_count: 1, error_count: 0, document_ids: [], error_codes: [], next_cursor: null,
+    });
+    expect(guard).not.toHaveBeenCalled();
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects known POS20 versus FEV01 fiscal metadata before storage and without overwriting history', async () => {
+    const h = makeEmailHarness();
+    const pos = preparedEmail();
+    pos.parsed.fiscal.document_type_code = '20'; pos.parsed.fiscal.uuid.scheme_name = 'CUDE-SHA384';
+    await h.service.ingestPreparedEmail(context, pos);
+    const row = [...h.createdDocs.values()][0];
+    const preserved = JSON.stringify(row);
+    h.uploadEvidence.mockClear(); h.prisma.received_documents.findFirst.mockClear();
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ConflictException);
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+    expect(JSON.stringify(row)).toBe(preserved);
+  });
+
+  it('keeps a historically ready API document ready on supplemental failure and retains its source on success', async () => {
+    const h = makeEmailHarness();
+    await h.service.importXml(context, xmlFile(), 'api');
+    const row = [...h.createdDocs.values()][0];
+    const raw = JSON.stringify(row.raw_payload);
+    const summary = JSON.stringify(row.validation_summary);
+    h.uploadEvidence.mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(row.processing_status).toBe('ready');
+    expect(h.prisma.received_documents.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: { processing_status: 'error' } }));
+    const outcome = await h.service.ingestPreparedEmail(context, preparedEmail());
+    expect(outcome.outcome).toBe('duplicate');
+    expect(row.source_channel).toBe('api');
+    expect(row.metadata.source_format).toBe('ubl_xml');
+    expect(JSON.stringify(row.raw_payload)).toBe(raw);
+    expect(JSON.stringify(row.validation_summary)).toBe(summary);
+    if (outcome.outcome === 'duplicate_other_store') throw new Error('Expected a visible duplicate');
+    expect(outcome.document).toMatchObject({ email_transport_received: true });
+  });
+
+  it('keeps included receipts and signatures unverified and never promotes a legal acceptance', async () => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail({ warnings: [], receipt_evidence: { included: true, reference_matches: true, response_code: '00' } });
+    prepared.parsed.normalized.validation.has_signature = true;
+    prepared.evidence.push(emailEvidence(Buffer.from('<ApplicationResponse xmlns="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2"/>'), 'dian_receipt', 'response.xml'));
+    await h.service.ingestPreparedEmail(context, prepared);
+    const row = [...h.createdDocs.values()][0];
+    expect(row.dian_validation_status).toBe('not_checked');
+    expect(row.signature_validation_status).toBe('not_verified');
+    expect(row.validation_summary.dian.status).toBe('not_checked');
+    expect(row.validation_summary.receipt_evidence).toEqual(prepared.receipt_evidence);
+    expect(row.accepted_at).toBeUndefined();
+    expect(row.fiscal_status).toBe('pending');
+    expect(row.posting_status).toBe('pending');
+    expect(JSON.stringify(row.metadata)).not.toContain('ApplicationResponse');
+  });
+
+  it('projects only safe fiscal receipt fields in lists and preserves legacy detail metadata', async () => {
+    const h = makeEmailHarness();
+    await h.service.ingestPreparedEmail(context, preparedEmail());
+    const row = [...h.createdDocs.values()][0];
+    row.metadata.private_checkpoint = 'must not appear in list';
+    h.prisma.received_documents.findMany.mockResolvedValueOnce([row]);
+    const list = await h.service.list(context, { page: 1, limit: 25 });
+    expect(list.data[0]).toMatchObject({ email_transport_received: true, email_reception: {
+      document_type_code: '01', profile_execution_id: '1', uuid_scheme_name: 'CUFE-SHA384',
+      receipt_evidence: { included: false, reference_matches: false, response_code: null },
+    } });
+    expect(list.data[0]).not.toHaveProperty('metadata');
+    expect(JSON.stringify(list)).not.toContain('private_checkpoint');
+    expect(JSON.stringify(list)).not.toContain('originals_checkpoint');
+    const detail = await h.service.findOne(context, row.id);
+    expect(detail.metadata).toMatchObject({ private_checkpoint: 'must not appear in list' });
+    expect(detail.email_transport_received).toBe(true);
+  });
+
+  it('aborts on a lost beforeWrite guard after upload without inserting files or issuing failure writes', async () => {
+    const h = makeEmailHarness();
+    const lost = new ConflictException('lease lost');
+    const guard = jest.fn(async () => { if (h.uploadEvidence.mock.calls.length > 0) throw lost; });
+    await expect(h.service.ingestPreparedEmail(context, preparedEmail(), guard)).rejects.toBe(lost);
+    expect(h.tx.received_document_files.create).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.prisma.received_documents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('propagates incomplete storage through the internal ingest wrapper instead of producing an acknowledgement-shaped success', async () => {
+    const h = makeEmailHarness();
+    h.uploadEvidence.mockRejectedValueOnce(new Error('storage unavailable'));
+    const scanQueue = { enqueue: jest.fn() };
+    const ingest = new DocumentReceptionIngestService(h.service, scanQueue as unknown as ReceivedDocumentScanQueueService);
+    await expect(ingest.ingestPreparedEmail(context, preparedEmail())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(scanQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each(['overflow', 'issuer_length', 'hash_mismatch', 'receiver_mismatch', 'missing_container'] as const)('rejects prepared %s before any document write', async (kind) => {
+    const h = makeEmailHarness();
+    const prepared = preparedEmail();
+    if (kind === 'overflow') prepared.parsed.normalized.items = Array.from({ length: 501 }, () => prepared.parsed.normalized.items[0]);
+    if (kind === 'issuer_length') prepared.parsed.normalized.issuer_name = 'x'.repeat(256);
+    if (kind === 'hash_mismatch') prepared.evidence[0].sha256 = '0'.repeat(64);
+    if (kind === 'receiver_mismatch') prepared.parsed.normalized.receiver_tax_id = '900111222';
+    if (kind === 'missing_container') prepared.parsed.fiscal.container = { profile_execution_id: '1', uuid: prepared.parsed.fiscal.uuid };
+    await expect(h.service.ingestPreparedEmail(context, prepared)).rejects.toBeInstanceOf(BadRequestException);
+    expect(h.tx.received_documents.create).not.toHaveBeenCalled();
+    expect(h.uploadEvidence).not.toHaveBeenCalled();
+  });
+
+  it('stores exact Latin1, ZIP and unverified response bytes only through the internal evidence path', async () => {
+    const previous = process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER;
+    process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER = 's3';
+    try {
+      const s3 = { uploadFile: jest.fn().mockResolvedValue('ignored') };
+      const storage = new ReceivedDocumentStorageService(s3 as unknown as S3Service);
+      const latin = emailEvidence(Buffer.from('<?xml version="1.0" encoding="ISO-8859-1"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"><Name>Café Bogotá</Name></Invoice>', 'latin1'));
+      latin.encoding = 'iso-8859-1';
+      const zip = emailEvidence(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]), 'zip', 'supplier.zip', 'application/zip');
+      const ar = emailEvidence(Buffer.from('<ApplicationResponse xmlns="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2"/>'), 'dian_receipt', 'response.xml');
+      for (const original of [latin, zip, ar]) {
+        const before = Buffer.from(original.bytes);
+        const stored = await storage.uploadEvidence({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, 50, original);
+        expect(stored.sha256).toBe(original.sha256);
+        expect(stored.file_size).toBe(before.length);
+        expect(s3.uploadFile).toHaveBeenLastCalledWith(original.bytes, expect.any(String), original.mime_type);
+        expect(original.bytes.equals(before)).toBe(true);
+        await expect(storage.upload({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, 50, {
+          buffer: original.bytes, originalname: original.filename, mimetype: original.mime_type, size: original.bytes.length,
+        })).rejects.toThrow();
+      }
+      expect(s3.uploadFile).toHaveBeenCalledTimes(3);
+    } finally {
+      if (previous === undefined) delete process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER;
+      else process.env.RECEIVED_DOCUMENT_STORAGE_DRIVER = previous;
+    }
+  });
+});
+
+describe('ReceivedDocumentsService inbox read wiring', () => {
+  const readContext = { ...context, fiscal_scope: 'ORGANIZATION' as const };
+  it('paginates server-side by arrival/id on request and strips compact events from rows', async () => {
+    const h = makeHarness();
+    const arrival = new Date('2026-10-13T10:00:00Z');
+    h.tx.received_documents.findMany = jest.fn().mockResolvedValue([{
+      id: 50, document_type: 'invoice', processing_status: 'ready', validation_status: 'valid',
+      structural_validation_status: 'valid', accepted_at: null, created_at: arrival,
+      events: [{ event_type: 'BUYER_DIAN_EVENT', event_code: '031', status: 'accepted' }],
+    }]);
+    h.tx.received_documents.count = jest.fn().mockResolvedValue(55);
+    const result = await h.service.listInbox(readContext, { page: 2, limit: 25, sort: 'inbox', inbox_state: 'reclaimed' });
+    expect(result).toMatchObject({ total: 55, page: 2, limit: 25 });
+    expect(result.data[0]).toMatchObject({ inbox_state: 'reclaimed', legal_status: 'reclaimed', arrived_at: arrival });
+    expect(result.data[0]).not.toHaveProperty('events');
+    expect(result.data[0]).not.toHaveProperty('raw_payload');
+    const args = h.tx.received_documents.findMany.mock.calls[0][0];
+    expect(args).toMatchObject({ take: 25, skip: 25, orderBy: [{ created_at: 'desc' }, { id: 'desc' }] });
+    expect(args.where.AND[0]).toMatchObject({ organization_id: 2, accounting_entity_id: 8, store_id: 3 });
+    expect(args.select.events.select).toEqual({ event_type: true, event_code: true, status: true, confirmed_at: true, event_date: true });
+    expect(args.select).not.toHaveProperty('raw_payload');
+    expect(h.tx.received_documents.count).toHaveBeenCalledWith({ where: args.where });
+    expect(h.tx.received_documents.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps issue-date ordering unless inbox ordering is explicitly selected', async () => {
+    const h = makeHarness();
+    h.tx.received_documents.findMany = jest.fn().mockResolvedValue([]);
+    h.tx.received_documents.count = jest.fn().mockResolvedValue(0);
+    await h.service.listInbox(readContext, { page: 1, limit: 25, legal_status: 'accepted' });
+    expect(h.tx.received_documents.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: [{ issue_date: 'desc' }, { created_at: 'desc' }] }));
+  });
+
+  it('revalidates entity/store ownership before invoking a health or summary reader', async () => {
+    const h = makeHarness();
+    const inboxStatus = { summary: jest.fn().mockResolvedValue({ total: 0 }), receptionStatus: jest.fn().mockResolvedValue({ configured: false }) };
+    Object.assign(h.service, { inboxStatus });
+    await h.service.inboxSummary(readContext, { page: 1, limit: 25 });
+    expect(inboxStatus.summary).toHaveBeenCalledWith({ organization_id: 2, accounting_entity_id: 8, store_id: 3 }, { page: 1, limit: 25 });
+    h.baseClient.accounting_entities.findFirst.mockResolvedValueOnce(null);
+    await expect(h.service.receptionStatus(readContext)).rejects.toThrow(ForbiddenException);
+    expect(inboxStatus.receptionStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns empty pages without entity creation and rejects forged null-entity store scope', async () => {
+    const h = makeHarness();
+    h.prisma.organizations = { findFirst: jest.fn().mockResolvedValue({ id: 2 }) };
+    h.prisma.stores = { findFirst: jest.fn().mockResolvedValue({ id: 3 }) };
+    expect(await h.service.listInbox({ ...readContext, accounting_entity_id: null }, { page: 3, limit: 100, sort: 'inbox' }))
+      .toEqual({ data: [], total: 0, page: 3, limit: 100 });
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
+    h.prisma.stores.findFirst.mockResolvedValueOnce(null);
+    await expect(h.service.listInbox({ ...readContext, accounting_entity_id: null, store_id: 999 }, { page: 1, limit: 25 })).rejects.toThrow(ForbiddenException);
+  });
+
+  it('adds inbox fields to detail without removing existing evidence relationships', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, document_type: 'invoice', processing_status: 'ready', validation_status: 'valid',
+      accepted_at: new Date('2026-10-13T10:00:00Z'), created_at: new Date('2026-10-13T09:00:00Z'),
+      files: [{ id: 1 }], items: [{ id: 2 }], taxes: [], links: [],
+      events: [{ id: 3, event_type: 'BUYER_DIAN_EVENT', event_code: '030', status: 'unknown' }],
+    });
+    const result = await h.service.findOneInbox(readContext, 50);
+    expect(result).toMatchObject({ inbox_state: 'requires_review', legal_status: 'accepted', legal_flags: { accepted: true, reclaimed: false }, files: [{ id: 1 }], items: [{ id: 2 }], events: [{ id: 3 }] });
   });
 });

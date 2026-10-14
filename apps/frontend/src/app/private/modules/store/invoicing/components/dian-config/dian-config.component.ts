@@ -8,7 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
@@ -21,7 +21,6 @@ import {
   CardComponent,
   IconComponent,
   StatsComponent,
-  TooltipComponent,
 } from '../../../../../../shared/components/index';
 import {
   DIAN_CONFIGURATION_TYPES,
@@ -35,7 +34,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { DianConfigWizardComponent } from './dian-config-wizard.component';
-import { ReceivedDocumentsConfigurationWizardComponent } from '../../received-documents/received-documents-configuration-wizard.component';
+import { ReceivedDocumentsConfigurationComponent } from '../../received-documents/received-documents-configuration.component';
 
 interface AxisStats {
   total: number;
@@ -71,15 +70,15 @@ interface AxisStats {
   selector: 'vendix-dian-config',
   standalone: true,
   imports: [
+    RouterLink,
     CardComponent,
     ButtonComponent,
     IconComponent,
     StatsComponent,
-    TooltipComponent,
     ModalComponent,
     DianDocumentTypeCardComponent,
     DianConfigWizardComponent,
-    ReceivedDocumentsConfigurationWizardComponent,
+    ReceivedDocumentsConfigurationComponent,
   ],
   template: `
     <div class="w-full">
@@ -134,19 +133,19 @@ interface AxisStats {
       <div class="mt-4 md:mt-6">
         @if (scopeBlockReason(); as reason) {
           <div
-            class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-primary)]"
+            class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-secondary)]"
           >
             {{ reason }}
           </div>
         }
 
         @if (loading()) {
-          <div class="py-10 text-center text-sm text-[var(--color-text-primary)]">
+          <div class="py-10 text-center text-sm text-[var(--color-text-secondary)]">
             Cargando habilitaciones…
           </div>
         } @else if (loadError(); as message) {
           <app-card>
-            <p class="text-sm text-text-primary">{{ message }}</p>
+            <p class="text-sm text-[var(--color-error)]">{{ message }}</p>
           </app-card>
         } @else {
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -164,52 +163,26 @@ interface AxisStats {
               <div class="flex items-start gap-3">
                 <span class="rounded-lg bg-primary/10 p-2 text-primary" aria-hidden="true"><app-icon name="inbox" [size]="18" /></span>
                 <div>
-                  <h2 class="text-base font-semibold text-text-primary">Recepción de documentos</h2>
-                  <p class="mt-1 text-sm text-text-primary">La entidad fiscal es de la organización. La recepción de esta tienda se administra allí; este panel conserva el alcance fiscal actual y no cambia su configuración.</p>
+                  <h2 class="text-base font-semibold text-text-primary">Recepción por correo</h2>
+                  <p class="mt-1 text-sm text-text-secondary">La entidad fiscal es de la organización. El correo se administra en el Buzón de esta tienda con su permiso operativo, sin cambiar la configuración fiscal.</p>
+                  @if (canReadReception()) {
+                    <a routerLink="/admin/invoicing/received-documents" class="inline-flex min-h-11 items-center font-medium text-primary underline">Abrir Buzón</a>
+                  }
                 </div>
               </div>
-              </app-card>
-            } @else if (!isSuperAdmin() && canReadReception()) {
-              <app-card [responsive]="true" [responsivePadding]="true" [fullHeight]="true" overflow="visible">
-              <div class="flex h-full flex-col gap-3">
-                <div class="flex min-w-0 items-start gap-3">
-                  <span class="rounded-lg bg-primary/10 p-2 text-primary" aria-hidden="true"><app-icon name="inbox" [size]="20" /></span>
-                  <div class="min-w-0">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <h2 class="text-base font-semibold text-text-primary">Recepción de documentos</h2>
-                      <app-tooltip content="La bandeja admite importación manual de XML. La conexión directa con DIAN no está implementada; la revisión y conciliación siguen siendo pasos operativos.">
-                        <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-primary)]" aria-label="Ayuda sobre recepción de documentos"><app-icon name="info" [size]="16" /></button>
-                      </app-tooltip>
-                    </div>
-                  </div>
-                </div>
-                <p class="text-sm text-text-primary">Importa XML manualmente, consulta el estado del comprador y revisa los documentos recibidos.</p>
-                <div class="mt-auto pt-2">
-                <app-button variant="primary" size="md" customClasses="h-11 min-h-11 w-full sm:w-auto" [disabled]="!canConfigureReception()" (clicked)="openReception()">
-                    <span slot="icon"><app-icon name="settings" [size]="16" /></span>
-                    Configurar
-                  </app-button>
-                </div>
-              </div>
-              @if (readOnly()) {
-                <p class="mt-3 text-xs text-text-primary" role="note">Modo consulta: la configuración no está disponible para escritura.</p>
-              } @else if (!receptionScopeReady()) {
-                <p class="mt-3 text-xs text-text-primary" role="note">La configuración de recepción requiere una entidad fiscal de tienda.</p>
-              } @else if (!canConfigureReception()) {
-                <p class="mt-3 text-xs text-text-primary" role="note">Tu perfil no tiene permiso para configurar esta entidad fiscal.</p>
-              }
               </app-card>
             }
           </div>
         }
 
-        @if (!isSuperAdmin() && fiscalScope() !== 'ORGANIZATION' && canReadReception() && receptionOpen()) {
-          <app-received-documents-configuration-wizard
-            [(isOpen)]="receptionOpen"
-            scope="store"
-            [scopeReady]="receptionScopeReady()"
-            [readOnly]="readOnly()"
-          />
+        @if (!isSuperAdmin() && canReadReception()) {
+          <div class="mt-4">
+            <app-received-documents-configuration
+              scope="store"
+              [scopeReady]="receptionScopeReady()"
+              [readOnly]="readOnly()"
+            />
+          </div>
         }
       </div>
 
@@ -241,7 +214,7 @@ interface AxisStats {
           ></vendix-dian-config-wizard>
         }
         <div slot="footer" class="flex justify-end">
-          <app-button customClasses="min-h-11" variant="outline" [disabled]="!canCloseWizard()" (clicked)="onWizardCancelled()">
+          <app-button variant="outline" [disabled]="!canCloseWizard()" (clicked)="onWizardCancelled()">
             Cerrar
           </app-button>
         </div>
@@ -266,22 +239,18 @@ export class DianConfigComponent {
    * backend. Aquí sólo se deja de OFRECER lo que no se declaró.
    */
   readonly readOnly = input(false);
-  readonly receptionOpen = signal(false);
   readonly isSuperAdmin = computed(() => {
     const roles = this.auth.userRoles();
     return roles.includes('super_admin') || roles.includes('SUPER_ADMIN');
   });
   readonly canReadReception = computed(() => this.auth.hasPermission('invoicing:received:read'));
-  readonly canConfigureReception = computed(() =>
-    !this.isSuperAdmin() && this.receptionScopeReady() && !this.readOnly() && this.auth.hasPermission('invoicing:write'),
-  );
 
   // ── State ─────────────────────────────────────────────────
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
   readonly axes = signal<FiscalReadinessAxis[]>([]);
   readonly fiscalScope = signal<string | null>(null);
-  readonly receptionScopeReady = computed(() => this.fiscalScope() === 'STORE');
+  readonly receptionScopeReady = computed(() => this.fiscalScope() === 'STORE' || this.fiscalScope() === 'ORGANIZATION');
 
   // Wizard
   readonly isWizardOpen = signal(false);
@@ -343,11 +312,6 @@ export class DianConfigComponent {
     }
     return { total: list.length, enabled, production, notStarted };
   });
-
-  openReception(): void {
-    if (!this.canConfigureReception() || !this.canReadReception()) return;
-    this.receptionOpen.set(true);
-  }
 
   readonly wizardTitle = computed(() => {
     const axis = this.axes().find(

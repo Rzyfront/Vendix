@@ -24,6 +24,9 @@ export interface OrganizationScopedWhere {
 @Injectable()
 export class OrganizationPrismaService extends BasePrismaService {
   private readonly org_scoped_models = [
+    // Operational store ownership is independent of fiscal entity scope.
+    'document_reception_email_inboxes',
+    'document_reception_email_messages',
     'users',
     'stores',
     'suppliers',
@@ -260,6 +263,15 @@ export class OrganizationPrismaService extends BasePrismaService {
   private scoped_client: any;
 
   // Organization-scoped models with automatic filtering
+  // Email reception remains scoped to the operational tenant, not a shared NIT.
+  get document_reception_email_inboxes() {
+    return this.scoped_client.document_reception_email_inboxes;
+  }
+
+  get document_reception_email_messages() {
+    return this.scoped_client.document_reception_email_messages;
+  }
+
   get users() {
     return this.scoped_client.users;
   }

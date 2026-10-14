@@ -27,11 +27,21 @@ import type { PlatformInvoiceKind } from '../../../../subscriptions/interfaces/p
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import {
   billingCycleLabel,
+  collectionStatusBadgeClasses,
+  collectionStatusLabel,
+  documentTypeLabel,
   evidenceTypeLabel,
+  formatDateOnly,
   invoiceStateLabel,
+  paymentMethodLabel,
+  personTypeLabel,
+  taxRegimeLabel,
   transmissionStatusBadgeClasses,
   transmissionStatusLabel,
 } from '../../platform-invoicing.constants';
+import { PlatformInvoicePaymentModalComponent } from '../../components/platform-invoice-payment-modal/platform-invoice-payment-modal.component';
+import { getFiscalResponsibilityLabel } from '../../../../../../../shared/constants/fiscal-responsibilities.constants';
+import type { PlatformInvoicePayment } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 
 // F-R2-14: el backend persiste `period_start`/`period_end` como
 // `DateTime @db.Timestamp(6)` (UTC en PG). El DatePipe de Angular los
@@ -86,6 +96,33 @@ interface PlatformInvoiceSnapshotPayload {
   global_discount_amount?: number | string;
 }
 
+/** `invoice.customer` normalizado por el backend (detalle plataforma). */
+interface PlatformCustomerView {
+  name?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  verification_digit?: string | null;
+  person_type?: string | null;
+  tax_regime_code?: string | null;
+  tax_responsibilities?: string[] | null;
+  email?: string | null;
+  phone?: string | null;
+  address_line?: string | null;
+  city?: string | null;
+  department?: string | null;
+  country?: string | null;
+}
+
+/** Datos del destinatario listos para pintar (de `customer` o del snapshot). */
+interface CustomerDisplay {
+  name: string;
+  documentLine: string;
+  regime: string | null;
+  responsibilities: string[];
+  email: string | null;
+  address: string | null;
+}
+
 interface SubscriptionInvoiceDetail {
   invoice: {
     id: number;
@@ -101,6 +138,11 @@ interface SubscriptionInvoiceDetail {
     amount_paid: string;
     currency: string;
     line_items: unknown[];
+    items?: PlatformLineSnapshot[];
+    discount_amount?: string;
+    balance_due?: string;
+    collection_status?: 'paid' | 'partial' | 'pending' | 'overdue' | null;
+    payments?: PlatformInvoicePayment[];
     payment_form?: '1' | '2';
     payment_means_code?: string;
     due_date?: string;
@@ -110,7 +152,7 @@ interface SubscriptionInvoiceDetail {
     withholding_amount?: string;
     exchange_rate?: string;
     exchange_rate_date?: string;
-    customer?: PlatformAcquirerSnapshot;
+    customer?: PlatformAcquirerSnapshot & PlatformCustomerView;
   };
   transmissions: Array<{
     id: number;
@@ -173,6 +215,7 @@ interface SubscriptionInvoiceDetail {
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
+    PlatformInvoicePaymentModalComponent,
   ],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
@@ -200,7 +243,7 @@ interface SubscriptionInvoiceDetail {
             <h2 class="font-semibold text-text-primary mb-2">Resumen</h2>
             <dl class="grid grid-cols-2 gap-y-1">
               <dt class="text-text-secondary">Estado</dt>
-              <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
+              <dd>{{ stateText() }}</dd>
               <dt class="text-text-secondary">Periodo</dt>
               <dd>{{ formatPeriodDate(d.invoice.period_start) }} → {{ formatPeriodDate(d.invoice.period_end) }}</dd>
               <dt class="text-text-secondary">Subtotal</dt>
@@ -209,12 +252,14 @@ interface SubscriptionInvoiceDetail {
               <dd>{{ taxAmountNumber() | currency }}</dd>
               <dt class="text-text-secondary">Total</dt>
               <dd class="font-semibold">{{ totalNumber() | currency }}</dd>
-              <dt class="text-text-secondary">Saldo a pagar</dt>
-              <dd>{{ saldo() | currency }}</dd>
-              @if (globalDiscountAmountNumber() > 0) {
-                <dt class="text-text-secondary">Descuento global</dt>
-                <dd>- {{ globalDiscountAmountNumber() | currency }}</dd>
+              @if (discountNumber() > 0) {
+                <dt class="text-text-secondary">Descuentos</dt>
+                <dd>- {{ discountNumber() | currency }}</dd>
               }
+              <dt class="text-text-secondary">Pagado</dt>
+              <dd>{{ paidNumber() | currency }}</dd>
+              <dt class="text-text-secondary">Saldo</dt>
+              <dd class="font-semibold">{{ saldo() | currency }}</dd>
               @if (withholdingAmountNumber() > 0) {
                 <dt class="text-text-secondary">Retenciones</dt>
                 <dd>{{ withholdingAmountNumber() | currency }}</dd>
@@ -227,9 +272,17 @@ interface SubscriptionInvoiceDetail {
             <dl class="grid grid-cols-2 gap-y-1">
               <dt class="text-text-secondary">Forma</dt>
               <dd>{{ d.invoice.payment_form === '2' ? 'Crédito' : 'Contado' }}</dd>
-              @if (d.invoice.due_date) {
+              @if (dueDateText(); as due) {
                 <dt class="text-text-secondary">Vencimiento</dt>
-                <dd>{{ formatPeriodDate(d.invoice.due_date) }}</dd>
+                <dd>{{ due }}</dd>
+              }
+              @if (d.invoice.collection_status; as cs) {
+                <dt class="text-text-secondary">Cobro</dt>
+                <dd>
+                  <span [class]="'inline-block px-2 py-0.5 rounded text-xs border ' + collectionStatusBadgeClasses(cs)">
+                    {{ collectionStatusLabel(cs) }}
+                  </span>
+                </dd>
               }
               @if (d.invoice.exchange_rate) {
                 <dt class="text-text-secondary">TRM</dt>
@@ -248,47 +301,41 @@ interface SubscriptionInvoiceDetail {
           </div>
         </section>
 
-        <!-- Tenant (destinatario) snapshot -->
-        @if (acquirerSnapshot(); as acq) {
+        <!-- Destinatario -->
+        @if (customerView(); as c) {
           <section class="mt-6 bg-surface rounded-card shadow-card p-4">
-            <h2 class="font-semibold text-text-primary mb-3">Destinatario (snapshot al emitir)</h2>
+            <h2 class="font-semibold text-text-primary mb-3">Destinatario</h2>
             <dl class="grid grid-cols-2 gap-y-1 text-sm">
-              <dt class="text-text-secondary">Tipo</dt>
-              <dd class="font-mono">{{ acq.kind }} :{{ acq.id }}</dd>
               <dt class="text-text-secondary">Razón social</dt>
-              <dd>{{ acq.legal_name }}</dd>
-              <dt class="text-text-secondary">NIT</dt>
-              <dd>{{ acq.tax_id }}{{ acq.tax_id_dv ? '-' + acq.tax_id_dv : '' }}</dd>
-              @if (acq.tax_regime_code) {
+              <dd>{{ c.name }}</dd>
+              <dt class="text-text-secondary">Tipo</dt>
+              <dd>{{ c.documentLine }}</dd>
+              @if (c.regime) {
                 <dt class="text-text-secondary">Régimen</dt>
-                <dd>{{ acq.tax_regime_code }}</dd>
+                <dd>{{ c.regime }}</dd>
               }
-              @if (acq.fiscal_responsibilities && acq.fiscal_responsibilities.length > 0) {
+              @if (c.responsibilities.length > 0) {
                 <dt class="text-text-secondary">Responsabilidades</dt>
-                <dd>{{ acq.fiscal_responsibilities.join(', ') }}</dd>
+                <dd>{{ c.responsibilities.join(', ') }}</dd>
               }
-              @if (acq.email) {
+              @if (c.email) {
                 <dt class="text-text-secondary">Email</dt>
-                <dd>{{ acq.email }}</dd>
+                <dd>{{ c.email }}</dd>
               }
-              @if (acq.address && acq.address.line) {
+              @if (c.address) {
                 <dt class="text-text-secondary">Dirección</dt>
-                <dd>
-                  {{ acq.address.line }} ·
-                  {{ acq.address.city ?? '' }} ·
-                  {{ acq.address.department_code ?? '' }}
-                </dd>
+                <dd>{{ c.address }}</dd>
               }
             </dl>
           </section>
         }
 
         <!-- Líneas con impuestos por línea -->
-        @if (invoiceSnapshot()?.items && invoiceSnapshot()!.items!.length > 0) {
+        @if (lineItems().length > 0) {
           <section class="mt-6 bg-surface rounded-card shadow-card p-4">
             <h2 class="font-semibold text-text-primary mb-3">Líneas</h2>
             <app-responsive-data-view
-              [data]="invoiceSnapshot()!.items!"
+              [data]="lineItems()"
               [columns]="lineColumns"
               [cardConfig]="lineCardConfig"
               [actions]="[]"
@@ -325,6 +372,38 @@ interface SubscriptionInvoiceDetail {
               emptyTitle="Sin retenciones"
               emptyIcon="minus-circle"
             />
+          </section>
+        }
+
+        <!-- Pagos registrados (solo riel plataforma) -->
+        @if (isPlatformRail() && d.invoice.state === 'accepted') {
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="font-semibold text-text-primary">Pagos</h2>
+              @if (canRegisterPayment()) {
+                <button
+                  app-button
+                  type="button"
+                  variant="primary"
+                  (click)="paymentModalOpen.set(true)"
+                >
+                  Registrar pago
+                </button>
+              }
+            </div>
+            @if (payments().length === 0) {
+              <p class="text-sm text-text-secondary">Aún no hay pagos registrados.</p>
+            } @else {
+              <app-responsive-data-view
+                [data]="payments()"
+                [columns]="paymentColumns"
+                [cardConfig]="paymentCardConfig"
+                [actions]="[]"
+                [loading]="false"
+                emptyTitle="Sin pagos"
+                emptyIcon="receipt"
+              />
+            }
           </section>
         }
 
@@ -519,6 +598,18 @@ interface SubscriptionInvoiceDetail {
       }
     </div>
 
+    @if (data(); as d) {
+      @if (canRegisterPayment()) {
+        <app-platform-invoice-payment-modal
+          [(isOpen)]="paymentModalOpen"
+          [invoiceId]="d.invoice.id"
+          [documentNumber]="d.invoice.invoice_number"
+          [balance]="saldo()"
+          (saved)="onPaymentSaved($event)"
+        />
+      }
+    }
+
     <!-- PASO 11: Cancelar documento — ConfirmationModal -->
     @if (cancelModalOpen()) {
       <app-confirmation-modal
@@ -612,6 +703,8 @@ export class PlatformInvoiceDetailComponent {
   readonly invoiceStateLabel = invoiceStateLabel;
   readonly billingCycleLabel = billingCycleLabel;
   readonly evidenceTypeLabel = evidenceTypeLabel;
+  readonly collectionStatusLabel = collectionStatusLabel;
+  readonly collectionStatusBadgeClasses = collectionStatusBadgeClasses;
   readonly transmissionStatusLabel = transmissionStatusLabel;
 
   private static readonly STATUS_LABELS: Record<string, string> = {
@@ -702,6 +795,100 @@ export class PlatformInvoiceDetailComponent {
     return null;
   });
 
+  /** Estado legible: en plataforma es el estado DIAN; en SaaS, el enum de la factura. */
+  readonly stateText = computed<string>(() => {
+    const state = this.data()?.invoice.state;
+    if (this.isPlatformRail()) {
+      // Valor legado del snapshot previo a que el backend derivara el estado.
+      if (state === 'custom_emitted') return 'Emitida';
+      return this.statusText(state);
+    }
+    return invoiceStateLabel(state);
+  });
+
+  readonly customerView = computed<CustomerDisplay | null>(() => {
+    const d = this.data();
+    if (!d) return null;
+    const c = d.invoice.customer as
+      | (PlatformAcquirerSnapshot & PlatformCustomerView)
+      | undefined;
+    if (c && (c.name || c.legal_name)) {
+      const docNumber = c.document_number ?? c.tax_id ?? '';
+      const dv = c.verification_digit ?? c.tax_id_dv;
+      const docType = c.document_type ?? (c.tax_id ? '31' : null);
+      const parts = [
+        `${documentTypeLabel(docType)} ${docNumber}${dv ? '-' + dv : ''}`.trim(),
+      ];
+      if (c.person_type) parts.push(personTypeLabel(c.person_type));
+      const addressLine = c.address_line ?? c.address?.line ?? null;
+      const city = c.city ?? c.address?.city ?? null;
+      return {
+        name: (c.name ?? c.legal_name) as string,
+        documentLine: parts.join(' · '),
+        regime: c.tax_regime_code ? taxRegimeLabel(c.tax_regime_code) : null,
+        responsibilities: (
+          c.tax_responsibilities ??
+          c.fiscal_responsibilities ??
+          []
+        ).map((code) => getFiscalResponsibilityLabel(code)),
+        email: c.email ?? null,
+        address: addressLine
+          ? [addressLine, city].filter(Boolean).join(', ')
+          : null,
+      };
+    }
+    // Riel SaaS / documentos viejos: snapshot del adquiriente en evidencias.
+    const acq = this.acquirerSnapshot();
+    if (!acq) return null;
+    return {
+      name: acq.legal_name,
+      documentLine: `${documentTypeLabel('31')} ${acq.tax_id}${acq.tax_id_dv ? '-' + acq.tax_id_dv : ''}`,
+      regime: acq.tax_regime_code ? taxRegimeLabel(acq.tax_regime_code) : null,
+      responsibilities: (acq.fiscal_responsibilities ?? []).map((code) =>
+        getFiscalResponsibilityLabel(code),
+      ),
+      email: acq.email ?? null,
+      address: acq.address?.line
+        ? [acq.address.line, acq.address.city].filter(Boolean).join(', ')
+        : null,
+    };
+  });
+
+  /** Líneas del documento: `items`, con `line_items` como respaldo (riel plataforma). */
+  readonly lineItems = computed<PlatformLineSnapshot[]>(() => {
+    const d = this.data();
+    if (!d) return [];
+    const fromSnapshot = this.invoiceSnapshot()?.items;
+    if (fromSnapshot && fromSnapshot.length > 0) return fromSnapshot;
+    if (this.isPlatformRail()) {
+      return (d.invoice.line_items ?? []) as PlatformLineSnapshot[];
+    }
+    return [];
+  });
+
+  readonly payments = computed<PlatformInvoicePayment[]>(
+    () => this.data()?.invoice.payments ?? [],
+  );
+
+  /** Vencimiento date-only (sin pasar por `Date`: evita correr el día). */
+  readonly dueDateText = computed<string | null>(() => {
+    const inv = this.data()?.invoice;
+    if (!inv) return null;
+    const raw = inv.due_date ?? (this.isPlatformRail() ? inv.due_at : null);
+    return raw ? formatDateOnly(raw) : null;
+  });
+
+  readonly canRegisterPayment = computed<boolean>(() => {
+    const d = this.data();
+    return (
+      this.isPlatformRail() &&
+      d?.invoice.state === 'accepted' &&
+      this.saldo() > 0
+    );
+  });
+
+  readonly paymentModalOpen = signal(false);
+
   constructor() {
     const kind: PlatformInvoiceKind =
       this.route.snapshot.data['kind'] === 'platform' ? 'platform' : 'subscription';
@@ -722,7 +909,13 @@ export class PlatformInvoiceDetailComponent {
   readonly saldo = computed<number>(() => {
     const d = this.data();
     if (!d) return 0;
+    if (d.invoice.balance_due != null) return Number(d.invoice.balance_due) || 0;
     return Number(d.invoice.total) - Number(d.invoice.amount_paid);
+  });
+
+  readonly paidNumber = computed<number>(() => {
+    const d = this.data();
+    return d ? Number(d.invoice.amount_paid) || 0 : 0;
   });
 
   readonly subtotalNumber = computed<number>(() => {
@@ -740,10 +933,15 @@ export class PlatformInvoiceDetailComponent {
     return d ? Number(d.invoice.total) : 0;
   });
 
-  readonly globalDiscountAmountNumber = computed<number>(() => {
+  /** Σ descuentos del documento (`discount_amount`); cae al descuento global legado. */
+  readonly discountNumber = computed<number>(() => {
     const d = this.data();
-    if (!d || !d.invoice.global_discount_amount) return 0;
-    return Number(d.invoice.global_discount_amount);
+    if (!d) return 0;
+    return (
+      Number(d.invoice.discount_amount) ||
+      Number(d.invoice.global_discount_amount) ||
+      0
+    );
   });
 
   readonly withholdingAmountNumber = computed<number>(() => {
@@ -784,6 +982,16 @@ export class PlatformInvoiceDetailComponent {
       transform: (v) => (v ? this.money(v) : '—'),
     },
     {
+      key: 'total',
+      label: 'Total',
+      align: 'right',
+      transform: (_v, item) => {
+        const line = item as { total?: unknown; line_total?: unknown };
+        const value = line.total ?? line.line_total;
+        return value != null ? this.money(value) : '—';
+      },
+    },
+    {
       key: 'taxes',
       label: 'Imp.',
       transform: (v) => `${((v as unknown[]) ?? []).length}`,
@@ -800,6 +1008,39 @@ export class PlatformInvoiceDetailComponent {
     subtitleKey: 'quantity',
     footerKey: 'unit_price',
     footerLabel: 'Precio',
+    footerStyle: 'prominent' as const,
+    footerTransform: (v: unknown) => this.money(v),
+  };
+
+  // ── Pagos registrados ──────────────────────────────────────────────────
+  readonly paymentColumns: TableColumn[] = [
+    {
+      key: 'paid_at',
+      label: 'Fecha',
+      transform: (v) => formatDateOnly(v as string),
+    },
+    {
+      key: 'payment_method',
+      label: 'Medio',
+      transform: (v) => paymentMethodLabel(v as string),
+    },
+    { key: 'reference', label: 'Referencia', transform: (v) => (v ? String(v) : '—') },
+    {
+      key: 'amount',
+      label: 'Monto',
+      align: 'right',
+      transform: (v) => this.money(v),
+    },
+  ];
+
+  readonly paymentCardConfig = {
+    titleKey: 'paid_at',
+    titleTransform: (item: PlatformInvoicePayment) => formatDateOnly(item.paid_at),
+    subtitleKey: 'payment_method',
+    subtitleTransform: (item: PlatformInvoicePayment) =>
+      paymentMethodLabel(item.payment_method),
+    footerKey: 'amount',
+    footerLabel: 'Monto',
     footerStyle: 'prominent' as const,
     footerTransform: (v: unknown) => this.money(v),
   };
@@ -950,6 +1191,19 @@ export class PlatformInvoiceDetailComponent {
     const s = d.invoice.state;
     return s === 'draft' || s === 'validated';
   });
+
+  /** El POST devuelve el detalle actualizado: se reemplaza sin recargar. */
+  onPaymentSaved(detail: unknown): void {
+    const updated = detail as SubscriptionInvoiceDetail | null;
+    if (updated?.invoice) {
+      this.data.set(updated);
+      this.toast.success('Pago registrado');
+      return;
+    }
+    this.toast.success('Pago registrado');
+    const id = this.data()?.invoice.id;
+    if (id) void this.load(id);
+  }
 
   formatPeriodDate(value: string | null | undefined): string {
     if (!value) return '—';

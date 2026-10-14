@@ -1,5 +1,6 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { Observable } from 'rxjs';
 import { FormBuilder, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -26,25 +27,43 @@ import type {
   FilterValues,
 } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
+  PaginatedEnvelope,
   SubscriptionFiscalEnvironment,
-  SubscriptionFiscalTransmission,
+  SubscriptionFiscalTransmission as BaseFiscalTransmission,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 // El mismo lector de errores del riel tienda: convierte el envelope del
 // backend en el copy en español que ya está curado en `ERROR_MESSAGES`.
 import { describeApiFailure } from '../../../../../store/invoicing/utils/invoicing-errors.util';
 import type { PlatformInvoiceKind } from '../../../../subscriptions/interfaces/platform-invoice-document.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { PlatformInvoiceDetailModalComponent } from '../../components/platform-invoice-detail-modal/platform-invoice-detail-modal.component';
 import {
+  COLLECTION_STATUS_COLOR_MAP,
+  COLLECTION_STATUS_OPTIONS,
   asNumber,
+  collectionStatusLabel,
   environmentLabel,
+  formatDateOnly,
   optionalNumericIdValidator,
   parseRequiredId,
   skippedReasonLabel,
   transmissionStatusBadgeClasses,
   transmissionStatusLabel,
 } from '../../platform-invoicing.constants';
+
+/**
+ * Fila del listado. Las filas del riel plataforma (`GET fiscal/invoices`)
+ * agregan los campos de cartera; en filas SaaS no vienen.
+ */
+type SubscriptionFiscalTransmission = BaseFiscalTransmission & {
+  total?: string | number | null;
+  amount_paid?: string | number | null;
+  balance_due?: string | number | null;
+  due_date?: string | null;
+  collection_status?: 'paid' | 'partial' | 'pending' | 'overdue' | null;
+};
 
 /**
  * Pestaña «Facturas»: emisión manual y registro de transmisiones DIAN de las
@@ -77,6 +96,7 @@ export class PlatformInvoicesComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
+  private readonly currencyFormat = inject(CurrencyFormatService);
   protected readonly store = inject(PlatformInvoicingStore);
 
   readonly transmissions = signal<SubscriptionFiscalTransmission[]>([]);
@@ -138,6 +158,14 @@ export class PlatformInvoicesComponent {
         { value: 'platform_invoice', label: 'Factura Plataforma' },
         { value: 'platform_support_document', label: 'Documento Soporte Plataforma' },
       ],
+    },
+    {
+      // «Vencidas» y demás estados de cobro solo existen en el listado de
+      // facturas de plataforma, así que este filtro cambia de endpoint.
+      key: 'collection_status',
+      label: 'Cobro',
+      type: 'select',
+      options: COLLECTION_STATUS_OPTIONS,
     },
   ];
 
@@ -219,14 +247,30 @@ export class PlatformInvoicesComponent {
       key: 'total',
       label: 'Total',
       align: 'right',
-      transform: (val, item: SubscriptionFiscalTransmission) => {
-        const total = asNumber(item.subscription_invoice?.total ?? 0);
-        return new Intl.NumberFormat('es-CO', {
-          style: 'currency',
-          currency: item.subscription_invoice?.currency || 'COP',
-          minimumFractionDigits: 0,
-        }).format(total);
+      transform: (val, item: SubscriptionFiscalTransmission) =>
+        this.totalText(item),
+    },
+    {
+      key: 'balance_due',
+      label: 'Saldo',
+      align: 'right',
+      transform: (val, item: SubscriptionFiscalTransmission) =>
+        item.balance_due != null ? this.currencyFormat.format(asNumber(item.balance_due)) : '—',
+    },
+    {
+      key: 'due_date',
+      label: 'Vence',
+      transform: (val) => formatDateOnly(val as string | null),
+    },
+    {
+      key: 'collection_status',
+      label: 'Cobro',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: COLLECTION_STATUS_COLOR_MAP,
       },
+      transform: (val) => collectionStatusLabel(val as string | null),
     },
     {
       key: 'created_at',
@@ -308,15 +352,23 @@ export class PlatformInvoicesComponent {
     footerKey: 'total',
     footerLabel: 'Total',
     footerStyle: 'prominent',
-    footerTransform: (val, item: SubscriptionFiscalTransmission) => {
-      const total = asNumber(item.subscription_invoice?.total ?? 0);
+    footerTransform: (val, item: SubscriptionFiscalTransmission) =>
+      this.totalText(item),
+  };
+
+  /** Total de la fila: SaaS lo trae en `subscription_invoice`, plataforma en `total`. */
+  private totalText(item: SubscriptionFiscalTransmission): string {
+    if (item.subscription_invoice) {
       return new Intl.NumberFormat('es-CO', {
         style: 'currency',
-        currency: item.subscription_invoice?.currency || 'COP',
+        currency: item.subscription_invoice.currency || 'COP',
         minimumFractionDigits: 0,
-      }).format(total);
-    },
-  };
+      }).format(asNumber(item.subscription_invoice.total ?? 0));
+    }
+    return item.total != null
+      ? this.currencyFormat.format(asNumber(item.total))
+      : '—';
+  }
 
   constructor() {
     this.store.loadStatus();
@@ -331,14 +383,36 @@ export class PlatformInvoicesComponent {
     const environment =
       (filters['environment'] as SubscriptionFiscalEnvironment | '') || undefined;
 
-    this.fiscal
-      .listTransmissions({
-        page: pagination.page,
-        limit: pagination.limit,
-        status,
-        environment,
-        search: this.search(),
-      })
+    const collectionStatus =
+      (filters['collection_status'] as
+        | 'overdue'
+        | 'pending'
+        | 'partial'
+        | 'paid'
+        | '') || undefined;
+    const sourceType = (filters['source_type'] as string) || undefined;
+    // El estado de cobro solo existe en el listado de plataforma.
+    const platformListing =
+      !!collectionStatus || sourceType === 'platform_invoice';
+
+    const request$: Observable<PaginatedEnvelope<SubscriptionFiscalTransmission>> =
+      platformListing
+        ? this.fiscal.listPlatformInvoices({
+            page: pagination.page,
+            limit: pagination.limit,
+            status,
+            q: this.search(),
+            collection_status: collectionStatus,
+          })
+        : this.fiscal.listTransmissions({
+            page: pagination.page,
+            limit: pagination.limit,
+            status,
+            environment,
+            search: this.search(),
+          });
+
+    request$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

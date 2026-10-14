@@ -4,13 +4,19 @@ import { join } from 'node:path';
 const source = readFileSync(join(__dirname, 'inputsearch.component.ts'), 'utf8');
 const styles = readFileSync(join(__dirname, 'inputsearch.component.scss'), 'utf8');
 
-describe('inputsearch touch target source guards', () => {
-  it('keeps the physical input and wrapper above 44px including the wrapper border', () => {
-    expect(styles).toContain('min-height: calc(44px + 2 * var(--border-width, 1px));');
-    expect(styles).toContain('min-height: 44px;');
-    expect(styles).toContain('width: 44px;');
-    expect(styles).toContain('height: 44px;');
-    expect(styles).toContain('padding-right: 3rem;');
+describe('Inputsearch original appearance and accessible behavior source guards', () => {
+  it('keeps size-dependent wrapper heights and the original clear-button padding', () => {
+    expect(styles).toContain('height: constants.$height-sm-mobile;');
+    expect(styles).toContain('height: constants.$height-md-mobile;');
+    expect(styles).toContain('height: constants.$height-lg-mobile;');
+    expect(styles).toContain('height: constants.$height-sm-desktop;');
+    expect(styles).toContain('height: constants.$height-md-desktop;');
+    expect(styles).toContain('height: constants.$height-lg-desktop;');
+    expect(styles).toContain('right: 0.375rem;\n    padding: 0.25rem;');
+    expect(styles).toContain('right: 0.5rem;\n    padding: 0.375rem;');
+    expect(styles).toContain('right: 0.75rem;\n    padding: 0.5rem;');
+    expect(styles).toContain('padding-right: 2rem;');
+    expect(styles).not.toContain('min-height: 44px;');
   });
 
   it('provides an accessible label fallback and retains the debounced CVA search flow', () => {
@@ -20,17 +26,17 @@ describe('inputsearch touch target source guards', () => {
     expect(source).toContain('debounceTime(this.debounceTime())');
   });
 
-  it('removes input-control transitions and press scaling when reduced motion is preferred', () => {
+  it('removes transitions, animation and press scaling only when reduced motion is preferred', () => {
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
     expect(styles).toContain('transition: none;');
     expect(styles).toContain('transform: none;');
-    expect(styles).toContain('outline: 2px solid var(--color-text-primary);');
-    expect(styles).not.toContain('var(--color-ring)');
+    expect(styles).toContain('animation: none;');
   });
 
-  it('uses readable theme foregrounds for placeholder and help text', () => {
-    expect(styles).toContain('color: var(--color-text-primary);');
-    expect(styles).not.toContain('.help-text {\n    color: var(--color-text-secondary);');
-    expect(styles).not.toContain('color: var(--color-text-muted);');
+  it('retains original placeholder/help foregrounds and the existing focus ring', () => {
+    expect(styles).toContain('&::placeholder {\n    color: var(--color-text-secondary);');
+    expect(styles).toContain('.help-text {\n    color: var(--color-text-secondary);');
+    expect(styles).toContain('box-shadow: 0 0 0 2px var(--color-ring);');
+    expect(styles).toContain('box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);');
   });
 });

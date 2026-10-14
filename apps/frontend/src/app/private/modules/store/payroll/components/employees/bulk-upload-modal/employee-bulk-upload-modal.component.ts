@@ -1,4 +1,5 @@
 import {Component, input, output, inject, effect, DestroyRef, signal, computed} from '@angular/core';
+import { EMPTY, expand } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
@@ -17,6 +18,9 @@ import {
 import {
   BulkEmployeeAnalysisResult,
   BulkEmployeeUploadResult,
+  BulkEmployeeUploadPage,
+  BULK_EMPLOYEE_PAGE_SIZE,
+  BULK_EMPLOYEE_MAX_FILE_MB,
 } from '../../../interfaces/bulk-employee-analysis.interface';
 
 @Component({
@@ -111,7 +115,7 @@ import {
                   Sube el archivo
                 </p>
                 <p class="text-[11px] text-violet-700">
-                  Excel (.xlsx, .xls) o CSV. Máx. 1000 empleados por archivo.
+                  Excel (.xlsx, .xls) o CSV. Máx. 10.000 empleados y 20 MB por archivo.
                 </p>
               </div>
             </div>
@@ -230,7 +234,7 @@ import {
               <p class="text-[11px] text-[var(--color-info)] leading-relaxed">
                 <span class="font-medium">Descarga la plantilla</span>, completa
                 los datos de tus empleados y sube el archivo. Formatos: .xlsx,
-                .xls, .csv · Máx. 1000 empleados.
+                .xls, .csv · Máx. 10.000 empleados · 20 MB.
               </p>
             </div>
 
@@ -672,11 +676,21 @@ import {
                   class="text-primary-600 animate-spin"
                 ></app-icon>
                 <p class="text-sm text-text-primary font-medium">
-                  Cargando empleados...
+                  Guardando {{ progress().doneRows }} de
+                  {{ progress().totalRows }}
                 </p>
-                <p class="text-xs text-muted-foreground mt-1">
-                  Esto puede tomar unos momentos
-                </p>
+                <div class="w-full rounded-lg border border-primary-600/30 bg-primary-600/5 px-3 py-2">
+                  <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>Lotes de {{ pageSize }} filas</span>
+                    <span class="font-semibold text-primary-600">{{ progressPercent() }}%</span>
+                  </div>
+                  <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border">
+                    <div
+                      class="h-full rounded-full bg-primary-600 transition-all"
+                      [style.width.%]="progressPercent()"
+                    ></div>
+                  </div>
+                </div>
               </div>
             }
 
@@ -690,7 +704,12 @@ import {
                   [size]="14"
                   class="shrink-0 mt-0.5"
                 ></app-icon>
-                <p>{{ uploadError() }}</p>
+                <p class="flex-1">{{ uploadError() }}</p>
+                @if (retryOffset() !== null) {
+                  <app-button variant="outline" size="sm" (clicked)="retryUpload()">
+                    Reintentar desde la fila {{ retryOffset()! + 2 }}
+                  </app-button>
+                }
               </div>
             }
 
@@ -962,6 +981,17 @@ export class EmployeeBulkUploadModalComponent {
 
   // Error state
   readonly uploadError = signal<string | null>(null);
+  readonly pageSize = BULK_EMPLOYEE_PAGE_SIZE;
+  private readonly progressState = signal({ doneRows: 0, totalRows: 0 });
+  readonly progress = this.progressState.asReadonly();
+  readonly progressPercent = computed(() => {
+    const p = this.progressState();
+    return p.totalRows > 0
+      ? Math.min(100, Math.round((p.doneRows / p.totalRows) * 100))
+      : 0;
+  });
+  /** Offset (fila de datos, base 0) desde el que se puede reintentar tras una página fallida. */
+  readonly retryOffset = signal<number | null>(null);
 
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
@@ -1070,7 +1100,7 @@ export class EmployeeBulkUploadModalComponent {
 
   // Cancel/Close
   onCancel() {
-    if (this.sessionId() && !this.uploadResults()) {
+    if (this.sessionId() && (!this.uploadResults() || this.retryOffset() !== null)) {
       this.payrollService.cancelBulkEmployeeSession(this.sessionId()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     if ((this.uploadResults()?.successful ?? 0) > 0) {
@@ -1094,6 +1124,8 @@ export class EmployeeBulkUploadModalComponent {
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
+    this.retryOffset.set(null);
+    this.progressState.set({ doneRows: 0, totalRows: 0 });
   }
 
   // Step 0: File operations
@@ -1158,8 +1190,10 @@ export class EmployeeBulkUploadModalComponent {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      this.toastService.error('El archivo excede el límite de 5 MB');
+    if (file.size > BULK_EMPLOYEE_MAX_FILE_MB * 1024 * 1024) {
+      this.toastService.error(
+        `El archivo excede el límite de ${BULK_EMPLOYEE_MAX_FILE_MB} MB`,
+      );
       return;
     }
 
@@ -1198,40 +1232,96 @@ export class EmployeeBulkUploadModalComponent {
     });
   }
 
-  // Step 1 -> 2: Upload
+  // Step 1 -> 2: Upload (páginas de 100 en serie; una página fallida detiene la cadena)
   proceedWithUpload() {
     if (!this.sessionId()) return;
+    this.uploadResults.set(null);
+    this.progressState.set({
+      doneRows: 0,
+      totalRows: this.analysisResult()?.total_employees ?? 0,
+    });
+    this.runCommit(0);
+  }
+
+  retryUpload() {
+    const offset = this.retryOffset();
+    if (offset === null || !this.sessionId()) return;
+    this.runCommit(offset);
+  }
+
+  private runCommit(startOffset: number) {
+    const sessionId = this.sessionId();
+    if (!sessionId) return;
+    const limit = BULK_EMPLOYEE_PAGE_SIZE;
+    let nextOffset = startOffset;
+    let lastPage: BulkEmployeeUploadPage | null = null;
 
     this.isUploading.set(true);
+    this.uploadError.set(null);
+    this.retryOffset.set(null);
     this.currentStep.set(2);
 
-    this.payrollService
-      .uploadBulkEmployeesFromSession(this.sessionId()!)
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (result) => {
-          this.isUploading.set(false);
-          this.uploadResults.set(result);
+    const fetchPage = (offset: number) =>
+      this.payrollService.uploadBulkEmployeesSessionPage(sessionId, offset, limit);
 
-          if (result.failed > 0) {
+    fetchPage(startOffset)
+      .pipe(
+        expand((page) =>
+          page.done ? EMPTY : fetchPage(page.offset + page.limit),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (page) => {
+          lastPage = page;
+          nextOffset = page.offset + page.limit;
+          this.progressState.update((p) => ({
+            totalRows: page.total > 0 ? page.total : p.totalRows,
+            doneRows: Math.min(page.total, nextOffset),
+          }));
+          this.accumulate(page);
+        },
+        error: (error) => {
+          this.isUploading.set(false);
+          this.retryOffset.set(nextOffset);
+          this.uploadError.set(
+            `Se detuvo en la fila ${nextOffset + 2}: ` +
+              (typeof error === 'string'
+                ? error
+                : parseApiError(error).userMessage),
+          );
+          this.toastService.error('Error en la carga masiva de empleados');
+        },
+        complete: () => {
+          this.isUploading.set(false);
+          const r = this.uploadResults();
+          if (!lastPage?.done) return;
+          if ((r?.failed ?? 0) > 0) {
             this.toastService.warning(
               'La carga se completó con algunos errores.',
             );
           } else {
             this.toastService.success(
-              `${result.successful} empleado(s) cargados exitosamente`,
+              `${r?.successful ?? 0} empleado(s) cargados exitosamente`,
             );
           }
         },
-        error: (error) => {
-          this.isUploading.set(false);
-          this.uploadError.set(
-            typeof error === 'string'
-              ? error
-              : parseApiError(error).userMessage,
-          );
-          this.toastService.error('Error en la carga masiva de empleados');
-        },
       });
+  }
+
+  private accumulate(page: BulkEmployeeUploadPage) {
+    const prev = this.uploadResults();
+    this.uploadResults.set({
+      success: (prev?.success ?? true) && (page.failed ?? 0) === 0,
+      total_processed: (prev?.total_processed ?? 0) + (page.total_processed ?? 0),
+      successful: (prev?.successful ?? 0) + (page.successful ?? 0),
+      failed: (prev?.failed ?? 0) + (page.failed ?? 0),
+      users_created: (prev?.users_created ?? 0) + (page.users_created ?? 0),
+      users_linked: (prev?.users_linked ?? 0) + (page.users_linked ?? 0),
+      updated: (prev?.updated ?? 0) + (page.updated ?? 0),
+      associated: (prev?.associated ?? 0) + (page.associated ?? 0),
+      results: [...(prev?.results ?? []), ...(page.results ?? [])],
+    });
   }
 
   formatFileSize(bytes: number): string {

@@ -111,8 +111,11 @@ export class OrganizationReceivedDocumentsController {
   @Get()
   @Permissions('organization:invoicing:received:read')
   async list(@Query() query: ReceivedDocumentQueryDto) {
-    const context = await this.contexts.resolveOrganization(query.store_id);
-    const result = await this.documents.list(context, query);
+    const inboxRequested = query.sort === 'inbox' || query.inbox_state !== undefined ||
+      query.legal_status !== undefined || query.document_type !== undefined;
+    const result = inboxRequested
+      ? await this.documents.listInbox(await this.contexts.resolveOrganizationRead(query.store_id), query)
+      : await this.documents.list(await this.contexts.resolveOrganization(query.store_id), query);
     return this.responses.paginated(
       result.data,
       result.total,
@@ -120,6 +123,18 @@ export class OrganizationReceivedDocumentsController {
       result.limit,
       'Documentos recibidos obtenidos',
     );
+  }
+
+  @Get('summary')
+  @Permissions('organization:invoicing:received:read')
+  async inboxSummary(@Query() query: ReceivedDocumentQueryDto) {
+    return this.responses.success(await this.documents.inboxSummary(await this.contexts.resolveOrganizationRead(query.store_id), query));
+  }
+
+  @Get('reception-status')
+  @Permissions('organization:invoicing:received:read')
+  async receptionStatus(@Query() query: ReceivedDocumentContextQueryDto) {
+    return this.responses.success(await this.documents.receptionStatus(await this.contexts.resolveOrganizationRead(query.store_id)));
   }
 
   @Post('scan')
@@ -225,9 +240,9 @@ export class OrganizationReceivedDocumentsController {
     @Param('id', ParseIntPipe) id: number,
     @Query() scope: ReceivedDocumentContextQueryDto,
   ) {
-    const context = await this.contexts.resolveOrganization(scope.store_id);
+    const context = await this.contexts.resolveOrganizationRead(scope.store_id);
     return this.responses.success(
-      await this.documents.findOne(context, id),
+      await this.documents.findOneInbox(context, id),
       'Documento recibido obtenido',
     );
   }

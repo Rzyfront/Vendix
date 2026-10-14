@@ -15,7 +15,7 @@ import { Type, Transform } from 'class-transformer';
 import { tax_type_enum } from '@prisma/client';
 import {
   IsValidFreightAndTax,
-  PURCHASE_ORDER_ITEMS_MAX,
+  PURCHASE_ORDER_CREATE_ITEMS_MAX,
   PurchaseOrderItemTaxDto,
   SHIPPING_COST_ALLOCATIONS,
   ShippingCostAllocation,
@@ -144,7 +144,7 @@ export class CostPreviewDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
+  @ArrayMaxSize(PURCHASE_ORDER_CREATE_ITEMS_MAX)
   @ValidateNested({ each: true })
   @Type(() => CostPreviewItemDto)
   items: CostPreviewItemDto[];

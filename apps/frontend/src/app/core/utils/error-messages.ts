@@ -258,7 +258,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
   BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
   BULK_PROD_LIMIT_EXCEEDED:
-    'Se excedio el limite maximo de productos por carga.',
+    'Se excedio el limite maximo de 10.000 productos por carga.',
   BULK_PROD_SESSION_EXPIRED:
     'La sesion de analisis expiro. Suba el archivo nuevamente.',
   BULK_PROD_VALIDATE_001:
@@ -354,14 +354,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
   INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',
-  INV_BULK_002: 'Se excedio el limite maximo de 1000 items por carga.',
+  INV_BULK_002: 'Se excedio el limite maximo de 10.000 items por carga.',
 
   // Customers
   CUST_FIND_001: 'Cliente no encontrado.',
   CUST_CREATE_001: 'Error al crear el cliente.',
   CUST_VALIDATE_001: 'La validacion del cliente fallo.',
   CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',
-  CUST_BULK_001: 'El archivo excede el limite de 1000 clientes.',
+  CUST_BULK_001: 'El archivo excede el limite de 10.000 clientes.',
   CUST_BULK_002: 'Error de validacion en los datos del cliente.',
   CUST_BULK_003: 'Email duplicado en el archivo.',
   CUST_BULK_004: 'No se pudo determinar la tienda actual.',
@@ -407,7 +407,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYROLL_CALC_001: 'No se encontraron empleados activos para calcular.',
   PAYROLL_PROVIDER_001: 'Error en el proveedor de nomina.',
   PAYROLL_PERM_001: 'No tiene permisos para acceder a nomina.',
-  PAYROLL_BULK_001: 'El archivo excede el limite de 1000 empleados.',
+  PAYROLL_BULK_001: 'El archivo excede el limite de 10.000 empleados.',
   PAYROLL_BULK_002: 'Error de validacion en los datos del empleado.',
   PAYROLL_BULK_003: 'Documento duplicado en el archivo.',
   PAYROLL_BULK_004: 'El email es obligatorio cuando se marca como usuario.',

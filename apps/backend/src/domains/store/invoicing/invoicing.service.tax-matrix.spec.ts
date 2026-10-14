@@ -402,6 +402,12 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
     {} as any,
     {} as any,
     {} as any,
+    {
+      assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+      reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+      ensureForSend: jest.fn().mockResolvedValue(undefined),
+      transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+    } as any,
   );
   const toTaxRow = (Object.create(InvoicingService.prototype) as any)
     .buildInvoiceTaxCreateInput as (row: unknown) => Record<string, unknown>;

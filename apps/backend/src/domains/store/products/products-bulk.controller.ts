@@ -161,7 +161,7 @@ export class ProductsBulkController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 }), // 20MB
         ],
       }),
     )
@@ -217,7 +217,7 @@ export class ProductsBulkController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 }), // 20MB
         ],
       }),
     )

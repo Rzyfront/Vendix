@@ -16,6 +16,7 @@ import {
   HttpStatus,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -27,12 +28,15 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import { ReceivePurchaseOrderAsyncDto } from './dto/receive-purchase-order-async.dto';
+import { PurchaseOrderReceiveQueueService } from './purchase-order-receive-queue.service';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { ConfigurePaymentPlanDto } from './dto/configure-payment-plan.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
+import { ResolvePurchaseOrderLinesDto } from './dto/resolve-lines.dto';
 import {
   RevalidateInvoiceDto,
   REVALIDATE_CONSOLIDATED_MAX_BYTES,
@@ -129,6 +133,11 @@ export class PurchaseOrdersController {
     // Escaneo IA async de facturas de compra (cola `invoice-scan`).
     @InjectQueue('invoice-scan')
     private readonly invoiceScanQueue: Queue<InvoiceScanJob>,
+    // Recepción asíncrona por lotes (cola `purchase-order-receive`).
+    // @Optional solo para no romper los specs (construcción manual con 6
+    // args y TestingModule sin este provider); en la app real Nest lo inyecta.
+    @Optional()
+    private readonly receiveQueueService?: PurchaseOrderReceiveQueueService,
   ) {}
 
   @Post()
@@ -532,6 +541,28 @@ export class PurchaseOrdersController {
     };
   }
 
+  // ===== Recepción asíncrona por lotes de 100 (OC grandes) =====
+  //   PATCH :id/receive/async       → 202 {job_id, total_lines, batches_total}
+  //   GET   receive-jobs/:jobId     → {job_id, state, progress, result?, error?}
+  // Declaradas ANTES de cualquier `@Get(':id')` / `@Post(':id/...')`.
+  @Patch(':id/receive/async')
+  @Permissions('store:orders:purchase_orders:receive')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async enqueueReceive(
+    @Param('id') id: string,
+    @Body() dto: ReceivePurchaseOrderAsyncDto,
+  ) {
+    const result = await this.receiveQueueService!.enqueueReceive(+id, dto);
+    return this.responseService.success(result, 'Recepción encolada');
+  }
+
+  @Get('receive-jobs/:jobId')
+  @Permissions('store:orders:purchase_orders:receive')
+  async getReceiveJob(@Param('jobId') jobId: string) {
+    const result = await this.receiveQueueService!.getReceiveJob(jobId);
+    return this.responseService.success(result);
+  }
+
   @Post('cost-preview')
   @Permissions('store:orders:purchase_orders:read')
   async getCostPreview(@Body() dto: CostPreviewDto) {
@@ -548,6 +579,18 @@ export class PurchaseOrdersController {
       result,
       'Conflictos de líneas nuevas obtenidos',
     );
+  }
+
+  // Estática: declarada antes de cualquier `@Post(':id/...')`. Resuelve
+  // (encuentra o crea) producto, variante, marca y categorías de un lote de
+  // líneas nuevas FUERA de la transacción de la orden; HTTP 200 con el
+  // detalle por fila (un error de una fila no tumba al resto).
+  @Post('resolve-lines')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:orders:purchase_orders:create')
+  async resolveLines(@Body() dto: ResolvePurchaseOrderLinesDto) {
+    const result = await this.purchaseOrdersService.resolveLines(dto);
+    return this.responseService.success(result, 'Líneas resueltas');
   }
 
   // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====
