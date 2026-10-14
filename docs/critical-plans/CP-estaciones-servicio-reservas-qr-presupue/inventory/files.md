@@ -1,0 +1,39 @@
+# Critical Files
+- `apps/backend/prisma/schema.prisma` — products, bookings, providers, orders, tables y modelos nuevos
+- `apps/backend/src/domains/store/reservations/availability.service.ts` — cálculo de cupos y variante
+- `apps/backend/src/domains/store/reservations/reservations.service.ts` — creación, hold y reasignación de citas
+- `apps/backend/src/domains/store/reservations/booking-confirmation.service.ts` — confirmación que hoy tolera conflicto
+- `apps/backend/src/domains/store/reservations/dto/create-booking.dto.ts` — entrada de reserva
+- `apps/backend/src/domains/store/reservations/dto/availability-query.dto.ts` — filtros de disponibilidad
+- `apps/backend/src/domains/store/reservations/providers/providers.service.ts` — servicios de proveedor
+- `apps/backend/src/domains/store/reservations/providers/providers.controller.ts` — API de proveedor
+- `apps/backend/src/domains/store/orders/orders.service.ts` — editor POS y escrituras de líneas/reserva
+- `apps/backend/src/domains/store/orders/orders.controller.ts` — API y SSE de órdenes
+- `apps/backend/src/domains/store/orders/order-history.types.ts` — eventos de orden
+- `apps/backend/src/domains/ecommerce/checkout/checkout.service.ts` — checkout y captura de fallo de reserva
+- `apps/backend/src/domains/ecommerce/tables/ecommerce-tables.controller.ts` — patrón SSE público con filtro
+- `apps/backend/src/domains/ecommerce/tables/ecommerce-tables.service.ts` — proyección pública y scoping
+- `apps/backend/src/domains/store/tables/tables.service.ts` — generación QR y URL ecommerce
+- `apps/backend/src/email/email.service.ts` — envío de correo
+- `apps/backend/src/domains/store/notifications/notifications-events.listener.ts` — plantilla/enlace público
+- `apps/frontend/src/app/private/modules/store/products/pages/product-create-page/product-create-page.component.ts` — configuración de servicio y proveedores
+- `apps/frontend/src/app/private/modules/store/products/pages/product-create-page/product-create-page.component.html` — formulario de servicio
+- `apps/frontend/src/app/private/modules/store/reservations/services/reservations.service.ts` — cliente API reservas
+- `apps/frontend/src/app/private/modules/store/reservations/interfaces/reservation.interface.ts` — contrato TypeScript
+- `apps/frontend/src/app/private/modules/store/reservations/components/reservation-form-modal/reservation-form-modal.component.ts` — reserva admin
+- `apps/frontend/src/app/private/modules/store/reservations/components/reschedule-modal/reschedule-modal.component.ts` — reprogramación
+- `apps/frontend/src/app/private/modules/store/reservations/components/calendar/calendar-container/calendar-container.component.ts` — agenda
+- `apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts` — contacto y propuesta
+- `apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.html` — detalle de orden
+- `apps/frontend/src/app/routes/public/store_ecommerce.public.routes.ts` — ruta pública de seguimiento
+- `apps/frontend/src/app/private/layouts/store-ecommerce/store-ecommerce-layout.component.ts` — contexto tienda en línea
+- `apps/backend/src/domains/store/tables/table-sessions.service.ts` — escritura de líneas y totales en mesa; barrido del guard
+- `apps/backend/src/domains/store/payments/payments.service.ts` — rutas de pago que actualizan órdenes
+- `apps/backend/src/domains/store/products/products.controller.ts` — contrato de requires_station
+- `apps/backend/src/domains/store/products/products.service.ts` — persistencia de requires_station
+- `apps/backend/src/domains/ecommerce/reservations/ecommerce-reservations.controller.ts` — disponibilidad, hold y confirmación públicos
+- `apps/backend/src/domains/store/reservations/reservations.controller.ts` — reservas administrativas
+- `apps/backend/src/domains/store/reservations/booking-confirmation.service.ts` — confirma por token aun si hay conflicto
+- `apps/backend/src/domains/ecommerce/reservations/dto/create-ecommerce-booking.dto.ts` — DTO público de cita
+- `apps/backend/src/domains/ecommerce/reservations/dto/hold-booking.dto.ts` — DTO de hold público
+- `apps/backend/src/domains/ecommerce/checkout/dto/checkout.dto.ts` — DTO de checkout con reserva

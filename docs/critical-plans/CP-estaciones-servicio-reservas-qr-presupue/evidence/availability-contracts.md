@@ -1,0 +1,9 @@
+# Binding availability and local-time contract
+
+Availability query `date` is a local calendar date in the store's IANA timezone. Provider and store opening hours keep their existing store-local meaning. Station schedule blocks use that station's IANA timezone. The availability service converts each schedule to UTC before intersecting it with allocations, buffers, provider bookings and station exceptions.
+
+Every returned slot includes `slot_start_at` and `slot_end_at` as exact ISO-8601 UTC instants, plus local display times, `utc_offset`, and `time_zone`. The slot start instant is the booking identity. If a local clock time occurs twice during a DST fold, return both instants with distinct offsets. If a candidate falls in a DST gap, do not return it. Never resolve a repeated or missing time by silently selecting a default occurrence.
+
+Reservation and hold writers for station-required services must accept `slot_start_at` from the selected result and derive the end from the effective service/variant duration plus buffer. They validate that the supplied instant still matches a currently available slot. Existing `date`, `start_time`, and `end_time` fields remain the store-local display snapshot for backwards compatibility; the allocation's UTC interval is canonical for station-required bookings. Writers for services without `requires_station` retain the existing local-time contract.
+
+Legacy future bookings without allocations remain blocking. Interpret their `date + start_time/end_time` in store timezone; if an endpoint falls in an ambiguous fold, treat the booking as occupying both possible UTC occurrences until the store is reconciled. Do not activate `requires_station` for a store until future active legacy rows are reconciled.
