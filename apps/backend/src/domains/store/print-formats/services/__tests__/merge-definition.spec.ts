@@ -257,7 +257,8 @@ describe('PrintGatewayService — mergeDefinition (P1.4 deep merge)', () => {
     const out = await service.preview(10, 'fiscal_electronic_invoice', {
       paper: { margin_mm: 10 },
     });
-    expect(out.width_mm).toBe(216);
+    // Ancho del papel resuelto por el kernel: carta = 215,9 mm.
+    expect(out.width_mm).toBeCloseTo(216, 0);
     expect(out.printable_width_mm).toBeCloseTo(195.9, 1);
     expect(out.content_width_mm).toBeCloseTo(195.9, 1);
   });

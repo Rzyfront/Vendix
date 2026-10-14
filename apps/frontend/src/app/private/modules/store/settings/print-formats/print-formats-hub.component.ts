@@ -198,7 +198,7 @@ interface CategoryGroup {
                             >
                               Siempre activo
                             </span>
-                          } else {
+                          } @else {
                             <!-- Gateway Pill -->
                             <button
                               type="button"
