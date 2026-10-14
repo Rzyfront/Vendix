@@ -2941,8 +2941,12 @@ export class InvoicingService {
         main_store_id: store_id,
         username,
         email: effectiveEmail,
-        first_name: (isJuridica ? null : (dto.first_name ?? '')) as string,
-        last_name: (isJuridica ? null : (dto.last_name ?? '')) as string,
+        // `users.first_name/last_name` son NOT NULL: para jurídica se guarda ''
+        // (igual que `CustomersService.create`); un null hacía que Prisma
+        // rechazara el `data` («Argument `organizations` is missing») y la
+        // factura con cliente NIT nuevo respondía 500.
+        first_name: isJuridica ? '' : (dto.first_name ?? ''),
+        last_name: isJuridica ? '' : (dto.last_name ?? ''),
         legal_name: dto.legal_name ?? null,
         document_type: (dto.document_type ?? null) as any,
         document_number: dto.document_number ?? null,
