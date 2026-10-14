@@ -4667,6 +4667,237 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('recordCashRegisterMovement — el POS no registra en caja cobros digitales pending (paso 7)', () => {
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+    const methodIds: Record<string, number> = {
+      cash: 9,
+      wompi: 12,
+      wallet: 11,
+    };
+
+    const arrangeCashRegister = (
+      methodType: string,
+      options: { enabled?: boolean; returnedState?: string } = {},
+    ) => {
+      mockRequestContext({ store_id: 1, organization_id: 1 });
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: {
+          cash_register: {
+            enabled: options.enabled ?? true,
+            track_non_cash_payments: true,
+          },
+        },
+      });
+      const methodId = methodIds[methodType];
+      const method = {
+        id: methodId,
+        display_name: methodType,
+        custom_config: {},
+        system_payment_method: {
+          type: methodType,
+          processing_mode: payment_processing_mode_enum.DIRECT,
+        },
+      };
+      const order = buildOrder({
+        id: 4242,
+        store_id: 1,
+        order_number: 'POS-CASH-REGISTER',
+        customer_id: 77,
+        delivery_type: 'direct_delivery',
+        grand_total: new Prisma.Decimal(100000),
+        total_paid: new Prisma.Decimal(0),
+        remaining_balance: new Prisma.Decimal(100000),
+        stores: { id: 1, organization_id: 1 },
+        order_items: [],
+      });
+      let totalPaid = 0;
+      let orderState: string = order.state;
+      let createdPayment: any;
+      const tx: any = {
+        wallets: { findFirst: jest.fn().mockResolvedValue({ id: 91 }) },
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }) },
+        store_payment_methods: {
+          findMany: jest.fn().mockResolvedValue([method]),
+          findFirst: jest.fn().mockResolvedValue(method),
+        },
+        cash_register_sessions: {
+          findFirst: jest.fn().mockResolvedValue({ id: 5 }),
+        },
+        cash_register_movements: { create: jest.fn().mockResolvedValue({ id: 901 }) },
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 5 }]),
+        payments: {
+          create: jest.fn(async ({ data }: any) => {
+            createdPayment = {
+              id: 7,
+              ...data,
+              ...(options.returnedState ? { state: options.returnedState } : {}),
+              store_payment_method: method,
+            };
+            return createdPayment;
+          }),
+          update: jest.fn(async ({ where, data }: any) => ({
+            ...createdPayment,
+            id: where.id,
+            ...data,
+          })),
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        orders: {
+          update: jest.fn(async ({ data }: any) => {
+            if (data.total_paid != null) totalPaid = Number(data.total_paid);
+            if (typeof data.state === 'string') orderState = data.state;
+            return { id: order.id };
+          }),
+          findUnique: jest.fn(async () => ({
+            id: order.id,
+            order_number: order.order_number,
+            state: orderState,
+            subtotal_amount: order.subtotal_amount,
+            discount_amount: order.discount_amount,
+            tax_amount: order.tax_amount,
+            shipping_cost: order.shipping_cost,
+            shipping_tax_amount: new Prisma.Decimal(0),
+            tip_amount: order.tip_amount,
+            grand_total: order.grand_total,
+            total_paid: new Prisma.Decimal(totalPaid),
+            order_items: [],
+          })),
+        },
+        order_items: { findMany: jest.fn().mockResolvedValue([]) },
+        table_sessions: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+      (prisma as any).$transaction = jest.fn(async (callback: any) => callback(tx));
+      jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
+        order,
+        hasSerialized: false,
+        promotionsSnapshot: [],
+        appliedPromotions: [],
+        couponInfo: { coupon_id: null, coupon_code: null, discount_amount: 0 },
+        kitchenFire: null,
+        closedSessionId: null,
+      });
+      jest.spyOn(service as any, 'hasPendingKitchenItemsTx').mockResolvedValue(false);
+      (fiscalThreshold.assertInvoiceNotRequired as jest.Mock).mockResolvedValue(undefined);
+
+      return { tx, methodId };
+    };
+
+    const processSinglePayment = (methodId: number) =>
+      service.processPosPayment(
+        {
+          store_id: 1,
+          currency: 'COP',
+          customer_id: 77,
+          items: [],
+          requires_payment: true,
+          store_payment_method_id: methodId,
+        } as any,
+        posUser,
+      );
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('POS wompi pendiente → recordSaleMovement no se llama', async () => {
+      const { tx, methodId } = arrangeCashRegister('wompi');
+
+      await processSinglePayment(methodId);
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('wallet succeeded → tampoco escribe: la pasarela queda fuera de caja', async () => {
+      const { tx, methodId } = arrangeCashRegister('wallet');
+      const debitInTransaction = jest.fn().mockResolvedValue({
+        transaction: { id: 305 },
+        balance_after: 10000,
+      });
+      (service as any).walletBalanceService = {
+        debitInTransaction,
+      };
+      await service.processPosPayment(
+        {
+          store_id: 1,
+          currency: 'COP',
+          customer_id: 77,
+          items: [],
+          requires_payment: true,
+          idempotency_key: 'wallet-cash-register-1',
+          payments: [{ store_payment_method_id: methodId, amount: 100000 }],
+        } as any,
+        posUser,
+      );
+
+      expect(debitInTransaction).toHaveBeenCalledWith(
+        tx,
+        91,
+        100000,
+        expect.objectContaining({
+          reference_type: 'payment',
+          expected_store_id: 1,
+          expected_customer_id: 77,
+        }),
+      );
+      expect(tx.payments.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'succeeded' }),
+        }),
+      );
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('efectivo pendiente → no escribe: la promesa no es dinero en caja', async () => {
+      const { tx, methodId } = arrangeCashRegister('cash', { returnedState: 'pending' });
+
+      await processSinglePayment(methodId);
+
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('POS efectivo succeeded → sí escribe el sale (no-regresión)', async () => {
+      const { tx, methodId } = arrangeCashRegister('cash');
+
+      await processSinglePayment(methodId);
+
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          session_id: 5,
+          store_id: 1,
+          user_id: posUser.id,
+          type: 'sale',
+          amount: 100000,
+          payment_method: 'cash',
+          order_id: 4242,
+          payment_id: 7,
+        }),
+      });
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.cash_register_movements.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('caja deshabilitada y sin sesión permite el cobro sin movimiento', async () => {
+      const { tx, methodId } = arrangeCashRegister('cash', { enabled: false });
+      tx.cash_register_sessions.findFirst.mockResolvedValue(null);
+
+      await processSinglePayment(methodId);
+
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: 'succeeded' }) }),
+      );
+      expect(tx.cash_register_sessions.findFirst).not.toHaveBeenCalled();
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+  });
+
   /**
    * Cobro multimétodo de contado en el POS (paso 2 del plan de pago
    * multimétodo): `payments[]` con 2 tramos crea 2 filas `succeeded` en la
@@ -5113,7 +5344,7 @@ describe('PaymentsService', () => {
       expect(orderPaid.payment_id).toBe(orderPaid.payment_ids[0]);
     });
 
-    it('bloquea la sesión y registra un movimiento por tramo dentro de la transacción', async () => {
+    it('registra un movimiento de caja por tramo, cada uno contra su método', async () => {
       const { tx } = arrangeMultiLegSale();
       // Caja habilitada con rastreo de no-efectivo: sin el flag, el tramo
       // de transferencia se omite por diseño (no es under-test aquí).

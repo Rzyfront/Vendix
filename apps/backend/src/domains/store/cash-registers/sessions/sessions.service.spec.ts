@@ -708,7 +708,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });
 
-    it('cierra cuando no hay pendientes y el cliente omite la decisión', async () => {
+    it('cierra igual que antes cuando el campo no llega (compatibilidad con apps/mobile)', async () => {
       const actual = OPENING_AMOUNT;
       stubCloseFlow({
         expected_closing_amount: EXPECTED_FRESH,
@@ -1014,7 +1014,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(report.net.net_taxes).toBe(report.sales.taxes - 4000);
     });
 
-    it('pending_collection abierto se limita a órdenes con saldo originadas en la sesión', async () => {
+    it('pending_collection cuenta órdenes shipped/delivered con saldo', async () => {
       const report = await service.getCloseReport(SESSION_ID);
 
       expect(report.pending_collection).toEqual({ count: 2, total: 42500.5 });
