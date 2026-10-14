@@ -161,6 +161,12 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 | Un conflicto que no debería existir | **`git patch-id`** prueba si es fantasma. |
 | `gh pr review --approve` falla en el propio PR | No se puede aprobar el PR propio: el veredicto va como `--comment`. |
 
+## Impresión térmica
+
+| Síntoma | Causa y regla |
+|---|---|
+| El ticket térmico se corta en los laterales («LIENTE», «$59.0(») aunque el margen guardado es 1,5 mm | El contenido se armó al ancho del papel menos márgenes (≈77 mm) y el cabezal de 80 mm sólo imprime ~72 mm (58 mm → ~48). Se maqueta al **ancho imprimible** (`printable_width_mm`) vía `resolvePrintGeometry`, nunca a `width_mm`; no fijar anchos ni margen 0 en rollo. Ver `vendix-print-geometry`. |
+
 ## Decision Rules
 
 | Situación | Qué hacer |
@@ -179,3 +185,4 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 - `how-to-test` — diseño de pruebas y credenciales
 - `git-workflow` — ramas, commits y PRs
 - `vendix-engram` — dónde persistir una trampa nueva
+- `vendix-print-geometry` — ancho imprimible en tickets térmicos

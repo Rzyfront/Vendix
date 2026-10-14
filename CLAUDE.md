@@ -87,6 +87,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new AI scan kind to the generic ai-scan queue | `vendix-ai-queue` |
 | Adding a new RUT responsibility code to forms, scanners or seeds | `vendix-dian-issuer-identity` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
+| Adding a new paper format to print formats | `vendix-print-geometry` |
+| Adding a new print route or PDF builder for rolls | `vendix-print-geometry` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
 | Adding a stream-intent handshake to an SSE endpoint | `vendix-ai-streaming` |
@@ -228,6 +230,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging a profit or margin that looks too high | `vendix-analytics-metrics` |
 | Debugging a shipping rate excluded or missing because the buyer address could not be geocoded | `vendix-shipping-distance-pricing` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
+| Debugging a ticket cut at the sides | `vendix-print-geometry` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
 | Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
@@ -284,6 +287,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
 | Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
+| Editing print formats, print templates, thermal ticket layout or paper geometry | `vendix-print-geometry` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing search cutover, rank weights, or trigram SQL | `vendix-smart-search` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
