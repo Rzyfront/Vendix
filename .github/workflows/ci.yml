@@ -17,11 +17,10 @@ permissions:
   contents: read
   pull-requests: read
 
-# Push a develop y PR con ese mismo head SHA comparten grupo: el último run
-# cancela al anterior, incluso entre eventos. No se ejecutan ambos completos.
-# Un SHA nuevo tiene otro grupo y no cancela automáticamente el SHA anterior.
+# Cada PR/rama cancela sólo sus corridas anteriores, no las de otro evento.
+# Audits omite el push cuando un PR abierto ya cubre esta rama.
 concurrency:
-  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,20 +32,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      run_ci: ${{ steps.ci_gate.outputs.run_ci }}
       frontend: ${{ steps.filter.outputs.frontend }}
       mobile: ${{ steps.filter.outputs.mobile }}
       backend: ${{ steps.filter.outputs.backend }}
     env:
       BASE_REF: ${{ github.event.pull_request.base.ref }}
     steps:
+      - name: Decidir si ejecutar CI (push cubierto por PR)
+        id: ci_gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Este primer paso aún no tiene checkout para resolver el repo.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          run_ci=true
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            if pr_count="$(gh pr list --head "${GITHUB_REF_NAME}" --state open --json number --jq length)"; then
+              if [[ "$pr_count" =~ ^[1-9][0-9]*$ ]]; then
+                run_ci=false
+              fi
+            else
+              echo "::warning::No se pudo consultar PRs abiertos; CI se ejecutará por seguridad."
+            fi
+          fi
+          echo "run_ci=$run_ci" >> "$GITHUB_OUTPUT"
       # F-193: paths-filter necesita checkout en push (diff con git local).
       # Historia completa también para state-refresh (origin/BASE_REF...HEAD).
       # Sin base explícita se conserva la resolución histórica de paths-filter.
       - uses: actions/checkout@v4
+        if: steps.ci_gate.outputs.run_ci == 'true'
         with:
           fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: filter
+        if: steps.ci_gate.outputs.run_ci == 'true'
         with:
           # Entradas compartidas gatean las tres apps; cada app conserva su filtro.
           filters: |
@@ -77,6 +98,7 @@ jobs:
               - 'scripts/industry-parity-audit.sh'
               - 'scripts/check-tools-no-prisma.sh'
       - uses: actions/setup-node@v4
+        if: steps.ci_gate.outputs.run_ci == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -84,32 +106,32 @@ jobs:
       # !cancelled() ejecuta las siguientes aunque otra falle; sin
       # continue-on-error, cualquier fallo conserva el job rojo.
       - name: Zoneless Audit
-        if: ${{ !cancelled() && steps.filter.outputs.frontend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.frontend == 'true' }}
         run: bash scripts/zoneless-audit.sh
       - name: State Refresh Audit
-        if: ${{ !cancelled() && steps.filter.outputs.frontend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.frontend == 'true' }}
         run: bash scripts/state-refresh-audit.sh
       - name: TZ Audit
-        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.backend == 'true' }}
         run: bash scripts/tz-audit.sh
       - name: Tenant Host Audit
-        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.backend == 'true' }}
         run: bash scripts/tenant-host-audit.sh
       - name: Prisma Singleton Audit
-        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.backend == 'true' }}
         run: bash scripts/prisma-singleton-audit.sh
       - name: Tools No-Prisma Gate
-        if: ${{ !cancelled() && steps.filter.outputs.backend == 'true' }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.backend == 'true' }}
         run: bash scripts/check-tools-no-prisma.sh
       - name: Industry Parity Audit
-        if: ${{ !cancelled() && (steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.mobile == 'true') }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && (steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.mobile == 'true') }}
         run: bash scripts/industry-parity-audit.sh
 
   backend-build:
     name: Backend Build (prisma + nest)
     runs-on: ubuntu-latest
     needs: audits
-    if: needs.audits.outputs.backend == 'true'
+    if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.backend == 'true'
     # Última corrida: ~4 min, secuencia de producción intacta.
     timeout-minutes: 10
     steps:
@@ -137,7 +159,7 @@ jobs:
     name: Backend Tests (PR regressions)
     runs-on: ubuntu-latest
     needs: audits
-    if: needs.audits.outputs.backend == 'true'
+    if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.backend == 'true'
     timeout-minutes: 10
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -231,7 +253,7 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     needs: audits
-    if: needs.audits.outputs.frontend == 'true'
+    if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.frontend == 'true'
     # Estimación: build medido ~3 min + Karma <=2 min, menos el setup duplicado.
     # Se conserva el subconjunto zoneless ya acotado, nunca la suite global.
     timeout-minutes: 10
@@ -292,7 +314,7 @@ jobs:
     name: Mobile
     runs-on: ubuntu-latest
     needs: audits
-    if: needs.audits.outputs.mobile == 'true'
+    if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.mobile == 'true'
     # Ambos jobs previos <=2 min; compartir setup estima <=4 min combinados.
     timeout-minutes: 10
     steps:
