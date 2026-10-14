@@ -222,6 +222,8 @@ model users {
   dispatch_routes_as_dispatcher      dispatch_routes[]             @relation("dispatch_routes_dispatcher")
   dispatch_routes_as_voided_by       dispatch_routes[]             @relation("dispatch_routes_voided_by")
   dispatch_routes_as_closed_by       dispatch_routes[]             @relation("dispatch_routes_closed_by")
+  dispatch_routes_as_settlement_cash_user dispatch_routes[]        @relation("dispatch_routes_settlement_cash_user")
+  dispatch_route_positions           dispatch_route_positions[]
   dispatch_routes_as_released_by     dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
   // Carrier Pool (Repartos Fase B4) — órdenes reclamadas por este repartidor.
   orders_claimed_by_carrier          orders[]                      @relation("orders_claimed_by_carrier")
@@ -1072,8 +1074,9 @@ model stores {
   menu_availability_windows menu_availability_windows[]
 
   // Dispatch Routes & Vehicles
-  dispatch_routes dispatch_routes[]
-  vehicles        vehicles[]
+  dispatch_routes          dispatch_routes[]
+  dispatch_route_positions dispatch_route_positions[]
+  vehicles                 vehicles[]
 
   // Print Formats Hub
   store_print_format_configs store_print_format_configs[]
@@ -8360,6 +8363,7 @@ model cash_register_sessions {
   closed_by_user users?                    @relation("cash_register_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
   movements      cash_register_movements[]
   origin_orders  orders[]                          @relation("orders_origin_cash_session")
+  settled_dispatch_routes dispatch_routes[]        @relation("dispatch_routes_settlement_cash_session")
 
   @@unique([id, store_id])
   @@index([store_id, status])
@@ -11772,10 +11776,17 @@ model dispatch_routes {
   closed_by_user_id            Int?
   voided_by_user_id            Int?
   created_by_user_id           Int?
+  // Caja con la que se liquidó el recaudo al cerrar la ruta (trazabilidad).
+  settlement_cash_session_id   Int?
+  settlement_cash_user_id      Int?
+  cash_settled_at              DateTime?                  @db.Timestamp(6)
   created_at                   DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at                   DateTime?                  @default(now()) @db.Timestamp(6)
 
   store              stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  settlement_cash_session cash_register_sessions? @relation("dispatch_routes_settlement_cash_session", fields: [settlement_cash_session_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  settlement_cash_user    users?                  @relation("dispatch_routes_settlement_cash_user", fields: [settlement_cash_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  positions          dispatch_route_positions[]
   vehicle            vehicles?              @relation(fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   driver_user        users?                 @relation("dispatch_routes_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dispatched_by_user users?                 @relation("dispatch_routes_dispatcher", fields: [dispatched_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
@@ -11793,6 +11804,29 @@ model dispatch_routes {
   @@index([driver_user_id])
   @@index([shipping_method_id])
   @@index([external_carrier_supplier_id])
+  @@index([settlement_cash_session_id])
+}
+
+// Tracking GPS del encargado de una planilla de ruta en curso.
+model dispatch_route_positions {
+  id          BigInt    @id @default(autoincrement())
+  store_id    Int
+  route_id    Int
+  user_id     Int
+  lat         Decimal   @db.Decimal(10, 7)
+  lng         Decimal   @db.Decimal(10, 7)
+  accuracy    Decimal?  @db.Decimal(8, 2)
+  heading     Decimal?  @db.Decimal(6, 2)
+  speed       Decimal?  @db.Decimal(8, 2)
+  recorded_at DateTime  @db.Timestamp(6)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores          @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  route dispatch_routes @relation(fields: [route_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user  users           @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([route_id, recorded_at])
+  @@index([store_id])
 }
 
 model dispatch_route_stops {
