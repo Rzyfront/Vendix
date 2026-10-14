@@ -239,6 +239,10 @@ export interface PrintTemplate {
 export interface PrintPreviewResponse {
   html: string;
   width_mm: number;
+  /** Ancho que el cabezal imprime de verdad (rollo); ausente en backends viejos. */
+  printable_width_mm?: number;
+  /** Ancho de contenido efectivo (papel − márgenes laterales). */
+  content_width_mm?: number;
   is_roll: boolean;
   definition: PrintFormatDefinition;
 }

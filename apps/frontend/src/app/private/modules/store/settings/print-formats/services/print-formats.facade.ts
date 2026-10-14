@@ -15,6 +15,7 @@ import {
 } from '../../../../../../core/models/print-formats.model';
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PrintAnnexValidatorService } from './print-annex-validator.service';
 import { preparePosSaleTicketDraft } from './section-field-catalog';
 
@@ -43,6 +44,10 @@ export class PrintFormatsFacade {
   });
   readonly previewWidthMm = signal<number>(80);
   readonly previewIsRoll = signal<boolean>(true);
+  /** Ancho imprimible (mm) devuelto por el último preview válido; null si el backend no lo envió. */
+  readonly previewPrintableWidthMm = signal<number | null>(null);
+  /** Mensaje del último preview rechazado por configuración de papel inválida; null si el último fue bueno. */
+  readonly previewConfigError = signal<string | null>(null);
   readonly isLoading = signal<boolean>(false);
   readonly isSaving = signal<boolean>(false);
   readonly isPreviewLoading = signal<boolean>(false);
@@ -191,6 +196,8 @@ export class PrintFormatsFacade {
     this.selectedFormatDetail.set(null);
     this.draftDefinition.set(null);
     this.previewHtml.set('');
+    this.previewPrintableWidthMm.set(null);
+    this.previewConfigError.set(null);
     this.previewDocumentId.set(null);
     this.recentDocuments.set([]);
     if (this.previewDebounceTimer) {
@@ -254,8 +261,17 @@ export class PrintFormatsFacade {
       this.previewHtml.set(preview.html);
       this.previewWidthMm.set(preview.width_mm);
       this.previewIsRoll.set(preview.is_roll);
+      this.previewPrintableWidthMm.set(preview.printable_width_mm ?? null);
+      this.previewConfigError.set(null);
     } catch (err: any) {
-      // Ignorar debounce preview errors para no saturar al usuario
+      // Papel inválido (400 PRINT_CONFIG_VALIDATION_001): mensaje en línea y se
+      // conserva el último preview bueno. Otros errores: silencio (debounce).
+      if (generation === this.previewGeneration) {
+        const parsed = parseApiError(err);
+        if (parsed.errorCode === 'PRINT_CONFIG_VALIDATION_001') {
+          this.previewConfigError.set(parsed.userMessage);
+        }
+      }
     } finally {
       if (generation === this.previewGeneration) {
         this.isPreviewLoading.set(false);
