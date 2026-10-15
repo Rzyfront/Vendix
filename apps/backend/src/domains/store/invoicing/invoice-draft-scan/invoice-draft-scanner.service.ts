@@ -26,6 +26,12 @@ import { fuzzyScore } from '../../../../ai-engine/utils/ocr-fuzzy-score.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
+import {
+  DIAN_DEPARTMENTS,
+  type DianMunicipality,
+  findDianMunicipality,
+  listDianMunicipalities,
+} from '../providers/dian-direct/constants/dian-geography';
 import { SettingsService } from '../../settings/settings.service';
 import { CustomersService } from '../../customers/customers.service';
 import {
@@ -33,12 +39,16 @@ import {
   DraftLineMatchStatus,
   DraftPaymentForm,
   DraftPersonType,
+  DraftWithholdingType,
   INVOICE_DRAFT_LOW_CONFIDENCE_THRESHOLD,
   INVOICE_DRAFT_SCAN_APP_KEY,
+  INVOICE_DRAFT_UNIT_CODES,
   InvoiceDraftExistingAcquirer,
+  InvoiceDraftScanAiu,
   InvoiceDraftScanContext,
   InvoiceDraftScanLine,
   InvoiceDraftScanResult,
+  InvoiceDraftScanWithholding,
   MAX_INVOICE_DRAFT_SCAN_NOTE_LENGTH,
 } from './invoice-draft-scan.types';
 const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
@@ -112,9 +122,145 @@ const MAX_DRAFT_LINES = 200;
 const OPTIONAL_PATHS = new Set([
   'invoice.reference',
   'invoice.notes',
+  'invoice.exchange_rate',
+  'invoice.exchange_rate_date',
   'payment.payment_method_hint',
   'lines.discount_percent',
+  'lines.unit_code',
 ]);
+
+const UNIT_CODES: ReadonlySet<string> = new Set(INVOICE_DRAFT_UNIT_CODES);
+
+/**
+ * Unidad impresa (ya pasada por `enumKey`) → código UN/ECE rec. 20 de la
+ * lista que ofrece la pantalla. «ML» NO está: en obra es metro lineal y en
+ * bebidas mililitro, y adivinar entre los dos cambia la cantidad facturada.
+ */
+const UNIT_ALIASES: Readonly<Record<string, string>> = {
+  UND: 'NIU',
+  UNDS: 'NIU',
+  UN: 'NIU',
+  U: 'NIU',
+  UNID: 'NIU',
+  UNIDAD: 'NIU',
+  UNIDADES: 'NIU',
+  EA: 'NIU',
+  PZA: 'NIU',
+  PIEZA: 'NIU',
+  PIEZAS: 'NIU',
+  C_U: 'NIU',
+  'C/U': 'NIU',
+  GL: 'NIU',
+  GLB: 'NIU',
+  GLOBAL: 'NIU',
+  SERVICIO: 'NIU',
+  KG: 'KGM',
+  KGS: 'KGM',
+  KILO: 'KGM',
+  KILOS: 'KGM',
+  KILOGRAMO: 'KGM',
+  KILOGRAMOS: 'KGM',
+  G: 'GRM',
+  GR: 'GRM',
+  GRS: 'GRM',
+  GRAMO: 'GRM',
+  GRAMOS: 'GRM',
+  L: 'LTR',
+  LT: 'LTR',
+  LTS: 'LTR',
+  LITRO: 'LTR',
+  LITROS: 'LTR',
+  MILILITRO: 'MLT',
+  MILILITROS: 'MLT',
+  M: 'MTR',
+  MT: 'MTR',
+  MTS: 'MTR',
+  METRO: 'MTR',
+  METROS: 'MTR',
+  METRO_LINEAL: 'MTR',
+  CM: 'CMT',
+  CENTIMETRO: 'CMT',
+  CENTIMETROS: 'CMT',
+  M2: 'MTK',
+  MT2: 'MTK',
+  METRO_CUADRADO: 'MTK',
+  METROS_CUADRADOS: 'MTK',
+  M3: 'MTQ',
+  MT3: 'MTQ',
+  METRO_CUBICO: 'MTQ',
+  METROS_CUBICOS: 'MTQ',
+  H: 'HUR',
+  HR: 'HUR',
+  HRS: 'HUR',
+  HORA: 'HUR',
+  HORAS: 'HUR',
+  DIA: 'DAY',
+  DIAS: 'DAY',
+  MES: 'LUN',
+  MESES: 'LUN',
+  PAR: 'PR',
+  PARES: 'PR',
+  JUEGO: 'SET',
+  JGO: 'SET',
+  KIT: 'SET',
+  CAJA: 'BX',
+  CAJAS: 'BX',
+  CJ: 'BX',
+  PAQUETE: 'PK',
+  PAQUETES: 'PK',
+  PAQ: 'PK',
+  PQ: 'PK',
+};
+
+/** Clase de retención impresa (ya pasada por `enumKey`) → tipo del borrador. */
+const WITHHOLDING_TYPE_ALIASES: Readonly<Record<string, DraftWithholdingType>> = {
+  RETEFUENTE: 'retefuente',
+  RETE_FUENTE: 'retefuente',
+  RTE_FTE: 'retefuente',
+  RETFTE: 'retefuente',
+  RETENCION_EN_LA_FUENTE: 'retefuente',
+  RETENCION_FUENTE: 'retefuente',
+  WITHHOLDING: 'retefuente',
+  RETEIVA: 'reteiva',
+  RETE_IVA: 'reteiva',
+  RETENCION_DE_IVA: 'reteiva',
+  RETENCION_IVA: 'reteiva',
+  RETEICA: 'reteica',
+  RETE_ICA: 'reteica',
+  RETENCION_DE_ICA: 'reteica',
+  RETENCION_ICA: 'reteica',
+};
+
+/** Techo defensivo de retenciones por borrador. */
+const MAX_DRAFT_WITHHOLDINGS = 10;
+
+/** Alias de departamento (ya normalizados con `geoKey`) → código DANE. */
+const DEPARTMENT_ALIASES: Readonly<Record<string, string>> = {
+  bogota: '11',
+  'distrito capital': '11',
+  'bogota distrito capital': '11',
+  valle: '76',
+  'norte santander': '54',
+  'san andres': '88',
+  'archipielago de san andres providencia y santa catalina': '88',
+  guajira: '44',
+};
+
+/**
+ * Nombre geográfico → clave comparable: sin tildes, minúsculas, sin
+ * puntuación y sin el sufijo «D.C.» (la lista DIAN escribe «Bogotá, D.c.»).
+ */
+function geoKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/ (d c|dc|distrito capital)$/, '')
+    .replace(/^(municipio|ciudad) de /, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 type Raw = Record<string, unknown>;
 
@@ -411,15 +557,13 @@ export class InvoiceDraftScannerService {
       email: this.buildEmail(acq.email, scoreOf('acquirer.email')),
       phone: this.buildPhone(acq.phone, scoreOf('acquirer.phone')),
       address_line: this.buildText(acq.address_line, scoreOf('acquirer.address_line'), 255),
-      city_name: this.buildText(acq.city_name, scoreOf('acquirer.city_name'), 100),
-      department_name: this.buildText(
-        acq.department_name,
-        scoreOf('acquirer.department_name'),
-        100,
-      ),
-      municipality_code: this.buildMunicipalityCode(
+      ...this.buildMunicipality(
         acq.municipality_code,
+        acq.city_name,
+        acq.department_name,
         scoreOf('acquirer.municipality_code'),
+        scoreOf('acquirer.city_name'),
+        scoreOf('acquirer.department_name'),
       ),
       tax_regime: this.buildTaxRegime(acq.tax_regime, scoreOf('acquirer.tax_regime')),
       fiscal_responsibilities: this.buildResponsibilities(
@@ -437,12 +581,31 @@ export class InvoiceDraftScannerService {
       dueDate.warning = `La fecha de vencimiento (${dueDate.value}) es anterior a la de emisión (${issueDate.value}). Corrígela.`;
     }
 
+    const invoiceCurrency = this.buildCurrency(
+      inv.currency,
+      scoreOf('invoice.currency'),
+      currency.code,
+    );
+    const foreign =
+      !!invoiceCurrency.value && invoiceCurrency.value !== currency.code;
     const invoice: InvoiceDraftScanResult['invoice'] = {
       issue_date: issueDate,
       due_date: dueDate,
-      currency: this.buildCurrency(inv.currency, scoreOf('invoice.currency'), currency.code),
+      currency: invoiceCurrency,
       reference: this.buildText(inv.reference, scoreOf('invoice.reference'), 100),
       notes: this.buildText(inv.notes, scoreOf('invoice.notes'), 1000),
+      // La TRM solo tiene sentido con moneda extranjera; en la moneda de la
+      // tienda se descarta (una «tasa» 1 o un precio mal leído no es TRM).
+      exchange_rate: foreign
+        ? this.buildExchangeRate(inv.exchange_rate, scoreOf('invoice.exchange_rate'))
+        : this.empty(),
+      exchange_rate_date: foreign
+        ? this.buildDate(
+            inv.exchange_rate_date,
+            scoreOf('invoice.exchange_rate_date'),
+            'fecha de la TRM',
+          )
+        : this.empty(),
     };
 
     // --- Pago ------------------------------------------------------------------
@@ -484,6 +647,10 @@ export class InvoiceDraftScannerService {
       );
     }
 
+    // --- Retenciones y AIU ------------------------------------------------------
+    const withholdings = this.buildWithholdings(parsed.withholdings, overall);
+    const aiu = this.buildAiu(this.asObject(parsed.aiu), scoreOf, parsed.aiu);
+
     // --- Totales -------------------------------------------------------------
     const money = (raw: unknown): number | null => {
       const n = this.toNumber(raw);
@@ -512,6 +679,8 @@ export class InvoiceDraftScannerService {
       invoice,
       payment,
       lines,
+      withholdings,
+      aiu,
       totals,
       note_applied: note ? this.trimOrNull(parsed.note_applied) : null,
       missing_fields: [],
@@ -670,6 +839,228 @@ export class InvoiceDraftScannerService {
       };
     }
     return this.checked(text.trim().startsWith('+') ? `+${digits}` : digits, confidence);
+  }
+
+  /**
+   * Municipio del adquiriente contra el catálogo DIAN (Divipola, 1122):
+   *  1. Código leído: debe existir en la lista; si existe, ciudad y
+   *     departamento vacíos se completan con los nombres oficiales, y una
+   *     ciudad leída que no corresponde al código deja aviso.
+   *  2. Sin código utilizable: ciudad (+ departamento) leídos se buscan por
+   *     nombre EXACTO normalizado. Solo se acepta una coincidencia ÚNICA (con
+   *     departamento, dentro de él); el código sale con aviso para revisión.
+   * Nunca se elige entre homónimos: sin departamento, «San Juan» queda vacío.
+   */
+  private buildMunicipality(
+    rawCode: unknown,
+    rawCity: unknown,
+    rawDepartment: unknown,
+    codeConfidence: number,
+    cityConfidence: number,
+    departmentConfidence: number,
+  ): {
+    municipality_code: DraftField<string>;
+    city_name: DraftField<string>;
+    department_name: DraftField<string>;
+  } {
+    let city = this.buildText(rawCity, cityConfidence, 100);
+    let department = this.buildText(rawDepartment, departmentConfidence, 100);
+    let code = this.buildMunicipalityCode(rawCode, codeConfidence);
+
+    if (code.value) {
+      const found = findDianMunicipality(code.value);
+      if (!found) {
+        code = {
+          value: null,
+          confidence: code.confidence,
+          warning: `El código DANE leído (${code.value}) no existe en la lista de municipios de la DIAN. Selecciona el municipio.`,
+        };
+      } else {
+        if (city.value && geoKey(city.value) !== geoKey(found.name) && !code.warning) {
+          code.warning = `El código DANE ${found.code} corresponde a ${found.name} (${found.department_name}), no a «${city.value}». Confírmalo.`;
+        }
+        if (!city.value) city = { value: found.name, confidence: code.confidence, warning: null };
+        if (!department.value) {
+          department = {
+            value: found.department_name,
+            confidence: code.confidence,
+            warning: null,
+          };
+        }
+        return { municipality_code: code, city_name: city, department_name: department };
+      }
+    }
+
+    if (city.value) {
+      const found = this.findMunicipalityByName(city.value, department.value);
+      if (found) {
+        code = {
+          value: found.code,
+          confidence: Math.min(
+            city.confidence,
+            department.value ? department.confidence : city.confidence,
+            90,
+          ),
+          warning: `Municipio tomado del catálogo DANE por su nombre: ${found.name} (${found.department_name}), código ${found.code}. Confírmalo.`,
+        };
+        if (!department.value) {
+          department = {
+            value: found.department_name,
+            confidence: code.confidence,
+            warning: null,
+          };
+        }
+      }
+    }
+    return { municipality_code: code, city_name: city, department_name: department };
+  }
+
+  /** Coincidencia ÚNICA por nombre normalizado (y departamento si se leyó). */
+  private findMunicipalityByName(
+    city: string,
+    department: string | null,
+  ): DianMunicipality | null {
+    const cityKey = geoKey(city);
+    if (!cityKey) return null;
+    let candidates = listDianMunicipalities().filter(
+      (m) => geoKey(m.name) === cityKey,
+    );
+    if (department) {
+      const departmentCode = this.departmentCodeOf(department);
+      // Un departamento leído pero desconocido no autoriza a elegir.
+      if (!departmentCode) return null;
+      candidates = candidates.filter((m) => m.department_code === departmentCode);
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  private departmentCodeOf(department: string): string | null {
+    const key = geoKey(department).replace(/^departamento (de |del )?/, '');
+    if (!key) return null;
+    if (DEPARTMENT_ALIASES[key]) return DEPARTMENT_ALIASES[key];
+    for (const [code, name] of Object.entries(DIAN_DEPARTMENTS)) {
+      if (geoKey(name) === key) return code;
+    }
+    return null;
+  }
+
+  /** TRM: pesos por unidad de la moneda extranjera; > 0 y razonable. */
+  private buildExchangeRate(raw: unknown, confidence: number): DraftField<number> {
+    const n = this.toNumber(raw);
+    if (n === null) return this.empty();
+    if (!(n > 0) || n > 1_000_000) {
+      return {
+        value: null,
+        confidence,
+        warning: `La tasa de cambio leída (${n}) no es válida. Escríbela a mano.`,
+      };
+    }
+    return this.checked(Math.round(n * 100) / 100, confidence);
+  }
+
+  private buildUnitCode(raw: unknown, confidence: number): DraftField<string> {
+    const text = this.str(raw).replace(/²/g, '2').replace(/³/g, '3');
+    if (!text) return this.empty();
+    const upper = text.toUpperCase().trim();
+    const key = this.enumKey(text);
+    const code = UNIT_CODES.has(upper)
+      ? upper
+      : (UNIT_ALIASES[key] ?? UNIT_ALIASES[upper] ?? null);
+    if (!code) {
+      return {
+        value: null,
+        confidence,
+        warning: `Unidad «${text}» no reconocida: queda la unidad por defecto. Elígela si no es «unidad».`,
+      };
+    }
+    return this.checked(code, confidence);
+  }
+
+  /**
+   * Retenciones impresas. Una fila necesita clase y tarifa válidas; lo demás
+   * se descarta. La tarifa es PORCENTAJE; una ReteICA mayor a 2 % casi siempre
+   * es la tarifa por mil sin convertir y queda con aviso.
+   */
+  private buildWithholdings(raw: unknown, overall: number): InvoiceDraftScanWithholding[] {
+    const list = Array.isArray(raw) ? raw : [];
+    const out: InvoiceDraftScanWithholding[] = [];
+    for (const entry of list) {
+      if (out.length >= MAX_DRAFT_WITHHOLDINGS) break;
+      const item = this.asObject(entry);
+      const confidence = this.clampConfidence(item.confidence, overall);
+      const typeText = this.str(item.type);
+      const typeValue = typeText
+        ? (WITHHOLDING_TYPE_ALIASES[this.enumKey(typeText)] ?? null)
+        : null;
+      const rateRaw = this.toNumber(item.rate);
+      if (!typeValue && rateRaw === null) continue;
+
+      const type: DraftField<DraftWithholdingType> = typeValue
+        ? this.checked(typeValue, confidence)
+        : {
+            value: null,
+            confidence,
+            warning: typeText
+              ? `Retención «${typeText}» no reconocida. Elige el concepto.`
+              : 'Retención sin clase. Elige el concepto.',
+          };
+
+      let rate: DraftField<number>;
+      if (rateRaw === null) {
+        rate = this.empty();
+      } else if (!(rateRaw > 0) || rateRaw > 100) {
+        rate = {
+          value: null,
+          confidence,
+          warning: `Tarifa de retención leída (${rateRaw} %) no válida. Escríbela a mano.`,
+        };
+      } else {
+        rate = this.checked(Math.round(rateRaw * 10000) / 10000, confidence);
+        if (typeValue === 'reteica' && rateRaw > 2 && !rate.warning) {
+          rate.warning = `ReteICA de ${rateRaw} % parece la tarifa por mil sin convertir (${rateRaw} ‰ = ${Math.round(rateRaw * 100) / 1000} %). Confírmala.`;
+        }
+      }
+      out.push({
+        type,
+        rate,
+        concept_hint: this.str(item.concept).slice(0, 100) || null,
+      });
+    }
+    return out;
+  }
+
+  /** Reparto AIU impreso; null si el documento no trae ninguno de sus datos. */
+  private buildAiu(
+    raw: Raw,
+    scoreOf: (path: string) => number,
+    original: unknown,
+  ): InvoiceDraftScanAiu | null {
+    if (!original || typeof original !== 'object' || Array.isArray(original)) return null;
+    const percent = (key: string): DraftField<number> => {
+      const confidence = scoreOf(`aiu.${key}`);
+      const n = this.toNumber(raw[key]);
+      if (n === null) return this.empty();
+      if (n < 0 || n > 100) {
+        return {
+          value: null,
+          confidence,
+          warning: `Porcentaje AIU leído (${n} %) fuera de 0-100. Escríbelo a mano.`,
+        };
+      }
+      return this.checked(Math.round(n * 100) / 100, confidence);
+    };
+    const aiu: InvoiceDraftScanAiu = {
+      administracion_percent: percent('administracion_percent'),
+      imprevistos_percent: percent('imprevistos_percent'),
+      utilidad_percent: percent('utilidad_percent'),
+      contract_object: this.buildText(
+        raw.contract_object,
+        scoreOf('aiu.contract_object'),
+        500,
+      ),
+    };
+    const any = Object.values(aiu).some((field) => field.value !== null || field.warning);
+    return any ? aiu : null;
   }
 
   private buildMunicipalityCode(raw: unknown, confidence: number): DraftField<string> {
@@ -934,6 +1325,7 @@ export class InvoiceDraftScannerService {
       unit_price: unitPrice,
       discount_percent: discountPercent,
       tax_rate: taxRate,
+      unit_code: this.buildUnitCode(item.unit_code ?? item.unit, confidence),
       sku,
       product_id: null,
       product_variant_id: null,
@@ -1168,10 +1560,31 @@ export class InvoiceDraftScannerService {
         'unit_price',
         'discount_percent',
         'tax_rate',
+        'unit_code',
       ] as const) {
         entries.push([`lines.${i}.${key}`, line[key]]);
       }
     });
+    return entries;
+  }
+
+  /**
+   * Retenciones y AIU: solo cuentan para REVISIÓN (aviso o confianza baja),
+   * nunca como faltantes — son opcionales por naturaleza.
+   */
+  private optionalEntries(
+    result: InvoiceDraftScanResult,
+  ): Array<[string, DraftField<unknown>]> {
+    const entries: Array<[string, DraftField<unknown>]> = [];
+    result.withholdings.forEach((row, i) => {
+      entries.push([`withholdings.${i}.type`, row.type]);
+      entries.push([`withholdings.${i}.rate`, row.rate]);
+    });
+    if (result.aiu) {
+      for (const [key, field] of Object.entries(result.aiu)) {
+        entries.push([`aiu.${key}`, field as DraftField<unknown>]);
+      }
+    }
     return entries;
   }
 
@@ -1190,7 +1603,7 @@ export class InvoiceDraftScannerService {
   }
 
   private collectReview(result: InvoiceDraftScanResult, note: string | null): string[] {
-    const review = this.fieldEntries(result)
+    const review = [...this.fieldEntries(result), ...this.optionalEntries(result)]
       .filter(
         ([, field]) =>
           field.warning !== null ||

@@ -23,6 +23,29 @@ export const MAX_INVOICE_DRAFT_SCAN_NOTE_LENGTH = 1000;
 /** Bajo este umbral (0-100) un campo se precarga pero se marca para revisión. */
 export const INVOICE_DRAFT_LOW_CONFIDENCE_THRESHOLD = 75;
 
+/**
+ * Unidades UN/ECE rec. 20 que la pantalla ofrece (`UNIT_CODE_OPTIONS` del
+ * frontend). Una unidad fuera de esta lista no se precarga.
+ */
+export const INVOICE_DRAFT_UNIT_CODES = [
+  'NIU',
+  'KGM',
+  'GRM',
+  'LTR',
+  'MLT',
+  'MTR',
+  'CMT',
+  'MTK',
+  'MTQ',
+  'HUR',
+  'DAY',
+  'LUN',
+  'PR',
+  'SET',
+  'BX',
+  'PK',
+] as const;
+
 export interface DraftField<T> {
   value: T | null;
   /** 0-100. */
@@ -83,6 +106,13 @@ export interface InvoiceDraftScanInvoice {
   currency: DraftField<string>;
   reference: DraftField<string>;
   notes: DraftField<string>;
+  /**
+   * TRM declarada: pesos (COP) por UNA unidad de `currency`. Solo cuando la
+   * moneda leída no es la de la tienda y el documento imprime la tasa.
+   */
+  exchange_rate: DraftField<number>;
+  /** YYYY-MM-DD de la TRM, si el documento la imprime. */
+  exchange_rate_date: DraftField<string>;
 }
 
 export interface InvoiceDraftScanPayment {
@@ -99,12 +129,43 @@ export interface InvoiceDraftScanLine {
   discount_percent: DraftField<number>;
   /** Porcentaje (19, 5, 0). */
   tax_rate: DraftField<number>;
+  /**
+   * Unidad de medida UN/ECE rec. 20 (`NIU`, `KGM`, `HUR`…), de la lista
+   * cerrada {@link INVOICE_DRAFT_UNIT_CODES}. null si no se imprimió o no se
+   * reconoce (la pantalla deja su unidad por defecto).
+   */
+  unit_code: DraftField<string>;
   sku: string | null;
   product_id: number | null;
   product_variant_id: number | null;
   match_status: DraftLineMatchStatus;
   /** 0-100 */
   match_confidence: number;
+}
+
+/** Clase de retención que el ADQUIRIENTE practica sobre la venta. */
+export type DraftWithholdingType = 'retefuente' | 'reteiva' | 'reteica';
+
+/**
+ * Retención impresa en los documentos (típicamente la orden de compra del
+ * cliente agente retenedor). Desde la tienda es una retención SUFRIDA.
+ */
+export interface InvoiceDraftScanWithholding {
+  type: DraftField<DraftWithholdingType>;
+  /** PORCENTAJE (2.5 = 2,5 %; ReteICA por mil se convierte: 9.66‰ = 0.966). */
+  rate: DraftField<number>;
+  /** Texto del concepto tal como se imprimió («Servicios», «Compras»…). */
+  concept_hint: string | null;
+}
+
+/** Reparto AIU impreso (cotizaciones y contratos de obra). */
+export interface InvoiceDraftScanAiu {
+  /** Porcentajes 0-100 sobre el costo directo. */
+  administracion_percent: DraftField<number>;
+  imprevistos_percent: DraftField<number>;
+  utilidad_percent: DraftField<number>;
+  /** Objeto del contrato / obra. */
+  contract_object: DraftField<string>;
 }
 
 export interface InvoiceDraftScanTotals {
@@ -120,6 +181,10 @@ export interface InvoiceDraftScanResult {
   invoice: InvoiceDraftScanInvoice;
   payment: InvoiceDraftScanPayment;
   lines: InvoiceDraftScanLine[];
+  /** Retenciones impresas (vacío si no hay). */
+  withholdings: InvoiceDraftScanWithholding[];
+  /** Reparto AIU impreso, o null si los documentos no traen AIU. */
+  aiu: InvoiceDraftScanAiu | null;
   totals: InvoiceDraftScanTotals;
   /** Cómo se aplicó la nota del usuario, en español. */
   note_applied: string | null;

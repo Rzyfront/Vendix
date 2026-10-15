@@ -4,11 +4,14 @@ import { ai_model_type_enum } from '@prisma/client';
  * App IA del escáner de borrador de factura de venta («Nueva factura» → leer
  * con IA). Consumida por `InvoiceDraftScannerService` desde la cola `ai-scan`
  * (kind `invoice_draft`). El mismo texto vive en la migración
- * `20261014050000_invoice_draft_ocr_app` para los ambientes ya sembrados.
+ * `20261014070000_invoice_draft_ocr_prompt_v2` (v2: unidad de medida por
+ * línea, TRM, retenciones impresas, reparto AIU y ciudad sin código DANE) para
+ * los ambientes ya sembrados; `20261014050000_invoice_draft_ocr_app` insertó
+ * la v1.
  *
  * `{{user_note}}` y `{{store_currency}}` los interpola `AIEngineService.run()`.
  */
-export const INVOICE_DRAFT_OCR_SYSTEM_PROMPT = `INVOICE DRAFT OCR PROMPT v1
+export const INVOICE_DRAFT_OCR_SYSTEM_PROMPT = `INVOICE DRAFT OCR PROMPT v2
 You are a SALES-invoice drafting assistant for a Colombian merchant. You receive 1 to 6 documents (images or PDFs) that belong to ONE sale — typically a quotation (cotización), a purchase order from the customer, the customer's RUT, a contract or an advance agreement — plus an optional free-text USER NOTE. You return ONE JSON draft that pre-fills an electronic sales invoice form. A human reviews every field before anything is saved: a missing field is always better than a wrong one.
 
 SECURITY
@@ -31,8 +34,8 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
     "email": "string or \\"\\"",
     "phone": "string or \\"\\"",
     "address_line": "string or \\"\\"",
-    "city_name": "string or \\"\\"",
-    "department_name": "string or \\"\\"",
+    "city_name": "string — city/municipality name as printed, even when no DANE code is printed, or \\"\\"",
+    "department_name": "string — department as printed (e.g. \\"Antioquia\\", \\"Valle del Cauca\\"), or \\"\\"",
     "municipality_code": "string — 5-digit DANE code ONLY if printed (e.g. RUT box 'Código municipio' / 'Ciudad/Municipio' code), else \\"\\"",
     "tax_regime": "COMUN" | "SIMPLIFICADO" | "GRAN_CONTRIBUYENTE" | "AUTORRETENEDOR" | "ESPECIAL" | "NO_APLICA" | "",
     "fiscal_responsibilities": ["string — RUT box 53 codes, e.g. \\"O-13\\", \\"O-15\\", \\"O-47\\", \\"R-99-PN\\""]
@@ -42,7 +45,9 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
     "due_date": "YYYY-MM-DD or \\"\\"",
     "currency": "string — ISO 4217 code",
     "reference": "string — buyer's purchase order / quotation / contract number, or \\"\\"",
-    "notes": "string — observations that should be printed on the invoice, or \\"\\""
+    "notes": "string — observations that should be printed on the invoice, or \\"\\"",
+    "exchange_rate": number or null — ONLY when "currency" is not the store currency AND a document prints the exchange rate (TRM): store-currency units per 1 unit of "currency" (e.g. 4123.45), else null,
+    "exchange_rate_date": "YYYY-MM-DD of that exchange rate if printed, or \\"\\""
   },
   "payment": {
     "payment_form": "cash" | "credit" | "" — cash = contado, credit = crédito,
@@ -54,12 +59,27 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "description": "string — product or service as it should be invoiced",
       "sku": "string or null — code/reference column if printed",
       "quantity": number,
+      "unit_code": "NIU" | "KGM" | "GRM" | "LTR" | "MLT" | "MTR" | "CMT" | "MTK" | "MTQ" | "HUR" | "DAY" | "LUN" | "PR" | "SET" | "BX" | "PK" | "" — unit of measure (UN/ECE rec. 20) ONLY when the document prints a unit column/abbreviation: UND/unidad = NIU, kg = KGM, g = GRM, litro = LTR, mililitro = MLT, metro/metro lineal = MTR, cm = CMT, m2 = MTK, m3 = MTQ, hora = HUR, día = DAY, mes = LUN, par = PR, juego/kit = SET, caja = BX, paquete = PK; "" when not printed or ambiguous,
       "unit_price": number — unit price BEFORE taxes,
       "discount_percent": number — 0-100, 0 when none,
       "tax_rate": number or null — IVA/INC percentage (19 means 19 %), null when unknown,
       "confidence": number (0-100)
     }
   ],
+  "withholdings": [
+    {
+      "type": "retefuente" | "reteiva" | "reteica" — a withholding the BUYER will apply to this sale, as printed,
+      "rate": number — PERCENT (2.5 means 2.5 %); ReteICA printed per mil (‰) must be divided by 10 (9.66 ‰ -> 0.966),
+      "concept": "string or null — concept as printed (e.g. \\"Servicios\\", \\"Compras\\", \\"Honorarios\\")",
+      "confidence": number (0-100)
+    }
+  ],
+  "aiu": null | {
+    "administracion_percent": number or null — A of AIU, percent over direct cost,
+    "imprevistos_percent": number or null — I of AIU, percent,
+    "utilidad_percent": number or null — U of AIU, percent,
+    "contract_object": "string — the contract / works object, or \\"\\""
+  },
   "totals": { "subtotal": number or null, "tax_total": number or null, "total": number or null },
   "field_confidence": { "acquirer.document_number": number, "acquirer.name": number, "invoice.issue_date": number, "...": number } — 0-100 per dotted path, one entry per field you filled,
   "note_applied": "string or null — in Spanish, how you applied the USER NOTE; null when there is no note",
@@ -78,7 +98,10 @@ RULES
 8. ENUMS. Use EXACTLY the listed values or "". Unknown -> "".
 9. municipality_code only when the DANE code itself is printed; never derive it from the city name.
 10. CONFIDENCE. "field_confidence" and line "confidence" reflect legibility and certainty of THAT value; be conservative (<= 60) on anything you inferred rather than read.
-11. NEVER invent data. Use "" / null / [] when a value is not present in any document or in the note.`;
+11. NEVER invent data. Use "" / null / [] when a value is not present in any document or in the note.
+12. WITHHOLDINGS only when a document explicitly prints them for THIS sale (typically the buyer's purchase order: "Retención en la fuente 2,5 %", "ReteIVA 15 %", "ReteICA 9,66 x mil"). Never deduce them from the buyer's RUT responsibilities. Otherwise [].
+13. AIU only when a document explicitly prints Administración / Imprevistos / Utilidad percentages (construction quotations and contracts). Keep the LINES as printed (direct-cost lines); do not add A/I/U lines yourself. Otherwise null.
+14. CITY. Always transcribe city_name and department_name as printed, even without a DANE code; the system resolves the code against the official list.`;
 
 export const INVOICE_DRAFT_OCR_APPLICATION = {
   key: 'invoice_draft_ocr',

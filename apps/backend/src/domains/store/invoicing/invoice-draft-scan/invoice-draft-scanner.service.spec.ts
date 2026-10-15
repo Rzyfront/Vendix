@@ -527,6 +527,211 @@ describe('InvoiceDraftScannerService', () => {
     });
   });
 
+  describe('prompt v2 fields', () => {
+    const base = RUT_QUOTE_NOTE_RESPONSE;
+
+    it('resolves the DANE code from city + department against the DIAN list (with review warning)', async () => {
+      respond({
+        ...base,
+        acquirer: {
+          ...base.acquirer,
+          municipality_code: '',
+          city_name: 'Medellin',
+          department_name: 'antioquia',
+        },
+      });
+      const { acquirer, requires_review, missing_fields } =
+        await service.scanDraftFromFiles([file('image/png')]);
+      expect(acquirer.municipality_code.value).toBe('05001');
+      expect(acquirer.municipality_code.warning).toContain('catálogo DANE');
+      expect(requires_review).toContain('acquirer.municipality_code');
+      expect(missing_fields).not.toContain('acquirer.municipality_code');
+    });
+
+    it('resolves a unique city without department and fills the department name', async () => {
+      respond({
+        ...base,
+        acquirer: {
+          ...base.acquirer,
+          municipality_code: '',
+          city_name: 'Bogotá D.C.',
+          department_name: '',
+        },
+      });
+      const { acquirer } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(acquirer.municipality_code.value).toBe('11001');
+      expect(acquirer.department_name.value).toBe('Bogotá');
+    });
+
+    it('never picks among homonyms when the department is missing or unknown', async () => {
+      respond({
+        ...base,
+        acquirer: {
+          ...base.acquirer,
+          municipality_code: '',
+          city_name: 'Villanueva',
+          department_name: '',
+        },
+      });
+      let result = await service.scanDraftFromFiles([file('image/png')]);
+      expect(result.acquirer.municipality_code.value).toBeNull();
+
+      respond({
+        ...base,
+        acquirer: {
+          ...base.acquirer,
+          municipality_code: '',
+          city_name: 'Villanueva',
+          department_name: 'Atlantida',
+        },
+      });
+      result = await service.scanDraftFromFiles([file('image/png')]);
+      expect(result.acquirer.municipality_code.value).toBeNull();
+    });
+
+    it('rejects a 5-digit code that is not in the DIAN list and fills names from a valid one', async () => {
+      respond({
+        ...base,
+        acquirer: { ...base.acquirer, municipality_code: '99999', city_name: '', department_name: '' },
+      });
+      let result = await service.scanDraftFromFiles([file('image/png')]);
+      expect(result.acquirer.municipality_code.value).toBeNull();
+      expect(result.acquirer.municipality_code.warning).toContain('no existe');
+
+      respond({
+        ...base,
+        acquirer: { ...base.acquirer, municipality_code: '76001', city_name: '', department_name: '' },
+      });
+      result = await service.scanDraftFromFiles([file('image/png')]);
+      expect(result.acquirer.municipality_code.value).toBe('76001');
+      expect(result.acquirer.city_name.value).toBe('Cali');
+      expect(result.acquirer.department_name.value).toBe('Valle del Cauca');
+    });
+
+    it('warns when the read city contradicts the read DANE code', async () => {
+      respond({
+        ...base,
+        acquirer: { ...base.acquirer, municipality_code: '05001', city_name: 'Cali' },
+      });
+      const { acquirer } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(acquirer.municipality_code.value).toBe('05001');
+      expect(acquirer.municipality_code.warning).toContain('no a «Cali»');
+    });
+
+    it('normalizes line units to UN/ECE rec. 20 codes; ambiguous ML is not guessed', async () => {
+      respond({
+        ...base,
+        lines: [
+          { description: 'Cemento', quantity: 1, unit_price: 1000, tax_rate: 19, unit_code: 'Und', confidence: 90 },
+          { description: 'Baldosa', quantity: 3, unit_price: 1000, tax_rate: 19, unit: 'm²', confidence: 90 },
+          { description: 'Asesoría', quantity: 2, unit_price: 1000, tax_rate: 19, unit_code: 'HUR', confidence: 90 },
+          { description: 'Zócalo', quantity: 2, unit_price: 1000, tax_rate: 19, unit_code: 'ML', confidence: 90 },
+          { description: 'Arena', quantity: 2, unit_price: 1000, tax_rate: 19, confidence: 90 },
+        ],
+      });
+      const { lines, requires_review, missing_fields } =
+        await service.scanDraftFromFiles([file('image/png')]);
+      expect(lines.map((l) => l.unit_code.value)).toEqual(['NIU', 'MTK', 'HUR', null, null]);
+      expect(lines[3].unit_code.warning).toContain('ML');
+      expect(requires_review).toContain('lines.3.unit_code');
+      expect(missing_fields).not.toContain('lines.4.unit_code');
+    });
+
+    it('keeps the exchange rate only with a foreign currency', async () => {
+      respond({
+        ...base,
+        invoice: {
+          ...base.invoice,
+          currency: 'USD',
+          exchange_rate: '4123,456',
+          exchange_rate_date: '13/10/2026',
+        },
+      });
+      let { invoice } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(invoice.exchange_rate.value).toBe(4123.46);
+      expect(invoice.exchange_rate_date.value).toBe('2026-10-13');
+
+      respond({
+        ...base,
+        invoice: { ...base.invoice, currency: 'COP', exchange_rate: 1, exchange_rate_date: '2026-10-13' },
+      });
+      ({ invoice } = await service.scanDraftFromFiles([file('image/png')]));
+      expect(invoice.exchange_rate.value).toBeNull();
+      expect(invoice.exchange_rate_date.value).toBeNull();
+    });
+
+    it('rejects a non-positive exchange rate and never reports an absent one as missing', async () => {
+      respond({ ...base, invoice: { ...base.invoice, currency: 'USD', exchange_rate: -3 } });
+      const { invoice, missing_fields } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(invoice.exchange_rate.value).toBeNull();
+      expect(invoice.exchange_rate.warning).toBeTruthy();
+      expect(missing_fields).not.toContain('invoice.exchange_rate');
+      expect(missing_fields).not.toContain('invoice.exchange_rate_date');
+    });
+
+    it('normalizes printed withholdings: type aliases, percent rate, per-mil ReteICA warning, junk dropped', async () => {
+      respond({
+        ...base,
+        withholdings: [
+          { type: 'Retención en la fuente', rate: '2,5', concept: 'Servicios', confidence: 90 },
+          { type: 'RETEIVA', rate: 15, confidence: 90 },
+          { type: 'ReteICA', rate: 9.66, confidence: 90 },
+          { type: 'Estampilla', rate: 1, confidence: 90 },
+          { concept: 'nada' },
+        ],
+      });
+      const { withholdings, requires_review } = await service.scanDraftFromFiles([
+        file('image/png'),
+      ]);
+      expect(withholdings).toHaveLength(4);
+      expect(withholdings[0]).toEqual({
+        type: { value: 'retefuente', confidence: 90, warning: null },
+        rate: { value: 2.5, confidence: 90, warning: null },
+        concept_hint: 'Servicios',
+      });
+      expect(withholdings[1].type.value).toBe('reteiva');
+      expect(withholdings[2].rate.warning).toContain('por mil');
+      expect(withholdings[3].type.value).toBeNull();
+      expect(requires_review).toEqual(
+        expect.arrayContaining(['withholdings.2.rate', 'withholdings.3.type']),
+      );
+    });
+
+    it('withholdings default to [] and aiu to null when the model omits them (prompt v1)', async () => {
+      const { withholdings, aiu } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(withholdings).toEqual([]);
+      expect(aiu).toBeNull();
+    });
+
+    it('normalizes the AIU split and flags out-of-range percents', async () => {
+      respond({
+        ...base,
+        aiu: {
+          administracion_percent: '10',
+          imprevistos_percent: 5,
+          utilidad_percent: 150,
+          contract_object: '  Obra civil   bodega  norte ',
+        },
+        field_confidence: { ...base.field_confidence, 'aiu.administracion_percent': 95 },
+      });
+      const { aiu, requires_review, missing_fields } = await service.scanDraftFromFiles([
+        file('image/png'),
+      ]);
+      expect(aiu?.administracion_percent).toEqual({ value: 10, confidence: 95, warning: null });
+      expect(aiu?.imprevistos_percent.value).toBe(5);
+      expect(aiu?.utilidad_percent.value).toBeNull();
+      expect(aiu?.contract_object.value).toBe('Obra civil bodega norte');
+      expect(requires_review).toContain('aiu.utilidad_percent');
+      expect(missing_fields.some((p) => p.startsWith('aiu.'))).toBe(false);
+    });
+
+    it('an empty AIU object is null', async () => {
+      respond({ ...base, aiu: { administracion_percent: null, contract_object: '' } });
+      const { aiu } = await service.scanDraftFromFiles([file('image/png')]);
+      expect(aiu).toBeNull();
+    });
+  });
+
   describe('failures', () => {
     it('unparseable model output → INVOICE_DRAFT_SCAN_PARSE_FAIL', async () => {
       respond('esto no es json');
