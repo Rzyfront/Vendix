@@ -268,10 +268,10 @@ interface SelectedResourcePreview {
                     >
                       <div class="flex min-w-0 items-center gap-3">
                         @if (generating()) {
-                          <div class="ai-orbit relative h-9 w-9 shrink-0">
-                            <span class="ai-orbit__core"></span>
-                            <span class="ai-orbit__ring"></span>
-                            <span class="ai-orbit__ring ai-orbit__ring--delayed"></span>
+                          <div class="vx-ai-orbit relative h-9 w-9 shrink-0">
+                            <span class="vx-ai-orbit__core"></span>
+                            <span class="vx-ai-orbit__ring"></span>
+                            <span class="vx-ai-orbit__ring vx-ai-orbit__ring--delayed"></span>
                           </div>
                         } @else {
                           <div
@@ -320,13 +320,13 @@ interface SelectedResourcePreview {
 
                           @if (generating() && !activeResultImage()) {
                             <div class="ai-result-stage__placeholder">
-                              <div class="ai-holo-grid"></div>
-                              <div class="ai-holo-aurora"></div>
-                              <div class="ai-sparkle ai-sparkle--a"></div>
-                              <div class="ai-sparkle ai-sparkle--b"></div>
-                              <div class="ai-sparkle ai-sparkle--c"></div>
-                              <div class="ai-sparkle ai-sparkle--d"></div>
-                              <div class="ai-sparkle ai-sparkle--e"></div>
+                              <div class="vx-ai-holo-grid"></div>
+                              <div class="vx-ai-holo-aurora"></div>
+                              <div class="vx-ai-sparkle vx-ai-sparkle--a"></div>
+                              <div class="vx-ai-sparkle vx-ai-sparkle--b"></div>
+                              <div class="vx-ai-sparkle vx-ai-sparkle--c"></div>
+                              <div class="vx-ai-sparkle vx-ai-sparkle--d"></div>
+                              <div class="vx-ai-sparkle vx-ai-sparkle--e"></div>
                               <div class="ai-result-stage__halo"></div>
                               <div class="ai-result-stage__icon">
                                 <app-icon name="sparkles" [size]="40"></app-icon>
@@ -390,13 +390,13 @@ interface SelectedResourcePreview {
                           ) {
                             <div class="ai-post-card__pending space-y-2">
                               <div class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-                                <span class="ai-dot-pulse"></span>
+                                <span class="vx-ai-dot-pulse"></span>
                                 Redactando post...
                               </div>
-                              <div class="ai-skeleton-line w-2/3"></div>
-                              <div class="ai-skeleton-line w-full"></div>
-                              <div class="ai-skeleton-line w-11/12"></div>
-                              <div class="ai-skeleton-line w-4/5"></div>
+                              <div class="vx-ai-skeleton-line w-2/3"></div>
+                              <div class="vx-ai-skeleton-line w-full"></div>
+                              <div class="vx-ai-skeleton-line w-11/12"></div>
+                              <div class="vx-ai-skeleton-line w-4/5"></div>
                             </div>
                           } @else if (generating()) {
                             <div
@@ -483,7 +483,7 @@ interface SelectedResourcePreview {
                   <app-icon
                     name="clipboard-check"
                     [size]="20"
-                    class="ai-soft-pulse text-[var(--color-primary)]"
+                    class="vx-ai-soft-pulse text-[var(--color-primary)]"
                   ></app-icon>
                 </div>
 
@@ -681,7 +681,7 @@ interface SelectedResourcePreview {
                         name="loader-2"
                         [size]="20"
                         [spin]="true"
-                        class="ai-soft-pulse text-[var(--color-primary)]"
+                        class="vx-ai-soft-pulse text-[var(--color-primary)]"
                       ></app-icon>
                     }
                   </div>
@@ -1395,11 +1395,6 @@ interface SelectedResourcePreview {
         font-weight: 600;
       }
 
-      .ai-soft-pulse {
-        filter: drop-shadow(0 0 10px rgba(var(--color-primary-rgb), 0.42));
-        animation: ai-soft-pulse 2.4s ease-in-out infinite;
-      }
-
       @keyframes ai-scan-line {
         0%,
         42% {
@@ -1564,44 +1559,6 @@ interface SelectedResourcePreview {
         pointer-events: none;
       }
 
-      .ai-sparkle {
-        position: absolute;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: color-mix(in oklab, var(--color-primary) 80%, white);
-        box-shadow: 0 0 12px
-          color-mix(in oklab, var(--color-primary) 80%, transparent);
-        opacity: 0;
-        z-index: 2;
-      }
-
-      .ai-sparkle--a {
-        top: 18%;
-        left: 22%;
-        animation: ai-sparkle-twinkle 3s ease-in-out infinite;
-      }
-      .ai-sparkle--b {
-        top: 32%;
-        right: 18%;
-        animation: ai-sparkle-twinkle 3.5s ease-in-out 0.4s infinite;
-      }
-      .ai-sparkle--c {
-        bottom: 24%;
-        left: 30%;
-        animation: ai-sparkle-twinkle 4s ease-in-out 0.8s infinite;
-      }
-      .ai-sparkle--d {
-        bottom: 18%;
-        right: 28%;
-        animation: ai-sparkle-twinkle 3.2s ease-in-out 1.2s infinite;
-      }
-      .ai-sparkle--e {
-        top: 50%;
-        left: 12%;
-        animation: ai-sparkle-twinkle 3.8s ease-in-out 1.6s infinite;
-      }
-
       .ai-post-skeleton {
         position: relative;
         overflow: hidden;
@@ -1621,49 +1578,6 @@ interface SelectedResourcePreview {
         background-position: 200% 0;
         animation: ai-shimmer-sweep 2.2s ease-in-out infinite;
         pointer-events: none;
-      }
-
-      .ai-skeleton-line {
-        height: 10px;
-        border-radius: 999px;
-        background: color-mix(
-          in oklab,
-          var(--color-text-secondary) 14%,
-          transparent
-        );
-      }
-
-      .ai-orbit {
-        display: inline-block;
-      }
-      .ai-orbit__core {
-        position: absolute;
-        inset: 50% auto auto 50%;
-        width: 14px;
-        height: 14px;
-        transform: translate(-50%, -50%);
-        border-radius: 50%;
-        background: var(--color-primary);
-        box-shadow: 0 0 18px
-          color-mix(in oklab, var(--color-primary) 70%, transparent);
-        animation: ai-soft-pulse 1.6s ease-in-out infinite;
-      }
-      .ai-orbit__ring {
-        position: absolute;
-        inset: 0;
-        border-radius: 50%;
-        border: 1.5px solid
-          color-mix(in oklab, var(--color-primary) 55%, transparent);
-        border-top-color: transparent;
-        border-left-color: transparent;
-        animation: ai-orbit-spin 1.4s linear infinite;
-      }
-      .ai-orbit__ring--delayed {
-        inset: -6px;
-        border-color: color-mix(in oklab, var(--color-info) 45%, transparent);
-        border-top-color: transparent;
-        border-right-color: transparent;
-        animation: ai-orbit-spin 2.1s linear reverse infinite;
       }
 
       @keyframes ai-shimmer-sweep {
@@ -1709,27 +1623,6 @@ interface SelectedResourcePreview {
           box-shadow:
             0 0 0 2px color-mix(in oklab, var(--color-primary) 35%, transparent),
             0 0 60px color-mix(in oklab, var(--color-primary) 55%, transparent);
-        }
-      }
-
-      @keyframes ai-sparkle-twinkle {
-        0%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.2);
-        }
-      }
-
-      @keyframes ai-orbit-spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
         }
       }
 
@@ -1788,17 +1681,6 @@ interface SelectedResourcePreview {
         opacity: 0.75;
       }
 
-      .ai-dot-pulse {
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--color-primary);
-        box-shadow: 0 0 8px
-          color-mix(in oklab, var(--color-primary) 60%, transparent);
-        animation: ai-soft-pulse 1.2s ease-in-out infinite;
-      }
-
       .ai-result-stage.is-error {
         background:
           radial-gradient(
@@ -1849,56 +1731,6 @@ interface SelectedResourcePreview {
         line-height: 1.4;
       }
 
-      .ai-holo-grid {
-        position: absolute;
-        inset: 0;
-        z-index: 0;
-        background-image:
-          linear-gradient(
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          ),
-          linear-gradient(
-            90deg,
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          );
-        background-size: 36px 36px;
-        background-position: 0 0;
-        mask-image: radial-gradient(
-          circle at 50% 50%,
-          rgba(0, 0, 0, 0.9),
-          rgba(0, 0, 0, 0) 70%
-        );
-        opacity: 0.55;
-        animation: ai-holo-grid-drift 8s linear infinite;
-      }
-
-      .ai-holo-aurora {
-        position: absolute;
-        inset: -20%;
-        z-index: 0;
-        background:
-          radial-gradient(
-            circle at 30% 30%,
-            color-mix(in oklab, var(--color-info, #6366f1) 45%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 70% 60%,
-            color-mix(in oklab, var(--color-primary) 40%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 50% 80%,
-            color-mix(in oklab, var(--color-success, #10b981) 30%, transparent),
-            transparent 55%
-          );
-        filter: blur(48px);
-        opacity: 0.5;
-        animation: ai-holo-aurora-shift 9s ease-in-out infinite;
-      }
-
       .ai-result-stage__prism {
         position: absolute;
         inset: 0;
@@ -1918,43 +1750,17 @@ interface SelectedResourcePreview {
         pointer-events: none;
       }
 
-      @keyframes ai-holo-grid-drift {
-        0% {
-          background-position: 0 0;
-        }
-        100% {
-          background-position: 36px 36px;
-        }
-      }
-
-      @keyframes ai-holo-aurora-shift {
-        0%,
-        100% {
-          transform: translate(0, 0) scale(1);
-        }
-        50% {
-          transform: translate(2%, -2%) scale(1.05);
-        }
-      }
-
       @media (prefers-reduced-motion: reduce) {
         .ai-glow-panel::after,
         .ai-result-panel::after,
         .ai-create-panel::after,
         .ai-generating .ai-preview-stage,
-        .ai-soft-pulse,
         .ai-result-stage__icon,
         .ai-result-stage__halo,
         .ai-result-stage__shimmer,
         .ai-result-stage__scan,
         .ai-result-stage__prism,
-        .ai-holo-grid,
-        .ai-holo-aurora,
-        .ai-dot-pulse,
-        .ai-sparkle,
-        .ai-post-skeleton::after,
-        .ai-orbit__core,
-        .ai-orbit__ring {
+        .ai-post-skeleton::after {
           animation: none;
         }
       }
