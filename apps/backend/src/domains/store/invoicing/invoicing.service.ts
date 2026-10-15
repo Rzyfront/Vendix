@@ -97,6 +97,10 @@ import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto'
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
+import {
+  INVOICE_TYPES_REQUIRING_ACQUIRER_EMAIL,
+  assertManualAcquirerEmail,
+} from './utils/acquirer-email.util';
 import { normalizeNit } from '../../../common/utils/nit.util';
 import {
   buildContractAiuDraft,
@@ -1358,6 +1362,65 @@ export class InvoicingService {
   }
 
   /**
+   * Compuerta de correo del adquiriente para la factura de venta MANUAL.
+   *
+   * Correo efectivo = `dto.customer_email` → correo de la ficha vinculada
+   * (`customer_id`, que gana sobre `inline_customer` igual que en `create`) →
+   * correo del `inline_customer`. Identidad para la exención de consumidor
+   * final con la misma precedencia que el snapshot que `create` persiste.
+   *
+   * Sólo LEE. Un `customer_id` que no existe en la organización no se juzga
+   * aquí: `assertCustomerResolvable` lo rechaza con su propio código.
+   */
+  private async assertManualInvoiceAcquirerEmail(
+    dto: CreateInvoiceDto,
+    context: { organization_id?: number | string | null },
+  ): Promise<void> {
+    if (!INVOICE_TYPES_REQUIRING_ACQUIRER_EMAIL.includes(dto.invoice_type)) {
+      return;
+    }
+
+    let ficha: {
+      email?: string | null;
+      document_type?: string | null;
+      document_number?: string | null;
+      legal_name?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null = null;
+    if (dto.customer_id != null) {
+      ficha = await this.prisma.users.findFirst({
+        where: {
+          id: dto.customer_id,
+          organization_id: Number(context.organization_id),
+        },
+        select: {
+          email: true,
+          document_type: true,
+          document_number: true,
+          legal_name: true,
+          first_name: true,
+          last_name: true,
+        },
+      });
+      if (!ficha) return;
+    }
+    const inline = dto.customer_id == null ? dto.inline_customer : undefined;
+    const source = ficha ?? inline ?? null;
+    const source_name = source
+      ? (source.legal_name ?? '').trim() ||
+        `${source.first_name ?? ''} ${source.last_name ?? ''}`.trim()
+      : '';
+
+    assertManualAcquirerEmail({
+      email_candidates: [dto.customer_email, source?.email],
+      document_type: dto.customer_document_type ?? source?.document_type,
+      document_number: dto.customer_tax_id ?? source?.document_number,
+      name: dto.customer_name ?? (source_name || null),
+    });
+  }
+
+  /**
    * `customer_id` que no existe, o que pertenece a OTRA organización.
    *
    * Se comprueba a mano porque `users` es el único de los tres identificadores
@@ -1756,7 +1819,10 @@ export class InvoicingService {
     );
   }
 
-  async create(dto: CreateInvoiceDto) {
+  async create(
+    dto: CreateInvoiceDto,
+    options: { require_acquirer_email?: boolean } = {},
+  ) {
     this.assertNoteUsesSpecificRoute(dto.invoice_type);
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
@@ -1779,6 +1845,14 @@ export class InvoicingService {
     // invoice, and feed the resulting `customer_id` into the invoice. When
     // both `customer_id` and `inline_customer` are sent, `customer_id` wins
     // (matches the rule documented in `CreateInvoiceDto`).
+    // Correo del adquiriente obligatorio en la CREACIÓN MANUAL (sólo cuando el
+    // punto de entrada lo pide: `POST store/invoicing`). Por encima del cliente
+    // en línea y del consecutivo: un rechazo aquí no deja ficha huérfana ni
+    // hueco de numeración. Ver `acquirer-email.util.ts`.
+    if (options.require_acquirer_email) {
+      await this.assertManualInvoiceAcquirerEmail(dto, context);
+    }
+
     let resolved_customer_id = dto.customer_id;
     if (resolved_customer_id == null && dto.inline_customer) {
       resolved_customer_id = await this.createInlineCustomer(

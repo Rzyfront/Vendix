@@ -21,6 +21,7 @@ import {
   draftToInlineCustomerBase,
   draftToInvoicePatch,
   isDateOnly,
+  isFinalConsumerDocument,
 } from './invoice-draft-mapping';
 
 /**
@@ -411,6 +412,62 @@ describe('invoice-draft-mapping', () => {
       );
       expect(pending).toContain('customer_email');
       expect(pending).not.toContain('customer_name');
+    });
+
+    it('borrador sin correo y adquiriente con documento ⇒ correo pendiente', () => {
+      const pending = draftPendingPaths(
+        result({ acquirer: acquirer({ email: none() }) }),
+        { today: '2026-10-14' },
+      );
+      expect(pending).toContain('customer_email');
+    });
+
+    it('con correo leído (confianza alta) el correo no queda pendiente', () => {
+      const pending = draftPendingPaths(result(), { today: '2026-10-14' });
+      expect(pending).not.toContain('customer_email');
+    });
+
+    it('consumidor final (sin documento o 222222222222) no exige correo', () => {
+      const sinDocumento = draftPendingPaths(
+        result({
+          acquirer: acquirer({
+            email: none(),
+            document_number: none(),
+            verification_digit: none(),
+          }),
+        }),
+        { today: '2026-10-14' },
+      );
+      expect(sinDocumento).not.toContain('customer_email');
+
+      const generico = draftPendingPaths(
+        result({
+          acquirer: acquirer({
+            email: none(),
+            document_type: f('CC'),
+            document_number: f('222222222222'),
+            verification_digit: none(),
+          }),
+        }),
+        { today: '2026-10-14' },
+      );
+      expect(generico).not.toContain('customer_email');
+    });
+
+    it('cliente reconocido sin correo en el borrador no se marca (lo trae su ficha)', () => {
+      const pending = draftPendingPaths(
+        result({ acquirer: acquirer({ email: none(), existing_customer_id: 55 }) }),
+        { today: '2026-10-14' },
+      );
+      expect(pending).not.toContain('customer_email');
+    });
+
+    it('isFinalConsumerDocument reconoce vacío y el documento genérico DIAN', () => {
+      expect(isFinalConsumerDocument('')).toBe(true);
+      expect(isFinalConsumerDocument(null)).toBe(true);
+      expect(isFinalConsumerDocument('222222222222')).toBe(true);
+      expect(isFinalConsumerDocument('222.222.222.222')).toBe(true);
+      expect(isFinalConsumerDocument('900123456')).toBe(false);
     });
 
     it('etiquetas legibles', () => {

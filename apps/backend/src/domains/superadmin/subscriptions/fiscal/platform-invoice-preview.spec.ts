@@ -122,6 +122,9 @@ describe('Mensajes del controller según estado de la transmisión', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
   );
 
   it('creación aceptada', async () => {

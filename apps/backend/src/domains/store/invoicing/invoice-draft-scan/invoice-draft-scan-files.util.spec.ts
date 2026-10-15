@@ -1,5 +1,8 @@
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { assertInvoiceDraftScanFiles } from './invoice-draft-scan-files.util';
+import {
+  assertInvoiceDraftScanFiles,
+  enqueueInvoiceDraftScan,
+} from './invoice-draft-scan-files.util';
 import { MAX_INVOICE_DRAFT_SCAN_FILES } from './invoice-draft-scan.types';
 
 const file = (mimetype: string, originalname = 'doc'): Express.Multer.File =>
@@ -48,5 +51,43 @@ describe('assertInvoiceDraftScanFiles', () => {
         ErrorCodes.INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE.code,
       );
     }
+  });
+});
+
+describe('enqueueInvoiceDraftScan', () => {
+  const deps = () => ({
+    scanner: { assertReady: jest.fn().mockResolvedValue(undefined) },
+    aiScanJobs: { enqueue: jest.fn().mockResolvedValue({ job_id: '42' }) },
+  });
+
+  it('store: valida, confirma la app IA y encola { note } (payload intacto)', async () => {
+    const d = deps();
+    const files = [file('application/pdf')];
+    await expect(enqueueInvoiceDraftScan(d, files, '  50 % anticipo  ')).resolves.toEqual({
+      job_id: '42',
+    });
+    expect(d.scanner.assertReady).toHaveBeenCalled();
+    expect(d.aiScanJobs.enqueue).toHaveBeenCalledWith('invoice_draft', files, {
+      note: '50 % anticipo',
+    });
+  });
+
+  it('platform: mismo kind con params.context = platform', async () => {
+    const d = deps();
+    const files = [file('image/png')];
+    await enqueueInvoiceDraftScan(d, files, '', 'platform');
+    expect(d.aiScanJobs.enqueue).toHaveBeenCalledWith('invoice_draft', files, {
+      note: null,
+      context: 'platform',
+    });
+  });
+
+  it('un lote inválido no llega a la IA ni a la cola', async () => {
+    const d = deps();
+    await expect(
+      enqueueInvoiceDraftScan(d, [file('application/msword')], null, 'platform'),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE.code });
+    expect(d.scanner.assertReady).not.toHaveBeenCalled();
+    expect(d.aiScanJobs.enqueue).not.toHaveBeenCalled();
   });
 });

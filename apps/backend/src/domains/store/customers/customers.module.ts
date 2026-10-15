@@ -40,7 +40,14 @@ import { EmailModule } from '../../../email/email.module';
     CustomerHistoryService,
     CustomerEmailListener,
   ],
-  exports: [CustomersService, CustomerLookupService, CustomerHistoryService],
+  exports: [
+    CustomersService,
+    CustomerLookupService,
+    CustomerHistoryService,
+    // Consulta pública RUES/SECOP/RNT: también la usa el riel super-admin
+    // (`superadmin/subscriptions/fiscal/customers/lookup/external`).
+    ExternalIdentityLookupService,
+  ],
 })
 export class CustomersModule implements OnModuleInit {
   constructor(

@@ -1148,6 +1148,7 @@ describe('invoice-create-page · missingAcquirerEmissionFields (validación en p
     customer_document_type: '31',
     customer_address: '',
     customer_municipality_code: '',
+    customer_email: 'compras@acme.co',
     isExport: false,
     ...overrides,
   });
@@ -1206,6 +1207,48 @@ describe('invoice-create-page · missingAcquirerEmissionFields (validación en p
     expect(
       fields(state({ customer_tax_id: '900123456', customer_name: 'ACME', isExport: true })),
     ).toEqual([]);
+  });
+
+  describe('correo del adquiriente (obligatorio en captura manual)', () => {
+    const complete = (overrides: Partial<AcquirerEmissionState> = {}) =>
+      state({
+        customer_tax_id: '900123456',
+        customer_name: 'ACME',
+        customer_address: 'Cra 1',
+        customer_municipality_code: '05001',
+        ...overrides,
+      });
+
+    it('adquiriente con documento sin correo ⇒ bloquea con «Requerido para emitir»', () => {
+      const missing = missingAcquirerEmissionFields(complete({ customer_email: '' }));
+      expect(missing.map((m) => m.field)).toEqual(['customer_email']);
+      expect(missing[0].label).toBe('Correo del adquiriente');
+      expect(missing[0].reason).toContain('Requerido para emitir');
+    });
+
+    it('correo en blanco (sólo espacios) cuenta como ausente', () => {
+      expect(fields(complete({ customer_email: '   ' }))).toEqual(['customer_email']);
+    });
+
+    it('cliente vinculado sin correo también lo exige (la ficha no lo trae)', () => {
+      expect(
+        fields(complete({ customer_id: 9, customer_name: '', customer_email: null })),
+      ).toEqual(['customer_email']);
+    });
+
+    it('consumidor final sin documento queda exento', () => {
+      expect(fields(state({ customer_email: '' }))).toEqual([]);
+    });
+
+    it('consumidor final con el documento genérico 222222222222 queda exento', () => {
+      expect(
+        fields(complete({ customer_tax_id: '222222222222', customer_email: '' })),
+      ).toEqual([]);
+    });
+
+    it('con correo no aparece', () => {
+      expect(fields(complete())).toEqual([]);
+    });
   });
 });
 
@@ -1502,6 +1545,26 @@ describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
       jasmine.arrayContaining(['taxes', 'unit_price']),
     );
     expect(second.mark.note).toContain('7 %');
+  });
+
+  it('borrador sin correo del adquiriente ⇒ el correo queda en «Revisar»', () => {
+    const draft = sample();
+    draft.acquirer = { ...draft.acquirer, email: empty<string>() };
+    const plan = planInvoiceDraft(draft, ctx());
+    expect(plan.headerMarks['customer_email']).toBe('pending');
+    // Y el faltante bloquea la emisión mientras siga vacío.
+    expect(
+      missingAcquirerEmissionFields({
+        customer_id: null,
+        customer_name: plan.acquirer.patch['customer_name'],
+        customer_tax_id: plan.acquirer.patch['customer_tax_id'],
+        customer_document_type: plan.acquirer.patch['customer_document_type'],
+        customer_address: plan.acquirer.patch['customer_address'],
+        customer_municipality_code: plan.acquirer.patch['customer_municipality_code'],
+        customer_email: plan.acquirer.patch['customer_email'] ?? '',
+        isExport: false,
+      }).map((m) => m.field),
+    ).toEqual(['customer_email']);
   });
 
   it('el aviso nombra pendientes, nota aplicada y totales que no cuadran', () => {

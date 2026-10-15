@@ -111,6 +111,23 @@ export function draftDocumentDigits(raw: unknown): string {
   return head.replace(/\D/g, '');
 }
 
+/**
+ * Documento genérico que la DIAN reserva para ventas a consumidor final.
+ * Fuente: anexo técnico (adquiriente «222222222222»).
+ */
+export const FINAL_CONSUMER_DOCUMENT = '222222222222';
+
+/**
+ * ¿El adquiriente es CONSUMIDOR FINAL? Sin número de documento (la forma en que
+ * esta pantalla factura a consumidor final) o con el documento genérico
+ * `222222222222`. Es la única excepción a la obligatoriedad del correo del
+ * adquiriente en la captura manual.
+ */
+export function isFinalConsumerDocument(raw: unknown): boolean {
+  const digits = draftDocumentDigits(raw);
+  return digits === '' || digits === FINAL_CONSUMER_DOCUMENT;
+}
+
 /** Sigla efectiva: la leída o, si sólo vino número + DV, NIT. */
 function acquirerSigla(acquirer: InvoiceDraftAcquirer): string {
   const sigla = hasDraftValue(acquirer.document_type)
@@ -696,6 +713,8 @@ export function draftPathToControl(path: string): string | null {
  *  - Todo lo que el backend lista en `missing_fields` / `requires_review`.
  *  - Con documento leído y sin cliente reconocido: nombre, dirección y
  *    municipio DANE si no vinieron (son lo que la DIAN exige para emitir).
+ *  - Correo ausente con un adquiriente que no es consumidor final (la
+ *    captura manual lo exige para emitir).
  *  - DV leído que contradice el módulo 11: el número quedó mal leído.
  *  - Lo escrito con confianza baja.
  *  - Fecha de emisión distinta de hoy: la factura se emite con fecha real.
@@ -723,6 +742,19 @@ export function draftPendingPaths(
       ? text(acquirer.municipality_code.value)
       : '';
     if (!/^\d{5}$/.test(municipality)) out.add('customer_municipality_code');
+  }
+  // Correo: obligatorio para emitir salvo consumidor final. Un borrador sin
+  // correo deja el campo en «Revisar». Con cliente reconocido no se marca: el
+  // correo sale de su ficha, y si la ficha tampoco lo tiene el faltante rojo
+  // de la página («Requerido para emitir») ya lo nombra.
+  if (
+    acquirer.existing_customer_id == null &&
+    !hasDraftValue(acquirer.email) &&
+    !isFinalConsumerDocument(
+      hasDraftValue(acquirer.document_number) ? acquirer.document_number.value : '',
+    )
+  ) {
+    out.add('customer_email');
   }
   if (draftNitDvMismatch(acquirer)) out.add('customer_tax_id');
 

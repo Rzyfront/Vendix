@@ -152,7 +152,11 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateInvoiceDto) {
-    const result = await this.invoicing_service.create(create_dto);
+    // Creación MANUAL: el correo del adquiriente es obligatorio (salvo
+    // consumidor final). Los flujos automáticos no pasan por este handler.
+    const result = await this.invoicing_service.create(create_dto, {
+      require_acquirer_email: true,
+    });
     return this.response_service.success(
       result,
       'Invoice created successfully',

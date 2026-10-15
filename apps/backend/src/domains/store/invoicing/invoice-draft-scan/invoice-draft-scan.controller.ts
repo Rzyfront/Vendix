@@ -9,7 +9,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import {
   ModuleFlowGuard,
@@ -23,12 +22,12 @@ import {
   RequireAIFeature,
 } from '../../subscriptions/guards/ai-access.guard';
 import { InvoiceDraftScannerService } from './invoice-draft-scanner.service';
-import { assertInvoiceDraftScanFiles } from './invoice-draft-scan-files.util';
-import { ScanInvoiceDraftDto } from './dto/scan-invoice-draft.dto';
 import {
-  INVOICE_DRAFT_SCAN_MAX_FILE_BYTES,
-  MAX_INVOICE_DRAFT_SCAN_FILES,
-} from './invoice-draft-scan.types';
+  enqueueInvoiceDraftScan,
+  INVOICE_DRAFT_SCAN_UPLOAD_MAX_COUNT,
+  INVOICE_DRAFT_SCAN_UPLOAD_OPTIONS,
+} from './invoice-draft-scan-files.util';
+import { ScanInvoiceDraftDto } from './dto/scan-invoice-draft.dto';
 
 /**
  * Escáner IA de borrador para «Nueva factura».
@@ -58,22 +57,21 @@ export class InvoiceDraftScanController {
   // Holgura de 1 a propósito: el exceso llega a `assertInvoiceDraftScanFiles`
   // y responde INVOICE_DRAFT_SCAN_TOO_MANY_FILES en vez del error de multer.
   @UseInterceptors(
-    FilesInterceptor('files', MAX_INVOICE_DRAFT_SCAN_FILES + 1, {
-      storage: memoryStorage(),
-      limits: { fileSize: INVOICE_DRAFT_SCAN_MAX_FILE_BYTES },
-    }),
+    FilesInterceptor(
+      'files',
+      INVOICE_DRAFT_SCAN_UPLOAD_MAX_COUNT,
+      INVOICE_DRAFT_SCAN_UPLOAD_OPTIONS,
+    ),
   )
   async scanDraftAsync(
     @UploadedFiles() files: Express.Multer.File[],
     @Body() dto: ScanInvoiceDraftDto,
   ) {
-    const valid_files = assertInvoiceDraftScanFiles(files);
-    await this.scanner.assertReady();
-    const note = dto?.note?.trim() || null;
-    const { job_id } = await this.aiScanJobs.enqueue(
-      'invoice_draft',
-      valid_files,
-      { note },
+    const { job_id } = await enqueueInvoiceDraftScan(
+      { scanner: this.scanner, aiScanJobs: this.aiScanJobs },
+      files,
+      dto?.note,
+      'store',
     );
     return this.responses.success({ job_id }, 'Escaneo encolado');
   }

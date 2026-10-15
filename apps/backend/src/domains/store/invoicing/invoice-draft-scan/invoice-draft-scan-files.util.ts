@@ -1,5 +1,24 @@
+import { memoryStorage } from 'multer';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { MAX_INVOICE_DRAFT_SCAN_FILES } from './invoice-draft-scan.types';
+import type { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
+import {
+  INVOICE_DRAFT_SCAN_MAX_FILE_BYTES,
+  InvoiceDraftScanContext,
+  MAX_INVOICE_DRAFT_SCAN_FILES,
+} from './invoice-draft-scan.types';
+import type { InvoiceDraftScannerService } from './invoice-draft-scanner.service';
+
+/**
+ * Argumentos de `FilesInterceptor('files', ...)` compartidos por los dos
+ * endpoints de escaneo (tienda y plataforma). Holgura de 1 a propósito: el
+ * exceso llega a `assertInvoiceDraftScanFiles` y responde
+ * INVOICE_DRAFT_SCAN_TOO_MANY_FILES en vez del error de multer.
+ */
+export const INVOICE_DRAFT_SCAN_UPLOAD_MAX_COUNT = MAX_INVOICE_DRAFT_SCAN_FILES + 1;
+export const INVOICE_DRAFT_SCAN_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: INVOICE_DRAFT_SCAN_MAX_FILE_BYTES },
+};
 
 /**
  * Tipos que el modelo de visión lee. Word/Excel y cualquier otro formato se
@@ -36,4 +55,27 @@ export function assertInvoiceDraftScanFiles(
     }
   }
   return files;
+}
+
+/**
+ * Flujo de encolado compartido del escáner de borrador (tienda y plataforma):
+ * valida el lote ANTES de tocar S3, confirma que la app IA está lista y encola
+ * el kind `invoice_draft`. En plataforma viaja `params.context = 'platform'`;
+ * en tienda el payload se conserva `{ note }` (el handler asume `store`).
+ */
+export async function enqueueInvoiceDraftScan(
+  deps: {
+    scanner: Pick<InvoiceDraftScannerService, 'assertReady'>;
+    aiScanJobs: Pick<AiScanJobService, 'enqueue'>;
+  },
+  files: Express.Multer.File[] | undefined,
+  rawNote: unknown,
+  context: InvoiceDraftScanContext = 'store',
+): Promise<{ job_id: string }> {
+  const validFiles = assertInvoiceDraftScanFiles(files);
+  await deps.scanner.assertReady();
+  const note = typeof rawNote === 'string' ? rawNote.trim() || null : null;
+  const params: Record<string, unknown> =
+    context === 'platform' ? { note, context: 'platform' } : { note };
+  return deps.aiScanJobs.enqueue('invoice_draft', validFiles, params);
 }

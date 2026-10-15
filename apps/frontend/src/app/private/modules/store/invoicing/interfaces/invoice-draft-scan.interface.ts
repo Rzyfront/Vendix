@@ -35,6 +35,11 @@ export interface InvoiceDraftAcquirer {
   fiscal_responsibilities: DraftField<string[]>;
   /** Cliente de la tienda que el backend ya reconoció por documento. */
   existing_customer_id: number | null;
+  /**
+   * Sólo plataforma: destinatario que el backend ya reconoció por documento.
+   * Ausente o `null` en tienda (allí manda `existing_customer_id`).
+   */
+  existing_acquirer?: InvoiceDraftExistingAcquirer | null;
 }
 
 export interface InvoiceDraftHeader {
@@ -71,6 +76,18 @@ export interface InvoiceDraftTotals {
   tax_total: number | null;
   total: number | null;
   consistent: boolean | null;
+}
+
+/**
+ * Adquiriente que el escáner de PLATAFORMA ya reconoció por documento
+ * (`superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async`). El de
+ * tienda no lo manda: allí manda `acquirer.existing_customer_id`.
+ */
+export interface InvoiceDraftExistingAcquirer {
+  kind: 'store' | 'organization' | 'user' | 'customer';
+  tenant_id: number;
+  /** Id compuesto del buscador de plataforma (`'org:44'`, `'store:3'`, `'customer:7'`, `'user:9'`). */
+  id: string;
 }
 
 export interface InvoiceDraftScanResult {

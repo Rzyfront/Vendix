@@ -48,11 +48,39 @@ describe('fiscal scan handler registrars', () => {
     ).resolves.toBe('D');
     expect(draft.scanDraftFromFiles).toHaveBeenCalledWith(files, {
       note: '50 % anticipo',
+      context: 'store',
+      job_context: ctx,
     });
 
     await registry.get('invoice_draft')!({ files, params: {}, context: ctx });
     expect(draft.scanDraftFromFiles).toHaveBeenLastCalledWith(files, {
       note: null,
+      context: 'store',
+      job_context: ctx,
+    });
+
+    // Riel super-admin: el mismo kind con `params.context = 'platform'`.
+    await registry.get('invoice_draft')!({
+      files,
+      params: { note: null, context: 'platform' },
+      context: ctx,
+    });
+    expect(draft.scanDraftFromFiles).toHaveBeenLastCalledWith(files, {
+      note: null,
+      context: 'platform',
+      job_context: ctx,
+    });
+
+    // Un valor desconocido nunca abre el riel de plataforma.
+    await registry.get('invoice_draft')!({
+      files,
+      params: { context: 'PLATFORM' },
+      context: ctx,
+    });
+    expect(draft.scanDraftFromFiles).toHaveBeenLastCalledWith(files, {
+      note: null,
+      context: 'store',
+      job_context: ctx,
     });
   });
 

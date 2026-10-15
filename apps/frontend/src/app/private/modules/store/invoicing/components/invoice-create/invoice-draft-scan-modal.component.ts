@@ -5,6 +5,7 @@ import {
   ElementRef,
   computed,
   inject,
+  input,
   model,
   output,
   signal,
@@ -29,7 +30,10 @@ import {
   INVOICE_DRAFT_SCAN_NOTE_MAX,
   InvoiceDraftScanResult,
 } from '../../interfaces/invoice-draft-scan.interface';
-import { InvoiceDraftScannerService } from '../../services/invoice-draft-scanner.service';
+import {
+  INVOICE_DRAFT_SCAN_STORE_PATH,
+  InvoiceDraftScannerService,
+} from '../../services/invoice-draft-scanner.service';
 
 /** Megas del tope por archivo, para los textos (15 MB). */
 const MAX_FILE_MB = Math.round(INVOICE_DRAFT_SCAN_MAX_FILE_BYTES / (1024 * 1024));
@@ -249,6 +253,11 @@ export class InvoiceDraftScanModalComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = model<boolean>(false);
+  /**
+   * Ruta del escáner (sin `apiUrl`). La tienda no la pasa; la «Nueva factura»
+   * de plataforma pasa `INVOICE_DRAFT_SCAN_PLATFORM_PATH`.
+   */
+  readonly endpoint = input<string>(INVOICE_DRAFT_SCAN_STORE_PATH);
   /** Borrador leído. El modal ya se cerró cuando esto sale. */
   readonly scanned = output<InvoiceDraftScanResult>();
 
@@ -397,7 +406,12 @@ export class InvoiceDraftScanModalComponent {
     this.scanning.set(true);
 
     this.scanSub = this.scanner
-      .scanDraft(files, this.note(), { onStall: () => this.stalled.set(true) })
+      .scanDraft(
+        files,
+        this.note(),
+        { onStall: () => this.stalled.set(true) },
+        this.endpoint(),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

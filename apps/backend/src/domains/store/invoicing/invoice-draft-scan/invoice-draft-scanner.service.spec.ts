@@ -96,6 +96,12 @@ describe('InvoiceDraftScannerService', () => {
   };
   let settings: { getStoreCurrencyInfo: jest.Mock };
   let customers: { findByDocumentInOrganization: jest.Mock };
+  let globalPrisma: {
+    organizations: { findFirst: jest.Mock };
+    stores: { findFirst: jest.Mock };
+    platform_customers: { findFirst: jest.Mock };
+    users: { findFirst: jest.Mock };
+  };
   let service: InvoiceDraftScannerService;
 
   const respond = (payload: unknown) =>
@@ -124,6 +130,12 @@ describe('InvoiceDraftScannerService', () => {
     customers = {
       findByDocumentInOrganization: jest.fn().mockResolvedValue(null),
     };
+    globalPrisma = {
+      organizations: { findFirst: jest.fn().mockResolvedValue(null) },
+      stores: { findFirst: jest.fn().mockResolvedValue(null) },
+      platform_customers: { findFirst: jest.fn().mockResolvedValue(null) },
+      users: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ organization_id: 7, store_id: 3, user_id: 1 } as any);
@@ -132,6 +144,7 @@ describe('InvoiceDraftScannerService', () => {
       prisma as any,
       settings as any,
       customers as any,
+      globalPrisma as any,
     );
     respond(RUT_QUOTE_NOTE_RESPONSE);
   });
@@ -317,6 +330,9 @@ describe('InvoiceDraftScannerService', () => {
       const { acquirer } = await service.scanDraftFromFiles([file('image/png')]);
       expect(customers.findByDocumentInOrganization).toHaveBeenCalledWith(7, NIT, 'NIT');
       expect(acquirer.existing_customer_id).toBe(321);
+      // En tienda nunca se busca un adquiriente de plataforma.
+      expect(acquirer.existing_acquirer).toBeNull();
+      expect(globalPrisma.organizations.findFirst).not.toHaveBeenCalled();
     });
 
     it('a lookup failure degrades to null instead of failing the scan', async () => {
@@ -551,6 +567,108 @@ describe('InvoiceDraftScannerService', () => {
       const boom = new Error('redis down');
       aiEngine.assertVisionModelLinked.mockRejectedValue(boom);
       await expect(service.assertReady()).rejects.toBe(boom);
+    });
+  });
+  describe('platform context (riel super-admin)', () => {
+    const superAdminCtx = {
+      store_id: null,
+      organization_id: 1,
+      user_id: 99,
+      is_super_admin: true,
+    };
+    const scanPlatform = (job_context: any = superAdminCtx) =>
+      service.scanDraftFromFiles([file('image/png')], {
+        note: null,
+        context: 'platform',
+        job_context,
+      });
+
+    it('uses COP without reading store settings and tells the model the seller is Vendix', async () => {
+      settings.getStoreCurrencyInfo.mockResolvedValue({ code: 'USD', decimal_places: 2 });
+      const result = await scanPlatform();
+      expect(settings.getStoreCurrencyInfo).not.toHaveBeenCalled();
+      const [, vars, messages] = aiEngine.run.mock.calls[0];
+      expect(vars.store_currency).toBe('COP');
+      expect(messages[0].content[0].text).toContain('seller/issuer of this invoice is Vendix');
+      expect(result.invoice.currency.value).toBe('COP');
+    });
+
+    it('does not cross the product catalog nor the store customers: free lines', async () => {
+      const { lines, acquirer } = await scanPlatform();
+      expect(prisma.products.findFirst).not.toHaveBeenCalled();
+      expect(prisma.products.findMany).not.toHaveBeenCalled();
+      expect(prisma.product_variants.findFirst).not.toHaveBeenCalled();
+      expect(customers.findByDocumentInOrganization).not.toHaveBeenCalled();
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line).toMatchObject({
+          product_id: null,
+          product_variant_id: null,
+          match_status: 'none',
+        });
+      }
+      expect(acquirer.existing_customer_id).toBeNull();
+      expect(acquirer.existing_acquirer).toBeNull();
+    });
+
+    it('existing_acquirer by tenant (organization first, exact tax_id)', async () => {
+      globalPrisma.organizations.findFirst.mockResolvedValue({ id: 44 });
+      const { acquirer } = await scanPlatform();
+      expect(acquirer.existing_acquirer).toEqual({
+        kind: 'organization',
+        tenant_id: 44,
+        id: 'org:44',
+      });
+      expect(globalPrisma.organizations.findFirst.mock.calls[0][0].where).toMatchObject({
+        tax_id: NIT,
+        is_platform: false,
+      });
+      expect(globalPrisma.platform_customers.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('existing_acquirer by store when no organization matches', async () => {
+      globalPrisma.stores.findFirst.mockResolvedValue({ id: 12 });
+      const { acquirer } = await scanPlatform();
+      expect(acquirer.existing_acquirer).toEqual({ kind: 'store', tenant_id: 12, id: 'store:12' });
+    });
+
+    it('existing_acquirer by platform_customers (same DIAN document code)', async () => {
+      globalPrisma.platform_customers.findFirst.mockResolvedValue({ id: 7 });
+      const { acquirer } = await scanPlatform();
+      expect(acquirer.existing_acquirer).toEqual({
+        kind: 'customer',
+        tenant_id: 7,
+        id: 'customer:7',
+      });
+      expect(globalPrisma.platform_customers.findFirst.mock.calls[0][0].where).toEqual({
+        tax_id: NIT,
+        document_type: '31',
+      });
+    });
+
+    it('a lookup failure degrades existing_acquirer to null', async () => {
+      globalPrisma.organizations.findFirst.mockRejectedValue(new Error('db down'));
+      const { acquirer } = await scanPlatform();
+      expect(acquirer.existing_acquirer).toBeNull();
+    });
+
+    it('rejects a non super-admin or a store context before calling the AI', async () => {
+      for (const ctx of [
+        { ...superAdminCtx, is_super_admin: false },
+        { ...superAdminCtx, store_id: 3 },
+      ]) {
+        await expect(scanPlatform(ctx)).rejects.toMatchObject({
+          errorCode: ErrorCodes.INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN.code,
+        });
+      }
+      expect(aiEngine.run).not.toHaveBeenCalled();
+    });
+
+    it('without job context falls back to the request context (store user → rejected)', async () => {
+      // beforeEach deja un contexto de tienda sin super-admin.
+      await expect(scanPlatform(null)).rejects.toMatchObject({
+        errorCode: ErrorCodes.INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN.code,
+      });
     });
   });
 });

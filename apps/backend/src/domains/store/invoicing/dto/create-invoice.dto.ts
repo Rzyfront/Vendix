@@ -602,7 +602,7 @@ export class CreateInvoiceDto {
     {},
     {
       message:
-        'customer_email debe ser un correo válido (ej. cliente@dominio.com). Es la dirección a la que se entrega la factura electrónica; déjalo vacío si no la tienes.',
+        'customer_email debe ser un correo válido (ej. cliente@dominio.com). Es la dirección a la que se entrega la factura electrónica.',
     },
   )
   @MaxLength(255, {

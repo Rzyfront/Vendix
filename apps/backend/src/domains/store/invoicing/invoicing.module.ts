@@ -189,6 +189,10 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // habilitación batch without a second copy of the WS-Security credential
     // loading and the persistence rules.
     DianTestService,
+    // Escáner IA de borrador: el riel super-admin
+    // (`superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async`) llama
+    // `assertReady()` antes de encolar el mismo kind `invoice_draft`.
+    InvoiceDraftScannerService,
   ],
 })
 export class InvoicingModule implements OnModuleInit {
