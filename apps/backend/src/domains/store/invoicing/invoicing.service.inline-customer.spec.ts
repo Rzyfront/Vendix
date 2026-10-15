@@ -49,9 +49,11 @@ describe('InvoicingService.createInlineCustomer', () => {
     );
 
     expect(id).toBe(99);
+    // Sin customer_address no se ofrece dirección (3er argumento undefined).
     expect(customersService.resolveInlineCustomer).toHaveBeenCalledWith(
       7,
       juridica,
+      undefined,
     );
   });
 
@@ -74,9 +76,11 @@ describe('InvoicingService.createInlineCustomer', () => {
     );
 
     expect(id).toBe(100);
+    // Sin customer_address no se ofrece dirección (3er argumento undefined).
     expect(customersService.resolveInlineCustomer).toHaveBeenCalledWith(
       7,
       natural,
+      undefined,
     );
   });
 
@@ -125,5 +129,60 @@ describe('InvoicingService.createInlineCustomer', () => {
       expect(err.errorCode).toBe('SYS_VALIDATION_001'),
     );
     expect(customersService.resolveInlineCustomer).not.toHaveBeenCalled();
+  });
+  it('6b: ofrece la dirección fiscal de la factura como billing del cliente', async () => {
+    const customersService = {
+      resolveInlineCustomer: jest
+        .fn()
+        .mockResolvedValue({ customer_id: 99, was_created: true }),
+    };
+
+    await (build(customersService) as any).createInlineCustomer(
+      { organization_id: 3, store_id: 7 },
+      juridica,
+      {
+        address_line: ' Cra 43A # 1-50 ',
+        city_code: '05001',
+        city_name: 'Medellín',
+        department_code: '05',
+        department_name: 'Antioquia',
+        country_code: 'CO',
+      },
+    );
+
+    expect(customersService.resolveInlineCustomer).toHaveBeenCalledWith(
+      7,
+      juridica,
+      {
+        billing_address: {
+          address_line1: 'Cra 43A # 1-50',
+          city: 'Medellín',
+          state_province: 'Antioquia',
+          municipality_code: '05001',
+          country_code: 'CO',
+          postal_code: null,
+        },
+      },
+    );
+  });
+
+  it('6b: sin address_line no ofrece dirección', async () => {
+    const customersService = {
+      resolveInlineCustomer: jest
+        .fn()
+        .mockResolvedValue({ customer_id: 99, was_created: true }),
+    };
+
+    await (build(customersService) as any).createInlineCustomer(
+      { organization_id: 3, store_id: 7 },
+      juridica,
+      { city_name: 'Medellín' },
+    );
+
+    expect(customersService.resolveInlineCustomer).toHaveBeenCalledWith(
+      7,
+      juridica,
+      undefined,
+    );
   });
 });
