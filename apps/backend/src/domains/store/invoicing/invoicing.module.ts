@@ -39,6 +39,7 @@ import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-
 import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
+import { CustomersModule } from '../customers/customers.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
@@ -61,6 +62,10 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoiceProviderModule,
     DianDirectModule,
     WithholdingTaxModule,
+    // Alta del cliente capturado en línea en la factura (`createInlineCustomer`)
+    // delega en `CustomersService`. Sin ciclo: `CustomersModule` sólo importa
+    // Response/Metadata/Email.
+    CustomersModule,
     // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
     // `DianTestService` en sus providers, porque Nest instancia el servicio una
     // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.

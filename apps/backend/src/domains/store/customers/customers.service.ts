@@ -1088,6 +1088,105 @@ export class CustomersService {
     };
   }
 
+  /**
+   * `person_type` efectivo al CREAR: el explícito del payload siempre gana; un
+   * NIT sin nombre de persona natural se infiere JURIDICA (una NIT sin nombre
+   * no puede ser natural). Compartido por `create()` y
+   * `resolveInlineCustomer()` para que ambos caminos deriven lo mismo.
+   */
+  private deriveCreatePersonType(
+    dto: CreateCustomerDto,
+    normalizedDoc: { type: string | null; number: string | null },
+  ): PersonaType | null | undefined {
+    if (dto.person_type !== undefined && dto.person_type !== null) {
+      return dto.person_type;
+    }
+    return normalizedDoc.type === 'NIT' &&
+      !!normalizedDoc.number &&
+      !dto.first_name?.trim() &&
+      !dto.last_name?.trim()
+      ? ('JURIDICA' as PersonaType)
+      : dto.person_type;
+  }
+
+  /**
+   * Cliente capturado en línea desde otro flujo (Facturas → Nueva factura).
+   *
+   * Mismo contrato que `create()` —es quien crea—, más dos reglas que el alta
+   * en línea necesita y el modal de clientes no:
+   *   1. Si ya existe un cliente no archivado en la organización con el mismo
+   *      (document_type, document_number), se REUTILIZA tal cual (sin pisar su
+   *      ficha) y se vincula a la tienda. Reintentar una factura que falló
+   *      después de crear el cliente no debe chocar contra su propio cliente.
+   *   2. Una persona jurídica (explícita o inferida por NIT sin nombres) exige
+   *      razón social: sin ella la factura saldría sin `RegistrationName`.
+   * Cualquier otro choque (p. ej. el correo ya es de otro cliente) sale de
+   * `create()` como 409 `SYS_CONFLICT_001`, nunca como 500.
+   */
+  async resolveInlineCustomer(
+    storeId: number,
+    dto: CreateCustomerDto,
+  ): Promise<{ customer_id: number; was_created: boolean }> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const normalizedDoc = this.normalizeDocument({
+      type: dto.document_type ?? null,
+      number: dto.document_number ?? null,
+    });
+
+    if (normalizedDoc.number && normalizedDoc.type) {
+      // Un NIT puede llegar con el DV pegado; la ficha guarda el número sin DV.
+      const lookupNumber =
+        normalizedDoc.type === 'NIT'
+          ? (this.splitNitAndDv(
+              dto.document_number,
+              normalizedDoc.number,
+              dto.verification_digit,
+            ).number ?? normalizedDoc.number)
+          : normalizedDoc.number;
+      const existing = await this.findByDocumentInOrganization(
+        store.organization_id,
+        lookupNumber,
+        normalizedDoc.type,
+      );
+      if (existing) {
+        try {
+          await this.prisma.store_users.upsert({
+            where: {
+              user_id_store_id: { user_id: existing.id, store_id: store.id },
+            },
+            create: { user_id: existing.id, store_id: store.id },
+            update: {},
+          });
+        } catch (linkErr) {
+          this.logger.warn(
+            `resolveInlineCustomer: store link failed for customer ${existing.id} store ${store.id}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
+        return { customer_id: existing.id, was_created: false };
+      }
+    }
+
+    const derivedPersonType = this.deriveCreatePersonType(dto, normalizedDoc);
+    if (derivedPersonType === 'JURIDICA' && !dto.legal_name?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.CUST_VALIDATE_001,
+        'La razón social es obligatoria para un cliente persona jurídica (NIT).',
+        { field: 'legal_name' },
+      );
+    }
+
+    const created = await this.create(store.id, dto);
+    return { customer_id: created.id, was_created: true };
+  }
+
   async create(storeId: number, dto: CreateCustomerDto) {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -1189,15 +1288,7 @@ export class CustomersService {
     // NIT sin `person_type` explícito y sin nombre de persona natural, se
     // infiere JURIDICA (una NIT sin nombre no puede ser natural); el
     // `person_type` explícito del payload SIEMPRE gana sobre la inferencia.
-    const derivedPersonType: PersonaType | null | undefined =
-      dto.person_type !== undefined && dto.person_type !== null
-        ? dto.person_type
-        : normalizedDoc.type === 'NIT' &&
-            !!normalizedDoc.number &&
-            !dto.first_name?.trim() &&
-            !dto.last_name?.trim()
-          ? ('JURIDICA' as PersonaType)
-          : dto.person_type;
+    const derivedPersonType = this.deriveCreatePersonType(dto, normalizedDoc);
     this.assertPersonaDocumentCoherence(
       derivedPersonType ?? null,
       normalizedDoc.type,
