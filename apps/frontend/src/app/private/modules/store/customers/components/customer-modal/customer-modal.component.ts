@@ -11,7 +11,13 @@ import {
   untracked,
 } from '@angular/core';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+  TouchedChangeEvent,
+} from '@angular/forms';
 import {
   ModalComponent,
   ButtonComponent,
@@ -55,6 +61,19 @@ const CUSTOMER_NIT_DV_VALIDATOR = nitDvGroupValidator(
   'document_number',
   'verification_digit',
 );
+
+/**
+ * Controles que viven en «Más datos» (modo completo). Si alguno queda
+ * inválido y tocado, la sección se despliega sola: un error plegado es un
+ * error que nadie encuentra (mismo criterio que Nueva factura).
+ */
+const MORE_DATA_FIELDS = [
+  'phone',
+  'tax_regime',
+  'fiscal_responsibilities',
+  'ciiu_code',
+  'is_withholding_agent',
+] as const;
 
 /** Field names `ui_fill_form` understands on this form (G1). */
 export const CUSTOMER_MODAL_FILLABLE_FIELDS = [
@@ -140,7 +159,7 @@ interface AddressDtoPayload {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      [size]="mode() === 'advanced' ? 'xl' : 'md'"
+      [size]="mode() === 'advanced' ? 'lg' : 'md'"
       [title]="modalTitle()"
       [subtitle]="modalSubtitle()"
     >
@@ -240,10 +259,9 @@ interface AddressDtoPayload {
         }
 
         <!-- ============================================================ -->
-        <!-- ADVANCED MODE (xl): 3 columnas                                -->
-        <!-- Col 1: Datos del cliente                                       -->
-        <!-- Col 2: Datos fiscales                                         -->
-        <!-- Col 3: Responsabilidades tributarias                          -->
+        <!-- ADVANCED MODE («Configuración completa»)                       -->
+        <!-- Arriba: lo que la DIAN exige para facturar (siempre visible).   -->
+        <!-- Abajo: «Más datos» plegado (teléfono, régimen, RUT, CIIU...).   -->
         <!-- ============================================================ -->
         @if (mode() === 'advanced') {
           <!-- Link para volver al modo rápido -->
@@ -256,15 +274,21 @@ interface AddressDtoPayload {
             Volver al modo rápido
           </button>
 
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- ============================================================ -->
-            <!-- COLUMNA 1: Datos del cliente (comercial)                    -->
-            <!-- ============================================================ -->
-            <div class="space-y-4">
-              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
-                Datos del cliente
+          <!-- Bloque obligatorio: datos para facturar -->
+          <section class="space-y-4" aria-labelledby="customer-modal-billing-title">
+            <div>
+              <h3
+                id="customer-modal-billing-title"
+                class="text-sm font-semibold text-[var(--color-text-primary)]"
+              >
+                Datos para facturar
               </h3>
+              <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+                Lo que la DIAN exige para facturarle electrónicamente.
+              </p>
+            </div>
 
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-selector
                 formControlName="person_type"
                 label="Tipo de persona"
@@ -272,72 +296,68 @@ interface AddressDtoPayload {
                 [options]="personTypeOptions"
               ></app-selector>
 
-              @if (person_type() !== 'JURIDICA') {
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <app-input
-                    formControlName="first_name"
-                    label="Nombre *"
-                    placeholder="Ej. María"
-                    [required]="true"
-                    [error]="getFieldError('first_name')"
-                    (blur)="onFieldBlur('first_name')"
-                    customWrapperClass="mt-0"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="last_name"
-                    label="Apellido *"
-                    placeholder="Ej. Rodríguez"
-                    [required]="true"
-                    [error]="getFieldError('last_name')"
-                    (blur)="onFieldBlur('last_name')"
-                    customWrapperClass="mt-0"
-                  ></app-input>
-                </div>
-              } @else {
-                <app-input
-                  formControlName="legal_name"
-                  label="Razón social *"
-                  placeholder="Ej. Acme S.A.S"
-                  [required]="true"
-                  [error]="getFieldError('legal_name')"
-                  (blur)="onFieldBlur('legal_name')"
-                  customWrapperClass="mt-0"
-                ></app-input>
-              }
-
               <app-input
                 formControlName="email"
-                label="Correo electrónico"
+                label="Correo electrónico *"
                 placeholder="cliente@ejemplo.com"
                 type="email"
+                [required]="true"
                 [error]="getFieldError('email')"
                 (blur)="onFieldBlur('email')"
                 customWrapperClass="mt-0"
               ></app-input>
 
-              <app-input
-                formControlName="phone"
-                label="Teléfono *"
-                type="tel"
-                placeholder="+57 300 000 0000"
-                [required]="true"
-                [error]="getFieldError('phone')"
-                (blur)="onFieldBlur('phone')"
-                customWrapperClass="mt-0"
-              ></app-input>
+              @if (person_type() !== 'JURIDICA') {
+                <app-input
+                  formControlName="first_name"
+                  label="Nombre *"
+                  placeholder="Ej. María"
+                  [required]="true"
+                  [error]="getFieldError('first_name')"
+                  (blur)="onFieldBlur('first_name')"
+                  customWrapperClass="mt-0"
+                ></app-input>
 
-              <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-3]="document_type() === 'NIT'" [class.sm:grid-cols-2]="document_type() !== 'NIT'">
+                <app-input
+                  formControlName="last_name"
+                  label="Apellido *"
+                  placeholder="Ej. Rodríguez"
+                  [required]="true"
+                  [error]="getFieldError('last_name')"
+                  (blur)="onFieldBlur('last_name')"
+                  customWrapperClass="mt-0"
+                ></app-input>
+              } @else {
+                <div class="md:col-span-2">
+                  <app-input
+                    formControlName="legal_name"
+                    label="Razón social *"
+                    placeholder="Ej. Acme S.A.S"
+                    [required]="true"
+                    [error]="getFieldError('legal_name')"
+                    (blur)="onFieldBlur('legal_name')"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                </div>
+              }
+
+              <div
+                class="md:col-span-2 grid grid-cols-1 gap-4"
+                [class.sm:grid-cols-3]="document_type() === 'NIT'"
+                [class.sm:grid-cols-2]="document_type() !== 'NIT'"
+              >
                 <app-selector
                   formControlName="document_type"
-                  label="Tipo doc"
+                  label="Tipo de documento *"
                   placeholder="Tipo"
+                  [errorText]="getFieldError('document_type')"
                   [options]="documentTypeOptions"
                 ></app-selector>
 
                 <app-input
                   formControlName="document_number"
-                  label="Número"
+                  label="Número de documento *"
+                  [required]="true"
                   [placeholder]="documentNumberPlaceholder()"
                   [error]="getFieldError('document_number')"
                   (blur)="onFieldBlur('document_number')"
@@ -357,129 +377,157 @@ interface AddressDtoPayload {
                   ></app-input>
                 }
               </div>
-
-              @if (legalPersonDocumentTypeWarning()) {
-                <!--
-                  P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
-                  este campo, pero esta ficha ya existía como JURIDICA con un
-                  tipo de documento distinto de NIT (dato guardado antes de
-                  esa regla, o corregido a mano). Se respeta lo guardado en
-                  vez de reescribirlo en silencio: el campo queda editable y
-                  el backend rechazará el guardado si la combinación sigue
-                  siendo incoherente.
-                -->
-                <app-alert-banner
-                  variant="warning"
-                  icon="alert-triangle"
-                  tone="token"
-                  heading="Persona jurídica debe usar NIT"
-                >
-                  Esta ficha es persona jurídica pero su tipo de documento no
-                  es NIT. Corrige el tipo de documento antes de guardar; de lo
-                  contrario el guardado será rechazado.
-                </app-alert-banner>
-              }
             </div>
 
-            <!-- ============================================================ -->
-            <!-- COLUMNA 2: Datos fiscales + Dirección                       -->
-            <!-- ============================================================ -->
-            <div class="space-y-4">
-              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
-                Datos fiscales
-              </h3>
+            @if (legalPersonDocumentTypeWarning()) {
+              <!--
+                P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
+                este campo, pero esta ficha ya existía como JURIDICA con un
+                tipo de documento distinto de NIT (dato guardado antes de
+                esa regla, o corregido a mano). Se respeta lo guardado en
+                vez de reescribirlo en silencio: el campo queda editable y
+                el backend rechazará el guardado si la combinación sigue
+                siendo incoherente.
+              -->
+              <app-alert-banner
+                variant="warning"
+                icon="alert-triangle"
+                tone="token"
+                heading="Persona jurídica debe usar NIT"
+              >
+                Esta ficha es persona jurídica pero su tipo de documento no
+                es NIT. Corrige el tipo de documento antes de guardar; de lo
+                contrario el guardado será rechazado.
+              </app-alert-banner>
+            }
 
-              <app-selector
-                formControlName="tax_regime"
-                label="Régimen tributario"
-                placeholder="Selecciona un régimen"
-                [options]="taxRegimeOptions"
-              ></app-selector>
-
-              <app-input
-                formControlName="ciiu_code"
-                label="Código CIIU"
-                placeholder="4711"
-                type="text"
-                [maxlength]="10"
-                hint="4 dígitos"
-                [error]="getFieldError('ciiu_code')"
-                (blur)="onFieldBlur('ciiu_code')"
-                customWrapperClass="mt-0"
-              ></app-input>
-
-              <div class="pt-2">
-                <app-toggle
-                  formControlName="is_withholding_agent"
-                  label="¿Es agente retenedor?"
-                ></app-toggle>
-              </div>
-
-              <!-- Dirección (se reutiliza para envío y facturación) -->
-              <div class="pt-2 border-t border-[var(--color-border)]">
-                <button
-                  type="button"
-                  class="flex w-full items-center justify-between text-left text-sm font-semibold text-[var(--color-text-primary)]"
-                  (click)="toggleAddressSection()"
-                >
-                  <span>Dirección (opcional)</span>
-                  <app-icon
-                    [name]="addressSectionOpen() ? 'chevron-down' : 'chevron-right'"
-                    [size]="16"
-                  ></app-icon>
-                </button>
-
-                @if (addressSectionOpen()) {
-                  <div class="mt-3">
-                    <app-address-form-fields
-                      [initialAddress]="existingAddress()"
-                      (addressChange)="onAddressChange($event)"
-                      (validChange)="onAddressValid($event)"
-                    ></app-address-form-fields>
-                  </div>
-                }
-              </div>
+            <!--
+              Dirección fiscal + municipio DIAN: obligatoria en modo completo
+              (sin municipio la emisión cae en CITY_CODE_REQUIRED). Siempre
+              renderizada aquí; en compacto oculta línea 2, país, postal y el
+              mapa hasta que el geocode resuelva.
+            -->
+            <div class="space-y-2">
+              <h4 class="text-xs font-semibold text-[var(--color-text-secondary)]">
+                Dirección fiscal *
+              </h4>
+              <app-address-form-fields
+                [initialAddress]="existingAddress()"
+                [compact]="true"
+                [showPhone]="false"
+                [showErrors]="addressShowErrors()"
+                (addressChange)="onAddressChange($event)"
+                (validChange)="onAddressValid($event)"
+              ></app-address-form-fields>
             </div>
+          </section>
 
-            <!-- ============================================================ -->
-            <!-- COLUMNA 3: Responsabilidades tributarias                    -->
-            <!-- ============================================================ -->
-            <div class="space-y-3">
-              <h3 class="text-sm font-semibold text-[var(--color-text-primary)] pb-1 border-b border-[var(--color-border)]">
-                Responsabilidades tributarias *
-              </h3>
-              <p class="text-xs text-[var(--color-text-secondary)]">
-                Una o más del RUT.
-              </p>
-              <div class="flex flex-col gap-1.5">
-                @for (resp of FISCAL_RESPONSIBILITIES; track resp) {
-                  <label class="flex items-start gap-2 px-2 py-1.5 rounded border border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-bg-secondary)]">
-                    <input
-                      type="checkbox"
-                      class="mt-0.5"
-                      [checked]="fiscalResponsibilitiesValue().includes(resp)"
-                      (change)="toggleFiscalResponsibility(resp)"
-                    />
-                    <span class="text-xs text-[var(--color-text-primary)] leading-tight">{{ FISCAL_RESPONSIBILITY_LABELS[resp] }}</span>
-                  </label>
+          <!-- Más datos: opcionales con default en backend/emisión. -->
+          <div class="mt-3 border-t border-border pt-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-text-primary"
+              [attr.aria-expanded]="showMoreData()"
+              aria-controls="customer-modal-more-data"
+              (click)="moreDataOpen.set(!showMoreData())"
+            >
+              <app-icon
+                [name]="showMoreData() ? 'chevron-up' : 'chevron-down'"
+                [size]="14"
+              ></app-icon>
+              Más datos
+              <span class="font-normal">
+                (teléfono, régimen, responsabilidades, CIIU y retención)
+              </span>
+            </button>
+
+            <!-- hidden y no un bloque condicional: plegar no destruye controles. -->
+            <div
+              id="customer-modal-more-data"
+              class="mt-3 space-y-4"
+              [hidden]="!showMoreData()"
+            >
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="phone"
+                  label="Teléfono"
+                  type="tel"
+                  placeholder="+57 300 000 0000"
+                  [error]="getFieldError('phone')"
+                  (blur)="onFieldBlur('phone')"
+                  customWrapperClass="mt-0"
+                ></app-input>
+
+                <app-selector
+                  formControlName="tax_regime"
+                  label="Régimen tributario"
+                  placeholder="Sin declarar"
+                  [options]="taxRegimeOptions"
+                ></app-selector>
+
+                <app-input
+                  formControlName="ciiu_code"
+                  label="Código CIIU"
+                  placeholder="4711"
+                  type="text"
+                  [maxlength]="10"
+                  hint="4 dígitos"
+                  [error]="getFieldError('ciiu_code')"
+                  (blur)="onFieldBlur('ciiu_code')"
+                  customWrapperClass="mt-0"
+                ></app-input>
+
+                <div class="flex items-center md:pt-6">
+                  <app-toggle
+                    formControlName="is_withholding_agent"
+                    label="¿Es agente retenedor?"
+                  ></app-toggle>
+                </div>
+              </div>
+
+              <div class="space-y-2">
+                <div>
+                  <h4 class="text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Responsabilidades fiscales
+                  </h4>
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    Una o más del RUT. Si no las conoces, se usa el valor por defecto.
+                  </p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                  @for (resp of FISCAL_RESPONSIBILITIES; track resp) {
+                    <label class="flex items-start gap-2 px-2 py-1.5 rounded border border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-bg-secondary)]">
+                      <input
+                        type="checkbox"
+                        class="mt-0.5"
+                        [checked]="fiscalResponsibilitiesValue().includes(resp)"
+                        (change)="toggleFiscalResponsibility(resp)"
+                      />
+                      <span class="text-xs text-[var(--color-text-primary)] leading-tight">{{ FISCAL_RESPONSIBILITY_LABELS[resp] }}</span>
+                    </label>
+                  }
+                </div>
+                @if (getFieldError('fiscal_responsibilities')) {
+                  <p class="text-xs text-[var(--color-error)] mt-1">
+                    {{ getFieldError('fiscal_responsibilities') }}
+                  </p>
                 }
               </div>
-              @if (getFieldError('fiscal_responsibilities')) {
-                <p class="text-xs text-[var(--color-error)] mt-1">
-                  {{ getFieldError('fiscal_responsibilities') }}
-                </p>
-              }
             </div>
           </div>
         }
       </form>
 
-      <!-- Footer (idéntico en ambos modos) -->
+      <!--
+        Footer. En modo completo el botón no se deshabilita por faltantes: el
+        intento de guardar es lo que pinta en rojo lo que falta (incluida la
+        dirección) y despliega «Más datos» si el error vive ahí.
+      -->
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
-          [disabled]="(mode() === 'quick' ? quickFormInvalid() : form.invalid) || loading()"
+          [disabled]="(mode() === 'quick' && quickFormInvalid()) || loading()"
           [loading]="loading()"
           (clicked)="onSubmit()"
         >
@@ -522,8 +570,14 @@ export class CustomerModalComponent {
   readonly addressPayload = signal<AddressPayload | null>(null);
   /** Validez del formulario hijo. */
   readonly addressValid = signal(false);
-  /** Sección de dirección abierta/cerrada. */
-  readonly addressSectionOpen = signal(false);
+  /**
+   * `true` tras el primer intento de guardar. Junto con el prefill enciende
+   * `showErrors` en la dirección para que los obligatorios vacíos salgan en
+   * rojo sin esperar a que el operador toque cada campo.
+   */
+  readonly submitAttempted = signal(false);
+  /** Apertura manual de «Más datos» (modo completo). */
+  readonly moreDataOpen = signal(false);
   /** ID de la dirección existente (editar-mode); null si no hay. */
   readonly existingAddressId = signal<number | null>(null);
   /** Dirección existente mapeada a AddressPayload para prefill el hijo. */
@@ -618,7 +672,7 @@ export class CustomerModalComponent {
   });
   readonly modalSubtitle = computed(() =>
     this.mode() === 'advanced'
-      ? 'Información DIAN completa para emisión electrónica'
+      ? 'Solo lo que la DIAN exige para facturar; el resto en «Más datos».'
       : 'Datos esenciales para crear el cliente',
   );
   readonly submitLabel = computed(() =>
@@ -635,6 +689,42 @@ export class CustomerModalComponent {
    * subscription a `form.statusChanges` en el constructor.
    */
   private readonly formStatus = signal<string>('INVALID');
+  /**
+   * `markAsTouched`/`markAllAsTouched` no emiten `statusChanges`: este tic
+   * (alimentado por `form.events`) es la dependencia reactiva de «tocado».
+   */
+  private readonly touchedTick = signal(0);
+
+  /**
+   * El modal arranca con datos (edición, o alta con RUES/escáner). Con
+   * prefill, los obligatorios vacíos se pintan en rojo desde el inicio.
+   */
+  readonly hasPrefill = computed(() => {
+    if (this.customer() !== null) return true;
+    const initial = this.initialValues();
+    return !!initial && Object.values(initial).some(
+      (v) => v !== null && v !== undefined && v !== '',
+    );
+  });
+
+  /** `showErrors` del formulario de dirección (modo completo). */
+  readonly addressShowErrors = computed(
+    () => this.submitAttempted() || this.hasPrefill(),
+  );
+
+  /**
+   * «Más datos» visible: abierto a mano, o con algún control propio inválido
+   * y tocado (p. ej. tras un intento de guardar, que marca todo como tocado).
+   */
+  readonly showMoreData = computed<boolean>(() => {
+    if (this.moreDataOpen()) return true;
+    this.formStatus();
+    this.touchedTick();
+    return MORE_DATA_FIELDS.some((field) => {
+      const control = this.form.controls[field];
+      return !!control && control.invalid && control.touched;
+    });
+  });
 
   /** En modo quick, sólo validamos los campos básicos (no fiscales avanzados). */
   quickFormInvalid(): boolean {
@@ -709,6 +799,13 @@ export class CustomerModalComponent {
     this.form.statusChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((status) => this.formStatus.set(status));
+    this.form.events
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        if (event instanceof TouchedChangeEvent) {
+          this.touchedTick.update((n) => n + 1);
+        }
+      });
 
     // Mantener `selectedDocumentType` sincronizado con el FormControl.
     effect(() => {
@@ -801,8 +898,12 @@ export class CustomerModalComponent {
     effect(() => {
       const ctrl = this.form.controls['document_number'];
       const type = this.selectedDocumentType();
+      // Modo completo: el número es obligatorio (la DIAN identifica al
+      // adquiriente por tipo + número). En rápido sigue opcional.
+      const advanced = this.mode() === 'advanced';
       if (type) {
         ctrl.setValidators([
+          ...(advanced ? [Validators.required] : []),
           Validators.pattern(type.regex),
           Validators.maxLength(type.maxLength),
         ]);
@@ -823,10 +924,13 @@ export class CustomerModalComponent {
     // que no hay default, un número sin tipo debe bloquear el guardado en
     // vez de viajar al backend con `document_type` vacío/adivinado.
     effect(() => {
+      // En modo completo el tipo es obligatorio siempre, haya número o no.
       const hasNumber = !!(documentNumberValue() ?? '').toString().trim();
       const docTypeCtrl = this.form.controls['document_type'];
-      docTypeCtrl.setValidators(hasNumber ? [Validators.required] : []);
+      const required = hasNumber || this.mode() === 'advanced';
+      docTypeCtrl.setValidators(required ? [Validators.required] : []);
       docTypeCtrl.updateValueAndValidity({ emitEvent: false });
+      this.formStatus.set(this.form.status);
     });
 
     // Group-level validator: solo aplica cuando document_type='NIT'.
@@ -882,16 +986,28 @@ export class CustomerModalComponent {
         // cuando el hijo aplique el effect de prefill.
         this.addressPayload.set(null);
         this.addressValid.set(false);
-        // Abrir la sección automáticamente si ya hay dirección.
-        this.addressSectionOpen.set(!!addr);
         // Editar: arrancar en advanced para mostrar todos los campos DIAN.
         this.mode.set('advanced');
         this.needsInvoicing.set(true);
+        // Sin tracking: estos helpers leen señales (modo, tipo de persona)
+        // que no deben volver a disparar el patch de la ficha.
+        untracked(() => {
+          this.applyModeValidators('advanced');
+          // Una ficha guardada sin correo (u otro obligatorio) se ve en rojo
+          // apenas abre, no recién al pulsar Guardar.
+          this.markRequiredInvalidAsTouched();
+        });
       }
     });
 
     effect(() => {
       const isOpen = this.isOpen();
+      if (isOpen) {
+        // Cada apertura (crear o editar) arranca con «Más datos» plegado y
+        // sin intento de envío previo.
+        this.moreDataOpen.set(false);
+        this.submitAttempted.set(false);
+      }
       if (isOpen && !this.customer()) {
         // `reset()` sin argumento pone TODOS los controles en `null`, ignorando
         // el default `[false]` del FormBuilder. `is_withholding_agent` es un
@@ -913,10 +1029,10 @@ export class CustomerModalComponent {
         this.existingAddressId.set(null);
         this.addressPayload.set(null);
         this.addressValid.set(false);
-        this.addressSectionOpen.set(false);
         // Crear: arrancar en modo rápido.
         this.mode.set('quick');
         this.needsInvoicing.set(false);
+        untracked(() => this.applyModeValidators('quick'));
       }
     });
   }
@@ -978,24 +1094,70 @@ export class CustomerModalComponent {
     this.isOpenChange.emit(false);
   }
 
-  /** Toggle de la sección colapsable de dirección. */
-  toggleAddressSection(): void {
-    this.addressSectionOpen.set(!this.addressSectionOpen());
+  /**
+   * Validadores que dependen del modo. Regla de Rafael: en «Configuración
+   * completa» el correo es OBLIGATORIO en todos los contextos (Clientes, POS,
+   * cambio de titular, membresías, mesas, Nueva factura) porque es a donde
+   * viaja la factura electrónica; el teléfono pasa a opcional y vive en «Más
+   * datos». El modo rápido queda intacto: correo opcional, teléfono requerido.
+   */
+  private applyModeValidators(mode: 'quick' | 'advanced'): void {
+    const email = this.form.controls['email'];
+    const phone = this.form.controls['phone'];
+    if (mode === 'advanced') {
+      email.setValidators([Validators.required, Validators.email]);
+      phone.setValidators([Validators.minLength(7)]);
+    } else {
+      email.setValidators([Validators.email]);
+      phone.setValidators([Validators.required, Validators.minLength(7)]);
+    }
+    email.updateValueAndValidity();
+    phone.updateValueAndValidity();
+    // `formStatus` alimenta `quickFormInvalid`/`showMoreData`; se sincroniza
+    // aquí por si el cambio de validadores no alteró el estado agregado.
+    this.formStatus.set(this.form.status);
   }
 
-  /** Cambia del modal rápido (md) al modal avanzado (xl, 3-col DIAN). */
-  switchToAdvanced(): void {
-    this.mode.set('advanced');
-    this.needsInvoicing.set(true);
-    if (this.existingAddress() || this.addressValid()) {
-      this.addressSectionOpen.set(true);
+  /**
+   * Marca como tocados los obligatorios del bloque «Datos para facturar» que
+   * estén vacíos o inválidos, para que salgan en rojo. Lee el valor del
+   * control (no la señal `person_type`) porque puede correr justo después de
+   * un `patchValue`, antes de que los efectos puente se actualicen.
+   */
+  private markRequiredInvalidAsTouched(): void {
+    const isJuridica = this.form.controls['person_type'].value === 'JURIDICA';
+    const fields = [
+      'email',
+      ...(isJuridica ? ['legal_name'] : ['first_name', 'last_name']),
+      'document_type',
+      'document_number',
+      'verification_digit',
+    ];
+    for (const field of fields) {
+      const control = this.form.controls[field];
+      if (!control) continue;
+      const value = control.value;
+      const empty = value === null || value === undefined || String(value).trim() === '';
+      if (control.invalid || empty) control.markAsTouched();
     }
   }
 
-  /** Vuelve del modal avanzado al modal rápido. */
+  /** Cambia del modal rápido (md) al modal completo (DIAN). */
+  switchToAdvanced(): void {
+    this.mode.set('advanced');
+    this.needsInvoicing.set(true);
+    this.applyModeValidators('advanced');
+    // Con datos ya cargados (ficha o RUES/escáner), lo que falta se ve ya.
+    if (this.hasPrefill()) {
+      this.markRequiredInvalidAsTouched();
+    }
+  }
+
+  /** Vuelve del modal completo al modal rápido. */
   switchToQuick(): void {
     this.mode.set('quick');
     this.needsInvoicing.set(false);
+    this.applyModeValidators('quick');
   }
 
   /** Handler del info checkbox: alterna entre quick y advanced. */
@@ -1067,6 +1229,11 @@ export class CustomerModalComponent {
   }
 
   onSubmit() {
+    const isAdvanced = this.mode() === 'advanced';
+    if (isAdvanced) {
+      this.submitAttempted.set(true);
+      this.markRequiredInvalidAsTouched();
+    }
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       // Un error de grupo (NIT ↔ DV) sólo se pinta junto al campo DV, dentro
@@ -1075,6 +1242,16 @@ export class CustomerModalComponent {
         this.getGroupNitDvError() ||
           'Revisa los campos marcados antes de guardar.',
       );
+      return;
+    }
+
+    // Modo completo: la dirección fiscal con municipio DIAN es obligatoria
+    // (sin ella la emisión electrónica falla con CITY_CODE_REQUIRED). El
+    // modo rápido no la muestra, así que no la exige.
+    if (isAdvanced && !this.addressValid()) {
+      this.submitAttempted.set(true);
+      this.form.markAllAsTouched();
+      this.toast.error('Completa la dirección fiscal y el municipio DIAN.');
       return;
     }
 
@@ -1123,14 +1300,17 @@ export class CustomerModalComponent {
       }
     } else {
       // CREAR-MODE: el modal no conoce el nuevo `customer_id` hasta que el
-      // padre reciba la respuesta de `createCustomer`. Emitimos `save` (el
-      // padre crea al cliente + refresca lista + cierra modal) y además
-      // emitimos `addressData` para que el padre persista la dirección tras
-      // el alta usando `CustomersService.createCustomerAddress`.
-      this.save.emit(data);
+      // padre reciba la respuesta de `createCustomer`. Emitimos `addressData`
+      // ANTES que `save`: todos los padres guardan la dirección como
+      // pendiente y la leen en el callback del alta (Clientes, POS, cambio de
+      // titular, membresías); emitirla primero evita que un `save` resuelto
+      // de forma síncrona la lea vacía. Nueva factura la aplica en
+      // `onCustomerAddressData` sobre los campos de dirección, que
+      // `onCustomerCreated` no toca, así que el orden no le afecta.
       if (this.addressValid() && this.addressPayload()) {
         this.addressData.emit(this.addressPayload()!);
       }
+      this.save.emit(data);
     }
   }
 
@@ -1142,6 +1322,8 @@ export class CustomerModalComponent {
 
     if (errors['required']) {
       switch (field) {
+        case 'email':
+          return 'El correo es obligatorio para facturar electrónicamente';
         case 'first_name':
           return 'El nombre es obligatorio';
         case 'last_name':
@@ -1150,6 +1332,10 @@ export class CustomerModalComponent {
           return 'La razón social es obligatoria';
         case 'phone':
           return 'El teléfono es obligatorio';
+        case 'document_type':
+          return 'Elige el tipo de documento';
+        case 'document_number':
+          return 'El número de documento es obligatorio para facturar';
         case 'fiscal_responsibilities':
           return 'Selecciona al menos una responsabilidad fiscal';
         default:
@@ -1258,6 +1444,22 @@ export class CustomerModalComponent {
       });
     }
 
-    return { applied, unknown, validation_errors, valid: this.form.valid };
+    // Modo completo: la dirección fiscal + municipio DIAN también es
+    // obligatoria (la guarda el hijo, no este form), así que Vexi no puede
+    // reportar «válido» sin ella.
+    const addressMissing = this.mode() === 'advanced' && !this.addressValid();
+    if (addressMissing) {
+      validation_errors.push({
+        field: 'address',
+        message: 'La dirección fiscal y el municipio DIAN son obligatorios',
+      });
+    }
+
+    return {
+      applied,
+      unknown,
+      validation_errors,
+      valid: this.form.valid && !addressMissing,
+    };
   }
 }
