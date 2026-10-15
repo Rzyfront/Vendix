@@ -31,6 +31,7 @@ const TYPE_LABELS: Record<OrgAdjustmentType, string> = {
   expiration: 'Vencido',
   count_variance: 'Conteo',
   manual_correction: 'Corrección',
+  initial_load: 'Carga inicial',
 };
 
 const STATUS_LABELS: Record<OrgAdjustmentStatus, string> = {
@@ -181,6 +182,7 @@ export class OrgAdjustmentListComponent {
         { value: 'expiration', label: 'Vencido' },
         { value: 'count_variance', label: 'Conteo' },
         { value: 'manual_correction', label: 'Corrección' },
+        { value: 'initial_load', label: 'Carga inicial' },
       ],
     },
     {

@@ -131,6 +131,7 @@ const ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 const MOVEMENT_TYPES = [

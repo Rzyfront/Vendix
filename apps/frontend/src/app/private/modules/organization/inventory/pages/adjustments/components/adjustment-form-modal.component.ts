@@ -73,6 +73,7 @@ const TYPE_GRID: { label: string; value: OrgAdjustmentType; icon: string }[] = [
 ];
 
 const REASON_BY_TYPE: Record<OrgAdjustmentType, string> = {
+  initial_load: 'INITIAL_LOAD',
   damage: 'DAMAGED',
   loss: 'LOST',
   theft: 'THEFT',
@@ -82,6 +83,7 @@ const REASON_BY_TYPE: Record<OrgAdjustmentType, string> = {
 };
 
 const TYPE_LABELS: Record<OrgAdjustmentType, string> = {
+  initial_load: 'Carga inicial',
   damage: 'Daño',
   loss: 'Pérdida',
   theft: 'Robo',

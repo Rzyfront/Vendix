@@ -91,6 +91,12 @@ export interface AdjustmentTransactionResult {
   adjustment_type: string;
 }
 
+interface AdjustmentCreationOptions {
+  approvedByUserId?: number;
+  /** Solo importadores: una carga inicial obsoleta se convierte en conteo. */
+  initialLoadFallback?: boolean;
+}
+
 export type BatchAdjustmentOutcome =
   | { index: number; ok: true; adjustment: InventoryAdjustment }
   | { index: number; ok: false; error: any };
@@ -175,7 +181,7 @@ export class InventoryAdjustmentsService {
    */
   async createAdjustment(
     data: CreateAdjustmentDto,
-    options: { approvedByUserId?: number } = {},
+    options: AdjustmentCreationOptions = {},
   ): Promise<InventoryAdjustment> {
     const { organizationId, userId } = this.resolveAdjustmentActor();
 
@@ -237,7 +243,7 @@ export class InventoryAdjustmentsService {
   async createAdjustmentInTransaction(
     prismaTx: any,
     data: CreateAdjustmentDto,
-    options: { approvedByUserId?: number } = {},
+    options: AdjustmentCreationOptions = {},
   ): Promise<AdjustmentTransactionResult> {
     const { organizationId, userId } = this.resolveAdjustmentActor();
 
@@ -268,6 +274,15 @@ export class InventoryAdjustmentsService {
       throw new BadRequestException(`Invalid adjustment type: ${data.type}`);
     }
 
+    // Serializa cargas iniciales concurrentes, incluso si todavía no existe
+    // stock_level. La segunda petición debe observar el saldo ya confirmado.
+    if (data.type === 'initial_load') {
+      await prisma.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `inventory-initial:${organizationId}:${locationId}:${productId}:${variantId ?? 'base'}`,
+      );
+    }
+
     let quantityBefore: number;
     let quantityChange: number;
 
@@ -293,6 +308,16 @@ export class InventoryAdjustmentsService {
       // Cantidad actual del lote (quantity - quantity_used)
       quantityBefore = batch.quantity - batch.quantity_used;
       quantityChange = quantityAfter - quantityBefore;
+
+      data = {
+        ...data,
+        type: this.resolveInitialLoadType(
+          data.type,
+          quantityBefore,
+          quantityChange,
+          options.initialLoadFallback,
+        ),
+      };
 
       // Actualizar el lote
       const newQuantity = batch.quantity + quantityChange;
@@ -329,6 +354,16 @@ export class InventoryAdjustmentsService {
       quantityBefore = currentStockLevel?.quantity_on_hand ?? 0;
       quantityChange = quantityAfter - quantityBefore;
     }
+
+    data = {
+      ...data,
+      type: this.resolveInitialLoadType(
+        data.type,
+        quantityBefore,
+        quantityChange,
+        options.initialLoadFallback,
+      ),
+    };
 
     // 3. Crear registro de ajuste
     const adjustment = await prisma.inventory_adjustments.create({
@@ -424,6 +459,24 @@ export class InventoryAdjustmentsService {
         : Number(stockUpdate.cost_snapshot?.total_cost || 0),
       adjustment_type: data.type,
     };
+  }
+
+  private resolveInitialLoadType(
+    type: AdjustmentType,
+    quantityBefore: number,
+    quantityChange: number,
+    allowFallback = false,
+  ): AdjustmentType {
+    if (
+      type === 'initial_load' &&
+      (quantityBefore !== 0 || quantityChange <= 0)
+    ) {
+      if (allowFallback) return 'count_variance';
+      throw new BadRequestException(
+        'Carga inicial solo permitida con cantidad actual 0 y una entrada positiva; usa diferencia de conteo para modificar existencias.',
+      );
+    }
+    return type;
   }
 
   /**
@@ -572,8 +625,13 @@ export class InventoryAdjustmentsService {
     }
     return settled
       .filter(
-        (entry): entry is { index: number; ok: true; adjustment: InventoryAdjustment } =>
-          entry.ok,
+        (
+          entry,
+        ): entry is {
+          index: number;
+          ok: true;
+          adjustment: InventoryAdjustment;
+        } => entry.ok,
       )
       .map((entry) => entry.adjustment);
   }
@@ -590,6 +648,7 @@ export class InventoryAdjustmentsService {
   async batchCreateAndCompleteSettled(
     locationId: number,
     items: BatchAdjustmentInput[],
+    options: { initialLoadFallback?: boolean } = {},
   ): Promise<BatchAdjustmentOutcome[]> {
     const userIdRaw = RequestContextService.getUserId();
     const userId = userIdRaw ? Number(userIdRaw) : null;
@@ -606,10 +665,16 @@ export class InventoryAdjustmentsService {
             batch_id: item.batch_id,
             type: item.type as AdjustmentType,
             quantity_after: item.quantity_after,
+            unit_cost: item.unit_cost,
             reason_code: item.reason_code,
             description: item.description,
           },
-          { approvedByUserId: userId ?? undefined },
+          {
+            approvedByUserId: userId ?? undefined,
+            ...(options.initialLoadFallback
+              ? { initialLoadFallback: true }
+              : {}),
+          },
         );
         outcomes.push({ index, ok: true, adjustment });
       } catch (error) {

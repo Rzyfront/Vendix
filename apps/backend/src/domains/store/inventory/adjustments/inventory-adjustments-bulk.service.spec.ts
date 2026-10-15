@@ -8,15 +8,27 @@ describe('InventoryAdjustmentsBulkService', () => {
     product_variants: { findMany: jest.fn(), findFirst: jest.fn() },
     stock_levels: { findMany: jest.fn() },
     $transaction: jest.fn(),
+    $executeRawUnsafe: jest.fn(),
+    audit_logs: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+    },
   };
   const mockSku = { next: jest.fn() };
-  const mockAdjustments = { batchCreateAndCompleteSettled: jest.fn() };
+  const mockAdjustments = {
+    batchCreateAndCompleteSettled: jest.fn(),
+    createAdjustmentInTransaction: jest.fn(),
+    emitInventoryAdjusted: jest.fn(),
+  };
   const mockS3 = {
     uploadFile: jest.fn(),
     downloadImage: jest.fn(),
     deleteFile: jest.fn(),
   };
   let service: InventoryAdjustmentsBulkService;
+  let receipts: Map<string, any>;
+  let lockTail: Promise<void>;
 
   const xlsx = (rows: any[][]): Buffer => {
     const ws = XLSX.utils.aoa_to_sheet([['SKU', 'Cantidad Nueva'], ...rows]);
@@ -34,19 +46,60 @@ describe('InventoryAdjustmentsBulkService', () => {
       mockS3 as any,
       mockSku as any,
     );
-    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
-      store_id: 3,
-    } as any);
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 3 } as any);
+    jest.spyOn(RequestContextService, 'getOrganizationId').mockReturnValue(1);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(9);
+    receipts = new Map();
+    lockTail = Promise.resolve();
+    mockPrisma.audit_logs.findMany.mockImplementation(async ({ where }: any) =>
+      [...receipts.values()].filter((r) =>
+        where.request_id.in.includes(r.request_id),
+      ),
+    );
+    mockPrisma.audit_logs.findFirst.mockImplementation(
+      async ({ where }: any) => receipts.get(where.request_id) ?? null,
+    );
+    mockPrisma.audit_logs.create.mockImplementation(async ({ data }: any) => {
+      receipts.set(data.request_id, data);
+      return data;
+    });
+
     mockPrisma.products.findMany.mockResolvedValue([]);
     mockPrisma.product_variants.findMany.mockResolvedValue([]);
     mockPrisma.stock_levels.findMany.mockResolvedValue([]);
-    mockPrisma.$transaction.mockImplementation(async (fn: any) =>
-      fn(mockPrisma),
-    );
+    mockPrisma.$transaction.mockImplementation(async (fn: any) => {
+      let release: (() => void) | undefined;
+      const tx = {
+        ...mockPrisma,
+        $executeRawUnsafe: jest.fn(async () => {
+          if (release) return;
+          const previous = lockTail;
+          lockTail = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          await previous;
+        }),
+      };
+      try {
+        return await fn(tx);
+      } finally {
+        release?.();
+      }
+    });
     mockPrisma.products.findFirst.mockResolvedValue(null);
     mockPrisma.product_variants.findFirst.mockResolvedValue(null);
     mockPrisma.products.create.mockResolvedValue({ id: 900 });
     mockSku.next.mockResolvedValue('CI-3-000001');
+    mockAdjustments.createAdjustmentInTransaction.mockImplementation(
+      async (_tx: any, data: any) => ({
+        adjustment: { id: 700, ...data },
+        quantity_change: data.quantity_after,
+        cost_amount: data.quantity_after * (data.unit_cost ?? 0),
+        adjustment_type: data.type,
+      }),
+    );
     mockAdjustments.batchCreateAndCompleteSettled.mockImplementation(
       async (_l: number, items: any[]) =>
         items.map((_, index) => ({ index, ok: true })),
@@ -184,6 +237,139 @@ describe('InventoryAdjustmentsBulkService', () => {
     ).not.toHaveBeenCalled();
   });
 
+  describe('contrato de carga inicial para productos existentes', () => {
+    beforeEach(() => {
+      mockPrisma.products.findMany.mockResolvedValue([
+        {
+          id: 1,
+          sku: 'CAFE',
+          name: 'Café',
+          track_inventory: true,
+          product_variants: [],
+          cost_price: null,
+        },
+      ]);
+    });
+
+    it('sin stock_level: análisis y commit usan initial_load y advierten valoración cero', async () => {
+      const file = xlsx([['CAFE', 10]]);
+      const analysis = await service.analyzeFile(file, dto);
+      expect(analysis.valid).toBe(1);
+      expect(analysis.initial_load_rows).toBe(1);
+      expect(analysis.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            row_number: 2,
+            message: expect.stringContaining('valorado en 0'),
+          }),
+        ]),
+      );
+      mockS3.downloadImage.mockResolvedValue(file);
+      const result = await service.uploadFromSession(analysis.session_id, dto, {
+        offset: 0,
+        limit: 100,
+      });
+      expect(result.failed).toBe(0);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction.mock.calls[0][1],
+      ).toMatchObject({ type: 'initial_load', quantity_after: 10 });
+      expect(result.results[0]).toMatchObject({
+        quantity_before: 0,
+        quantity_change: 10,
+      });
+    });
+
+    it.each([
+      [8, 12],
+      [8, 2],
+      [0, 0],
+    ])(
+      'initial_load global con saldo %i y destino %i degrada/omite con warning',
+      async (before, after) => {
+        mockPrisma.stock_levels.findMany.mockResolvedValue([
+          { product_id: 1, product_variant_id: null, quantity_on_hand: before },
+        ]);
+        const file = xlsx([['CAFE', after]]);
+        const options = { ...dto, adjustment_type: 'initial_load' };
+        const analysis = await service.analyzeFile(file, options);
+        expect(analysis.initial_load_rows).toBe(0);
+        expect(analysis.warnings[0].message).toContain('diferencia de conteo');
+        await service.uploadFromFile(file, options);
+        if (before !== after) {
+          expect(
+            mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1][0]
+              .type,
+          ).toBe('count_variance');
+        } else {
+          expect(
+            mockAdjustments.batchCreateAndCompleteSettled,
+          ).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it('initial_load en columna se degrada igual que el global', async () => {
+      mockPrisma.stock_levels.findMany.mockResolvedValue([
+        { product_id: 1, product_variant_id: null, quantity_on_hand: 8 },
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['SKU', 'Cantidad Nueva', 'Tipo Ajuste'],
+        ['CAFE', 2, 'initial_load'],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'S');
+      const file = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const result = await service.uploadFromFile(file, dto);
+      expect(result.results[0].warnings?.[0]).toContain('diferencia de conteo');
+      expect(
+        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1][0].type,
+      ).toBe('count_variance');
+    });
+
+    it('initial_load existente respeta Precio Compra y no advierte cero con costo de ficha', async () => {
+      mockPrisma.products.findMany.mockResolvedValue([
+        {
+          id: 1,
+          sku: 'CAFE',
+          name: 'Café',
+          track_inventory: true,
+          product_variants: [],
+          cost_price: 500,
+        },
+      ]);
+      const analysis = await service.analyzeFile(xlsx([['CAFE', 10]]), dto);
+      expect(
+        analysis.warnings.some((warning) =>
+          warning.message.includes('valorado en 0'),
+        ),
+      ).toBe(false);
+    });
+
+    it('reintento de fila existente no crea ajuste ni revierte movimientos posteriores', async () => {
+      const file = xlsx([['CAFE', 10]]);
+      mockS3.downloadImage.mockResolvedValue(file);
+      const first = await service.uploadFromSession('sid', dto, {
+        offset: 0,
+        limit: 100,
+      });
+      mockPrisma.stock_levels.findMany.mockResolvedValue([
+        { product_id: 1, product_variant_id: null, quantity_on_hand: 3 },
+      ]);
+      const retried = await service.uploadFromSession('sid', dto, {
+        offset: 0,
+        limit: 100,
+      });
+      expect(retried).toEqual(first);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockAdjustments.emitInventoryAdjusted).toHaveBeenCalledTimes(1);
+      expect(
+        mockPrisma.audit_logs.findFirst.mock.calls[0][0].where,
+      ).toMatchObject({ store_id: 3, organization_id: 1 });
+    });
+  });
+
   describe('tope de 10000 filas', () => {
     it('acepta 10000 filas', async () => {
       simpleProducts(10000);
@@ -234,7 +420,9 @@ describe('InventoryAdjustmentsBulkService', () => {
       });
 
       const items =
-        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1];
+        mockAdjustments.createAdjustmentInTransaction.mock.calls.map(
+          (call) => call[1],
+        );
       expect(items).toHaveLength(100);
       expect(items[0].product_id).toBe(101); // SKU-100
       expect(items[99].product_id).toBe(200); // SKU-199
@@ -249,7 +437,7 @@ describe('InventoryAdjustmentsBulkService', () => {
       expect(mockS3.deleteFile).not.toHaveBeenCalled();
     });
 
-    it('ultima pagina: done=true borra el archivo', async () => {
+    it('ultima pagina: done=true conserva archivo para reintentar respuesta perdida', async () => {
       simpleProducts(150);
       mockS3.downloadImage.mockResolvedValue(xlsx(manyRows(150)));
 
@@ -259,21 +447,20 @@ describe('InventoryAdjustmentsBulkService', () => {
       });
 
       expect(res.done).toBe(true);
-      expect(mockS3.deleteFile).toHaveBeenCalledWith(
-        'tmp/bulk-adjustments/3/sid.xlsx',
-      );
+      expect(mockS3.deleteFile).not.toHaveBeenCalled();
     });
 
     it('si la pagina falla, el archivo NO se borra', async () => {
       simpleProducts(50);
       mockS3.downloadImage.mockResolvedValue(xlsx(manyRows(50)));
-      mockAdjustments.batchCreateAndCompleteSettled.mockRejectedValue(
+      mockAdjustments.createAdjustmentInTransaction.mockRejectedValue(
         new Error('boom'),
       );
-
-      await expect(
-        service.uploadFromSession('sid', dto, { offset: 0, limit: 100 }),
-      ).rejects.toThrow('boom');
+      const result = await service.uploadFromSession('sid', dto, {
+        offset: 0,
+        limit: 100,
+      });
+      expect(result.failed).toBe(50);
       expect(mockS3.deleteFile).not.toHaveBeenCalled();
     });
 
@@ -288,7 +475,7 @@ describe('InventoryAdjustmentsBulkService', () => {
       });
     });
 
-    it('sin offset/limit: modo legacy completo y borra el archivo', async () => {
+    it('sin offset/limit: archivo completo conserva recibos y archivo para retry', async () => {
       simpleProducts(5);
       mockS3.downloadImage.mockResolvedValue(xlsx(manyRows(5)));
 
@@ -296,7 +483,7 @@ describe('InventoryAdjustmentsBulkService', () => {
 
       expect(res.total_processed).toBe(5);
       expect(res.done).toBeUndefined();
-      expect(mockS3.deleteFile).toHaveBeenCalledTimes(1);
+      expect(mockS3.deleteFile).not.toHaveBeenCalled();
     });
   });
 
@@ -342,7 +529,13 @@ describe('InventoryAdjustmentsBulkService', () => {
   describe('productos nuevos (carga inicial)', () => {
     const xlsxNew = (rows: any[][]): Buffer => {
       const ws = XLSX.utils.aoa_to_sheet([
-        ['SKU', 'Nombre Producto', 'Cantidad Nueva', 'Precio Venta', 'Precio Compra'],
+        [
+          'SKU',
+          'Nombre Producto',
+          'Cantidad Nueva',
+          'Precio Venta',
+          'Precio Compra',
+        ],
         ...rows,
       ]);
       const wb = XLSX.utils.book_new();
@@ -359,13 +552,12 @@ describe('InventoryAdjustmentsBulkService', () => {
         dto,
       );
 
-      expect(res.failed).toBe(0);
-      expect(res.new_products).toBe(2);
+      expect(res.failed).toBe(1);
+      expect(res.new_products).toBe(1);
       expect(res.auto_sku).toBe(1);
       expect(res.requires_initial_load_ack).toBe(true);
       expect(res.new_product_rows).toEqual([
         { row_number: 2, sku: null, name: 'Galleta', quantity: 10 },
-        { row_number: 3, sku: 'NUEVO-1', name: 'Chocolate', quantity: 4 },
       ]);
     });
 
@@ -391,11 +583,10 @@ describe('InventoryAdjustmentsBulkService', () => {
         ]),
         dto,
       );
-      expect(res.new_products).toBe(1);
-      expect(res.errors).toEqual([
-        expect.objectContaining({ row_number: 3, sku: 'DUP' }),
-      ]);
-      expect(res.errors[0].message).toContain('duplicado');
+      expect(res.new_products).toBe(0);
+      expect(res.errors).toHaveLength(2);
+      expect(res.errors[1]).toMatchObject({ row_number: 3, sku: 'DUP' });
+      expect(res.errors[1].message).toContain('duplicado');
     });
 
     it('commit sin ack lanza INV_ADJ_BULK_INITIAL_LOAD_ACK_001 y no escribe', async () => {
@@ -426,7 +617,10 @@ describe('InventoryAdjustmentsBulkService', () => {
         { offset: 0, limit: 100 },
       );
 
-      expect(mockSku.next).toHaveBeenCalledWith(3, mockPrisma);
+      expect(mockSku.next).toHaveBeenCalledWith(
+        3,
+        expect.objectContaining({ products: mockPrisma.products }),
+      );
       expect(mockPrisma.products.create.mock.calls[0][0].data).toMatchObject({
         store_id: 3,
         name: 'Galleta Maria',
@@ -437,9 +631,9 @@ describe('InventoryAdjustmentsBulkService', () => {
         state: 'active',
         track_inventory: true,
       });
-      const items =
-        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1];
-      expect(items[0]).toMatchObject({
+      expect(
+        mockAdjustments.createAdjustmentInTransaction.mock.calls[0][1],
+      ).toMatchObject({
         product_id: 900,
         type: 'initial_load',
         quantity_after: 10,
@@ -453,11 +647,18 @@ describe('InventoryAdjustmentsBulkService', () => {
     });
 
     it('commit con ack: SKU que ya existe se ajusta, no se duplica', async () => {
-      mockPrisma.products.findFirst.mockResolvedValue({
-        id: 44,
-        track_inventory: true,
-        product_variants: [],
-      });
+      mockPrisma.products.findMany.mockResolvedValue([
+        {
+          id: 44,
+          sku: 'YA-EXISTE',
+          name: 'Algo',
+          track_inventory: true,
+          product_variants: [],
+        },
+      ]);
+      mockPrisma.stock_levels.findMany.mockResolvedValue([
+        { product_id: 44, product_variant_id: null, quantity_on_hand: 1 },
+      ]);
       mockS3.downloadImage.mockResolvedValue(
         xlsxNew([['YA-EXISTE', 'Algo', 3, '', '']]),
       );
@@ -469,10 +670,157 @@ describe('InventoryAdjustmentsBulkService', () => {
       );
 
       expect(mockPrisma.products.create).not.toHaveBeenCalled();
-      const items =
-        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1];
-      expect(items[0]).toMatchObject({ product_id: 44, type: 'count_variance' });
+      expect(
+        mockAdjustments.createAdjustmentInTransaction.mock.calls[0][1],
+      ).toMatchObject({ product_id: 44, type: 'count_variance' });
       expect(res.results[0].action).toBe('adjusted');
+    });
+
+    it('SKU desconocido aunque tenga nombre nunca da de alta producto', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['ERRATA', 'Galleta', 2, '', '']]),
+      );
+      const result = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      expect(result.failed).toBe(1);
+      expect(result.results[0].message).toContain('verifica el SKU');
+      expect(mockPrisma.products.create).not.toHaveBeenCalled();
+    });
+
+    it('análisis advierte nombre existente y costo ausente por cada fila nueva', async () => {
+      mockPrisma.products.findMany.mockResolvedValue([{ name: 'Galleta' }]);
+      const result = await service.analyzeFile(
+        xlsxNew([['', 'galleta', 3, '', '']]),
+        dto,
+      );
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            row_number: 2,
+            message: expect.stringContaining('este nombre'),
+          }),
+          expect.objectContaining({
+            row_number: 2,
+            message: expect.stringContaining('valorado en 0'),
+          }),
+        ]),
+      );
+    });
+
+    it('reintento última página devuelve mismo SKU y no crea producto ni ajuste adicional', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta', 3, '', '900']]),
+      );
+      const first = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      const retried = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      expect(retried).toEqual(first);
+      expect(mockPrisma.products.create).toHaveBeenCalledTimes(1);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockAdjustments.emitInventoryAdjusted).toHaveBeenCalledTimes(1);
+      expect(mockS3.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('dos reintentos concurrentes se serializan por sesión/fila y crean una sola vez', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta', 3, '', '900']]),
+      );
+      const [first, concurrent] = await Promise.all([
+        service.uploadFromSession(
+          'sid',
+          { ...dto, initial_load_ack: true },
+          { offset: 0, limit: 100 },
+        ),
+        service.uploadFromSession(
+          'sid',
+          { ...dto, initial_load_ack: true },
+          { offset: 0, limit: 100 },
+        ),
+      ]);
+      expect(first).toEqual(concurrent);
+      expect(mockPrisma.products.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.audit_logs.create).toHaveBeenCalledTimes(1);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('producto de cantidad cero también tiene recibo durable y no se duplica', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta', 0, '', '']]),
+      );
+      await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      expect(mockPrisma.products.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.audit_logs.create).toHaveBeenCalledTimes(1);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('fallo del ajuste revierte producto y recibo: reintento crea una sola alta confirmada', async () => {
+      let products: any[] = [];
+      mockPrisma.products.create.mockImplementation(async ({ data }: any) => {
+        products.push(data);
+        return { id: 900 };
+      });
+      mockPrisma.$transaction.mockImplementation(async (fn: any) => {
+        const before = [...products];
+        const priorReceipts = new Map(receipts);
+        try {
+          return await fn(mockPrisma);
+        } catch (error) {
+          products = before;
+          receipts = priorReceipts;
+          throw error;
+        }
+      });
+      mockAdjustments.createAdjustmentInTransaction.mockRejectedValueOnce(
+        new Error('fallo costeo'),
+      );
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta', 3, '', '900']]),
+      );
+      const failed = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      expect(failed.failed).toBe(1);
+      expect(products).toHaveLength(0);
+      expect(receipts.size).toBe(0);
+      expect(mockAdjustments.emitInventoryAdjusted).not.toHaveBeenCalled();
+      const retried = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+      expect(retried.successful).toBe(1);
+      expect(products).toHaveLength(1);
+      expect(receipts.size).toBe(1);
+      expect(
+        mockAdjustments.createAdjustmentInTransaction.mock.calls[0][0],
+      ).toBe(mockPrisma);
     });
   });
 });

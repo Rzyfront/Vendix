@@ -29,6 +29,7 @@ interface BulkResultItem {
   product_name?: string;
   status: 'success' | 'error';
   message?: string;
+  warnings?: string[];
   quantity_before?: number;
   quantity_after?: number;
   quantity_change?: number;
@@ -44,6 +45,7 @@ interface BulkAnalysisResult {
   valid: number;
   failed: number;
   errors: { row_number: number; sku: string; message: string }[];
+  warnings?: { row_number: number; sku: string; message: string }[];
   new_products?: number;
   auto_sku?: number;
   requires_initial_load_ack?: boolean;
@@ -118,8 +120,9 @@ interface BulkUploadResult {
             <p class="text-sm text-blue-800">
               Define la <strong>ubicación</strong> y el
               <strong>tipo de ajuste</strong> que se aplicará a todo el archivo.
-              Si incluyes productos que no existen, se crearán y su stock se
-              registrará como <strong>Carga inicial</strong>.
+              Solo las filas con SKU vacío crean productos nuevos. Un SKU
+              escrito debe existir. Las entradas sin stock en la bodega se
+              registran como <strong>Carga inicial</strong>.
             </p>
           </div>
 
@@ -449,6 +452,19 @@ interface BulkUploadResult {
             </div>
           }
 
+          @if ((analysis()!.warnings?.length ?? 0) > 0) {
+            <app-alert-banner variant="warning" tone="token" heading="Advertencias antes de aplicar">
+              <ul class="max-h-52 overflow-y-auto space-y-1">
+                @for (warning of analysis()!.warnings; track $index) {
+                  <li class="text-xs">
+                    <strong>Fila {{ warning.row_number }}</strong>
+                    {{ warning.sku ? '(' + warning.sku + ')' : '' }}: {{ warning.message }}
+                  </li>
+                }
+              </ul>
+            </app-alert-banner>
+          }
+
           @if (analysis()!.errors.length > 0) {
             <div class="border border-red-100 rounded-lg overflow-hidden">
               <div
@@ -627,6 +643,9 @@ interface BulkUploadResult {
                             {{ item.quantity_before }} → {{ item.quantity_after }}
                           } @else {
                             {{ item.message || '' }}
+                          }
+                          @for (warning of item.warnings ?? []; track $index) {
+                            <p class="mt-1 text-xs text-amber-700">{{ warning }}</p>
                           }
                         </td>
                       </tr>
@@ -959,7 +978,8 @@ export class BulkAdjustmentModalComponent {
           this.isUploading.set(false);
           const result = this.uploadResult();
           if (!lastDone) return;
-          this.sessionId = null; // el backend ya borró el archivo (done)
+          // Respuesta final recibida: ya no se necesita reintentar esta sesión.
+          this.cancelSession();
           if (result?.failed === 0) {
             this.toast_service.success(
               `${result.successful} ajustes aplicados exitosamente`,

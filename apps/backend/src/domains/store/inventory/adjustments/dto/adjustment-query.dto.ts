@@ -17,6 +17,7 @@ const ADJUSTMENT_TYPES: AdjustmentType[] = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ];
 
 /**

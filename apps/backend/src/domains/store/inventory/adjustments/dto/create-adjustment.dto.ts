@@ -56,6 +56,7 @@ export class CreateAdjustmentDto {
   @Min(1)
   batch_id?: number;
 
+  /** initial_load requiere saldo actual 0 y delta positivo (validado en servicio). */
   @IsIn(ADJUSTMENT_TYPES)
   type: AdjustmentType;
 

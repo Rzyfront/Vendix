@@ -40,9 +40,7 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
       {} as any,
       {} as any,
     );
-    jest
-      .spyOn(RequestContextService, 'getStoreId')
-      .mockReturnValue(3);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(3);
     mockSearchPath.isKillSwitchOn.mockReturnValue(false);
   });
 
@@ -160,6 +158,7 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
 
 describe('InventoryAdjustmentsService — initial_load', () => {
   const tx: any = {
+    $executeRawUnsafe: jest.fn(),
     stock_levels: { findFirst: jest.fn() },
     inventory_adjustments: { create: jest.fn() },
     products: { findFirst: jest.fn() },
@@ -188,10 +187,12 @@ describe('InventoryAdjustmentsService — initial_load', () => {
       new_cost_per_unit: 4100,
     });
     stockManager.updateStock.mockResolvedValue({ cost_snapshot: null });
-    tx.inventory_adjustments.create.mockImplementation(async ({ data }: any) => ({
-      id: 5,
-      ...data,
-    }));
+    tx.inventory_adjustments.create.mockImplementation(
+      async ({ data }: any) => ({
+        id: 5,
+        ...data,
+      }),
+    );
   });
 
   it('positivo: costea la entrada y mueve stock como initial', async () => {
@@ -239,11 +240,53 @@ describe('InventoryAdjustmentsService — initial_load', () => {
       quantity_after: 4,
     } as any);
 
-    expect(tx.inventory_adjustments.create.mock.calls[0][0].data.quantity_before).toBe(0);
+    expect(
+      tx.inventory_adjustments.create.mock.calls[0][0].data.quantity_before,
+    ).toBe(0);
     expect(costing.calculateCostOnReceipt.mock.calls[0][0].unit_cost).toBe(500);
     expect(res.cost_amount).toBe(2000);
   });
 
+  it.each([
+    [5, 8],
+    [5, 2],
+    [0, 0],
+  ])(
+    'rechaza initial_load con saldo %i y destino %i antes de escribir',
+    async (before, after) => {
+      tx.stock_levels.findFirst.mockResolvedValue({ quantity_on_hand: before });
+      await expect(
+        service.createAdjustmentInTransaction(tx, {
+          product_id: 1,
+          location_id: 2,
+          type: 'initial_load',
+          quantity_after: after,
+        } as any),
+      ).rejects.toThrow('cantidad actual 0 y una entrada positiva');
+      expect(tx.inventory_adjustments.create).not.toHaveBeenCalled();
+      expect(stockManager.updateStock).not.toHaveBeenCalled();
+      expect(costing.calculateCostOnReceipt).not.toHaveBeenCalled();
+    },
+  );
+
+  it('batch settled preserva unit_cost al crear el ajuste', async () => {
+    const create = jest
+      .spyOn(service, 'createAdjustment')
+      .mockResolvedValue({ id: 12 } as any);
+    const results = await service.batchCreateAndCompleteSettled(2, [
+      {
+        product_id: 1,
+        type: 'initial_load',
+        quantity_after: 4,
+        unit_cost: 2750,
+      },
+    ]);
+    expect(results[0].ok).toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_cost: 2750 }),
+      { approvedByUserId: 9 },
+    );
+  });
   it('count_variance se mantiene: sin costeo de recepción y movement adjustment', async () => {
     tx.stock_levels.findFirst.mockResolvedValue({ quantity_on_hand: 3 });
     stockManager.updateStock.mockResolvedValue({
@@ -258,7 +301,9 @@ describe('InventoryAdjustmentsService — initial_load', () => {
     } as any);
 
     expect(costing.calculateCostOnReceipt).not.toHaveBeenCalled();
-    expect(stockManager.updateStock.mock.calls[0][0].movement_type).toBe('adjustment');
+    expect(stockManager.updateStock.mock.calls[0][0].movement_type).toBe(
+      'adjustment',
+    );
     expect(res.cost_amount).toBe(70);
   });
 

@@ -43,6 +43,7 @@ export class BulkAdjustmentItemResultDto {
   product_name?: string;
   status: 'success' | 'error';
   message?: string;
+  warnings?: string[];
   quantity_before?: number;
   quantity_after?: number;
   quantity_change?: number;
@@ -87,7 +88,7 @@ export class BulkAdjustmentUploadSessionDto extends BulkAdjustmentUploadDto {
   limit?: number;
 
   /**
-   * Confirmación explícita de que las filas sin SKU existente crean productos
+   * Confirmación explícita de que las filas con SKU vacío crean productos
    * nuevos como carga inicial. Sin `true` el commit se rechaza si hay alguna.
    */
   @IsOptional()
@@ -108,6 +109,8 @@ export class BulkAdjustmentAnalysisResultDto {
   valid: number;
   failed: number;
   errors: { row_number: number; sku: string; message: string }[];
+  warnings: { row_number: number; sku: string; message: string }[];
+  initial_load_rows: number;
   /** Filas que crearán un producto nuevo. */
   new_products: number;
   /** De ellas, las que no traen SKU y se autogenerará. */

@@ -1,7 +1,11 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { InventoryAdjustmentsService } from './inventory-adjustments.service';
+import {
+  InventoryAdjustmentsService,
+  BatchAdjustmentInput,
+  AdjustmentTransactionResult,
+} from './inventory-adjustments.service';
 import {
   BulkAdjustmentUploadDto,
   BulkAdjustmentUploadResultDto,
@@ -19,6 +23,7 @@ import { S3Service } from '@common/services/s3.service';
 import { parseMoneyCell } from '@common/money-kernel';
 import { generateSlug } from '@common/utils/slug.util';
 import { StoreSkuGeneratorService } from './store-sku-generator.service';
+import type { AdjustmentType } from './interfaces/inventory-adjustment.interface';
 
 /** Tamaño de grupo para los `findMany({ in })` de la validación. */
 const LOOKUP_CHUNK = 1000;
@@ -34,8 +39,6 @@ interface NewProductRow {
   base_price: number | null;
   unit_cost: number | null;
   description: string;
-  /** Tipo pedido por la fila/global, usado solo si el SKU ya existe al confirmar. */
-  type: string;
   result_row: BulkAdjustmentItemResultDto;
 }
 
@@ -281,6 +284,16 @@ export class InventoryAdjustmentsBulkService {
       valid: evaluation.successful,
       failed: evaluation.failed,
       errors,
+      warnings: evaluation.results.flatMap((r) =>
+        (r.warnings ?? []).map((message) => ({
+          row_number: r.row_number,
+          sku: r.sku,
+          message,
+        })),
+      ),
+      initial_load_rows: evaluation.valid_items.filter(
+        (item) => item.type === 'initial_load',
+      ).length,
       new_products: evaluation.new_rows.length,
       auto_sku: evaluation.new_rows.filter((n) => n.auto_sku).length,
       requires_initial_load_ack: evaluation.new_rows.length > 0,
@@ -296,8 +309,8 @@ export class InventoryAdjustmentsBulkService {
   /**
    * Confirma una sesion de analisis. Con `offset`/`limit` procesa solo la
    * pagina `[offset, offset + limit)`; sin ellos, el archivo completo (legacy).
-   * El S3 temporal se borra solo con `done=true` (o en el modo legacy); si la
-   * pagina lanza, se conserva para reintentar.
+   * Conserva el archivo temporal hasta cancelación/lifecycle para poder
+   * reintentar incluso una última página cuya respuesta se perdió.
    */
   async uploadFromSession(
     session_id: string,
@@ -342,20 +355,17 @@ export class InventoryAdjustmentsBulkService {
         upload_dto,
         store_id,
         offset,
+        session_id,
       );
       const done = offset + limit >= total;
-      if (done) {
-        await this.safeDelete(s3_key);
-      }
+      // No borrar al completar: si se pierde la respuesta de la última página,
+      // el mismo session_id debe poder devolver sus recibos ya confirmados.
+      // La cancelación explícita (o el lifecycle del prefijo tmp/) limpia S3.
       return { ...result, total, offset, limit, done };
     }
 
-    try {
-      const rows = this.parseAndCheckLimits(file_buffer);
-      return await this.processRows(rows, upload_dto, store_id, 0);
-    } finally {
-      await this.safeDelete(s3_key);
-    }
+    const rows = this.parseAndCheckLimits(file_buffer);
+    return this.processRows(rows, upload_dto, store_id, 0, session_id);
   }
 
   /** Cancela una sesion de analisis y limpia el archivo temporal. */
@@ -395,12 +405,13 @@ export class InventoryAdjustmentsBulkService {
     return rows;
   }
 
-  /** Valida las filas y aplica los ajustes validos. */
+  /** Valida las filas y aplica los ajustes válidos, con recibos durables por fila. */
   private async processRows(
     rows: Record<string, any>[],
     upload_dto: BulkAdjustmentUploadDto & { initial_load_ack?: boolean },
     store_id: number,
     row_offset: number,
+    session_id?: string,
   ): Promise<BulkAdjustmentUploadResultDto> {
     const evaluation = await this.evaluateRows(
       rows,
@@ -408,67 +419,293 @@ export class InventoryAdjustmentsBulkService {
       store_id,
       row_offset,
     );
-    const { results, valid_items } = evaluation;
-    let { successful, failed } = evaluation;
-
+    const { results, valid_items, applied_rows, new_rows } = evaluation;
     this.assertInitialLoadAck(evaluation.new_rows.length, upload_dto);
 
-    // Ejecutar ajustes batch usando el servicio existente
-    if (valid_items.length > 0) {
-      // Se pide el resultado POR ÍTEM. Antes se llamaba al lote que aborta en el
-      // primer fallo y el `catch` marcaba como error TODAS las filas válidas:
-      // el lote no es atómico, así que las anteriores ya estaban aplicadas y el
-      // reporte decía "0 exitosos, 1000 con errores" con el stock movido. El
-      // operador no tenía forma de saber qué quedó hecho.
+    // Una fila ya confirmada gana sobre el estado ACTUAL del catálogo/stock:
+    // reintentar no debe revertir ventas, renombres u otros ajustes posteriores.
+    const committed = new Map<number, BulkAdjustmentItemResultDto>();
+    if (session_id) {
+      const receipts = await this.prisma.audit_logs.findMany({
+        where: {
+          store_id,
+          organization_id: RequestContextService.getOrganizationId(),
+          resource: this.sessionResource(session_id),
+          action: 'bulk_inventory.row_committed',
+          request_id: {
+            in: results.map((row) =>
+              this.rowRequestId(session_id, row.row_number),
+            ),
+          },
+        },
+        select: { new_values: true },
+      });
+      for (const receipt of receipts) {
+        const row =
+          receipt.new_values as unknown as BulkAdjustmentItemResultDto;
+        committed.set(row.row_number, row);
+      }
+      for (const row of results) {
+        const previous = committed.get(row.row_number);
+        if (previous) Object.assign(row, previous);
+      }
+    }
+
+    if (!session_id && valid_items.length > 0) {
       const outcomes =
         await this.adjustmentsService.batchCreateAndCompleteSettled(
           upload_dto.location_id,
           valid_items,
+          { initialLoadFallback: true },
         );
-
-      // `valid_items[i]` y la fila de `results` con ajuste pendiente van en el
-      // mismo orden, así que el índice del lote mapea a la fila del archivo.
-      const applied_rows = evaluation.applied_rows;
-
       for (const outcome of outcomes) {
-        if (outcome.ok) continue;
+        if (outcome.ok) {
+          if (outcome.adjustment?.adjustment_type) {
+            this.reflectCommittedAdjustment(
+              applied_rows[outcome.index],
+              outcome.adjustment,
+              valid_items[outcome.index].type,
+            );
+          }
+          continue;
+        }
         const row = applied_rows[outcome.index];
         if (!row) continue;
         row.status = 'error';
         row.message = `Error al aplicar ajuste: ${outcome.error?.message ?? 'desconocido'}`;
-        successful--;
-        failed++;
+      }
+    } else if (session_id) {
+      for (let index = 0; index < valid_items.length; index++) {
+        const row = applied_rows[index];
+        if (committed.has(row.row_number)) continue;
+        await this.commitSessionRow(session_id, row, store_id, async (tx) => {
+          const result =
+            await this.adjustmentsService.createAdjustmentInTransaction(
+              tx,
+              {
+                ...valid_items[index],
+                type: valid_items[index].type as AdjustmentType,
+                location_id: upload_dto.location_id,
+              },
+              {
+                approvedByUserId:
+                  RequestContextService.getUserId() ?? undefined,
+                initialLoadFallback: true,
+              },
+            );
+          const committedRow = { ...row, action: 'adjusted' as const };
+          this.reflectCommittedAdjustment(
+            committedRow,
+            result.adjustment,
+            valid_items[index].type,
+          );
+          return { row: committedRow, adjustment: result };
+        });
       }
     }
 
-    // Filas nuevas (con ack): una transacción por fila para crear el producto
-    // y luego su ajuste `initial_load`.
-    for (const nr of evaluation.new_rows) {
-      const outcome = await this.commitNewProductRow(
-        nr,
-        upload_dto,
+    // Producto + stock/costeo + recibo se confirman en UNA transacción por fila.
+    // Una caída antes del ajuste ya no deja un producto huérfano que se duplique.
+    for (const nr of new_rows) {
+      if (committed.has(nr.row_number)) continue;
+      await this.commitSessionRow(
+        session_id,
+        nr.result_row,
         store_id,
+        async (tx) => {
+          // El generador toma max(SKU)+1; serializar también filas DIFERENTES
+          // evita que dos sesiones de la misma tienda elijan el mismo CI-… .
+          await tx.$executeRawUnsafe(
+            'SELECT pg_advisory_xact_lock(hashtext($1))',
+            `inventory-bulk-sku:${store_id}`,
+          );
+          const sku = await this.skuGenerator.next(store_id, tx);
+          const slug = await this.uniqueSlug(tx, nr.name, sku);
+          const product = await tx.products.create({
+            data: {
+              store_id,
+              name: nr.name,
+              slug,
+              sku,
+              base_price: nr.base_price ?? 0,
+              cost_price: nr.unit_cost,
+              product_type: 'physical',
+              state: 'active',
+              track_inventory: true,
+              stock_quantity: 0,
+              updated_at: new Date(),
+            },
+            select: { id: true },
+          });
+          const adjustment =
+            nr.quantity > 0
+              ? await this.adjustmentsService.createAdjustmentInTransaction(
+                  tx,
+                  {
+                    product_id: product.id,
+                    location_id: upload_dto.location_id,
+                    type: 'initial_load',
+                    quantity_after: nr.quantity,
+                    ...(nr.unit_cost !== null
+                      ? { unit_cost: nr.unit_cost }
+                      : {}),
+                    description: nr.description,
+                  },
+                  {
+                    approvedByUserId:
+                      RequestContextService.getUserId() ?? undefined,
+                  },
+                )
+              : undefined;
+          return {
+            row: {
+              ...nr.result_row,
+              sku,
+              action: 'created',
+              message: `Producto creado con SKU ${sku} (${nr.quantity > 0 ? 'carga inicial' : 'sin stock inicial'})`,
+            },
+            adjustment,
+          };
+        },
       );
-      const row = nr.result_row;
-      if (outcome.sku) row.sku = outcome.sku;
-      if (outcome.ok) {
-        row.action = outcome.action;
-        row.message = outcome.message;
-        continue;
-      }
-      row.status = 'error';
-      row.message = outcome.message;
-      successful--;
-      failed++;
     }
 
+    if (session_id) {
+      const handled = new Set(
+        [...applied_rows, ...new_rows.map((nr) => nr.result_row)].map(
+          (row) => row.row_number,
+        ),
+      );
+      for (const row of results) {
+        if (
+          row.status !== 'success' ||
+          handled.has(row.row_number) ||
+          committed.has(row.row_number)
+        )
+          continue;
+        await this.commitSessionRow(session_id, row, store_id, async () => ({
+          row: { ...row },
+        }));
+      }
+    }
+
+    const failed = results.filter((row) => row.status === 'error').length;
     return {
       success: failed === 0,
       total_processed: rows.length,
-      successful,
+      successful: results.length - failed,
       failed,
       results,
     };
+  }
+
+  private reflectCommittedAdjustment(
+    row: BulkAdjustmentItemResultDto,
+    adjustment: {
+      adjustment_type: string;
+      quantity_before: number;
+      quantity_after: number;
+      quantity_change: number;
+    },
+    requestedType: string,
+  ): void {
+    if (adjustment.quantity_before === undefined) return;
+    if (
+      requestedType === 'initial_load' &&
+      adjustment.adjustment_type !== 'initial_load'
+    ) {
+      row.warnings = [
+        ...(row.warnings ?? []),
+        'El stock cambió desde el análisis: la carga inicial se convirtió en diferencia de conteo.',
+      ];
+    }
+    row.quantity_before = adjustment.quantity_before;
+    row.quantity_after = adjustment.quantity_after;
+    row.quantity_change = adjustment.quantity_change;
+  }
+
+  private rowRequestId(session_id: string, row_number: number): string {
+    return `bulk-adjustments:${session_id}:${row_number}`;
+  }
+
+  private sessionResource(session_id: string): string {
+    // Reutiliza el índice existente (resource, resource_id, created_at).
+    return `bulk_inventory_session:${session_id}`;
+  }
+
+  /** audit_logs no es auto-scoped: scope explícito al leer Y escribir. */
+  private async commitSessionRow(
+    session_id: string | undefined,
+    row: BulkAdjustmentItemResultDto,
+    store_id: number,
+    apply: (tx: any) => Promise<{
+      row: BulkAdjustmentItemResultDto;
+      adjustment?: AdjustmentTransactionResult;
+    }>,
+  ): Promise<void> {
+    const organization_id = RequestContextService.getOrganizationId();
+    const user_id = RequestContextService.getUserId() ?? null;
+    const request_id = session_id
+      ? this.rowRequestId(session_id, row.row_number)
+      : undefined;
+    try {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          if (request_id) {
+            await tx.$executeRawUnsafe(
+              'SELECT pg_advisory_xact_lock(hashtext($1))',
+              `${store_id}:${request_id}`,
+            );
+            const previous = await tx.audit_logs.findFirst({
+              where: {
+                store_id,
+                organization_id,
+                request_id,
+                resource: this.sessionResource(session_id!),
+                resource_id: row.row_number,
+                action: 'bulk_inventory.row_committed',
+              },
+              select: { new_values: true },
+            });
+            if (previous)
+              return {
+                row: previous.new_values as unknown as BulkAdjustmentItemResultDto,
+              };
+          }
+          const applied = await apply(tx);
+          if (request_id) {
+            await tx.audit_logs.create({
+              data: {
+                store_id,
+                organization_id,
+                user_id,
+                request_id,
+                resource: this.sessionResource(session_id!),
+                action: 'bulk_inventory.row_committed',
+                resource_id: row.row_number,
+                metadata: {
+                  adjustment_id: applied.adjustment?.adjustment.id ?? null,
+                },
+                new_values: applied.row as unknown as Record<string, unknown>,
+              },
+            });
+          }
+          return applied;
+        },
+        { timeout: 30_000, maxWait: 10_000 },
+      );
+      Object.assign(row, result.row);
+      if (result.adjustment && organization_id) {
+        this.adjustmentsService.emitInventoryAdjusted(
+          result.adjustment,
+          organization_id,
+          user_id,
+        );
+      }
+    } catch (error) {
+      row.status = 'error';
+      row.message = `Error al aplicar fila: ${error?.message ?? 'desconocido'}`;
+    }
   }
 
   /**
@@ -483,28 +720,14 @@ export class InventoryAdjustmentsBulkService {
     row_offset: number,
   ): Promise<{
     results: BulkAdjustmentItemResultDto[];
-    valid_items: {
-      product_id: number;
-      product_variant_id?: number;
-      type: string;
-      quantity_after: number;
-      reason_code?: string;
-      description?: string;
-    }[];
+    valid_items: BatchAdjustmentInput[];
     applied_rows: BulkAdjustmentItemResultDto[];
     new_rows: NewProductRow[];
     successful: number;
     failed: number;
   }> {
     const results: BulkAdjustmentItemResultDto[] = [];
-    const valid_items: {
-      product_id: number;
-      product_variant_id?: number;
-      type: string;
-      quantity_after: number;
-      reason_code?: string;
-      description?: string;
-    }[] = [];
+    const valid_items: BatchAdjustmentInput[] = [];
     const applied_rows: BulkAdjustmentItemResultDto[] = [];
     const new_rows: NewProductRow[] = [];
     const seen_skus = new Set<string>();
@@ -533,6 +756,7 @@ export class InventoryAdjustmentsBulkService {
           name: true,
           sku: true,
           track_inventory: true,
+          cost_price: true,
           product_variants: { select: { sku: true }, take: 3 },
         },
         orderBy: { id: 'asc' },
@@ -558,7 +782,10 @@ export class InventoryAdjustmentsBulkService {
           product_id: true,
           name: true,
           track_inventory_override: true,
-          products: { select: { name: true, track_inventory: true } },
+          cost_price: true,
+          products: {
+            select: { name: true, track_inventory: true, cost_price: true },
+          },
         },
         orderBy: { id: 'asc' },
       });
@@ -599,9 +826,33 @@ export class InventoryAdjustmentsBulkService {
       }
     }
 
+    const newNames = Array.from(
+      new Set(
+        rows
+          .filter((row) => !row.sku?.toString().trim())
+          .map((row) => row.name?.toString().trim())
+          .filter((name): name is string => !!name),
+      ),
+    );
+    const existingNames = new Set<string>();
+    for (const names of this.chunk(newNames, LOOKUP_CHUNK)) {
+      const products = await this.prisma.products.findMany({
+        where: {
+          store_id,
+          state: { not: 'archived' },
+          OR: names.map((name) => ({
+            name: { equals: name, mode: 'insensitive' as const },
+          })),
+        },
+        select: { name: true },
+      });
+      for (const product of products)
+        existingNames.add(product.name.trim().toLocaleLowerCase());
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const row_number = row_offset + i + 2; // +2 porque la fila 1 es header y el índice empieza en 0
+      const row_number = row.__row_number ?? row_offset + i + 2; // +2 porque la fila 1 es header y el índice empieza en 0
 
       const sku: string = row.sku?.toString().trim() ?? '';
       const name: string = row.name?.toString().trim() ?? '';
@@ -634,7 +885,7 @@ export class InventoryAdjustmentsBulkService {
 
       // Validar que quantity_after sea un número válido >= 0
       const quantity_after = Number(row.quantity_after);
-      if (isNaN(quantity_after) || quantity_after < 0) {
+      if (!Number.isFinite(quantity_after) || quantity_after < 0) {
         results.push({
           row_number,
           sku,
@@ -650,6 +901,7 @@ export class InventoryAdjustmentsBulkService {
       let product_variant_id: number | null = null;
       let product_name: string;
       let track_inventory: boolean;
+      let fallbackCost = 0;
 
       const product = sku ? products_by_sku.get(sku) : undefined;
 
@@ -671,17 +923,19 @@ export class InventoryAdjustmentsBulkService {
         product_id = product.id;
         product_name = product.name;
         track_inventory = product.track_inventory;
+        fallbackCost = Number(product.cost_price ?? 0);
       } else {
         const variant = sku ? variants_by_sku.get(sku) : undefined;
 
         if (!variant) {
-          // SKU vacío o no encontrado: con nombre es un producto nuevo.
-          if (!name) {
+          // Un SKU escrito es una referencia, nunca permiso para dar de alta.
+          // Evita duplicar catálogo por errores tipográficos o un SKU renombrado.
+          if (sku || !name) {
             results.push({
               row_number,
               sku,
               status: 'error',
-              message: `Producto con SKU "${sku}" no encontrado; para crearlo agrega el Nombre Producto`,
+              message: `Producto con SKU "${sku}" no encontrado; verifica el SKU. Para crear un producto nuevo deja el SKU vacío y agrega el Nombre Producto`,
             });
             failed++;
             continue;
@@ -707,9 +961,19 @@ export class InventoryAdjustmentsBulkService {
             sku,
             product_name: name,
             status: 'success',
-            message: sku
-              ? 'Producto nuevo (se creará como carga inicial)'
-              : 'Producto nuevo (se creará con SKU automático)',
+            message: 'Producto nuevo (se creará con SKU automático)',
+            warnings: [
+              ...((unit_cost ?? 0) <= 0
+                ? [
+                    'Sin costo de compra: el inventario inicial quedará valorado en 0.',
+                  ]
+                : []),
+              ...(existingNames.has(name.toLocaleLowerCase())
+                ? [
+                    'Ya existe un producto con este nombre; revisa su SKU para evitar duplicados.',
+                  ]
+                : []),
+            ],
             quantity_before: 0,
             quantity_after: floor_qty,
             quantity_change: floor_qty,
@@ -728,10 +992,6 @@ export class InventoryAdjustmentsBulkService {
               row.description?.toString().trim() ||
               upload_dto.description ||
               'Carga inicial (ajuste masivo)',
-            type:
-              this.normalizeAdjustmentType(row.type) ||
-              upload_dto.adjustment_type ||
-              'count_variance',
             result_row,
           });
           successful++;
@@ -744,6 +1004,10 @@ export class InventoryAdjustmentsBulkService {
           : variant.products.name;
         track_inventory =
           variant.track_inventory_override ?? variant.products.track_inventory;
+        fallbackCost =
+          Number(variant.cost_price ?? 0) > 0
+            ? Number(variant.cost_price)
+            : Number(variant.products.cost_price ?? 0);
       }
 
       if (!track_inventory) {
@@ -772,6 +1036,14 @@ export class InventoryAdjustmentsBulkService {
           quantity_before,
           quantity_after,
           quantity_change: 0,
+          ...((this.normalizeAdjustmentType(row.type) ||
+            upload_dto.adjustment_type) === 'initial_load'
+            ? {
+                warnings: [
+                  'Carga inicial no aplicable: se usará diferencia de conteo porque requiere cantidad actual 0 y una entrada positiva.',
+                ],
+              }
+            : {}),
         });
         successful++;
         continue;
@@ -779,8 +1051,48 @@ export class InventoryAdjustmentsBulkService {
 
       // Determinar tipo de ajuste: por fila o global
       const row_type = this.normalizeAdjustmentType(row.type);
-      const adjustment_type =
+      let adjustment_type =
         row_type || upload_dto.adjustment_type || 'count_variance';
+      const warnings: string[] = [];
+      if (
+        adjustment_type === 'initial_load' &&
+        (quantity_before !== 0 || quantity_after <= quantity_before)
+      ) {
+        adjustment_type = 'count_variance';
+        warnings.push(
+          'Carga inicial no aplicable: se usará diferencia de conteo porque requiere cantidad actual 0 y una entrada positiva.',
+        );
+      }
+      const stockKey = `${product_id}:${product_variant_id ?? 'null'}`;
+      if (!stock_by_key.has(stockKey) && quantity_after > 0) {
+        adjustment_type = 'initial_load';
+        warnings.push(
+          'No existe stock en esta bodega: la entrada se registrará como carga inicial.',
+        );
+      }
+      const unit_cost =
+        adjustment_type === 'initial_load'
+          ? this.parseOptionalMoney(row.unit_cost)
+          : null;
+      if (unit_cost === 'invalid') {
+        results.push({
+          row_number,
+          sku,
+          product_name,
+          status: 'error',
+          message: 'Precio Compra inválido: debe ser un monto >= 0',
+        });
+        failed++;
+        continue;
+      }
+      if (
+        adjustment_type === 'initial_load' &&
+        (unit_cost ?? fallbackCost) <= 0
+      ) {
+        warnings.push(
+          'Sin costo de compra: el inventario inicial quedará valorado en 0.',
+        );
+      }
 
       const description =
         row.description?.toString().trim() ||
@@ -791,6 +1103,7 @@ export class InventoryAdjustmentsBulkService {
         product_id,
         ...(product_variant_id ? { product_variant_id } : {}),
         type: adjustment_type,
+        ...(unit_cost !== null ? { unit_cost } : {}),
         quantity_after: Math.floor(quantity_after),
         description,
       });
@@ -803,6 +1116,7 @@ export class InventoryAdjustmentsBulkService {
         quantity_before,
         quantity_after: Math.floor(quantity_after),
         quantity_change: Math.floor(quantity_after) - quantity_before,
+        warnings,
       };
       results.push(result_row);
       applied_rows.push(result_row);
@@ -842,157 +1156,11 @@ export class InventoryAdjustmentsBulkService {
     }
   }
 
-  /**
-   * Crea el producto nuevo (tx propia: SKU, slug y alta atómicos) y luego su
-   * ajuste `initial_load`. Si el SKU ya existe al confirmar (página anterior u
-   * otra fila) se trata como existente: se ajusta, no se duplica.
-   */
-  private async commitNewProductRow(
-    nr: NewProductRow,
-    upload_dto: BulkAdjustmentUploadDto,
-    store_id: number,
-  ): Promise<
-    | { ok: true; sku: string; action: 'created' | 'adjusted'; message: string }
-    | { ok: false; sku?: string; message: string }
-  > {
-    let target: {
-      product_id: number;
-      product_variant_id?: number;
-      sku: string;
-      created: boolean;
-    };
-    try {
-      target = await this.prisma.$transaction(async (tx: any) => {
-        if (nr.sku) {
-          const existing_product = await tx.products.findFirst({
-            where: { store_id, sku: nr.sku, state: { not: 'archived' } },
-            select: {
-              id: true,
-              track_inventory: true,
-              product_variants: { select: { id: true }, take: 1 },
-            },
-          });
-          if (existing_product) {
-            if (existing_product.product_variants.length > 0) {
-              throw new BadRequestException(
-                `El producto con SKU "${nr.sku}" maneja variantes: usa el SKU de la variante`,
-              );
-            }
-            if (!existing_product.track_inventory) {
-              throw new BadRequestException(
-                'El producto no tiene seguimiento de inventario habilitado',
-              );
-            }
-            return {
-              product_id: existing_product.id,
-              sku: nr.sku,
-              created: false,
-            };
-          }
-          const existing_variant = await tx.product_variants.findFirst({
-            where: {
-              sku: nr.sku,
-              products: { store_id, state: { not: 'archived' } },
-            },
-            select: {
-              id: true,
-              product_id: true,
-              track_inventory_override: true,
-              products: { select: { track_inventory: true } },
-            },
-          });
-          if (existing_variant) {
-            const tracked =
-              existing_variant.track_inventory_override ??
-              existing_variant.products.track_inventory;
-            if (!tracked) {
-              throw new BadRequestException(
-                'El producto no tiene seguimiento de inventario habilitado',
-              );
-            }
-            return {
-              product_id: existing_variant.product_id,
-              product_variant_id: existing_variant.id,
-              sku: nr.sku,
-              created: false,
-            };
-          }
-        }
-
-        const sku = nr.sku ?? (await this.skuGenerator.next(store_id, tx));
-        const slug = await this.uniqueSlug(tx, nr.name, sku);
-        const product = await tx.products.create({
-          data: {
-            store_id,
-            name: nr.name,
-            slug,
-            sku,
-            base_price: nr.base_price ?? 0,
-            cost_price: nr.unit_cost,
-            product_type: 'physical',
-            state: 'active',
-            track_inventory: true,
-            stock_quantity: 0,
-            updated_at: new Date(),
-          },
-          select: { id: true },
-        });
-        return { product_id: product.id, sku, created: true };
-      });
-    } catch (error: any) {
-      return {
-        ok: false,
-        message: `Error al crear el producto: ${error?.message ?? 'desconocido'}`,
-      };
-    }
-
-    // Producto nuevo con cantidad 0: no hay stock que cargar, solo el alta.
-    if (target.created && nr.quantity === 0) {
-      return {
-        ok: true,
-        sku: target.sku,
-        action: 'created',
-        message: `Producto creado con SKU ${target.sku} (sin stock inicial)`,
-      };
-    }
-
-    const type = target.created ? 'initial_load' : nr.type;
-    const [outcome] =
-      await this.adjustmentsService.batchCreateAndCompleteSettled(
-        upload_dto.location_id,
-        [
-          {
-            product_id: target.product_id,
-            ...(target.product_variant_id
-              ? { product_variant_id: target.product_variant_id }
-              : {}),
-            type,
-            quantity_after: nr.quantity,
-            ...(nr.unit_cost !== null ? { unit_cost: nr.unit_cost } : {}),
-            description: nr.description,
-          },
-        ],
-      );
-
-    if (outcome && !outcome.ok) {
-      return {
-        ok: false,
-        sku: target.sku,
-        message: `${target.created ? `Producto creado con SKU ${target.sku}, pero falló` : 'Error al aplicar'} el ajuste: ${outcome.error?.message ?? 'desconocido'}`,
-      };
-    }
-
-    return {
-      ok: true,
-      sku: target.sku,
-      action: target.created ? 'created' : 'adjusted',
-      message: target.created
-        ? `Producto creado con SKU ${target.sku} (carga inicial)`
-        : `El SKU ${target.sku} ya existía: se ajustó el stock`,
-    };
-  }
-
-  private async uniqueSlug(tx: any, name: string, sku: string): Promise<string> {
+  private async uniqueSlug(
+    tx: any,
+    name: string,
+    sku: string,
+  ): Promise<string> {
     const base = generateSlug(name) || generateSlug(sku) || 'producto';
     const taken = async (slug: string) =>
       !!(await tx.products.findFirst({
@@ -1066,7 +1234,7 @@ export class InventoryAdjustmentsBulkService {
         const row_data = json_data[i] as any[];
         if (!row_data || row_data.length === 0) continue;
 
-        const row: Record<string, any> = {};
+        const row: Record<string, any> = { __row_number: i + 1 };
         let has_data = false;
 
         row_data.forEach((cell_value, index) => {
