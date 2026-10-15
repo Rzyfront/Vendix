@@ -11,7 +11,9 @@ export type ButtonVariant =
   | 'outline-success'
   | 'ghost'
   | 'danger'
-  | 'success';
+  | 'success'
+  /** Acción de IA: gradiente + glow + shimmer al hover (Vendix AI Style). */
+  | 'ai';
 export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
 
 @Component({
@@ -144,45 +146,62 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
         box-shadow: 0 4px 12px rgba(var(--color-warning-rgb), 0.3);
       }
 
-      /* Outline hover backgrounds */
+      /* ── Outline: "hover filled" ──
+         Reposo: borde al 50 % + texto del color, fondo transparente.
+         Hover (no deshabilitado): fondo RELLENO del color y texto contrastado,
+         igual que la variante sólida equivalente. Cada variante sólo declara su
+         terna de tokens; el comportamiento vive una vez en .btn-outline-fill.
+         El texto se cambia aquí y no con una clase hover:text-* porque esta
+         regla (clase + :hover + :not + atributo de encapsulación) le gana a la
+         clase base text-[var(--color-*)] y a un hover:bg-* de customClasses; el
+         icono proyectado hereda currentColor y cambia con el texto. Quien pase
+         utilidades con !important en customClasses conserva su look. */
       .btn-outline-border {
-        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
-      }
-
-      .btn-outline-border:hover:not(:disabled) {
-        background: rgba(var(--color-primary-rgb), 0.06);
+        --btn-outline-rgb: var(--color-primary-rgb);
+        --btn-outline-fill: var(--color-primary);
+        --btn-outline-on: var(--color-text-on-primary);
       }
 
       .btn-outline-secondary-border {
-        border: 1px solid rgba(var(--color-secondary-rgb), 0.5);
-      }
-
-      .btn-outline-secondary-border:hover:not(:disabled) {
-        background: rgba(var(--color-secondary-rgb), 0.06);
+        --btn-outline-rgb: var(--color-secondary-rgb);
+        --btn-outline-fill: var(--color-secondary);
+        --btn-outline-on: var(--color-text-on-primary);
       }
 
       .btn-outline-danger-border {
-        border: 1px solid rgba(var(--color-destructive-rgb), 0.5);
+        --btn-outline-rgb: var(--color-destructive-rgb);
+        --btn-outline-fill: var(--color-destructive);
+        --btn-outline-on: var(--color-text-on-primary);
       }
 
-      .btn-outline-danger-border:hover:not(:disabled) {
-        background: rgba(var(--color-destructive-rgb), 0.06);
-      }
-
+      /* Naranja claro: el blanco no llega a contraste legible, va texto oscuro. */
       .btn-outline-warning-border {
-        border: 1px solid rgba(var(--color-warning-rgb), 0.5);
-      }
-
-      .btn-outline-warning-border:hover:not(:disabled) {
-        background: rgba(var(--color-warning-rgb), 0.06);
+        --btn-outline-rgb: var(--color-warning-rgb);
+        --btn-outline-fill: var(--color-warning);
+        --btn-outline-on: var(--color-text-on-warning, #1c1917);
       }
 
       .btn-outline-success-border {
-        border: 1px solid rgba(var(--color-success-rgb), 0.5);
+        --btn-outline-rgb: var(--color-success-rgb);
+        --btn-outline-fill: var(--color-success);
+        --btn-outline-on: var(--color-text-on-primary);
       }
 
-      .btn-outline-success-border:hover:not(:disabled) {
-        background: rgba(var(--color-success-rgb), 0.06);
+      /* Sin background en reposo a propósito: el fondo por defecto ya es
+         transparente y fijarlo aquí pisaría un bg-* legítimo de customClasses
+         (p. ej. los botones de icono de toolbar con bg-surface). */
+      .btn-outline-fill {
+        border: 1px solid rgba(var(--btn-outline-rgb), 0.5);
+      }
+
+      .btn-outline-fill:hover:not(:disabled) {
+        background-color: var(--btn-outline-fill);
+        border-color: var(--btn-outline-fill);
+        color: var(--btn-outline-on);
+      }
+
+      .btn-outline-fill:focus-visible {
+        border-color: var(--btn-outline-fill);
       }
     `,
   ],
@@ -268,26 +287,31 @@ export class ButtonComponent {
       ],
       outline: [
         'btn-outline-border',
+        'btn-outline-fill',
         'text-[var(--color-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-secondary': [
         'btn-outline-secondary-border',
+        'btn-outline-fill',
         'text-[var(--color-secondary)]',
         'focus:ring-[var(--color-secondary)]/50',
       ],
       'outline-danger': [
         'btn-outline-danger-border',
+        'btn-outline-fill',
         'text-[var(--color-destructive)]',
         'focus:ring-[var(--color-destructive)]/50',
       ],
       'outline-warning': [
         'btn-outline-warning-border',
+        'btn-outline-fill',
         'text-[var(--color-warning)]',
         'focus:ring-orange-500/50',
       ],
       'outline-success': [
         'btn-outline-success-border',
+        'btn-outline-fill',
         'text-[var(--color-success)]',
         'focus:ring-[var(--color-success)]/50',
       ],
@@ -309,6 +333,14 @@ export class ButtonComponent {
         'text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-success)]/50',
         'btn-shadow-success',
+      ],
+      // Estilo global `vx-ai-button` (src/styles/vendix-ai-style.scss, skill
+      // vendix-ai-style): gradiente, glow y shimmer al hover; respeta
+      // prefers-reduced-motion. No lleva clases bg-/text- de Tailwind porque
+      // la clase global ya fija fondo y color.
+      ai: [
+        'vx-ai-button',
+        'focus:ring-[var(--color-primary)]/50',
       ],
     };
 
