@@ -661,8 +661,11 @@ export class DocumentPrintService {
 
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) {
+      // Rechaza en vez de resolver en silencio: no se envió nada a la
+      // impresora, y quien cuenta lo enviado (la impresión por lote) lo daría
+      // por impreso.
       iframe.remove();
-      return;
+      throw new Error('No se pudo preparar el documento de impresión.');
     }
 
     doc.open();
