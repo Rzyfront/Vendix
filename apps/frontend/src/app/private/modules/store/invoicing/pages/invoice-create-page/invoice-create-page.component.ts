@@ -238,6 +238,37 @@ import type {
   LineasRowPaths,
 } from '../../../../../../shared/components/invoice-sections/index';
 /**
+ * ESCÁNER IA «CARGAR DOCUMENTOS». El modal lee; las funciones puras de
+ * `invoice-draft-mapping` traducen el borrador a controles; las marcas
+ * «IA»/«Revisar» las pintan las secciones compartidas.
+ */
+import { invoiceFieldMarkClass } from '../../../../../../shared/components/invoice-sections/index';
+import type {
+  InvoiceFieldMark,
+  InvoiceFieldMarks,
+  LineasRowMark,
+} from '../../../../../../shared/components/invoice-sections/index';
+import { InvoiceDraftScanModalComponent } from '../../components/invoice-create/invoice-draft-scan-modal.component';
+import type {
+  DraftField,
+  InvoiceDraftScanResult,
+} from '../../interfaces/invoice-draft-scan.interface';
+import {
+  DRAFT_LOW_CONFIDENCE,
+  draftDocumentDigits,
+  draftLinesToLineInputs,
+  draftNitDvMismatch,
+  draftPathLabel,
+  draftPendingPaths,
+  draftToAcquirerPatch,
+  draftToInlineCustomerBase,
+  draftToInvoicePatch,
+  hasDraftValue,
+  type DraftAcquirerPatch,
+  type DraftInvoicePatch,
+  type DraftLineValue,
+} from '../../utils/invoice-draft-mapping';
+/**
  * SECCIÓN IMPUESTOS COMPARTIDA con la matriz por porción del editor de
  * perfiles (B.4). En contexto `invoice` sólo pinta el agregado de línea
  * (`taxBreakdown()`) de solo lectura — la matriz por porción no tiene hoy
@@ -1876,6 +1907,228 @@ export function externalIdentityToInlineCustomer(
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Borrador IA («Cargar documentos»): plan puro de aplicación
+// ─────────────────────────────────────────────────────────────
+
+/** Tope de líneas del `FormArray` `items` (el mismo de `appendItem`). */
+export const INVOICE_MAX_LINES = 100;
+
+/**
+ * ¿La fila ya tiene algo del operador? Descripción, precio o producto. Mismo
+ * criterio que `seedModelLines` (descripción o precio) más el vínculo al
+ * catálogo: una fila con producto elegido y sin precio también es trabajo.
+ */
+export function isCapturedInvoiceLine(item: {
+  description?: unknown;
+  unit_price?: unknown;
+  product_id?: unknown;
+}): boolean {
+  return (
+    String(item?.description ?? '').trim().length > 0 ||
+    Number(item?.unit_price ?? 0) > 0 ||
+    item?.product_id != null
+  );
+}
+
+/** Lo que se cuenta en el aviso tras aplicar el borrador. */
+export interface InvoiceDraftNotice {
+  documents: number;
+  /** Etiquetas legibles de lo que la IA no encontró o no está segura. */
+  pending: string[];
+  noteApplied: string | null;
+  extractionNotes: string | null;
+  /** Lo leído que la pantalla no pudo representar, en palabras. */
+  unresolved: string[];
+  /** `totals.consistent === false`: el total leído no cuadra con las líneas. */
+  totalsInconsistent: boolean;
+  /** Total que dice el documento, para compararlo con el resumen. */
+  documentTotal: number | null;
+  /** Cómo quedó el adquiriente; lo completa la página al resolverlo. */
+  acquirer: string | null;
+}
+
+export interface InvoiceDraftPlanContext {
+  today: string;
+  currentNotes: string;
+  notesLimit: number;
+  foreignCurrencies: readonly string[];
+  taxes: readonly TaxOption[];
+  /** Valor crudo de las filas actuales de `items`. */
+  currentItems: readonly {
+    description?: unknown;
+    unit_price?: unknown;
+    product_id?: unknown;
+  }[];
+  maxLines: number;
+  descriptionLimit: number;
+}
+
+export interface InvoiceDraftPlanLine {
+  value: DraftLineValue;
+  mark: LineasRowMark;
+}
+
+export interface InvoiceDraftPlan {
+  acquirer: DraftAcquirerPatch;
+  inlineBase: CustomerModalPrefill;
+  /** `true` si el borrador trae algo del adquiriente (documento o nombre). */
+  hasAcquirer: boolean;
+  invoice: DraftInvoicePatch;
+  /** Marcas por control de cabecera y adquiriente; `pending` gana a `ai`. */
+  headerMarks: Record<string, InvoiceFieldMark>;
+  /**
+   * `true` ⇒ las filas actuales no tienen nada del operador y se REEMPLAZAN.
+   * `false` ⇒ se agregan al final (las filas en blanco se descartan antes).
+   */
+  replaceLines: boolean;
+  lines: InvoiceDraftPlanLine[];
+  /** Líneas leídas que no cupieron por el tope de 100. */
+  droppedLines: number;
+  notice: InvoiceDraftNotice;
+}
+
+/**
+ * Borrador IA ⇒ todo lo que la página escribe, sin tocar el formulario.
+ *
+ * Compone las funciones de `invoice-draft-mapping` y decide lo que es de la
+ * PANTALLA:
+ *  - Líneas: si el operador no había capturado ninguna, el borrador las
+ *    REEMPLAZA (las filas en blanco no son trabajo); si ya había, las del
+ *    borrador se AGREGAN al final. Reemplazar líneas escritas a mano sin
+ *    preguntar es justo lo que `seedModelLines` se niega a hacer, y aquí vale
+ *    lo mismo. Se respeta el tope: lo que no cabe se cuenta en el aviso.
+ *  - Marcas: lo escrito por la IA es `ai`; lo que el backend o el mapeo
+ *    señalan por revisar es `pending`, y `pending` gana.
+ *  - Aviso: pendientes legibles, nota aplicada, notas de extracción, lo no
+ *    representable y totales que no cuadran.
+ */
+export function planInvoiceDraft(
+  result: InvoiceDraftScanResult,
+  ctx: InvoiceDraftPlanContext,
+): InvoiceDraftPlan {
+  const acquirer = draftToAcquirerPatch(result.acquirer);
+  const invoice = draftToInvoicePatch(result, {
+    today: ctx.today,
+    currentNotes: ctx.currentNotes,
+    notesLimit: ctx.notesLimit,
+    foreignCurrencies: ctx.foreignCurrencies,
+  });
+  const pendingPaths = draftPendingPaths(result, { today: ctx.today });
+
+  // ── Marcas de cabecera y adquiriente
+  const headerMarks: Record<string, InvoiceFieldMark> = {};
+  for (const path of [...acquirer.aiPaths, ...invoice.aiPaths]) {
+    headerMarks[path] = 'ai';
+  }
+  for (const path of pendingPaths) {
+    if (!path.startsWith('lines.')) headerMarks[path] = 'pending';
+  }
+
+  // ── Pendientes de fila que señaló el backend (`lines.N.<control>` / `lines.N`)
+  const rowPending = new Map<number, Set<string>>();
+  const wholeRow = new Set<number>();
+  for (const path of pendingPaths) {
+    const match = /^lines\.(\d+)(?:\.(\w+))?$/.exec(path);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (!match[2]) {
+      wholeRow.add(index);
+      continue;
+    }
+    const set = rowPending.get(index) ?? new Set<string>();
+    set.add(match[2]);
+    rowPending.set(index, set);
+  }
+
+  // ── Líneas
+  const replaceLines = !ctx.currentItems.some((item) => isCapturedInvoiceLine(item));
+  const kept = replaceLines
+    ? 0
+    : ctx.currentItems.filter((item) => isCapturedInvoiceLine(item)).length;
+  const room = Math.max(0, ctx.maxLines - kept);
+  const inputs = draftLinesToLineInputs(result.lines ?? [], ctx.taxes);
+  const lines: InvoiceDraftPlanLine[] = inputs.slice(0, room).map((input) => {
+    const pending = new Set<string>(input.pendingFields);
+    for (const field of rowPending.get(input.draftIndex) ?? []) pending.add(field);
+    const notes = [input.note, wholeRow.has(input.draftIndex) ? 'Revisa la línea completa' : null]
+      .filter((note): note is string => !!note);
+    return {
+      value: {
+        ...input.value,
+        description: input.value.description.slice(0, ctx.descriptionLimit),
+      },
+      mark: {
+        ai: [...input.aiFields],
+        pending: [...pending],
+        note: notes.length > 0 ? notes.join(' · ') : null,
+      },
+    };
+  });
+  const droppedLines = inputs.length - lines.length;
+
+  // ── Aviso
+  const pending = Array.from(
+    new Set(
+      [...(result.missing_fields ?? []), ...(result.requires_review ?? [])].map(
+        (path) => draftPathLabel(path),
+      ),
+    ),
+  );
+  const unresolved = [...invoice.unresolved];
+  if (draftNitDvMismatch(result.acquirer)) {
+    unresolved.push(
+      'El dígito de verificación leído no corresponde al NIT: revisa el número del documento.',
+    );
+  }
+  if (droppedLines > 0) {
+    unresolved.push(
+      `${droppedLines} línea(s) del documento no se cargaron: la factura admite hasta ${ctx.maxLines}.`,
+    );
+  }
+
+  const hasAcquirer =
+    !!acquirer.documentDigits || hasDraftValue(result.acquirer.name);
+
+  return {
+    acquirer,
+    inlineBase: draftToInlineCustomerBase(result.acquirer),
+    hasAcquirer,
+    invoice,
+    headerMarks,
+    replaceLines,
+    lines,
+    droppedLines,
+    notice: {
+      documents: Math.max(1, Number(result.documents_scanned) || 1),
+      pending,
+      noteApplied: result.note_applied?.trim() || null,
+      extractionNotes: result.extraction_notes?.trim() || null,
+      unresolved,
+      totalsInconsistent: result.totals?.consistent === false,
+      documentTotal:
+        typeof result.totals?.total === 'number' ? result.totals.total : null,
+      acquirer: null,
+    },
+  };
+}
+
+/**
+ * Quita UN campo de la marca de una fila (el operador lo editó). Devuelve
+ * `null` si la fila se queda sin nada que señalar, para soltar la marca.
+ */
+export function dropRowMarkField(
+  mark: LineasRowMark,
+  field: string,
+): LineasRowMark | null {
+  const next: LineasRowMark = {
+    ai: mark.ai.filter((entry) => entry !== field),
+    pending: mark.pending.filter((entry) => entry !== field),
+    note: mark.note ?? null,
+  };
+  return next.ai.length === 0 && next.pending.length === 0 ? null : next;
+}
+
 /**
  * VISTA DE FACTURA AVANZADA (superficie fiscal).
  *
@@ -1987,6 +2240,7 @@ export function externalIdentityToInlineCustomer(
     InvoiceSectionFormatoComponent,
     InvoiceSectionNotasComponent,
     InvoiceSummaryAsideComponent,
+    InvoiceDraftScanModalComponent,
     ModalComponent,
   ],
   template: `
@@ -2101,6 +2355,100 @@ export function externalIdentityToInlineCustomer(
             captura, una por documento y otra preconfigurada, y separarlas
             distinto haría que la segunda no se leyera como espejo de la primera.
           -->
+          <!--
+            «CARGAR DOCUMENTOS» (escáner IA). Un atajo, no un paso: la IA lee
+            la cotización, la orden de compra o el RUT del cliente y arma un
+            BORRADOR sobre este mismo formulario. Nada se emite ni se crea:
+            lo leído queda marcado (acento = IA, ámbar = revisar) y el botón
+            de emisión sigue siendo el de siempre.
+          -->
+          <div
+            class="flex flex-col gap-2 rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p
+              class="flex items-start gap-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+            >
+              <app-icon
+                name="sparkles"
+                [size]="14"
+                class="mt-0.5 shrink-0 text-[var(--color-primary)]"
+              />
+              @if (draftAcquirerResolving()) {
+                <span role="status">Buscando al adquiriente del borrador…</span>
+              } @else {
+                <span>
+                  ¿Tienes la cotización, la orden de compra o el RUT del cliente?
+                  La IA arma el borrador por ti.
+                </span>
+              }
+            </p>
+            <app-button
+              variant="outline"
+              size="sm"
+              type="button"
+              [disabled]="draftCreated()"
+              (clicked)="draftScanOpen.set(true)"
+            >
+              <app-icon slot="icon" name="upload" [size]="14" />
+              Cargar documentos
+            </app-button>
+          </div>
+
+          @if (draftNotice(); as notice) {
+            <app-alert-banner variant="info" icon="sparkles" tone="token">
+              Borrador cargado con IA desde {{ notice.documents }}
+              {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Revisa
+              los campos marcados antes de emitir.
+              <span class="mt-1 block text-xs font-normal">
+                Borde de acento: lo leyó la IA. Borde ámbar: no lo encontró o
+                no está segura.
+              </span>
+              @if (notice.acquirer) {
+                <span class="mt-1 block text-xs font-normal">
+                  {{ notice.acquirer }}
+                </span>
+              }
+              @if (notice.pending.length > 0) {
+                <span class="mt-1 block text-xs font-normal">
+                  Por revisar: {{ notice.pending.join(', ') }}.
+                </span>
+              }
+              @if (notice.noteApplied) {
+                <span class="mt-1 block text-xs font-normal">
+                  Indicación aplicada: {{ notice.noteApplied }}
+                </span>
+              }
+              @if (notice.extractionNotes) {
+                <span class="mt-1 block text-xs font-normal">
+                  Nota de la lectura: {{ notice.extractionNotes }}
+                </span>
+              }
+              @if (notice.totalsInconsistent) {
+                <span class="mt-1 block text-xs font-medium text-warning">
+                  Los totales del documento no cuadran con sus líneas
+                  @if (notice.documentTotal !== null) {
+                    (el documento dice {{ formatCurrency(notice.documentTotal) }})
+                  }: compáralo con el resumen antes de emitir.
+                </span>
+              }
+              @if (notice.unresolved.length > 0) {
+                <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs font-normal">
+                  @for (item of notice.unresolved; track item) {
+                    <li>{{ item }}</li>
+                  }
+                </ul>
+              }
+              <button
+                bannerActions
+                type="button"
+                class="mt-1.5 text-xs font-semibold text-[var(--color-primary)] underline underline-offset-2"
+                (click)="draftNotice.set(null)"
+              >
+                Cerrar aviso
+              </button>
+            </app-alert-banner>
+          }
+
           <form [formGroup]="invoiceForm" class="space-y-6">
             <!-- ── DOCUMENTO ─────────────────────────────────────── -->
             <vendix-invoice-form-section
@@ -2154,6 +2502,7 @@ export function externalIdentityToInlineCustomer(
                 [errors]="documentoErrors()"
                 [dueDateRequired]="isCredit()"
                 [dueDateHelp]="dueDateHelp()"
+                [fieldMarks]="draftHeaderMarks()"
                 (invoiceTypeChanged)="onInvoiceTypeChange()"
                 (paymentFormChanged)="onPaymentFormChange()"
                 (issueDateChanged)="syncDueDate()"
@@ -2395,7 +2744,7 @@ export function externalIdentityToInlineCustomer(
                   fija syncLinkedCustomerIdentityLock con
                   control.disable()/enable().
                 -->
-                <div [ngClass]="missingFieldClass('customer_document_type')">
+                <div [ngClass]="acquirerFieldClass('customer_document_type')">
                   <app-selector
                     label="Tipo de identificación"
                     formControlName="customer_document_type"
@@ -2407,6 +2756,7 @@ export function externalIdentityToInlineCustomer(
                 <app-input
                   label="Número de documento"
                   formControlName="customer_tax_id"
+                  [ngClass]="acquirerFieldClass('customer_tax_id')"
                   [control]="control('customer_tax_id')"
                   [error]="fieldError('customer_tax_id')"
                   [placeholder]="customerTaxIdPlaceholder()"
@@ -2442,13 +2792,14 @@ export function externalIdentityToInlineCustomer(
                   <app-selector
                     label="Tipo de persona"
                     formControlName="customer_person_type"
+                    [ngClass]="acquirerFieldClass('customer_person_type')"
                     [options]="customerPersonTypeOptions"
                     size="sm"
                   ></app-selector>
                 }
               </div>
 
-              <div class="mt-3" [ngClass]="missingFieldClass('customer_name')">
+              <div class="mt-3" [ngClass]="acquirerFieldClass('customer_name')">
                 <app-input
                   [label]="customerNameLabel()"
                   [placeholder]="customerNamePlaceholder()"
@@ -2462,7 +2813,7 @@ export function externalIdentityToInlineCustomer(
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                <div [ngClass]="missingFieldClass('customer_address')">
+                <div [ngClass]="acquirerFieldClass('customer_address')">
                   <app-input
                     label="Dirección fiscal"
                     placeholder="Ej. Cra 10 # 20-30, Of. 401"
@@ -2485,7 +2836,7 @@ export function externalIdentityToInlineCustomer(
                   </label>
                   <div
                     id="customer_municipality_code"
-                    [ngClass]="missingFieldClass('customer_municipality_code')"
+                    [ngClass]="acquirerFieldClass('customer_municipality_code')"
                   >
                     <app-dian-municipality-select
                       formControlName="customer_municipality_code"
@@ -2531,6 +2882,7 @@ export function externalIdentityToInlineCustomer(
                       label="Correo"
                       type="email"
                       formControlName="customer_email"
+                      [ngClass]="acquirerFieldClass('customer_email')"
                       [control]="control('customer_email')"
                       [error]="fieldError('customer_email')"
                       placeholder="cliente@dominio.com"
@@ -2540,6 +2892,7 @@ export function externalIdentityToInlineCustomer(
                     <app-input
                       label="Teléfono"
                       formControlName="customer_phone"
+                      [ngClass]="acquirerFieldClass('customer_phone')"
                       [control]="control('customer_phone')"
                       [error]="fieldError('customer_phone')"
                       size="sm"
@@ -2549,6 +2902,7 @@ export function externalIdentityToInlineCustomer(
                     <app-selector
                       label="Régimen tributario"
                       formControlName="customer_tax_regime"
+                      [ngClass]="acquirerFieldClass('customer_tax_regime')"
                       [options]="taxRegimeOptions"
                       [errorText]="fieldError('customer_tax_regime') ?? ''"
                       placeholder="Sin declarar"
@@ -2568,7 +2922,11 @@ export function externalIdentityToInlineCustomer(
                 cerraría en seco — el archivo deja de parsear con un «',' expected»
                 que apunta a esta línea y no explica nada.
               -->
-              <fieldset id="customer_fiscal_responsibilities" class="mt-3">
+              <fieldset
+                id="customer_fiscal_responsibilities"
+                class="mt-3"
+                [ngClass]="acquirerFieldClass('customer_fiscal_responsibilities')"
+              >
                 <legend
                   class="text-xs font-medium text-[var(--color-text-secondary)] mb-1"
                 >
@@ -3194,6 +3552,7 @@ export function externalIdentityToInlineCustomer(
                 [carriesAiu]="lineCarriesAiuBound"
                 [toggleAiu]="toggleLineAiuBound"
                 [availableTaxes]="availableTaxes()"
+                [rowMarks]="lineasRowMarks()"
                 emptyStateText="Una factura sin líneas no es una factura: quemaría un consecutivo autorizado para declarar un total de cero."
                 (openProductPicker)="openProductPicker($event)"
                 (openAdvancedItem)="openAdvancedItem($event)"
@@ -3836,6 +4195,12 @@ export function externalIdentityToInlineCustomer(
       [isEditing]="customItemEditing()"
       (saved)="onCustomItemSaved($event)"
       (closed)="customItemOpen.set(false)"
+    />
+
+    <!-- «Cargar documentos»: el modal sólo lee; aplicar es de la página. -->
+    <vendix-invoice-draft-scan-modal
+      [(isOpen)]="draftScanOpen"
+      (scanned)="onDraftScanned($event)"
     />
 
     <!--
@@ -5505,6 +5870,40 @@ export class InvoiceCreatePageComponent implements OnInit {
   /** «Más datos» del adquiriente (correo, teléfono, régimen, RUT) desplegado. */
   readonly acquirerMoreOpen = signal(false);
 
+  // ── Borrador IA («Cargar documentos») ───────────────────────
+
+  readonly draftScanOpen = signal(false);
+  /** Aviso tras aplicar un borrador; `null` = cerrado o sin borrador. */
+  readonly draftNotice = signal<InvoiceDraftNotice | null>(null);
+  /** `true` mientras se busca el adquiriente del borrador (tienda → org → RUES). */
+  readonly draftAcquirerResolving = signal(false);
+  /**
+   * Marcas «IA»/«Revisar» de cabecera y adquiriente, por nombre de control.
+   * Se pasan tal cual a `[fieldMarks]` de la sección Documento (sus rutas son
+   * los mismos nombres) y las lee `acquirerFieldClass`.
+   */
+  readonly draftHeaderMarks = signal<InvoiceFieldMarks>({});
+  /**
+   * Marcas de fila por `row_uid`, no por índice: borrar una línea no corre la
+   * marca a la vecina. `lineasRowMarks` las alinea con `itemControls()`.
+   */
+  private readonly draftRowMarks = signal<ReadonlyMap<string, LineasRowMark>>(
+    new Map(),
+  );
+  readonly lineasRowMarks = computed<readonly (LineasRowMark | null)[]>(() => {
+    const marks = this.draftRowMarks();
+    if (marks.size === 0) return [];
+    return this.itemControls().map((row) => marks.get(this.rowUid(row)) ?? null);
+  });
+  /** Suscripciones que sueltan una marca cuando el operador edita el campo. */
+  private draftMarkSubs = new Subscription();
+  /**
+   * Turno del último borrador aplicado. Una respuesta asíncrona (ficha del
+   * cliente, RUES) de un borrador anterior —o de antes de un «Limpiar»— se
+   * descarta en vez de pisar el adquiriente vigente.
+   */
+  private draftApplyToken = 0;
+
   /**
    * Lo que le falta al adquiriente PARA EMITIR, ahora mismo. Misma función
    * pura que alimenta `collectBlockers`, así que lo marcado en rojo junto al
@@ -5560,6 +5959,18 @@ export class InvoiceCreatePageComponent implements OnInit {
     return this.isEmissionMissing(field)
       ? InvoiceCreatePageComponent.MISSING_FIELD_CLASS
       : '';
+  }
+
+  /**
+   * Borde del campo del adquiriente: el rojo de «falta para emitir» manda
+   * sobre la marca del borrador IA (un campo vacío que bloquea es lo primero
+   * que hay que ver); sin faltante, la marca «IA»/«Revisar» si la hay.
+   */
+  acquirerFieldClass(field: string): string {
+    return (
+      this.missingFieldClass(field) ||
+      invoiceFieldMarkClass(this.draftHeaderMarks()[field])
+    );
   }
 
   /**
@@ -7806,6 +8217,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   constructor() {
     this.currencyService.loadCurrency();
     this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
+    this.destroyRef.onDestroy(() => this.draftMarkSubs.unsubscribe());
 
     // PREVALIDACIÓN VIVA. Activa sólo en modo manual y con al menos una línea
     // con descripción (`liveDraftDto` es `null` si no). Un fallo de red se
@@ -8997,6 +9409,8 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   removeItem(index: number): void {
+    const row = this.itemsArray.at(index);
+    if (row) this.dropDraftRowMark(this.rowUid(row));
     this.itemsArray.removeAt(index);
   }
 
@@ -9315,6 +9729,399 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.customerResults.set([]);
     this.externalResult.set(null);
     this.externalLoading.set(false);
+  }
+
+  // ── Borrador IA («Cargar documentos») ───────────────────────
+
+  /**
+   * Vuelca el borrador del escáner al formulario. NADA se emite ni se crea: el
+   * cliente nuevo, si lo hay, viaja como `inline_customer` al emitir —el mismo
+   * camino de RUES— y la factura sale por el botón de siempre.
+   *
+   * Orden fijo: cabecera (patch → `syncDueDate()` → vencimiento, porque en
+   * crédito `syncDueDate` habilita y VACÍA el control), líneas, marcas, aviso
+   * y, al final, el adquiriente, que es asíncrono (ficha / organización / RUES)
+   * y se descarta si entretanto llega otro borrador o se limpia el formulario.
+   */
+  onDraftScanned(result: InvoiceDraftScanResult): void {
+    this.clearDraftMarks();
+    this.draftApplyToken += 1;
+    const token = this.draftApplyToken;
+    const raw = this.invoiceForm.getRawValue() as Record<string, unknown>;
+    const plan = planInvoiceDraft(result, {
+      today: storeToday(this.storeSettingsFacade.timezone()),
+      currentNotes: String(raw['notes'] ?? ''),
+      notesLimit: CONFIG_LIMITS.header_note,
+      foreignCurrencies: this.foreignCurrencyOptions.map((option) =>
+        String(option.value),
+      ),
+      taxes: this.availableTaxes(),
+      currentItems: (Array.isArray(raw['items'])
+        ? raw['items']
+        : []) as InvoiceDraftPlanContext['currentItems'],
+      maxLines: INVOICE_MAX_LINES,
+      descriptionLimit: this.itemDescriptionLimit,
+    });
+
+    // b. Cabecera y pago.
+    if (Object.keys(plan.invoice.patch).length > 0) {
+      this.invoiceForm.patchValue(plan.invoice.patch);
+    }
+    this.syncDueDate();
+    if (plan.invoice.dueDate) {
+      this.control('due_date')?.setValue(plan.invoice.dueDate);
+    }
+    if (plan.invoice.patch['use_foreign_currency'] === true) {
+      this.setSection('divisa', true);
+      this.onExchangeRateInputsChanged();
+    }
+
+    // c. Líneas.
+    const rowMarks = this.applyDraftLines(plan);
+
+    // d. Marcas. Las del adquiriente esperan a saber si es un cliente
+    // existente (sus datos vienen de la ficha, no de la IA) o uno nuevo.
+    const documentMarks: Record<string, InvoiceFieldMark> = {};
+    for (const [path, mark] of Object.entries(plan.headerMarks)) {
+      if (!path.startsWith('customer_')) documentMarks[path] = mark;
+    }
+    this.addDraftHeaderMarks(documentMarks);
+    this.setDraftRowMarks(rowMarks);
+
+    this.setSection('documento', true);
+    if (plan.lines.length > 0) this.setSection('lineas', true);
+    if (plan.hasAcquirer) this.setSection('adquiriente', true);
+
+    // e. Aviso.
+    this.draftNotice.set(plan.notice);
+
+    // a. Adquiriente.
+    if (plan.hasAcquirer) this.resolveDraftAcquirer(result, plan, token);
+  }
+
+  /**
+   * Escribe las líneas del plan y devuelve sus marcas por `row_uid`. Sin
+   * líneas leídas no toca nada. Al AGREGAR se descartan antes las filas en
+   * blanco: no son trabajo de nadie y dejarían la factura con una línea sin
+   * descripción entre las leídas.
+   */
+  private applyDraftLines(plan: InvoiceDraftPlan): Map<string, LineasRowMark> {
+    const marks = new Map<string, LineasRowMark>();
+    if (plan.lines.length === 0) return marks;
+    if (plan.replaceLines) {
+      this.itemsArray.clear();
+    } else {
+      for (let i = this.itemsArray.length - 1; i >= 0; i--) {
+        const row = this.itemsArray.at(i);
+        if (!isCapturedInvoiceLine(row.getRawValue())) {
+          this.dropDraftRowMark(this.rowUid(row));
+          this.itemsArray.removeAt(i);
+        }
+      }
+    }
+    for (const line of plan.lines) {
+      const group = this.appendItem();
+      if (!group) break;
+      // `product_variant_id` no tiene control en la fila: `patchValue` lo
+      // ignora (ver el reporte del escáner).
+      group.patchValue(line.value);
+      marks.set(this.rowUid(group), line.mark);
+    }
+    if (this.itemsArray.length === 0) this.appendItem();
+    return marks;
+  }
+
+  /**
+   * Adquiriente del borrador, de más a menos resuelto: el cliente que el
+   * backend ya reconoció (`existing_customer_id`), la búsqueda por documento
+   * de la tienda y luego la de la organización (la misma de la tanda A), y si
+   * no existe, cliente nuevo con lo leído más lo que RUES complete.
+   *
+   * El borrador REEMPLAZA al adquiriente que hubiera: se parte de cero, igual
+   * que «Cambiar cliente».
+   */
+  private resolveDraftAcquirer(
+    result: InvoiceDraftScanResult,
+    plan: InvoiceDraftPlan,
+    token: number,
+  ): void {
+    this.changeCustomer();
+    const digits = plan.acquirer.documentDigits;
+    const existingId = Number(result.acquirer.existing_customer_id ?? 0);
+    if (!digits && !(existingId > 0)) {
+      this.applyDraftInlineAcquirer(result, plan, token, false);
+      return;
+    }
+
+    this.draftAcquirerResolving.set(true);
+    const byId$: Observable<Customer | null> =
+      existingId > 0
+        ? this.customersService.getCustomer(existingId).pipe(
+            map((response) => unwrapCustomerResponse(response)),
+            catchError(() => of(null)),
+          )
+        : of(null);
+
+    byId$
+      .pipe(
+        switchMap((found) =>
+          found || !digits ? of(found) : this.findCustomerByDocument(digits),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((found) => {
+        if (token !== this.draftApplyToken) return;
+        this.draftAcquirerResolving.set(false);
+        // El operador eligió un cliente mientras se buscaba: manda él.
+        if (this.invoiceForm.get('customer_id')?.value) return;
+        if (found) {
+          // MISMO flujo que elegirlo en el buscador: precarga toda la ficha y
+          // muestra la tarjeta compacta si está completa. Sin marcas IA: los
+          // datos son los de la ficha, no los leídos.
+          this.selectCustomer(found);
+          this.setDraftAcquirerNotice(
+            `Adquiriente: ${this.customerDisplayName(found)}, cliente existente. Se usaron los datos de su ficha.`,
+          );
+          return;
+        }
+        this.applyDraftInlineAcquirer(result, plan, token, !!digits);
+      });
+  }
+
+  /**
+   * Tienda primero (búsqueda paginada, coincidencia EXACTA de documento) y
+   * luego la organización (`lookupByDocument`, que además lo vincula a la
+   * tienda). `null` si no está en ninguna; los errores también son `null`.
+   */
+  private findCustomerByDocument(digits: string): Observable<Customer | null> {
+    return this.customersService.getCustomers(1, 10, { search: digits }).pipe(
+      map(
+        (response) =>
+          (response?.data ?? []).find(
+            (customer: Customer) =>
+              draftDocumentDigits(customer.document_number) === digits,
+          ) ?? null,
+      ),
+      catchError(() => of(null)),
+      switchMap((found) =>
+        found
+          ? of(found)
+          : this.customersService
+              .lookupByDocument(digits)
+              .pipe(catchError(() => of(null))),
+      ),
+    );
+  }
+
+  /**
+   * Cliente NUEVO con lo leído: los controles del adquiriente, la base del
+   * `inline_customer` (lo que la pantalla no expone, como la sigla del tipo)
+   * y sus marcas. Con documento, RUES completa después lo que falte.
+   */
+  private applyDraftInlineAcquirer(
+    result: InvoiceDraftScanResult,
+    plan: InvoiceDraftPlan,
+    token: number,
+    withRues: boolean,
+  ): void {
+    const patch = plan.acquirer.patch;
+    this.invoiceForm.patchValue({ ...patch, customer_id: null });
+    this.inlineCustomer.set({ ...plan.inlineBase });
+    this.linkedCustomer.set(null);
+    const name = String(patch['customer_name'] ?? '').trim();
+    this.linkedCustomerLabel.set(name ? name + ' (se creará al emitir)' : null);
+
+    const acquirerMarks: Record<string, InvoiceFieldMark> = {};
+    for (const [path, mark] of Object.entries(plan.headerMarks)) {
+      if (path.startsWith('customer_')) acquirerMarks[path] = mark;
+    }
+    // Una marca plegada en «Más datos» es una marca que nadie ve.
+    if (
+      Object.keys(acquirerMarks).some((path) =>
+        InvoiceCreatePageComponent.ACQUIRER_MORE_FIELDS.has(path),
+      )
+    ) {
+      this.acquirerMoreOpen.set(true);
+    }
+    this.addDraftHeaderMarks(acquirerMarks);
+    this.setDraftAcquirerNotice(
+      name
+        ? `Adquiriente nuevo: ${name}. Se creará como cliente al emitir la factura.`
+        : 'Adquiriente nuevo: se creará como cliente al emitir la factura.',
+    );
+
+    if (withRues) this.completeDraftAcquirerFromRues(result, plan, token);
+  }
+
+  /**
+   * RUES / fuentes públicas completan el adquiriente nuevo SIN pisar lo que
+   * la IA leyó con buena confianza: el nombre y el tipo de persona sólo se
+   * toman de RUES si la IA no los trajo o los trajo con confianza baja. Lo que
+   * RUES escribe suelta su marca (dato oficial, no propuesta de la IA).
+   */
+  private completeDraftAcquirerFromRues(
+    result: InvoiceDraftScanResult,
+    plan: InvoiceDraftPlan,
+    token: number,
+  ): void {
+    const digits = plan.acquirer.documentDigits;
+    this.draftAcquirerResolving.set(true);
+    this.customersService
+      .lookupExternalByDocument(digits)
+      .pipe(
+        // RUES caído no tumba el borrador: queda lo que leyó la IA.
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((response) => {
+        if (token !== this.draftApplyToken) return;
+        this.draftAcquirerResolving.set(false);
+        const identity = response?.found ? response.identity : null;
+        if (!identity) return;
+        // Se descarta si el operador cambió de adquiriente entretanto.
+        if (this.invoiceForm.get('customer_id')?.value) return;
+        if (
+          draftDocumentDigits(this.invoiceForm.get('customer_tax_id')?.value) !==
+          digits
+        ) {
+          return;
+        }
+
+        const acquirer = result.acquirer;
+        const weak = (field: DraftField<unknown>): boolean =>
+          !hasDraftValue(field) || field.confidence < DRAFT_LOW_CONFIDENCE;
+        const external = externalIdentityToInlineCustomer(identity);
+        const ruesName = (
+          external.legal_name ||
+          [external.first_name, external.last_name].filter(Boolean).join(' ')
+        ).trim();
+        const raw = this.invoiceForm.getRawValue() as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        const inlinePatch: Partial<CreateCustomerRequest> = {};
+
+        if (
+          ruesName &&
+          (!String(raw['customer_name'] ?? '').trim() || weak(acquirer.name))
+        ) {
+          patch['customer_name'] = ruesName;
+          inlinePatch.first_name = external.first_name;
+          inlinePatch.last_name = external.last_name;
+          inlinePatch.legal_name = external.legal_name ?? null;
+        }
+        if (
+          identity.person_type &&
+          this.isNitCustomer() &&
+          weak(acquirer.person_type)
+        ) {
+          patch['customer_person_type'] = identity.person_type;
+          inlinePatch.person_type = identity.person_type;
+        }
+        if (Object.keys(patch).length === 0) return;
+
+        this.invoiceForm.patchValue(patch);
+        this.inlineCustomer.update((current) =>
+          current
+            ? {
+                ...current,
+                ...inlinePatch,
+                document_type: current.document_type || external.document_type,
+              }
+            : current,
+        );
+        const name = String(
+          this.invoiceForm.get('customer_name')?.value ?? '',
+        ).trim();
+        if (name) this.linkedCustomerLabel.set(name + ' (se creará al emitir)');
+        this.setDraftAcquirerNotice(
+          `Adquiriente nuevo: ${name || 'sin nombre'}. Completado con RUES; se creará como cliente al emitir la factura.`,
+        );
+      });
+  }
+
+  private setDraftAcquirerNotice(text: string): void {
+    this.draftNotice.update((notice) =>
+      notice ? { ...notice, acquirer: text } : notice,
+    );
+  }
+
+  /**
+   * Agrega marcas de cabecera/adquiriente y suelta cada una la PRIMERA vez
+   * que su control cambia: lo que el operador escribe ya no es una propuesta
+   * de la IA. Se suscribe DESPUÉS de escribir el borrador, así que el propio
+   * patch no la suelta.
+   */
+  private addDraftHeaderMarks(marks: Record<string, InvoiceFieldMark>): void {
+    const paths = Object.keys(marks);
+    if (paths.length === 0) return;
+    this.draftHeaderMarks.update((current) => ({ ...current, ...marks }));
+    for (const path of paths) {
+      const control = this.invoiceForm.get(path);
+      if (!control) continue;
+      this.draftMarkSubs.add(
+        control.valueChanges
+          .pipe(take(1))
+          .subscribe(() => this.dropDraftHeaderMark(path)),
+      );
+    }
+  }
+
+  private dropDraftHeaderMark(path: string): void {
+    this.draftHeaderMarks.update((current) => {
+      if (!(path in current)) return current;
+      const next: Record<string, InvoiceFieldMark> = { ...current };
+      delete next[path];
+      return next;
+    });
+  }
+
+  /** Marcas de fila + el mismo «se suelta al editar» por campo de la fila. */
+  private setDraftRowMarks(marks: Map<string, LineasRowMark>): void {
+    this.draftRowMarks.set(marks);
+    for (const [uid, mark] of marks) {
+      const row = this.itemsArray.controls.find(
+        (control) => this.rowUid(control) === uid,
+      );
+      if (!row) continue;
+      for (const field of new Set([...mark.ai, ...mark.pending])) {
+        // `product` no es un control: lo representa el vínculo al catálogo.
+        const control = row.get(field === 'product' ? 'product_id' : field);
+        if (!control) continue;
+        this.draftMarkSubs.add(
+          control.valueChanges
+            .pipe(take(1))
+            .subscribe(() => this.dropDraftRowField(uid, field)),
+        );
+      }
+    }
+  }
+
+  private dropDraftRowField(uid: string, field: string): void {
+    this.draftRowMarks.update((current) => {
+      const mark = current.get(uid);
+      if (!mark) return current;
+      const next = new Map(current);
+      const reduced = dropRowMarkField(mark, field);
+      if (reduced) next.set(uid, reduced);
+      else next.delete(uid);
+      return next;
+    });
+  }
+
+  private dropDraftRowMark(uid: string): void {
+    if (!this.draftRowMarks().has(uid)) return;
+    this.draftRowMarks.update((current) => {
+      const next = new Map(current);
+      next.delete(uid);
+      return next;
+    });
+  }
+
+  /** Sin marcas ni suscripciones: otro borrador o el formulario limpio. */
+  private clearDraftMarks(): void {
+    this.draftMarkSubs.unsubscribe();
+    this.draftMarkSubs = new Subscription();
+    this.draftHeaderMarks.set({});
+    this.draftRowMarks.set(new Map());
   }
 
   /**
@@ -10854,6 +11661,12 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   private resetForm(): void {
+    // Formulario limpio = sin borrador IA: ni marcas, ni aviso, ni respuestas
+    // asíncronas pendientes del adquiriente.
+    this.clearDraftMarks();
+    this.draftNotice.set(null);
+    this.draftApplyToken += 1;
+    this.draftAcquirerResolving.set(false);
     this.itemsArray.clear();
     this.withholdingsArray.clear();
     // LA MATRIZ AIU TAMBIÉN. Un `reset()` no vacía un `FormArray`: le pone
