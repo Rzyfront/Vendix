@@ -11102,6 +11102,39 @@ model platform_settings {
   updated_at         DateTime @default(now()) @db.Timestamp(6)
 }
 
+/// Clientes EXTERNOS de la plataforma: adquirientes a los que Vendix factura
+/// electrónicamente desde el riel super-admin y que no son tenants (stores /
+/// organizations / users). Se alimenta con un upsert al emitir
+/// `POST superadmin/subscriptions/fiscal/sales-invoices` con
+/// `customer.kind = 'external'`, para que el buscador del picker
+/// (`customers/search`, kind `customer`) los ofrezca en la siguiente factura.
+/// Tabla global (sin organization_id/store_id): pertenece a la plataforma.
+model platform_customers {
+  id                      Int       @id @default(autoincrement())
+  /// Código DIAN del documento: '31' NIT, '13' CC, '22' CE, '41' pasaporte...
+  document_type           String    @db.VarChar(10)
+  tax_id                  String    @db.VarChar(50)
+  tax_id_dv               String?   @db.VarChar(1)
+  legal_name              String    @db.VarChar(255)
+  /// '1' Persona Jurídica / '2' Persona Natural (cbc:AdditionalAccountID).
+  person_type             String?   @db.VarChar(1)
+  /// '48' responsable de IVA / '49' no responsable.
+  tax_regime_code         String?   @db.VarChar(10)
+  fiscal_responsibilities String[]  @default([])
+  email                   String?   @db.VarChar(255)
+  phone                   String?   @db.VarChar(50)
+  address_line            String?   @db.VarChar(255)
+  city                    String?   @db.VarChar(100)
+  city_code               String?   @db.VarChar(10)
+  department_code         String?   @db.VarChar(10)
+  last_invoiced_at        DateTime? @db.Timestamp(6)
+  created_at              DateTime  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@unique([document_type, tax_id], map: "platform_customers_document_type_tax_id_key")
+  @@index([tax_id], map: "platform_customers_tax_id_idx")
+}
+
 /// Audit row that records when a single organization consumed its
 /// platform-wide auto-trial. The UNIQUE constraint on `organization_id`
 /// is the enforcement primitive that makes "one trial per org, ever"

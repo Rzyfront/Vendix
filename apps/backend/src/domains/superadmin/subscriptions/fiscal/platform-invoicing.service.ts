@@ -13,7 +13,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
-import { PlatformTenantsService } from './platform-tenants.service';
+import {
+  PlatformTenantsService,
+  toDianDocumentType,
+} from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
 import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
@@ -269,6 +272,12 @@ document_type: args.dto.customer.document_type ?? '31',
     const legacyDto = this.mapMvpV1ToLegacyCreateDto(args.dto, tenant);
     const legacyResult = await this.subscriptionFiscalService.createPlatformInvoice(legacyDto);
 
+    // El documento ya existe (aceptado o rechazado por la DIAN, el número quedó
+    // quemado): el adquiriente externo se recuerda para la próxima factura.
+    if (args.dto.customer?.kind === 'external') {
+      await this.rememberExternalCustomer(tenant);
+    }
+
     if (args.dto.save_as_profile?.name) {
       try {
         // Delega en `PlatformProfilesService.create`, que es el unico camino que
@@ -341,6 +350,86 @@ document_type: args.dto.customer.document_type ?? '31',
       error_message: legacyResult.error_message,
       idempotent_replay: legacyResult.idempotent_replay ?? false,
     };
+  }
+
+  /**
+   * Upsert del adquiriente externo en `platform_customers` (clave
+   * `document_type + tax_id`), para que `customers/search` lo ofrezca como
+   * kind `customer` en la siguiente factura.
+   *
+   * POR QUÉ FUERA DE LA TRANSACCIÓN DE EMISIÓN Y NO-FATAL: la emisión
+   * (`createPlatformInvoice`) firma, consume un consecutivo autorizado y habla
+   * con la DIAN; ese resultado es irreversible. Atar el directorio de clientes
+   * a esa transacción haría que un fallo accesorio (p. ej. la tabla aún no
+   * migrada) revirtiera —o tumbara la respuesta de— una factura ya timbrada.
+   * Mismo criterio que `save_as_profile`: se intenta después y un fallo queda
+   * en WARN. El costo es que el directorio puede perder una fila; la factura y
+   * su snapshot en `fiscal_evidences` siguen siendo la fuente de verdad.
+   *
+   * Actualiza los datos con lo facturado y mueve `last_invoiced_at`; un campo
+   * opcional vacío en esta factura NO borra el valor que ya estaba guardado.
+   */
+  private async rememberExternalCustomer(tenant: any): Promise<void> {
+    const taxId = typeof tenant?.tax_id === 'string' ? tenant.tax_id.trim() : '';
+    if (!taxId) return;
+    const documentType = toDianDocumentType(tenant.document_type) ?? '31';
+    const legalName = String(tenant.legal_name ?? '').trim();
+    if (!legalName) return;
+
+    const opt = (v: unknown): string | null => {
+      if (typeof v !== 'string') return null;
+      const t = v.trim();
+      return t ? t : null;
+    };
+    const responsibilities = Array.isArray(tenant.fiscal_responsibilities)
+      ? tenant.fiscal_responsibilities.filter(
+          (c: unknown): c is string => typeof c === 'string' && !!c.trim(),
+        )
+      : [];
+    const fields = {
+      tax_id_dv: documentType === '31' ? opt(tenant.tax_id_dv) : null,
+      person_type: opt(tenant.person_type),
+      tax_regime_code: opt(tenant.tax_regime_code),
+      email: opt(tenant.email),
+      phone: opt(tenant.phone),
+      address_line: opt(tenant.address?.line),
+      city: opt(tenant.address?.city),
+      city_code: opt(tenant.address?.city_code),
+      department_code: opt(tenant.address?.department_code),
+    };
+    const now = new Date();
+    // En UPDATE sólo viaja lo que trae valor: `null` no pisa lo guardado.
+    const updateFields = Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== null),
+    );
+
+    try {
+      await (this.prismaClient as PrismaClient).platform_customers.upsert({
+        where: {
+          document_type_tax_id: { document_type: documentType, tax_id: taxId },
+        },
+        create: {
+          document_type: documentType,
+          tax_id: taxId,
+          legal_name: legalName,
+          ...fields,
+          fiscal_responsibilities: responsibilities,
+          last_invoiced_at: now,
+        },
+        update: {
+          legal_name: legalName,
+          ...updateFields,
+          ...(responsibilities.length
+            ? { fiscal_responsibilities: responsibilities }
+            : {}),
+          last_invoiced_at: now,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo registrar el cliente externo ${documentType}:${taxId} en platform_customers: ${err}`,
+      );
+    }
   }
 
   /**

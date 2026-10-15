@@ -717,6 +717,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.platform_settings;
   }
 
+  // Clientes externos del riel de facturación de plataforma (tabla global).
+  get platform_customers() {
+    return this.baseClient.platform_customers;
+  }
+
   get commission_accrual_pending() {
     return this.baseClient.commission_accrual_pending;
   }
