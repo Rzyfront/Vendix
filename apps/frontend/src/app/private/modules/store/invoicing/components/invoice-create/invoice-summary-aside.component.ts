@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import {
   SaveRequirement,
@@ -29,12 +30,18 @@ export interface InvoiceSummaryTotals {
  *
  * Jerarquía: desglose en texto secundario con cifras a la derecha y dígitos
  * tabulares; TOTAL en bloque tintado con el token primario (neto y «Son:»
- * subordinados); estado con ícono + texto; acciones en tres niveles.
+ * subordinados); estado con ícono + texto; acciones en tres niveles dentro de
+ * su propia sección.
+ *
+ * «Emitir directamente» (sólo si `showEmitToggle`): el aside sólo pinta el
+ * conmutador y publica el cambio por `emitImmediately` (model); el estado lo
+ * es la página, que lo reinicia a apagado en cada factura. Encendido, el botón
+ * principal dice `emitSubmitLabel` en vez de `submitLabel`.
  */
 @Component({
   selector: 'vendix-invoice-summary-aside',
   standalone: true,
-  imports: [ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [ButtonComponent, IconComponent, ToggleComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="w-full space-y-4">
@@ -218,11 +225,35 @@ export interface InvoiceSummaryTotals {
             </ul>
           </details>
         }
+
+        @if (showEmitToggle()) {
+          <div class="mt-3 flex items-start justify-between gap-3 border-t border-border pt-3">
+            <div class="min-w-0">
+              <p class="text-xs font-semibold text-text-primary">Emitir directamente</p>
+              <p class="mt-0.5 text-[11px] leading-snug text-text-secondary">
+                Al crear, la factura se numera y se envía a la DIAN de inmediato.
+              </p>
+            </div>
+            <app-toggle
+              class="shrink-0"
+              data-testid="emit-immediately-toggle"
+              ariaLabel="Emitir directamente"
+              [checked]="emitImmediately()"
+              [disabled]="busy() || !canSubmit()"
+              (changed)="emitImmediately.set($event)"
+            />
+          </div>
+        }
       </section>
 
-      <!-- ACCIONES: primaria a todo el ancho; Validar y Vista previa en fila
-           de dos; Cancelar como acción terciaria. -->
-      <div class="space-y-2">
+      <!-- ACCIONES: sección propia (fondo y borde sólidos). Primaria a todo el
+           ancho; Validar y Vista previa en fila de dos (outline); Cancelar
+           como acción destructiva tenue (outline-danger). -->
+      <section
+        class="space-y-2 rounded-2xl border border-border bg-surface p-4 shadow-sm"
+        aria-label="Acciones de la factura"
+        data-testid="invoice-summary-actions"
+      >
         <app-button
           type="button"
           variant="primary"
@@ -234,7 +265,7 @@ export interface InvoiceSummaryTotals {
           (clicked)="submit.emit()"
         >
           <app-icon slot="icon" name="send" [size]="15" />
-          {{ submitLabel() }}
+          {{ effectiveSubmitLabel() }}
         </app-button>
         <div class="grid grid-cols-2 gap-2">
           <app-button
@@ -263,7 +294,7 @@ export interface InvoiceSummaryTotals {
         </div>
         <app-button
           type="button"
-          variant="ghost"
+          variant="outline-danger"
           size="sm"
           [fullWidth]="true"
           class="w-full justify-center"
@@ -272,7 +303,7 @@ export interface InvoiceSummaryTotals {
         >
           Cancelar
         </app-button>
-      </div>
+      </section>
     </div>
   `,
 })
@@ -286,6 +317,18 @@ export class InvoiceSummaryAsideComponent {
   readonly canSubmit = input(true);
   /** `false` cuando la página aún no tiene cifras propias (p. ej. desde pedido). */
   readonly showTotals = input(true);
+  /** Pinta «Emitir directamente» en Estado (sólo la captura manual de tienda). */
+  readonly showEmitToggle = input(false);
+  /** Estado del conmutador; dueño: la página. Siempre arranca apagado. */
+  readonly emitImmediately = model(false);
+  /** Texto del botón principal con «Emitir directamente» encendido. */
+  readonly emitSubmitLabel = input('Crear y emitir');
+
+  readonly effectiveSubmitLabel = computed(() =>
+    this.showEmitToggle() && this.emitImmediately()
+      ? this.emitSubmitLabel()
+      : this.submitLabel(),
+  );
 
   readonly submit = output<void>();
   readonly validate = output<void>();

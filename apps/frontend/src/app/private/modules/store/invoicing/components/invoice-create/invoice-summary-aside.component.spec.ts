@@ -1,10 +1,13 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 
 import {
   InvoiceSummaryAsideComponent,
   type InvoiceSummaryTotals,
 } from './invoice-summary-aside.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import type { SaveRequirement } from '../../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 
 /**
@@ -126,5 +129,99 @@ describe('InvoiceSummaryAsideComponent · humo de render', () => {
     fixture.componentRef.setInput('canSubmit', false);
     fixture.detectChanges();
     expect(buttonByText('Crear factura')!.disabled).toBeTrue();
+  });
+
+  const buttonVariant = (label: string): string | undefined =>
+    fixture.debugElement
+      .queryAll(By.directive(ButtonComponent))
+      .find((de) => ((de.nativeElement as HTMLElement).textContent ?? '').includes(label))
+      ?.componentInstance.variant();
+
+  const toggleButton = (): HTMLButtonElement | null =>
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-testid="emit-immediately-toggle"] button',
+    );
+
+  it('las acciones viven en su propia sección sólida', () => {
+    const section = (fixture.nativeElement as HTMLElement).querySelector(
+      'section[data-testid="invoice-summary-actions"]',
+    );
+    expect(section).not.toBeNull();
+    expect(section!.className).toContain('rounded-2xl');
+    expect(section!.className).toContain('border-border');
+    expect(section!.className).toContain('bg-surface');
+    expect(section!.textContent).toContain('Crear factura');
+    expect(section!.textContent).toContain('Validar');
+    expect(section!.textContent).toContain('Vista previa');
+    expect(section!.textContent).toContain('Cancelar');
+  });
+
+  it('variantes: primaria, Validar/Vista previa outline y Cancelar outline-danger', () => {
+    expect(buttonVariant('Crear factura')).toBe('primary');
+    expect(buttonVariant('Validar')).toBe('outline');
+    expect(buttonVariant('Vista previa')).toBe('outline');
+    expect(buttonVariant('Cancelar')).toBe('outline-danger');
+  });
+
+  describe('«Emitir directamente»', () => {
+    it('sin showEmitToggle no se pinta', () => {
+      expect(text()).not.toContain('Emitir directamente');
+      expect(toggleButton()).toBeNull();
+    });
+
+    it('con showEmitToggle arranca APAGADO y el botón dice «Crear factura»', () => {
+      fixture.componentRef.setInput('showEmitToggle', true);
+      fixture.detectChanges();
+      expect(text()).toContain('Emitir directamente');
+      expect(text()).toContain('se envía a la DIAN de inmediato');
+      expect(component.emitImmediately()).toBeFalse();
+      expect(toggleButton()!.getAttribute('aria-pressed')).toBe('false');
+      expect(buttonByText('Crear factura')).toBeDefined();
+      expect(text()).not.toContain('Crear y emitir');
+    });
+
+    it('al encenderlo emite el cambio y el botón dice «Crear y emitir»', () => {
+      fixture.componentRef.setInput('showEmitToggle', true);
+      fixture.detectChanges();
+      const changes: boolean[] = [];
+      component.emitImmediately.subscribe((value) => changes.push(value));
+
+      toggleButton()!.click();
+      fixture.detectChanges();
+
+      expect(changes).toEqual([true]);
+      expect(component.emitImmediately()).toBeTrue();
+      expect(buttonByText('Crear y emitir')).toBeDefined();
+      expect(text()).not.toContain('Crear factura');
+    });
+
+    it('la página lo reinicia: emitImmediately=false vuelve a apagarlo', () => {
+      fixture.componentRef.setInput('showEmitToggle', true);
+      fixture.componentRef.setInput('emitImmediately', true);
+      fixture.detectChanges();
+      expect(buttonByText('Crear y emitir')).toBeDefined();
+
+      fixture.componentRef.setInput('emitImmediately', false);
+      fixture.detectChanges();
+      expect(toggleButton()!.getAttribute('aria-pressed')).toBe('false');
+      expect(buttonByText('Crear factura')).toBeDefined();
+    });
+
+    it('respeta submitLabel apagado y emitSubmitLabel encendido', () => {
+      fixture.componentRef.setInput('showEmitToggle', true);
+      fixture.componentRef.setInput('submitLabel', 'Generar');
+      fixture.detectChanges();
+      expect(buttonByText('Generar')).toBeDefined();
+      fixture.componentRef.setInput('emitImmediately', true);
+      fixture.detectChanges();
+      expect(buttonByText('Crear y emitir')).toBeDefined();
+    });
+
+    it('sin showEmitToggle, aunque llegue encendido, el botón no promete emitir', () => {
+      fixture.componentRef.setInput('emitImmediately', true);
+      fixture.detectChanges();
+      expect(buttonByText('Crear factura')).toBeDefined();
+      expect(fixture.debugElement.query(By.directive(ToggleComponent))).toBeNull();
+    });
   });
 });

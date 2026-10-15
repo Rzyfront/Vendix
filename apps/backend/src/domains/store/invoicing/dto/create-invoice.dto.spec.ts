@@ -69,6 +69,8 @@ const FRONTEND_INVOICE_KEYS = [
   'due_date',
   'notes',
   'items',
+  // «Emitir directamente» del resumen de «Nueva factura».
+  'emit_immediately',
 ] as const;
 
 /** Claves de cada línea (`itemsPayload`, mismas líneas del componente). */
@@ -130,6 +132,7 @@ const FRONTEND_INVOICE_SAMPLE: Record<string, unknown> = {
   due_date: isoDay(30),
   notes: 'Gracias por su compra',
   items: [FRONTEND_ITEM_SAMPLE],
+  emit_immediately: true,
 };
 
 /** Payload mínimo válido; base sobre la que cada caso negativo hace un override. */

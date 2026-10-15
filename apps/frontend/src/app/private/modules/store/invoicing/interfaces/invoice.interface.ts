@@ -44,6 +44,8 @@ export function toDianConfigurationType(
 }
 
 export interface Invoice {
+  /** Sólo en la respuesta de crear con `emit_immediately: true`. */
+  emission?: InvoiceEmissionOutcome | null;
   related_invoice_id?: number | null;
   refund_id?: number | null;
   id: number;
@@ -965,6 +967,27 @@ export interface CreateInvoiceDto {
    * Espejo de `InvoiceWithholdingInputDto` del backend.
    */
   withholdings?: InvoiceWithholdingInput[];
+  /**
+   * «Emitir directamente»: tras crear, el backend valida y envía a la DIAN en
+   * la misma petición. Si la emisión falla responde 2xx con la factura y el
+   * desenlace en `Invoice.emission`; la factura nunca se pierde.
+   */
+  emit_immediately?: boolean;
+}
+
+/**
+ * Desenlace de la emisión inmediata (`emit_immediately: true`) que el backend
+ * adjunta a la factura creada. Ausente sin el flag.
+ */
+export interface InvoiceEmissionOutcome {
+  attempted: boolean;
+  success: boolean;
+  phase: 'validate' | 'send' | null;
+  status?: string | null;
+  error_code?: string | null;
+  message?: string | null;
+  http_status?: number | null;
+  details?: unknown;
 }
 
 /**
