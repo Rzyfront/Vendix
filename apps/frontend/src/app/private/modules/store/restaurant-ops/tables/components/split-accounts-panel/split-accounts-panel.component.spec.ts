@@ -130,7 +130,7 @@ describe('SplitAccountsPanelComponent', () => {
     router.navigate.and.resolveTo(true);
     dialog = jasmine.createSpyObj('DialogService', ['confirm']);
     dialog.confirm.and.resolveTo(true);
-    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']);
     await TestBed.configureTestingModule({
       imports: [SplitAccountsPanelComponent],
       providers: [
@@ -157,6 +157,7 @@ describe('SplitAccountsPanelComponent', () => {
             'lookupByDocument',
             'resolveCustomer',
             'searchCustomers',
+            'createCustomerAddress',
           ]),
         },
         {
@@ -491,6 +492,57 @@ describe('SplitAccountsPanelComponent', () => {
       const modal = fixture.debugElement.query(By.directive(CustomerModalComponent));
       expect(modal.componentInstance.initialValues()).toEqual({ first_name: 'Ana' });
       expect(modal.componentInstance.customer()).toBeNull();
+    });
+
+    describe('dirección capturada en crear-mode', () => {
+      const address = {
+        address_line1: 'Calle 10 # 5-20',
+        city: 'Bogotá',
+        state_province: 'Bogotá D.C.',
+        country_code: 'CO',
+        municipality_code: '11001',
+        latitude: 4.6,
+        longitude: -74.08,
+      } as any;
+      const emitAddressAndSave = async () => {
+        component.editPayer(0);
+        component.onPickerCreateNew();
+        fixture.detectChanges();
+        const modal = fixture.debugElement.query(By.directive(CustomerModalComponent));
+        modal.componentInstance.addressData.emit(address);
+        modal.componentInstance.save.emit({ first_name: 'Ana', document_number: '123' });
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      };
+
+      it('persiste la dirección cuando el cliente se crea vía resolve', async () => {
+        await create({ allowCreate: true });
+        const customers = TestBed.inject(CustomersService) as jasmine.SpyObj<CustomersService>;
+        customers.lookupByDocument.and.returnValue(of(null) as any);
+        customers.resolveCustomer.and.returnValue(of({ customer: { ...customer, id: 77 } }) as any);
+        customers.createCustomerAddress.and.returnValue(of({ id: 1 }));
+        await emitAddressAndSave();
+        expect(customers.createCustomerAddress).toHaveBeenCalledTimes(1);
+        expect(customers.createCustomerAddress.calls.argsFor(0)[0]).toEqual(
+          jasmine.objectContaining({
+            customer_id: 77,
+            municipality_code: '11001',
+            address_line_1: 'Calle 10 # 5-20',
+            latitude: '4.6',
+            longitude: '-74.08',
+          }),
+        );
+        expect(component.payers()[0].customer_id).toBe(77);
+      });
+
+      it('no persiste la dirección cuando el lookup encuentra un cliente existente', async () => {
+        await create({ allowCreate: true });
+        const customers = TestBed.inject(CustomersService) as jasmine.SpyObj<CustomersService>;
+        customers.lookupByDocument.and.returnValue(of(customer) as any);
+        await emitAddressAndSave();
+        expect(customers.resolveCustomer).not.toHaveBeenCalled();
+        expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+        expect(component.payers()[0].customer_id).toBe(55);
+      });
     });
   });
 

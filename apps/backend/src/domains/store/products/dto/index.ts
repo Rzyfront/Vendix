@@ -2309,6 +2309,15 @@ export class BulkUploadSessionDto {
   @Min(1)
   @Max(MAX_BULK_UPLOAD_PAGE)
   limit?: number;
+
+  /**
+   * Consentimiento explícito de carga inicial de inventario. Obligatorio
+   * (`true`) cuando el archivo trae filas con "Cantidad Inicial"; sin él el
+   * commit se rechaza (PROD_BULK_INITIAL_LOAD_ACK_001) sin escribir nada.
+   */
+  @IsOptional()
+  @IsBoolean()
+  initial_load_ack?: boolean;
 }
 
 export class BulkUploadItemResultDto {

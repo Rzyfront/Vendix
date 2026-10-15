@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -16,6 +17,7 @@ const ADJUSTMENT_TYPES: AdjustmentType[] = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ];
 
 /**
@@ -54,6 +56,7 @@ export class CreateAdjustmentDto {
   @Min(1)
   batch_id?: number;
 
+  /** initial_load requiere saldo actual 0 y delta positivo (validado en servicio). */
   @IsIn(ADJUSTMENT_TYPES)
   type: AdjustmentType;
 
@@ -65,6 +68,16 @@ export class CreateAdjustmentDto {
   @IsInt()
   @Min(0)
   quantity_after: number;
+
+  /**
+   * Costo unitario de entrada (sólo relevante para `initial_load` con
+   * cantidad positiva). Si falta, se resuelve del costo del producto.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unit_cost?: number;
 
   @IsOptional()
   @IsString()

@@ -68,6 +68,15 @@ export class BulkProductAnalysisItemDto {
   variants?: BulkVariantAnalysisItemDto[];
 }
 
+export class BulkInitialLoadSummaryDto {
+  /** Filas físicas sin variantes con "Cantidad Inicial" válida (>= 0). */
+  rows_with_quantity: number;
+  /** Suma de unidades de esas filas. */
+  total_units: number;
+  /** true cuando rows_with_quantity > 0: el commit exige `initial_load_ack`. */
+  requires_ack: boolean;
+}
+
 export class BulkProductAnalysisResultDto {
   session_id: string;
   total_products: number;
@@ -76,4 +85,5 @@ export class BulkProductAnalysisResultDto {
   with_warnings: number;
   with_errors: number;
   products: BulkProductAnalysisItemDto[];
+  initial_load: BulkInitialLoadSummaryDto;
 }

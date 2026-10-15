@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsIn,
+  IsBoolean,
   IsInt,
   Min,
   Max,
@@ -17,6 +18,7 @@ const VALID_ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 export class BulkAdjustmentUploadDto {
@@ -41,9 +43,12 @@ export class BulkAdjustmentItemResultDto {
   product_name?: string;
   status: 'success' | 'error';
   message?: string;
+  warnings?: string[];
   quantity_before?: number;
   quantity_after?: number;
   quantity_change?: number;
+  /** `created` cuando la fila creó un producto nuevo (carga inicial). */
+  action?: 'created' | 'adjusted';
 }
 
 export class BulkAdjustmentUploadResultDto {
@@ -81,6 +86,14 @@ export class BulkAdjustmentUploadSessionDto extends BulkAdjustmentUploadDto {
   @Min(1)
   @Max(MAX_BULK_ADJUSTMENT_UPLOAD_PAGE)
   limit?: number;
+
+  /**
+   * Confirmación explícita de que las filas con SKU vacío crean productos
+   * nuevos como carga inicial. Sin `true` el commit se rechaza si hay alguna.
+   */
+  @IsOptional()
+  @IsBoolean()
+  initial_load_ack?: boolean;
 }
 
 export class BulkAdjustmentUploadSessionResultDto extends BulkAdjustmentUploadResultDto {
@@ -96,4 +109,19 @@ export class BulkAdjustmentAnalysisResultDto {
   valid: number;
   failed: number;
   errors: { row_number: number; sku: string; message: string }[];
+  warnings: { row_number: number; sku: string; message: string }[];
+  initial_load_rows: number;
+  /** Filas que crearán un producto nuevo. */
+  new_products: number;
+  /** De ellas, las que no traen SKU y se autogenerará. */
+  auto_sku: number;
+  /** `true` si hay productos nuevos: el commit exige `initial_load_ack`. */
+  requires_initial_load_ack: boolean;
+  /** Muestra de las filas nuevas (máx. 50). */
+  new_product_rows: {
+    row_number: number;
+    sku: string | null;
+    name: string;
+    quantity: number;
+  }[];
 }

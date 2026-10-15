@@ -21,6 +21,9 @@ import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
 import { FiscalScanHandlersRegistrar } from './fiscal-scan-handlers.registrar';
+import { InvoiceDraftScannerService } from './invoice-draft-scan/invoice-draft-scanner.service';
+import { InvoiceDraftScanController } from './invoice-draft-scan/invoice-draft-scan.controller';
+import { SettingsModule } from '../settings/settings.module';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
@@ -39,9 +42,11 @@ import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-
 import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
+import { CustomersModule } from '../customers/customers.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
+import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
@@ -61,6 +66,14 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoiceProviderModule,
     DianDirectModule,
     WithholdingTaxModule,
+    // Alta del cliente capturado en línea en la factura (`createInlineCustomer`)
+    // delega en `CustomersService`. Sin ciclo: `CustomersModule` sólo importa
+    // Response/Metadata/Email.
+    CustomersModule,
+    // Escáner IA de borrador de factura: moneda de la tienda + decimales
+    // (`SettingsService.getStoreCurrencyInfo`). Sin ciclo: SettingsModule no
+    // importa InvoicingModule.
+    SettingsModule,
     // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
     // `DianTestService` en sus providers, porque Nest instancia el servicio una
     // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
@@ -96,6 +109,9 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     StoreDocumentReceptionConnectionsController,
     StoreDocumentEmailReceptionController,
     StoreReceivedDocumentsController,
+    // `store/invoicing/scan-draft/async` ANTES de `InvoicingController`, que
+    // monta `@Post(':id/...')` sobre el mismo prefijo.
+    InvoiceDraftScanController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene
@@ -120,6 +136,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,
+    InvoiceDraftScannerService,
     FiscalScanHandlersRegistrar,
     InvoiceNumberGenerator,
     // Motor aritmético único del documento, puerta de identidad fiscal del
@@ -158,6 +175,9 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // después del commit de la venta.
     PosFiscalEmissionService,
     OneShotEmissionService,
+    // Creación manual + emisión opcional (`emit_immediately`) reusando
+    // `InvoiceFlowService.validate` + `send`.
+    ManualInvoiceEmissionService,
     PosSaleCompletedListener,
   ],
   exports: [
@@ -173,6 +193,10 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // habilitación batch without a second copy of the WS-Security credential
     // loading and the persistence rules.
     DianTestService,
+    // Escáner IA de borrador: el riel super-admin
+    // (`superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async`) llama
+    // `assertReady()` antes de encolar el mismo kind `invoice_draft`.
+    InvoiceDraftScannerService,
   ],
 })
 export class InvoicingModule implements OnModuleInit {

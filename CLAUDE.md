@@ -32,6 +32,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-ai-platform-core` |
 | -- | `vendix-ai-queue` |
 | -- | `vendix-ai-streaming` |
+| -- | `vendix-ai-style` |
 | -- | `vendix-analytics-metrics` |
 | -- | `vendix-angular-forms` |
 | -- | `vendix-app-architecture` |
@@ -94,6 +95,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a stream-intent handshake to an SSE endpoint | `vendix-ai-streaming` |
 | Adding a validate-before-mutate stock guard on an order/kitchen path | `vendix-inventory-stock` |
 | Adding a write tool that needs user confirmation | `vendix-ai-agent-tools` |
+| Adding an AI scanning, analyzing or generating animation in the frontend | `vendix-ai-style` |
 | Adding an exportEndpoint to the report registry | `vendix-report-xlsx` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding bulk operations to a module (orders, purchases, products) | `vendix-bulk-operations` |
@@ -318,6 +320,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
+| Highlighting the IA syllable or an AI feature name with gradient text | `vendix-ai-style` |
 | Implementing AI streaming | `vendix-ai-streaming` |
 | Implementing ControlValueAccessor (CVA) in custom form components | `vendix-zoneless-signals` |
 | Implementing ControlValueAccessor in frontend components | `vendix-angular-forms` |
@@ -429,6 +432,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
 | Splitting withholding across multi-tender payment legs | `vendix-auto-entries` |
+| Styling AI buttons, badges, sections or loading states | `vendix-ai-style` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |

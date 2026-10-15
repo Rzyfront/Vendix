@@ -4,7 +4,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import * as bcrypt from 'bcrypt';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
@@ -24,6 +23,8 @@ import {
 } from './dto/create-invoice.dto';
 import { TaxFiscalType } from '../taxes/dto';
 import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
+import { InvoiceAddressDto } from './dto/invoice-address.dto';
+import { CustomersService } from '../customers/customers.service';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import {
@@ -96,6 +97,10 @@ import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto'
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
+import {
+  INVOICE_TYPES_REQUIRING_ACQUIRER_EMAIL,
+  assertManualAcquirerEmail,
+} from './utils/acquirer-email.util';
 import { normalizeNit } from '../../../common/utils/nit.util';
 import {
   buildContractAiuDraft,
@@ -936,6 +941,8 @@ export class InvoicingService {
     private readonly withholdingFlow: WithholdingFlowService,
     /** Optional in TS to keep existing unit-test construction source-compatible; Nest resolves it from ProfilesModule. */
     private readonly profileAccountingValidator?: ProfileAccountingValidator,
+    /** Optional in TS for the same reason; Nest resolves it from CustomersModule. */
+    private readonly customersService?: CustomersService,
   ) {}
 
   /**
@@ -1355,6 +1362,65 @@ export class InvoicingService {
   }
 
   /**
+   * Compuerta de correo del adquiriente para la factura de venta MANUAL.
+   *
+   * Correo efectivo = `dto.customer_email` → correo de la ficha vinculada
+   * (`customer_id`, que gana sobre `inline_customer` igual que en `create`) →
+   * correo del `inline_customer`. Identidad para la exención de consumidor
+   * final con la misma precedencia que el snapshot que `create` persiste.
+   *
+   * Sólo LEE. Un `customer_id` que no existe en la organización no se juzga
+   * aquí: `assertCustomerResolvable` lo rechaza con su propio código.
+   */
+  private async assertManualInvoiceAcquirerEmail(
+    dto: CreateInvoiceDto,
+    context: { organization_id?: number | string | null },
+  ): Promise<void> {
+    if (!INVOICE_TYPES_REQUIRING_ACQUIRER_EMAIL.includes(dto.invoice_type)) {
+      return;
+    }
+
+    let ficha: {
+      email?: string | null;
+      document_type?: string | null;
+      document_number?: string | null;
+      legal_name?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null = null;
+    if (dto.customer_id != null) {
+      ficha = await this.prisma.users.findFirst({
+        where: {
+          id: dto.customer_id,
+          organization_id: Number(context.organization_id),
+        },
+        select: {
+          email: true,
+          document_type: true,
+          document_number: true,
+          legal_name: true,
+          first_name: true,
+          last_name: true,
+        },
+      });
+      if (!ficha) return;
+    }
+    const inline = dto.customer_id == null ? dto.inline_customer : undefined;
+    const source = ficha ?? inline ?? null;
+    const source_name = source
+      ? (source.legal_name ?? '').trim() ||
+        `${source.first_name ?? ''} ${source.last_name ?? ''}`.trim()
+      : '';
+
+    assertManualAcquirerEmail({
+      email_candidates: [dto.customer_email, source?.email],
+      document_type: dto.customer_document_type ?? source?.document_type,
+      document_number: dto.customer_tax_id ?? source?.document_number,
+      name: dto.customer_name ?? (source_name || null),
+    });
+  }
+
+  /**
    * `customer_id` que no existe, o que pertenece a OTRA organización.
    *
    * Se comprueba a mano porque `users` es el único de los tres identificadores
@@ -1753,7 +1819,73 @@ export class InvoicingService {
     );
   }
 
-  async create(dto: CreateInvoiceDto) {
+  /** El índice único es la autoridad también ante dos POST concurrentes. */
+  async createIdempotently(
+    dto: CreateInvoiceDto,
+    options: { require_acquirer_email?: boolean } = {},
+  ) {
+    const context = this.getContext();
+    const key = dto.client_request_id?.toLowerCase();
+    const findExisting = (client: any = this.prisma) => client.invoices.findFirst({
+      where: {
+        store_id: context.store_id,
+        organization_id: context.organization_id,
+        client_request_id: key,
+      },
+      include: INVOICE_INCLUDE,
+    });
+    if (!key) return { invoice: await this.create(dto, options), replayed: false };
+    const existing = await findExisting();
+    if (existing) return { invoice: existing, replayed: true };
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // El lock cubre también el alta inline y el consecutivo: el perdedor
+        // no puede fallar por email ni consumir otro número antes del índice.
+        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',
+          `invoice-create:${context.store_id}:${key}`);
+        const winner = await findExisting(tx);
+        if (winner) return { invoice: winner, replayed: true };
+        const invoice = await this.create({ ...dto, client_request_id: key }, {
+          ...options, transaction: tx, defer_created_event: true,
+        });
+        return { invoice, replayed: false };
+      }, { timeout: 60_000, maxWait: 10_000 });
+      if (!result.replayed) this.emitInvoiceCreated(result.invoice);
+      return result;
+    } catch (error) {
+      const conflict = error as { code?: string; meta?: { target?: string | string[] } };
+      const target = conflict?.meta?.target;
+      const keyConflict = Array.isArray(target)
+        ? target.includes('store_id') && target.includes('client_request_id')
+        : target === 'invoices_store_client_request_id_key';
+      if (conflict?.code === 'P2002' && keyConflict) {
+        const winner = await findExisting();
+        if (winner) return { invoice: winner, replayed: true };
+      }
+      throw error;
+    }
+  }
+
+  private emitInvoiceCreated(invoice: { id: number; invoice_number?: string | null; invoice_type?: string }): void {
+    this.event_emitter.emit('invoice.created', {
+      invoice_id: invoice.id, invoice_number: invoice.invoice_number, invoice_type: invoice.invoice_type,
+    });
+  }
+
+  /** Sólo los endpoints manuales activan esta regla; no cambia el carril POS. */
+  async assertPersistedAcquirerEmail(id: number): Promise<void> {
+    const invoice = await this.findOne(id);
+    await this.assertManualInvoiceAcquirerEmail(
+      invoice as unknown as CreateInvoiceDto,
+      this.getContext(),
+    );
+  }
+
+  async create(
+    dto: CreateInvoiceDto,
+    options: { require_acquirer_email?: boolean; transaction?: Prisma.TransactionClient; defer_created_event?: boolean } = {},
+  ) {
+    const prisma = options.transaction ?? this.prisma;
     this.assertNoteUsesSpecificRoute(dto.invoice_type);
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
@@ -1776,11 +1908,20 @@ export class InvoicingService {
     // invoice, and feed the resulting `customer_id` into the invoice. When
     // both `customer_id` and `inline_customer` are sent, `customer_id` wins
     // (matches the rule documented in `CreateInvoiceDto`).
+    // Correo obligatorio al EMITIR manualmente, no al guardar un borrador.
+    // El punto de entrada activa esta opción con emit_immediately. Antes del cliente
+    // en línea y del consecutivo: un rechazo aquí no deja ficha huérfana ni
+    // hueco de numeración. Ver `acquirer-email.util.ts`.
+    if (options.require_acquirer_email) {
+      await this.assertManualInvoiceAcquirerEmail(dto, context);
+    }
+
     let resolved_customer_id = dto.customer_id;
     if (resolved_customer_id == null && dto.inline_customer) {
       resolved_customer_id = await this.createInlineCustomer(
         context,
         dto.inline_customer,
+        dto.customer_address,
       );
     } else {
       // Sólo el id que llegó del cliente necesita puerta: el creado en línea
@@ -1794,7 +1935,7 @@ export class InvoicingService {
     // `dto.customer_*`, como antes.
     const linked_customer_ficha =
       resolved_customer_id != null
-        ? await this.prisma.users.findFirst({
+        ? await prisma.users.findFirst({
             where: { id: resolved_customer_id },
             select: CUSTOMER_FOR_INVOICE_SELECT,
           })
@@ -1950,11 +2091,12 @@ export class InvoicingService {
       calculated.header_taxes,
       calculated.lines,
     );
-    const invoice = await this.prisma.invoices.create({
+    const invoice = await prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
         accounting_entity_id,
+        client_request_id: dto.client_request_id,
         fiscal_document_type: this.toFiscalDocumentType(dto.invoice_type),
         invoice_number,
         invoice_type: dto.invoice_type,
@@ -2164,12 +2306,13 @@ export class InvoicingService {
         invoice.id,
         calculated.lines.map((line) => line.taxes),
         calculated.header_taxes,
+        prisma,
       );
       // Se recarga para que el documento devuelto incluya las filas de impuesto
       // recién escritas: sin esto el llamador vería `invoice_taxes: []` y
       // concluiría que la factura nació sin tributos.
       created =
-        (await this.prisma.invoices.findFirst({
+        (await prisma.invoices.findFirst({
           where: { id: invoice.id },
           include: INVOICE_INCLUDE,
         })) ?? invoice;
@@ -2182,8 +2325,8 @@ export class InvoicingService {
     if (dto.withholdings && dto.withholdings.length > 0) {
       // Resolver el contexto de tienda/organización desde el ALS — `create()`
       // ya validó que existe vía `assertInvoicingAreaActive`, así que aquí basta
-      // con derivar los ids que `applyClientDeclaredWithholdings` exige para
-      // abrir su propia transacción.
+      // con derivar los ids que `applyClientDeclaredWithholdings` exige.
+      // Con UUID se reutiliza la transacción de creación también en los hijos.
       const ctx = this.getContext();
       const organization_id = Number(ctx.organization_id);
       const store_id = ctx.store_id != null ? Number(ctx.store_id) : null;
@@ -2196,6 +2339,7 @@ export class InvoicingService {
         customer_id:
           invoice.customer_id != null ? Number(invoice.customer_id) : null,
         declared: dto.withholdings,
+        ...(options.transaction ? { client: options.transaction } : {}),
         // Step 8 — año civil de emisión en la zona de la tienda.
         year: await this.resolveCivilYear(new Date(issue_date), {
           store_id,
@@ -2208,23 +2352,19 @@ export class InvoicingService {
       //   recalculo automático en `accepted` queda como FALLBACK para facturas
       //   sin desglose explícito: declarado gana sobre auto cuando coexisten.
       if (!aggregated.isZero()) {
-        await this.prisma.invoices.update({
+        await prisma.invoices.update({
           where: { id: invoice.id },
           data: { withholding_amount: aggregated },
         });
         created =
-          (await this.prisma.invoices.findFirst({
+          (await prisma.invoices.findFirst({
             where: { id: invoice.id },
             include: INVOICE_INCLUDE,
           })) ?? created;
       }
     }
 
-    this.event_emitter.emit('invoice.created', {
-      invoice_id: created.id,
-      invoice_number: created.invoice_number,
-      invoice_type: created.invoice_type,
-    });
+    if (!options.defer_created_event) this.emitInvoiceCreated(created);
 
     this.logger.log(
       `Invoice ${created.invoice_number} created (ID: ${created.id})`,
@@ -2863,23 +3003,14 @@ export class InvoicingService {
   }
 
   /**
-   * QUI-690 — Inline customer creation for the XXL invoice-create modal.
+   * QUI-690 — Cliente capturado en línea en Facturas → Nueva factura.
    *
-   * Mirrors a subset of `CustomersService.create()`:
-   *   - Normalize persona (JURIDICA → first/last forced null, legal_name kept).
-   *   - Generate unique username seed + temporary password.
-   *   - Assign the `customer` system role via `user_roles`.
-   *
-   * Deliberately simpler than `CustomersService.create()`:
-   *   - Skips email/document dedup queries (DTO validators + DB unique
-   *     constraints catch duplicates and surface as P2002 → controller maps
-   *     to SYS_CONFLICT_001).
-   *   - Skips store existence check (the caller's ALS context already
-   *     guarantees a valid store; an invalid context would fail elsewhere).
-   *
-   * Trade-off: this path produces a customer row that the bulk-edit and
-   * dedup flows don't know about until the next request re-queries. For
-   * the XXL modal flow (single user, single invoice) this is acceptable.
+   * Delega en `CustomersService.resolveInlineCustomer`, que aplica las MISMAS
+   * reglas que el modal de clientes (persona jurídica ⇔ NIT, razón social
+   * obligatoria, nombres en '' para jurídica, split NIT/DV, rol `customer` y
+   * vínculo `store_users`) y reutiliza el cliente si el documento ya existe en
+   * la organización. Antes este método mantenía un alta paralela sin
+   * deduplicar: un NIT repetido o un nombre NULL terminaban en 500.
    */
   private async createInlineCustomer(
     context: {
@@ -2887,92 +3018,47 @@ export class InvoicingService {
       store_id?: number;
     },
     dto: CreateCustomerDto,
+    invoice_address?: Partial<InvoiceAddressDto> | null,
   ): Promise<number> {
-    const organization_id = Number(context.organization_id);
     const store_id = Number(context.store_id);
 
-    if (!organization_id || !store_id) {
+    if (!Number(context.organization_id) || !store_id) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
         'Contexto de tienda requerido para crear cliente inline',
       );
     }
-
-    const customerRole = await this.prisma.roles.findFirst({
-      where: { name: 'customer', is_system_role: true },
-    });
-    if (!customerRole) {
+    if (!this.customersService) {
       throw new VendixHttpException(
-        ErrorCodes.CUST_CREATE_001,
-        'El rol de sistema "customer" no existe — seed requerido',
+        ErrorCodes.SYS_VALIDATION_001,
+        'Alta de cliente en línea no disponible en este contexto',
       );
     }
 
-    const isJuridica = dto.person_type === 'JURIDICA';
-    const effectiveEmail = dto.email?.trim() || null;
-
-    // Username: email → document_number → first_name → synthetic. Uniqueness
-    // enforced by a small loop with a numeric suffix. Inline-only path; the
-    // full `CustomersService.create()` uses a more robust generator.
-    const baseUsername =
-      effectiveEmail?.split('@')[0] ??
-      dto.document_number ??
-      dto.first_name ??
-      `customer-${Date.now()}`;
-    let username = baseUsername.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!username) username = `customer-${Date.now()}`;
-    let attempt = 0;
-    while (
-      await this.prisma.users.findFirst({
-        where: { username, organization_id },
-        select: { id: true },
-      })
-    ) {
-      attempt += 1;
-      username = `${baseUsername}-${attempt}`;
-    }
-
-    const tempPassword = `tmp-${Math.random().toString(36).slice(2, 12)}`;
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
-
-    const created = await this.prisma.users.create({
-      data: {
-        organization_id,
-        main_store_id: store_id,
-        username,
-        email: effectiveEmail,
-        first_name: (isJuridica ? null : (dto.first_name ?? '')) as string,
-        last_name: (isJuridica ? null : (dto.last_name ?? '')) as string,
-        legal_name: dto.legal_name ?? null,
-        document_type: (dto.document_type ?? null) as any,
-        document_number: dto.document_number ?? null,
-        verification_digit: dto.verification_digit ?? null,
-        phone: dto.phone ?? null,
-        tax_regime: (dto.tax_regime ?? null) as any,
-        person_type: (dto.person_type ?? null) as any,
-        fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
-        ciiu_code: dto.ciiu_code ?? null,
-        is_withholding_agent: dto.is_withholding_agent ?? false,
-        password: hashedPassword,
-        state: 'active',
-        email_verified: false,
-      },
-      select: { id: true },
-    });
-
-    // `user_roles` sólo tiene `user_id`, `role_id` y `store_id`; el tenant se
-    // deriva del usuario y de la tienda. Pasar `organization_id` hacía que
-    // Prisma rechazara el `data` completo, así que el cliente inline se creaba
-    // sin rol y la factura fallaba después con «Error interno».
-    await this.prisma.user_roles.create({
-      data: {
-        user_id: created.id,
-        role_id: customerRole.id,
-        store_id,
-      },
-    });
-
-    return created.id;
+    // 6b — la dirección fiscal de la factura se ofrece como `billing` del
+    // cliente. `resolveInlineCustomer` sólo la graba si el cliente NACE aquí
+    // (un cliente existente conserva su ficha) y nunca bloquea por ella.
+    const address_line =
+      typeof invoice_address?.address_line === 'string'
+        ? invoice_address.address_line.trim()
+        : '';
+    const { customer_id } = await this.customersService.resolveInlineCustomer(
+      store_id,
+      dto,
+      address_line
+        ? {
+            billing_address: {
+              address_line1: address_line,
+              city: invoice_address?.city_name ?? null,
+              state_province: invoice_address?.department_name ?? null,
+              municipality_code: invoice_address?.city_code ?? null,
+              country_code: invoice_address?.country_code ?? 'CO',
+              postal_code: invoice_address?.postal_code ?? null,
+            },
+          }
+        : undefined,
+    );
+    return customer_id;
   }
 
   /**
@@ -6885,6 +6971,7 @@ export class InvoicingService {
     customer_id?: number | null;
     declared: InvoiceWithholdingInputDto[];
     year: number;
+    client?: Prisma.TransactionClient;
   }): Promise<Prisma.Decimal> {
     if (params.declared.length === 0) {
       return new Prisma.Decimal(0);
@@ -6893,7 +6980,7 @@ export class InvoicingService {
     // Una sola lectura para todos los conceptos declarados: deduplicar por id,
     //   pedir `with { tenant_scope }`, y fallar entero si ALGUNO no pertenece.
     const conceptIds = [...new Set(params.declared.map((w) => w.concept_id))];
-    const concepts = await this.prisma.withholding_concepts.findMany({
+    const concepts = await (params.client ?? this.prisma).withholding_concepts.findMany({
       where: {
         id: { in: conceptIds },
         organization_id: params.organization_id,
@@ -6984,14 +7071,10 @@ export class InvoicingService {
     //   - suffered:  la tienda FUE RETENIDA por el cliente → el cliente es la
     //     contraparte también, pero se anota en `customer_id` que es el camino
     //     que el flujo de aceptación ya usa para este rol.
-    // El `client` (transacción) NO se pasa porque `prisma.invoices.create`
-    // corre fuera de `$transaction`: persistir las retenciones dentro de la
-    // misma escritura atómica exigiría refactor mayor y, sobre todo, no
-    // resuelve ningún caso real (un fallo del pool después del commit
-    // simplemente deja la retención huérfana, situación que `accepted`
-    // reintenta desde `resolveWithholdingForInvoice`).
+    // Creación con UUID: todos los hijos usan la misma tx que la factura.
     if (practiced.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,
@@ -7005,6 +7088,7 @@ export class InvoicingService {
     }
     if (suffered.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,
@@ -7019,6 +7103,7 @@ export class InvoicingService {
     // self no entra al DTO por ahora; el motor de aceptación lo cubre.
     if (selfLines.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,

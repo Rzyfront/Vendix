@@ -69,6 +69,8 @@ const FRONTEND_INVOICE_KEYS = [
   'due_date',
   'notes',
   'items',
+  // «Emitir directamente» del resumen de «Nueva factura».
+  'emit_immediately',
 ] as const;
 
 /** Claves de cada línea (`itemsPayload`, mismas líneas del componente). */
@@ -130,6 +132,7 @@ const FRONTEND_INVOICE_SAMPLE: Record<string, unknown> = {
   due_date: isoDay(30),
   notes: 'Gracias por su compra',
   items: [FRONTEND_ITEM_SAMPLE],
+  emit_immediately: true,
 };
 
 /** Payload mínimo válido; base sobre la que cada caso negativo hace un override. */
@@ -1228,5 +1231,52 @@ describe('CreateInvoiceDto — D.7: la compuerta del Modelo 1 está abierta', ()
     expect(messagesAt(errors, 'aiu_accounting_model')).toContain(
       'sumada, no_sumada',
     );
+  });
+});
+
+describe('CreateInvoiceDto — emit_immediately (crear + emitir en un paso)', () => {
+  const valueAfterPipe = (raw: unknown): unknown =>
+    (
+      plainToInstance(
+        CreateInvoiceDto,
+        { ...baseInvoice(), emit_immediately: raw },
+        { enableImplicitConversion: true },
+      ) as any
+    ).emit_immediately;
+
+  it('ausente: el documento valida igual que antes', async () => {
+    const errors = await validateAsPipe(baseInvoice());
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([true, false])('acepta el booleano %p', async (value) => {
+    const errors = await validateAsPipe({ ...baseInvoice(), emit_immediately: value });
+    expect(failedPaths(errors)).toEqual([]);
+    expect(valueAfterPipe(value)).toBe(value);
+  });
+
+  it("el string 'false' llega como false — NO como true por conversión implícita", async () => {
+    // Sin el @Transform que lee el valor crudo, `enableImplicitConversion`
+    // haría Boolean('false') === true y dispararía una emisión DIAN.
+    expect(valueAfterPipe('false')).toBe(false);
+    expect(valueAfterPipe('true')).toBe(true);
+    const errors = await validateAsPipe({ ...baseInvoice(), emit_immediately: 'false' });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([['sí'], [1], [0], [{}], [[]]])('rechaza %p con 400', async (value) => {
+    const errors = await validateAsPipe({ ...baseInvoice(), emit_immediately: value });
+    expect(failedPaths(errors)).toContain('emit_immediately');
+    expect(messagesAt(errors, 'emit_immediately')).toContain(
+      'emit_immediately debe ser verdadero o falso.',
+    );
+  });
+
+  it('UpdateInvoiceDto NO lo admite: un PATCH no emite (forbidNonWhitelisted)', async () => {
+    // Import diferido: el resto del spec no depende del DTO de actualización.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { UpdateInvoiceDto } = require('./update-invoice.dto');
+    const errors = await validateAsPipe({ emit_immediately: true }, UpdateInvoiceDto);
+    expect(whitelistOrphans(errors)).toContain('emit_immediately');
   });
 });

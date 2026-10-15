@@ -301,6 +301,7 @@ const ADJUSTMENT_TYPES: readonly AdjustmentType[] = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ];
 
 interface StockTarget {

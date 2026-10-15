@@ -27,6 +27,8 @@ import { CreateInvoiceDto } from './create-invoice.dto';
  *   origen.
  * · `inline_customer` — crear un cliente como efecto secundario de un PATCH es
  *   otra operación. Si hace falta, se crea por el módulo de clientes.
+ * · `emit_immediately` — emitir es una transición (`:id/validate`,
+ *   `:id/send`), no un campo del documento. Un PATCH no emite.
  *
  * CUIDADO al tocar `CreateInvoiceDto`: `PartialType` no solo hace opcionales
  * los campos, también hereda sus INICIALIZADORES
@@ -41,5 +43,6 @@ export class UpdateInvoiceDto extends PartialType(
     'invoice_type',
     'resolution_id',
     'inline_customer',
+    'emit_immediately',
   ] as const),
 ) {}

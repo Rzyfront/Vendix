@@ -13,11 +13,16 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
-import { PlatformTenantsService } from './platform-tenants.service';
+import {
+  PlatformTenantsService,
+  toDianDocumentType,
+} from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
+import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
 import { localDateString } from '../../../../common/utils/store-timezone.util';
+import { dianPartyId, normalizeNit } from '../../../../common/utils/nit.util';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.1
@@ -120,7 +125,9 @@ export class PlatformInvoicingService {
   }> {
     let tenant: any;
     if (args.dto.customer?.kind === 'external') {
-      if (!args.dto.customer.legal_name?.trim() || !args.dto.customer.tax_id?.trim()) {
+      const documentType = toDianDocumentType(args.dto.customer.document_type) ?? '31';
+      const taxId = dianPartyId(args.dto.customer.tax_id, documentType);
+      if (!args.dto.customer.legal_name?.trim() || !taxId) {
         throw new VendixHttpException(
           ErrorCodes.SYS_VALIDATION_001,
           'El cliente externo requiere nombre o razón social y NIT / documento válido.',
@@ -131,13 +138,10 @@ export class PlatformInvoicingService {
         tenant_id: 0,
         name: args.dto.customer.legal_name,
         legal_name: args.dto.customer.legal_name,
-        tax_id: args.dto.customer.tax_id,
-        tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
-        // Default '31' (NIT, código DIAN) — NO 'NIT' (etiqueta). El XML exige
-// el código; una etiqueta donde va código es rechazo silencioso del
-// provider. Si el operador eligió CC/CE/Pasaporte en el form, ese valor
-// ya viaja en `args.dto.customer.document_type` y pisa el default.
-document_type: args.dto.customer.document_type ?? '31',
+        tax_id: taxId,
+        // El DV es un checksum del NIT; nunca inventar '0' ni pegarlo al número.
+        tax_id_dv: documentType === '31' ? normalizeNit(taxId).dv : null,
+        document_type: documentType,
         person_type: args.dto.customer.person_type ?? '2',
         tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
         fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
@@ -233,6 +237,16 @@ document_type: args.dto.customer.document_type ?? '31',
       };
     }
 
+    // Creación MANUAL: correo del adquiriente obligatorio (salvo consumidor
+    // final). Se juzga el correo EFECTIVO —el del formulario o, si no vino, el
+    // de la ficha del tenant— antes de cualquier escritura o consecutivo.
+    assertManualAcquirerEmail({
+      email_candidates: [tenant.email],
+      document_type: tenant.document_type,
+      document_number: tenant.tax_id,
+      name: tenant.legal_name ?? tenant.name,
+    });
+
     if (args.dto.profile_id) {
       await this.assertPlatformProfileMatchesOperation(
         args.dto.profile_id,
@@ -268,6 +282,12 @@ document_type: args.dto.customer.document_type ?? '31',
 
     const legacyDto = this.mapMvpV1ToLegacyCreateDto(args.dto, tenant);
     const legacyResult = await this.subscriptionFiscalService.createPlatformInvoice(legacyDto);
+
+    // El documento ya existe (aceptado o rechazado por la DIAN, el número quedó
+    // quemado): el adquiriente externo se recuerda para la próxima factura.
+    if (args.dto.customer?.kind === 'external') {
+      await this.rememberExternalCustomer(tenant, args.dto.customer);
+    }
 
     if (args.dto.save_as_profile?.name) {
       try {
@@ -341,6 +361,97 @@ document_type: args.dto.customer.document_type ?? '31',
       error_message: legacyResult.error_message,
       idempotent_replay: legacyResult.idempotent_replay ?? false,
     };
+  }
+
+  /**
+   * Upsert del adquiriente externo en `platform_customers` (clave
+   * `document_type + tax_id`), para que `customers/search` lo ofrezca como
+   * kind `customer` en la siguiente factura.
+   *
+   * POR QUÉ FUERA DE LA TRANSACCIÓN DE EMISIÓN Y NO-FATAL: la emisión
+   * (`createPlatformInvoice`) firma, consume un consecutivo autorizado y habla
+   * con la DIAN; ese resultado es irreversible. Atar el directorio de clientes
+   * a esa transacción haría que un fallo accesorio (p. ej. la tabla aún no
+   * migrada) revirtiera —o tumbara la respuesta de— una factura ya timbrada.
+   * Mismo criterio que `save_as_profile`: se intenta después y un fallo queda
+   * en WARN. El costo es que el directorio puede perder una fila; la factura y
+   * su snapshot en `fiscal_evidences` siguen siendo la fuente de verdad.
+   *
+   * Actualiza los datos con lo facturado y mueve `last_invoiced_at`; un campo
+   * opcional vacío en esta factura NO borra el valor que ya estaba guardado.
+   */
+  private async rememberExternalCustomer(
+    tenant: any,
+    input: {
+      person_type?: string | null;
+      tax_regime_code?: string | null;
+      fiscal_responsibilities?: string[] | null;
+    },
+  ): Promise<void> {
+    const documentType = toDianDocumentType(tenant.document_type) ?? '31';
+    const taxId = dianPartyId(tenant?.tax_id, documentType);
+    if (!taxId) return;
+    const legalName = String(tenant.legal_name ?? '').trim();
+    if (!legalName) return;
+
+    const opt = (v: unknown): string | null => {
+      if (typeof v !== 'string') return null;
+      const t = v.trim();
+      return t ? t : null;
+    };
+    const responsibilities = Array.isArray(tenant.fiscal_responsibilities)
+      ? tenant.fiscal_responsibilities.filter(
+          (c: unknown): c is string => typeof c === 'string' && !!c.trim(),
+        )
+      : [];
+    const fields = {
+      tax_id_dv: documentType === '31' ? normalizeNit(taxId).dv : null,
+      person_type: opt(tenant.person_type),
+      tax_regime_code: opt(tenant.tax_regime_code),
+      email: opt(tenant.email),
+      phone: opt(tenant.phone),
+      address_line: opt(tenant.address?.line),
+      city: opt(tenant.address?.city),
+      city_code: opt(tenant.address?.city_code),
+      department_code: opt(tenant.address?.department_code),
+    };
+    const now = new Date();
+    // En UPDATE sólo viaja lo que trae valor: `null` no pisa lo guardado.
+    const updateFields = Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== null),
+    );
+    // El tenant lleva defaults para emitir; no son una elección del operador
+    // y no deben degradar una ficha fiscal ya conocida al volver a facturar.
+    if (!opt(input.person_type)) delete updateFields.person_type;
+    if (!opt(input.tax_regime_code)) delete updateFields.tax_regime_code;
+
+    try {
+      await (this.prismaClient as PrismaClient).platform_customers.upsert({
+        where: {
+          document_type_tax_id: { document_type: documentType, tax_id: taxId },
+        },
+        create: {
+          document_type: documentType,
+          tax_id: taxId,
+          legal_name: legalName,
+          ...fields,
+          fiscal_responsibilities: responsibilities,
+          last_invoiced_at: now,
+        },
+        update: {
+          legal_name: legalName,
+          ...updateFields,
+          ...(Array.isArray(input.fiscal_responsibilities) && responsibilities.length
+            ? { fiscal_responsibilities: responsibilities }
+            : {}),
+          last_invoiced_at: now,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo registrar el cliente externo ${documentType}:${taxId} en platform_customers: ${err}`,
+      );
+    }
   }
 
   /**
@@ -900,11 +1011,13 @@ document_type: args.dto.customer.document_type ?? '31',
   private mapToStoreCreateInvoiceDto(dto: any, tenant: any): any {
     const customer = this.mapTenantToCustomerFields(tenant, dto);
 
-    // El riel tienda exige `customer_tax_id` y `customer_verification_digit`
-    // SIEMPRE para `document_type='sales_invoice'` (cliente nominativo).
-    // Validamos aca (no en DTO) por consistencia con `INVOICING_VALIDATE_001`
-    // que es el tipo de error que veria el operador.
-    if (!customer.customer_tax_id || !customer.customer_verification_digit) {
+    // Sólo un NIT lleva DV. Exigirlo para CC obliga a inventar un '0' y
+    // bloquea usuarios persona natural que no deben declarar ese checksum.
+    const documentType = toDianDocumentType(customer.customer_document_type) ?? '31';
+    if (
+      !customer.customer_tax_id ||
+      (documentType === '31' && !customer.customer_verification_digit)
+    ) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_TENANT_FISCAL_DATA_INCOMPLETE,
         `El destinatario ${tenant.kind}:${tenant.tenant_id ?? tenant.id} no tiene tax_id+DV en la base de datos. Captura los campos faltantes en el formulario antes de emitir.`,

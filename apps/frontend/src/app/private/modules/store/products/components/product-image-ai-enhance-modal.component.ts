@@ -126,13 +126,13 @@ import { ProductsService } from '../services/products.service';
                 }
               }
               <div class="ai-result-stage__placeholder">
-                <div class="ai-holo-grid"></div>
-                <div class="ai-holo-aurora"></div>
-                <div class="ai-sparkle ai-sparkle--a"></div>
-                <div class="ai-sparkle ai-sparkle--b"></div>
-                <div class="ai-sparkle ai-sparkle--c"></div>
-                <div class="ai-sparkle ai-sparkle--d"></div>
-                <div class="ai-sparkle ai-sparkle--e"></div>
+                <div class="vx-ai-holo-grid"></div>
+                <div class="vx-ai-holo-aurora"></div>
+                <div class="vx-ai-sparkle vx-ai-sparkle--a"></div>
+                <div class="vx-ai-sparkle vx-ai-sparkle--b"></div>
+                <div class="vx-ai-sparkle vx-ai-sparkle--c"></div>
+                <div class="vx-ai-sparkle vx-ai-sparkle--d"></div>
+                <div class="vx-ai-sparkle vx-ai-sparkle--e"></div>
                 <div class="ai-result-stage__halo"></div>
                 <div class="ai-result-stage__icon">
                   <app-icon name="sparkles" size="38"></app-icon>
@@ -612,94 +612,6 @@ import { ProductsService } from '../services/products.service';
         cursor: ew-resize;
       }
 
-      .ai-holo-grid {
-        position: absolute;
-        inset: 0;
-        z-index: 0;
-        background-image:
-          linear-gradient(
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          ),
-          linear-gradient(
-            90deg,
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          );
-        background-size: 36px 36px;
-        background-position: 0 0;
-        mask-image: radial-gradient(
-          circle at 50% 50%,
-          rgba(0, 0, 0, 0.9),
-          rgba(0, 0, 0, 0) 70%
-        );
-        opacity: 0.55;
-        animation: ai-holo-grid-drift 8s linear infinite;
-      }
-
-      .ai-holo-aurora {
-        position: absolute;
-        inset: -20%;
-        z-index: 0;
-        background:
-          radial-gradient(
-            circle at 30% 30%,
-            color-mix(in oklab, var(--color-info, #6366f1) 45%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 70% 60%,
-            color-mix(in oklab, var(--color-primary) 40%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 50% 80%,
-            color-mix(in oklab, var(--color-success, #10b981) 30%, transparent),
-            transparent 55%
-          );
-        filter: blur(48px);
-        opacity: 0.5;
-        animation: ai-holo-aurora-shift 9s ease-in-out infinite;
-      }
-
-      .ai-sparkle {
-        position: absolute;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: color-mix(in oklab, var(--color-primary) 80%, white);
-        box-shadow: 0 0 12px
-          color-mix(in oklab, var(--color-primary) 80%, transparent);
-        opacity: 0;
-        z-index: 2;
-      }
-
-      .ai-sparkle--a {
-        top: 18%;
-        left: 22%;
-        animation: ai-sparkle-twinkle 3s ease-in-out infinite;
-      }
-      .ai-sparkle--b {
-        top: 32%;
-        right: 18%;
-        animation: ai-sparkle-twinkle 3.5s ease-in-out 0.4s infinite;
-      }
-      .ai-sparkle--c {
-        bottom: 24%;
-        left: 30%;
-        animation: ai-sparkle-twinkle 4s ease-in-out 0.8s infinite;
-      }
-      .ai-sparkle--d {
-        bottom: 18%;
-        right: 28%;
-        animation: ai-sparkle-twinkle 3.2s ease-in-out 1.2s infinite;
-      }
-      .ai-sparkle--e {
-        top: 50%;
-        left: 12%;
-        animation: ai-sparkle-twinkle 3.8s ease-in-out 1.6s infinite;
-      }
-
       @keyframes ai-breathe {
         0%,
         100% {
@@ -766,37 +678,6 @@ import { ProductsService } from '../services/products.service';
         }
       }
 
-      @keyframes ai-sparkle-twinkle {
-        0%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.2);
-        }
-      }
-
-      @keyframes ai-holo-grid-drift {
-        0% {
-          background-position: 0 0;
-        }
-        100% {
-          background-position: 36px 36px;
-        }
-      }
-
-      @keyframes ai-holo-aurora-shift {
-        0%,
-        100% {
-          transform: translate(0, 0) scale(1);
-        }
-        50% {
-          transform: translate(2%, -2%) scale(1.05);
-        }
-      }
-
       @media (prefers-reduced-motion: reduce) {
         .ai-result-stage.is-generating,
         .ai-result-stage__caption,
@@ -804,10 +685,7 @@ import { ProductsService } from '../services/products.service';
         .ai-result-stage__halo,
         .ai-result-stage__shimmer,
         .ai-result-stage__scan,
-        .ai-result-stage__prism,
-        .ai-holo-grid,
-        .ai-holo-aurora,
-        .ai-sparkle {
+        .ai-result-stage__prism {
           animation: none !important;
         }
       }

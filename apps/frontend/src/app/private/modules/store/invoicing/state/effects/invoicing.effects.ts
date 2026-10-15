@@ -253,12 +253,17 @@ export class InvoicingEffects {
       switchMap(({ invoice }) =>
         this.invoicingService.createInvoice(invoice).pipe(
           map((response) => {
-            this.toastService.success('Factura creada');
+            // Con «Emitir directamente» el aviso depende del desenlace de la
+            // emisión (creada y emitida / creada sin emitir): lo da la página.
+            if (!response.data?.emission?.attempted && !response.data?.idempotency_replayed) {
+              this.toastService.success('Factura creada');
+            }
             return InvoicingActions.createInvoiceSuccess({ invoice: response.data });
           }),
           catchError((error) =>
             this.fail(error, (f) =>
               InvoicingActions.createInvoiceFailure({
+                httpStatus: (error as { status?: number })?.status,
                 error: f.message,
                 errorCode: f.errorCode,
                 details: f.details,

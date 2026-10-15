@@ -52,6 +52,7 @@ import {
 } from './dto/subscription-fiscal.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
+import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 
 /** Accepted by the resolution scanner; anything else is rejected before the AI. */
 const SCAN_ALLOWED_MIME_TYPES = [
@@ -540,6 +541,16 @@ export class SubscriptionFiscalController {
     summary: 'Create a platform invoice (services not tied to subscription)',
   })
   async createPlatformInvoice(@Body() dto: CreatePlatformInvoiceDto): Promise<any> {
+    // Creación MANUAL: correo del adquiriente obligatorio (salvo consumidor
+    // final). Va en el controller y no en `createPlatformInvoice` porque ese
+    // método también lo invoca la fachada V1, que ya juzgó el correo efectivo
+    // (form → ficha del tenant) antes de llegar aquí.
+    assertManualAcquirerEmail({
+      email_candidates: [dto.customer?.email],
+      document_type: dto.customer?.document_type,
+      document_number: dto.customer?.tax_id,
+      name: dto.customer?.legal_name,
+    });
     const result = await this.fiscalService.createPlatformInvoice(dto);
     return this.responseService.created(result, 'Platform invoice created');
   }

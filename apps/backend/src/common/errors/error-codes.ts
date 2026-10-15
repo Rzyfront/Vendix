@@ -868,6 +868,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado',
   },
+  PROD_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'PROD_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Esta carga contiene inventario inicial: debes confirmar que eres consciente de que es una carga inicial.',
+  },
   PROD_CREATE_001: {
     code: 'PROD_CREATE_001',
     httpStatus: 400,
@@ -1645,6 +1651,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Adjustment not found',
   },
+  INV_ADJ_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'INV_ADJ_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Este ajuste crea productos nuevos: debes confirmar que es una carga inicial.',
+  },
   INV_BULK_001: {
     code: 'INV_BULK_001',
     httpStatus: 400,
@@ -2198,6 +2210,35 @@ export const ErrorCodes = {
     code: 'INVOICING_CREATE_003',
     httpStatus: 422,
     devMessage: 'Sales orders carry no tax breakdown; cannot be invoiced',
+  },
+  /**
+   * Factura de venta CREADA A MANO sin correo del adquiriente.
+   *
+   * El correo es el destino del `AttachedDocument` que la norma obliga a
+   * entregar: una factura nominativa sin él se emite ante la DIAN pero el
+   * cliente nunca la recibe. Sólo lo exigen los puntos de entrada manuales
+   * (`POST store/invoicing`, `POST superadmin/.../sales-invoices` y
+   * `POST superadmin/subscriptions/fiscal/invoices`); los flujos automáticos
+   * (POS, desde orden, cuenta, pedido, contrato, SaaS) NO pasan por esta
+   * compuerta. Consumidor final (`222222222222` o venta sin adquiriente
+   * declarado) queda exento. Se lanza ANTES de numerar o escribir.
+   */
+  INVOICING_ACQUIRER_EMAIL_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_EMAIL_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente es obligatorio para crear una factura electrónica manual.',
+  },
+  /**
+   * El correo efectivo del adquiriente (el del formulario, o el heredado de la
+   * ficha del cliente / tenant) no tiene forma de correo. Mismo alcance que
+   * `INVOICING_ACQUIRER_EMAIL_REQUIRED`.
+   */
+  INVOICING_ACQUIRER_EMAIL_INVALID: {
+    code: 'INVOICING_ACQUIRER_EMAIL_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente no es un correo válido (ej. cliente@dominio.com).',
   },
   /**
    * El área fiscal «invoicing» está inactiva para el tenant.
@@ -4981,6 +5022,47 @@ export const ErrorCodes = {
     code: 'HABILITATION_SCAN_TOO_MANY_FILES',
     httpStatus: 400,
     devMessage: 'Too many files — the habilitation scanner accepts up to 3',
+  },
+
+  // Escáner IA de borrador de factura de venta («Nueva factura» → leer con IA).
+  // Nada se crea ni se emite: el resultado es un borrador para revisar.
+  INVOICE_DRAFT_SCAN_NO_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_NO_FILES',
+    httpStatus: 400,
+    devMessage: 'No file provided for the invoice draft scan',
+  },
+  INVOICE_DRAFT_SCAN_TOO_MANY_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_TOO_MANY_FILES',
+    httpStatus: 400,
+    devMessage: 'Too many files — the invoice draft scanner accepts up to 6',
+  },
+  INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE: {
+    code: 'INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE',
+    httpStatus: 400,
+    devMessage:
+      'Unsupported file type — only JPEG, PNG, WebP and PDF are accepted (Word/Excel are not)',
+  },
+  INVOICE_DRAFT_SCAN_PARSE_FAIL: {
+    code: 'INVOICE_DRAFT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse the AI invoice draft response as valid JSON',
+  },
+  INVOICE_DRAFT_SCAN_AI_FAILED: {
+    code: 'INVOICE_DRAFT_SCAN_AI_FAILED',
+    httpStatus: 502,
+    devMessage: 'AI invoice draft extraction failed',
+  },
+  INVOICE_DRAFT_SCAN_NOT_READY: {
+    code: 'INVOICE_DRAFT_SCAN_NOT_READY',
+    httpStatus: 409,
+    devMessage:
+      'The invoice draft scanner AI application is missing, inactive or has no vision model linked',
+  },
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN: {
+    code: 'INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'The platform invoice draft scan requires a super-admin context without store',
   },
 
   // Monitoring

@@ -34,10 +34,15 @@ import { environment } from '../../../../../../../environments/environment';
  * viene del snapshot (kind='platform_acquirer_snapshot') que el
  * servicio devuelve en /customers/search y /customers/:kind/:id.
  */
-export type AcquirerKind = 'store' | 'organization' | 'user' | 'external';
+/**
+ * `customer`: cliente de PLATAFORMA guardado de facturas anteriores (id
+ * `'customer:<n>'`). Se emite con `customer.kind = 'external'` y todos sus
+ * datos: no es un tenant con ficha propia.
+ */
+export type AcquirerKind = 'store' | 'organization' | 'user' | 'customer' | 'external';
 
 export interface PlatformAcquirer {
-  id: string; // compuesto: 'store:<n>' u 'org:<n>'
+  id: string; // compuesto: 'store:<n>', 'org:<n>', 'user:<n>' o 'customer:<n>'
   kind: AcquirerKind;
   tenant_id: number;
   name: string;
@@ -57,7 +62,8 @@ export interface PlatformAcquirer {
     department_code: string | null;
     city_code?: string | null;
   };
-  organization: { id: number; name: string | null };
+  /** En `customer` (cliente de plataforma) llega `{ id: null, name: null }`. */
+  organization: { id: number | null; name: string | null };
   fiscal_data_complete: boolean;
 }
 

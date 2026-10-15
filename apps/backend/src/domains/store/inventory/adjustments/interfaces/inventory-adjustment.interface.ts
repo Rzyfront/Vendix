@@ -4,7 +4,8 @@ export type AdjustmentType =
   | 'theft'
   | 'expiration'
   | 'count_variance'
-  | 'manual_correction';
+  | 'manual_correction'
+  | 'initial_load';
 
 // La creación dejó de ser una `interface`: como DTO el ValidationPipe la
 // ignoraba entera. Vive en `../dto/create-adjustment.dto.ts`.

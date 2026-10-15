@@ -10,7 +10,8 @@ export type AiScanKind =
   | 'inventory_count'
   | 'member_roster'
   | 'product_image_enhance'
-  | 'product_image_generate';
+  | 'product_image_generate'
+  | 'invoice_draft';
 
 export interface AiScanJobContext {
   store_id: number | null;

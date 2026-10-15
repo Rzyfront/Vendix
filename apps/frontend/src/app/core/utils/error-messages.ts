@@ -757,6 +757,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Falta la entidad fiscal de la tienda. Completa los datos legales (NIT y razon social) antes de crear el plan de cuentas.',
 
   // Invoicing
+  INVOICING_ACQUIRER_EMAIL_REQUIRED:
+    'El correo del cliente es obligatorio para crear la factura electrónica.',
+  INVOICING_ACQUIRER_EMAIL_INVALID:
+    'El correo del cliente no es válido (ej. cliente@dominio.com).',
   INVOICING_FIND_001: 'No se encontro la factura.',
   INVOICING_FIND_002: 'No se encontro la resolucion de facturacion.',
   INVOICING_FIND_003: 'No se encontro la orden asociada.',
@@ -825,6 +829,23 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer los documentos de habilitación. Intenta con fotos más nítidas o escribe los datos a mano.',
   HABILITATION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de «Nueva factura» (cotizaciones, órdenes de compra, RUT del
+  // cliente…). FacturIA sólo completa el formulario: un fallo significa «no
+  // pude leerlo», el formulario sigue disponible para capturarlo a mano.
+  INVOICE_DRAFT_SCAN_NO_FILES:
+    'Sube al menos un documento (PDF o imagen) para que FacturIA complete la factura.',
+  INVOICE_DRAFT_SCAN_TOO_MANY_FILES:
+    'Máximo 6 documentos por escaneo. Quita alguno e inténtalo de nuevo.',
+  INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE:
+    'Formato no soportado. Usa PDF, JPG, PNG o WebP (Word y Excel no se aceptan).',
+  INVOICE_DRAFT_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o captura la factura a mano.',
+  INVOICE_DRAFT_SCAN_AI_FAILED:
+    'La IA no pudo leer los documentos. Intenta con archivos más nítidos o captura la factura a mano.',
+  INVOICE_DRAFT_SCAN_NOT_READY:
+    'El escáner de facturas no está disponible en este momento. Captura la factura a mano o inténtalo más tarde.',
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN:
+    'El escáner de facturas de la plataforma sólo está disponible para el superadministrador de la plataforma (sin tienda seleccionada).',
   INVOICING_RESOLUTION_006:
     'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala antes de crear la resolución.',
   INVOICING_RESOLUTION_007:
