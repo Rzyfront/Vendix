@@ -16,6 +16,13 @@
  * Nada de esto emite ni crea: al emitir, el backend registra al cliente
  * externo como cliente de la plataforma.
  */
+import {
+  FormControl,
+  Validators,
+  type AbstractControl,
+  type ValidationErrors,
+  type ValidatorFn,
+} from '@angular/forms';
 import type { TaxOption, TaxSelection } from '../../../../../../shared/components/tax-selector';
 import type {
   InvoiceFieldMark,
@@ -432,6 +439,12 @@ export function planPlatformInvoiceDraft(
   const invoice = draftToPlatformInvoicePatch(result, ctx);
   const pendingPaths = draftPendingPaths(result, { today: ctx.today });
 
+  const existing = result.acquirer?.existing_acquirer ?? null;
+  const existingAcquirer =
+    existing && Number(existing.tenant_id) > 0 && existing.kind ? existing : null;
+  const hasAcquirer =
+    !!acquirer.documentDigits || hasDraftValue(result.acquirer.name) || !!existingAcquirer;
+
   const headerMarks: Record<string, InvoiceFieldMark> = {};
   for (const path of [...acquirer.aiPaths, ...invoice.aiPaths]) {
     headerMarks[path] = 'ai';
@@ -441,6 +454,18 @@ export function planPlatformInvoiceDraft(
     ...acquirer.pendingPaths,
   ]) {
     headerMarks[path] = 'pending';
+  }
+  // CORREO: la plataforma no factura a consumidor final, así que un
+  // adquiriente leído sin correo (o con uno mal formado) deja el campo en
+  // «Revisar» siempre — sin la excepción del documento genérico que aplica la
+  // tienda. Con un destinatario ya registrado la página no aplica las marcas
+  // `external_*` (sus datos salen de la ficha, y si falta el correo lo nombra
+  // «Requerido para emitir»); sólo cuentan si cae al camino de cliente nuevo.
+  if (
+    hasAcquirer &&
+    !isValidPlatformAcquirerEmail(text(acquirer.patch['external_email']))
+  ) {
+    headerMarks['external_email'] = 'pending';
   }
 
   // Pendientes de fila que señaló el backend (`lines.N.<control>` / `lines.N`).
@@ -511,14 +536,9 @@ export function planPlatformInvoiceDraft(
     );
   }
 
-  const existing = result.acquirer?.existing_acquirer ?? null;
-  const existingAcquirer =
-    existing && Number(existing.tenant_id) > 0 && existing.kind ? existing : null;
-
   return {
     acquirer,
-    hasAcquirer:
-      !!acquirer.documentDigits || hasDraftValue(result.acquirer.name) || !!existingAcquirer,
+    hasAcquirer,
     existingAcquirer,
     invoice,
     headerMarks,
@@ -562,6 +582,48 @@ export interface PlatformAcquirerMissingField {
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * ¿El correo del adquiriente sirve para entregar la factura? UNA sola
+ * definición para la lista de faltantes, el validador del control y la marca
+ * «Revisar» del borrador IA: exige dominio con punto (`EMAIL_PATTERN`) Y pasa
+ * `Validators.email` de Angular, sobre el valor RECORTADO (el payload viaja
+ * recortado). Si las dos reglas vivieran por separado, un correo como
+ * `a@b..co` dejaría el control inválido sin ningún faltante que lo nombre, y
+ * «Emitir» caería en el error genérico «Revisa los campos marcados».
+ */
+export function isValidPlatformAcquirerEmail(raw: unknown): boolean {
+  const email = text(raw);
+  if (!email || !EMAIL_PATTERN.test(email)) return false;
+  return Validators.email(new FormControl(email)) === null;
+}
+
+/**
+ * Validador del formato del correo (`{ email: true }`, la misma clave que
+ * `Validators.email`). Vacío no es error de formato: eso lo dice
+ * `Validators.required`, que acompaña a este validador en el control.
+ */
+export const platformAcquirerEmailValidator: ValidatorFn = (
+  control: AbstractControl,
+): ValidationErrors | null => {
+  const email = text(control.value);
+  if (!email) return null;
+  return isValidPlatformAcquirerEmail(email) ? null : { email: true };
+};
+
+/**
+ * Lo que se pinta bajo un campo que falta para emitir: el motivo cuando es un
+ * correo mal formado, «Requerido para emitir» en cualquier otro caso; `''` si
+ * el campo no falta.
+ */
+export function platformMissingHint(
+  missing: PlatformAcquirerMissingField | null | undefined,
+): string {
+  if (!missing) return '';
+  return missing.reason.startsWith('El correo no')
+    ? missing.reason
+    : 'Requerido para emitir';
+}
+
+/**
  * Qué le falta al adquiriente PARA EMITIR, sin red. Es la ÚNICA definición:
  * la usa la lista junto al botón, el borde rojo y el «Requerido para emitir»
  * de cada campo, y el bloqueo de «Emitir».
@@ -601,7 +663,7 @@ export function platformAcquirerMissing(
   const email = value('external_email');
   if (!email) {
     add('external_email', 'Correo para el envío', 'Es la dirección a la que se entrega la factura electrónica.');
-  } else if (!EMAIL_PATTERN.test(email)) {
+  } else if (!isValidPlatformAcquirerEmail(email)) {
     add('external_email', 'Correo para el envío', 'El correo no tiene un formato válido.');
   }
   if (!value('external_address_line')) {

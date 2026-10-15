@@ -318,37 +318,33 @@
           [expanded]="sectionExpanded()['adquiriente']"
           (expandedChange)="toggleSection('adquiriente', $event)"
         >
-          <!-- Conmutador de modo de cliente -->
-          <div class="flex items-center gap-2 mb-4 p-1 rounded-xl bg-surface-secondary/70 border border-border w-fit">
+          <!-- Conmutador de modo de cliente. Control segmentado (mismo que el
+               selector de modo de la tienda): el estado se lee por relleno Y
+               por aria-pressed, no sólo por color. -->
+          <div
+            class="mb-4 flex w-full gap-1 rounded-xl border border-border bg-surface p-1 shadow-sm sm:w-fit"
+            role="group"
+            aria-label="Tipo de adquiriente"
+          >
             <button
               type="button"
-              class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all"
-              [class.bg-surface]="acquirerMode() === 'system'"
-              [class.text-text-primary]="acquirerMode() === 'system'"
-              [class.shadow-sm]="acquirerMode() === 'system'"
-              [class.text-text-secondary]="acquirerMode() !== 'system'"
+              class="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:flex-none"
+              [ngClass]="acquirerModeClass('system')"
               [attr.aria-pressed]="acquirerMode() === 'system'"
               (click)="setAcquirerMode('system')"
             >
-              <span class="flex items-center gap-1.5">
-                <app-icon name="building-2" [size]="14" />
-                Registrado en la plataforma
-              </span>
+              <app-icon name="building-2" [size]="14" />
+              Registrado en la plataforma
             </button>
             <button
               type="button"
-              class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all"
-              [class.bg-surface]="acquirerMode() === 'external'"
-              [class.text-text-primary]="acquirerMode() === 'external'"
-              [class.shadow-sm]="acquirerMode() === 'external'"
-              [class.text-text-secondary]="acquirerMode() !== 'external'"
+              class="inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:flex-none"
+              [ngClass]="acquirerModeClass('external')"
               [attr.aria-pressed]="acquirerMode() === 'external'"
               (click)="setAcquirerMode('external')"
             >
-              <span class="flex items-center gap-1.5">
-                <app-icon name="user-plus" [size]="14" />
-                Cliente nuevo
-              </span>
+              <app-icon name="user-plus" [size]="14" />
+              Cliente nuevo
             </button>
           </div>
 
@@ -419,8 +415,9 @@
                     }
                   </div>
                   @if (acquirerMissing().length > 0) {
-                    <p class="text-xs text-[var(--color-destructive)]" role="status">
-                      Para emitir falta: {{ acquirerMissingLabels() }}.
+                    <p class="flex items-start gap-1.5 text-xs leading-snug text-[var(--color-destructive)]" role="status">
+                      <app-icon name="alert-triangle" [size]="13" class="mt-px shrink-0" />
+                      <span>Para emitir falta: {{ acquirerMissingLabels() }}.</span>
                     </p>
                   }
                   <ng-container [ngTemplateOutlet]="acquirerFields"></ng-container>
@@ -521,8 +518,9 @@
                   </button>
                 </div>
                 @if (acquirerMissing().length > 0) {
-                  <p class="text-xs text-[var(--color-destructive)]" role="status">
-                    Para emitir falta: {{ acquirerMissingLabels() }}.
+                  <p class="flex items-start gap-1.5 text-xs leading-snug text-[var(--color-destructive)]" role="status">
+                    <app-icon name="alert-triangle" [size]="13" class="mt-px shrink-0" />
+                    <span>Para emitir falta: {{ acquirerMissingLabels() }}.</span>
                   </p>
                 }
                 <ng-container [ngTemplateOutlet]="acquirerFields"></ng-container>
@@ -759,66 +757,104 @@
         }
       </div>
 
-      <!-- Columna Lateral Sticky: Resumen Financiero y Acciones (4 cols) -->
-      <div class="lg:col-span-4 space-y-4 sticky top-6">
+      <!--
+        COLUMNA LATERAL: perfil, resumen, estado y acciones (4 cols).
+
+        Mismo patrón que la «Nueva factura» de la tienda. En móvil va debajo
+        del contenido, en flujo normal (sin sticky ni scroll propio). Desde lg
+        queda pegada justo DEBAJO de la cabecera del módulo (el sticky-header
+        de ModuleTabsShellComponent): su alto se MIDE (observeAsideStickyOffsets)
+        y llega como variables CSS; los valores de respaldo cubren el primer
+        pintado. Si el contenido excede el alto visible desplaza por dentro; el
+        padding deja aire para sombras y anillos de foco que el overflow
+        recortaría.
+
+        El componente compartido `vendix-invoice-summary-aside` NO se usa aquí:
+        pinta siempre «Validar» y «Cancelar» como acciones fijas y la
+        plataforma no tiene validación previa propia. Se replica su estructura
+        visual con las mismas clases y tokens.
+      -->
+      <aside
+        id="platform-invoice-summary-aside"
+        class="space-y-4 lg:col-span-4 lg:sticky lg:self-start lg:top-[var(--invoice-aside-top,5.5rem)] lg:max-h-[var(--invoice-aside-max-h,calc(100dvh_-_9rem))] lg:overflow-y-auto lg:overscroll-contain lg:p-1 lg:pb-4 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--color-border)_transparent]"
+        [style.--invoice-aside-top]="asideStickyTop()"
+        [style.--invoice-aside-max-h]="asideStickyMaxHeight()"
+        aria-label="Resumen y acciones de la factura"
+      >
 
         <!--
           PERFIL DE FACTURACIÓN COMO CHIP OPCIONAL. Arriba del resumen porque
           es un atajo, no un paso: sin tocarlo se aplica el predeterminado (o el
           único activo) sin pisar lo ya escrito. Al pulsarlo se despliega la
-          lista para elegir otro o quitarlo.
+          lista para elegir otro o quitarlo. La explicación vive en el ícono de
+          ayuda (hermano del botón: un botón no puede vivir dentro de otro).
         -->
-        <div class="rounded-xl border border-border bg-surface">
-          <button
-            type="button"
-            class="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-            [attr.aria-expanded]="sectionExpanded()['perfil']"
-            aria-controls="platform-invoice-profile-panel"
-            title="Un perfil autocompleta resolución, forma y medio de pago, notas, retenciones y líneas modelo."
-            (click)="toggleSection('perfil', !sectionExpanded()['perfil'])"
-          >
-            <span class="flex min-w-0 items-center gap-2 text-xs">
-              <app-icon name="layers" [size]="14" class="shrink-0 text-text-secondary" />
-              <span class="truncate text-text-primary">
-                Perfil: <strong>{{ profileSummary() }}</strong>
+        <div class="rounded-2xl border border-border bg-surface shadow-sm">
+          <div class="flex items-center gap-1 pr-2">
+            <button
+              type="button"
+              class="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              [attr.aria-expanded]="sectionExpanded()['perfil']"
+              aria-controls="platform-invoice-profile-panel"
+              (click)="toggleSection('perfil', !sectionExpanded()['perfil'])"
+            >
+              <span class="flex min-w-0 items-center gap-2 text-xs">
+                <app-icon name="layers" [size]="14" class="shrink-0 text-text-secondary" />
+                <span class="truncate text-text-primary">
+                  Perfil: <strong>{{ profileSummary() }}</strong>
+                </span>
               </span>
-            </span>
-            <app-icon
-              [name]="sectionExpanded()['perfil'] ? 'chevron-up' : 'chevron-down'"
-              [size]="14"
-              class="shrink-0 text-text-secondary"
-            />
-          </button>
+              <app-icon
+                [name]="sectionExpanded()['perfil'] ? 'chevron-up' : 'chevron-down'"
+                [size]="14"
+                class="shrink-0 text-text-secondary"
+              />
+            </button>
+            @if (profilesForOperationType().length > 0) {
+              <vendix-invoice-help-popover
+                label="Qué hace el perfil de facturación"
+                heading="Perfil de facturación"
+              >
+                <p>
+                  Autocompleta la resolución, la forma y el medio de pago, las
+                  notas, las retenciones y las líneas modelo. Sin tocarlo se
+                  aplica el predeterminado (o el único activo) sin pisar lo que
+                  ya escribiste.
+                </p>
+              </vendix-invoice-help-popover>
+            }
+          </div>
           <div
             id="platform-invoice-profile-panel"
-            class="border-t border-border px-3 py-3 space-y-2"
+            class="space-y-2 border-t border-border px-3 py-3"
             [hidden]="!sectionExpanded()['perfil']"
           >
             @if (profilesForOperationType().length === 0) {
               <p class="text-xs text-text-secondary">
                 No hay perfiles activos para factura estándar. La factura se llena a mano y se emite igual.
               </p>
-              <a routerLink="/super-admin/fiscal/invoicing/profiles/new" class="inline-block text-xs font-semibold text-primary hover:underline">
-                Crear perfil →
+              <a
+                routerLink="/super-admin/fiscal/invoicing/profiles/new"
+                class="inline-flex items-center gap-1 rounded text-xs font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                Crear perfil
+                <app-icon name="chevron-right" [size]="12" />
               </a>
             } @else {
               @if (profileAutoSelected() && selectedProfile()) {
-                <p class="text-xs leading-relaxed text-text-primary">
-                  Usando el perfil predeterminado <strong>{{ selectedProfile()?.name }}</strong>. Lo que ya
-                  habías escrito se conservó. Elige otro abajo si esta factura va distinta.
-                </p>
-              } @else {
-                <p class="text-xs text-text-secondary">
-                  Elegir uno autocompleta la resolución, los medios de pago, las notas y las retenciones.
-                </p>
+                <div class="flex items-start gap-2.5 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
+                  <app-icon name="check-circle" [size]="15" class="mt-0.5 shrink-0 text-primary" />
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    Predeterminado: <strong>{{ selectedProfile()?.name }}</strong>. Lo ya escrito se conservó.
+                  </p>
+                </div>
               }
               <div class="space-y-1.5">
                 @for (p of profilesForOperationType(); track p.id) {
                   <button
                     type="button"
-                    class="w-full rounded-lg border px-3 py-2 text-left transition-colors flex items-center justify-between gap-2"
-                    [class.border-primary]="selectedProfile()?.id === p.id"
-                    [class.border-border]="selectedProfile()?.id !== p.id"
+                    class="flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    [ngClass]="selectedProfile()?.id === p.id ? 'border-primary bg-primary/5' : 'border-border'"
                     [attr.aria-pressed]="selectedProfile()?.id === p.id"
                     (click)="applyProfile(p.id)"
                   >
@@ -837,7 +873,7 @@
               @if (selectedProfile()) {
                 <button
                   type="button"
-                  class="text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary"
+                  class="rounded text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   (click)="clearProfile()"
                 >
                   Quitar perfil
@@ -847,138 +883,226 @@
           </div>
         </div>
 
-        <!-- Tarjeta de Resumen Financiero -->
-        <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm space-y-4">
-          <div class="flex items-center justify-between border-b border-border pb-3">
-            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
-              <app-icon name="calculator" [size]="16" class="text-primary" />
+        <!--
+          RESUMEN: desglose en texto secundario con cifras a la derecha y
+          dígitos tabulares; TOTAL en bloque tintado con el token primario.
+        -->
+        <section
+          class="rounded-2xl border border-border bg-surface p-4 shadow-sm"
+          aria-label="Resumen de la factura"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">
+              <span
+                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                aria-hidden="true"
+              >
+                <app-icon name="calculator" [size]="15" />
+              </span>
               Resumen de la factura
             </h3>
-            <span class="text-xs text-text-secondary">{{ itemsArray.length }} {{ itemsArray.length === 1 ? 'línea' : 'líneas' }}</span>
+            <span class="shrink-0 rounded-full bg-[var(--color-surface-secondary)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-text-secondary">
+              {{ itemsArray.length }} {{ itemsArray.length === 1 ? 'línea' : 'líneas' }}
+            </span>
           </div>
 
-          <dl class="space-y-2.5 text-xs">
-            <div class="flex items-center justify-between text-text-secondary">
-              <dt>Subtotal bruto:</dt>
-              <dd class="font-medium text-text-primary">{{ totals().grossSubtotal | currency }}</dd>
+          <dl class="mt-4 space-y-2 text-xs">
+            <div class="flex items-baseline justify-between gap-3">
+              <dt class="text-text-secondary">Subtotal bruto</dt>
+              <dd class="text-right font-medium tabular-nums text-text-primary">
+                {{ totals().grossSubtotal | currency }}
+              </dd>
             </div>
-
             @if (totals().totalDiscount > 0) {
-              <div class="flex items-center justify-between text-success">
-                <dt>Descuentos:</dt>
-                <dd class="font-medium">- {{ totals().totalDiscount | currency }}</dd>
+              <div class="flex items-baseline justify-between gap-3">
+                <dt class="text-text-secondary">Descuentos</dt>
+                <dd class="text-right font-medium tabular-nums text-text-primary">
+                  - {{ totals().totalDiscount | currency }}
+                </dd>
               </div>
             }
-
-            <div class="flex items-center justify-between text-text-secondary border-t border-border/50 pt-2">
-              <dt>Base gravable:</dt>
-              <dd class="font-medium text-text-primary">{{ totals().taxableBase | currency }}</dd>
+            <div class="flex items-baseline justify-between gap-3 border-t border-border pt-2">
+              <dt class="text-text-secondary">Base gravable</dt>
+              <dd class="text-right font-medium tabular-nums text-text-primary">
+                {{ totals().taxableBase | currency }}
+              </dd>
             </div>
-
             @for (row of taxBreakdown(); track row.key) {
-              <div class="flex items-center justify-between text-text-secondary">
-                <dt>{{ row.name }}{{ row.isInclusive ? ' (incl.)' : '' }}:</dt>
-                <dd class="font-medium text-text-primary">{{ row.amount | currency }}</dd>
+              <div class="flex items-baseline justify-between gap-3">
+                <dt
+                  class="min-w-0 truncate text-text-secondary"
+                  [title]="row.name + (row.isInclusive ? ' (incl.)' : '')"
+                >
+                  {{ row.name }}{{ row.isInclusive ? ' (incl.)' : '' }}
+                </dt>
+                <dd class="shrink-0 text-right font-medium tabular-nums text-text-primary">
+                  {{ row.amount | currency }}
+                </dd>
               </div>
             }
-
-            <div class="flex items-center justify-between text-text-secondary">
-              <dt>Total impuestos:</dt>
-              <dd class="font-medium text-text-primary">{{ totals().totalIva | currency }}</dd>
+            <div class="flex items-baseline justify-between gap-3">
+              <dt class="text-text-secondary">Total impuestos</dt>
+              <dd class="text-right font-medium tabular-nums text-text-primary">
+                {{ totals().totalIva | currency }}
+              </dd>
             </div>
-
-            <div class="flex items-center justify-between border-t border-border pt-3 text-sm font-bold text-text-primary">
-              <dt>Total factura:</dt>
-              <dd class="text-base text-primary font-extrabold">{{ totals().total | currency }}</dd>
-            </div>
-
-            <!--
-              Las retenciones NO restan del total facturado: la DIAN recibe el
-              total del documento y la retención sólo cambia lo que el cliente
-              gira. Por eso el neto va aparte y en gris, nunca en lugar del total.
-            -->
             @if (totals().totalWithheld > 0) {
-              <div class="flex items-center justify-between text-warning">
-                <dt>Retenciones:</dt>
-                <dd class="font-medium">- {{ totals().totalWithheld | currency }}</dd>
-              </div>
-              <div class="flex items-center justify-between text-text-secondary">
-                <dt>Neto a girar:</dt>
-                <dd class="font-semibold text-text-primary">{{ totals().netPayable | currency }}</dd>
+              <div class="flex items-baseline justify-between gap-3 border-t border-border pt-2">
+                <dt class="text-text-secondary">Retenciones</dt>
+                <dd class="text-right font-medium tabular-nums text-warning">
+                  - {{ totals().totalWithheld | currency }}
+                </dd>
               </div>
             }
           </dl>
 
-          @if (backendPreviewError()) {
-            <p class="text-[11px] text-danger" role="alert">{{ backendPreviewError() }}</p>
-          }
-
           <!--
-            LO QUE FALTA PARA EMITIR, antes de emitir. Cada fila lleva al
-            campo; «Emitir» revisa esta misma lista y enfoca el primero.
+            Las retenciones NO restan del total facturado: la DIAN recibe el
+            total del documento y la retención sólo cambia lo que el cliente
+            gira. Por eso el neto va dentro del bloque, subordinado, nunca en
+            lugar del total.
           -->
-          @if (emitMissing().length > 0) {
-            <div class="rounded-lg border border-border bg-surface-secondary/40 p-3" role="status">
-              <p class="text-xs font-semibold text-[var(--color-destructive)]">
-                Falta para emitir ({{ emitMissing().length }})
-              </p>
-              <ul class="mt-1.5 space-y-1">
-                @for (item of emitMissing(); track item.key) {
-                  <li>
-                    <button
-                      type="button"
-                      class="flex w-full items-start gap-1.5 text-left text-xs text-text-primary hover:underline"
-                      [title]="item.reason"
-                      (click)="focusMissing(item)"
-                    >
-                      <app-icon name="alert-triangle" [size]="12" class="mt-0.5 shrink-0 text-[var(--color-destructive)]" />
-                      <span>{{ item.label }}</span>
-                    </button>
-                  </li>
-                }
-              </ul>
+          <div class="mt-4 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3">
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Total factura
+              </span>
+              <span class="text-right text-xl font-bold leading-tight tabular-nums text-primary">
+                {{ totals().total | currency }}
+              </span>
             </div>
+            @if (totals().totalWithheld > 0) {
+              <div class="mt-2 flex items-baseline justify-between gap-3 border-t border-primary/15 pt-2 text-xs">
+                <span class="text-text-secondary">Neto a girar</span>
+                <span class="text-right font-semibold tabular-nums text-text-primary">
+                  {{ totals().netPayable | currency }}
+                </span>
+              </div>
+            }
+          </div>
+
+          @if (backendPreviewError()) {
+            <p
+              class="mt-3 flex items-start gap-1.5 text-[11px] leading-snug text-[var(--color-destructive)]"
+              role="alert"
+            >
+              <app-icon name="alert-circle" [size]="13" class="mt-px shrink-0" />
+              <span>{{ backendPreviewError() }}</span>
+            </p>
           }
+        </section>
 
-          <div class="pt-2 space-y-2">
-            <app-button
-              type="button"
-              variant="primary"
-              size="md"
-              class="w-full justify-center"
-              [loading]="submitting()"
-              [disabled]="submitting()"
-              (clicked)="submit()"
-            >
-              <app-icon slot="icon" name="send" [size]="16"></app-icon>
-              {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir Factura Electrónica' }}
-            </app-button>
+        <!--
+          ESTADO: lo que falta para emitir, o lista para emitir; siempre con
+          ícono y texto (nunca sólo color). Cada fila lleva al campo; «Emitir»
+          revisa esta misma lista y enfoca el primero.
+        -->
+        <section
+          class="rounded-2xl border bg-surface p-4"
+          [ngClass]="emitMissing().length > 0 ? 'border-warning/40' : 'border-border'"
+          aria-live="polite"
+        >
+          <h4 class="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
+            @if (emitMissing().length > 0) {
+              <app-icon name="alert-triangle" [size]="14" class="shrink-0 text-warning" />
+              Falta para emitir
+              <span
+                class="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-warning/15 px-1.5 text-[11px] font-semibold tabular-nums text-text-primary"
+              >
+                {{ emitMissing().length }}
+              </span>
+            } @else {
+              <app-icon name="clipboard-check" [size]="14" class="shrink-0 text-text-secondary" />
+              Estado
+            }
+          </h4>
 
-            <app-button
-              type="button"
-              variant="outline"
-              size="sm"
-              class="w-full justify-center"
-              (clicked)="openPrintPreview()"
+          @if (emitMissing().length > 0) {
+            <ul class="mt-3 space-y-2">
+              @for (item of emitMissing(); track item.key) {
+                <li>
+                  <button
+                    type="button"
+                    class="group flex w-full items-start gap-2 rounded-lg border border-border bg-surface p-2.5 text-left text-xs transition-colors hover:border-warning hover:bg-[var(--color-surface-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    (click)="focusMissing(item)"
+                  >
+                    <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-semibold text-text-primary">{{ item.label }}</span>
+                      @if (item.reason && item.reason !== item.label) {
+                        <span class="mt-0.5 block leading-snug text-text-secondary">{{ item.reason }}</span>
+                      }
+                    </span>
+                    <app-icon
+                      name="chevron-right"
+                      [size]="13"
+                      class="mt-0.5 shrink-0 text-text-secondary group-hover:text-primary"
+                    />
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p
+              class="mt-3 flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-text-primary"
             >
-              <app-icon slot="icon" name="eye" [size]="14"></app-icon>
-              Previsualizar totales
-            </app-button>
-          </div>
+              <app-icon name="check-circle" [size]="15" class="shrink-0 text-success" />
+              Lista para emitir
+            </p>
+          }
+        </section>
+
+        <!--
+          ACCIONES: la primaria a todo el ancho; «Previsualizar totales» como
+          secundaria; «Cancelar» (vuelve a la lista de facturas) terciaria.
+        -->
+        <div class="space-y-2">
+          <app-button
+            type="button"
+            variant="primary"
+            size="md"
+            [fullWidth]="true"
+            class="w-full justify-center"
+            [loading]="submitting()"
+            [disabled]="submitting()"
+            (clicked)="submit()"
+          >
+            <app-icon slot="icon" name="send" [size]="15"></app-icon>
+            {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir Factura Electrónica' }}
+          </app-button>
+          <app-button
+            type="button"
+            variant="outline"
+            size="sm"
+            [fullWidth]="true"
+            class="w-full justify-center"
+            (clicked)="openPrintPreview()"
+          >
+            <app-icon slot="icon" name="eye" [size]="14"></app-icon>
+            Previsualizar totales
+          </app-button>
+          <app-button
+            type="button"
+            variant="ghost"
+            size="sm"
+            [fullWidth]="true"
+            class="w-full justify-center"
+            [disabled]="submitting()"
+            (clicked)="onCancel()"
+          >
+            Cancelar
+          </app-button>
         </div>
 
-        <!-- Indicador de Cumplimiento Fiscal DIAN -->
-        <div class="rounded-xl border border-border/80 bg-surface-secondary/40 p-4 text-xs space-y-2">
-          <div class="flex items-center gap-1.5 font-semibold text-text-primary">
-            <app-icon name="shield-check" [size]="15" class="text-success" />
-            Validación previa DIAN
-          </div>
-          <p class="text-text-secondary text-[11px] leading-relaxed">
-            Esta factura se emitirá firmada digitalmente con el certificado de la plataforma y asignará el siguiente consecutivo de la resolución seleccionada.
-          </p>
-        </div>
-
-      </div>
+        <!-- Nota de cumplimiento fiscal DIAN: informativa, subordinada. -->
+        <p class="flex items-start gap-2 px-1 text-[11px] leading-relaxed text-text-secondary">
+          <app-icon name="shield-check" [size]="14" class="mt-px shrink-0 text-success" />
+          <span>
+            Se emite firmada digitalmente con el certificado de la plataforma y toma el
+            siguiente consecutivo de la resolución seleccionada.
+          </span>
+        </p>
+      </aside>
     </div>
   </form>
 </div>

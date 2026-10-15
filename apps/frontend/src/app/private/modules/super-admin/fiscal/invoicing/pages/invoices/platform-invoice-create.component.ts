@@ -2,7 +2,9 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   OnInit,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -17,6 +19,7 @@ import {
   FormControl,
   FormGroup,
   ReactiveFormsModule,
+  ValidatorFn,
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
@@ -64,6 +67,9 @@ import {
 } from '../../../../../store/customers/components/rues-identity-card/rues-identity-card.component';
 import type { ExternalCustomerLookupResult } from '../../../../../store/customers/models/customer.model';
 import { InvoiceDraftScanModalComponent } from '../../../../../store/invoicing/components/invoice-create/invoice-draft-scan-modal.component';
+// Ayuda en popover (ícono help-circle) de la «Nueva factura» de la tienda,
+// reutilizada tal cual para explicar el perfil sin un párrafo fijo.
+import { InvoiceHelpPopoverComponent } from '../../../../../store/invoicing/components/invoice-create/invoice-help-popover.component';
 import { INVOICE_DRAFT_SCAN_PLATFORM_PATH } from '../../../../../store/invoicing/services/invoice-draft-scanner.service';
 import type { InvoiceDraftScanResult } from '../../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
 import {
@@ -130,9 +136,40 @@ import {
   isCapturedPlatformLine,
   isWeakDraftField,
   planPlatformInvoiceDraft,
+  platformAcquirerEmailValidator,
   platformAcquirerMissing,
+  platformMissingHint,
   platformTaxRegimeFromResponsibilities,
 } from '../../utils/platform-invoice-draft-mapping';
+
+/**
+ * Validadores del correo del adquiriente (`external_email`): OBLIGATORIO y con
+ * formato. La plataforma no factura a consumidor final (siempre exige número
+ * de documento), así que no hay excepción por el genérico 222222222222. El
+ * formato es la MISMA regla que usa `platformAcquirerMissing` (la que bloquea
+ * «Emitir» y pinta «Requerido para emitir»): ver `isValidPlatformAcquirerEmail`.
+ */
+export const PLATFORM_EXTERNAL_EMAIL_VALIDATORS: ValidatorFn[] = [
+  Validators.required,
+  platformAcquirerEmailValidator,
+];
+
+/**
+ * Primer ancestro que desplaza verticalmente (el <main> del layout privado),
+ * o null si desplaza la ventana. Mismo criterio que la «Nueva factura» de la
+ * tienda para el resumen lateral pegajoso.
+ */
+function findScrollContainer(node: HTMLElement): HTMLElement | null {
+  let current = node.parentElement;
+  while (current && current !== document.body) {
+    const overflowY = getComputedStyle(current).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
 
 /**
  * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
@@ -300,6 +337,7 @@ function unwrapAcquirerRows(res: unknown): PlatformAcquirer[] {
     TenantPickerComponent,
     RuesIdentityCardComponent,
     InvoiceDraftScanModalComponent,
+    InvoiceHelpPopoverComponent,
     VendixCurrencyPipe,
     AccountCodeSelectComponent,
     PlatformSectionWrapperComponent,
@@ -372,7 +410,10 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     // 48 = Resp IVA, 49 = No resp. Vacío hasta que el operador o la ficha lo
     // digan: un '48' por omisión declaraba responsable de IVA a cualquiera.
     external_tax_regime_code: [''],
-    external_email: [''],
+    // Obligatorio y con formato (ver PLATFORM_EXTERNAL_EMAIL_VALIDATORS). Quien
+    // bloquea y nombra el faltante es `platformAcquirerMissing`; esto sólo deja
+    // el control `invalid`, con la misma regla.
+    external_email: ['', PLATFORM_EXTERNAL_EMAIL_VALIDATORS],
     external_phone: [''],
     external_address_line: [''],
     // Sin municipio por omisión: Bogotá «de fábrica» pasaba por dato real.
@@ -851,11 +892,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
   /** «Requerido para emitir» (o el motivo) junto al campo; vacío si no falta. */
   missingHint(field: string): string {
-    const missing = this.acquirerMissingByField().get(field);
-    if (!missing) return '';
-    return missing.reason.startsWith('El correo no')
-      ? missing.reason
-      : 'Requerido para emitir';
+    return platformMissingHint(this.acquirerMissingByField().get(field));
   }
 
   /**
@@ -867,6 +904,13 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       return PlatformInvoiceCreateComponent.MISSING_FIELD_CLASS;
     }
     return invoiceFieldMarkClass(this.draftHeaderMarks()[field]);
+  }
+
+  /** Clases del segmento activo/inactivo del conmutador de adquiriente (las de la tienda). */
+  acquirerModeClass(mode: 'system' | 'external'): string {
+    return this.acquirerMode() === mode
+      ? 'bg-primary text-[var(--color-text-on-primary)] shadow-sm'
+      : 'text-text-secondary hover:bg-[var(--color-surface-secondary)] hover:text-text-primary';
   }
 
   /** ¿El documento del adquiriente es NIT? Sólo entonces hay DV y se pregunta la persona. */
@@ -2832,5 +2876,62 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
   onCancel(): void {
     this.router.navigate(['/super-admin/fiscal/invoicing/invoices']);
+  }
+
+  // ── Resumen lateral pegajoso ────────────────────────────────────
+
+  /**
+   * La cabecera de esta página NO es suya: el `app-sticky-header` lo pinta
+   * `ModuleTabsShellComponent` (título, volver y pestañas) por encima del
+   * `<router-outlet>`. Por eso no hay `viewChild` posible y se busca en el DOM
+   * del shell que contiene a la página.
+   */
+  private readonly hostEl = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly asideTopPx = signal<number | null>(null);
+  private readonly asideMaxHeightPx = signal<number | null>(null);
+  readonly asideStickyTop = computed(() => {
+    const top = this.asideTopPx();
+    return top === null ? null : top + 'px';
+  });
+  readonly asideStickyMaxHeight = computed(() => {
+    const max = this.asideMaxHeightPx();
+    return max === null ? null : max + 'px';
+  });
+
+  /**
+   * Mide el alto real de la cabecera del módulo y del contenedor que desplaza
+   * (el <main> del layout) y lo publica como variables CSS del aside
+   * (`--invoice-aside-top` / `--invoice-aside-max-h`), igual que la tienda. Se
+   * re-mide con ResizeObserver: la cabecera cambia de alto con las pestañas y
+   * el contenedor con el tamaño de la ventana. Sin cabecera, quedan los
+   * valores de respaldo del CSS.
+   */
+  private readonly asideStickyMeasure = afterNextRender(() =>
+    this.observeAsideStickyOffsets(),
+  );
+
+  private observeAsideStickyOffsets(): void {
+    if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const host = this.hostEl.nativeElement;
+    const header = host
+      .closest('app-module-tabs-shell')
+      ?.querySelector<HTMLElement>('app-sticky-header');
+    if (!header) return;
+    const scroller = findScrollContainer(host);
+    const GAP = 16;
+    const BOTTOM = 16;
+    const measure = (): void => {
+      const top = Math.round(header.getBoundingClientRect().height + GAP);
+      const viewport = scroller ? scroller.clientHeight : window.innerHeight;
+      this.asideTopPx.set(top);
+      this.asideMaxHeightPx.set(Math.max(240, Math.round(viewport - top - BOTTOM)));
+    };
+    measure();
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(header);
+    observer.observe(scroller ?? document.documentElement);
+    this.destroyRef.onDestroy(() => observer.disconnect());
   }
 }

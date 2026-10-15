@@ -1,3 +1,4 @@
+import { FormControl } from '@angular/forms';
 import { PLATFORM_TAX_CATALOG } from '../../../../../../shared/components/invoice-sections';
 import { computeNitDv } from '../../../../../../shared/utils/nit.util';
 import type {
@@ -11,8 +12,11 @@ import {
   draftToPlatformAcquirerPatch,
   draftToPlatformInvoicePatch,
   isCapturedPlatformLine,
+  isValidPlatformAcquirerEmail,
   planPlatformInvoiceDraft,
+  platformAcquirerEmailValidator,
   platformAcquirerMissing,
+  platformMissingHint,
   platformPaymentMeansCode,
   platformTaxRegimeCode,
   platformTaxRegimeFromResponsibilities,
@@ -341,6 +345,49 @@ describe('platform-invoice-draft-mapping', () => {
       expect(plan.hasAcquirer).toBeTrue();
     });
 
+    it('correo leído con buena confianza ⇒ IA, no «Revisar»', () => {
+      const plan = planPlatformInvoiceDraft(result(), ctx());
+      expect(plan.acquirer.patch['external_email']).toBe('compras@andina.co');
+      expect(plan.headerMarks['external_email']).toBe('ai');
+    });
+
+    it('adquiriente nuevo sin correo ⇒ el correo queda en «Revisar» y bloquea', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ acquirer: acquirer({ email: none() }) }),
+        ctx(),
+      );
+      expect(plan.headerMarks['external_email']).toBe('pending');
+      // Y mientras siga vacío es un faltante para emitir.
+      const fields = platformAcquirerMissing({
+        external_person_type: '1',
+        ...plan.acquirer.patch,
+      }).map((m) => m.field);
+      expect(fields).toEqual(['external_email']);
+    });
+
+    it('correo leído mal formado ⇒ «Revisar»', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ acquirer: acquirer({ email: f('compras@andina') }) }),
+        ctx(),
+      );
+      expect(plan.headerMarks['external_email']).toBe('pending');
+    });
+
+    it('sin excepción de consumidor final: 222222222222 sin correo también queda en «Revisar»', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({
+          acquirer: acquirer({
+            document_type: f('CC'),
+            document_number: f('222222222222'),
+            verification_digit: none(),
+            email: none(),
+          }),
+        }),
+        ctx(),
+      );
+      expect(plan.headerMarks['external_email']).toBe('pending');
+    });
+
     it('sin adquiriente leído no se toca el adquiriente', () => {
       const empty = acquirer({
         document_type: none(),
@@ -409,11 +456,85 @@ describe('platform-invoice-draft-mapping', () => {
       expect(fields).toEqual(['external_email', 'external_city_code']);
     });
 
+    it('sin correo ⇒ «Requerido para emitir»; mal formado ⇒ el motivo', () => {
+      const sinCorreo = platformAcquirerMissing({ ...complete, external_email: '   ' });
+      expect(sinCorreo.map((m) => m.field)).toEqual(['external_email']);
+      expect(platformMissingHint(sinCorreo[0])).toBe('Requerido para emitir');
+
+      const malFormado = platformAcquirerMissing({ ...complete, external_email: 'a@b..co' });
+      expect(malFormado.map((m) => m.field)).toEqual(['external_email']);
+      expect(platformMissingHint(malFormado[0])).toBe('El correo no tiene un formato válido.');
+
+      expect(platformMissingHint(undefined)).toBe('');
+    });
+
+    it('el documento genérico 222222222222 NO exime el correo en plataforma', () => {
+      const fields = platformAcquirerMissing({
+        ...complete,
+        external_document_type: '13',
+        external_tax_id: '222222222222',
+        external_tax_id_dv: '',
+        external_person_type: '2',
+        external_email: '',
+      }).map((m) => m.field);
+      expect(fields).toEqual(['external_email']);
+    });
+
+    it('precarga de un destinatario (tenant/cliente) sin correo ⇒ sólo falta el correo', () => {
+      // Lo que `onTenantPicked` vuelca cuando la ficha no trae correo.
+      const fields = platformAcquirerMissing({ ...complete, external_email: '' }).map(
+        (m) => m.field,
+      );
+      expect(fields).toEqual(['external_email']);
+    });
+
+    it('precarga RUES (identidad sin correo ni dirección) ⇒ el correo es faltante', () => {
+      const fields = platformAcquirerMissing({
+        external_document_type: '31',
+        external_tax_id: NIT,
+        external_tax_id_dv: NIT_DV,
+        external_legal_name: 'Constructora Andina S.A.S.',
+        external_person_type: '1',
+      }).map((m) => m.field);
+      expect(fields).toContain('external_email');
+    });
+
     it('NIT sin DV', () => {
       const fields = platformAcquirerMissing({ ...complete, external_tax_id_dv: '' }).map(
         (m) => m.field,
       );
       expect(fields).toEqual(['external_tax_id_dv']);
+    });
+  });
+
+  describe('correo del adquiriente (una sola regla)', () => {
+    it('isValidPlatformAcquirerEmail', () => {
+      expect(isValidPlatformAcquirerEmail('compras@andina.co')).toBeTrue();
+      expect(isValidPlatformAcquirerEmail('  compras@andina.co  ')).toBeTrue();
+      expect(isValidPlatformAcquirerEmail('')).toBeFalse();
+      expect(isValidPlatformAcquirerEmail(null)).toBeFalse();
+      expect(isValidPlatformAcquirerEmail('compras@')).toBeFalse();
+      // Sin punto en el dominio: Angular lo acepta, la regla de emisión no.
+      expect(isValidPlatformAcquirerEmail('compras@andina')).toBeFalse();
+      // Doble punto: la regla de emisión lo aceptaba, Angular no.
+      expect(isValidPlatformAcquirerEmail('a@b..co')).toBeFalse();
+    });
+
+    it('el validador del control coincide con el faltante para emitir', () => {
+      const samples = ['', 'compras@andina.co', ' x@y.co ', 'compras@', 'compras@andina', 'a@b..co'];
+      for (const email of samples) {
+        const control = new FormControl(email, platformAcquirerEmailValidator);
+        const listed = platformAcquirerMissing({ external_email: email }).some(
+          (m) => m.field === 'external_email',
+        );
+        // Vacío: lo nombra `required` (en el componente), no el formato.
+        if (!email.trim()) {
+          expect(control.valid).withContext(`«${email}»`).toBeTrue();
+          expect(listed).withContext(`«${email}»`).toBeTrue();
+          continue;
+        }
+        expect(control.invalid).withContext(`«${email}»`).toBe(listed);
+      }
     });
   });
 });
