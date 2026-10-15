@@ -1819,10 +1819,73 @@ export class InvoicingService {
     );
   }
 
-  async create(
+  /** El índice único es la autoridad también ante dos POST concurrentes. */
+  async createIdempotently(
     dto: CreateInvoiceDto,
     options: { require_acquirer_email?: boolean } = {},
   ) {
+    const context = this.getContext();
+    const key = dto.client_request_id?.toLowerCase();
+    const findExisting = (client: any = this.prisma) => client.invoices.findFirst({
+      where: {
+        store_id: context.store_id,
+        organization_id: context.organization_id,
+        client_request_id: key,
+      },
+      include: INVOICE_INCLUDE,
+    });
+    if (!key) return { invoice: await this.create(dto, options), replayed: false };
+    const existing = await findExisting();
+    if (existing) return { invoice: existing, replayed: true };
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // El lock cubre también el alta inline y el consecutivo: el perdedor
+        // no puede fallar por email ni consumir otro número antes del índice.
+        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',
+          `invoice-create:${context.store_id}:${key}`);
+        const winner = await findExisting(tx);
+        if (winner) return { invoice: winner, replayed: true };
+        const invoice = await this.create({ ...dto, client_request_id: key }, {
+          ...options, transaction: tx, defer_created_event: true,
+        });
+        return { invoice, replayed: false };
+      }, { timeout: 60_000, maxWait: 10_000 });
+      if (!result.replayed) this.emitInvoiceCreated(result.invoice);
+      return result;
+    } catch (error) {
+      const conflict = error as { code?: string; meta?: { target?: string | string[] } };
+      const target = conflict?.meta?.target;
+      const keyConflict = Array.isArray(target)
+        ? target.includes('store_id') && target.includes('client_request_id')
+        : target === 'invoices_store_client_request_id_key';
+      if (conflict?.code === 'P2002' && keyConflict) {
+        const winner = await findExisting();
+        if (winner) return { invoice: winner, replayed: true };
+      }
+      throw error;
+    }
+  }
+
+  private emitInvoiceCreated(invoice: { id: number; invoice_number?: string | null; invoice_type?: string }): void {
+    this.event_emitter.emit('invoice.created', {
+      invoice_id: invoice.id, invoice_number: invoice.invoice_number, invoice_type: invoice.invoice_type,
+    });
+  }
+
+  /** Sólo los endpoints manuales activan esta regla; no cambia el carril POS. */
+  async assertPersistedAcquirerEmail(id: number): Promise<void> {
+    const invoice = await this.findOne(id);
+    await this.assertManualInvoiceAcquirerEmail(
+      invoice as unknown as CreateInvoiceDto,
+      this.getContext(),
+    );
+  }
+
+  async create(
+    dto: CreateInvoiceDto,
+    options: { require_acquirer_email?: boolean; transaction?: Prisma.TransactionClient; defer_created_event?: boolean } = {},
+  ) {
+    const prisma = options.transaction ?? this.prisma;
     this.assertNoteUsesSpecificRoute(dto.invoice_type);
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
@@ -1845,8 +1908,8 @@ export class InvoicingService {
     // invoice, and feed the resulting `customer_id` into the invoice. When
     // both `customer_id` and `inline_customer` are sent, `customer_id` wins
     // (matches the rule documented in `CreateInvoiceDto`).
-    // Correo del adquiriente obligatorio en la CREACIÓN MANUAL (sólo cuando el
-    // punto de entrada lo pide: `POST store/invoicing`). Por encima del cliente
+    // Correo obligatorio al EMITIR manualmente, no al guardar un borrador.
+    // El punto de entrada activa esta opción con emit_immediately. Antes del cliente
     // en línea y del consecutivo: un rechazo aquí no deja ficha huérfana ni
     // hueco de numeración. Ver `acquirer-email.util.ts`.
     if (options.require_acquirer_email) {
@@ -1872,7 +1935,7 @@ export class InvoicingService {
     // `dto.customer_*`, como antes.
     const linked_customer_ficha =
       resolved_customer_id != null
-        ? await this.prisma.users.findFirst({
+        ? await prisma.users.findFirst({
             where: { id: resolved_customer_id },
             select: CUSTOMER_FOR_INVOICE_SELECT,
           })
@@ -2028,11 +2091,12 @@ export class InvoicingService {
       calculated.header_taxes,
       calculated.lines,
     );
-    const invoice = await this.prisma.invoices.create({
+    const invoice = await prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
         accounting_entity_id,
+        client_request_id: dto.client_request_id,
         fiscal_document_type: this.toFiscalDocumentType(dto.invoice_type),
         invoice_number,
         invoice_type: dto.invoice_type,
@@ -2242,12 +2306,13 @@ export class InvoicingService {
         invoice.id,
         calculated.lines.map((line) => line.taxes),
         calculated.header_taxes,
+        prisma,
       );
       // Se recarga para que el documento devuelto incluya las filas de impuesto
       // recién escritas: sin esto el llamador vería `invoice_taxes: []` y
       // concluiría que la factura nació sin tributos.
       created =
-        (await this.prisma.invoices.findFirst({
+        (await prisma.invoices.findFirst({
           where: { id: invoice.id },
           include: INVOICE_INCLUDE,
         })) ?? invoice;
@@ -2260,8 +2325,8 @@ export class InvoicingService {
     if (dto.withholdings && dto.withholdings.length > 0) {
       // Resolver el contexto de tienda/organización desde el ALS — `create()`
       // ya validó que existe vía `assertInvoicingAreaActive`, así que aquí basta
-      // con derivar los ids que `applyClientDeclaredWithholdings` exige para
-      // abrir su propia transacción.
+      // con derivar los ids que `applyClientDeclaredWithholdings` exige.
+      // Con UUID se reutiliza la transacción de creación también en los hijos.
       const ctx = this.getContext();
       const organization_id = Number(ctx.organization_id);
       const store_id = ctx.store_id != null ? Number(ctx.store_id) : null;
@@ -2274,6 +2339,7 @@ export class InvoicingService {
         customer_id:
           invoice.customer_id != null ? Number(invoice.customer_id) : null,
         declared: dto.withholdings,
+        ...(options.transaction ? { client: options.transaction } : {}),
         // Step 8 — año civil de emisión en la zona de la tienda.
         year: await this.resolveCivilYear(new Date(issue_date), {
           store_id,
@@ -2286,23 +2352,19 @@ export class InvoicingService {
       //   recalculo automático en `accepted` queda como FALLBACK para facturas
       //   sin desglose explícito: declarado gana sobre auto cuando coexisten.
       if (!aggregated.isZero()) {
-        await this.prisma.invoices.update({
+        await prisma.invoices.update({
           where: { id: invoice.id },
           data: { withholding_amount: aggregated },
         });
         created =
-          (await this.prisma.invoices.findFirst({
+          (await prisma.invoices.findFirst({
             where: { id: invoice.id },
             include: INVOICE_INCLUDE,
           })) ?? created;
       }
     }
 
-    this.event_emitter.emit('invoice.created', {
-      invoice_id: created.id,
-      invoice_number: created.invoice_number,
-      invoice_type: created.invoice_type,
-    });
+    if (!options.defer_created_event) this.emitInvoiceCreated(created);
 
     this.logger.log(
       `Invoice ${created.invoice_number} created (ID: ${created.id})`,
@@ -6909,6 +6971,7 @@ export class InvoicingService {
     customer_id?: number | null;
     declared: InvoiceWithholdingInputDto[];
     year: number;
+    client?: Prisma.TransactionClient;
   }): Promise<Prisma.Decimal> {
     if (params.declared.length === 0) {
       return new Prisma.Decimal(0);
@@ -6917,7 +6980,7 @@ export class InvoicingService {
     // Una sola lectura para todos los conceptos declarados: deduplicar por id,
     //   pedir `with { tenant_scope }`, y fallar entero si ALGUNO no pertenece.
     const conceptIds = [...new Set(params.declared.map((w) => w.concept_id))];
-    const concepts = await this.prisma.withholding_concepts.findMany({
+    const concepts = await (params.client ?? this.prisma).withholding_concepts.findMany({
       where: {
         id: { in: conceptIds },
         organization_id: params.organization_id,
@@ -7008,14 +7071,10 @@ export class InvoicingService {
     //   - suffered:  la tienda FUE RETENIDA por el cliente → el cliente es la
     //     contraparte también, pero se anota en `customer_id` que es el camino
     //     que el flujo de aceptación ya usa para este rol.
-    // El `client` (transacción) NO se pasa porque `prisma.invoices.create`
-    // corre fuera de `$transaction`: persistir las retenciones dentro de la
-    // misma escritura atómica exigiría refactor mayor y, sobre todo, no
-    // resuelve ningún caso real (un fallo del pool después del commit
-    // simplemente deja la retención huérfana, situación que `accepted`
-    // reintenta desde `resolveWithholdingForInvoice`).
+    // Creación con UUID: todos los hijos usan la misma tx que la factura.
     if (practiced.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,
@@ -7029,6 +7088,7 @@ export class InvoicingService {
     }
     if (suffered.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,
@@ -7043,6 +7103,7 @@ export class InvoicingService {
     // self no entra al DTO por ahora; el motor de aceptación lo cubre.
     if (selfLines.length > 0) {
       await this.withholdingFlow.persistWithholdingLines({
+        ...(params.client ? { client: params.client } : {}),
         organization_id: params.organization_id,
         store_id: params.store_id ?? null,
         accounting_entity_id: params.accounting_entity_id ?? null,

@@ -5,7 +5,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER } from '../validators/customer-fiscal-identity.validator';
 
 /**
- * CORREO DEL ADQUIRIENTE OBLIGATORIO EN LA CREACIÓN MANUAL DE FACTURA.
+ * CORREO DEL ADQUIRIENTE OBLIGATORIO PARA EMITIR UNA FACTURA MANUAL.
  *
  * El correo es el destino del `AttachedDocument` que la norma obliga a
  * entregar. Una factura nominativa sin correo se emite y la DIAN la acepta,
@@ -14,7 +14,8 @@ import { DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER } from '../validators/customer-fisc
  * ## Alcance — SÓLO los puntos de entrada manuales
  *
  * Esta compuerta la activan explícitamente:
- *   - `POST store/invoicing` (`InvoicingService.create(dto, { require_acquirer_email: true })`).
+ *   - `POST store/invoicing` sólo con `emit_immediately: true`.
+ *   - `PATCH store/invoicing/:id/validate` y `:id/send` antes de emitir.
  *   - `POST superadmin/fiscal/sales-invoices` (`PlatformInvoicingService.createSalesInvoice`).
  *   - `POST superadmin/subscriptions/fiscal/invoices` (controller legacy).
  *
@@ -85,7 +86,7 @@ export function assertManualAcquirerEmail(
   if (!email) {
     throw new VendixHttpException(
       ErrorCodes.INVOICING_ACQUIRER_EMAIL_REQUIRED,
-      'El correo del cliente es obligatorio para crear la factura electrónica: es la dirección a la que se le entrega. Escríbelo en el formulario o agrégalo a la ficha del cliente.',
+      'El correo del cliente es obligatorio para emitir la factura electrónica: es la dirección a la que se le entrega. Escríbelo en el formulario o agrégalo a la ficha del cliente.',
       { field: 'customer_email' },
     );
   }

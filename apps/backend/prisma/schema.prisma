@@ -6068,6 +6068,8 @@ model videos {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
+  /// Idempotencia de creación manual por tienda. Único parcial mantenido en SQL.
+  client_request_id String? @db.Uuid
   financial_account_id Int?
   financial_account order_financial_accounts? @relation(fields: [financial_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   @@index([financial_account_id])

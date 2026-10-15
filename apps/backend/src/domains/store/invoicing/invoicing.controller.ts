@@ -154,11 +154,16 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateInvoiceDto) {
-    // Creación MANUAL: el correo del adquiriente es obligatorio (salvo
-    // consumidor final). Los flujos automáticos no pasan por este handler.
-    const result = await this.invoicing_service.create(create_dto, {
-      require_acquirer_email: true,
-    });
+    const options = { require_acquirer_email: create_dto.emit_immediately === true };
+    const { invoice: result, replayed } = create_dto.client_request_id
+      ? await this.invoicing_service.createIdempotently(create_dto, options)
+      : { invoice: await this.invoicing_service.create(create_dto, options), replayed: false };
+
+    // Recuperar nunca vuelve a validar/enviar. El primer POST puede seguir en vuelo.
+    if (replayed) {
+      return this.response_service.success({ ...result, idempotency_replayed: true },
+        'Factura existente recuperada; consulta su estado antes de reintentar la emisión.');
+    }
 
     // `emit_immediately: true` — la factura YA está creada; acá se intenta
     // validar + enviar con los mismos métodos de los botones del detalle. Un
@@ -429,6 +434,7 @@ export class InvoicingController {
   @Patch(':id/validate')
   @Permissions('invoicing:write')
   async validate(@Param('id', ParseIntPipe) id: number) {
+    await this.invoicing_service.assertPersistedAcquirerEmail(id);
     const result = await this.invoice_flow_service.validate(id);
     return this.response_service.success(
       result,
@@ -452,6 +458,7 @@ export class InvoicingController {
   @Patch(':id/send')
   @Permissions('invoicing:write')
   async send(@Param('id', ParseIntPipe) id: number) {
+    await this.invoicing_service.assertPersistedAcquirerEmail(id);
     const result = await this.invoice_flow_service.send(id);
     return this.response_service.success(result, 'Invoice sent successfully');
   }

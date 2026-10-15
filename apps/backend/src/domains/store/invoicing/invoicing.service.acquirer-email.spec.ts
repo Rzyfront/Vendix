@@ -14,7 +14,7 @@ import { VendixHttpException } from '../../../common/errors';
  *   - correo heredado de la ficha vinculada o del `inline_customer` → pasa;
  *   - consumidor final (222222222222 o sin número de documento) → exento;
  *   - `create(dto)` sin la opción (notas plataforma) y `createFromOrder` no
- *     exigen correo; el controller sí activa la opción.
+ *     exigen correo; el controller sólo activa la opción al emitir inmediatamente.
  *
  * Para no simular toda la creación, el paso siguiente a la compuerta
  * (`assertCustomerResolvable` / `createInlineCustomer`) lanza un centinela:
@@ -258,6 +258,16 @@ describe('InvoicingService.create — correo del adquiriente (factura manual)', 
     expect(usersFindFirst).not.toHaveBeenCalled();
   });
 
+  it('validar/enviar un borrador nominativo sin correo se rechaza con el mismo código', async () => {
+    jest.spyOn(service, 'findOne').mockResolvedValue(baseDto({ id: 91 }) as any);
+    await expectCode(service.assertPersistedAcquirerEmail(91), 'INVOICING_ACQUIRER_EMAIL_REQUIRED');
+  });
+
+  it('validar/enviar consumidor final sin correo sigue exento', async () => {
+    jest.spyOn(service, 'findOne').mockResolvedValue(baseDto({ id: 91, customer_tax_id: '222222222222' }) as any);
+    await expect(service.assertPersistedAcquirerEmail(91)).resolves.toBeUndefined();
+  });
+
   it('createFromOrder (flujo automático) nunca pasa por la compuerta', async () => {
     const gate = jest.spyOn(service as any, 'assertManualInvoiceAcquirerEmail');
     (service as any).prisma.orders = {
@@ -282,13 +292,27 @@ describe('InvoicingController — cableado de la compuerta de correo', () => {
       {} as any,
     );
 
-  it('POST store/invoicing activa require_acquirer_email', async () => {
+  it('POST store/invoicing permite guardar borrador sin correo', async () => {
     const invoicing = { create: jest.fn().mockResolvedValue({ id: 1 }) };
     const dto = { invoice_type: 'sales_invoice' } as any;
     await build(invoicing).create(dto);
     expect(invoicing.create).toHaveBeenCalledWith(dto, {
-      require_acquirer_email: true,
+      require_acquirer_email: false,
     });
+  });
+
+  it('emit_immediately exige correo antes de crear', async () => {
+    const dto = { invoice_type: 'sales_invoice', emit_immediately: true } as any;
+    const invoicing = { create: jest.fn().mockRejectedValue(new Error('correo requerido')) };
+    await expect(build(invoicing).create(dto)).rejects.toThrow('correo requerido');
+    expect(invoicing.create).toHaveBeenCalledWith(dto, { require_acquirer_email: true });
+  });
+
+  it.each(['validate', 'send'] as const)('%s comprueba correo antes de emitir el borrador guardado', async (method) => {
+    const assertPersistedAcquirerEmail = jest.fn().mockRejectedValue(new Error('correo requerido'));
+    const controller = build({ assertPersistedAcquirerEmail });
+    await expect(controller[method](1)).rejects.toThrow('correo requerido');
+    expect(assertPersistedAcquirerEmail).toHaveBeenCalledWith(1);
   });
 
   it('POST from-order delega sin opción de correo', async () => {

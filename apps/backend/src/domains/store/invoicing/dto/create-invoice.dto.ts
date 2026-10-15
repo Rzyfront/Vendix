@@ -14,6 +14,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -503,6 +504,11 @@ export class CreateInvoiceTaxDto {
 }
 
 export class CreateInvoiceDto {
+  /** Misma clave UUID en todos los reintentos del borrador, incluso tras timeout. */
+  @IsOptional()
+  @IsUUID()
+  client_request_id?: string;
+
   @IsIn([
     'sales_invoice',
     'purchase_invoice',

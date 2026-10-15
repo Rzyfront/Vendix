@@ -44,6 +44,7 @@ export function toDianConfigurationType(
 }
 
 export interface Invoice {
+  idempotency_replayed?: boolean;
   /** Sólo en la respuesta de crear con `emit_immediately: true`. */
   emission?: InvoiceEmissionOutcome | null;
   related_invoice_id?: number | null;
@@ -939,6 +940,7 @@ export interface CreateCustomerRequest {
 }
 
 export interface CreateInvoiceDto {
+  client_request_id?: string;
   invoice_type: InvoiceType;
   customer_name?: string;
   customer_tax_id?: string;

@@ -25,6 +25,7 @@ import { DianRejection } from '../../utils/invoicing-errors.util';
  * se mete aqui el `HttpErrorResponse` crudo.
  */
 export interface MutationFailure {
+  httpStatus?: number;
   error: string;
   errorCode?: string | null;
   details?: unknown;

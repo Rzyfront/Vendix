@@ -86,6 +86,8 @@ import {
   InvoiceEmissionOutcome,
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
+import { selectUser, selectUserStore } from '../../../../../../core/store/auth/auth.selectors';
+import { invoiceCreateFailurePolicy, resolveInvoiceCreateRequestKey, mustConfirmInvoiceCreate } from '../../utils/invoice-create-retry-state';
 import { canEditContractInvoice } from '../../interfaces/invoice-contract-editability';
 import { InvoicingService } from '../../services/invoicing.service';
 import {
@@ -2467,6 +2469,11 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
                 }
               </ul>
             }
+            @if (conflictingCustomer()) {
+              <button type="button" class="mt-2 min-h-[44px] underline focus-visible:outline" (click)="selectConflictingCustomer()">
+                Seleccionar el cliente existente
+              </button>
+            }
           </app-alert-banner>
         }
 
@@ -4693,6 +4700,8 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
 export class InvoiceCreatePageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly store = inject(Store);
+  private readonly currentUser = this.store.selectSignal(selectUser);
+  private readonly currentStore = this.store.selectSignal(selectUserStore);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly invoicingService = inject(InvoicingService);
@@ -4762,6 +4771,12 @@ export class InvoiceCreatePageComponent implements OnInit {
    * vuelve a apagar para la siguiente factura.
    */
   readonly emitImmediately = signal(false);
+  // Se genera al enviar, nunca al reintentar. Una respuesta incierta conserva
+  // también el payload: recuperar la factura original precede a editarla.
+  private clientRequestId: string | null = null;
+  private pendingCreatePayload: CreateInvoiceDto | null = null;
+  private createResultUncertain = false;
+  readonly conflictingCustomer = signal<{ id: number; document: string; customer?: Customer } | null>(null);
   /** Keeps every editor control unmounted while a requested invoice is checked. */
   readonly contractInvoiceEditRedirecting = signal(false);
   readonly customerModalOpen = signal(false);
@@ -6154,7 +6169,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     return missingAcquirerEmissionFields({
       customer_id: raw['customer_id'],
       customer_name: raw['customer_name'],
-      customer_tax_id: raw['customer_tax_id'],
+      customer_tax_id: this.effectiveAcquirerDocument(),
       customer_document_type: raw['customer_document_type'],
       customer_address: raw['customer_address'],
       customer_municipality_code: raw['customer_municipality_code'],
@@ -6362,12 +6377,16 @@ export class InvoiceCreatePageComponent implements OnInit {
    * validador acompaña a `missingAcquirerEmissionFields`, que es quien bloquea
    * y marca «Requerido para emitir»; esto sólo deja el control en `invalid`.
    */
+  readonly effectiveAcquirerDocument = computed(() =>
+    String(this.rawValue()['customer_tax_id'] ?? '').trim() ||
+    this.linkedCustomer()?.document_number || this.inlineCustomer()?.document_number || '',
+  );
   readonly isEmailExemptAcquirer = computed(() =>
-    isFinalConsumerDocument(this.rawValue()['customer_tax_id']),
+    isFinalConsumerDocument(this.effectiveAcquirerDocument()),
   );
 
   private readonly syncCustomerEmailRequirement = effect(() => {
-    const required = !this.isEmailExemptAcquirer();
+    const required = this.emitImmediately() && !this.isEmailExemptAcquirer();
     const control = this.invoiceForm.get('customer_email');
     if (!control) return;
     control.setValidators(
@@ -10763,6 +10782,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     }
 
     this.clearSubmitError();
+    if (this.pendingCreatePayload) {
+      this.createInvoiceNow(this.pendingCreatePayload);
+      return;
+    }
 
     if (this.mode() === 'from_order') {
       const orderId = this.orderIdControl.value;
@@ -10795,7 +10818,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     // 1) Lo que se ve sin red. Si falta algo, se enfoca el PRIMERO (en el orden
     //    de la pantalla) y no se crea nada.
-    const local = this.collectBlockers();
+    const local = this.collectBlockers(this.emitImmediately());
     if (local.length > 0) {
       this.presentBlockers(local, 'send');
       return;
@@ -10841,9 +10864,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     // Sólo la captura manual lleva el flag (el aside no pinta el conmutador
     // desde pedido). «Validar» y la vista previa nunca lo mandan.
     const emit = this.mode() === 'manual' && this.emitImmediately();
-    this.store.dispatch(
-      createInvoice({ invoice: withEmitImmediately(payload, emit) }),
-    );
+    const requestKey = resolveInvoiceCreateRequestKey(this.clientRequestId, this.readPendingRequestKey(),
+      () => globalThis.crypto.randomUUID());
+    this.createResultUncertain ||= requestKey.recoveredUncertainty;
+    this.clientRequestId = requestKey.key;
+    this.persistPendingRequestKey(this.clientRequestId);
+    const request = this.pendingCreatePayload ?? {
+      ...withEmitImmediately(payload, emit), client_request_id: this.clientRequestId,
+    };
+    this.pendingCreatePayload = request;
+    this.store.dispatch(createInvoice({ invoice: request }));
   }
 
   /**
@@ -10930,7 +10960,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * es un callejón sin salida, y con ocho secciones plegables el campo culpable
    * puede estar fuera de la vista.
    */
-  private collectBlockers(): SaveRequirement[] {
+  private collectBlockers(requireEmail = true): SaveRequirement[] {
     const blockers: SaveRequirement[] = [];
     const raw = this.rawValue();
 
@@ -10940,6 +10970,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     // nombre, tipo, dirección fiscal y municipio DANE son obligatorios (salvo
     // exportación). El DV no se verifica: se DERIVA del NIT con el módulo 11.
     for (const missing of this.acquirerMissing()) {
+      if (!requireEmail && missing.field === 'customer_email') continue;
       blockers.push(
         localRequirement(
           missing.field,
@@ -11605,6 +11636,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.clearSubmitError();
 
     const invoiceId = Number(invoice?.id);
+    this.pendingCreatePayload = null;
+    this.createResultUncertain = false;
+    this.persistPendingRequestKey(null);
+    if (invoice?.idempotency_replayed && Number.isFinite(invoiceId) && invoiceId > 0) {
+      this.toastService.info('Se recuperó la factura existente. Revisa su estado antes de emitirla.');
+      this.resetForm();
+      const target = invoiceDetailNavigation(invoiceId);
+      void this.router.navigate(target.commands, target.extras);
+      return;
+    }
     // «Emitir directamente»: el backend ya intentó validar y enviar. Con
     // desenlace no hay puerta de emisión que consultar: o salió, o la factura
     // quedó creada sin emitir y se reintenta desde su detalle.
@@ -11940,7 +11981,23 @@ export class InvoiceCreatePageComponent implements OnInit {
   ): void {
     if (!this.submitting()) return;
     this.submitting.set(false);
-    this.submitError.set(failure.error);
+    const status = failure.httpStatus;
+    const policy = invoiceCreateFailurePolicy(status, this.createResultUncertain);
+    if (policy.releasePayload) this.pendingCreatePayload = null;
+    if (!policy.preserveRequestKey) this.persistPendingRequestKey(null);
+    const uncertain = policy.uncertainResponse;
+    this.createResultUncertain = policy.resultUncertain;
+    this.submitError.set(uncertain
+      ? 'No se confirmó el resultado. Reintenta para recuperar la misma factura; no se creará otra.'
+      : failure.error);
+    const details = failure.details as { existing_customer_id?: unknown; existing_customer_document_number?: unknown; existing_customer?: Customer } | null;
+    const existingId = Number(details?.existing_customer_id);
+    if (failure.errorCode === 'SYS_CONFLICT_001' && existingId > 0) {
+      this.conflictingCustomer.set({ id: existingId,
+        document: draftDocumentDigits(details?.existing_customer_document_number),
+        customer: details?.existing_customer?.id === existingId ? details.existing_customer : undefined });
+      this.submitError.set('Ya existe un cliente con ese correo; selecciónalo.');
+    }
     // La causa viaja para el encabezado: un rechazo aritmético no es un
     // «formulario incompleto» y su encabezado lo dice (ver
     // `submitErrorHeading`).
@@ -12038,6 +12095,34 @@ export class InvoiceCreatePageComponent implements OnInit {
     }
   }
 
+  selectConflictingCustomer(): void {
+    const conflict = this.conflictingCustomer();
+    if (!conflict) return;
+    if (conflict.customer) {
+      this.selectCustomer(conflict.customer);
+      this.conflictingCustomer.set(null);
+      this.clearSubmitError();
+      return;
+    }
+    this.customersService.getCustomer(conflict.id).pipe(
+      map((response) => unwrapCustomerResponse(response)),
+      catchError(() => of(null)),
+      switchMap((found) => found || !conflict.document ? of(found) : this.findCustomerByDocument(conflict.document)),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe({
+      next: (customer) => {
+        if (!customer) {
+          this.toastService.info('Busca el cliente existente por su correo en el selector de clientes.');
+          return;
+        }
+        this.selectCustomer(customer);
+        this.conflictingCustomer.set(null);
+        this.clearSubmitError();
+      },
+      error: () => this.toastService.error('No se pudo cargar el cliente existente. Búscalo por su correo.'),
+    });
+  }
+
   private clearSubmitError(): void {
     this.submitError.set(null);
     this.submitErrorDetails.set([]);
@@ -12051,7 +12136,34 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.erroredControls = [];
   }
 
+  private pendingRequestStorageKey(): string | null {
+    const storeId = this.currentStore()?.id;
+    const userId = this.currentUser()?.id;
+    return storeId && userId ? `vendix:invoice-request:${userId}:${storeId}` : null;
+  }
+
+  private readPendingRequestKey(): string | null {
+    try {
+      const storageKey = this.pendingRequestStorageKey();
+      return storageKey ? globalThis.sessionStorage?.getItem(storageKey) ?? null : null;
+    } catch { return null; }
+  }
+
+  private persistPendingRequestKey(value: string | null): void {
+    try {
+      const storageKey = this.pendingRequestStorageKey();
+      if (!storageKey) return;
+      if (value) globalThis.sessionStorage?.setItem(storageKey, value);
+      else globalThis.sessionStorage?.removeItem(storageKey);
+    } catch { /* Almacenamiento deshabilitado: la clave sigue viva en la vista. */ }
+  }
+
   private resetForm(): void {
+    this.persistPendingRequestKey(null);
+    this.clientRequestId = null;
+    this.pendingCreatePayload = null;
+    this.createResultUncertain = false;
+    this.conflictingCustomer.set(null);
     // «Emitir directamente» no se hereda: cada factura arranca apagada.
     this.emitImmediately.set(false);
     // Formulario limpio = sin borrador IA: ni marcas, ni aviso, ni respuestas
@@ -12467,6 +12579,10 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   cancel(): void {
     if (this.submitting()) return;
+    if (mustConfirmInvoiceCreate(!!this.pendingCreatePayload, this.createResultUncertain, this.readPendingRequestKey())) {
+      this.toastService.info('El resultado sigue sin confirmar. Reintenta para recuperar la misma factura antes de descartarla.');
+      return;
+    }
     this.clearSubmitError();
 
     // Si el borrador ya existe, salir TIENE que limpiar: el formulario dejó de
