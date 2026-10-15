@@ -1168,6 +1168,7 @@ export class AccountingEventsListener {
     store_id?: number;
     cost_amount: number;
     quantity_change: number;
+    adjustment_type?: string;
     user_id?: number;
   }) {
     try {
@@ -1187,6 +1188,7 @@ export class AccountingEventsListener {
         store_id: event.store_id,
         cost_amount: Number(event.cost_amount),
         quantity_change: Number(event.quantity_change),
+        adjustment_type: event.adjustment_type,
         user_id: event.user_id,
       });
       if (entry) {

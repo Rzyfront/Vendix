@@ -3,11 +3,13 @@ import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.se
 import { RequestContextService } from '@common/context/request-context.service';
 
 describe('InventoryAdjustmentsBulkService', () => {
-  const mockPrisma = {
-    products: { findMany: jest.fn() },
-    product_variants: { findMany: jest.fn() },
+  const mockPrisma: any = {
+    products: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+    product_variants: { findMany: jest.fn(), findFirst: jest.fn() },
     stock_levels: { findMany: jest.fn() },
+    $transaction: jest.fn(),
   };
+  const mockSku = { next: jest.fn() };
   const mockAdjustments = { batchCreateAndCompleteSettled: jest.fn() };
   const mockS3 = {
     uploadFile: jest.fn(),
@@ -30,6 +32,7 @@ describe('InventoryAdjustmentsBulkService', () => {
       mockPrisma as any,
       mockAdjustments as any,
       mockS3 as any,
+      mockSku as any,
     );
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 3,
@@ -37,6 +40,13 @@ describe('InventoryAdjustmentsBulkService', () => {
     mockPrisma.products.findMany.mockResolvedValue([]);
     mockPrisma.product_variants.findMany.mockResolvedValue([]);
     mockPrisma.stock_levels.findMany.mockResolvedValue([]);
+    mockPrisma.$transaction.mockImplementation(async (fn: any) =>
+      fn(mockPrisma),
+    );
+    mockPrisma.products.findFirst.mockResolvedValue(null);
+    mockPrisma.product_variants.findFirst.mockResolvedValue(null);
+    mockPrisma.products.create.mockResolvedValue({ id: 900 });
+    mockSku.next.mockResolvedValue('CI-3-000001');
     mockAdjustments.batchCreateAndCompleteSettled.mockImplementation(
       async (_l: number, items: any[]) =>
         items.map((_, index) => ({ index, ok: true })),
@@ -290,45 +300,179 @@ describe('InventoryAdjustmentsBulkService', () => {
     });
   });
 
-  it('plantilla prellenada: SKU de variante y omite base huérfana', async () => {
+  it('plantilla existing: incluye producto con stock 0 y SKU de variante', async () => {
+    mockPrisma.products.findMany.mockResolvedValue([
+      {
+        id: 5,
+        sku: 'CAM',
+        name: 'Camisa',
+        product_variants: [{ id: 22, sku: 'CAM-R', name: 'Rojo' }],
+      },
+      { id: 6, sku: 'CAFE', name: 'Cafe', product_variants: [] },
+      { id: 7, sku: 'SIN-STOCK', name: 'Sin stock', product_variants: [] },
+    ]);
     mockPrisma.stock_levels.findMany.mockResolvedValue([
-      {
-        product_variant_id: 22,
-        quantity_on_hand: 5,
-        products: {
-          sku: 'CAM',
-          name: 'Camisa',
-          _count: { product_variants: 2 },
-        },
-        product_variants: { sku: 'CAM-R', name: 'Rojo' },
-      },
-      {
-        product_variant_id: null,
-        quantity_on_hand: 3,
-        products: {
-          sku: 'CAM',
-          name: 'Camisa',
-          _count: { product_variants: 2 },
-        },
-        product_variants: null,
-      },
-      {
-        product_variant_id: null,
-        quantity_on_hand: 8,
-        products: {
-          sku: 'CAFE',
-          name: 'Cafe',
-          _count: { product_variants: 0 },
-        },
-        product_variants: null,
-      },
+      { product_id: 5, product_variant_id: 22, quantity_on_hand: 5 },
+      { product_id: 6, product_variant_id: null, quantity_on_hand: 8 },
     ]);
 
-    const buf = await service.generateExcelTemplate(7);
+    const buf = await service.generateExcelTemplate(7, 'existing');
     const wb = XLSX.read(buf, { type: 'buffer' });
     const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    expect(rows.map((r) => r['SKU'])).toEqual(['CAM-R', 'CAFE']);
+    expect(rows.map((r) => r['SKU'])).toEqual(['CAM-R', 'CAFE', 'SIN-STOCK']);
     expect(rows[0]['Nombre Producto']).toBe('Camisa - Rojo');
+    expect(rows.map((r) => r['Cantidad Actual'])).toEqual(['5', '8', '0']);
+    expect(Object.keys(rows[0])).toEqual(
+      expect.arrayContaining(['Precio Venta', 'Precio Compra']),
+    );
+    expect(mockPrisma.products.findMany.mock.calls[0][0].where).toMatchObject({
+      store_id: 3,
+      product_type: 'physical',
+      track_inventory: true,
+    });
+  });
+
+  it('plantilla existing sin location_id: 400', async () => {
+    await expect(
+      service.generateExcelTemplate(undefined, 'existing'),
+    ).rejects.toThrow('location_id');
+  });
+
+  describe('productos nuevos (carga inicial)', () => {
+    const xlsxNew = (rows: any[][]): Buffer => {
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['SKU', 'Nombre Producto', 'Cantidad Nueva', 'Precio Venta', 'Precio Compra'],
+        ...rows,
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'S');
+      return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    };
+
+    it('analisis: SKU vacio + nombre cuenta new_products y auto_sku', async () => {
+      const res = await service.analyzeFile(
+        xlsxNew([
+          ['', 'Galleta', 10, '$ 1.500', '900'],
+          ['NUEVO-1', 'Chocolate', 4, '', ''],
+        ]),
+        dto,
+      );
+
+      expect(res.failed).toBe(0);
+      expect(res.new_products).toBe(2);
+      expect(res.auto_sku).toBe(1);
+      expect(res.requires_initial_load_ack).toBe(true);
+      expect(res.new_product_rows).toEqual([
+        { row_number: 2, sku: null, name: 'Galleta', quantity: 10 },
+        { row_number: 3, sku: 'NUEVO-1', name: 'Chocolate', quantity: 4 },
+      ]);
+    });
+
+    it('fila sin SKU ni nombre es error; SKU desconocido sin nombre tambien', async () => {
+      const res = await service.analyzeFile(
+        xlsxNew([
+          ['', '', 5, '', ''],
+          ['NOPE', '', 5, '', ''],
+        ]),
+        dto,
+      );
+      // La fila 1 sin SKU ni nombre no tiene datos salvo la cantidad: es fila.
+      expect(res.new_products).toBe(0);
+      expect(res.failed).toBe(2);
+      expect(res.errors[1].message).toContain('agrega el Nombre Producto');
+    });
+
+    it('SKU duplicado dentro del archivo: error en la segunda aparicion', async () => {
+      const res = await service.analyzeFile(
+        xlsxNew([
+          ['DUP', 'Uno', 1, '', ''],
+          ['DUP', 'Dos', 2, '', ''],
+        ]),
+        dto,
+      );
+      expect(res.new_products).toBe(1);
+      expect(res.errors).toEqual([
+        expect.objectContaining({ row_number: 3, sku: 'DUP' }),
+      ]);
+      expect(res.errors[0].message).toContain('duplicado');
+    });
+
+    it('commit sin ack lanza INV_ADJ_BULK_INITIAL_LOAD_ACK_001 y no escribe', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta', 10, '', '']]),
+      );
+      await expect(
+        service.uploadFromSession('sid', dto, { offset: 0, limit: 100 }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INV_ADJ_BULK_INITIAL_LOAD_ACK_001',
+        }),
+      });
+      expect(mockPrisma.products.create).not.toHaveBeenCalled();
+      expect(
+        mockAdjustments.batchCreateAndCompleteSettled,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('commit con ack: crea producto con SKU automatico y ajusta initial_load', async () => {
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['', 'Galleta Maria', 10, '$ 1.500', '900']]),
+      );
+
+      const res: any = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+
+      expect(mockSku.next).toHaveBeenCalledWith(3, mockPrisma);
+      expect(mockPrisma.products.create.mock.calls[0][0].data).toMatchObject({
+        store_id: 3,
+        name: 'Galleta Maria',
+        sku: 'CI-3-000001',
+        base_price: 1500,
+        cost_price: 900,
+        product_type: 'physical',
+        state: 'active',
+        track_inventory: true,
+      });
+      const items =
+        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1];
+      expect(items[0]).toMatchObject({
+        product_id: 900,
+        type: 'initial_load',
+        quantity_after: 10,
+        unit_cost: 900,
+      });
+      expect(res.successful).toBe(1);
+      expect(res.results[0]).toMatchObject({
+        action: 'created',
+        sku: 'CI-3-000001',
+      });
+    });
+
+    it('commit con ack: SKU que ya existe se ajusta, no se duplica', async () => {
+      mockPrisma.products.findFirst.mockResolvedValue({
+        id: 44,
+        track_inventory: true,
+        product_variants: [],
+      });
+      mockS3.downloadImage.mockResolvedValue(
+        xlsxNew([['YA-EXISTE', 'Algo', 3, '', '']]),
+      );
+
+      const res: any = await service.uploadFromSession(
+        'sid',
+        { ...dto, initial_load_ack: true },
+        { offset: 0, limit: 100 },
+      );
+
+      expect(mockPrisma.products.create).not.toHaveBeenCalled();
+      const items =
+        mockAdjustments.batchCreateAndCompleteSettled.mock.calls[0][1];
+      expect(items[0]).toMatchObject({ product_id: 44, type: 'count_variance' });
+      expect(res.results[0].action).toBe('adjusted');
+    });
   });
 });

@@ -7,6 +7,7 @@ import {
   signal,
   computed,
   DestroyRef,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
@@ -19,6 +20,8 @@ import {
   ButtonComponent,
   IconComponent,
   ToastService,
+  AlertBannerComponent,
+  AiReviewAckComponent,
 } from '../../../../../../shared/components';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import {
@@ -49,6 +52,8 @@ import {
     IconComponent,
     StepsLineComponent,
     SpinnerComponent,
+    AlertBannerComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -251,10 +256,12 @@ import {
               <div class="flex-1">
                 <p class="text-sm text-blue-800">
                   Esta carga masiva gestiona el
-                  <strong>catálogo</strong> (definir productos y servicios). No
-                  mueve stock, costos de compra ni activos registrados. Para
-                  ingresar mercancía con costo y respaldo contable, usa
-                  <strong>Inventario > POP > Carga masiva</strong>.
+                  <strong>catálogo</strong> (definir productos y servicios).
+                  Opcional: si incluyes «Cantidad Inicial» y «Precio Compra», el
+                  inventario se registrará como
+                  <strong>Carga inicial</strong> (sin orden de compra) e
+                  incrementará el costo de inventario. Las compras normales se
+                  registran en <strong>Inventario > POP</strong>.
                 </p>
               </div>
               <a
@@ -555,6 +562,32 @@ import {
                   </div>
                 </div>
               </div>
+
+              <!-- Consentimiento de carga inicial -->
+              @if (analysisResult()!.initial_load?.requires_ack) {
+                <div class="mt-3 space-y-3">
+                  <app-alert-banner
+                    variant="warning"
+                    tone="token"
+                    heading="Esta carga contiene inventario inicial"
+                  >
+                    {{ analysisResult()!.initial_load!.rows_with_quantity }}
+                    productos traen cantidad ({{
+                      analysisResult()!.initial_load!.total_units
+                    }}
+                    unidades). Se fijará su stock como Carga inicial en la
+                    ubicación principal, sin orden de compra, e incrementará el
+                    costo de inventario.
+                  </app-alert-banner>
+                  <app-ai-review-ack
+                    #initialLoadAckBlock
+                    [(acknowledged)]="initialLoadAck"
+                    [message]="
+                      'Soy consciente de que estoy realizando una carga inicial de inventario y que esto modifica el stock y el costo de los productos.'
+                    "
+                  />
+                </div>
+              }
 
               <!-- Update legend -->
               @if (hasUpdates()) {
@@ -1604,6 +1637,10 @@ export class BulkUploadModalComponent {
   readonly isAnalyzing = signal(false);
   readonly analysisResult = signal<BulkProductAnalysisResult | null>(null);
   sessionId: string | null = null;
+  readonly initialLoadAck = signal(false);
+  private readonly initialLoadAckBlock = viewChild<AiReviewAckComponent>(
+    'initialLoadAckBlock',
+  );
 
   // Upload state
   readonly isUploading = signal(false);
@@ -1648,6 +1685,7 @@ export class BulkUploadModalComponent {
   readonly canProceed = computed<boolean>(() => {
     const r = this.analysisResult();
     if (!r) return false;
+    if (r.initial_load?.requires_ack && !this.initialLoadAck()) return false;
     return r.ready > 0 || r.with_warnings > 0;
   });
 
@@ -1764,6 +1802,7 @@ export class BulkUploadModalComponent {
 
   // Navigation
   goBack() {
+    this.initialLoadAck.set(false);
     this.currentStep.update((step) => (step > 0 ? step - 1 : step));
   }
 
@@ -1811,6 +1850,7 @@ export class BulkUploadModalComponent {
     this.isDragging.set(false);
     this.isAnalyzing.set(false);
     this.analysisResult.set(null);
+    this.initialLoadAck.set(false);
     this.sessionId = null;
     this.isUploading.set(false);
     this.uploadResults.set(null);
@@ -1905,6 +1945,7 @@ export class BulkUploadModalComponent {
     if (!file) return;
 
     this.isAnalyzing.set(true);
+    this.initialLoadAck.set(false);
     this.uploadError.set(null);
     this.currentStep.set(1);
 
@@ -1943,6 +1984,14 @@ export class BulkUploadModalComponent {
     const sessionId = this.sessionId;
     if (!sessionId) return;
 
+    const requiresAck =
+      this.analysisResult()?.initial_load?.requires_ack === true;
+    if (requiresAck && !this.initialLoadAck()) {
+      this.initialLoadAckBlock()?.requestAttention();
+      return;
+    }
+    const initialLoadAck = requiresAck ? true : undefined;
+
     const limit = BULK_UPLOAD_PAGE_SIZE;
     let total = this.analysisResult()?.total_products ?? 0;
     let doneSeen = false;
@@ -1967,7 +2016,12 @@ export class BulkUploadModalComponent {
     // y la cadena continúa con la siguiente.
     const fetchPage = (offset: number) =>
       this.productsService
-        .uploadProductsFromSessionPage(sessionId, offset, limit)
+        .uploadProductsFromSessionPage(
+          sessionId,
+          offset,
+          limit,
+          initialLoadAck,
+        )
         .pipe(
           catchError((error) => {
             const message =

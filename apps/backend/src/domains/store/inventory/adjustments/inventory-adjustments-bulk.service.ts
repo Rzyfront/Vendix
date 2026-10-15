@@ -16,9 +16,28 @@ import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 import { S3Service } from '@common/services/s3.service';
+import { parseMoneyCell } from '@common/money-kernel';
+import { generateSlug } from '@common/utils/slug.util';
+import { StoreSkuGeneratorService } from './store-sku-generator.service';
 
 /** Tamaño de grupo para los `findMany({ in })` de la validación. */
 const LOOKUP_CHUNK = 1000;
+
+/** Fila del archivo que crea un producto nuevo (carga inicial). */
+interface NewProductRow {
+  row_number: number;
+  /** SKU del archivo; null = se autogenerará. */
+  sku: string | null;
+  auto_sku: boolean;
+  name: string;
+  quantity: number;
+  base_price: number | null;
+  unit_cost: number | null;
+  description: string;
+  /** Tipo pedido por la fila/global, usado solo si el SKU ya existe al confirmar. */
+  type: string;
+  result_row: BulkAdjustmentItemResultDto;
+}
 
 @Injectable()
 export class InventoryAdjustmentsBulkService {
@@ -41,8 +60,14 @@ export class InventoryAdjustmentsBulkService {
     descripción: 'description',
     descripcion: 'description',
     description: 'description',
-    'nombre producto': '_product_name',
-    nombre: '_product_name',
+    'nombre producto': 'name',
+    nombre: 'name',
+    name: 'name',
+    'precio venta': 'base_price',
+    'precio de venta': 'base_price',
+    'precio compra': 'unit_cost',
+    'precio de compra': 'unit_cost',
+    costo: 'unit_cost',
     'cantidad actual': '_current_quantity',
   };
 
@@ -50,13 +75,33 @@ export class InventoryAdjustmentsBulkService {
     private readonly prisma: StorePrismaService,
     private readonly adjustmentsService: InventoryAdjustmentsService,
     private readonly s3Service: S3Service,
+    private readonly skuGenerator: StoreSkuGeneratorService,
   ) {}
 
   /**
-   * Genera la plantilla Excel para ajuste masivo de inventario
-   * Si se pasa location_id, la plantilla se pre-pobla con productos y stock actual
+   * Genera la plantilla Excel para ajuste masivo de inventario.
+   * - `existing` (default si llega `location_id`): TODOS los productos físicos
+   *   con seguimiento de inventario de la tienda (y una fila por variante) con
+   *   la cantidad actual en esa ubicación (0 si no hay stock_level).
+   * - `example` (default sin `location_id`): filas de ejemplo.
    */
-  async generateExcelTemplate(location_id?: number): Promise<Buffer> {
+  async generateExcelTemplate(
+    location_id?: number,
+    mode?: string,
+  ): Promise<Buffer> {
+    const resolved_mode =
+      mode === 'example' || mode === 'existing'
+        ? mode
+        : location_id
+          ? 'existing'
+          : 'example';
+
+    if (resolved_mode === 'existing' && !location_id) {
+      throw new BadRequestException(
+        'El modo "existing" requiere el parámetro location_id',
+      );
+    }
+
     const headers = [
       'SKU',
       'Nombre Producto',
@@ -64,66 +109,84 @@ export class InventoryAdjustmentsBulkService {
       'Cantidad Nueva',
       'Tipo Ajuste',
       'Descripción',
+      'Precio Venta',
+      'Precio Compra',
     ];
 
     let data: any[] = [];
 
-    if (location_id) {
-      // Template pre-poblado con stock actual
-      const stock_levels = await this.prisma.stock_levels.findMany({
+    if (resolved_mode === 'existing') {
+      const store_id = this.requireStoreId();
+      const products = await this.prisma.products.findMany({
         where: {
-          location_id: location_id,
-          quantity_on_hand: { gt: 0 },
-          products: {
-            state: { not: 'archived' },
-            track_inventory: true,
-          },
+          store_id,
+          product_type: 'physical',
+          track_inventory: true,
+          state: { not: 'archived' },
         },
-        include: {
-          products: {
-            select: {
-              sku: true,
-              name: true,
-              _count: { select: { product_variants: true } },
-            },
-          },
+        select: {
+          id: true,
+          sku: true,
+          name: true,
           product_variants: {
-            select: { sku: true, name: true },
+            select: { id: true, sku: true, name: true },
+            orderBy: { id: 'asc' },
           },
         },
-        orderBy: {
-          products: { name: 'asc' },
-        },
+        orderBy: { name: 'asc' },
       });
 
-      // Fila de variante -> SKU/nombre de la VARIANTE (el upload resuelve por
-      // ese SKU). Fila base huérfana (product_variant_id null) de un producto
-      // que tiene variantes: se omite, el upload la rechazaría por ambigua.
-      data = stock_levels
-        .filter((sl) => {
-          if (sl.product_variant_id) return !!sl.product_variants?.sku;
-          if (sl.products._count?.product_variants > 0) return false;
-          return !!sl.products.sku;
-        })
-        .map((sl) => {
-          const variant = sl.product_variant_id ? sl.product_variants : null;
-          return {
-            SKU: variant ? variant.sku : sl.products.sku,
-            'Nombre Producto': variant
-              ? variant.name
-                ? `${sl.products.name} - ${variant.name}`
-                : sl.products.name
-              : sl.products.name,
-            'Cantidad Actual': sl.quantity_on_hand,
+      const stock_by_key = new Map<string, number>();
+      const product_ids = products.map((p) => p.id);
+      for (const chunk of this.chunk(product_ids, LOOKUP_CHUNK)) {
+        const levels = await this.prisma.stock_levels.findMany({
+          where: { product_id: { in: chunk }, location_id },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity_on_hand: true,
+          },
+        });
+        for (const l of levels) {
+          stock_by_key.set(
+            `${l.product_id}:${l.product_variant_id ?? 'null'}`,
+            l.quantity_on_hand ?? 0,
+          );
+        }
+      }
+
+      // Sin variantes: fila del producto. Con variantes: una fila por variante
+      // con el SKU de la variante (el upload resuelve por ese SKU).
+      for (const p of products) {
+        if (p.product_variants.length === 0) {
+          if (!p.sku) continue;
+          data.push({
+            SKU: p.sku,
+            'Nombre Producto': p.name,
+            'Cantidad Actual': stock_by_key.get(`${p.id}:null`) ?? 0,
             'Cantidad Nueva': '',
             'Tipo Ajuste': '',
             Descripción: '',
-          };
-        });
-    }
-
-    if (data.length === 0) {
-      // Template vacío con ejemplos
+            'Precio Venta': '',
+            'Precio Compra': '',
+          });
+          continue;
+        }
+        for (const v of p.product_variants) {
+          if (!v.sku) continue;
+          data.push({
+            SKU: v.sku,
+            'Nombre Producto': v.name ? `${p.name} - ${v.name}` : p.name,
+            'Cantidad Actual': stock_by_key.get(`${p.id}:${v.id}`) ?? 0,
+            'Cantidad Nueva': '',
+            'Tipo Ajuste': '',
+            Descripción: '',
+            'Precio Venta': '',
+            'Precio Compra': '',
+          });
+        }
+      }
+    } else {
       data = [
         {
           SKU: 'PROD-001',
@@ -132,14 +195,8 @@ export class InventoryAdjustmentsBulkService {
           'Cantidad Nueva': 50,
           'Tipo Ajuste': 'count_variance',
           Descripción: 'Conteo físico',
-        },
-        {
-          SKU: 'PROD-002',
-          'Nombre Producto': 'Producto Ejemplo 2',
-          'Cantidad Actual': '(se ignora)',
-          'Cantidad Nueva': 30,
-          'Tipo Ajuste': '',
-          Descripción: '',
+          'Precio Venta': '',
+          'Precio Compra': '',
         },
         {
           SKU: 'PROD-003',
@@ -148,6 +205,19 @@ export class InventoryAdjustmentsBulkService {
           'Cantidad Nueva': 0,
           'Tipo Ajuste': 'damage',
           Descripción: 'Mercancía dañada',
+          'Precio Venta': '',
+          'Precio Compra': '',
+        },
+        {
+          // Producto nuevo: SKU vacío = se autogenera (CI-{tienda}-{NNNNNN}).
+          SKU: '',
+          'Nombre Producto': 'Producto Nuevo Ejemplo',
+          'Cantidad Actual': '(se ignora)',
+          'Cantidad Nueva': 20,
+          'Tipo Ajuste': '',
+          Descripción: 'Carga inicial',
+          'Precio Venta': 15000,
+          'Precio Compra': 9000,
         },
       ];
     }
@@ -211,6 +281,15 @@ export class InventoryAdjustmentsBulkService {
       valid: evaluation.successful,
       failed: evaluation.failed,
       errors,
+      new_products: evaluation.new_rows.length,
+      auto_sku: evaluation.new_rows.filter((n) => n.auto_sku).length,
+      requires_initial_load_ack: evaluation.new_rows.length > 0,
+      new_product_rows: evaluation.new_rows.slice(0, 50).map((n) => ({
+        row_number: n.row_number,
+        sku: n.sku,
+        name: n.name,
+        quantity: n.quantity,
+      })),
     };
   }
 
@@ -222,7 +301,7 @@ export class InventoryAdjustmentsBulkService {
    */
   async uploadFromSession(
     session_id: string,
-    upload_dto: BulkAdjustmentUploadDto,
+    upload_dto: BulkAdjustmentUploadDto & { initial_load_ack?: boolean },
     page?: { offset?: number; limit?: number },
   ): Promise<
     BulkAdjustmentUploadResultDto | BulkAdjustmentUploadSessionResultDto
@@ -246,6 +325,12 @@ export class InventoryAdjustmentsBulkService {
 
       const all = this.parseAndCheckLimits(file_buffer);
       const total = all.length;
+      // El archivo COMPLETO manda: si crea productos y no hay ack, se rechaza
+      // antes de escribir cualquier página.
+      if (upload_dto.initial_load_ack !== true) {
+        const full = await this.evaluateRows(all, upload_dto, store_id, 0);
+        this.assertInitialLoadAck(full.new_rows.length, upload_dto);
+      }
       if (offset >= total) {
         throw new BadRequestException(
           `El offset (${offset}) está fuera del archivo: contiene ${total} filas de datos`,
@@ -313,7 +398,7 @@ export class InventoryAdjustmentsBulkService {
   /** Valida las filas y aplica los ajustes validos. */
   private async processRows(
     rows: Record<string, any>[],
-    upload_dto: BulkAdjustmentUploadDto,
+    upload_dto: BulkAdjustmentUploadDto & { initial_load_ack?: boolean },
     store_id: number,
     row_offset: number,
   ): Promise<BulkAdjustmentUploadResultDto> {
@@ -325,6 +410,8 @@ export class InventoryAdjustmentsBulkService {
     );
     const { results, valid_items } = evaluation;
     let { successful, failed } = evaluation;
+
+    this.assertInitialLoadAck(evaluation.new_rows.length, upload_dto);
 
     // Ejecutar ajustes batch usando el servicio existente
     if (valid_items.length > 0) {
@@ -352,6 +439,27 @@ export class InventoryAdjustmentsBulkService {
         successful--;
         failed++;
       }
+    }
+
+    // Filas nuevas (con ack): una transacción por fila para crear el producto
+    // y luego su ajuste `initial_load`.
+    for (const nr of evaluation.new_rows) {
+      const outcome = await this.commitNewProductRow(
+        nr,
+        upload_dto,
+        store_id,
+      );
+      const row = nr.result_row;
+      if (outcome.sku) row.sku = outcome.sku;
+      if (outcome.ok) {
+        row.action = outcome.action;
+        row.message = outcome.message;
+        continue;
+      }
+      row.status = 'error';
+      row.message = outcome.message;
+      successful--;
+      failed++;
     }
 
     return {
@@ -384,6 +492,7 @@ export class InventoryAdjustmentsBulkService {
       description?: string;
     }[];
     applied_rows: BulkAdjustmentItemResultDto[];
+    new_rows: NewProductRow[];
     successful: number;
     failed: number;
   }> {
@@ -397,6 +506,8 @@ export class InventoryAdjustmentsBulkService {
       description?: string;
     }[] = [];
     const applied_rows: BulkAdjustmentItemResultDto[] = [];
+    const new_rows: NewProductRow[] = [];
+    const seen_skus = new Set<string>();
     let successful = 0;
     let failed = 0;
 
@@ -492,16 +603,33 @@ export class InventoryAdjustmentsBulkService {
       const row = rows[i];
       const row_number = row_offset + i + 2; // +2 porque la fila 1 es header y el índice empieza en 0
 
-      const sku = row.sku?.toString().trim();
-      if (!sku) {
+      const sku: string = row.sku?.toString().trim() ?? '';
+      const name: string = row.name?.toString().trim() ?? '';
+
+      if (!sku && !name) {
         results.push({
           row_number,
           sku: '',
           status: 'error',
-          message: 'SKU vacío o no proporcionado',
+          message:
+            'SKU vacío o no proporcionado; para crear un producto nuevo agrega el Nombre Producto',
         });
         failed++;
         continue;
+      }
+
+      if (sku) {
+        if (seen_skus.has(sku)) {
+          results.push({
+            row_number,
+            sku,
+            status: 'error',
+            message: `SKU duplicado en el archivo: "${sku}" ya aparece en una fila anterior`,
+          });
+          failed++;
+          continue;
+        }
+        seen_skus.add(sku);
       }
 
       // Validar que quantity_after sea un número válido >= 0
@@ -523,7 +651,7 @@ export class InventoryAdjustmentsBulkService {
       let product_name: string;
       let track_inventory: boolean;
 
-      const product = products_by_sku.get(sku);
+      const product = sku ? products_by_sku.get(sku) : undefined;
 
       if (product) {
         if (product.product_variants?.length > 0) {
@@ -544,16 +672,69 @@ export class InventoryAdjustmentsBulkService {
         product_name = product.name;
         track_inventory = product.track_inventory;
       } else {
-        const variant = variants_by_sku.get(sku);
+        const variant = sku ? variants_by_sku.get(sku) : undefined;
 
         if (!variant) {
-          results.push({
+          // SKU vacío o no encontrado: con nombre es un producto nuevo.
+          if (!name) {
+            results.push({
+              row_number,
+              sku,
+              status: 'error',
+              message: `Producto con SKU "${sku}" no encontrado; para crearlo agrega el Nombre Producto`,
+            });
+            failed++;
+            continue;
+          }
+
+          const base_price = this.parseOptionalMoney(row.base_price);
+          const unit_cost = this.parseOptionalMoney(row.unit_cost);
+          if (base_price === 'invalid' || unit_cost === 'invalid') {
+            results.push({
+              row_number,
+              sku,
+              product_name: name,
+              status: 'error',
+              message: `${base_price === 'invalid' ? 'Precio Venta' : 'Precio Compra'} inválido: debe ser un monto >= 0`,
+            });
+            failed++;
+            continue;
+          }
+
+          const floor_qty = Math.floor(quantity_after);
+          const result_row: BulkAdjustmentItemResultDto = {
             row_number,
             sku,
-            status: 'error',
-            message: `Producto con SKU "${sku}" no encontrado`,
+            product_name: name,
+            status: 'success',
+            message: sku
+              ? 'Producto nuevo (se creará como carga inicial)'
+              : 'Producto nuevo (se creará con SKU automático)',
+            quantity_before: 0,
+            quantity_after: floor_qty,
+            quantity_change: floor_qty,
+            action: 'created',
+          };
+          results.push(result_row);
+          new_rows.push({
+            row_number,
+            sku: sku || null,
+            auto_sku: !sku,
+            name,
+            quantity: floor_qty,
+            base_price,
+            unit_cost,
+            description:
+              row.description?.toString().trim() ||
+              upload_dto.description ||
+              'Carga inicial (ajuste masivo)',
+            type:
+              this.normalizeAdjustmentType(row.type) ||
+              upload_dto.adjustment_type ||
+              'count_variance',
+            result_row,
           });
-          failed++;
+          successful++;
           continue;
         }
         product_id = variant.product_id;
@@ -628,7 +809,204 @@ export class InventoryAdjustmentsBulkService {
       successful++;
     }
 
-    return { results, valid_items, applied_rows, successful, failed };
+    return {
+      results,
+      valid_items,
+      applied_rows,
+      new_rows,
+      successful,
+      failed,
+    };
+  }
+
+  /** `null` = vacío; 'invalid' = no numérico o negativo. */
+  private parseOptionalMoney(raw: unknown): number | null | 'invalid' {
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      return null;
+    }
+    const n = parseMoneyCell(raw);
+    if (n === null || n < 0) return 'invalid';
+    return n;
+  }
+
+  private assertInitialLoadAck(
+    new_count: number,
+    upload_dto: { initial_load_ack?: boolean },
+  ): void {
+    if (new_count > 0 && upload_dto.initial_load_ack !== true) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_ADJ_BULK_INITIAL_LOAD_ACK_001,
+        undefined,
+        { new_products: new_count },
+      );
+    }
+  }
+
+  /**
+   * Crea el producto nuevo (tx propia: SKU, slug y alta atómicos) y luego su
+   * ajuste `initial_load`. Si el SKU ya existe al confirmar (página anterior u
+   * otra fila) se trata como existente: se ajusta, no se duplica.
+   */
+  private async commitNewProductRow(
+    nr: NewProductRow,
+    upload_dto: BulkAdjustmentUploadDto,
+    store_id: number,
+  ): Promise<
+    | { ok: true; sku: string; action: 'created' | 'adjusted'; message: string }
+    | { ok: false; sku?: string; message: string }
+  > {
+    let target: {
+      product_id: number;
+      product_variant_id?: number;
+      sku: string;
+      created: boolean;
+    };
+    try {
+      target = await this.prisma.$transaction(async (tx: any) => {
+        if (nr.sku) {
+          const existing_product = await tx.products.findFirst({
+            where: { store_id, sku: nr.sku, state: { not: 'archived' } },
+            select: {
+              id: true,
+              track_inventory: true,
+              product_variants: { select: { id: true }, take: 1 },
+            },
+          });
+          if (existing_product) {
+            if (existing_product.product_variants.length > 0) {
+              throw new BadRequestException(
+                `El producto con SKU "${nr.sku}" maneja variantes: usa el SKU de la variante`,
+              );
+            }
+            if (!existing_product.track_inventory) {
+              throw new BadRequestException(
+                'El producto no tiene seguimiento de inventario habilitado',
+              );
+            }
+            return {
+              product_id: existing_product.id,
+              sku: nr.sku,
+              created: false,
+            };
+          }
+          const existing_variant = await tx.product_variants.findFirst({
+            where: {
+              sku: nr.sku,
+              products: { store_id, state: { not: 'archived' } },
+            },
+            select: {
+              id: true,
+              product_id: true,
+              track_inventory_override: true,
+              products: { select: { track_inventory: true } },
+            },
+          });
+          if (existing_variant) {
+            const tracked =
+              existing_variant.track_inventory_override ??
+              existing_variant.products.track_inventory;
+            if (!tracked) {
+              throw new BadRequestException(
+                'El producto no tiene seguimiento de inventario habilitado',
+              );
+            }
+            return {
+              product_id: existing_variant.product_id,
+              product_variant_id: existing_variant.id,
+              sku: nr.sku,
+              created: false,
+            };
+          }
+        }
+
+        const sku = nr.sku ?? (await this.skuGenerator.next(store_id, tx));
+        const slug = await this.uniqueSlug(tx, nr.name, sku);
+        const product = await tx.products.create({
+          data: {
+            store_id,
+            name: nr.name,
+            slug,
+            sku,
+            base_price: nr.base_price ?? 0,
+            cost_price: nr.unit_cost,
+            product_type: 'physical',
+            state: 'active',
+            track_inventory: true,
+            stock_quantity: 0,
+            updated_at: new Date(),
+          },
+          select: { id: true },
+        });
+        return { product_id: product.id, sku, created: true };
+      });
+    } catch (error: any) {
+      return {
+        ok: false,
+        message: `Error al crear el producto: ${error?.message ?? 'desconocido'}`,
+      };
+    }
+
+    // Producto nuevo con cantidad 0: no hay stock que cargar, solo el alta.
+    if (target.created && nr.quantity === 0) {
+      return {
+        ok: true,
+        sku: target.sku,
+        action: 'created',
+        message: `Producto creado con SKU ${target.sku} (sin stock inicial)`,
+      };
+    }
+
+    const type = target.created ? 'initial_load' : nr.type;
+    const [outcome] =
+      await this.adjustmentsService.batchCreateAndCompleteSettled(
+        upload_dto.location_id,
+        [
+          {
+            product_id: target.product_id,
+            ...(target.product_variant_id
+              ? { product_variant_id: target.product_variant_id }
+              : {}),
+            type,
+            quantity_after: nr.quantity,
+            ...(nr.unit_cost !== null ? { unit_cost: nr.unit_cost } : {}),
+            description: nr.description,
+          },
+        ],
+      );
+
+    if (outcome && !outcome.ok) {
+      return {
+        ok: false,
+        sku: target.sku,
+        message: `${target.created ? `Producto creado con SKU ${target.sku}, pero falló` : 'Error al aplicar'} el ajuste: ${outcome.error?.message ?? 'desconocido'}`,
+      };
+    }
+
+    return {
+      ok: true,
+      sku: target.sku,
+      action: target.created ? 'created' : 'adjusted',
+      message: target.created
+        ? `Producto creado con SKU ${target.sku} (carga inicial)`
+        : `El SKU ${target.sku} ya existía: se ajustó el stock`,
+    };
+  }
+
+  private async uniqueSlug(tx: any, name: string, sku: string): Promise<string> {
+    const base = generateSlug(name) || generateSlug(sku) || 'producto';
+    const taken = async (slug: string) =>
+      !!(await tx.products.findFirst({
+        where: { slug, state: { not: 'archived' } },
+        select: { id: true },
+      }));
+    if (!(await taken(base))) return base;
+    const with_sku = `${base}-${generateSlug(sku)}`;
+    if (!(await taken(with_sku))) return with_sku;
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${with_sku}-${n}`;
+      if (!(await taken(candidate))) return candidate;
+    }
+    return `${with_sku}-${Date.now()}`;
   }
 
   private chunk<T>(items: T[], size: number): T[][] {
@@ -709,7 +1087,7 @@ export class InventoryAdjustmentsBulkService {
           }
         });
 
-        if (has_data && row['sku']) {
+        if (has_data) {
           rows.push(row);
         }
       }
@@ -738,6 +1116,7 @@ export class InventoryAdjustmentsBulkService {
       expiration: 'expiration',
       count_variance: 'count_variance',
       manual_correction: 'manual_correction',
+      initial_load: 'initial_load',
       // Español
       daño: 'damage',
       dano: 'damage',
@@ -754,6 +1133,7 @@ export class InventoryAdjustmentsBulkService {
       'correccion manual': 'manual_correction',
       corrección: 'manual_correction',
       correccion: 'manual_correction',
+      'carga inicial': 'initial_load',
     };
 
     return type_map[normalized] || null;
