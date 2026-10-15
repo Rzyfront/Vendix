@@ -17,6 +17,7 @@ describe('CustomersService.resolveInlineCustomer', () => {
     users: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     roles: { findFirst: jest.fn() },
     store_users: { upsert: jest.fn() },
+    addresses: { create: jest.fn() },
   };
   const eventEmitter = { emit: jest.fn() };
   let service: CustomersService;
@@ -33,6 +34,7 @@ describe('CustomersService.resolveInlineCustomer', () => {
       ...data,
     }));
     jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
+    prisma.addresses.create.mockResolvedValue({ id: 500 });
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -139,5 +141,86 @@ describe('CustomersService.resolveInlineCustomer', () => {
     });
     await expect(promise).rejects.toBeInstanceOf(VendixHttpException);
     expect(prisma.users.create).not.toHaveBeenCalled();
+  });
+  describe('dirección fiscal de la factura (6b)', () => {
+    const natural = {
+      document_type: 'CC',
+      document_number: '1020304050',
+      first_name: 'Ana',
+      last_name: 'Pérez',
+    } as CreateCustomerDto;
+    const billing_address = {
+      address_line1: ' Cra 43A # 1-50 ',
+      city: 'Medellín',
+      state_province: 'Antioquia',
+      municipality_code: '05001',
+      country_code: 'CO',
+    };
+
+    it('cliente nuevo: nace vinculado a la tienda, con rol customer y su dirección billing primaria', async () => {
+      const result = await service.resolveInlineCustomer(7, natural, {
+        billing_address,
+      });
+
+      expect(result).toEqual({ customer_id: 99, was_created: true });
+      const data = createdData();
+      expect(data.store_users).toEqual({ create: { store_id: 7 } });
+      expect(data.user_roles).toEqual({ create: { role_id: 5 } });
+      expect(prisma.addresses.create).toHaveBeenCalledTimes(1);
+      expect(prisma.addresses.create.mock.calls[0][0].data).toEqual({
+        address_line1: 'Cra 43A # 1-50',
+        city: 'Medellín',
+        state_province: 'Antioquia',
+        country_code: 'CO',
+        postal_code: null,
+        municipality_code: '05001',
+        type: 'billing',
+        is_primary: true,
+        store_id: 7,
+        organization_id: null,
+        user_id: 99,
+      });
+    });
+
+    it('sin address_line no graba dirección', async () => {
+      await service.resolveInlineCustomer(7, natural, {
+        billing_address: { address_line1: '   ', city: 'Medellín' },
+      });
+      await service.resolveInlineCustomer(7, natural);
+
+      expect(prisma.users.create).toHaveBeenCalledTimes(2);
+      expect(prisma.addresses.create).not.toHaveBeenCalled();
+    });
+
+    it('si grabar la dirección falla, el cliente igual queda creado (no bloquea)', async () => {
+      prisma.addresses.create.mockRejectedValueOnce(new Error('db down'));
+      const warn = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+
+      const result = await service.resolveInlineCustomer(7, natural, {
+        billing_address,
+      });
+
+      expect(result).toEqual({ customer_id: 99, was_created: true });
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it('cliente existente por documento: no crea ni toca su ficha/direcciones, sólo upsert de store_users', async () => {
+      prisma.users.findFirst.mockResolvedValueOnce({ id: 41, addresses: [] });
+
+      const result = await service.resolveInlineCustomer(7, natural, {
+        billing_address,
+      });
+
+      expect(result).toEqual({ customer_id: 41, was_created: false });
+      expect(prisma.users.create).not.toHaveBeenCalled();
+      expect(prisma.addresses.create).not.toHaveBeenCalled();
+      expect(prisma.store_users.upsert).toHaveBeenCalledWith({
+        where: { user_id_store_id: { user_id: 41, store_id: 7 } },
+        create: { user_id: 41, store_id: 7 },
+        update: {},
+      });
+    });
   });
 });
