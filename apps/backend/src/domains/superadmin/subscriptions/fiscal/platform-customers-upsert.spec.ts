@@ -108,6 +108,10 @@ describe('PlatformInvoicingService — upsert de platform_customers', () => {
         tax_id: '1020304050',
         document_type: '13',
         person_type: '2',
+        // El correo es obligatorio en la factura manual de plataforma
+        // (INVOICING_ACQUIRER_EMAIL_REQUIRED): el campo opcional vacío que
+        // este caso prueba es el teléfono.
+        email: 'juan.perez@correo.co',
       }),
     );
     const call = upsert.mock.calls[0][0];
@@ -115,7 +119,6 @@ describe('PlatformInvoicingService — upsert de platform_customers', () => {
       document_type: '13',
       tax_id: '1020304050',
     });
-    expect(call.update).not.toHaveProperty('email');
     expect(call.update).not.toHaveProperty('phone');
     // Cédula: el DV por defecto ('0') no se guarda.
     expect(call.create.tax_id_dv).toBeNull();
@@ -134,6 +137,7 @@ describe('PlatformInvoicingService — upsert de platform_customers', () => {
       tenant_id: 4,
       legal_name: 'Tienda Demo SAS',
       tax_id: '900111222',
+      email: 'admin@tiendademo.co',
       tax_id_dv: '1',
       document_type: '31',
       person_type: '1',

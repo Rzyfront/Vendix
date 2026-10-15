@@ -349,7 +349,12 @@ describe('PlatformInvoicingService — save_as_profile y estado real (2.5 / 1.4)
     dianConfigurationId: 9,
     actorUserId: 1,
     dto: {
-      customer: { kind: 'external', legal_name: 'Cliente SAS', tax_id: '900123456' },
+      customer: {
+        kind: 'external',
+        legal_name: 'Cliente SAS',
+        tax_id: '900123456',
+        email: 'facturas@cliente.co',
+      },
       operation_type: '10',
       payment_form: '2',
       payment_means_code: '42',

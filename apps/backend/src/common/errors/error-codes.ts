@@ -2200,6 +2200,35 @@ export const ErrorCodes = {
     devMessage: 'Sales orders carry no tax breakdown; cannot be invoiced',
   },
   /**
+   * Factura de venta CREADA A MANO sin correo del adquiriente.
+   *
+   * El correo es el destino del `AttachedDocument` que la norma obliga a
+   * entregar: una factura nominativa sin él se emite ante la DIAN pero el
+   * cliente nunca la recibe. Sólo lo exigen los puntos de entrada manuales
+   * (`POST store/invoicing`, `POST superadmin/.../sales-invoices` y
+   * `POST superadmin/subscriptions/fiscal/invoices`); los flujos automáticos
+   * (POS, desde orden, cuenta, pedido, contrato, SaaS) NO pasan por esta
+   * compuerta. Consumidor final (`222222222222` o venta sin adquiriente
+   * declarado) queda exento. Se lanza ANTES de numerar o escribir.
+   */
+  INVOICING_ACQUIRER_EMAIL_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_EMAIL_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente es obligatorio para crear una factura electrónica manual.',
+  },
+  /**
+   * El correo efectivo del adquiriente (el del formulario, o el heredado de la
+   * ficha del cliente / tenant) no tiene forma de correo. Mismo alcance que
+   * `INVOICING_ACQUIRER_EMAIL_REQUIRED`.
+   */
+  INVOICING_ACQUIRER_EMAIL_INVALID: {
+    code: 'INVOICING_ACQUIRER_EMAIL_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente no es un correo válido (ej. cliente@dominio.com).',
+  },
+  /**
    * El área fiscal «invoicing» está inactiva para el tenant.
    *
    * Las dos compuertas de abajo lanzaban `ForbiddenException` a secas. Un 403

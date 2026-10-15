@@ -19,6 +19,7 @@ import {
 } from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
+import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
 import { localDateString } from '../../../../common/utils/store-timezone.util';
 
@@ -235,6 +236,16 @@ document_type: args.dto.customer.document_type ?? '31',
           : tenant.address,
       };
     }
+
+    // Creación MANUAL: correo del adquiriente obligatorio (salvo consumidor
+    // final). Se juzga el correo EFECTIVO —el del formulario o, si no vino, el
+    // de la ficha del tenant— antes de cualquier escritura o consecutivo.
+    assertManualAcquirerEmail({
+      email_candidates: [tenant.email],
+      document_type: tenant.document_type,
+      document_number: tenant.tax_id,
+      name: tenant.legal_name ?? tenant.name,
+    });
 
     if (args.dto.profile_id) {
       await this.assertPlatformProfileMatchesOperation(
