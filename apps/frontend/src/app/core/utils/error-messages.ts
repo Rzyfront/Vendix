@@ -840,6 +840,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer los documentos. Intenta con archivos más nítidos o captura la factura a mano.',
   INVOICE_DRAFT_SCAN_NOT_READY:
     'El escáner de facturas no está disponible en este momento. Captura la factura a mano o inténtalo más tarde.',
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN:
+    'El escáner de facturas de la plataforma sólo está disponible para el superadministrador de la plataforma (sin tienda seleccionada).',
   INVOICING_RESOLUTION_006:
     'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala antes de crear la resolución.',
   INVOICING_RESOLUTION_007:

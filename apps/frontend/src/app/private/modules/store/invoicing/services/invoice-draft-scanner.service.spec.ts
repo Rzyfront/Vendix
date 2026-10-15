@@ -5,6 +5,7 @@ import { environment } from '../../../../../../environments/environment';
 import { AiScanJobService } from '../../../../../core/services/ai-scan-job.service';
 import type { InvoiceDraftScanResult } from '../interfaces/invoice-draft-scan.interface';
 import {
+  INVOICE_DRAFT_SCAN_PLATFORM_PATH,
   InvoiceDraftScannerService,
   buildInvoiceDraftScanFormData,
 } from './invoice-draft-scanner.service';
@@ -68,5 +69,25 @@ describe('InvoiceDraftScannerService', () => {
     expect(body.getAll('files').length).toBe(2);
     expect(body.get('note')).toBe('pago a 30 días');
     expect(opts.onStall).toBe(onStall);
+  });
+
+  it('scanDraft: con la ruta de plataforma encola en superadmin/.../scan-draft/async', async () => {
+    const result = { documents_scanned: 1 } as InvoiceDraftScanResult;
+    const enqueueAndWait = jasmine
+      .createSpy('enqueueAndWait')
+      .and.returnValue(of(result));
+    TestBed.configureTestingModule({
+      providers: [{ provide: AiScanJobService, useValue: { enqueueAndWait } }],
+    });
+    const service = TestBed.inject(InvoiceDraftScannerService);
+
+    await firstValueFrom(
+      service.scanDraft([file('a.pdf')], null, undefined, INVOICE_DRAFT_SCAN_PLATFORM_PATH),
+    );
+
+    const [url] = enqueueAndWait.calls.mostRecent().args as [string];
+    expect(url).toBe(
+      `${environment.apiUrl}/superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async`,
+    );
   });
 });

@@ -32,6 +32,13 @@ export function buildInvoiceDraftScanFormData(
   return formData;
 }
 
+/** Ruta (sin `apiUrl`) del escáner de la TIENDA: la de siempre. */
+export const INVOICE_DRAFT_SCAN_STORE_PATH = 'store/invoicing/scan-draft/async';
+
+/** Ruta (sin `apiUrl`) del escáner de la PLATAFORMA (superadmin). */
+export const INVOICE_DRAFT_SCAN_PLATFORM_PATH =
+  'superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async';
+
 /**
  * Cliente del escáner IA de «Nueva factura».
  *
@@ -45,13 +52,19 @@ export function buildInvoiceDraftScanFormData(
 export class InvoiceDraftScannerService {
   private readonly aiScanJobs = inject(AiScanJobService);
 
+  /**
+   * `path` elige el riel: la tienda por omisión; la plataforma pasa
+   * `INVOICE_DRAFT_SCAN_PLATFORM_PATH`. Mismo multipart y mismo job en los dos.
+   */
   scanDraft(
     files: readonly File[],
     note: string | null | undefined,
     opts?: AiScanJobOptions,
+    path: string = INVOICE_DRAFT_SCAN_STORE_PATH,
   ): Observable<InvoiceDraftScanResult> {
+    const route = String(path || INVOICE_DRAFT_SCAN_STORE_PATH).replace(/^\/+/, '');
     return this.aiScanJobs.enqueueAndWait<InvoiceDraftScanResult>(
-      `${environment.apiUrl}/store/invoicing/scan-draft/async`,
+      `${environment.apiUrl}/${route}`,
       buildInvoiceDraftScanFormData(files, note),
       opts,
     );
