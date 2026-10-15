@@ -38,11 +38,18 @@
  *
  * ## Un render fallido NO se traga
  *
- * `printTicketsBatch` no envuelve cada tiquete en su propio `try/catch` a
- * propósito: un `TicketData` malformado rechaza TODO el lote en vez de saltarse
- * en silencio una orden que el operador seleccionó. El `catchError` de aquí es
- * el que captura ese rechazo y lo convierte en un desenlace con el mensaje real
- * y los ids afectados — nunca en un "listo" mentiroso.
+ * Las órdenes que `printTicketsBatch` no pudo resolver o imprimir vuelven en
+ * `failedOrderIds` y se suman a `failedIds` del desenlace: nunca se omiten en
+ * silencio. Si NADA llegó al papel, `printTicketsBatch` rechaza; el
+ * `catchError` de aquí convierte ese rechazo en un desenlace con el mensaje y
+ * los ids afectados — nunca en un "listo" mentiroso.
+ *
+ * ## Formatos mezclados ⇒ varias tandas
+ *
+ * El backend decide el formato de cada orden (factura electrónica o tiquete
+ * POS, cada uno con su papel). Lo que no cabe en un solo documento sale en
+ * tandas separadas, un diálogo por tanda; `printJobs` / `printJobLabels` le
+ * permiten al componente explicarle al operador por qué vio más de un diálogo.
  */
 
 import { Injectable, inject, signal } from '@angular/core';
@@ -50,13 +57,17 @@ import {
   Observable,
   catchError,
   finalize,
-  from,
   map,
   of,
   switchMap,
 } from 'rxjs';
 
-import { PosTicketService } from '../../pos/services/pos-ticket.service';
+import type { PrintFormatType } from '../../../../../core/models/print-formats.model';
+import {
+  PosTicketService,
+  TicketBatchPrintError,
+  type TicketBatchPrintResult,
+} from '../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../services/order-ticket.service';
 import { OrdersBulkService } from './orders-bulk.service';
 import type {
@@ -71,6 +82,105 @@ export interface BulkPrintRenderProgress {
 }
 
 const IDLE_RENDER_PROGRESS: BulkPrintRenderProgress = { done: 0, total: 0 };
+
+/** Nombre que ve el operador para cada formato que puede resolver una orden. */
+const PRINT_JOB_LABELS: Partial<Record<PrintFormatType, string>> = {
+  pos_sale_ticket: 'tiquete POS',
+  pos_electronic_invoice: 'factura electrónica',
+  fiscal_electronic_invoice: 'factura electrónica',
+  sales_order_invoice: 'factura de venta',
+};
+
+/** Mensaje cuando el render cae por algo que no es un error de dominio. */
+const GENERIC_RENDER_FAILURE =
+  'No se pudieron dibujar los tiquetes de la selección, así que no se envió nada a la impresora. ' +
+  'Vuelve a intentarlo; si persiste, imprime en grupos más pequeños para aislar la orden que falla.';
+
+/** Toast que resume la impresión masiva para el operador. */
+export interface BulkPrintOutcomeMessage {
+  level: 'success' | 'warning' | 'error';
+  message: string;
+}
+
+/**
+ * Traduce el resultado de la impresión a lo que ve el operador. Función pura
+ * (fuera del componente) para poder fijar el texto con tests.
+ *
+ * Tres desenlaces, y ninguno puede quedar mudo:
+ *
+ * 1. **Nada enviado** (`rendered === 0`) — se muestra el mensaje REAL
+ *    (`failureMessage`), del backend o del render.
+ * 2. **Parcial** — se envió, pero hubo órdenes omitidas por el backend
+ *    (canceladas, reembolsadas, inexistentes) y/o fallidas (lote caído, render
+ *    o tanda que no se pudo enviar). Cada grupo lleva SU conteo y SU motivo:
+ *    mezclarlos le atribuiría a las omitidas el error de las fallidas.
+ * 3. **Completo** — se confirma con el conteo de tiquetes y de hojas.
+ *
+ * El texto dice "enviadas al diálogo de impresión" y no "impresas":
+ * `window.print()` no avisa si el operador canceló el diálogo, así que no hay
+ * forma de afirmar que salió papel. En 2 y 3, si hubo varias tandas, se explica
+ * por qué el operador vio más de un diálogo.
+ */
+export function describeBulkPrintOutcome(
+  outcome: BulkPrintOutcome,
+  requested: number,
+): BulkPrintOutcomeMessage {
+  if (outcome.rendered === 0) {
+    return {
+      level: 'error',
+      message:
+        outcome.failureMessage ??
+        'No se pudo imprimir ninguna de las órdenes seleccionadas.',
+    };
+  }
+
+  const jobsNote = printJobsNote(outcome);
+  const sent = `${outcome.rendered} de ${requested} órdenes enviadas al diálogo de impresión`;
+  const skippedCount = outcome.skipped.length;
+  const failedCount =
+    outcome.failedIds.length + (outcome.failedWithoutIdCount ?? 0);
+
+  if (skippedCount === 0 && failedCount === 0) {
+    return {
+      level: 'success',
+      message:
+        `${sent} (${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'}).` +
+        jobsNote,
+    };
+  }
+
+  const parts = [`${sent}.`];
+  if (skippedCount > 0) {
+    // Se nombran hasta 3 órdenes concretas: la lista completa puede ser de 80
+    // y un toast no es un informe. El conteo sí es siempre el total real.
+    const named = outcome.skipped
+      .slice(0, 3)
+      .map((s) => s.order_number ?? `#${s.id}`)
+      .join(', ');
+    parts.push(
+      `${skippedCount} ${skippedCount === 1 ? 'omitida' : 'omitidas'} ` +
+        `(${named}${skippedCount > 3 ? '…' : ''}): canceladas, reembolsadas o no disponibles.`,
+    );
+  }
+  if (failedCount > 0) {
+    parts.push(
+      `${failedCount} ${failedCount === 1 ? 'no se pudo enviar' : 'no se pudieron enviar'}: ` +
+        (outcome.failureMessage ?? 'falló su preparación o su envío a la impresora.'),
+    );
+  }
+
+  return { level: 'warning', message: parts.join(' ') + jobsNote };
+}
+
+/** Explica por qué el operador vio más de un diálogo de impresión. */
+export function printJobsNote(outcome: BulkPrintOutcome): string {
+  const jobs = outcome.printJobs ?? 1;
+  if (jobs <= 1) return '';
+  const labels = outcome.printJobLabels ?? [];
+  return labels.length > 1
+    ? ` Se enviaron en ${jobs} tandas (un diálogo por tanda) porque las órdenes usan formatos distintos (${labels.join(' / ')}).`
+    : ` Se enviaron en ${jobs} tandas (un diálogo por tanda) porque las órdenes usan diseños o papeles distintos.`;
+}
 
 @Injectable({ providedIn: 'root' })
 export class OrdersBulkPrintService {
@@ -145,46 +255,58 @@ export class OrdersBulkPrintService {
 
     this.renderProgressState.set({ done: 0, total: tickets.length });
 
-    return from(
-      this.posTicket.printTicketsBatch(tickets, {
-        onProgress: (done, total) =>
-          this.renderProgressState.set({ done, total }),
-      }),
-    ).pipe(
+    // `new Observable` y no `from(promise)`: la Promise no se cancela, así que
+    // si el operador navega fuera (el `takeUntilDestroyed` del componente
+    // desuscribe) el bucle de tandas seguiría abriendo diálogos en otra
+    // pantalla y escribiendo el avance después del `finalize`. El teardown
+    // aborta la señal y `printTicketsBatch` corta antes del siguiente render,
+    // de la siguiente tanda y de cada `onProgress`.
+    const batch$ = new Observable<TicketBatchPrintResult>((subscriber) => {
+      const controller = new AbortController();
+      this.posTicket
+        .printTicketsBatch(tickets, {
+          signal: controller.signal,
+          onProgress: (done, total) =>
+            this.renderProgressState.set({ done, total }),
+        })
+        .then(
+          (result) => {
+            subscriber.next(result);
+            subscriber.complete();
+          },
+          (error: unknown) => subscriber.error(error),
+        );
+      return () => controller.abort();
+    });
+
+    return batch$.pipe(
       // El reset del avance lo hace el `finalize` de `printSelection`, que cubre
       // también la cancelación; repetirlo aquí solo daría dos dueños del mismo
       // estado.
-      map(
-        ({ rendered, pages }) =>
-          ({
-            rendered,
-            pages,
-            skipped: payload.skipped ?? [],
-            failureMessage: payload.failureMessage,
-            failedIds: payload.failedIds ?? [],
-          }) satisfies BulkPrintOutcome,
-      ),
+      map((result) => this.toOutcome(payload, result)),
       catchError((error: unknown) => {
-        // El detalle técnico va a la consola y NO al toast: aquí el error es un
-        // `TypeError` del render, no un mensaje del backend redactado para el
-        // operador. `extractApiErrorMessage` devolvería el texto crudo de la
-        // excepción ("Cannot read properties of undefined…"), que no le dice
-        // nada a quien está en el mostrador.
+        // El detalle técnico va a la consola y NO al toast. Solo un
+        // `TicketBatchPrintError` trae un mensaje redactado para el operador;
+        // cualquier otro (un `TypeError` del render) se cambia por el genérico,
+        // porque "Cannot read properties of undefined…" no le dice nada a quien
+        // está en el mostrador.
         console.error(
           '[orders-bulk-print] el render del lote falló; no se imprimió nada',
           error,
+          error instanceof TicketBatchPrintError ? error.detail : undefined,
         );
-        // Todo-o-nada: si el render se cayó, NADA llegó al papel, así que los
-        // ids de las órdenes que sí eran imprimibles pasan a fallidos. El
-        // mensaje del render pisa el del backend: es el fallo que el operador
-        // acaba de ver, y el otro ya quedó en la consola.
+        // Si `printTicketsBatch` rechazó, NADA llegó al papel, así que los ids
+        // de las órdenes que sí eran imprimibles pasan a fallidos. El mensaje
+        // del render pisa el del backend: es el fallo que el operador acaba de
+        // ver, y el otro ya quedó en la consola.
         return of({
           rendered: 0,
           pages: 0,
           skipped: payload.skipped ?? [],
           failureMessage:
-            'No se pudieron dibujar los tiquetes de la selección, así que no se envió nada a la impresora. ' +
-            'Vuelve a intentarlo; si persiste, imprime en grupos más pequeños para aislar la orden que falla.',
+            error instanceof TicketBatchPrintError
+              ? error.message
+              : GENERIC_RENDER_FAILURE,
           failedIds: [
             ...(payload.failedIds ?? []),
             ...orders.map((order) => order.id),
@@ -192,6 +314,41 @@ export class OrdersBulkPrintService {
         } satisfies BulkPrintOutcome);
       }),
     );
+  }
+
+  /**
+   * Funde el resultado del render con lo que ya traía el payload. Las órdenes
+   * que no llegaron al papel se suman a `failedIds`; el mensaje del backend
+   * (lote HTTP caído) va primero porque ocurrió antes.
+   */
+  private toOutcome(
+    payload: BulkPrintPayload,
+    result: TicketBatchPrintResult,
+  ): BulkPrintOutcome {
+    const failureMessage =
+      [payload.failureMessage, result.failureMessage]
+        .filter((message): message is string => !!message)
+        .join(' ') || undefined;
+    const labels = [
+      ...new Set(
+        result.groupFormats
+          .map((format) => PRINT_JOB_LABELS[format])
+          .filter((label): label is string => !!label),
+      ),
+    ];
+
+    return {
+      rendered: result.rendered,
+      pages: result.pages,
+      skipped: payload.skipped ?? [],
+      failureMessage,
+      failedIds: [...(payload.failedIds ?? []), ...result.failedOrderIds],
+      ...(result.failedWithoutIdCount > 0
+        ? { failedWithoutIdCount: result.failedWithoutIdCount }
+        : {}),
+      printJobs: result.groups,
+      printJobLabels: labels,
+    };
   }
 
   private emptyOutcome(payload: BulkPrintPayload): BulkPrintOutcome {

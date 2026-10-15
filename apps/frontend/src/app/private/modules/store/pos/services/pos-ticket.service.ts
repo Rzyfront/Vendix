@@ -82,6 +82,65 @@ export function resolveFiscalQualitiesLine(
  */
 const BATCH_YIELD_EVERY = 20;
 
+/**
+ * Resultado de `printTicketsBatch`.
+ *
+ * Un lote puede salir en varias tandas (un diálogo por tanda) cuando el backend
+ * resuelve las órdenes a formatos distintos: factura electrónica vs tiquete
+ * POS, o papeles distintos. Un documento HTML solo admite un `<head>` y un
+ * `@page`, así que mezclarlos en uno solo imprimiría mal la mitad del lote.
+ */
+export interface TicketBatchPrintResult {
+  /**
+   * Tiquetes que llegaron a un documento entregado al diálogo de impresión.
+   * `window.print()` no informa si el operador canceló el diálogo, así que esto
+   * NO garantiza papel: solo que el documento se le presentó.
+   */
+  rendered: number;
+  /** Hojas resultantes (suma de copias de los documentos enviados al diálogo). */
+  pages: number;
+  /** Documentos (diálogos) abiertos. */
+  groups: number;
+  /** `format_type` de cada tanda enviada, en el orden en que salieron. */
+  groupFormats: PrintFormatType[];
+  /** Órdenes que NO llegaron al diálogo: no resolvieron o su tanda falló. */
+  failedOrderIds: number[];
+  /**
+   * Tiquetes fallidos sin id de orden (ni `orderId` ni `id` numérico). No caben
+   * en `failedOrderIds`, pero cuentan como no enviados: sin este conteo el
+   * total de fallidas quedaría corto.
+   */
+  failedWithoutIdCount: number;
+  /** Mensaje legible para el operador del primer fallo, si hubo alguno. */
+  failureMessage?: string;
+}
+
+/**
+ * Error de dominio de la impresión por lote: su `message` está redactado para
+ * el operador y se puede mostrar tal cual. El detalle técnico va en `detail`
+ * (consola), nunca al toast.
+ */
+export class TicketBatchPrintError extends Error {
+  constructor(
+    message: string,
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = 'TicketBatchPrintError';
+  }
+}
+
+/**
+ * La impresión por lote se canceló desde fuera (el operador navegó a otra
+ * pantalla). No es un fallo que mostrar: quien canceló ya no escucha.
+ */
+export class TicketBatchPrintCancelledError extends Error {
+  constructor() {
+    super('La impresión por lote se canceló.');
+    this.name = 'TicketBatchPrintCancelledError';
+  }
+}
+
 /** Bounded wait for a currency load already in flight (see `ensureCurrencyLoaded`). */
 const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
 const CURRENCY_WAIT_STEP_MS = 50;
@@ -840,17 +899,28 @@ export class PosTicketService {
   }
 
   /**
-   * Prints N tickets as ONE document, in one dialog.
+   * Prints N tickets as one document per compatible group, one dialog each.
    *
    * Copies are contiguous per ticket (order1 ×C, order2 ×C, …) rather than the
    * whole batch repeated C times, so the operator splits the stack by order
    * instead of collating 600 sheets by hand.
    *
    * Each resolved gateway document contributes its own configured copies.
-   * The output can have one shell only, so incompatible template heads or
-   * paper geometry are rejected before anything is sent to the printer.
+   * A document can have one shell only, so results are grouped by
+   * `head + width_mm + is_roll` (first-appearance order, order preserved
+   * inside each group) and each group is printed as its own document,
+   * sequentially. Usually 1 group; 2 when the selection mixes electronic
+   * invoices and POS tickets.
    *
-   * @returns `rendered` tickets and `pages` sheets (`rendered × copies`).
+   * A group that fails to print does not abort the rest: its orders go to
+   * `failedOrderIds`. Only when nothing at all reaches the printer does this
+   * reject, with a {@link TicketBatchPrintError}.
+   *
+   * `signal` cancels the loop: it is checked before every render request,
+   * before every group's dialog and before every `onProgress`, so a caller
+   * that went away (navigation) never opens another dialog nor writes
+   * progress. Aborting rejects with {@link TicketBatchPrintCancelledError}.
+   * A dialog already open cannot be closed; the loop stops after it.
    */
   async printTicketsBatch(
     tickets: readonly TicketData[],
@@ -866,12 +936,24 @@ export class PosTicketService {
        */
       copiesOverride?: number;
       onProgress?: (done: number, total: number) => void;
+      signal?: AbortSignal;
     },
-  ): Promise<{ rendered: number; pages: number }> {
+  ): Promise<TicketBatchPrintResult> {
+    const signal = options?.signal;
+    const throwIfCancelled = (): void => {
+      if (signal?.aborted) throw new TicketBatchPrintCancelledError();
+    };
+    const reportProgress = (done: number, total: number): void => {
+      if (!signal?.aborted) options?.onProgress?.(done, total);
+    };
+
     const total = tickets.length;
     if (!total) {
-      return { rendered: 0, pages: 0 };
+      return {
+        rendered: 0, pages: 0, groups: 0, groupFormats: [], failedOrderIds: [], failedWithoutIdCount: 0,
+      };
     }
+    throwIfCancelled();
 
     if (tickets.length === 1) {
       const candidateDocId =
@@ -887,7 +969,14 @@ export class PosTicketService {
           documentType: 'pos_order',
           documentId: candidateDocId,
         });
-        return { rendered: 1, pages: result.pages };
+        return {
+          rendered: 1,
+          pages: result.pages,
+          groups: 1,
+          groupFormats: [],
+          failedOrderIds: [],
+          failedWithoutIdCount: 0,
+        };
       }
     }
 
@@ -899,14 +988,17 @@ export class PosTicketService {
       orderId: number | null;
       html: string | null;
       copies: number;
+      formatType?: PrintFormatType;
       widthMm?: number;
       isRoll?: boolean;
       head?: string;
+      body?: string;
       error?: string;
     }> = [];
 
     let done = 0;
     for (const ticket of tickets) {
+      throwIfCancelled();
       const candidateDocId =
         ticket.orderId ??
         (Number.isInteger(Number(ticket.id)) && Number(ticket.id) > 0
@@ -921,7 +1013,7 @@ export class PosTicketService {
           error: 'sin orderId ni id numérico',
         });
         done++;
-        options?.onProgress?.(done, total);
+        reportProgress(done, total);
         continue;
       }
 
@@ -950,9 +1042,11 @@ export class PosTicketService {
           orderId: candidateDocId,
           html: rendered.html,
           copies: this.documentPrint.normalizeGatewayCopies(rendered.copies),
+          formatType: resolved.format_type,
           widthMm: rendered.width_mm,
           isRoll: rendered.is_roll,
           head: shell.head,
+          body: shell.body,
         });
       } catch (err) {
         results.push({
@@ -964,7 +1058,7 @@ export class PosTicketService {
       }
 
       done++;
-      options?.onProgress?.(done, total);
+      reportProgress(done, total);
 
       // Yield al main thread para que la barra de progreso no se congele.
       if (done % BATCH_YIELD_EVERY === 0 && done < total) {
@@ -973,66 +1067,131 @@ export class PosTicketService {
     }
 
     // Type guard explícito para conservar un HTML completo y metadatos válidos.
-    type ResultWithHtml = {
-      orderId: number | null;
+    type ResultWithHtml = (typeof results)[number] & {
       html: string;
-      copies: number;
-      widthMm?: number;
-      isRoll?: boolean;
-      head?: string;
-      error?: string;
+      head: string;
+      body: string;
     };
     const succeeded = results.filter(
       (r): r is ResultWithHtml => r.html !== null,
     );
     const failed = results.filter((r) => r.html === null);
+    const failedOrderIds = failed
+      .map((f) => f.orderId)
+      .filter((id): id is number => id !== null);
+    let failedWithoutIdCount = failed.length - failedOrderIds.length;
+    const failureDetails = failed.map(
+      (f) => `doc ${f.orderId ?? '?'}: ${f.error}`,
+    );
 
     if (succeeded.length === 0) {
-      // Ninguno resolvió: nada que imprimir. Reportamos y salimos.
-      const detail = failed
-        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
-        .join('; ');
-      throw new Error(`Lote sin tiquetes imprimibles: ${detail}`);
-    }
-
-    const first = succeeded[0];
-    const incompatible = succeeded.some((result) =>
-      result.head !== first.head ||
-      result.widthMm !== first.widthMm ||
-      result.isRoll !== first.isRoll,
-    );
-    if (incompatible) {
-      throw new Error(
-        'El lote contiene diseños o papeles incompatibles; imprima por separado.',
+      // Ninguno resolvió: nada que imprimir. El mensaje es para el operador; el
+      // detalle técnico (errores HTTP, HTML incompleto…) queda en `detail`.
+      throw new TicketBatchPrintError(
+        failed.length === 1
+          ? 'La orden seleccionada no se pudo preparar para imprimir; no se envió nada a la impresora.'
+          : `Ninguna de las ${failed.length} órdenes se pudo preparar para imprimir; no se envió nada a la impresora.`,
+        failureDetails.join('; '),
       );
     }
 
-    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
-    let bodies = '';
+    // Un documento admite un solo `<head>` (estilos, `@page`) y un solo papel,
+    // así que se agrupa por esa clave en lugar de abortar el lote: una selección
+    // que mezcla factura electrónica y tiquete POS sale en dos tandas. `Map`
+    // conserva el orden de inserción ⇒ las tandas salen en el orden de la
+    // primera orden de cada una, y dentro de cada tanda en el orden pedido.
+    const groups = new Map<string, ResultWithHtml[]>();
     for (const result of succeeded) {
-      const shell = this.readGatewayDocumentShell(result.html);
-      for (let copy = 0; copy < result.copies; copy++) {
-        if (bodies) bodies += separator;
-        bodies += shell.body;
-      }
+      const key = `${result.isRoll}|${result.widthMm}|${result.head}`;
+      const group = groups.get(key);
+      if (group) group.push(result);
+      else groups.set(key, [result]);
     }
-    const assembled = first.html.replace(
-      /(<body\b[^>]*>)[\s\S]*?(<\/body\s*>)/i,
-      (_match, opening: string, closing: string) => `${opening}${bodies}${closing}`,
-    );
-    await this.documentPrint.printGatewayHtml(assembled, 1);
 
+    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
+    let rendered = 0;
+    let pages = 0;
+    const groupFormats: PrintFormatType[] = [];
+    let groupFailures = 0;
+
+    // Secuencial a propósito: cada tanda abre su propio diálogo, y dos
+    // diálogos simultáneos se pisan en el navegador.
+    for (const group of groups.values()) {
+      throwIfCancelled();
+      let bodies = '';
+      for (const result of group) {
+        for (let copy = 0; copy < result.copies; copy++) {
+          if (bodies) bodies += separator;
+          bodies += result.body;
+        }
+      }
+      const assembled = group[0].html.replace(
+        /(<body\b[^>]*>)[\s\S]*?(<\/body\s*>)/i,
+        (_match, opening: string, closing: string) => `${opening}${bodies}${closing}`,
+      );
+
+      try {
+        await this.documentPrint.printGatewayHtml(assembled, 1);
+      } catch (err) {
+        // Una tanda caída no tumba las demás: sus órdenes pasan a fallidas y
+        // se sigue con la siguiente.
+        groupFailures++;
+        for (const result of group) {
+          if (result.orderId !== null) failedOrderIds.push(result.orderId);
+          else failedWithoutIdCount++;
+          failureDetails.push(
+            `doc ${result.orderId ?? '?'}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        continue;
+      }
+
+      rendered += group.length;
+      pages += group.reduce((sum, result) => sum + result.copies, 0);
+      if (group[0].formatType) groupFormats.push(group[0].formatType);
+    }
+
+    if (failureDetails.length > 0) {
+      console.warn(
+        `printTicketsBatch: ${failed.length + (succeeded.length - rendered)} tiquete(s) no se imprimieron — ${failureDetails.join('; ')}`,
+      );
+    }
+
+    if (rendered === 0) {
+      throw new TicketBatchPrintError(
+        groups.size === 1
+          ? 'No se pudo enviar el documento a la impresora. Vuelve a intentarlo.'
+          : `No se pudo enviar ninguna de las ${groups.size} tandas a la impresora. Vuelve a intentarlo.`,
+        failureDetails.join('; '),
+      );
+    }
+
+    // Resumen legible de lo que no salió: órdenes que no resolvieron y tandas
+    // que no se pudieron enviar. Los ids concretos viajan en `failedOrderIds`.
+    const failureParts: string[] = [];
     if (failed.length > 0) {
-      // No tiramos el lote (ya se imprimió lo bueno); sólo informamos.
-      const detail = failed
-        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
-        .join('; ');
-      console.warn(`printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`);
+      failureParts.push(
+        failed.length === 1
+          ? '1 orden no se pudo preparar para imprimir.'
+          : `${failed.length} órdenes no se pudieron preparar para imprimir.`,
+      );
+    }
+    if (groupFailures > 0) {
+      failureParts.push(
+        groupFailures === 1
+          ? 'Una de las tandas no se pudo enviar a la impresora.'
+          : `${groupFailures} tandas no se pudieron enviar a la impresora.`,
+      );
     }
 
     return {
-      rendered: succeeded.length,
-      pages: succeeded.reduce((pages, result) => pages + result.copies, 0),
+      rendered,
+      pages,
+      groups: groups.size - groupFailures,
+      groupFormats,
+      failedOrderIds,
+      failedWithoutIdCount,
+      ...(failureParts.length ? { failureMessage: failureParts.join(' ') } : {}),
     };
   }
 

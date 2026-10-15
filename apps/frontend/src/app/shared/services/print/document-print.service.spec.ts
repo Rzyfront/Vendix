@@ -330,6 +330,19 @@ describe('DocumentPrintService Print Formats gates', () => {
     expect((service as any).sendToPrinter).not.toHaveBeenCalled();
   });
 
+  it('rejects, instead of resolving silently, when the print iframe has no document', async () => {
+    (service as any).sendToPrinter.and.callThrough();
+    const iframe = window.document.createElement('iframe');
+    Object.defineProperty(iframe, 'contentDocument', { value: null });
+    Object.defineProperty(iframe, 'contentWindow', { value: null });
+    spyOn(window.document, 'createElement').and.returnValue(iframe);
+
+    await expectAsync(
+      service.printGatewayHtml('<html><head></head><body><p>A</p></body></html>', 1),
+    ).toBeRejectedWithError('No se pudo preparar el documento de impresión.');
+    expect(iframe.isConnected).toBeFalse();
+  });
+
   it('preserves replacement-token sequences literally when expanding body content', async () => {
     const literal = "$& $` $' $$";
     const html = `<html><head><title>tokens</title></head><body><p>${literal}</p></body></html>`;

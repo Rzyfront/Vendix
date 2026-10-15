@@ -5,6 +5,7 @@ export const environment = {
   vendixDomain: 'vendix.com',
   // Vacío: la portada comercial no mide en desarrollo
   commercialAnalyticsId: '',
+  sectorGuidesEnabled: true,
 
   // Configuración para desarrollo
   debugDomainDetection: true,

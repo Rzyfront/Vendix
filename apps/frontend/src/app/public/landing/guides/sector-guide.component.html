@@ -1,0 +1,78 @@
+<a class="skip-link" [routerLink]="[]" fragment="guide-content">Saltar al contenido</a>
+<header class="guide-header">
+  <a routerLink="/" class="guide-brand"
+    ><img src="/vlogo.png" alt="" width="32" height="32" />Vendix</a
+  >
+  <nav aria-label="Navegación de guías">
+    <a routerLink="/" fragment="guias">Todas las guías</a>
+    <a routerLink="/" fragment="precios-section">Planes y precios</a>
+  </nav>
+</header>
+<main id="guide-content" class="guide-content">
+  @if (guide(); as article) {
+    <p class="preview-label">Borrador para revisión · Sin publicar</p>
+    <p class="guide-category">{{ article.category }}</p>
+    <h1>{{ article.title }}</h1>
+    <p class="guide-intro">{{ article.intro }}</p>
+    <nav class="guide-toc" aria-label="En esta guía">
+      <h2>En esta guía</h2>
+      <ul>
+        @for (
+          section of article.sections;
+          track section.heading;
+          let i = $index
+        ) {
+          <li>
+            <a [routerLink]="[]" [fragment]="'guide-section-' + i">{{
+              section.heading
+            }}</a>
+          </li>
+        }
+        <li>
+          <a [routerLink]="[]" fragment="preparar"
+            >Lista para tu demostración</a
+          >
+        </li>
+      </ul>
+    </nav>
+    @for (section of article.sections; track section.heading; let i = $index) {
+      <section [id]="'guide-section-' + i" class="article-section">
+        <h2>{{ section.heading }}</h2>
+        @for (paragraph of section.paragraphs; track $index) {
+          <p>{{ paragraph }}</p>
+        }
+      </section>
+    }
+    <section id="preparar" class="guide-checklist">
+      <h2>Lista para tu demostración</h2>
+      <p>
+        Prepara estos datos y revísalos con el equipo antes de ejecutar el caso.
+      </p>
+      <ul>
+        @for (item of article.checklist; track item) {
+          <li>{{ item }}</li>
+        }
+      </ul>
+      <p>
+        No se envían datos desde esta página. Las funciones y su configuración
+        deben confirmarse para tu plan y operación.
+      </p>
+    </section>
+    <aside class="related-guides" aria-label="Otras guías">
+      <h2>Sigue preparando tu operación</h2>
+      <a routerLink="/guias/comandas-restaurantes"
+        >Comandas para restaurantes</a
+      >
+      <a routerLink="/guias/ventas-mayoristas-al-detal"
+        >Ventas mayoristas y al detal</a
+      >
+      <a routerLink="/guias/preparar-demostracion">Preparar una demostración</a>
+    </aside>
+  } @else {
+    <h1>Guía no disponible</h1>
+    <p>Consulta las guías disponibles para preparar tu operación.</p>
+  }
+  <a class="guide-back" routerLink="/" fragment="guias"
+    >Volver a las guías de Vendix</a
+  >
+</main>

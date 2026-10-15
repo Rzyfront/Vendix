@@ -39,15 +39,28 @@ export class StoreUsersManagementService {
     if (query.state) params = params.set('state', query.state);
 
     return this.http.get<any>(this.baseUrl, { params }).pipe(
-      map((response) => ({
-        data: response.data,
-        pagination: {
-          page: response.meta?.page || response.pagination?.page || 1,
-          limit: response.meta?.limit || response.pagination?.limit || 10,
-          total: response.meta?.total || response.pagination?.total || 0,
-          total_pages: response.meta?.totalPages || response.pagination?.total_pages || 0,
-        },
-      } as PaginatedStoreUsersResponse)),
+      map((response) => {
+        const total = response.meta?.total ?? response.pagination?.total ?? 0;
+        const page = response.meta?.page ?? response.pagination?.page ?? 1;
+        const limit = response.meta?.limit ?? response.pagination?.limit ?? 10;
+        const totalPages =
+          response.meta?.totalPages ??
+          response.pagination?.totalPages ??
+          response.meta?.total_pages ??
+          response.pagination?.total_pages ??
+          Math.max(1, Math.ceil(total / limit));
+
+        return {
+          data: response.data,
+          pagination: {
+            page,
+            limit,
+            total,
+            total_pages: totalPages,
+            totalPages,
+          },
+        } as PaginatedStoreUsersResponse;
+      }),
       catchError((error) => throwError(() => error)),
     );
   }
