@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed, effect } from '@angular/core';
+import { Component, input, output, signal, computed, effect, untracked } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { SelectorComponent, SelectorOption } from '../selector/selector.component';
@@ -126,30 +126,38 @@ export class DateRangeFilterComponent {
     // para no reescribir señales con el mismo valor en cada pasada.
     effect(() => {
       const incoming = this.value();
-
-      if (incoming?.preset && incoming.preset !== this.selectedPreset()) {
-        this.selectedPreset.set(incoming.preset);
-      }
-      if (incoming?.start_date && incoming.start_date !== this.customStartDate()) {
-        this.customStartDate.set(incoming.start_date);
-      }
-      if (incoming?.end_date && incoming.end_date !== this.customEndDate()) {
-        this.customEndDate.set(incoming.end_date);
-      }
-
-      if (!this.customStartDate() || !this.customEndDate()) {
-        const defaultRange = this.getDateRange(this.selectedPreset());
-        if (defaultRange) {
-          this.customStartDate.set(defaultRange.start_date);
-          this.customEndDate.set(defaultRange.end_date);
-        }
-      }
+      untracked(() => this.syncFromValue(incoming));
     });
+  }
+
+  private syncFromValue(incoming: DateRangeFilter | undefined): void {
+    if (incoming?.preset && incoming.preset !== this.selectedPreset()) {
+      this.selectedPreset.set(incoming.preset);
+    }
+    if (incoming?.start_date && incoming.start_date !== this.customStartDate()) {
+      this.customStartDate.set(incoming.start_date);
+    }
+    if (incoming?.end_date && incoming.end_date !== this.customEndDate()) {
+      this.customEndDate.set(incoming.end_date);
+    }
+
+    if (!this.customStartDate() || !this.customEndDate()) {
+      const defaultRange = this.getDateRange(this.selectedPreset());
+      if (defaultRange) {
+        this.customStartDate.set(defaultRange.start_date);
+        this.customEndDate.set(defaultRange.end_date);
+      }
+    }
   }
 
   onPresetChange(preset: string): void {
     this.selectedPreset.set(preset as DatePreset);
-    if (preset !== 'custom') {
+    if (preset === 'custom') {
+      // Hay que emitir también 'custom': el padre (p. ej. options-dropdown)
+      // reconstruye `value` con su preset guardado y el effect revertía la
+      // selección, así que los inputs de fecha nunca llegaban a mostrarse.
+      this.emitCustomRange();
+    } else {
       const range = this.getDateRange(preset as DatePreset);
       if (range) {
         this.customStartDate.set(range.start_date);
