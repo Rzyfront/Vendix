@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HolderChangeAccountingService } from '../../invoicing/invoice-holder-changes/holder-change-accounting.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { resolvePaymentInvoiceBranch } from './payment-invoice-branch.util';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -130,6 +131,7 @@ export class AutoEntryService {
     private readonly fiscal_scope_service: FiscalScopeService,
     private readonly fiscal_gate: FiscalGateService,
     private readonly entry_failure_service: AccountingEntryFailureService,
+    @Optional() private readonly holderAccounting?: HolderChangeAccountingService,
   ) {}
 
   /**
@@ -1988,6 +1990,7 @@ export class AutoEntryService {
       bank_account_id?: number;
     };
   }) {
+    if (await this.holderAccounting?.handlesInvoice(data.invoice_id, data.organization_id)) return null;
     if (data.financial_account_id) {
       return this.createAutoEntry({
         source_type: 'invoice.validated', source_id: data.invoice_id,
@@ -2733,6 +2736,7 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
   }) {
+    if (await this.holderAccounting?.handlesInvoice(data.invoice_id, data.organization_id)) return null;
     // Factura de origen omitida porque su venta ya se reconoció en el carril POS
     // (`not_applicable`, ver findPriorSaleRecognition): la 1305 nunca se debitó,
     // así que la NC no puede acreditarla. Un solo carril reversa la venta por

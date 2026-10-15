@@ -1,3 +1,5 @@
+import { GuestOrderAccessModule } from '@common/context/guest-order-access.module';
+import { InvoiceHolderLinksModule } from '../../store/invoicing/invoice-holder-changes/invoice-holder-links.module';
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
@@ -29,6 +31,9 @@ import { StorefrontSharedModule } from '../shared/storefront-shared.module';
 
 @Module({
   imports: [
+    GuestOrderAccessModule,
+    InvoiceHolderLinksModule,
+
     PrismaModule,
     CartModule,
     // MenuAvailabilityCheckerService enforces strict carta schedule at checkout.

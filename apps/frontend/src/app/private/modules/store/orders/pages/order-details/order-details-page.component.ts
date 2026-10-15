@@ -1,3 +1,4 @@
+import { InvoiceHolderChangeComponent } from '../../../invoicing/components/invoice-holder-change/invoice-holder-change.component';
 import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
 import type {
   SplitFinancialAccount,
@@ -1029,6 +1030,7 @@ export interface InvoiceCardView {
   selector: 'app-order-details-page',
   standalone: true,
   imports: [
+    InvoiceHolderChangeComponent,
     SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
@@ -5828,6 +5830,10 @@ export class OrderDetailsPageComponent {
         },
       });
   }
+
+  readonly holderChangeInvoiceId = computed(() => this.order()?.holder_change_context?.original_invoice_id ?? this.order()?.active_sales_invoice?.id ?? null);
+  readonly holderChangeOperationId = computed(() => this.order()?.holder_change_context?.operation_id ?? null);
+  onHolderChange(): void { this.refreshOrder(); }
 
   private refreshOrder(): void {
     const id = this.order()?.id;

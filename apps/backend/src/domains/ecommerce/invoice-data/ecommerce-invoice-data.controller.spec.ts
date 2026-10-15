@@ -219,7 +219,9 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
     // frontend usa para reconciliar KDS con el summary REST; debe salir.
     expect((projected.ticket as any).items[0].order_item_id).toBe(501);
     const blob = JSON.stringify(projected);
-    expect(blob).not.toMatch(/cost|settings|email|device_id|recipe|sku|notes_internal/);
+    expect(blob).not.toMatch(
+      /cost|settings|email|device_id|recipe|sku|notes_internal/,
+    );
   });
 
   it('projectForGuest blanquea order.* y descarta shipping_method_id', () => {
@@ -262,7 +264,9 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
           type: 'order.payment_updated',
           data: {
             order_id: 42,
-            payments: [{ payment_id: 1, state: 'succeeded', has_receipt: true }],
+            payments: [
+              { payment_id: 1, state: 'succeeded', has_receipt: true },
+            ],
           },
         },
         BINDING,
@@ -275,7 +279,9 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
           type: 'order.payment_updated',
           data: {
             order_id: 43,
-            payments: [{ payment_id: 9, state: 'succeeded', has_receipt: false }],
+            payments: [
+              { payment_id: 9, state: 'succeeded', has_receipt: false },
+            ],
           },
         },
         BINDING,
@@ -326,7 +332,9 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
       ts: expect.any(Number),
     });
     const blob = JSON.stringify(projected);
-    expect(blob).not.toMatch(/cost|settings|email|device_id|amount|method|s3_key|kind/);
+    expect(blob).not.toMatch(
+      /cost|settings|email|device_id|amount|method|s3_key|kind/,
+    );
   });
 
   it('projectGuestSnapshot expone solo el subconjunto vivo (sin customer/totales)', () => {
@@ -401,5 +409,76 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
     expect((projected as any).items[0].order_item_id).toBe(501);
     const blob = JSON.stringify(projected);
     expect(blob).not.toMatch(/cost|settings|email|device_id/);
+  });
+});
+
+describe('EcommerceInvoiceDataController safe public fiscal contracts', () => {
+  let controller: EcommerceInvoiceDataController,
+    service: any,
+    external: any,
+    municipalities: any,
+    res: any;
+  beforeEach(() => {
+    service = {
+      getStatus: jest
+        .fn()
+        .mockResolvedValue({
+          status: 'processing',
+          phase: 'waiting_credit_note_dian',
+        }),
+      validatePublicToken: jest.fn().mockResolvedValue({ store_id: 2 }),
+      submitData: jest
+        .fn()
+        .mockResolvedValue({
+          status: 'processing',
+          phase: 'waiting_credit_note_dian',
+        }),
+    };
+    external = {
+      lookup: jest.fn().mockResolvedValue({ found: false, unavailable: true }),
+    };
+    municipalities = {
+      listDepartments: jest
+        .fn()
+        .mockReturnValue([{ code: '11', name: 'Bogotá' }]),
+    };
+    res = { status: jest.fn() };
+    controller = new EcommerceInvoiceDataController(
+      service,
+      { success: (data: unknown) => ({ success: true, data }) } as any,
+      {} as any,
+      external,
+      municipalities,
+    );
+  });
+  it('status uses pure reader, never lazy opening or submitting', async () => {
+    expect(await controller.status('signed')).toMatchObject({
+      data: { phase: 'waiting_credit_note_dian' },
+    });
+    expect(service.getStatus).toHaveBeenCalledWith('signed');
+    expect(service.submitData).not.toHaveBeenCalled();
+  });
+  it('acceptance of capture responds 202, completed responds 200', async () => {
+    await controller.submitData('signed', {} as any, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    service.submitData.mockResolvedValue({ status: 'completed' });
+    await controller.submitData('signed', {} as any, res);
+    expect(res.status).toHaveBeenLastCalledWith(200);
+  });
+  it('lookup failure is manually recoverable and only called after capability validation', async () => {
+    expect(
+      await controller.lookup('signed', { document_number: '900123456' }),
+    ).toMatchObject({ data: { found: false, unavailable: true } });
+    expect(service.validatePublicToken).toHaveBeenCalledWith('signed');
+    expect(external.lookup).toHaveBeenCalledWith('900123456');
+  });
+  it('invalid token prevents catalog and external requests', async () => {
+    service.validatePublicToken.mockRejectedValue(new Error('invalid'));
+    await expect(
+      controller.lookup('bad', { document_number: '900123456' }),
+    ).rejects.toThrow();
+    await expect(controller.departments('bad')).rejects.toThrow();
+    expect(external.lookup).not.toHaveBeenCalled();
+    expect(municipalities.listDepartments).not.toHaveBeenCalled();
   });
 });

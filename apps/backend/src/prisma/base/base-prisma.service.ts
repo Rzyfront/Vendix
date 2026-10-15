@@ -4,14 +4,24 @@ import {
   OnModuleInit,
   Logger,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+
+function createBaseClient(adapter: PrismaPg) {
+  // Keep the shared Prisma client interface compatible with transaction consumers.
+  // The runtime omit still applies to every default projection.
+  return new PrismaClient<Prisma.PrismaClientOptions>({
+    adapter,
+    log: ['error', 'warn'],
+    omit: { orders: { public_access_token: true } },
+  });
+}
 
 @Injectable()
 export abstract class BasePrismaService implements OnModuleInit {
   protected readonly logger = new Logger(this.constructor.name);
-  protected readonly baseClient: PrismaClient;
+  protected readonly baseClient: ReturnType<typeof createBaseClient>;
 
   constructor() {
     const connectionString = process.env.DATABASE_URL!;
@@ -20,10 +30,8 @@ export abstract class BasePrismaService implements OnModuleInit {
     const pool = new Pool({ connectionString, max });
     const adapter = new PrismaPg(pool);
 
-    this.baseClient = new PrismaClient({
-      adapter,
-      log: ['error', 'warn'],
-    });
+    // Guest capability is not an ordinary order field; only explicit select can expose it.
+    this.baseClient = createBaseClient(adapter);
   }
 
   async onModuleInit() {

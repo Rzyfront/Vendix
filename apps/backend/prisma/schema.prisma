@@ -8,6 +8,9 @@ datasource db {
 }
 
 model users {
+  invoice_holder_changes_previous_customer_id invoice_holder_changes[] @relation("invoice_holder_changes_previous_customer_id")
+  invoice_holder_changes_target_customer_id invoice_holder_changes[] @relation("invoice_holder_changes_target_customer_id")
+  invoice_holder_changes_created_by_user_id invoice_holder_changes[] @relation("invoice_holder_changes_created_by_user_id")
   financial_split_creations order_financial_splits[] @relation("financial_split_creator")
   financial_accounts order_financial_accounts[] @relation("financial_account_customer")
   id                         Int                          @id @default(autoincrement())
@@ -579,6 +582,8 @@ model order_events {
 }
 
 model organizations {
+  invoice_holder_change_accounting_effects_organization_id invoice_holder_change_accounting_effects[] @relation("invoice_holder_change_accounting_effects_organization_id")
+  invoice_holder_changes_organization_id invoice_holder_changes[] @relation("invoice_holder_changes_organization_id")
   id                            Int                               @id @default(autoincrement())
   name                          String                            @db.VarChar(255)
   slug                          String                            @unique @db.VarChar(255)
@@ -878,6 +883,8 @@ model organization_payment_policies {
 }
 
 model stores {
+  invoice_holder_change_accounting_effects_store_id invoice_holder_change_accounting_effects[] @relation("invoice_holder_change_accounting_effects_store_id")
+  invoice_holder_changes_store_id invoice_holder_changes[] @relation("invoice_holder_changes_store_id")
   financial_splits order_financial_splits[]
   financial_accounts order_financial_accounts[]
   financial_lines order_financial_lines[]
@@ -1612,6 +1619,8 @@ model order_items {
 }
 
 model orders {
+  invoice_holder_changes_original_order_id invoice_holder_changes[] @relation("invoice_holder_changes_original_order_id")
+  public_access_token String? @unique @db.VarChar(64)
   // F-006: financial ownership only; this order remains the sole physical sale.
   active_financial_split_id Int? @unique
   active_financial_split order_financial_splits? @relation("active_financial_split", fields: [active_financial_split_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -6068,6 +6077,11 @@ model videos {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
+  invoice_holder_change_accounting_effects_source_credit_note_id invoice_holder_change_accounting_effects? @relation("invoice_holder_change_accounting_effects_source_credit_note_id")
+  invoice_holder_change_accounting_effects_invoice_id invoice_holder_change_accounting_effects[] @relation("invoice_holder_change_accounting_effects_invoice_id")
+  invoice_holder_changes_new_invoice_id invoice_holder_changes? @relation("invoice_holder_changes_new_invoice_id")
+  invoice_holder_changes_credit_note_id invoice_holder_changes? @relation("invoice_holder_changes_credit_note_id")
+  invoice_holder_changes_original_invoice_id invoice_holder_changes? @relation("invoice_holder_changes_original_invoice_id")
   /// Idempotencia de creación manual por tienda. Único parcial mantenido en SQL.
   client_request_id String? @db.Uuid
   financial_account_id Int?
@@ -6711,6 +6725,8 @@ model invoice_profile_versions {
 // ===== ACCOUNTING DOMAIN =====
 
 model accounting_entities {
+  invoice_holder_change_accounting_effects_accounting_entity_id invoice_holder_change_accounting_effects[] @relation("invoice_holder_change_accounting_effects_accounting_entity_id")
+  invoice_holder_changes_accounting_entity_id invoice_holder_changes[] @relation("invoice_holder_changes_accounting_entity_id")
   id              Int                               @id @default(autoincrement())
   organization_id Int
   store_id        Int?
@@ -6848,6 +6864,7 @@ model fiscal_periods {
 
 /// The purchase VAT contribution source key is enforced by a partial unique index in migration 20261002170000_purchase_vat_contributions.
 model accounting_entries {
+  invoice_holder_change_accounting_effects_accounting_entry_id invoice_holder_change_accounting_effects[] @relation("invoice_holder_change_accounting_effects_accounting_entry_id")
   id                         Int                          @id @default(autoincrement())
   organization_id            Int
   store_id                   Int?
@@ -10041,6 +10058,11 @@ model customer_queue {
 }
 
 model invoice_data_requests {
+  invoice_holder_changes_request_id invoice_holder_changes? @relation("invoice_holder_changes_request_id")
+  origin String? @db.VarChar(30)
+  opened_at DateTime? @db.Timestamp(6)
+  active_invoice_key String? @unique @db.VarChar(100)
+  submission_hash String? @db.VarChar(64)
   id              Int                              @id @default(autoincrement())
   store_id        Int
   order_id        Int
@@ -12752,4 +12774,84 @@ model fiscal_tax_payments {
   @@index([evidence_id], map: "fiscal_tax_payments_evidence_idx")
   @@index([accounting_entry_id], map: "fiscal_tax_payments_entry_idx")
   @@index([reversal_of_id], map: "fiscal_tax_payments_reversal_idx")
+}
+
+
+model invoice_holder_changes {
+  target_customer_relation users? @relation("invoice_holder_changes_target_customer_id", fields: [target_customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  previous_customer_relation users? @relation("invoice_holder_changes_previous_customer_id", fields: [previous_customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user_relation users? @relation("invoice_holder_changes_created_by_user_id", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  new_invoice_relation invoices? @relation("invoice_holder_changes_new_invoice_id", fields: [new_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  credit_note_relation invoices? @relation("invoice_holder_changes_credit_note_id", fields: [credit_note_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  request_relation invoice_data_requests? @relation("invoice_holder_changes_request_id", fields: [request_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  original_invoice_relation invoices @relation("invoice_holder_changes_original_invoice_id", fields: [original_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  original_order_relation orders @relation("invoice_holder_changes_original_order_id", fields: [original_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity_relation accounting_entities @relation("invoice_holder_changes_accounting_entity_id", fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store_relation stores @relation("invoice_holder_changes_store_id", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization_relation organizations @relation("invoice_holder_changes_organization_id", fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id Int @id @default(autoincrement())
+  organization_id Int
+  store_id Int
+  accounting_entity_id Int
+  original_order_id Int
+  original_invoice_id Int @unique
+  request_id Int? @unique
+  mode String @db.VarChar(30)
+  purpose String @default("holder_change") @db.VarChar(30)
+  phase String @default("requested") @db.VarChar(50)
+  run_status String @default("ready") @db.VarChar(30)
+  active_order_key String? @unique @db.VarChar(100)
+  previous_customer_id Int?
+  target_customer_id Int?
+  customer_snapshot Json?
+  economic_snapshot_hash String @db.VarChar(64)
+  credit_note_id Int? @unique
+  new_invoice_id Int? @unique
+  created_by_user_id Int?
+  reason String @db.VarChar(500)
+  version Int @default(0)
+  attempt_count Int @default(0)
+  last_error_code String? @db.VarChar(100)
+  last_error_message String? @db.VarChar(500)
+  next_retry_at DateTime? @db.Timestamp(6)
+  lease_owner String? @db.VarChar(100)
+  lease_expires_at DateTime? @db.Timestamp(6)
+  released_at DateTime? @db.Timestamp(6)
+  completed_at DateTime? @db.Timestamp(6)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+  effects invoice_holder_change_accounting_effects[]
+  @@index([store_id, run_status, next_retry_at])
+  @@index([organization_id, original_order_id])
+  @@index([lease_expires_at])
+}
+
+model invoice_holder_change_accounting_effects {
+  accounting_entry_relation accounting_entries? @relation("invoice_holder_change_accounting_effects_accounting_entry_id", fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "ihcae_accounting_entry_id_fkey")
+  source_credit_note_relation invoices? @relation("invoice_holder_change_accounting_effects_source_credit_note_id", fields: [source_credit_note_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "ihcae_source_credit_note_id_fkey")
+  invoice_relation invoices? @relation("invoice_holder_change_accounting_effects_invoice_id", fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity_relation accounting_entities @relation("invoice_holder_change_accounting_effects_accounting_entity_id", fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "ihcae_accounting_entity_id_fkey")
+  store_relation stores @relation("invoice_holder_change_accounting_effects_store_id", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization_relation organizations @relation("invoice_holder_change_accounting_effects_organization_id", fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id Int @id @default(autoincrement())
+  operation_id Int
+  organization_id Int
+  store_id Int
+  accounting_entity_id Int
+  role String @db.VarChar(20)
+  state String @default("pending") @db.VarChar(20)
+  invoice_id Int?
+  accounting_entry_id Int?
+  source_credit_note_id Int? @unique
+  clearing_amount Decimal? @db.Decimal(18, 2)
+  error_code String? @db.VarChar(100)
+  error_message String? @db.VarChar(500)
+  attempt_count Int @default(0)
+  next_retry_at DateTime? @db.Timestamp(6)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+  applied_at DateTime? @db.Timestamp(6)
+  operation invoice_holder_changes @relation(fields: [operation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([operation_id, role])
+  @@index([store_id, state, next_retry_at])
 }

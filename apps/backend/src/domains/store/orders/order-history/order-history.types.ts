@@ -15,6 +15,7 @@ export type OrderEventType =
   | 'refund_created'
   | 'refund_resolved'
   | 'customer_changed'
+  | 'holder_change_transition'
   | 'item_delivered'
   | 'item_cancelled'
   | 'item_delivery_reverted'

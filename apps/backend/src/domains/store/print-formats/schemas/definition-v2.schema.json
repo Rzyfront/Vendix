@@ -7,6 +7,10 @@
   "additionalProperties": false,
   "required": ["v", "paper"],
   "properties": {
+    "show_holder_change_qr": {
+      "type": "boolean",
+      "description": "Opt-in POS FE por tienda. Ausente o false no muestra QR de cambio de titular; no afecta QR DIAN."
+    },
     "v": {
       "type": "integer",
       "enum": [2],

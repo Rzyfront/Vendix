@@ -1,3 +1,4 @@
+import { HolderChangeAccountingModule } from '../invoicing/invoice-holder-changes/holder-change-accounting.service';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
@@ -88,6 +89,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
 
 @Module({
   imports: [
+    HolderChangeAccountingModule,
     ResponseModule,
     PrismaModule,
     S3Module,

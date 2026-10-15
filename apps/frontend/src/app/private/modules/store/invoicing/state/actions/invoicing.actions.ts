@@ -468,3 +468,8 @@ export const loadDianConfigsFailure = createAction(
 // ── Clear State ─────────────────────────────────────────────
 
 export const clearInvoicingState = createAction('[Invoicing] Clear State');
+
+// Durable holder changes use the same mutation/effect refresh boundary as invoices.
+export const holderChangeCommand = createAction('[Invoicing] Holder Change Command', props<{ requestId: string; command: import('../../services/invoice-holder-change.service').HolderChangeCommand }>());
+export const holderChangeCommandSuccess = createAction('[Invoicing] Holder Change Command Success', props<{ requestId: string; operation: import('../../services/invoice-holder-change.service').HolderChangeOperation }>());
+export const holderChangeCommandFailure = createAction('[Invoicing] Holder Change Command Failure', props<{ requestId: string; error: string }>());

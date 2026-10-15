@@ -56,6 +56,19 @@ function lookupGeometry(format: PrintPaperFormat) {
       </h4>
 
       <div class="space-y-3">
+        @if (formatType() === 'pos_electronic_invoice') {
+          <div class="space-y-1">
+            <label class="flex items-start gap-2 min-h-11 cursor-pointer" for="print-format-holder-change-qr">
+              <input id="print-format-holder-change-qr" type="checkbox"
+                [ngModel]="definition().show_holder_change_qr === true"
+                (ngModelChange)="setHolderChangeQr($event)"
+                aria-describedby="print-format-holder-change-qr-help"
+                class="mt-0.5 w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500" />
+              <span class="text-[11px] font-medium text-text-primary">Mostrar QR para solicitar factura a nombre del cliente</span>
+            </label>
+            <p id="print-format-holder-change-qr-help" class="text-[10px] text-text-tertiary">Solo en facturas de consumidor final. Desactivado por defecto.</p>
+          </div>
+        }
         <!-- Format -->
         <div>
           <label class="block text-[11px] font-medium text-text-secondary mb-1">
@@ -364,6 +377,10 @@ export class PrintPaperPanelComponent {
   readonly definitionChanged = output<PrintFormatDefinition>();
 
   private readonly printService = inject(DocumentPrintService);
+  setHolderChangeQr(enabled: boolean): void {
+    if (this.formatType() !== 'pos_electronic_invoice') return;
+    this.definitionChanged.emit({ ...this.definition(), show_holder_change_qr: enabled === true });
+  }
 
   /** Geometría efectiva (kernel) del borrador: única fuente de mínimos. */
   readonly geometry = computed(() => resolvePrintGeometry(this.definition().paper));

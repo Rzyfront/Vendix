@@ -194,6 +194,7 @@ export interface Order {
    * factura de venta vigente. Aditivo: `invoices[0]` sigue mostrando la
    * última factura de cualquier tipo para la tarjeta.
    */
+  holder_change_context?: { operation_id?: number; original_invoice_id?: number } | null;
   active_sales_invoice?: { id: number; status: string } | null;
   /** Table session if order was placed at a restaurant table */
   table_sessions?: OrderTableSession[];

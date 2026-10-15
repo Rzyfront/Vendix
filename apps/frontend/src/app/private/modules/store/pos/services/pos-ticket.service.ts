@@ -775,33 +775,8 @@ export class PosTicketService {
       </div>
     `;
 
-    // QR Code for retroactive invoicing (Consumidor Final sales)
-    if (ticketData.invoiceDataToken && ticketData.invoiceDataQrUrl) {
-      const qrUrl = ticketData.invoiceDataQrUrl;
-      try {
-        const QRCode = await import('qrcode');
-        const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 200, margin: 1 });
-        html += `
-          <hr style="border: 1px dashed #000; margin: 10px 0;">
-          <div style="text-align: center; margin: 10px 0;">
-            <p style="margin: 2px 0; font-size: 11px; font-weight: bold;">Solicite su factura electrónica</p>
-            <img src="${qrDataUrl}" style="width: min(160px, 100%); height: auto; margin: 8px auto;" />
-            <p style="margin: 2px 0; font-size: 10px;">Escanee el código QR o visite:</p>
-            <p style="margin: 4px 0; font-size: 9px; word-break: break-all;">${qrUrl}</p>
-          </div>
-        `;
-      } catch (err) {
-        // Fallback: just show URL without QR image
-        html += `
-          <hr style="border: 1px dashed #000; margin: 10px 0;">
-          <div style="text-align: center; margin: 10px 0;">
-            <p style="margin: 2px 0; font-size: 11px; font-weight: bold;">Solicite su factura electrónica</p>
-            <p style="margin: 2px 0; font-size: 10px;">Visite:</p>
-            <p style="margin: 4px 0; font-size: 9px; word-break: break-all;">${qrUrl}</p>
-          </div>
-        `;
-      }
-    }
+    // Holder-change QR belongs exclusively to the fiscal gateway FE renderer.
+    // This legacy local sale ticket is nonfiscal and must not manufacture it.
 
     if (printer.printFooter) {
       // The old footer always warned "esta factura electrónica no está avalada

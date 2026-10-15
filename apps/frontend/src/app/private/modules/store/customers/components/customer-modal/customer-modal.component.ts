@@ -1,3 +1,4 @@
+import { CustomerBillingFieldsComponent, CustomerBillingData } from '../../../../../../shared/components/customer-billing-fields/customer-billing-fields.component';
 import {
   Component,
   ChangeDetectionStrategy,
@@ -125,7 +126,7 @@ interface AddressDtoPayload {
   state: string;
   country: string;
   postal_code?: string;
-  type: 'shipping';
+  type: 'shipping' | 'billing';
   is_primary: true;
   customer_id?: number;
   latitude?: string;
@@ -145,6 +146,7 @@ interface AddressDtoPayload {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    CustomerBillingFieldsComponent,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -264,6 +266,7 @@ interface AddressDtoPayload {
         <!-- Abajo: «Más datos» plegado (teléfono, régimen, RUT, CIIU...).   -->
         <!-- ============================================================ -->
         @if (mode() === 'advanced') {
+          @if (!forceBilling()) {
           <!-- Link para volver al modo rápido -->
           <button
             type="button"
@@ -274,6 +277,7 @@ interface AddressDtoPayload {
             Volver al modo rápido
           </button>
 
+          }
           <!-- Bloque obligatorio: datos para facturar -->
           <section class="space-y-4" aria-labelledby="customer-modal-billing-title">
             <div>
@@ -288,6 +292,9 @@ interface AddressDtoPayload {
               </p>
             </div>
 
+            @if (forceBilling()) {
+              <app-customer-billing-fields [initialValue]="billingInitial()" (changed)="onBillingChanged($event)" />
+            } @else {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-selector
                 formControlName="person_type"
@@ -378,6 +385,7 @@ interface AddressDtoPayload {
                 }
               </div>
             </div>
+            }
 
             @if (legalPersonDocumentTypeWarning()) {
               <!--
@@ -544,6 +552,14 @@ export class CustomerModalComponent {
   private destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
+  readonly forceBilling = input(false);
+  readonly initialBillingAddress = input<AddressPayload | null>(null);
+  readonly billingInitial = computed<Partial<CustomerBillingData> | null>(() => {
+    const initial = this.initialValues();
+    return initial ? {person_type: initial.person_type === 'JURIDICA' ? 'JURIDICA' : 'NATURAL', document_type: initial.document_type || 'CC', document_number: initial.document_number || '', verification_digit: initial.verification_digit || '', first_name: initial.first_name || '', last_name: initial.last_name || '', legal_name: initial.legal_name || '', email: initial.email || '', phone: initial.phone || ''} : null;
+  });
+  onBillingChanged(value: CustomerBillingData): void { this.form.patchValue(value); }
+
   readonly customer = input<Customer | null>(null);
   /**
    * Prellenado para el modo alta (ej. identidad RUES, documento digitado).
@@ -583,9 +599,9 @@ export class CustomerModalComponent {
   /** Dirección existente mapeada a AddressPayload para prefill el hijo. */
   readonly existingAddress = computed<AddressPayload | null>(() => {
     const c = this.customer() as (Customer & { addresses?: CustomerAddress[] }) | null;
-    if (!c?.addresses?.length) return null;
+    if (!c?.addresses?.length) return this.forceBilling() ? this.initialBillingAddress() : null;
     const addr =
-      c.addresses.find((a) => a.type === 'shipping' && a.is_primary) ??
+      c.addresses.find((a) => a.type === (this.forceBilling() ? 'billing' : 'shipping') && a.is_primary) ??
       c.addresses[0];
     if (!addr) return null;
     // latitude/longitude vienen como Decimal (string|number) desde el backend;
@@ -978,7 +994,7 @@ export class CustomerModalComponent {
         // Cargar la dirección de envío existente (si la hay) para el hijo.
         const c = customer as Customer & { addresses?: CustomerAddress[] };
         const addr =
-          c.addresses?.find((a) => a.type === 'shipping' && a.is_primary) ??
+          c.addresses?.find((a) => a.type === (this.forceBilling() ? 'billing' : 'shipping') && a.is_primary) ??
           c.addresses?.[0] ??
           null;
         this.existingAddressId.set(addr?.id ?? null);
@@ -1030,9 +1046,10 @@ export class CustomerModalComponent {
         this.addressPayload.set(null);
         this.addressValid.set(false);
         // Crear: arrancar en modo rápido.
-        this.mode.set('quick');
-        this.needsInvoicing.set(false);
-        untracked(() => this.applyModeValidators('quick'));
+        const mode = this.forceBilling() ? 'advanced' : 'quick';
+        this.mode.set(mode);
+        this.needsInvoicing.set(mode === 'advanced');
+        untracked(() => this.applyModeValidators(mode));
       }
     });
   }
@@ -1155,6 +1172,7 @@ export class CustomerModalComponent {
 
   /** Vuelve del modal completo al modal rápido. */
   switchToQuick(): void {
+    if (this.forceBilling()) return;
     this.mode.set('quick');
     this.needsInvoicing.set(false);
     this.applyModeValidators('quick');
@@ -1195,7 +1213,7 @@ export class CustomerModalComponent {
       city: p.city ?? '',
       state: p.state_province ?? '',
       country: p.country_code ?? '',
-      type: 'shipping',
+      type: this.forceBilling() ? 'billing' : 'shipping',
       is_primary: true,
     };
     if (p.address_line2) dto.address_line_2 = p.address_line2;
@@ -1291,8 +1309,8 @@ export class CustomerModalComponent {
               this.toast.error(
                 'No se pudo guardar la dirección de envío. El cliente se actualizará igualmente.',
               );
-              // Igual emitimos para que el cliente se actualice.
-              this.save.emit(data);
+              // Billing continuation must never advance past a failed address write.
+              if (!this.forceBilling()) this.save.emit(data);
             },
           });
       } else {

@@ -71,4 +71,6 @@ export interface PosFiscalStatus {
    * formulario público. El POS lo usa para imprimir/compartir el enlace.
    */
   invoice_data_token: string | null;
+  invoice_data_url?: string | null;
+  invoice_data_expires_at?: Date | null;
 }

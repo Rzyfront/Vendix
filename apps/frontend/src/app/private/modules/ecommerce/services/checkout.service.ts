@@ -163,6 +163,8 @@ export interface CheckoutResponse {
   message: string;
   public_order_token?: string | null;
   invoice_data_token?: string | null;
+  invoice_data_url?: string | null;
+  invoice_data_expires_at?: string | null;
   invoice_id?: number | null;
   // Backend-authoritative totals — the frontend renders these instead of
   // recomputing on its own to avoid drift.
@@ -483,7 +485,7 @@ export class CheckoutService {
     token: string,
   ): Observable<{ success: boolean; data: any }> {
     return this.http.get<{ success: boolean; data: any }>(
-      `${environment.apiUrl}/ecommerce/invoice-data/${token}/order-summary`,
+      `${environment.apiUrl}/ecommerce/invoice-data/${encodeURIComponent(token)}/order-summary`,
       { headers: this.getHeaders() },
     );
   }

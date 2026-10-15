@@ -1,3 +1,6 @@
+import { GuestOrderAccessModule } from '@common/context/guest-order-access.module';
+import { InvoiceHolderLinksModule } from '../invoice-holder-changes/invoice-holder-links.module';
+import { AddressesModule } from '../../addresses/addresses.module';
 import { Module } from '@nestjs/common';
 import { InvoiceDataRequestsController } from './invoice-data-requests.controller';
 import { InvoiceDataRequestsService } from './invoice-data-requests.service';
@@ -9,7 +12,16 @@ import { S3Module } from '@common/services/s3.module';
 import { OrderHistoryModule } from '../../orders/order-history/order-history.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, InvoicingModule, S3Module, OrderHistoryModule],
+  imports: [
+    GuestOrderAccessModule,
+    InvoiceHolderLinksModule,
+    AddressesModule,
+    ResponseModule,
+    PrismaModule,
+    InvoicingModule,
+    S3Module,
+    OrderHistoryModule,
+  ],
   controllers: [InvoiceDataRequestsController],
   providers: [InvoiceDataRequestsService, InvoiceDataRequestSubmittedListener],
   exports: [InvoiceDataRequestsService],

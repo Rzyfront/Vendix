@@ -1,3 +1,6 @@
+import { GuestOrderAccessService } from '@common/context/guest-order-access.service';
+import { InvoiceHolderLinkService } from '../../store/invoicing/invoice-holder-changes/invoice-holder-link.service';
+import { randomUUID } from 'crypto';
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -191,6 +194,8 @@ export class CheckoutService {
     // motivo; sin él devuelve "sin alcance fijo".
     @Optional()
     private readonly shippingCalculator?: ShippingCalculatorService,
+    @Optional() private readonly guestOrderAccess?: GuestOrderAccessService,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   /**
@@ -206,9 +211,14 @@ export class CheckoutService {
     if (!rate_id || !store_id || !this.shippingTaxService) {
       return { ...EMPTY_SHIPPING_TAX };
     }
-    return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
-      store_id,
-    });
+    return this.shippingTaxService.snapshotForRate(
+      null,
+      rate_id,
+      shipping_cost,
+      {
+        store_id,
+      },
+    );
   }
 
   /**
@@ -277,7 +287,8 @@ export class CheckoutService {
         (d) =>
           d.notes !== undefined &&
           d.product_id === line.product_id &&
-          (d.product_variant_id ?? null) === (line.product_variant_id ?? null) &&
+          (d.product_variant_id ?? null) ===
+            (line.product_variant_id ?? null) &&
           (d.price_tier_id ?? null) === (line.applied_price_tier_id ?? null),
       );
       return match
@@ -436,9 +447,7 @@ export class CheckoutService {
     if (!buyer) {
       const resolved = await distance.resolveBuyerCoords(
         {
-          address_line1: address_snapshot?.address_line1 as
-            | string
-            | undefined,
+          address_line1: address_snapshot?.address_line1 as string | undefined,
           city: address_snapshot?.city as string | undefined,
           state_province: address_snapshot?.state_province as
             | string
@@ -704,7 +713,10 @@ export class CheckoutService {
           ? (e['legacy'] as Record<string, unknown>)
           : {};
       const candidate =
-        e['bank_account_id'] ?? e['id'] ?? nested['bank_account_id'] ?? nested['id'];
+        e['bank_account_id'] ??
+        e['id'] ??
+        nested['bank_account_id'] ??
+        nested['id'];
       const id = Number(candidate);
       if (Number.isInteger(id) && id > 0 && !ids.includes(id)) ids.push(id);
     }
@@ -726,9 +738,8 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const state = await this.fiscalStatusService.getStoreInvoicingState(
-      store_id,
-    );
+    const state =
+      await this.fiscalStatusService.getStoreInvoicingState(store_id);
     return { invoicing_enabled: state === 'ACTIVE' };
   }
 
@@ -1098,36 +1109,25 @@ export class CheckoutService {
 
   private async createGuestOrderArtifacts(
     orderId: number,
-    guestCustomer?: {
-      first_name?: string | null;
-      last_name?: string | null;
-      email?: string | null;
-      phone?: string | null;
-      document_type?: string | null;
-      document_number?: string | null;
-    } | null,
-  ): Promise<{ invoice_data_token: string; invoice_id: number | null } | null> {
+    _guestCustomer?: unknown,
+  ) {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) return null;
-
-    const request = await this.invoiceDataRequestsService.createRequest(
-      store_id,
-      orderId,
-      undefined,
-      guestCustomer,
-    );
+    // The capability was assigned in the original order insert, independently of FE.
+    const order = await this.store_prisma.orders.findFirst({
+      where: { id: orderId, store_id },
+      select: { public_access_token: true },
+    });
     const invoice_id = await this.createInvoiceIfConfigured(orderId);
-
-    if (invoice_id) {
-      await this.store_prisma.invoice_data_requests.update({
-        where: { id: request.id },
-        data: { invoice_id, updated_at: new Date() },
-      });
-    }
-
+    const link = invoice_id
+      ? await this.holderLinks!.getLinkForInvoice(invoice_id, store_id)
+      : null;
     return {
-      invoice_data_token: request.token,
+      public_order_token: order?.public_access_token ?? null,
       invoice_id,
+      invoice_data_token: link?.token ?? null,
+      invoice_data_url: link?.url ?? null,
+      invoice_data_expires_at: link?.expires_at ?? null,
     };
   }
 
@@ -1144,11 +1144,11 @@ export class CheckoutService {
         throw new BadRequestException('Token público de orden requerido');
       }
 
-      const publicOrder =
-        await this.store_prisma.invoice_data_requests.findFirst({
-          where: { token: publicOrderToken, order_id: orderId },
-          select: { id: true },
-        });
+      const binding = await this.guestOrderAccess!.resolve(
+        publicOrderToken,
+        RequestContextService.getStoreId() ?? undefined,
+      );
+      const publicOrder = binding?.order_id === orderId;
 
       if (!publicOrder) {
         throw new BadRequestException('Token público de orden inválido');
@@ -1292,9 +1292,7 @@ export class CheckoutService {
         cart_subtotal: this.roundMoney(quote.promotional_subtotal),
         product_ids: productIds,
         category_ids: Array.from(
-          new Set(
-            productIds.flatMap((id) => categoryMap.get(id) ?? []),
-          ),
+          new Set(productIds.flatMap((id) => categoryMap.get(id) ?? [])),
         ),
         items: couponItems,
       });
@@ -1307,7 +1305,9 @@ export class CheckoutService {
 
     const promotion_discount = this.roundMoney(quote.total_discount);
     const coupon_discount = this.roundMoney(coupon?.discount_amount ?? 0);
-    const total_discount = this.roundMoney(promotion_discount + coupon_discount);
+    const total_discount = this.roundMoney(
+      promotion_discount + coupon_discount,
+    );
 
     return {
       quote,
@@ -1338,7 +1338,13 @@ export class CheckoutService {
   }> {
     const code = dto.coupon_code?.trim().toUpperCase();
     if (!code || !dto.items?.length) {
-      return { valid: false, coupon_id: null, code: code ?? '', discount_amount: 0, subtotal: 0 };
+      return {
+        valid: false,
+        coupon_id: null,
+        code: code ?? '',
+        discount_amount: 0,
+        subtotal: 0,
+      };
     }
     const customerId = RequestContextService.getUserId() ?? null;
 
@@ -1417,8 +1423,7 @@ export class CheckoutService {
           code,
           discount_amount: 0,
           subtotal: 0,
-          reason:
-            body?.error_code ?? body?.message ?? 'Cupón no válido',
+          reason: body?.error_code ?? body?.message ?? 'Cupón no válido',
         };
       }
       throw err;
@@ -1554,11 +1559,10 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
 
-      selected = await resolvePublicSaleUnitSelections(
-        this.prisma,
-        requested,
-        { storeId: store_id, selectionEnabled },
-      );
+      selected = await resolvePublicSaleUnitSelections(this.prisma, requested, {
+        storeId: store_id,
+        selectionEnabled,
+      });
     }
 
     // Qué significa una línea SIN tarifa depende de si la tienda publicó el
@@ -1667,10 +1671,7 @@ export class CheckoutService {
     const backend_cart_items = cart?.cart_items || [];
     let cart_items = CheckoutService.applyDtoItemNotes<
       (typeof backend_cart_items)[number]
-    >(
-      backend_cart_items,
-      dto.items,
-    );
+    >(backend_cart_items, dto.items);
 
     if (
       (is_guest || cart_items.length === 0) &&
@@ -1798,7 +1799,6 @@ export class CheckoutService {
           `Product ${item.product?.name ?? item.product_id} is sold out and cannot be checked out`,
         );
       }
-
 
       const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
         item.product,
@@ -2099,7 +2099,8 @@ export class CheckoutService {
             is_inclusive: t.is_inclusive,
             // F-067: la base viaja explícita cuando existe; ausente ⇒ default
             // 'fraction' del camino + regla de ambigüedad en el kernel.
-            rate_basis: (t as { rate_basis?: InclusiveRateBasis } | null)?.rate_basis,
+            rate_basis: (t as { rate_basis?: InclusiveRateBasis } | null)
+              ?.rate_basis,
           })),
         );
         // F-061: el corto inalcanzable (ADR-04) no se persiste en silencio:
@@ -2281,6 +2282,7 @@ export class CheckoutService {
         order_number,
         customer_id: resolved_customer_id,
         customer_alias: guest_customer_alias,
+        public_access_token: is_guest ? randomUUID() : null,
         // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
         // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
         // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
@@ -2561,7 +2563,10 @@ export class CheckoutService {
       // type system can't prove it), skip the stamp and let the cart age out
       // as abandoned naturally instead of throwing.
       if (resolved_customer_id != null) {
-        await this.cart_service.markCartConverted(resolved_customer_id, order.id);
+        await this.cart_service.markCartConverted(
+          resolved_customer_id,
+          order.id,
+        );
       }
       // store_id y user_id se resuelven automáticamente
       await this.cart_service.clearCart();
@@ -2588,8 +2593,10 @@ export class CheckoutService {
       // devuelve cuando el comprador efectivamente subió un archivo; sin
       // `receipt_s3_key` no hay comprobante que re-leer.
       payment_id: payment_id_with_receipt,
-      public_order_token: guestArtifacts?.invoice_data_token ?? null,
+      public_order_token: guestArtifacts?.public_order_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_data_url: guestArtifacts?.invoice_data_url ?? null,
+      invoice_data_expires_at: guestArtifacts?.invoice_data_expires_at ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       // Líneas para el resumen post-compra y el automensaje de WhatsApp
       // ("Finalizar por WhatsApp" arma el wa.me desde esta respuesta, no
@@ -2648,9 +2655,7 @@ export class CheckoutService {
       this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
       this.s3Service.headObject(payment.receipt_s3_key),
     ]);
-    const expires_at = new Date(
-      Date.now() + TTL_SECONDS * 1000,
-    ).toISOString();
+    const expires_at = new Date(Date.now() + TTL_SECONDS * 1000).toISOString();
 
     return { url, expires_at, content_type: head?.contentType ?? null };
   }
@@ -2968,7 +2973,8 @@ export class CheckoutService {
           taxInfo.taxes.map((t: any) => ({
             rate: t.rate,
             is_inclusive: t.is_inclusive,
-            rate_basis: (t as { rate_basis?: InclusiveRateBasis } | null)?.rate_basis,
+            rate_basis: (t as { rate_basis?: InclusiveRateBasis } | null)
+              ?.rate_basis,
           })),
         );
         if ((waUnitTotals.unclosed_residual_cents ?? 0) !== 0) {
@@ -3000,7 +3006,9 @@ export class CheckoutService {
           tax_rate: waUnitTotals.total_rate,
           tax_amount_item: waUnitTotals.total_tax_amount,
           total_tax: Number(waLineTaxDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
-          total_net: Number(waLineBaseDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
+          total_net: Number(
+            waLineBaseDec.toFixed(2, Prisma.Decimal.ROUND_DOWN),
+          ),
           item_taxes: waUnitTotals.taxes.map(
             (t, taxIndex): CheckoutLineTaxSnapshot => {
               // QUI-INC — la fila de catálogo va TIPADA: sin `as any` y sin
@@ -3174,6 +3182,7 @@ export class CheckoutService {
         order_number,
         customer_id: resolved_customer_id,
         customer_alias: wa_guest_customer_alias,
+        public_access_token: is_guest ? randomUUID() : null,
         channel: 'whatsapp',
         currency: cart_currency,
         subtotal_amount: subtotal,
@@ -3318,7 +3327,10 @@ export class CheckoutService {
       // QUI-628: stamp the cart as converted BEFORE clearCart so the cart
       // row preserves the conversion link (see the ecommerce flow above).
       if (resolved_customer_id != null) {
-        await this.cart_service.markCartConverted(resolved_customer_id, order.id);
+        await this.cart_service.markCartConverted(
+          resolved_customer_id,
+          order.id,
+        );
       }
       await this.cart_service.clearCart();
     }
@@ -3337,8 +3349,10 @@ export class CheckoutService {
       customer_alias:
         (order as any).customer_alias ?? wa_guest_customer_alias ?? null,
       total: order.grand_total,
-      public_order_token: guestArtifacts?.invoice_data_token ?? null,
+      public_order_token: guestArtifacts?.public_order_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_data_url: guestArtifacts?.invoice_data_url ?? null,
+      invoice_data_expires_at: guestArtifacts?.invoice_data_expires_at ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       subtotal: subtotal,
       tax: total_tax,
@@ -3886,10 +3900,7 @@ export class CheckoutService {
     file: Express.Multer.File,
   ): Promise<string> {
     const mime = file.mimetype;
-    if (
-      !mime ||
-      !CheckoutService.RECEIPT_ALLOWED_MIME_TYPES.includes(mime)
-    ) {
+    if (!mime || !CheckoutService.RECEIPT_ALLOWED_MIME_TYPES.includes(mime)) {
       throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
     }
 
@@ -4158,9 +4169,10 @@ export class CheckoutService {
    * ORG-scope organization has no active central warehouse — the operator
    * MUST configure one before ecommerce orders can be reserved.
    */
-  private async resolveReservationLocationId(
-    item: { product_id: number; product_variant_id: number | null },
-  ): Promise<number> {
+  private async resolveReservationLocationId(item: {
+    product_id: number;
+    product_variant_id: number | null;
+  }): Promise<number> {
     const organization_id = RequestContextService.getOrganizationId();
 
     if (organization_id) {
@@ -4169,7 +4181,9 @@ export class CheckoutService {
 
       if (scope === 'ORGANIZATION') {
         const central =
-          await this.operatingScopeService.findCentralWarehouse(organization_id);
+          await this.operatingScopeService.findCentralWarehouse(
+            organization_id,
+          );
         if (!central) {
           throw new BadRequestException({
             code: 'CENTRAL_WAREHOUSE_NOT_CONFIGURED',

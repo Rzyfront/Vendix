@@ -424,7 +424,12 @@ export class InvoiceDeliveryService {
       );
       if (invoice.pdf_url) {
         try {
-          pdf_buffer = await this.s3_service.downloadFile(invoice.pdf_url);
+          const currentVariant = await this.fiscal_pdf_render_service.getCurrentRepresentationVariant(invoice.store_id, invoice.id);
+          if (invoice.pdf_url.endsWith(`-${currentVariant}.pdf`)) {
+            pdf_buffer = await this.s3_service.downloadFile(invoice.pdf_url);
+          } else {
+            this.logger.warn(`Invoice ${invoice.id}: persisted PDF is not the current representation; omitted from delivery after render failure. Retry PDF rendering.`);
+          }
         } catch (s3_error) {
           this.logger.error(
             `No se pudo descargar el PDF persistido de la factura #${invoice.invoice_number} para el reenvío: ${(s3_error as Error)?.message ?? s3_error}`,

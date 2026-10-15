@@ -1,3 +1,4 @@
+import { lockHolderChangeOrder, assertNoHolderChangeReservation } from '../orders/shared/holder-change-reservation';
 import { projectFinancialAccountInvoice } from './utils/split-invoice-projection.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { Injectable, Logger } from '@nestjs/common';
@@ -3083,9 +3084,12 @@ export class InvoicingService {
    */
   private async assertNotAlreadyInvoiced(
     where: { order_id: number } | { sales_order_id: number },
+    client: Pick<Prisma.TransactionClient, 'invoices'> = this.prisma,
   ): Promise<void> {
-    const existing = await this.prisma.invoices.findFirst({
+    const scope = this.getContext();
+    const existing = await client.invoices.findFirst({
       where: {
+        organization_id: scope.organization_id, store_id: scope.store_id,
         ...where,
         // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
         // `order_id` pero no son «la factura de la orden».
@@ -3682,7 +3686,7 @@ export class InvoicingService {
       this.buildInvoiceTaxCreateInput(tax_item),
     );
 
-    const invoiceDataRequest = order.invoice_data_requests?.[0];
+    const invoiceDataRequest = order.invoice_data_requests?.find((r) => r.submitted_at && r.document_number);
     // El adquiriente declarado para ESTE documento sale de UNA sola fuente
     // completa — la fila `users` del pedido si hay cliente identificado, o los
     // datos que el comprador cargó como invitado (`invoice_data_requests`) — y
@@ -3732,7 +3736,15 @@ export class InvoicingService {
       order.payments,
     );
 
-    const invoice = await this.prisma.invoices.create({
+    const created = await this.prisma.$transaction(async (tx) => {
+      await lockHolderChangeOrder(tx, order_id, context.store_id!, context.organization_id!);
+      await assertNoHolderChangeReservation(tx, order_id, context.store_id!);
+      await this.assertNotAlreadyInvoiced({ order_id }, tx);
+      const current = await tx.orders.findFirst({ where: { id: order_id, store_id: context.store_id } });
+      if (!current || current.updated_at?.getTime() !== order.updated_at?.getTime()) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CREATE_002, 'La orden cambió durante la preparación de la factura. Reintenta.');
+      }
+      const invoice = await tx.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
@@ -3808,19 +3820,23 @@ export class InvoicingService {
       include: INVOICE_INCLUDE,
     });
 
-    let created = invoice;
+    let saved = invoice;
     if (split_order_line_taxes) {
       await this.persistLineTaxes(
         invoice.id,
         persistedLineTaxes,
         persistedHeaderTaxRows,
+        tx,
       );
-      created =
-        (await this.prisma.invoices.findFirst({
+      saved =
+        (await tx.invoices.findFirst({
           where: { id: invoice.id },
           include: INVOICE_INCLUDE,
         })) ?? invoice;
     }
+
+      return saved;
+    });
 
     this.event_emitter.emit('invoice.created', {
       invoice_id: created.id,

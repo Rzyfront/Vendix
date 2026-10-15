@@ -299,3 +299,6 @@ export {
   type IncentiveProgressData,
 } from './gamified-incentive-bar/gamified-incentive-bar.component';
 
+
+export { CustomerBillingFieldsComponent, createCustomerBillingForm } from './customer-billing-fields/customer-billing-fields.component';
+export type { CustomerBillingData } from './customer-billing-fields/customer-billing-fields.component';

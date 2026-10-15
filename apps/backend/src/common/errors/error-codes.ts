@@ -2164,6 +2164,47 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Sales order not found',
   },
+  // Cambio de titular: errores públicos sin tokens ni datos de terceros.
+  CF_HOLDER_TOKEN_INVALID: {
+    code: 'CF_HOLDER_TOKEN_INVALID', httpStatus: 404,
+    devMessage: 'El enlace de cambio de titular no es válido.',
+  },
+  CF_HOLDER_TOKEN_EXPIRED: {
+    code: 'CF_HOLDER_TOKEN_EXPIRED', httpStatus: 410,
+    devMessage: 'El enlace de cambio de titular venció. Contacta al comercio.',
+  },
+  CF_HOLDER_INELIGIBLE: {
+    code: 'CF_HOLDER_INELIGIBLE', httpStatus: 409,
+    devMessage: 'Esta factura no permite iniciar un cambio de titular.',
+  },
+  CF_HOLDER_CAPTURE_INVALID: {
+    code: 'CF_HOLDER_CAPTURE_INVALID', httpStatus: 400,
+    devMessage: 'Revisa los datos obligatorios del nuevo titular.',
+  },
+  CF_HOLDER_SUBMISSION_CONFLICT: {
+    code: 'CF_HOLDER_SUBMISSION_CONFLICT', httpStatus: 409,
+    devMessage: 'La solicitud ya se envió con otros datos. Consulta su estado antes de continuar.',
+  },
+  CF_HOLDER_LEGACY_REVIEW_REQUIRED: {
+    code: 'CF_HOLDER_LEGACY_REVIEW_REQUIRED', httpStatus: 409,
+    devMessage: 'El historial de esta factura requiere revisión del comercio antes de continuar.',
+  },
+  CF_HOLDER_CHANGE_CONFLICT: {
+    code: 'CF_HOLDER_CHANGE_CONFLICT', httpStatus: 409,
+    devMessage: 'La orden ya tiene un cambio de titular en curso. Continúa la operación existente.',
+  },
+  CF_HOLDER_ACCOUNTING_REVIEW_REQUIRED: {
+    code: 'CF_HOLDER_ACCOUNTING_REVIEW_REQUIRED', httpStatus: 409,
+    devMessage: 'Es necesario revisar la conciliación contable antes de continuar.',
+  },
+  CF_HOLDER_ECONOMIC_MISMATCH: {
+    code: 'CF_HOLDER_ECONOMIC_MISMATCH', httpStatus: 409,
+    devMessage: 'Los valores de la orden no coinciden con la factura original. Solicita revisión al comercio.',
+  },
+  CF_HOLDER_CHANGE_DISABLED: {
+    code: 'CF_HOLDER_CHANGE_DISABLED', httpStatus: 409,
+    devMessage: 'El cambio de titular no está habilitado para nuevas solicitudes en esta tienda.',
+  },
   INVOICING_CREATE_001: {
     code: 'INVOICING_CREATE_001',
     httpStatus: 400,

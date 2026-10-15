@@ -2932,10 +2932,7 @@ export class PosComponent {
         customer: paymentData.order?.customer || sc,
         payment: paymentData.order?.payment || paymentData.payment,
         invoiceDataToken: paymentData.order?.invoice_data_token,
-        invoiceDataQrUrl:
-          paymentData.order?.invoice_data_token && this.storeDomainHostname
-            ? `${window.location.protocol}//${this.storeDomainHostname}/factura/${paymentData.order.invoice_data_token}`
-            : undefined,
+        invoiceDataQrUrl: paymentData.order?.invoice_data_url ?? undefined,
       });
 
       this.showOrderConfirmation.set(true);

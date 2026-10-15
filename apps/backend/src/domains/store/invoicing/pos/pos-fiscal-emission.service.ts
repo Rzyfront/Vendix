@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { InvoiceHolderLinkService } from '../invoice-holder-changes/invoice-holder-link.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
@@ -86,6 +87,7 @@ export class PosFiscalEmissionService {
     private readonly fiscal_scope: FiscalScopeService,
     // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
     private readonly orderHistory: OrderHistoryService,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   /**
@@ -173,7 +175,10 @@ export class PosFiscalEmissionService {
 
       const order = await this.prisma.orders.findFirst({
         where: { id: order_id },
-        select: { store_id: true, stores: { select: { organization_id: true } } },
+        select: {
+          store_id: true,
+          stores: { select: { organization_id: true } },
+        },
       });
       if (!order) return;
 
@@ -352,7 +357,10 @@ export class PosFiscalEmissionService {
       } catch (error) {
         // Cuenta sin cobrar: no es un fallo de emisión sino una precondición
         // de negocio; se propaga con su código para que el cliente la pinte.
-        if (account_id !== null && this.errorCodeOf(error) === 'SPLIT_ACCOUNT_UNPAID_INVOICE') {
+        if (
+          account_id !== null &&
+          this.errorCodeOf(error) === 'SPLIT_ACCOUNT_UNPAID_INVOICE'
+        ) {
           throw error;
         }
         return this.failed(
@@ -443,7 +451,8 @@ export class PosFiscalEmissionService {
     const invoice = await this.findLatestSalesInvoice(order_id);
 
     if (!invoice) {
-      const eligibility = await this.invoicing.getElectronicEmissionEligibility();
+      const eligibility =
+        await this.invoicing.getElectronicEmissionEligibility();
       if (!eligibility.eligible) {
         return this.notApplicable(order_id, eligibility.reason);
       }
@@ -469,7 +478,7 @@ export class PosFiscalEmissionService {
           ...this.emptyStatus(order_id),
           state,
           message,
-          invoice_data_token: await this.findInvoiceDataToken(order_id),
+          ...(await this.findInvoiceDataLink(order_id)),
         };
       }
 
@@ -480,7 +489,7 @@ export class PosFiscalEmissionService {
         ...this.emptyStatus(order_id),
         state: 'pending',
         message: 'Emitiendo el documento electrónico…',
-        invoice_data_token: await this.findInvoiceDataToken(order_id),
+        ...(await this.findInvoiceDataLink(order_id)),
       };
     }
 
@@ -532,7 +541,11 @@ export class PosFiscalEmissionService {
     return this.prisma.invoices.findFirst({
       where:
         account_id === null
-          ? { order_id, financial_account_id: null, invoice_type: 'sales_invoice' }
+          ? {
+              order_id,
+              financial_account_id: null,
+              invoice_type: 'sales_invoice',
+            }
           : {
               financial_account_id: account_id,
               invoice_type: 'sales_invoice',
@@ -552,13 +565,21 @@ export class PosFiscalEmissionService {
   }
 
   /** Token de la solicitud de datos vigente (carril nominativo diferido). */
-  private async findInvoiceDataToken(order_id: number): Promise<string | null> {
-    const request = await this.prisma.invoice_data_requests.findFirst({
-      where: { order_id, status: { in: ['pending', 'submitted'] } },
+  private async findInvoiceDataLink(order_id: number) {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { order_id, invoice_type: 'sales_invoice' },
       orderBy: { created_at: 'desc' },
-      select: { token: true },
+      select: { id: true, store_id: true },
     });
-    return request?.token ?? null;
+    const link =
+      invoice && this.holderLinks
+        ? await this.holderLinks.getLinkForInvoice(invoice.id, invoice.store_id)
+        : null;
+    return {
+      invoice_data_token: link?.token ?? null,
+      invoice_data_url: link?.url ?? null,
+      invoice_data_expires_at: link?.expires_at ?? null,
+    };
   }
 
   /**
@@ -571,7 +592,9 @@ export class PosFiscalEmissionService {
    * `new_status` es `VarChar(60)` y un motivo de rechazo redactado en español
    * no cabe: truncarlo dejaría una constancia que no dice qué pasó.
    */
-  private async findUncoveredSaleError(order_id: number): Promise<string | null> {
+  private async findUncoveredSaleError(
+    order_id: number,
+  ): Promise<string | null> {
     const event = await this.prisma.fiscal_operation_events.findFirst({
       where: {
         event_type: UNCOVERED_SALE_EVENT_TYPE,
@@ -600,7 +623,9 @@ export class PosFiscalEmissionService {
 
   private async buildStatus(
     order_id: number,
-    invoice: Awaited<ReturnType<PosFiscalEmissionService['findLatestSalesInvoice']>>,
+    invoice: Awaited<
+      ReturnType<PosFiscalEmissionService['findLatestSalesInvoice']>
+    >,
     blockers: FiscalDocumentFinding[],
     failure_message?: string,
   ): Promise<PosFiscalStatus> {
@@ -654,7 +679,7 @@ export class PosFiscalEmissionService {
       blockers,
       retry: retry_alive,
       contingency_deadline: invoice.contingency_deadline,
-      invoice_data_token: await this.findInvoiceDataToken(order_id),
+      ...(await this.findInvoiceDataLink(order_id)),
     };
   }
 
@@ -712,7 +737,8 @@ export class PosFiscalEmissionService {
       return {
         state: 'failed',
         message:
-          failure_message ?? 'La DIAN rechazó el documento. Revisa la factura para corregirlo.',
+          failure_message ??
+          'La DIAN rechazó el documento. Revisa la factura para corregirlo.',
       };
     }
 
@@ -747,7 +773,10 @@ export class PosFiscalEmissionService {
     };
   }
 
-  private notApplicable(order_id: number, reason: string | null): PosFiscalStatus {
+  private notApplicable(
+    order_id: number,
+    reason: string | null,
+  ): PosFiscalStatus {
     return {
       ...this.emptyStatus(order_id),
       state: 'not_applicable',

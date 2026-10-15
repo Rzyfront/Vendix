@@ -1,3 +1,4 @@
+import { assertNoHolderChangeReservation } from '../orders/shared/holder-change-reservation';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -186,6 +187,7 @@ export class SplitOrderService {
     `;
     if (!rows.length)
       throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
+    await assertNoHolderChangeReservation(tx, orderId, store_id);
     return this.source(tx, orderId);
   }
 

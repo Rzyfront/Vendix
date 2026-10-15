@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { renderInvoiceHolderQr } from '../../invoicing/utils/invoice-holder-qr.util';
+import { InvoiceHolderLinkService } from '../../invoicing/invoice-holder-changes/invoice-holder-link.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -31,6 +33,7 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
     private readonly prisma: StorePrismaService,
     private readonly qrService: QrService,
     private readonly s3Service?: S3Service,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   async fetchDocumentData(
@@ -86,6 +89,8 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       tz,
     });
 
+    await this.attachHolderLink(printData, invoice.id, storeId);
+
     // Si la factura tiene orden asociada, enriquecer con mesa/cajero si existen
     if (invoice.order_id) {
       const order = await this.prisma.orders.findFirst({
@@ -135,6 +140,17 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
     }
 
     return printData;
+  }
+
+  private async attachHolderLink(data: StandardPrintDataModel, invoiceId: number, storeId: number): Promise<void> {
+    try {
+      const link = await this.holderLinks?.getLinkForInvoice(invoiceId, storeId);
+      if (!link) return;
+      const qr = await renderInvoiceHolderQr(link.url);
+      data.holder_change = { url: link.url, expires_at: link.expires_at.toISOString(), qr_png_base64: qr.toString('base64') };
+    } catch {
+      this.logger.warn(`Holder QR representation unavailable for invoice ${invoiceId}`);
+    }
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {

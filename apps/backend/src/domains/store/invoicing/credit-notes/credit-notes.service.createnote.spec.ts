@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { holderEconomicHash } from '../invoice-holder-changes/invoice-holder-change.types';
 import { CreditNotesService } from './credit-notes.service';
 import type { CreateCreditNoteDto } from './dto/create-credit-note.dto';
 import {
@@ -53,6 +54,7 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     const created_items: Array<Record<string, any>> = [];
 
     const noteSnapshot = () => ({
+      ...Object.fromEntries(Object.entries(last_created_data ?? {}).map(([k, v]) => [k, v === Prisma.DbNull ? null : v])),
       id: NOTE_ID,
       invoice_number: last_created_data?.invoice_number,
       invoice_type: last_created_data?.invoice_type,
@@ -175,6 +177,24 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     extra: Record<string, unknown> = {},
   ) => ({ source_invoice_item_id, quantity, unit_price, ...extra });
 
+  it('holder mirror preserves freight and withholding in the atomic note checkpoint', async () => {
+    const parent = baseParent({ id: 7100, subtotal_amount: money(105), tax_amount: money(0),
+      discount_amount: money(0), total_amount: money(105), shipping_amount: money(5), withholding_amount: money(0),
+      invoice_items: [{ id: 900000, description: 'Venta', quantity: money(1), unit_price: money(100),
+        discount_amount: money(0), tax_amount: money(0), total_amount: money(100), unit_code: 'NIU', is_inclusive: false },
+        { id: 900001, description: 'Flete', quantity: money(1), unit_price: money(5),
+          discount_amount: money(0), tax_amount: money(0), total_amount: money(5), unit_code: 'NIU', is_inclusive: false }],
+      invoice_taxes: [],
+    });
+    const h = setup(parent);
+    (h.prisma as any).invoice_holder_changes = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+    const note = await h.service.createHolderChangeCreditNote({ related_invoice_id: 7100, reason: 'Cambio titular', note_concept_code: '2' } as any, h.prisma as never, 21);
+    expect(h.created[0].shipping_amount).toEqual(money(5));
+    expect(holderEconomicHash(note as any)).toEqual(holderEconomicHash(parent as any));
+    expect((h.prisma as any).invoice_holder_changes.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ credit_note_id: NOTE_ID, phase: 'credit_note_draft' }),
+    }));
+  });
   it.each(['033', '034'])('blocks NC creation before numbering when original has accepted RADIAN event %s', async (event_code) => {
     const parent = baseParent({
       id: 7100,

@@ -1,3 +1,4 @@
+import { GuestOrderAccessModule } from '@common/context/guest-order-access.module';
 import { Module } from '@nestjs/common';
 import { EcommerceReviewsService } from './reviews.service';
 import { EcommerceReviewsController } from './reviews.controller';
@@ -8,7 +9,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, S3Module],
+  imports: [GuestOrderAccessModule, PrismaModule, ResponseModule, S3Module],
   controllers: [EcommerceReviewsController, OrderReviewsController],
   providers: [EcommerceReviewsService, OrderReviewsService],
   exports: [EcommerceReviewsService],

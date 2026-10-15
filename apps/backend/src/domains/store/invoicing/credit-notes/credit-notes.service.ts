@@ -212,6 +212,10 @@ export class CreditNotesService {
     return context;
   }
 
+  async createHolderChangeCreditNote(dto: CreateCreditNoteDto, tx: Prisma.TransactionClient, operationId: number) {
+    return this.createNote(dto, 'credit_note', { tx, operationId });
+  }
+
   async createCreditNote(dto: CreateCreditNoteDto) {
     return this.createNote(dto, 'credit_note');
   }
@@ -456,6 +460,7 @@ export class CreditNotesService {
   private async createNote(
     dto: CreateCreditNoteDto | CreateDebitNoteDto,
     type: 'credit_note' | 'debit_note',
+    holder?: { tx: Prisma.TransactionClient; operationId: number },
   ) {
     const context = this.getContext();
     if (typeof context.organization_id !== 'number' || typeof context.store_id !== 'number') {
@@ -698,12 +703,13 @@ export class CreditNotesService {
       ? new Date(dto.issue_date)
       : new Date(localDateString(new Date(), await resolveStoreTimezone(this.prisma, context.store_id!)));
     const { invoice_number, resolution_id } = await this.invoice_number_generator.generateNextNumber({
+      ...(holder ? { tx: holder.tx } : {}),
       document_type: type,
       accounting_entity_id: related_invoice.accounting_entity_id,
     });
 
     try {
-      const note = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const persist = async (tx: Prisma.TransactionClient) => {
         const created = await tx.invoices.create({
           data: {
             organization_id: context.organization_id!,
@@ -730,6 +736,10 @@ export class CreditNotesService {
             discount_amount: recalculated.discount_amount,
             tax_amount: recalculated.tax_amount,
             total_amount: recalculated.total_amount,
+            ...(holder && isExactTotal ? {
+              shipping_amount: related_invoice.shipping_amount,
+              withholding_amount: related_invoice.withholding_amount,
+            } : {}),
             currency: related_invoice.currency,
             foreign_currency: related_invoice.foreign_currency,
             foreign_total_amount: foreignTotalAmount,
@@ -802,9 +812,17 @@ export class CreditNotesService {
           include: INVOICE_INCLUDE,
         });
         if (!refetched) throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+        if (holder) {
+          const updated = await tx.invoice_holder_changes.updateMany({
+            where: { id: holder.operationId, store_id: context.store_id, organization_id: context.organization_id, credit_note_id: null },
+            data: { credit_note_id: created.id, phase: 'credit_note_draft', version: { increment: 1 } },
+          });
+          if (updated.count !== 1) throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002, 'La operación ya tiene una nota crédito.');
+        }
         return refetched;
-      });
-      this.event_emitter.emit('invoice.created', {
+      };
+      const note = holder ? await persist(holder.tx) : await this.prisma.$transaction(persist);
+      if (!holder) this.event_emitter.emit('invoice.created', {
         invoice_id: note.id,
         invoice_number: note.invoice_number,
         invoice_type: type,

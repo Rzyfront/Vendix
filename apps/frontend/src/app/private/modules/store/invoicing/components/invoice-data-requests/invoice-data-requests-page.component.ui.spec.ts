@@ -21,6 +21,8 @@ describe('invoice data requests UI source contract', () => {
     ]) {
       expect(source).toContain(`'${status}'`);
     }
+    expect(source).toContain("readonly visibility = signal<InvoiceRequestVisibility>('requested')");
+    expect(source).toContain('.summary(this.search(), this.visibility())');
     expect(source).not.toContain('pillClass');
     expect(source).not.toContain('rounded-full border transition-colors');
   });
@@ -69,11 +71,12 @@ describe('invoice data requests UI source contract', () => {
     expect(source).toContain('badgeTransform: (value) =>');
   });
 
-  it('preserves process-only-for-submitted and treats null as a warning', () => {
-    expect(source).toContain("show: (item) => item?.status === 'submitted'");
+  it('retries recoverable failures and never claims success for a waiting operation', () => {
+    expect(source).toContain("show: (item) => item?.can_retry || item?.status === 'submitted'");
     expect(source).toContain('disabled: () => this.processingId() !== null');
-    expect(source).toContain("if (row.status !== 'submitted' || this.processingId() !== null)");
-    expect(source).toContain('if (response?.data)');
+    expect(source).toContain("if (!(row.can_retry || row.status === 'submitted') || this.processingId() !== null)");
+    expect(source).toContain("response?.data?.status === 'completed'");
+    expect(source).toContain("response?.data?.phase === 'fiscal_completed'");
     expect(source).toContain('this.toast.warning(');
     expect(source).not.toMatch(/else\s*\{\s*this\.toast\.success/);
   });

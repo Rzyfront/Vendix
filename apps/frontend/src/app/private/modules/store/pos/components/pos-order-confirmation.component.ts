@@ -1016,20 +1016,13 @@ export class PosOrderConfirmationComponent {
     const d = this.orderData();
     return Number(d?.invoice?.discount_amount ?? d?.discount_amount ?? d?.discount ?? 0);
   });
-  readonly derivedInvoiceDataToken = computed(() => this.orderData()?.invoiceDataToken ?? this.orderData()?.invoice_data_token);
+  readonly derivedInvoiceDataToken = computed(() => {
+    const fiscal = this.fiscalStatus();
+    return fiscal ? fiscal.invoice_data_token ?? undefined : this.orderData()?.invoiceDataToken ?? this.orderData()?.invoice_data_token;
+  });
   readonly derivedInvoiceDataQrUrl = computed(() => {
-    const d = this.orderData();
-    const token = d?.invoiceDataToken ?? d?.invoice_data_token;
-    // CP-POS-MODAL-SCOPE-001 / Phase F.8 v3 — storeDomainHostname was
-    // a property that the legacy `loadOrderData` assigned; we removed
-    // that path. Fall back to `window.location.hostname` so the QR URL
-    // still works even if the store-specific hostname signal isn't wired
-    // through this input anymore.
-    const hostname =
-      (this as any).storeDomainHostname ?? window.location.hostname;
-    return token && hostname
-      ? `${window.location.protocol}//${hostname}/factura/${token}`
-      : undefined;
+    const fiscal = this.fiscalStatus();
+    return fiscal ? fiscal.invoice_data_url ?? undefined : this.orderData()?.invoiceDataQrUrl ?? this.orderData()?.invoice_data_url;
   });
   readonly derivedElectronicInvoice = computed(() => this.electronicInvoice() ?? undefined);
   readonly derivedAppliedPromotions = computed(() => {

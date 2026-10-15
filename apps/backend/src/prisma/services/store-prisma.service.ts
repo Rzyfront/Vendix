@@ -8,7 +8,12 @@ import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class StorePrismaService extends BasePrismaService {
+  get invoice_holder_changes() { return this.scoped_client.invoice_holder_changes; }
+  get invoice_holder_change_accounting_effects() { return this.scoped_client.invoice_holder_change_accounting_effects; }
+
   private readonly store_scoped_models = [
+    'invoice_holder_changes',
+    'invoice_holder_change_accounting_effects',
     // Operational store ownership is independent of fiscal entity scope.
     'document_reception_email_inboxes',
     'document_reception_email_messages',
@@ -157,6 +162,8 @@ export class StorePrismaService extends BasePrismaService {
   ];
 
   private readonly fiscal_entity_scoped_models = [
+    'invoice_holder_changes',
+    'invoice_holder_change_accounting_effects',
     'invoice_resolutions',
     'chart_of_accounts',
     'fiscal_periods',
@@ -179,6 +186,8 @@ export class StorePrismaService extends BasePrismaService {
   // Models whose accounting_entity_id column is NOT NULL in schema.prisma —
   // they cannot carry legacy (null-entity) rows and Prisma rejects null filters.
   private readonly fiscal_entity_required_models = [
+    'invoice_holder_changes',
+    'invoice_holder_change_accounting_effects',
     'invoice_resolutions',
     'fiscal_transmissions',
     'fiscal_evidences',
@@ -190,6 +199,8 @@ export class StorePrismaService extends BasePrismaService {
   ];
 
   private readonly fiscal_entity_models_with_store_id = [
+    'invoice_holder_changes',
+    'invoice_holder_change_accounting_effects',
     'invoice_resolutions',
     'accounting_entries',
     'accounting_account_mappings',

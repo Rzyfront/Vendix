@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { allowsHolderChangeQr } from '../lib/holder-change-qr-policy';
+import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import { renderInvoiceHolderQr } from '../../invoicing/utils/invoice-holder-qr.util';
+import { InvoiceHolderLinkService } from '../../invoicing/invoice-holder-changes/invoice-holder-link.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { QrService } from '../../../../common/services/qr.service';
@@ -288,6 +292,7 @@ export class FiscalInvoicePdfRenderService {
     private readonly prisma: StorePrismaService,
     private readonly s3Service: S3Service,
     private readonly qrService: QrService,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   /**
@@ -307,10 +312,16 @@ export class FiscalInvoicePdfRenderService {
    *   identidad fiscal del emisor quedó incompleta — el mismo contrato que
    *   `GET /store/invoicing/:id/pdf`.
    */
+  async getCurrentRepresentationVariant(storeId: number, invoiceId: number): Promise<string> {
+    const holder = await this.holderLinks?.getLinkForInvoice(invoiceId, storeId);
+    return holder ? `cf-holder-v1-${holder.expires_at.getTime()}` : 'cf-holder-v1-none';
+  }
+
   async renderBuffer(
     storeId: number,
     documentId: number | string,
     formatType?: string,
+    definition?: PrintFormatDefinition,
   ): Promise<Buffer> {
     const id = Number(documentId);
     if (!Number.isInteger(id) || id <= 0) {
@@ -426,6 +437,13 @@ export class FiscalInvoicePdfRenderService {
     //     motor, no como esclavo»), y el territorio del builder pertenece a
     //     otro agente — slice 3 sólo cierra el cableado del consumer.
 
+    const holder = allowsHolderChangeQr(formatType, definition) ? await this.holderLinks?.getLinkForInvoice(invoice.id, storeId) : null;
+    if (holder) {
+      let buffer: Buffer | undefined;
+      try { buffer = await renderInvoiceHolderQr(holder.url); }
+      catch { this.logger.warn(`Holder QR representation unavailable for invoice ${invoice.id}`); }
+      data.holder_change = { url: holder.url, expires_at: holder.expires_at.toISOString(), qr_buffer: buffer };
+    }
     return InvoicePdfBuilder.generate(data);
   }
 }

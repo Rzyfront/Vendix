@@ -363,7 +363,7 @@ export class PrintGatewayService {
             `No hay renderizador PDF registrado para el formato ${formatType}.`,
           );
         }
-        pdf_buffer = await renderer.renderBuffer(storeId, documentId, formatType);
+        pdf_buffer = await renderer.renderBuffer(storeId, documentId, formatType, effective.definition);
         // TODO(integration-slice-4): thread `paper_definition` from caller
         //   - Cuando `RenderPrintDocumentDto` extienda `paper_format`
         //     (opción B del plan E.11), pasarlo aquí a `renderBuffer` por
@@ -396,7 +396,7 @@ export class PrintGatewayService {
 
     // Componer HTML — Step 8: fecha del compositor en la zona de la tienda.
     const gateway_tz = await this.resolveGatewayTimezone(storeId);
-    const html = this.composer.compose(effective.definition, data, undefined, gateway_tz);
+    const html = this.composer.compose(effective.definition, data, undefined, gateway_tz, formatType);
 
     const elapsed = Date.now() - start;
     this.logger.log(
@@ -684,6 +684,7 @@ export class PrintGatewayService {
       data,
       renderMode === 'tokenized' ? 'tokenized' : 'dummy',
       preview_tz,
+      formatType,
     );
 
     const previewGeometry = resolvePrintGeometry(previewDef.paper);
@@ -854,6 +855,9 @@ export class PrintGatewayService {
 
     // `logo` y `company_block` sólo se sustituyen si la clave aparece
     // EXPLÍCITAMENTE en el override (no se pisan con `undefined` accidentales).
+    if ('show_holder_change_qr' in overrides) {
+      merged.show_holder_change_qr = overrides.show_holder_change_qr === true;
+    }
     if ('logo' in overrides) {
       merged.logo = overrides.logo as PrintFormatDefinition['logo'];
     }

@@ -1,3 +1,4 @@
+import { allowsHolderChangeQr, stripAutomaticHolderQr } from '../lib/holder-change-qr-policy';
 import { Injectable } from '@nestjs/common';
 import {
   PrintFormatDefinition,
@@ -64,11 +65,17 @@ export class PrintLayoutComposerService {
     data: StandardPrintDataModel,
     mode: 'dummy' | 'tokenized' = 'dummy',
     tz?: string,
+    formatType?: string,
   ): string {
+    const resolvedType = formatType ?? (definition as PrintFormatDefinition & {format_type?: string}).format_type;
+    if (!allowsHolderChangeQr(resolvedType, definition)) {
+      // Suppress dynamic holder tokens too; the DIAN payload is left untouched.
+      data = {...data, holder_change: undefined};
+    }
     // Si la definición incluye una plantilla custom completa, se compila directamente
     if (definition.custom_template && definition.custom_template.trim().length > 0) {
       const compiledCustom = this.compiler.compile(definition.custom_template, data, mode, tz);
-      return this.wrapInHtmlDocument(definition, compiledCustom.compiled);
+      return this.wrapInHtmlDocument(definition, this.appendHolderQr(definition, data, compiledCustom.compiled, resolvedType));
     }
 
     // De lo contrario, se compone estructuralmente por secciones
@@ -124,7 +131,20 @@ export class PrintLayoutComposerService {
       </div>
     `;
 
-    return this.wrapInHtmlDocument(definition, bodyContent);
+    return this.wrapInHtmlDocument(definition, this.appendHolderQr(definition, data, bodyContent, resolvedType));
+  }
+
+  private appendHolderQr(definition: PrintFormatDefinition, data: StandardPrintDataModel, html: string, formatType?: string): string {
+    if (!allowsHolderChangeQr(formatType, definition) || !data.holder_change) return stripAutomaticHolderQr(html);
+    const type = formatType ?? (definition as PrintFormatDefinition & { format_type?: string }).format_type;
+    if ((type && !['fiscal_electronic_invoice', 'pos_electronic_invoice'].includes(type)) || !data.holder_change || html.includes('data-vx-holder-change')) return html;
+    const holder = data.holder_change;
+    const expiry = this.compiler.escapeHtml(holder.expires_at.slice(0, 10));
+    const block = `<section data-vx-holder-change="cf-holder-v1" style="text-align:center;break-inside:avoid;max-width:100%;padding:12px 0;overflow-wrap:anywhere"><strong>¿Necesitas la factura a tu nombre? Escanea aquí</strong><div><img alt="Solicitar cambio de titular de factura" src="data:image/png;base64,${holder.qr_png_base64}" style="width:min(180px,100%);max-width:100%;height:auto;image-rendering:crisp-edges" /></div><div>Válido hasta ${expiry} (UTC). No es el QR de verificación DIAN.</div></section>`;
+    // Custom templates remain untouched in storage. Insert exactly once at rendering.
+    const footer = html.search(/<footer\b|<(?:div|section)[^>]*(?:class=["'][^"']*(?:section-footer|print-footer)|data-section-id=["'](?:sec_footer|footer))/i);
+    const end = footer >= 0 ? footer : html.includes('print-container') ? html.lastIndexOf('</div>') : html.search(/<\/body>/i);
+    return end >= 0 ? html.slice(0, end) + block + html.slice(end) : html + block;
   }
 
   private renderSection(

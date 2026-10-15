@@ -9,6 +9,7 @@ import { PrintFormat } from '../../settings/interfaces/store-settings.interface'
 import { resolvePrintGeometry } from '../../print-formats/lib/print-geometry';
 
 export interface InvoicePdfData {
+  holder_change?: { url: string; expires_at: string; qr_buffer?: Buffer };
   // Emisor
   company_name: string;
   company_nit: string;
@@ -529,6 +530,23 @@ export class InvoicePdfBuilder {
           doc.moveDown(0.5);
           this.drawQrSection(doc, L, data.qr_code, data.qr_code_buffer);
           qr_page_index = this.currentPageIndex(doc);
+        }
+
+        if (data.holder_change) {
+          const holder = data.holder_change;
+          // Signed links are denser than the DIAN payload. Keep enough module
+          // pitch on 203-dpi thermal heads, still clamped to printable width.
+          const side = this.qrSide(L, 130);
+          this.ensureSpace(doc, L, side + 75);
+          doc.moveDown(0.5);
+          doc.font('Helvetica-Bold').fontSize(this.fs(L, 9)).fillColor('#222222')
+            .text('¿Necesitas la factura a tu nombre? Escanea aquí', L.margin, doc.y, { width: L.content, align: 'center' });
+          if (holder.qr_buffer) {
+            const y = doc.y + 5;
+            doc.image(holder.qr_buffer, L.margin + (L.content - side) / 2, y, { fit: [side, side] });
+            doc.y = y + side + 5;
+          }
+          doc.font('Helvetica').fontSize(this.fs(L, 7)).text(`Válido hasta ${holder.expires_at.slice(0, 10)} (UTC). Cambio de titular, no verificación DIAN.`, L.margin, doc.y, { width: L.content, align: 'center', link: holder.url });
         }
 
         // --- Footer ---

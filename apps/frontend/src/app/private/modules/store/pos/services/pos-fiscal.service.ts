@@ -49,6 +49,8 @@ export interface PosFiscalStatus {
   } | null;
   contingency_deadline: string | null;
   invoice_data_token: string | null;
+  invoice_data_url?: string | null;
+  invoice_data_expires_at?: string | null;
   /**
    * Lo que falta para emitir (sólo blockers), con `target`/`cta` para llevar al
    * usuario a corregirlo. Opcional: un backend anterior no lo envía.

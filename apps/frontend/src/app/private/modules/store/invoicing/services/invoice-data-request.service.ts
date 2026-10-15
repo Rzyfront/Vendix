@@ -8,6 +8,7 @@ import type {
   InvoiceDataRequestQuery,
   InvoiceDataRequestRow,
   InvoiceDataRequestSummary,
+  InvoiceRequestVisibility,
 } from '../interfaces/invoice-data-request.interface';
 
 /**
@@ -49,6 +50,7 @@ export class InvoiceDataRequestService {
     query: InvoiceDataRequestQuery = {},
   ): Observable<InvoiceDataRequestListResponse> {
     const params: Record<string, string | number> = {};
+    params['visibility'] = query.visibility || 'requested';
     if (query.status) params['status'] = query.status;
     if (query.search?.trim()) params['search'] = query.search.trim();
     if (query.page) params['page'] = query.page;
@@ -67,8 +69,9 @@ export class InvoiceDataRequestService {
    * siguiera el filtro activo, al elegir un estado las otras cinco tarjetas
    * caerían a cero y dejarían de servir para navegar.
    */
-  summary(search?: string): Observable<ApiResponse<InvoiceDataRequestSummary>> {
+  summary(search?: string, visibility: InvoiceRequestVisibility = 'requested'): Observable<ApiResponse<InvoiceDataRequestSummary>> {
     const params: Record<string, string> = {};
+    params['visibility'] = visibility;
     if (search?.trim()) params['search'] = search.trim();
 
     return this.http.get<ApiResponse<InvoiceDataRequestSummary>>(

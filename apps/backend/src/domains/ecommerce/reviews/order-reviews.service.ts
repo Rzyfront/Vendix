@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { GuestOrderAccessService } from '@common/context/guest-order-access.service';
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
@@ -43,6 +45,8 @@ export class OrderReviewsService {
     private readonly prisma: EcommercePrismaService,
     private readonly reviews_service: EcommerceReviewsService,
     private readonly s3_service: S3Service,
+    @Optional() private readonly guestOrderAccess?: GuestOrderAccessService,
+    @Optional() private readonly contextRunner?: StoreContextRunner,
   ) {}
 
   // ------------------------------------------------------------------
@@ -90,17 +94,16 @@ export class OrderReviewsService {
 
     let order: any = null;
     if ('token' in ref) {
-      const base = this.prisma.withoutScope();
-      const request = await base.invoice_data_requests.findFirst({
-        where: { token: ref.token, store_id },
-        select: { order_id: true },
-      });
-      if (request) {
-        order = await base.orders.findFirst({
-          where: { id: request.order_id, store_id },
-          select: this.orderSelect,
-        });
-      }
+      const binding = await this.guestOrderAccess!.resolve(ref.token, store_id);
+      if (binding)
+        order = await this.contextRunner!.runInStoreContext(
+          binding.store_id,
+          () =>
+            this.prisma.orders.findFirst({
+              where: { id: binding.order_id, store_id },
+              select: this.orderSelect,
+            }),
+        );
     } else {
       order = await this.prisma.orders.findFirst({
         where: { id: ref.order_id },

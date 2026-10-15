@@ -1,3 +1,6 @@
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   Controller,
   Get,
@@ -45,6 +48,7 @@ export class InvoiceDataRequestsController {
   }
 
   @Get()
+  @Permissions('invoicing:read')
   async findAll(
     @Req() req: AuthenticatedRequest,
     @Query() query: QueryInvoiceDataRequestsDto,
@@ -65,25 +69,35 @@ export class InvoiceDataRequestsController {
    * conteo NO debe seguir el filtro de estado — ver `summaryByStore`.
    */
   @Get('summary')
+  @Permissions('invoicing:read')
   async summary(
     @Req() req: AuthenticatedRequest,
-    @Query('search') search?: string,
+    @Query() query: QueryInvoiceDataRequestsDto,
   ) {
     const store_id = this.requireStoreId(req);
-    const result = await this.service.summaryByStore(store_id, search);
+    const result = await this.service.summaryByStore(
+      store_id,
+      query.search,
+      query.visibility,
+    );
     return this.responseService.success(result);
   }
 
   @Post(':id/process')
+  @Permissions('invoicing:write')
   async process(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) id: number,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const store_id = this.requireStoreId(req);
     const result = await this.service.processRequest(id, store_id);
+    res.status(result.run_status === 'completed' ? 200 : 202);
     return this.responseService.success(
       result,
-      'Solicitud procesada correctamente',
+      result.run_status === 'completed'
+        ? 'Factura emitida'
+        : 'Solicitud en proceso',
     );
   }
 }

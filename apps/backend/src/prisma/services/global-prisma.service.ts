@@ -4,6 +4,10 @@ import { BasePrismaService } from '../base/base-prisma.service';
 
 @Injectable()
 export class GlobalPrismaService extends BasePrismaService {
+  get invoice_data_requests() { return this.baseClient.invoice_data_requests; }
+  get invoice_holder_changes() { return this.baseClient.invoice_holder_changes; }
+  get invoice_holder_change_accounting_effects() { return this.baseClient.invoice_holder_change_accounting_effects; }
+
   // Global service provides access to ALL models without any scoping
   // This is used for superadmin operations that need cross-tenant access
 

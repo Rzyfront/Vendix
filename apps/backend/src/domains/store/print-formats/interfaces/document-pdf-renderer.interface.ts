@@ -1,3 +1,4 @@
+import { PrintFormatDefinition } from './print-format.interface';
 /**
  * ADR-15 §4 (CP-pos-exclusive-tax-double-charge, unificación remisión-gateway)
  * — contrato de un renderizador PDF registrado detrás de `engine:'pdf'` en
@@ -16,5 +17,6 @@ export interface IDocumentPdfRenderer {
     storeId: number,
     documentId: number | string,
     formatType?: string,
+    definition?: PrintFormatDefinition,
   ): Promise<Buffer>;
 }

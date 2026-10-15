@@ -87,6 +87,7 @@ export interface StandardPrintTaxRow {
 }
 
 export interface StandardPrintDataModel {
+  holder_change?: { url: string; expires_at: string; qr_png_base64: string };
   store: StandardPrintParty;
   organization?: StandardPrintParty;
   customer?: StandardPrintParty;

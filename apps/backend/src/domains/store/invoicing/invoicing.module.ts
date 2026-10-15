@@ -1,3 +1,8 @@
+import { InvoiceHolderLinksModule } from './invoice-holder-changes/invoice-holder-links.module';
+import { InvoiceHolderChangesService } from './invoice-holder-changes/invoice-holder-changes.service';
+import { InvoiceHolderChangesController } from './invoice-holder-changes/invoice-holder-changes.controller';
+import { InvoiceHolderChangeRecoveryService } from './invoice-holder-changes/invoice-holder-change-recovery.service';
+import { HolderChangeAccountingModule } from './invoice-holder-changes/holder-change-accounting.service';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createInvoicingTools } from '../../../ai-engine/tools/domains/invoicing.tools';
@@ -59,6 +64,8 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
 
 @Module({
   imports: [
+    InvoiceHolderLinksModule,
+    HolderChangeAccountingModule,
     ResponseModule,
     PrismaModule,
     S3Module,
@@ -88,6 +95,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoiceDeliveryModule,
   ],
   controllers: [
+    InvoiceHolderChangesController,
     DianConfigController,
     // QUI-657 — cola de plataforma para tramitar certificados de firma de los
     // tenants que no tienen uno. Vive en este módulo (no en super-admin) porque
@@ -120,6 +128,8 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     PosFiscalController,
   ],
   providers: [
+    InvoiceHolderChangesService,
+    InvoiceHolderChangeRecoveryService,
     // Renders the DIAN verification URL as a scannable PNG for the invoice's
     // graphic representation. Registered as a direct provider, matching how
     // `products.module.ts` consumes it — there is no `QrModule` in this repo.
@@ -181,6 +191,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     PosSaleCompletedListener,
   ],
   exports: [
+    InvoiceHolderChangesService,
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,

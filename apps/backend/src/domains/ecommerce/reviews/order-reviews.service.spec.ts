@@ -9,6 +9,7 @@ describe('OrderReviewsService', () => {
     orders: { findFirst: jest.Mock };
   };
   let prisma: any;
+  let guest: any;
   let reviews_service: any;
   let s3: { signUrl: jest.Mock };
 
@@ -69,16 +70,29 @@ describe('OrderReviewsService', () => {
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 11, user_id: 7 } as any);
-    service = new OrderReviewsService(prisma, reviews_service, s3 as any);
+    guest = {
+      resolve: jest
+        .fn()
+        .mockResolvedValue({ order_id: 50, store_id: 11, organization_id: 1 }),
+    };
+    service = new OrderReviewsService(
+      prisma,
+      reviews_service,
+      s3 as any,
+      guest,
+      {
+        runInStoreContext: async (_id: number, fn: () => Promise<unknown>) =>
+          fn(),
+      } as any,
+    );
   });
 
   afterEach(() => jest.restoreAllMocks());
 
   it('status con orden pending: experiencia si, productos not_delivered', async () => {
     const status = await service.getStatus({ token: 'tok' });
-    expect(base.invoice_data_requests.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { token: 'tok', store_id: 11 } }),
-    );
+    expect(guest.resolve).toHaveBeenCalledWith('tok', 11);
+    expect(prisma.withoutScope).not.toHaveBeenCalled();
     expect(status.can_review_experience).toBe(true);
     expect(status.order_review).toBeNull();
     expect(status.items).toHaveLength(1);
@@ -91,7 +105,7 @@ describe('OrderReviewsService', () => {
   });
 
   it('token inexistente -> 404 ORD_REVIEW_NOT_FOUND', async () => {
-    base.invoice_data_requests.findFirst.mockResolvedValue(null);
+    guest.resolve.mockResolvedValue(null);
     await expectCode(
       service.getStatus({ token: 'nope' }),
       'ORD_REVIEW_NOT_FOUND',
@@ -140,7 +154,9 @@ describe('OrderReviewsService', () => {
   });
 
   it('orden cancelada -> 400 ORD_REVIEW_ORDER_INVALID_STATE', async () => {
-    base.orders.findFirst.mockResolvedValue(baseOrder({ state: 'cancelled' }));
+    prisma.orders.findFirst.mockResolvedValue(
+      baseOrder({ state: 'cancelled' }),
+    );
     await expectCode(
       service.createExperience({ token: 'tok' }, { rating: 4 }),
       'ORD_REVIEW_ORDER_INVALID_STATE',
@@ -149,7 +165,9 @@ describe('OrderReviewsService', () => {
   });
 
   it('producto fuera de la orden -> 400 ORD_REVIEW_PRODUCT_NOT_IN_ORDER', async () => {
-    base.orders.findFirst.mockResolvedValue(baseOrder({ state: 'delivered' }));
+    prisma.orders.findFirst.mockResolvedValue(
+      baseOrder({ state: 'delivered' }),
+    );
     await expectCode(
       service.createProductReview(
         { token: 'tok' },
@@ -170,7 +188,9 @@ describe('OrderReviewsService', () => {
   });
 
   it('producto con orden delivered -> crea pending con order_id y emite evento', async () => {
-    base.orders.findFirst.mockResolvedValue(baseOrder({ state: 'delivered' }));
+    prisma.orders.findFirst.mockResolvedValue(
+      baseOrder({ state: 'delivered' }),
+    );
     const review = await service.createProductReview(
       { token: 'tok' },
       { product_id: 1, rating: 5, comment: 'comentario largo ok' },

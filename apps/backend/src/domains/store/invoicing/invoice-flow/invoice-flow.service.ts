@@ -1140,6 +1140,22 @@ export class InvoiceFlowService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     }
 
+    const holder = await this.prisma.invoice_holder_changes?.findFirst({
+      where: { new_invoice_id: id, store_id: invoice.store_id, organization_id: invoice.organization_id },
+      select: { customer_snapshot: true },
+    });
+    if (holder?.customer_snapshot && invoice.customer) {
+      const snapshot = holder.customer_snapshot as Record<string, unknown>;
+      Object.assign(invoice.customer, {
+        first_name: snapshot.first_name ?? '', last_name: snapshot.last_name ?? '', legal_name: snapshot.legal_name ?? null,
+        document_type: snapshot.document_type, document_number: snapshot.document_number,
+        verification_digit: snapshot.verification_digit ?? null, person_type: snapshot.person_type,
+        email: snapshot.email, phone: snapshot.phone ?? null, is_withholding_agent: false,
+        ...(snapshot.tax_regime ? { tax_regime: snapshot.tax_regime } : {}),
+        fiscal_responsibilities: snapshot.fiscal_responsibilities ?? invoice.customer.fiscal_responsibilities,
+        addresses: [{ ...(snapshot.address as object), type: 'billing', is_primary: true }],
+      });
+    }
     return invoice;
   }
 
@@ -5142,6 +5158,54 @@ export class InvoiceFlowService {
           m && m.severity === 'rechazo' && typeof m.text === 'string' && m.text,
       )
       .map((m: any) => ({ code: String(m.code ?? ''), text: m.text }));
+  }
+
+  /** Read DIAN status for the persisted transmission, never rebuild or resend its payload. */
+  async refreshHolderFiscalStatus(id: number, operation: { id: number; store_id: number; organization_id: number; accounting_entity_id: number }) {
+    const context = this.getContext();
+    if (context.store_id !== operation.store_id || context.organization_id !== operation.organization_id) throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID);
+    const binding = await this.prisma.invoice_holder_changes.findFirst({where:{id:operation.id,store_id:operation.store_id,organization_id:operation.organization_id,accounting_entity_id:operation.accounting_entity_id,OR:[{original_invoice_id:id},{credit_note_id:id},{new_invoice_id:id}]},select:{id:true}});
+    if(!binding) throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID);
+    const invoice=await this.getInvoice(id);
+    const transmission=await this.prisma.fiscal_transmissions.findFirst({where:{organization_id:operation.organization_id,accounting_entity_id:operation.accounting_entity_id,source_type:'invoice',source_id:id},orderBy:{id:'desc'}});
+    if(!transmission || transmission.transmission_status==='accepted') return;
+    const key=transmission.cufe||transmission.cude||transmission.cuds||transmission.cune||invoice.cufe;
+    if(!key)return;
+    const provider=await this.resolver.resolve({configuration_type:this.configurationType(invoice.invoice_type)});
+    const status=await this.queryStatusSafely(provider,key,id);
+    if(status?.status==='accepted') {
+      const response=this.buildResponseFromStatus({success:true,tracking_id:transmission.tracking_id??key,cufe:transmission.cufe??undefined,cude:transmission.cude??undefined,cuds:transmission.cuds??undefined,cune:transmission.cune??undefined},status,key,'holder_recovery','Aceptación recuperada por consulta DIAN');
+      await this.fiscal_ledger.markAccepted(transmission.id,response);
+      await this.reconcileAcceptedFromLedger(id,operation);
+    }
+  }
+
+  /** Internal repair only: a durable holder operation AND accepted DIAN ledger authorize projection. */
+  async reconcileAcceptedFromLedger(id: number, operation: { id: number; store_id: number; organization_id: number; accounting_entity_id: number }) {
+    const context = this.getContext();
+    if (context.store_id !== operation.store_id || context.organization_id !== operation.organization_id) {
+      throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID);
+    }
+    const binding = await this.prisma.invoice_holder_changes.findFirst({
+      where: { id: operation.id, store_id: operation.store_id, organization_id: operation.organization_id,
+        accounting_entity_id: operation.accounting_entity_id,
+        OR: [{ original_invoice_id: id }, { credit_note_id: id }, { new_invoice_id: id }] },
+      select: { id: true },
+    });
+    if (!binding) throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID);
+    const invoice = await this.getInvoice(id);
+    if (invoice.accounting_entity_id !== operation.accounting_entity_id) throw new VendixHttpException(ErrorCodes.FISCAL_SCOPE_INVALID);
+    const evidence = await this.fiscal_ledger.findAcceptedInvoiceTransmission(invoice);
+    const fiscalKey = evidence?.cufe || evidence?.cude || evidence?.cuds || evidence?.cune;
+    if (!evidence?.tracking_id || !evidence.request_hash || !fiscalKey || (invoice.cufe && invoice.cufe !== fiscalKey)) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_PROVIDER_004, 'La evidencia DIAN no permite reparar la aceptación.');
+    }
+    if (invoice.status === 'accepted') return invoice;
+    // No public transition relaxation and no retransmission, email or duplicate acceptance event.
+    return this.persistAcceptedInvoiceAndContract(invoice, {
+      status: 'accepted', send_status: 'sent_ok', transmission_status: 'accepted', dian_status: 'accepted',
+      accounting_status: 'provisional', accepted_at: evidence.accepted_at ?? new Date(), cufe: fiscalKey,
+    });
   }
 
   async accept(id: number) {

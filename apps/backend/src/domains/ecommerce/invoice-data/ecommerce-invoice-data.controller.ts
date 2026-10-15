@@ -1,3 +1,13 @@
+import { Header, HttpCode, Res, Query, Optional } from '@nestjs/common';
+import type { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
+import { IsString, MaxLength, MinLength } from 'class-validator';
+import { ExternalIdentityLookupService } from '../../store/customers/external-identity/external-identity-lookup.service';
+import { DianMunicipalitiesService } from '../../store/addresses/dian-municipalities.service';
+import {
+  DianMunicipalityQueryDto,
+  DianMunicipalityResolveQueryDto,
+} from '../../store/addresses/dto';
 import {
   Body,
   Controller,
@@ -51,6 +61,10 @@ const GUEST_KDS_MAP: Record<string, string> = {
   'ticket.delivered': 'kitchen.delivered',
 };
 
+class PublicIdentityLookupQuery {
+  @IsString() @MinLength(5) @MaxLength(30) document_number: string;
+}
+
 @Controller('ecommerce/invoice-data')
 export class EcommerceInvoiceDataController {
   private readonly logger = new Logger(EcommerceInvoiceDataController.name);
@@ -59,10 +73,14 @@ export class EcommerceInvoiceDataController {
     private readonly invoiceDataService: InvoiceDataRequestsService,
     private readonly responseService: ResponseService,
     private readonly sseService: NotificationsSseService,
+    @Optional()
+    private readonly externalIdentity?: ExternalIdentityLookupService,
+    @Optional() private readonly municipalities?: DianMunicipalitiesService,
   ) {}
 
   @Public()
   @Get(':token/order-summary')
+  @Header('Cache-Control', 'no-store')
   async getOrderSummary(@Param('token') token: string) {
     const summary = await this.invoiceDataService.getOrderSummaryByToken(token);
     return this.responseService.success(summary);
@@ -77,6 +95,7 @@ export class EcommerceInvoiceDataController {
    */
   @OptionalAuth()
   @Get(':token/payments/:paymentId/receipt-url')
+  @Header('Cache-Control', 'no-store')
   async getGuestPaymentReceiptUrl(
     @Param('token') token: string,
     @Param('paymentId', ParseIntPipe) paymentId: number,
@@ -227,7 +246,85 @@ export class EcommerceInvoiceDataController {
   }
 
   @Public()
+  @Get(':token/status')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  async status(@Param('token') token: string) {
+    return this.responseService.success(
+      await this.invoiceDataService.getStatus(token),
+    );
+  }
+
+  @Public()
+  @Get(':token/lookup/external')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async lookup(
+    @Param('token') token: string,
+    @Query() query: PublicIdentityLookupQuery,
+  ) {
+    await this.invoiceDataService.validatePublicToken(token);
+    return this.responseService.success(
+      await this.externalIdentity!.lookup(query.document_number),
+    );
+  }
+
+  @Public()
+  @Get(':token/dian/departments')
+  @Header('Cache-Control', 'no-store')
+  async departments(@Param('token') token: string) {
+    await this.invoiceDataService.validatePublicToken(token);
+    return this.responseService.success(this.municipalities!.listDepartments());
+  }
+  @Public()
+  @Get(':token/dian/municipalities')
+  @Header('Cache-Control', 'no-store')
+  async municipalitySearch(
+    @Param('token') token: string,
+    @Query() query: DianMunicipalityQueryDto,
+  ) {
+    await this.invoiceDataService.validatePublicToken(token);
+    const result = this.municipalities!.search(
+      query.search,
+      query.limit,
+      query.department_code,
+    );
+    return this.responseService.paginated(
+      result.items,
+      result.total,
+      1,
+      query.department_code !== undefined
+        ? Math.max(result.items.length, 1)
+        : (query.limit ?? 20),
+    );
+  }
+  @Public()
+  @Get(':token/dian/municipalities/resolve')
+  @Header('Cache-Control', 'no-store')
+  async municipalityResolve(
+    @Param('token') token: string,
+    @Query() query: DianMunicipalityResolveQueryDto,
+  ) {
+    await this.invoiceDataService.validatePublicToken(token);
+    return this.responseService.success(
+      this.municipalities!.resolveByName(query.city, query.department),
+    );
+  }
+  @Public()
+  @Get(':token/dian/municipalities/:code')
+  @Header('Cache-Control', 'no-store')
+  async municipality(
+    @Param('token') token: string,
+    @Param('code') code: string,
+  ) {
+    await this.invoiceDataService.validatePublicToken(token);
+    return this.responseService.success(this.municipalities!.findByCode(code));
+  }
+
+  @Public()
   @Get(':token')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async getRequestInfo(@Param('token') token: string) {
     const request = await this.invoiceDataService.getByToken(token);
     return this.responseService.success(request);
@@ -235,14 +332,19 @@ export class EcommerceInvoiceDataController {
 
   @Public()
   @Post(':token/submit')
+  @HttpCode(202)
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async submitData(
     @Param('token') token: string,
     @Body() dto: SubmitInvoiceDataDto,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const result = await this.invoiceDataService.submitData(token, dto);
+    res?.status(result.status === 'completed' ? 200 : 202);
     return this.responseService.success(
       result,
-      'Datos de facturación recibidos correctamente',
+      'Datos recibidos. Consulta el progreso de la emisión.',
     );
   }
 
@@ -283,7 +385,9 @@ export class EcommerceInvoiceDataController {
    * Whitelist campo por campo — cualquier campo desconocido del productor
    * se descarta (costos, settings, PII de terceros, staff, notas internas).
    */
-  private projectForGuest(ev: Record<string, unknown>): Record<string, unknown> {
+  private projectForGuest(
+    ev: Record<string, unknown>,
+  ): Record<string, unknown> {
     const type = typeof ev?.type === 'string' ? (ev.type as string) : '';
 
     if (type === 'order.status_changed') {

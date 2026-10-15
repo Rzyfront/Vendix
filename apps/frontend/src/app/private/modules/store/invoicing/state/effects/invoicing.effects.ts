@@ -1,8 +1,10 @@
+import { InvoiceHolderChangeService } from '../../services/invoice-holder-change.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
 import { Observable, of } from 'rxjs';
-import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/operators';
+import { map, switchMap, exhaustMap, concatMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { InvoicingService } from '../../services/invoicing.service';
 import * as InvoicingActions from '../actions/invoicing.actions';
 import { selectInvoicingState } from '../selectors/invoicing.selectors';
@@ -43,6 +45,7 @@ import { DianDocumentEvent } from '../../interfaces/invoice.interface';
  */
 @Injectable()
 export class InvoicingEffects {
+  private readonly holderChanges = inject(InvoiceHolderChangeService);
   private actions$ = inject(Actions);
   private store = inject(Store);
   private invoicingService = inject(InvoicingService);
@@ -818,6 +821,18 @@ export class InvoicingEffects {
   );
 
   // ── DIAN configs (gate pre-factura) ───────────────────────
+
+  holderChangeCommand$ = createEffect(() => this.actions$.pipe(
+    ofType(InvoicingActions.holderChangeCommand),
+    concatMap(({ requestId, command }) => this.holderChanges.execute(command).pipe(
+      map(operation => InvoicingActions.holderChangeCommandSuccess({ requestId, operation })),
+      catchError(error => {const message = parseApiError(error).userMessage; this.toastService.error(message);return of(InvoicingActions.holderChangeCommandFailure({requestId,error:message}));}),
+    )),
+  ));
+  holderChangeRefresh$ = createEffect(() => this.actions$.pipe(
+    ofType(InvoicingActions.holderChangeCommandSuccess),
+    switchMap(({operation}) => [InvoicingActions.loadInvoices(), InvoicingActions.loadInvoiceStats(), InvoicingActions.loadInvoice({id:operation.new_invoice_id || operation.original_invoice_id})]),
+  ));
 
   loadDianConfigs$ = createEffect(() =>
     this.actions$.pipe(

@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -50,6 +51,9 @@ export const INVOICE_DATA_REQUEST_STATUSES = Object.values(
  * parámetro que no esté acá.
  */
 export class QueryInvoiceDataRequestsDto {
+  @IsOptional()
+  @IsIn(['requested', 'pending', 'expired', 'historical', 'all'])
+  visibility?: 'requested' | 'pending' | 'expired' | 'historical' | 'all';
   /**
    * Estado exacto. Vacío = todas.
    *

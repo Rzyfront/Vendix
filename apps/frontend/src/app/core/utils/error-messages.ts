@@ -757,6 +757,16 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Falta la entidad fiscal de la tienda. Completa los datos legales (NIT y razon social) antes de crear el plan de cuentas.',
 
   // Invoicing
+  CF_HOLDER_TOKEN_INVALID: 'El enlace de cambio de titular no es válido.',
+  CF_HOLDER_TOKEN_EXPIRED: 'El enlace de cambio de titular venció. Contacta al comercio.',
+  CF_HOLDER_INELIGIBLE: 'Esta factura no permite iniciar un cambio de titular.',
+  CF_HOLDER_CAPTURE_INVALID: 'Revisa los datos obligatorios del nuevo titular.',
+  CF_HOLDER_SUBMISSION_CONFLICT: 'La solicitud ya se envió con otros datos. Consulta su estado antes de continuar.',
+  CF_HOLDER_LEGACY_REVIEW_REQUIRED: 'El historial de esta factura requiere revisión del comercio antes de continuar.',
+  CF_HOLDER_CHANGE_CONFLICT: 'La orden ya tiene un cambio de titular en curso. Continúa la operación existente.',
+  CF_HOLDER_ACCOUNTING_REVIEW_REQUIRED: 'Es necesario revisar la conciliación contable antes de continuar.',
+  CF_HOLDER_ECONOMIC_MISMATCH: 'Los valores de la orden no coinciden con la factura original. Solicita revisión al comercio.',
+  CF_HOLDER_CHANGE_DISABLED: 'El cambio de titular no está habilitado para nuevas solicitudes en esta tienda.',
   INVOICING_ACQUIRER_EMAIL_REQUIRED:
     'El correo del cliente es obligatorio para crear la factura electrónica.',
   INVOICING_ACQUIRER_EMAIL_INVALID:

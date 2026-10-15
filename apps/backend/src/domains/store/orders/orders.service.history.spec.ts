@@ -36,6 +36,8 @@ describe('OrdersService.update — customer_changed', () => {
 
   const build = () => {
     const prisma: any = {
+      invoice_holder_changes: { findFirst: jest.fn().mockResolvedValue(null) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID }]),
       orders: {
         findFirst: jest.fn().mockResolvedValue({ ...draftOrder }),
         update: jest.fn().mockResolvedValue({ ...draftOrder, customer_id: 217 }),
@@ -50,6 +52,7 @@ describe('OrdersService.update — customer_changed', () => {
       store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       accounts_receivable: { findFirst: jest.fn().mockResolvedValue(null) },
     };
+    prisma.$transaction = jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma));
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
     const service = new OrdersService(
       prisma,

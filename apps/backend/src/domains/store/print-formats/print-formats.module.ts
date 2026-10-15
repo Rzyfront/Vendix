@@ -1,3 +1,4 @@
+import { InvoiceHolderLinksModule } from '../invoicing/invoice-holder-changes/invoice-holder-links.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseService } from '@common/responses/response.service';
@@ -103,6 +104,7 @@ import { DispatchNotePdfModule } from '../dispatch-notes/pdf/dispatch-note-pdf.m
 
 @Module({
   imports: [
+    InvoiceHolderLinksModule,
     PrismaModule,
     // E.11 casilla 4 — el render PDF bajo demanda descarga el logo del emisor
     // desde S3 (best-effort), igual que hace `generatePdf` en invoicing.

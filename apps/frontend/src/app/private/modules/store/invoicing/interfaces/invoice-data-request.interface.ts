@@ -33,6 +33,14 @@ export interface InvoiceDataRequestOrder {
 }
 
 export interface InvoiceDataRequestRow {
+  operation_id?: number | null;
+  phase?: string | null;
+  run_status?: string | null;
+  can_retry?: boolean;
+  last_error_message?: string | null;
+  credit_note_id?: number | null;
+  legal_name?: string | null;
+
   id: number;
   store_id: number;
   order_id: number;
@@ -62,7 +70,10 @@ export interface InvoiceDataRequestRow {
 }
 
 /** Filtros aceptados por `GET /store/invoice-data-requests`. */
+export type InvoiceRequestVisibility = 'requested' | 'pending' | 'expired' | 'historical' | 'all';
 export interface InvoiceDataRequestQuery {
+  visibility?: InvoiceRequestVisibility;
+
   status?: InvoiceDataRequestStatus | '';
   search?: string;
   page?: number;

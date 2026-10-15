@@ -1,4 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { renderInvoiceHolderQr } from '../utils/invoice-holder-qr.util';
+import { InvoiceHolderLinkService } from '../invoice-holder-changes/invoice-holder-link.service';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -91,6 +94,7 @@ export class InvoicePdfService {
     private readonly s3_service: S3Service,
     private readonly event_emitter: EventEmitter2,
     private readonly qr_service: QrService,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   /**
@@ -315,10 +319,18 @@ export class InvoicePdfService {
       qr_code_buffer: await this.renderVerificationQr(invoice.qr_code),
     };
 
+    const holderLink = await this.holderLinks?.getLinkForInvoice(invoice.id, invoice.store_id);
+    if (holderLink) {
+      let qr_buffer: Buffer | undefined;
+      try { qr_buffer = await renderInvoiceHolderQr(holderLink.url); }
+      catch { this.logger.warn(`Holder QR representation unavailable for invoice ${invoice.id}; retry rendering.`); }
+      pdf_data.holder_change = { url: holderLink.url, expires_at: holderLink.expires_at.toISOString(), qr_buffer };
+    }
     const pdf_buffer = await InvoicePdfBuilder.generate(pdf_data);
 
     // Upload to S3
-    const s3_key = `stores/${invoice.store_id}/invoices/${invoice.id}/invoice-${invoice.invoice_number}.pdf`;
+    const variant = holderLink ? (pdf_data.holder_change?.qr_buffer ? `cf-holder-v1-${holderLink.expires_at.getTime()}` : 'cf-holder-v1-qr-unavailable') : 'cf-holder-v1-none';
+    const s3_key = `stores/${invoice.store_id}/invoices/${invoice.id}/invoice-${invoice.invoice_number}-${randomUUID()}-${variant}.pdf`;
     await this.s3_service.uploadFile(pdf_buffer, s3_key, 'application/pdf');
 
     // Persist S3 key on the invoice
@@ -490,7 +502,7 @@ export class InvoicePdfService {
   async getPdf(invoice_id: number): Promise<string> {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id },
-      select: { id: true, pdf_url: true },
+      select: { id: true, store_id: true, pdf_url: true },
     });
 
     if (!invoice) {
@@ -498,7 +510,9 @@ export class InvoicePdfService {
     }
 
     // If PDF already exists, return a fresh signed URL
-    if (invoice.pdf_url) {
+    const holder = await this.holderLinks?.getLinkForInvoice(invoice.id, invoice.store_id);
+    const variant = holder ? `cf-holder-v1-${holder.expires_at.getTime()}` : 'cf-holder-v1-none';
+    if (invoice.pdf_url?.endsWith(`-${variant}.pdf`)) {
       return this.s3_service.getPresignedUrl(invoice.pdf_url);
     }
 

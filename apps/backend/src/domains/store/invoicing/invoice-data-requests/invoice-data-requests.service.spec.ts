@@ -1,326 +1,251 @@
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { InvoiceDataRequestsService } from './invoice-data-requests.service';
+import { DianMunicipalitiesService } from '../../addresses/dian-municipalities.service';
 
-describe('InvoiceDataRequestsService (nominative conversion)', () => {
-  const REQUEST_ID = 7;
-  const STORE_ID = 2;
-  const ORDER_ID = 30;
-  const CUSTOMER_ID = 50;
-  const NEW_INVOICE_ID = 901;
-  const CREDIT_NOTE_ID = 555;
-
-  const baseRequest = {
-    id: REQUEST_ID,
-    store_id: STORE_ID,
-    order_id: ORDER_ID,
-    invoice_id: null,
-    token: 'tok-123',
-    first_name: 'Ana',
-    last_name: 'Diaz',
+describe('InvoiceDataRequestsService: lazy public demand and durable delegation', () => {
+  let service: InvoiceDataRequestsService,
+    prisma: any,
+    tx: any,
+    links: any,
+    motor: any,
+    requests: any[];
+  const binding = {
+    store_id: 2,
+    organization_id: 1,
+    order_id: 4,
+    invoice_id: 5,
+    expires_at: new Date('2026-11-13T12:00:00Z'),
+  };
+  const capture = {
+    person_type: 'NATURAL' as const,
     document_type: 'CC',
-    document_number: '123456',
-    email: 'ana@example.com',
-    phone: null,
-    status: 'submitted',
-    order: {
-      id: ORDER_ID,
-      customer_id: null,
-      stores: { organization_id: 1 },
-      order_items: [],
+    document_number: '1023456789',
+    first_name: 'Ana',
+    last_name: 'Díaz',
+    email: 'ANA@example.test',
+    address: {
+      address_line1: 'Calle 10 # 1-2',
+      city: 'Bogotá, D.c.',
+      state_province: 'Bogotá',
+      country_code: 'CO',
+      municipality_code: '11001',
     },
   };
-
-  const acceptedInvoice = {
-    id: 100,
-    status: 'accepted',
-    currency: 'COP',
-    invoice_items: [
-      {
-        product_id: 1,
-        product_variant_id: null,
-        description: 'Prod',
-        quantity: 2,
-        unit_price: 100,
-        discount_amount: 0,
-        tax_amount: 38,
-      },
-    ],
-    invoice_taxes: [
-      {
-        tax_rate_id: 5,
-        tax_name: 'IVA 19%',
-        tax_rate: 19,
-        taxable_amount: 200,
-        tax_amount: 38,
-        tax_type: 'iva',
-      },
-    ],
-  };
-
-  const createService = (overrides: any = {}) => {
-    const prisma = {
+  beforeEach(() => {
+    requests = [];
+    tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 4 }]),
+      invoice_holder_changes: { findFirst: jest.fn().mockResolvedValue(null) },
       invoice_data_requests: {
-        findFirst: jest.fn().mockResolvedValue(baseRequest),
+        findMany: jest.fn().mockImplementation(async () => requests),
+        create: jest.fn().mockImplementation(async ({ data }) => {
+          const r = { id: 7, new_invoice_id: null, ...data };
+          requests.push(r);
+          return r;
+        }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        update: jest.fn().mockImplementation(({ data }) =>
-          Promise.resolve({ ...baseRequest, ...data }),
-        ),
-        ...overrides.invoice_data_requests,
       },
-      users: {
-        // Existing customer found, skips creation path
-        findFirst: jest.fn().mockResolvedValue({ id: CUSTOMER_ID }),
-        // P1-B — el carril 'accepted' valida identidad/carril del NUEVO
-        // adquiriente ANTES de emitir la NC espejo (`resolveAcquirerRail`).
-        // Persona natural con cédula plana (sin forma de NIT): no bloquea.
-        findUnique: jest.fn().mockResolvedValue({
-          id: CUSTOMER_ID,
-          document_type: 'CC',
-          document_number: '123456',
-          legal_name: null,
-          first_name: 'Ana',
-          last_name: 'Diaz',
-          person_type: null,
-        }),
-        update: jest.fn().mockImplementation(({ data }) =>
-          Promise.resolve({ id: CUSTOMER_ID, ...data }),
-        ),
-        create: jest.fn(),
-        ...overrides.users,
-      },
-      roles: {
-        findFirst: jest.fn().mockResolvedValue({ id: 4, name: 'customer' }),
-        ...overrides.roles,
-      },
+    };
+    prisma = {
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
       orders: {
-        update: jest.fn().mockResolvedValue({ id: ORDER_ID }),
-        ...overrides.orders,
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 4, order_number: 'ORD-4' }),
       },
-      invoices: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        update: jest.fn().mockResolvedValue({ id: 100 }),
-        ...overrides.invoices,
+      stores: {
+        findFirst: jest.fn().mockResolvedValue({ id: 2, name: 'Shop' }),
       },
-    };
-    const event_emitter = { emit: jest.fn() };
-    const invoicing = {
-      createFromOrder: jest.fn().mockResolvedValue({ id: NEW_INVOICE_ID }),
-      ...overrides.invoicing,
-    };
-    const credit_notes = {
-      createCreditNote: jest.fn().mockResolvedValue({ id: CREDIT_NOTE_ID }),
-      ...overrides.credit_notes,
-    };
-    const invoice_flow = {
-      validate: jest.fn().mockImplementation((id: number) =>
-        Promise.resolve({ id, status: 'validated' }),
-      ),
-      send: jest.fn().mockImplementation((id: number) =>
-        Promise.resolve({ id, status: 'sent' }),
-      ),
-      ...overrides.invoice_flow,
-    };
-
-    // S3 is only touched when a request carries an attachment; these flows do
-    // not, so the stub exists to satisfy the constructor, not to be exercised.
-    const s3Service = {
-      uploadImage: jest.fn(),
-      downloadImage: jest.fn(),
-      ...overrides.s3Service,
-    };
-    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
-    const orderHistory = {
-      record: jest.fn().mockResolvedValue(null),
-      ...overrides.orderHistory,
-    };
-
-    return {
-      service: new InvoiceDataRequestsService(
-        prisma as any,
-        event_emitter as any,
-        invoicing as any,
-        credit_notes as any,
-        invoice_flow as any,
-        s3Service as any,
-        orderHistory as any,
-      ),
-      prisma,
-      event_emitter,
-      invoicing,
-      credit_notes,
-      invoice_flow,
-      s3Service,
-      orderHistory,
-    };
-  };
-
-  const completedUpdateCall = (prisma: any) =>
-    prisma.invoice_data_requests.update.mock.calls.find(
-      ([args]: any[]) => args.data?.status === 'completed',
-    );
-
-  it('aborts silently when another worker already claimed the request (CAS count 0)', async () => {
-    const { service, prisma, invoicing } = createService({
       invoice_data_requests: {
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+        groupBy: jest.fn().mockResolvedValue([]),
       },
-    });
-
-    await expect(
-      service.processRequest(REQUEST_ID, STORE_ID),
-    ).resolves.toBeNull();
-
-    expect(prisma.invoice_data_requests.updateMany).toHaveBeenCalledWith({
-      where: { id: REQUEST_ID, status: 'submitted' },
-      data: expect.objectContaining({ status: 'processing' }),
-    });
-    expect(prisma.users.findFirst).not.toHaveBeenCalled();
-    expect(invoicing.createFromOrder).not.toHaveBeenCalled();
-    expect(prisma.invoice_data_requests.update).not.toHaveBeenCalled();
-  });
-
-  it('issues a new nominative invoice (validate + send) when the order has no invoice', async () => {
-    const { service, prisma, invoicing, credit_notes, invoice_flow } =
-      createService();
-
-    const result = await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(invoicing.createFromOrder).toHaveBeenCalledWith(ORDER_ID);
-    expect(invoice_flow.validate).toHaveBeenCalledWith(NEW_INVOICE_ID);
-    expect(invoice_flow.send).toHaveBeenCalledWith(NEW_INVOICE_ID);
-    expect(credit_notes.createCreditNote).not.toHaveBeenCalled();
-
-    const completed = completedUpdateCall(prisma);
-    expect(completed).toBeDefined();
-    expect(completed[0].data.new_invoice_id).toBe(NEW_INVOICE_ID);
-    expect(result?.status).toBe('completed');
-  });
-
-  it('registra customer_changed en order_events cuando el cliente pasa de null a un usuario', async () => {
-    const { service, orderHistory, prisma } = createService();
-
-    await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(orderHistory.record).toHaveBeenCalledWith(
+      invoice_holder_changes: {
+        findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+    links = {
+      resolveToken: jest.fn().mockResolvedValue(binding),
+      isAdmissionEnabled: jest.fn().mockReturnValue(true),
+    };
+    motor = {
+      adoptLegacySubmittedRequest: jest
+        .fn()
+        .mockResolvedValue({ id: 12, run_status: 'waiting' }),
+      startPublic: jest.fn().mockResolvedValue({
+        id: 9,
+        phase: 'waiting_credit_note_dian',
+        run_status: 'waiting',
+        new_invoice_id: null,
+      }),
+      resume: jest.fn(),
+    };
+    const runner = {
+      runInStoreContext: jest.fn(async (_store: number, callback: any) =>
+        callback(),
+      ),
+    };
+    service = new InvoiceDataRequestsService(
       prisma,
-      expect.objectContaining({
-        orderId: ORDER_ID,
-        storeId: STORE_ID,
-        organizationId: 1,
-        type: 'customer_changed',
-        payload: { from_customer_id: null, to_customer_id: CUSTOMER_ID },
-      }),
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      links,
+      {} as any,
+      runner as any,
+      motor,
+      new DianMunicipalitiesService(),
     );
   });
-
-  it('updates a draft invoice in place without credit note or new invoice', async () => {
-    const { service, prisma, invoicing, credit_notes } = createService({
-      invoices: {
-        findFirst: jest.fn().mockResolvedValue({
-          ...acceptedInvoice,
-          status: 'draft',
-        }),
-        update: jest.fn().mockResolvedValue({ id: 100 }),
-      },
-    });
-
-    await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(prisma.invoices.update).toHaveBeenCalledWith({
-      where: { id: 100 },
-      data: expect.objectContaining({
-        customer_id: CUSTOMER_ID,
-        customer_name: 'Ana Diaz',
-        customer_tax_id: '123456',
-      }),
-    });
-    expect(credit_notes.createCreditNote).not.toHaveBeenCalled();
-    expect(invoicing.createFromOrder).not.toHaveBeenCalled();
-
-    const completed = completedUpdateCall(prisma);
-    expect(completed[0].data.new_invoice_id).toBe(100);
+  it('opens once, reuses canonical request and never emits fiscal documents', async () => {
+    const first = await service.getByToken('signed'),
+      second = await service.getByToken('signed');
+    expect(first.id).toBe(second.id);
+    expect(tx.invoice_data_requests.create).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveProperty('token');
+    expect(first).not.toHaveProperty('email');
+    expect(motor.startPublic).not.toHaveBeenCalled();
   });
-
-  it('issues a full mirror credit note + new nominative invoice for an accepted invoice', async () => {
-    const { service, prisma, invoicing, credit_notes, invoice_flow } =
-      createService({
-        invoices: {
-          findFirst: jest.fn().mockResolvedValue(acceptedInvoice),
-          update: jest.fn(),
-        },
+  it('status and token-guarded catalog validation do not materialize requests', async () => {
+    expect(await service.getStatus('signed')).toMatchObject({
+      status: 'not_opened',
+    });
+    await service.validatePublicToken('signed');
+    expect(tx.invoice_data_requests.create).not.toHaveBeenCalled();
+    expect(tx.invoice_data_requests.updateMany).not.toHaveBeenCalled();
+  });
+  it('reads a materialized legacy request without writes when admissions are off', async () => {
+    tx.invoice_data_requests.findMany.mockResolvedValue([{
+      id: 7, status: 'completed', store_id: 2, order_id: 4, invoice_id: 5,
+      expires_at: new Date(Date.now() + 86400000), new_invoice_id: 15,
+    }]);
+    links.isAdmissionEnabled.mockReturnValue(false);
+    const result = await service.getByToken('legacy');
+    expect(result.capabilities.can_submit).toBe(false);
+    expect(links.resolveToken).toHaveBeenCalledWith('legacy', 'status');
+    expect(tx.invoice_data_requests.create).not.toHaveBeenCalled();
+    expect(tx.invoice_data_requests.updateMany).not.toHaveBeenCalled();
+  });
+  it('neutral public form ignores a staff session from another tenant', async () => {
+    (service as any).contextRunner = new StoreContextRunner({
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+      },
+    } as any);
+    prisma.$transaction.mockImplementation(async (callback: any) => {
+      expect(RequestContextService.getContext()).toMatchObject({
+        store_id: 2,
+        organization_id: 1,
+        is_super_admin: false,
+        is_owner: false,
       });
-
-    await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(credit_notes.createCreditNote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        related_invoice_id: 100,
-        reason: 'Conversión a factura nominativa por solicitud del cliente',
-        currency: 'COP',
-      }),
-    );
-    // P2(c) — la NC espejo es un REEMPLAZO TOTAL (verbatim) del documento
-    // aceptado, no una devolución parcial: sin `items:` ni `taxes:` en el
-    // DTO, `createNote` copia cabecera + líneas + el vínculo tributo↔línea
-    // directamente de `related_invoice` (carril TOTAL, P2(a)/P2(c)).
-    expect(credit_notes.createCreditNote.mock.calls[0][0]).not.toHaveProperty(
-      'items',
-    );
-    expect(credit_notes.createCreditNote.mock.calls[0][0]).not.toHaveProperty(
-      'taxes',
-    );
-    expect(invoicing.createFromOrder).toHaveBeenCalledWith(ORDER_ID);
-    // Both the mirror credit note and the new invoice are validated and sent
-    expect(invoice_flow.validate).toHaveBeenCalledWith(CREDIT_NOTE_ID);
-    expect(invoice_flow.validate).toHaveBeenCalledWith(NEW_INVOICE_ID);
-    expect(invoice_flow.send).toHaveBeenCalledWith(CREDIT_NOTE_ID);
-    expect(invoice_flow.send).toHaveBeenCalledWith(NEW_INVOICE_ID);
-    // The original invoice is never mutated
-    expect(prisma.invoices.update).not.toHaveBeenCalled();
-
-    const completed = completedUpdateCall(prisma);
-    expect(completed[0].data.new_invoice_id).toBe(NEW_INVOICE_ID);
-  });
-
-  it('defers (reverts to submitted) when the invoice is sent and awaiting DIAN', async () => {
-    const { service, prisma, invoicing, credit_notes } = createService({
-      invoices: {
-        findFirst: jest.fn().mockResolvedValue({
-          ...acceptedInvoice,
-          status: 'sent',
-        }),
-        update: jest.fn(),
+      expect(RequestContextService.getContext()?.user_id).toBeUndefined();
+      return callback(tx);
+    });
+    await RequestContextService.runIsolated(
+      {
+        store_id: 99,
+        organization_id: 99,
+        user_id: 88,
+        is_super_admin: false,
+        is_owner: false,
       },
-    });
-
-    const result = await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(credit_notes.createCreditNote).not.toHaveBeenCalled();
-    expect(invoicing.createFromOrder).not.toHaveBeenCalled();
-    expect(prisma.invoices.update).not.toHaveBeenCalled();
-
-    expect(prisma.invoice_data_requests.update).toHaveBeenCalledWith({
-      where: { id: REQUEST_ID },
-      data: expect.objectContaining({ status: 'submitted' }),
-    });
-    expect(completedUpdateCall(prisma)).toBeUndefined();
-    expect(result?.status).toBe('submitted');
+      () => service.getByToken('signed'),
+    );
+    expect(prisma.orders.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 4, store_id: 2 } }),
+    );
   });
-
-  it('still completes the request when the DIAN transmission fails (best-effort send)', async () => {
-    const { service, prisma, invoice_flow } = createService({
-      invoice_flow: {
-        validate: jest.fn().mockResolvedValue({ id: NEW_INVOICE_ID }),
-        send: jest.fn().mockRejectedValue(new Error('DIAN timeout')),
-      },
+  it('invalid and expired tokens fail before a transaction or new request', async () => {
+    links.resolveToken.mockRejectedValue(new Error('invalid'));
+    await expect(service.getByToken('bad')).rejects.toThrow();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+  it('never presents pending DIAN as completed and delegates normalized capture/hash', async () => {
+    const result = await service.submitData('signed', capture);
+    expect(result).toMatchObject({
+      status: 'processing',
+      phase: 'waiting_credit_note_dian',
+      operation_id: 9,
     });
-
-    const result = await service.processRequest(REQUEST_ID, STORE_ID);
-
-    expect(invoice_flow.send).toHaveBeenCalledWith(NEW_INVOICE_ID);
-    const completed = completedUpdateCall(prisma);
-    expect(completed).toBeDefined();
-    expect(completed[0].data.new_invoice_id).toBe(NEW_INVOICE_ID);
-    expect(result?.status).toBe('completed');
+    expect(motor.startPublic).toHaveBeenCalledWith(
+      7,
+      2,
+      expect.objectContaining({ email: 'ana@example.test' }),
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+    );
+  });
+  it('rejects invalid DV, sentinel CF and missing municipality before motor', async () => {
+    for (const data of [
+      { ...capture, document_number: '222222222222' },
+      {
+        ...capture,
+        address: { ...capture.address, municipality_code: '99999' },
+      },
+      {
+        ...capture,
+        person_type: 'JURIDICA',
+        document_type: 'NIT',
+        document_number: '900123456',
+        verification_digit: '0',
+        legal_name: 'Empresa SAS',
+      },
+    ])
+      await expect(service.submitData('signed', data as any)).rejects.toThrow();
+    expect(motor.startPublic).not.toHaveBeenCalled();
+    expect(tx.invoice_data_requests.create).not.toHaveBeenCalled();
+  });
+  it('existing saga status survives unlink and never materializes another demand', async () => {
+    tx.invoice_holder_changes.findFirst.mockResolvedValue({
+      id: 9,
+      phase: 'completed',
+      run_status: 'completed',
+      new_invoice_id: 88,
+    });
+    const result = await service.getByToken('signed');
+    expect(result).toMatchObject({ status: 'completed', new_invoice_id: 88 });
+    expect(tx.invoice_data_requests.create).not.toHaveBeenCalled();
+  });
+  it('admin process resumes the existing durable operation, not a second converter', async () => {
+    prisma.invoice_data_requests.findFirst.mockResolvedValue({ id: 7 });
+    prisma.invoice_holder_changes.findFirst.mockResolvedValue({ id: 9 });
+    await service.processRequest(7, 2);
+    expect(motor.resume).toHaveBeenCalledWith(9);
+  });
+  it('submitted legacy delegates proof-based adoption to the single motor', async () => {
+    prisma.invoice_data_requests.findFirst.mockResolvedValue({
+      id: 7,
+      status: 'submitted',
+    });
+    prisma.invoice_holder_changes.findFirst.mockResolvedValue(null);
+    await service.processRequest(7, 2);
+    expect(motor.adoptLegacySubmittedRequest).toHaveBeenCalledWith(7);
+  });
+  it('legacy demand without a recoverable saga requires review rather than best-effort success', async () => {
+    prisma.invoice_data_requests.findFirst.mockResolvedValue({ id: 7 });
+    prisma.invoice_holder_changes.findFirst.mockResolvedValue(null);
+    await expect(service.processRequest(7, 2)).rejects.toMatchObject({
+      errorCode: 'CF_HOLDER_LEGACY_REVIEW_REQUIRED',
+    });
+  });
+  it('default inbox omits unrequested legacy pending and keeps summary in the same universe', async () => {
+    await service.findByStore(2);
+    await service.summaryByStore(2);
+    expect(
+      prisma.invoice_data_requests.findMany.mock.calls[0][0].where,
+    ).toEqual(prisma.invoice_data_requests.groupBy.mock.calls[0][0].where);
+    expect(
+      JSON.stringify(
+        prisma.invoice_data_requests.groupBy.mock.calls[0][0].where,
+      ),
+    ).toContain('submitted_at');
   });
 });
 

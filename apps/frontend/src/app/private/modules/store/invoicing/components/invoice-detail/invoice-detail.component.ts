@@ -1,3 +1,4 @@
+import { InvoiceHolderChangeComponent } from '../invoice-holder-change/invoice-holder-change.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -80,6 +81,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    InvoiceHolderChangeComponent,
     NgClass,
     DatePipe,
     ModalComponent,
@@ -100,6 +102,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
       >
       @if (detail(); as inv) {
         <div class="p-4">
+          <vendix-invoice-holder-change [invoiceId]="inv.id" />
           @if (!canEditContractInvoice(inv)) {
             <app-alert-banner variant="warning" heading="Acuerdo económico congelado" class="mb-4 block">
               Esta factura pertenece al contrato #{{ inv.contract_id }} y conserva el snapshot aceptado. No se puede editar el borrador ni volver a capturar sus importes; sí puedes validar, enviar a la DIAN o cancelar el borrador con las acciones disponibles.

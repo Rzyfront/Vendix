@@ -15,7 +15,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, exhaustMap, take, takeWhile, timer } from 'rxjs';
 import { CheckoutService } from '../../services/checkout.service';
 import { AccountService } from '../../services/account.service';
 import { GuestOrderSseService } from '../../services/guest-order-sse.service';
@@ -177,6 +177,10 @@ interface GuestReceiptPreview {
 }
 
 export interface GuestOrderSummary {
+  invoice_data_token?: string | null;
+  invoice_data_url?: string | null;
+  invoice_data_expires_at?: string | null;
+
   token: string;
   order: GuestOrderData;
   customer?: GuestOrderCustomer;
@@ -232,6 +236,12 @@ export interface GuestOrderSummary {
           [attr.data-currency]="currencyCode()"
           [class.card-enter]="justPurchased()"
         >
+          @if (data.invoice_data_url) {
+            <section class="p-4" aria-label="Factura a tu nombre">
+              <a [href]="data.invoice_data_url" class="inline-flex min-h-11 items-center underline">¿Necesitas la factura a tu nombre?</a>
+              <p>Completa los datos fiscales desde este enlace. No es el seguimiento del pedido.</p>
+            </section>
+          }
           <!-- HERO HEADER (mirror del checkout, estado completado) -->
           <div class="order-header-hero is-complete" [style.--fill]="'100%'">
             <span class="hero-badge">
@@ -2166,6 +2176,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       .subscribe({
         next: (response) => {
           this.fetchedSummary.set(response.data);
+          if (!response.data.invoice_data_url) this.pollFiscalLink(token);
           // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
           // effect ya se saltó ese caso (summary null), así que se re-aplica
           // explícitamente sobre el summary recién llegado.
@@ -2767,6 +2778,17 @@ export class GuestOrderSummaryComponent implements OnInit {
    * Solo toca estado vivo: `order.state`, `delivery_type`, ETA, cocina por
    * plato y pagos. Totales/cliente/tienda/factura son inmutables del REST.
    */
+  private pollFiscalLink(token: string): void {
+    timer(5000, 5000).pipe(
+      take(24), exhaustMap(() => this.checkoutService.getGuestOrderSummary(token)),
+      takeWhile(() => !this.fetchedSummary()?.invoice_data_url, true),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe({next: response => {
+      const current = this.fetchedSummary();
+      if (current) this.fetchedSummary.set({...current, invoice_data_token:response.data.invoice_data_token ?? null, invoice_data_url:response.data.invoice_data_url ?? null, invoice_data_expires_at:response.data.invoice_data_expires_at ?? null});
+    },error: () => {/* Order tracking continues; fiscal links are optional. */}});
+  }
+
   private fuseLiveState(): void {
     const current = untracked(() => this.summary());
     if (!current) return;

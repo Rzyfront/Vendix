@@ -2800,22 +2800,9 @@ export class PaymentsService {
           );
         }
 
-        // Create invoice data request for anonymous/CF sales
-        if (!createPosPaymentDto.customer_id && result.order?.id) {
-          try {
-            const invoiceDataRequest =
-              await this.invoiceDataRequestsService.createRequest(
-                createPosPaymentDto.store_id,
-                Number(result.order.id),
-              );
-            result.order.invoice_data_token = invoiceDataRequest.token;
-          } catch (err) {
-            this.logger.error(
-              `Failed to create invoice data request: ${err.message}`,
-              err.stack,
-            );
-          }
-        }
+        // A paid sale never materializes fiscal demand. The asynchronous FE status
+        // supplies a signed link only after an eligible CF document is accepted.
+        if (result.order) result.order.invoice_data_token = null;
 
         // ─────────────────────────────────────────────────────────────────
         // AQUÍ LA VENTA SE DESACOPLA DE LA TRANSMISIÓN A LA DIAN.

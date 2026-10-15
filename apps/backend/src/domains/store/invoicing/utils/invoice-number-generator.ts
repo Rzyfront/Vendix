@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -28,6 +29,7 @@ type FiscalDocumentType =
 type GenerateNextNumberOptions =
   | number
   | {
+      tx?: Prisma.TransactionClient;
       resolution_id?: number;
       document_type?: FiscalDocumentType;
       accounting_entity_id?: number;
@@ -106,7 +108,7 @@ export class InvoiceNumberGenerator {
       ).id;
 
     const client = this.prisma.withoutScope();
-    const updated = await client.$transaction(async (tx: any) => {
+    const allocateInTransaction = async (tx: Prisma.TransactionClient) => {
       const lockKey = `invoice_resolution:${accounting_entity_id}:${document_type}`;
       // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
       // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
@@ -299,7 +301,8 @@ export class InvoiceNumberGenerator {
       return tx.invoice_resolutions.findUnique({
         where: { id: resolution.id },
       });
-    });
+    };
+    const updated = await (('tx' in normalized && normalized.tx) ? allocateInTransaction(normalized.tx) : client.$transaction(allocateInTransaction));
 
     if (!updated) {
       // Defensivo: la fila acaba de aceptar el `updateMany` dentro de la misma

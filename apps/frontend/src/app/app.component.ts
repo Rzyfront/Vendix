@@ -46,7 +46,7 @@ import { StoreAvailabilityService } from './core/services/store-availability.ser
   // the client's blocking APP_INITIALIZER has already made routesConfigured true.
   // The swap to the resolved app happens as a normal post-hydration update.
   template: `
-    @if (hydrated() && resolutionError(); as err) {
+    @if (hydrated() && !isNeutralInvoicePage && resolutionError(); as err) {
       <app-domain-resolution-error [kind]="err.kind" (retry)="onRetry()" />
     } @else if (hydrated() && routesConfigured()) {
       <main>
@@ -60,7 +60,7 @@ import { StoreAvailabilityService } from './core/services/store-availability.ser
            as an overlay ON TOP of the router-outlet so dismissing it reveals
            the catalog underneath (read-only mode). The backend is the real
            block; this reinforces the UX. -->
-      @if (storeAvailability.shouldShowBanner()) {
+      @if (!isNeutralInvoicePage && storeAvailability.shouldShowBanner()) {
         <app-store-unavailable-banner />
       }
     } @else {
@@ -81,6 +81,7 @@ export class AppComponent {
   readonly storeAvailability = inject(StoreAvailabilityService);
 
   readonly isBrowser = isPlatformBrowser(this.platformId);
+  readonly isNeutralInvoicePage = this.isBrowser && /^\/factura\/[^/]+/.test(window.location.pathname);
 
   /** Typed domain/app_type resolution failure (null while resolving/on success). */
   readonly resolutionError = this.configFacade.resolutionError;

@@ -83,7 +83,7 @@ export interface TicketData {
   };
   cashier?: string;
   transactionId?: string;
-  invoiceDataToken?: string;
+  invoiceDataToken?: string | null;
   invoiceDataQrUrl?: string;
   /**
    * Set when the sale already produced a validated electronic invoice. Turns the

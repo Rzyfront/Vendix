@@ -130,6 +130,7 @@ export class RouteManagerService {
     const dynamicAppRoutes = appConfig.routes;
 
     return [
+      ...this.getNeutralInvoiceRoutes(),
       ...staticAuthRoutes,
       ...dynamicAppRoutes,
       // Catch-all route: redirect to home and show toast via component
@@ -141,6 +142,10 @@ export class RouteManagerService {
           ),
       },
     ];
+  }
+
+  private getNeutralInvoiceRoutes(): Routes {
+    return [{ path: 'factura/:token', loadComponent: () => import('../../public/ecommerce/pages/invoice-data/invoice-data.component').then(c => c.InvoiceDataComponent) }];
   }
 
   private getStaticAuthRoutes(): Routes {
@@ -202,6 +207,7 @@ export class RouteManagerService {
    */
   private getFallbackRoutes(): Routes {
     return [
+      ...this.getNeutralInvoiceRoutes(),
       ...this.getStaticAuthRoutes(),
       { path: '', children: [] },
       { path: '**', redirectTo: '' },

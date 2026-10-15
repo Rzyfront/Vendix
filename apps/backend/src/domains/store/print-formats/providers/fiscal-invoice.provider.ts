@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { renderInvoiceHolderQr } from '../../invoicing/utils/invoice-holder-qr.util';
+import { InvoiceHolderLinkService } from '../../invoicing/invoice-holder-changes/invoice-holder-link.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -36,6 +38,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
     private readonly prisma: StorePrismaService,
     private readonly qrService: QrService,
     private readonly s3Service?: S3Service,
+    @Optional() private readonly holderLinks?: InvoiceHolderLinkService,
   ) {}
 
   async fetchDocumentData(
@@ -70,7 +73,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
     // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
     const tz = await resolveStoreTimezone(this.prisma, storeId);
 
-    return mapFiscalDocumentToPrintData(invoice, {
+    const printData = mapFiscalDocumentToPrintData(invoice, {
       qrBase64,
       acceptedLabel: 'Aprobada por DIAN',
       pendingLabel: 'Pendiente',
@@ -82,6 +85,19 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       ),
       tz,
     });
+    await this.attachHolderLink(printData, invoice.id, storeId);
+    return printData;
+  }
+
+  private async attachHolderLink(data: StandardPrintDataModel, invoiceId: number, storeId: number): Promise<void> {
+    try {
+      const link = await this.holderLinks?.getLinkForInvoice(invoiceId, storeId);
+      if (!link) return;
+      const qr = await renderInvoiceHolderQr(link.url);
+      data.holder_change = { url: link.url, expires_at: link.expires_at.toISOString(), qr_png_base64: qr.toString('base64') };
+    } catch {
+      this.logger.warn(`Holder QR representation unavailable for invoice ${invoiceId}`);
+    }
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {

@@ -176,6 +176,8 @@ export interface PrintTokenDefinition {
  * servicio las enruta a la ruta legacy sin AJV.
  */
 export interface PrintFormatDefinition {
+  /** POS FE only: explicit per-store opt-in; missing/false never prints holder QR. */
+  show_holder_change_qr?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. Discriminador (1 = legacy, 2 = schema enforced). */
   v?: PrintFormatVersion;
   paper: PrintPaperConfig;

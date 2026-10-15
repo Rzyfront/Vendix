@@ -1884,6 +1884,9 @@
                Set de pruebas, habilitación en trámite o tienda sin
                configuración DIAN y sin factura aceptada: la tarjeta no
                existe. -->
+          @if (holderChangeInvoiceId(); as holderInvoiceId) {
+            <vendix-invoice-holder-change [invoiceId]="holderInvoiceId" [initialOperationId]="holderChangeOperationId()" (changed)="onHolderChange()" />
+          }
           @if (showElectronicInvoiceCard()) {
             <app-card shadow="sm" [responsivePadding]="true">
               <h2

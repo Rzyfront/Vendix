@@ -1,3 +1,4 @@
+import { lockHolderChangeOrder, assertNoHolderChangeReservation } from './shared/holder-change-reservation';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
@@ -1799,6 +1800,11 @@ export class OrdersService {
       account_invoices,
       order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
+      holder_change_context: await this.prisma.invoice_holder_changes.findFirst({
+        where: { original_order_id: order.id, store_id: order.store_id },
+        orderBy: { id: 'desc' },
+        select: { id: true, original_invoice_id: true, credit_note_id: true, new_invoice_id: true, phase: true, run_status: true },
+      }).then(op => op ? { ...op, operation_id: op.id } : null),
       active_sales_invoice: activeTitularInvoice
         ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
         : null,
@@ -2505,7 +2511,11 @@ export class OrdersService {
 
     let updatedOrder;
     try {
-      updatedOrder = await this.prisma.orders.update({
+      updatedOrder = await this.prisma.$transaction(async tx => {
+        const context = RequestContextService.getContext();
+        await lockHolderChangeOrder(tx, id, order.store_id, context!.organization_id!);
+        await assertNoHolderChangeReservation(tx, id, order.store_id);
+        return tx.orders.update({
         where: { id },
         data: { ...updateOrderDto, updated_at: new Date() },
         include: {
@@ -2559,6 +2569,7 @@ export class OrdersService {
             },
           },
         },
+      });
       });
     } catch (error) {
       // Release-854 follow-up paso 1 — compensación: el borrador ya tiene

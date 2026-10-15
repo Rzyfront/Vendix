@@ -1,3 +1,4 @@
+import { assertNoHolderChangeReservation } from '../../shared/holder-change-reservation';
 import {
   Injectable,
   Inject,
@@ -917,6 +918,7 @@ export class RefundFlowService {
         // re-reads under the lock are the claim; P2002 still maps to a
         // creation conflict in the rejection handler below.
         await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        await assertNoHolderChangeReservation(tx, orderId, order.store_id);
         const fresh = await tx.orders.findFirst({
           where: { id: orderId },
           select: { state: true },
@@ -2590,6 +2592,7 @@ export class RefundFlowService {
         // Serialize two manual completions for the same order, so the prior
         // shipping/tip allocation snapshot has a deterministic predecessor.
         await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        await assertNoHolderChangeReservation(tx, orderId, order.store_id);
         const prior = await tx.refunds.findMany({
           where: { order_id: orderId, state: 'completed' },
           select: { id: true, amount: true },

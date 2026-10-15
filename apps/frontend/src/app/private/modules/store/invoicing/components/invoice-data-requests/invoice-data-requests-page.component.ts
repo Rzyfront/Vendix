@@ -1,3 +1,4 @@
+import type { InvoiceRequestVisibility } from '../../interfaces/invoice-data-request.interface';
 import {
   Component,
   DestroyRef,
@@ -300,6 +301,7 @@ export class InvoiceDataRequestsPageComponent {
   private summarySubscription?: Subscription;
 
   readonly filterConfigs: FilterConfig[] = [
+    {key:'visibility',label:'Solicitudes',type:'select',placeholder:'Enviadas por clientes',options:[{label:'Enviadas por clientes',value:'requested'},{label:'Abiertas sin enviar',value:'pending'},{label:'Vencidas',value:'expired'},{label:'Históricas',value:'historical'},{label:'Todas',value:'all'}]},
     {
       key: 'status',
       label: 'Estado',
@@ -326,6 +328,7 @@ export class InvoiceDataRequestsPageComponent {
   readonly error = signal<string | null>(null);
   readonly summary = signal<InvoiceDataRequestSummary>(EMPTY_SUMMARY);
 
+  readonly visibility = signal<InvoiceRequestVisibility>('requested');
   readonly statusFilter = signal<InvoiceDataRequestStatus | ''>('');
   readonly search = signal('');
   readonly searchValue = signal('');
@@ -333,13 +336,14 @@ export class InvoiceDataRequestsPageComponent {
   readonly totalItems = signal(0);
   readonly filterValues = computed<FilterValues>(() => ({
     status: this.statusFilter() || null,
+    visibility: this.visibility(),
   }));
   readonly totalPages = computed(() =>
     Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
   );
 
   readonly hasActiveFilters = computed(
-    () => this.statusFilter() !== '' || this.search().trim() !== '',
+    () => this.visibility() !== 'requested' || this.statusFilter() !== '' || this.search().trim() !== '',
   );
 
   /**
@@ -360,6 +364,7 @@ export class InvoiceDataRequestsPageComponent {
     this.error.set(null);
     this.listSubscription = this.service
       .list({
+        visibility: this.visibility(),
         status: this.statusFilter(),
         search: this.search(),
         page: this.filters().page,
@@ -397,7 +402,7 @@ export class InvoiceDataRequestsPageComponent {
     this.summaryLoading.set(true);
     this.summaryError.set(false);
     this.summarySubscription = this.service
-      .summary(this.search())
+      .summary(this.search(), this.visibility())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -420,6 +425,10 @@ export class InvoiceDataRequestsPageComponent {
 
   // ── Filtros ────────────────────────────────────────────
   onFilterChange(values: FilterValues): void {
+    const visibility = values['visibility'] as InvoiceRequestVisibility || 'requested';
+    if (this.visibility() !== visibility) {
+      this.visibility.set(visibility);this.filters.update(current => ({...current,page:1}));this.reload();
+    }
     const selected = values['status'];
     const status = !selected
       ? ''
@@ -451,6 +460,7 @@ export class InvoiceDataRequestsPageComponent {
   }
 
   clearFilters(): void {
+    this.visibility.set('requested');
     this.statusFilter.set('');
     this.search.set('');
     this.searchValue.set('');
@@ -471,7 +481,7 @@ export class InvoiceDataRequestsPageComponent {
    * emitida» ahí sería afirmar un documento que este clic no creó.
    */
   process(row: InvoiceDataRequestRow): void {
-    if (row.status !== 'submitted' || this.processingId() !== null) {
+    if (!(row.can_retry || row.status === 'submitted') || this.processingId() !== null) {
       return;
     }
     this.processingId.set(row.id);
@@ -481,14 +491,10 @@ export class InvoiceDataRequestsPageComponent {
       .subscribe({
         next: (response) => {
           this.processingId.set(null);
-          if (response?.data) {
-            this.toast.success(
-              'Solicitud procesada: se emitió la factura a nombre del cliente.',
-            );
+          if (response?.data?.status === 'completed' || response?.data?.phase === 'completed' || response?.data?.phase === 'fiscal_completed') {
+            this.toast.success('Factura aceptada por la DIAN.');
           } else {
-            this.toast.warning(
-              'Otro proceso ya estaba atendiendo esta solicitud. Se actualizó la lista.',
-            );
+            this.toast.warning('Solicitud en curso. Se conserva el avance; revisa su fase antes de reintentar.');
           }
           this.reload();
         },
@@ -533,7 +539,7 @@ export class InvoiceDataRequestsPageComponent {
    * es más honesto que pintar una línea en blanco.
    */
   customerLine(row: InvoiceDataRequestRow): string {
-    const name = [row.first_name, row.last_name]
+    const name = [row.legal_name || row.first_name, row.last_name]
       .filter((part) => part && part.trim())
       .join(' ')
       .trim();
@@ -602,9 +608,12 @@ export class InvoiceDataRequestsPageComponent {
       badgeTransform: (value) =>
         STATUS_LABELS[value as InvoiceDataRequestStatus] ?? String(value ?? '—'),
     },
+    {key:'phase',label:'Fase del proceso',priority:2,defaultValue:'—'},
+    {key:'last_error_message',label:'Detalle / error',priority:3,defaultValue:'—'},
+    {key:'credit_note_id',label:'Nota crédito',priority:3,transform:(value)=>value ? `#${value}` : '—'},
     {
       key: 'new_invoice_id',
-      label: 'Factura emitida',
+      label: 'Factura de reemplazo',
       priority: 4,
       transform: (value) => (value ? `#${value}` : '—'),
     },
@@ -667,12 +676,12 @@ export class InvoiceDataRequestsPageComponent {
   readonly tableActions: TableAction[] = [
     {
       label: (item) =>
-        this.processingId() === item?.id ? 'Procesando…' : 'Procesar ahora',
+        this.processingId() === item?.id ? 'Procesando…' : item?.can_retry ? 'Reintentar' : 'Continuar',
       icon: 'play',
       variant: 'primary',
       tooltip:
         'Emite la factura a nombre del cliente con los datos que ya envió.',
-      show: (item) => item?.status === 'submitted',
+      show: (item) => item?.can_retry || item?.status === 'submitted',
       disabled: () => this.processingId() !== null,
       action: (item) => this.process(item),
     },

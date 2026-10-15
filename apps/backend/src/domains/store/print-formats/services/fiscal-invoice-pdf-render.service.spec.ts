@@ -1,3 +1,5 @@
+import { InvoiceHolderLinkService } from '../../invoicing/invoice-holder-changes/invoice-holder-link.service';
+import { InvoicePdfBuilder, InvoicePdfData } from '../../invoicing/services/invoice-pdf.builder';
 import {
   FiscalInvoicePdfRenderService,
   buildFiscalInvoicePdfData,
@@ -206,6 +208,20 @@ describe('FiscalInvoicePdfRenderService — paridad numérica HTML↔PDF y pdf_b
       );
       return { service, prisma };
     }
+
+    it.each([undefined, false, true])('POS PDF holder QR follows explicit opt-in %s while DIAN stays intact', async enabled => {
+      const getLinkForInvoice = jest.fn().mockResolvedValue({token:'cfh1.fixture',url:'https://example.test/factura/cfh1.fixture',expires_at:new Date('2026-11-14T00:00:00Z')});
+      const prisma = {invoices:{findFirst:jest.fn().mockResolvedValue(fila)},store_settings:{findFirst:jest.fn().mockResolvedValue(null)}};
+      const service = new FiscalInvoicePdfRenderService(prisma as unknown as StorePrismaService,{} as S3Service,new QrService(),{getLinkForInvoice} as unknown as InvoiceHolderLinkService);
+      let captured: InvoicePdfData | undefined;
+      const generate = jest.spyOn(InvoicePdfBuilder,'generate').mockImplementation(async data => {captured=data;return Buffer.from('%PDF-fixture');});
+      try {
+        await service.renderBuffer(10,41,'pos_electronic_invoice',{...definition,show_holder_change_qr:enabled});
+        expect(captured?.qr_code).toBe(fila.qr_code);expect(captured?.cufe).toBe(fila.cufe);
+        expect(Boolean(captured?.holder_change)).toBe(enabled === true);
+        expect(getLinkForInvoice).toHaveBeenCalledTimes(enabled === true ? 1 : 0);
+      } finally {generate.mockRestore();}
+    });
 
     it('devuelve un Buffer no vacío que empieza con %PDF', async () => {
       const { service } = buildService(fila);

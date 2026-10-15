@@ -175,6 +175,8 @@ export interface PrintTokenDefinition {
  * y los providers importan los nombres v1.
  */
 export interface PrintFormatDefinition {
+  /** POS FE only: explicit per-store opt-in; missing/false never prints holder QR. */
+  show_holder_change_qr?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. Discriminador (1 = legacy, 2 = schema enforced). */
   v?: PrintFormatVersion;
   paper: PrintPaperConfig;

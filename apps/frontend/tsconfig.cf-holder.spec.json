@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.spec.json",
+  "include": [
+    "src/**/*.d.ts",
+    "src/test-init.ts",
+    "src/app/shared/components/customer-billing-fields/customer-billing-fields.component.spec.ts",
+    "src/app/public/ecommerce/pages/invoice-data/invoice-data.component.spec.ts",
+    "src/app/private/modules/store/invoicing/components/invoice-holder-change/invoice-holder-change.component.spec.ts",
+    "src/app/private/modules/store/customers/components/customer-modal/customer-modal.component.spec.ts",
+    "src/app/private/modules/store/orders/pages/order-details/order-details-page.component.spec.ts",
+    "src/app/private/modules/store/invoicing/components/invoice-data-requests/invoice-data-requests-page.component.spec.ts",
+    "src/app/private/modules/store/settings/print-formats/components/print-properties-panel/__tests__/paper-panel.holder-qr.spec.ts"
+  ],
+  "exclude": [
+    "src/**/*.ui.spec.ts"
+  ]
+}
