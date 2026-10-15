@@ -4,6 +4,8 @@ export const environment = {
   vendixDomain: 'vendix.online',
   // GA4 de la portada comercial (solo vendix.online, ver VendixLandingComponent)
   commercialAnalyticsId: 'G-1N43GNPS5Q',
+  // Editorial preview: activation requires a separate publication review.
+  sectorGuidesEnabled: false,
 
   // Configuración para producción
   debugDomainDetection: false,

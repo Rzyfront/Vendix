@@ -31,6 +31,8 @@ import { VexiToolTraceComponent } from '../../../shared/components/vexi-dock/vex
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../environments/environment';
+import { SectorGuidesComponent } from '../guides/sector-guides.component';
+import { SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
 import {
   PublicPlansService,
   PublicPlan,
@@ -274,11 +276,13 @@ const COMMERCIAL_CAMPAIGN_PARAMS = [
     HeroLiveDashboardComponent,
     VexiAvatarComponent,
     VexiToolTraceComponent,
+    SectorGuidesComponent,
   ],
   templateUrl: './vendix-landing.component.html',
   styleUrls: ['./vendix-landing.component.scss'],
 })
 export class VendixLandingComponent implements OnInit {
+  readonly sectorGuidesEnabled = SECTOR_GUIDES_ENABLED;
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly sanitizer = inject(DomSanitizer);
