@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { NgClass } from '@angular/common';
 import {
   FormArray,
   FormControl,
@@ -14,6 +15,10 @@ import {
 } from '@angular/forms';
 
 import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import {
+  type InvoiceFieldMarks,
+  invoiceFieldMarkClass,
+} from './invoice-section-marks';
 import type { AlertBannerVariant } from '../alert-banner/alert-banner.component';
 import { ButtonComponent } from '../button/button.component';
 import { IconComponent } from '../icon/icon.component';
@@ -107,6 +112,7 @@ export interface DocumentoSectionErrors {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   imports: [
+    NgClass,
     ReactiveFormsModule,
     AlertBannerComponent,
     ButtonComponent,
@@ -182,6 +188,7 @@ export interface DocumentoSectionErrors {
             label="Fecha de emisión"
             type="date"
             data-control-name="issue_date"
+            [ngClass]="markClass(paths().issue_date)"
             [formControl]="issueDateControl()!"
             [error]="errors().issue_date"
             [required]="true"
@@ -199,6 +206,7 @@ export interface DocumentoSectionErrors {
         <app-selector
           label="Forma de pago"
           data-control-name="payment_form"
+          [ngClass]="markClass(paths().payment_form)"
           [formControl]="paymentFormControl()"
           [options]="paymentFormOptions()"
           [errorText]="errors().payment_form ?? ''"
@@ -208,6 +216,7 @@ export interface DocumentoSectionErrors {
         <app-selector
           label="Medio de pago"
           data-control-name="payment_means_code"
+          [ngClass]="markClass(paths().payment_means_code)"
           [formControl]="paymentMeansCodeControl()"
           [options]="paymentMeansOptions()"
           [errorText]="errors().payment_means_code ?? ''"
@@ -219,6 +228,7 @@ export interface DocumentoSectionErrors {
             label="Vencimiento"
             type="date"
             data-control-name="due_date"
+            [ngClass]="markClass(paths().due_date)"
             [formControl]="dueDateControl()!"
             [error]="errors().due_date"
             [required]="dueDateRequired()"
@@ -229,7 +239,7 @@ export interface DocumentoSectionErrors {
       </div>
 
       @if (isInvoice()) {
-        <div>
+        <div [ngClass]="markClass(paths().notes)">
           <app-textarea
             label="Notas"
             [formControl]="notesControl()!"
@@ -371,6 +381,18 @@ export class InvoiceSectionDocumentoComponent {
   /** Un mensaje por índice de nota de cabecera. Sólo aplica en el perfil. */
   readonly headerNoteErrors = input<readonly (string | undefined)[]>([]);
   readonly headerNoteLimit = input<number>(CONFIG_LIMITS.header_note);
+  /**
+   * Marcas de precarga por RUTA de control (la misma de `paths()`): borde de
+   * acento para lo que escribió la IA, ámbar para lo que hay que revisar. Vacío
+   * por omisión: el editor de perfiles no lo pasa y se pinta igual que antes.
+   */
+  readonly fieldMarks = input<InvoiceFieldMarks>({});
+
+  /** Clases del campo según su marca; `''` si la ruta no existe o no tiene. */
+  markClass(path: string | null): string {
+    if (!path) return '';
+    return invoiceFieldMarkClass(this.fieldMarks()[path]);
+  }
 
   readonly invoiceTypeChanged = output<void>();
   readonly paymentFormChanged = output<void>();

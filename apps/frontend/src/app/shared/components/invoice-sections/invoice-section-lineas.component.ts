@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { AbstractControl, FormControl, ReactiveFormsModule } from '@angular/forms';
 
 import { ButtonComponent } from '../button/button.component';
@@ -23,8 +24,23 @@ import type {
 } from '../../../core/utils/invoice-profile-config.contract';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
+import {
+  type InvoiceFieldMark,
+  type LineasRowMark,
+  invoiceFieldMarkClass,
+} from './invoice-section-marks';
 
 const NBSP_LABEL_FALLBACK = 'Vincular producto';
+
+/** Nombre legible de un campo de fila para el «Revisar: …» de la precarga IA. */
+const LINE_FIELD_LABELS: Readonly<Record<string, string>> = {
+  description: 'descripción',
+  quantity: 'cantidad',
+  unit_price: 'precio',
+  discount_amount: 'descuento',
+  taxes: 'impuesto',
+  product: 'producto',
+};
 
 /**
  * Valores que el control de componente AIU puede llevar, para efectos de
@@ -122,6 +138,7 @@ export interface LineasRowErrors {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   imports: [
+    NgClass,
     ReactiveFormsModule,
     ButtonComponent,
     IconComponent,
@@ -135,10 +152,33 @@ export interface LineasRowErrors {
       @for (row of rows(); track row; let i = $index) {
         @if (isInvoice()) {
           <div
-            class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 space-y-2"
+            class="rounded-lg border bg-[var(--color-surface-secondary)] p-2 space-y-2"
+            [ngClass]="markOf(i) ? 'border-[var(--color-primary)]' : 'border-border'"
           >
+            @if (markOf(i); as mark) {
+              <!-- Precarga IA: qué escribió la IA y qué hay que revisar. -->
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                <span
+                  class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold text-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)]"
+                >
+                  <app-icon name="sparkles" [size]="11" />
+                  IA
+                </span>
+                @if (mark.pending.length > 0) {
+                  <span class="font-medium text-[var(--color-warning)]">
+                    Revisar: {{ pendingLabel(mark) }}
+                  </span>
+                }
+                @if (mark.note) {
+                  <span class="text-[var(--color-text-secondary)]">{{ mark.note }}</span>
+                }
+              </div>
+            }
             <div class="grid grid-cols-12 gap-2 items-end">
-              <div class="col-span-12 md:col-span-4">
+              <div
+                class="col-span-12 md:col-span-4"
+                [ngClass]="fieldMarkClass(i, 'description')"
+              >
                 <app-input
                   label="Descripción"
                   [attr.data-control-name]="'description'"
@@ -171,7 +211,10 @@ export interface LineasRowErrors {
                   }
                 }
               </div>
-              <div class="col-span-6 md:col-span-2">
+              <div
+                class="col-span-6 md:col-span-2"
+                [ngClass]="fieldMarkClass(i, 'quantity')"
+              >
                 <app-input
                   label="Cantidad"
                   [attr.data-control-name]="'quantity'"
@@ -195,7 +238,10 @@ export interface LineasRowErrors {
                   size="sm"
                 ></app-selector>
               </div>
-              <div class="col-span-6 md:col-span-2">
+              <div
+                class="col-span-6 md:col-span-2"
+                [ngClass]="fieldMarkClass(i, 'unit_price')"
+              >
                 <app-input
                   label="Precio unitario"
                   [currency]="true"
@@ -207,7 +253,10 @@ export interface LineasRowErrors {
                   size="sm"
                 ></app-input>
               </div>
-              <div class="col-span-6 md:col-span-2">
+              <div
+                class="col-span-6 md:col-span-2"
+                [ngClass]="fieldMarkClass(i, 'discount_amount')"
+              >
                 <app-input
                   label="Descuento"
                   [attr.data-control-name]="'discount_amount'"
@@ -322,6 +371,7 @@ export interface LineasRowErrors {
               isAiuLineTaxable, único punto donde vive la tabla.
             -->
             <vendix-invoice-line-taxes
+              [ngClass]="fieldMarkClass(i, 'taxes')"
               [formControl]="rowControl(row, rowPaths().taxes!)"
               [taxes]="availableTaxes()"
               [aiuLineComponent]="aiuLineComponentFor(row, i)"
@@ -584,6 +634,13 @@ export class InvoiceSectionLineasComponent {
   readonly showCustomItemAction = input<boolean>(true);
 
   readonly maxLines = input<number>(100);
+  /**
+   * Marcas de precarga por fila (mismo índice que `rows()`), `null` sin marca.
+   * Los nombres de campo son los controles de la fila (`description`,
+   * `quantity`, `unit_price`, `discount_amount`, `taxes`). Sólo se pintan en
+   * contexto `invoice`; vacío por omisión.
+   */
+  readonly rowMarks = input<readonly (LineasRowMark | null)[]>([]);
   readonly emptyStateText = input.required<string>();
 
   readonly addBlankLine = output<void>();
@@ -602,6 +659,26 @@ export class InvoiceSectionLineasComponent {
 
   rowControl(row: AbstractControl, path: string): FormControl {
     return row.get(path) as FormControl;
+  }
+
+  markOf(index: number): LineasRowMark | null {
+    return this.rowMarks()[index] ?? null;
+  }
+
+  /** `pending` gana sobre `ai`: lo dudoso se señala aunque lo haya escrito la IA. */
+  fieldMarkClass(index: number, field: string): string {
+    const mark = this.markOf(index);
+    if (!mark) return '';
+    let kind: InvoiceFieldMark | null = null;
+    if (mark.pending.includes(field)) kind = 'pending';
+    else if (mark.ai.includes(field)) kind = 'ai';
+    return invoiceFieldMarkClass(kind);
+  }
+
+  pendingLabel(mark: LineasRowMark): string {
+    return mark.pending
+      .map((field) => LINE_FIELD_LABELS[field] ?? field)
+      .join(', ');
   }
 
   errorsFor(index: number): LineasRowErrors {

@@ -28,3 +28,4 @@ export * from './invoice-section-retenciones.component';
 export * from './invoice-section-divisa.component';
 export * from './invoice-section-formato.component';
 export * from './invoice-section-notas.component';
+export * from './invoice-section-marks';
