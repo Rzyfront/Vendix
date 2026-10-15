@@ -1,4 +1,4 @@
-import { Component, signal, inject, input, output, DestroyRef, computed } from '@angular/core';
+import { Component, signal, inject, input, output, DestroyRef, computed, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, expand } from 'rxjs';
 
@@ -12,6 +12,8 @@ import {
   TextareaComponent,
   IconComponent,
   ToastService,
+  AlertBannerComponent,
+  AiReviewAckComponent,
 } from '../../../../../../shared/components/index';
 
 import { InventoryService } from '../../services';
@@ -37,6 +39,15 @@ interface BulkAnalysisResult {
   valid: number;
   failed: number;
   errors: { row_number: number; sku: string; message: string }[];
+  new_products?: number;
+  auto_sku?: number;
+  requires_initial_load_ack?: boolean;
+  new_product_rows?: {
+    row_number: number;
+    sku: string | null;
+    name: string;
+    quantity: number;
+  }[];
 }
 
 interface BulkUploadPage extends BulkUploadResult {
@@ -63,8 +74,10 @@ interface BulkUploadResult {
     ButtonComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent
-],
+    IconComponent,
+    AlertBannerComponent,
+    AiReviewAckComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -124,11 +137,33 @@ interface BulkUploadResult {
               [rows]="2"
             ></app-textarea>
 
-            <div class="pt-2">
+            <div class="pt-2 space-y-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Tipo de plantilla">
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="templateMode() === 'existing'"
+                  class="text-left rounded-lg border p-3 transition-colors"
+                  [class]="templateMode() === 'existing' ? 'border-primary bg-primary/5' : 'border-gray-200'"
+                  (click)="templateMode.set('existing')"
+                >
+                  <span class="block text-sm font-medium text-gray-800">Productos existentes con stock actual</span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="templateMode() === 'example'"
+                  class="text-left rounded-lg border p-3 transition-colors"
+                  [class]="templateMode() === 'example' ? 'border-primary bg-primary/5' : 'border-gray-200'"
+                  (click)="templateMode.set('example')"
+                >
+                  <span class="block text-sm font-medium text-gray-800">Plantilla de ejemplo</span>
+                </button>
+              </div>
               <app-button
                 variant="outline"
                 size="sm"
-                [disabled]="!selectedLocationId() || isDownloading()"
+                [disabled]="isDownloading() || (templateMode() === 'existing' && !selectedLocationId())"
                 [loading]="isDownloading()"
                 (clicked)="downloadTemplate()"
               >
@@ -138,7 +173,11 @@ interface BulkUploadResult {
                 </div>
               </app-button>
               <p class="text-xs text-gray-500 mt-1">
-                La plantilla incluirá los productos con stock en la ubicación seleccionada
+                @if (templateMode() === 'existing') {
+                  Incluye todos los productos con inventario de la ubicación y su stock actual. Edita «Cantidad Nueva»; agrega filas con Nombre, Precio Venta y Precio Compra para crear productos nuevos (deja el SKU vacío para generarlo). Requiere seleccionar una ubicación.
+                } @else {
+                  Archivo con filas de ejemplo para ver el formato esperado.
+                }
               </p>
             </div>
           </div>
@@ -219,6 +258,33 @@ interface BulkUploadResult {
                   </p>
                 }
               </div>
+            }
+            @if (analysis()!.requires_initial_load_ack) {
+              <app-alert-banner
+                variant="warning"
+                tone="token"
+                heading="Este ajuste contiene productos nuevos"
+              >
+                {{ analysis()!.new_products }} productos no existen y se crearán
+                ({{ analysis()!.auto_sku }} con SKU generado automáticamente). Su
+                stock se registrará como Carga inicial e incrementará el costo de
+                inventario.
+                @if (newProductPreview().length > 0) {
+                  <ul class="mt-2 list-disc pl-5 text-xs">
+                    @for (r of newProductPreview(); track r.row_number) {
+                      <li>{{ r.name }} · {{ r.quantity }}</li>
+                    }
+                  </ul>
+                  @if (newProductsExtra() > 0) {
+                    <p class="mt-1 text-xs">y {{ newProductsExtra() }} más</p>
+                  }
+                }
+              </app-alert-banner>
+              <app-ai-review-ack
+                #initialLoadAckBlock
+                [(acknowledged)]="initialLoadAck"
+                [message]="'Estoy de acuerdo con crear estos productos y registrar su stock como carga inicial.'"
+              />
             }
             <p class="text-xs text-gray-500">
               Se aplicarán las {{ analysis()!.valid }} filas válidas en lotes de {{ pageSize }}.
@@ -382,7 +448,7 @@ interface BulkUploadResult {
             @if (step() === 3) {
               <app-button
                 variant="primary"
-                [disabled]="!analysis() || analysis()!.valid === 0"
+                [disabled]="!analysis() || analysis()!.valid === 0 || (analysis()!.requires_initial_load_ack && !initialLoadAck())"
                 (clicked)="confirmUpload()"
               >
                 Aplicar {{ analysis()?.valid || 0 }} ajustes
@@ -406,6 +472,11 @@ export class BulkAdjustmentModalComponent {
 
   readonly step = signal(1);
   readonly isDownloading = signal(false);
+  readonly templateMode = signal<'example' | 'existing'>('existing');
+  readonly initialLoadAck = signal(false);
+  private readonly initialLoadAckBlock = viewChild<AiReviewAckComponent>('initialLoadAckBlock');
+  readonly newProductPreview = computed(() => (this.analysis()?.new_product_rows ?? []).slice(0, 5));
+  readonly newProductsExtra = computed(() => Math.max(0, (this.analysis()?.new_products ?? this.analysis()?.new_product_rows?.length ?? 0) - this.newProductPreview().length));
   readonly isUploading = signal(false);
 
   readonly selectedLocationId = signal<string | number | null>(null);
@@ -451,6 +522,7 @@ export class BulkAdjustmentModalComponent {
     if (this.step() === 3) {
       this.cancelSession();
       this.analysis.set(null);
+      this.initialLoadAck.set(false);
     }
     if (this.step() > 1) this.step.set(this.step() - 1);
   }
@@ -460,7 +532,7 @@ export class BulkAdjustmentModalComponent {
     const locId = this.selectedLocationId();
     const location_id = locId !== null && locId !== '' ? Number(locId) : undefined;
 
-    this.inventory_service.downloadAdjustmentTemplate(location_id)
+    this.inventory_service.downloadAdjustmentTemplate(location_id, this.templateMode())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
@@ -521,6 +593,7 @@ export class BulkAdjustmentModalComponent {
     const locId = this.selectedLocationId();
     if (!file || !locId) return;
 
+    this.initialLoadAck.set(false);
     this.isAnalyzing.set(true);
     this.uploadError.set(null);
 
@@ -556,6 +629,10 @@ export class BulkAdjustmentModalComponent {
 
   /** Paso 3 -> 4: commit paginado de 100 en 100. */
   confirmUpload(): void {
+    if (this.analysis()?.requires_initial_load_ack && !this.initialLoadAck()) {
+      this.initialLoadAckBlock()?.requestAttention();
+      return;
+    }
     this.uploadResult.set(null);
     this.progressState.set({
       doneRows: 0,
@@ -578,6 +655,8 @@ export class BulkAdjustmentModalComponent {
     const location_id = Number(locId);
     const type = this.selectedAdjustmentType() || 'count_variance';
     const desc = this.description() || undefined;
+    const initialLoadAck =
+      this.analysis()?.requires_initial_load_ack === true ? true : undefined;
     const limit = BULK_ADJUSTMENT_PAGE_SIZE;
     let nextOffset = startOffset;
     let lastDone = false;
@@ -595,6 +674,7 @@ export class BulkAdjustmentModalComponent {
         limit,
         type,
         desc,
+        initialLoadAck,
       );
 
     fetchPage(startOffset)
@@ -686,6 +766,8 @@ export class BulkAdjustmentModalComponent {
     this.selectedFile.set(null);
     this.uploadResult.set(null);
     this.analysis.set(null);
+    this.initialLoadAck.set(false);
+    this.templateMode.set('existing');
     this.uploadError.set(null);
     this.retryOffset.set(null);
     this.progressState.set({ doneRows: 0, totalRows: 0 });

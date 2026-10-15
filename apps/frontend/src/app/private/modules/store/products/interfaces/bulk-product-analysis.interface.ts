@@ -63,6 +63,12 @@ export interface BulkProductAnalysisResult {
   with_warnings: number;
   with_errors: number;
   products: BulkProductAnalysisItem[];
+  /** Presente cuando el archivo trae cantidades iniciales de inventario. */
+  initial_load?: {
+    rows_with_quantity: number;
+    total_units: number;
+    requires_ack: boolean;
+  };
 }
 
 export interface BulkProductUploadItemResult {
