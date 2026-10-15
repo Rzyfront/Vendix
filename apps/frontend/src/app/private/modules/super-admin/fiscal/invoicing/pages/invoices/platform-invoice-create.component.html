@@ -8,61 +8,283 @@
     en el panel de resumen de la derecha, que es donde se ven junto al total que
     se va a emitir.
   -->
+  <!--
+    «CARGAR DOCUMENTOS» (escáner IA). Mismo modal y mismo mapeo que la «Nueva
+    factura» de la tienda, contra el endpoint de plataforma. Nada se emite ni
+    se crea: lo leído queda marcado (acento = IA, ámbar = revisar) y el botón
+    de emisión sigue siendo el de siempre.
+  -->
+  <div
+    class="flex flex-col gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+  >
+    <p class="flex items-start gap-2 text-xs leading-relaxed text-text-secondary">
+      <app-icon name="sparkles" [size]="14" class="mt-0.5 shrink-0 text-primary" />
+      @if (draftAcquirerResolving()) {
+        <span role="status">Buscando al adquiriente del borrador…</span>
+      } @else {
+        <span>
+          ¿Tienes la cotización, la orden de compra o el RUT del cliente? La IA arma el
+          borrador por ti.
+        </span>
+      }
+    </p>
+    <app-button variant="outline" size="sm" type="button" (clicked)="draftScanOpen.set(true)">
+      <app-icon slot="icon" name="upload" [size]="14" />
+      Cargar documentos
+    </app-button>
+  </div>
+
+  @if (draftNotice(); as notice) {
+    <app-alert-banner variant="info" icon="sparkles" tone="token">
+      Borrador cargado con IA desde {{ notice.documents }}
+      {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Revisa los campos marcados
+      antes de emitir.
+      <span class="mt-1 block text-xs font-normal">
+        Borde de acento: lo leyó la IA. Borde ámbar: no lo encontró o no está segura.
+      </span>
+      @if (notice.acquirer) {
+        <span class="mt-1 block text-xs font-normal">{{ notice.acquirer }}</span>
+      }
+      @if (notice.pending.length > 0) {
+        <span class="mt-1 block text-xs font-normal">
+          Por revisar: {{ notice.pending.join(', ') }}.
+        </span>
+      }
+      @if (notice.noteApplied) {
+        <span class="mt-1 block text-xs font-normal">
+          Indicación aplicada: {{ notice.noteApplied }}
+        </span>
+      }
+      @if (notice.extractionNotes) {
+        <span class="mt-1 block text-xs font-normal">
+          Nota de la lectura: {{ notice.extractionNotes }}
+        </span>
+      }
+      @if (notice.totalsInconsistent) {
+        <span class="mt-1 block text-xs font-medium text-warning">
+          Los totales del documento no cuadran con sus líneas
+          @if (notice.documentTotal !== null) {
+            (el documento dice {{ notice.documentTotal | currency }})
+          }: compáralo con el resumen antes de emitir.
+        </span>
+      }
+      @if (notice.unresolved.length > 0) {
+        <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs font-normal">
+          @for (item of notice.unresolved; track item) {
+            <li>{{ item }}</li>
+          }
+        </ul>
+      }
+      <button
+        bannerActions
+        type="button"
+        class="mt-1.5 text-xs font-semibold text-primary underline underline-offset-2"
+        (click)="draftNotice.set(null)"
+      >
+        Cerrar aviso
+      </button>
+    </app-alert-banner>
+  }
+
   <form [formGroup]="invoiceForm" class="space-y-6">
+    <!--
+      CAMPOS FISCALES DEL ADQUIRIENTE, escritos UNA vez y usados en los dos
+      modos (destinatario registrado en edición y cliente nuevo). Se declara
+      dentro del formGroup: los formControlName resuelven el grupo desde aquí.
+
+      Lo que la DIAN exige para emitir va a la vista y se marca en rojo si
+      falta; teléfono, departamento y responsabilidades del RUT viven
+      plegados en «Más datos».
+    -->
+    <ng-template #acquirerFields>
+      <div class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div id="pf-external_document_type" [ngClass]="acquirerFieldClass('external_document_type')">
+            <app-selector
+              label="Tipo de documento"
+              [options]="documentTypeOptions"
+              formControlName="external_document_type"
+              [errorText]="missingHint('external_document_type')"
+              size="sm"
+            ></app-selector>
+          </div>
+          <div id="pf-external_tax_id" [ngClass]="acquirerFieldClass('external_tax_id')">
+            <app-input
+              label="Número de documento"
+              formControlName="external_tax_id"
+              placeholder="Ej. 900123456"
+              [required]="true"
+              [error]="missingHint('external_tax_id')"
+              size="sm"
+            ></app-input>
+          </div>
+          @if (isNitAcquirer()) {
+            <div id="pf-external_tax_id_dv" [ngClass]="acquirerFieldClass('external_tax_id_dv')">
+              <app-input
+                label="DV"
+                formControlName="external_tax_id_dv"
+                [readonly]="true"
+                helperText="Calculado (módulo 11 DIAN)."
+                [error]="missingHint('external_tax_id_dv')"
+                size="sm"
+              ></app-input>
+            </div>
+            <div id="pf-external_person_type" [ngClass]="acquirerFieldClass('external_person_type')">
+              <app-selector
+                label="Tipo de persona"
+                [options]="personTypeOptions"
+                formControlName="external_person_type"
+                [errorText]="missingHint('external_person_type')"
+                size="sm"
+              ></app-selector>
+            </div>
+          }
+        </div>
+
+        <div id="pf-external_legal_name" [ngClass]="acquirerFieldClass('external_legal_name')">
+          <app-input
+            [label]="isNitAcquirer() && rawValue()['external_person_type'] !== '2' ? 'Razón social' : 'Nombres y apellidos'"
+            formControlName="external_legal_name"
+            placeholder="Nombre del cliente o empresa"
+            [required]="true"
+            [error]="missingHint('external_legal_name')"
+            size="sm"
+          ></app-input>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div id="pf-external_tax_regime_code" [ngClass]="acquirerFieldClass('external_tax_regime_code')">
+            <app-selector
+              label="Régimen tributario"
+              [options]="taxRegimeOptions"
+              formControlName="external_tax_regime_code"
+              placeholder="Sin declarar"
+              [errorText]="missingHint('external_tax_regime_code')"
+              size="sm"
+            ></app-selector>
+          </div>
+          <div id="pf-external_email" [ngClass]="acquirerFieldClass('external_email')">
+            <app-input
+              label="Correo para el envío"
+              formControlName="external_email"
+              type="email"
+              placeholder="facturacion@cliente.com"
+              [required]="true"
+              [error]="missingHint('external_email')"
+              helperText="Es la dirección a la que se entrega la factura electrónica."
+              size="sm"
+            ></app-input>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div id="pf-external_address_line" [ngClass]="acquirerFieldClass('external_address_line')">
+            <app-input
+              label="Dirección fiscal"
+              formControlName="external_address_line"
+              placeholder="Calle, carrera, número, oficina..."
+              [required]="true"
+              [error]="missingHint('external_address_line')"
+              size="sm"
+            ></app-input>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1">Municipio (DANE)</label>
+            <div id="pf-external_city_code" [ngClass]="acquirerFieldClass('external_city_code')">
+              <app-dian-municipality-select
+                formControlName="external_city_code"
+                placeholder="Busca por nombre o código DANE..."
+                (municipalitySelected)="onCustomerMunicipality($event)"
+              />
+            </div>
+            @if (missingHint('external_city_code'); as cityErr) {
+              <p class="mt-1 text-xs text-[var(--color-destructive)]">{{ cityErr }}</p>
+            }
+          </div>
+        </div>
+
+        <!-- Más datos: no bloquean la emisión. -->
+        <div class="border-t border-border pt-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-text-primary"
+            [attr.aria-expanded]="acquirerMoreOpen()"
+            aria-controls="platform-acquirer-more"
+            (click)="acquirerMoreOpen.set(!acquirerMoreOpen())"
+          >
+            <app-icon [name]="acquirerMoreOpen() ? 'chevron-up' : 'chevron-down'" [size]="14" />
+            Más datos
+            <span class="font-normal">(teléfono, departamento y responsabilidades del RUT)</span>
+          </button>
+          <div id="platform-acquirer-more" class="mt-3 space-y-3" [hidden]="!acquirerMoreOpen()">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div id="pf-external_phone" [ngClass]="acquirerFieldClass('external_phone')">
+                <app-input
+                  label="Teléfono"
+                  formControlName="external_phone"
+                  placeholder="Ej. 3001234567"
+                  size="sm"
+                ></app-input>
+              </div>
+              <div id="pf-external_department_code" [ngClass]="acquirerFieldClass('external_department_code')">
+                <app-selector
+                  label="Departamento"
+                  [options]="departmentOptions"
+                  formControlName="external_department_code"
+                  [searchable]="true"
+                  placeholder="Se toma del municipio"
+                  size="sm"
+                ></app-selector>
+              </div>
+            </div>
+            <fieldset
+              id="pf-external_fiscal_responsibilities"
+              [ngClass]="acquirerFieldClass('external_fiscal_responsibilities')"
+            >
+              <legend class="text-xs font-medium text-text-secondary mb-1">
+                Responsabilidades fiscales (RUT)
+              </legend>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-64 overflow-y-auto pr-1">
+                @for (code of fiscalResponsibilities; track code) {
+                  <label
+                    class="flex items-center gap-2 cursor-pointer rounded-lg border px-2 py-2 transition-colors"
+                    [style.border-color]="hasResponsibility(code) ? 'var(--color-primary)' : 'var(--color-border)'"
+                    [style.background]="
+                      hasResponsibility(code)
+                        ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)'
+                        : 'var(--color-surface)'
+                    "
+                  >
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 shrink-0 rounded border-border accent-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                      [checked]="hasResponsibility(code)"
+                      (change)="toggleResponsibility(code)"
+                    />
+                    <span class="text-xs text-text-primary leading-tight truncate" [title]="responsibilityLabels[code]">
+                      {{ code }} · {{ responsibilityLabels[code] }}
+                    </span>
+                  </label>
+                }
+              </div>
+              <p class="mt-1 text-[11px] text-text-secondary">
+                Sin ninguna marcada se declara la responsabilidad por omisión del tipo de persona.
+              </p>
+            </fieldset>
+          </div>
+        </div>
+      </div>
+    </ng-template>
+
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
       <!-- Columna Principal (8 cols) -->
       <div class="lg:col-span-8 space-y-6">
 
-        <!-- 1. Perfil de Facturación -->
+        <!-- 1. Documento y Condiciones -->
+        <div id="platform-invoice-documento">
         <app-platform-section-wrapper
-          title="1. Perfil de facturación"
-          icon="wand-2"
-          [expanded]="sectionExpanded()['perfil']"
-          (expandedChange)="toggleSection('perfil', $event)"
-        >
-          <div class="space-y-3">
-            <p class="text-xs text-text-secondary">
-              Selecciona un perfil para autocompletar la resolución autorizada, medios de pago y notas predeterminadas.
-            </p>
-            @if (profilesForOperationType().length === 0) {
-              <div class="p-3 rounded-lg bg-surface-secondary/50 border border-border text-xs text-text-secondary flex items-center justify-between">
-                <span>No hay perfiles configurados para factura estándar.</span>
-                <a routerLink="/super-admin/fiscal/invoicing/profiles/new" class="text-primary hover:underline font-medium">Crear perfil →</a>
-              </div>
-            } @else {
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                @for (p of profilesForOperationType(); track p.id) {
-                  <div
-                    class="p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3"
-                    [class.border-primary]="invoiceForm.value.profile_id === p.id"
-                    [class.bg-primary/5]="invoiceForm.value.profile_id === p.id"
-                    [class.shadow-sm]="invoiceForm.value.profile_id === p.id"
-                    [class.border-border]="invoiceForm.value.profile_id !== p.id"
-                    (click)="applyProfile(p.id)"
-                  >
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="text-sm font-semibold text-text-primary truncate">{{ p.name }}</span>
-                        @if (p.is_default) {
-                          <app-badge variant="success" size="xsm">Predeterminado</app-badge>
-                        }
-                      </div>
-                      <p class="text-xs text-text-secondary truncate mt-0.5">Versión {{ p.current_version }}</p>
-                    </div>
-                    @if (invoiceForm.value.profile_id === p.id) {
-                      <app-badge variant="primary" size="sm">Aplicado</app-badge>
-                    }
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        </app-platform-section-wrapper>
-
-        <!-- 2. Documento y Condiciones -->
-        <app-platform-section-wrapper
-          title="2. Documento y condiciones de pago"
+          title="1. Documento y condiciones de pago"
           icon="file-text"
           [expanded]="sectionExpanded()['documento']"
           (expandedChange)="toggleSection('documento', $event)"
@@ -81,14 +303,17 @@
             documentLabel="Factura de venta"
             [dueDateRequired]="isCredit()"
             [errors]="documentoErrors()"
+            [fieldMarks]="draftHeaderMarks()"
             dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
           ></vendix-invoice-section-documento>
         </app-platform-section-wrapper>
+        </div>
 
-        <!-- 3. Adquiriente (Destinatario) -->
+        <!-- 2. Adquiriente (Destinatario) -->
+        <div id="platform-invoice-acquirer">
         <app-platform-section-wrapper
-          title="3. Adquiriente (Destinatario)"
+          title="2. Adquiriente (Destinatario)"
           icon="user-round"
           [expanded]="sectionExpanded()['adquiriente']"
           (expandedChange)="toggleSection('adquiriente', $event)"
@@ -102,11 +327,12 @@
               [class.text-text-primary]="acquirerMode() === 'system'"
               [class.shadow-sm]="acquirerMode() === 'system'"
               [class.text-text-secondary]="acquirerMode() !== 'system'"
+              [attr.aria-pressed]="acquirerMode() === 'system'"
               (click)="setAcquirerMode('system')"
             >
               <span class="flex items-center gap-1.5">
                 <app-icon name="building-2" [size]="14" />
-                Entidad del sistema
+                Registrado en la plataforma
               </span>
             </button>
             <button
@@ -116,151 +342,200 @@
               [class.text-text-primary]="acquirerMode() === 'external'"
               [class.shadow-sm]="acquirerMode() === 'external'"
               [class.text-text-secondary]="acquirerMode() !== 'external'"
+              [attr.aria-pressed]="acquirerMode() === 'external'"
               (click)="setAcquirerMode('external')"
             >
               <span class="flex items-center gap-1.5">
                 <app-icon name="user-plus" [size]="14" />
-                Cliente externo manual
+                Cliente nuevo
               </span>
             </button>
           </div>
 
           @if (acquirerMode() === 'system') {
             <p class="text-xs text-text-secondary mb-3">
-              Busca y selecciona una tienda, organización o usuario registrado para autocompletar su identificación tributaria.
+              Busca una tienda, organización, usuario o un cliente de facturas anteriores: sus datos fiscales se precargan.
             </p>
             <app-platform-tenant-picker
+              [preselected]="selectedTenant()"
               (tenantPicked)="onTenantPicked($event)"
             ></app-platform-tenant-picker>
-          }
 
-          <!--
-            Los datos fiscales se muestran en LOS DOS modos.
-
-            En modo sistema aparecen recién elegido el destinatario, ya
-            precargados desde su ficha, para revisarlos o completarlos. Antes
-            el picker guardaba el tenant y no enseñaba nada: cuando a la tienda
-            le faltaba el NIT o el DV la emisión moría en el backend pidiendo
-            «captura los campos faltantes en el formulario», y en el formulario
-            no había ningún campo que capturar.
-          -->
-          @if (acquirerMode() === 'external' || selectedTenant()) {
-            <div class="space-y-4 pt-1" [class.mt-4]="acquirerMode() === 'system'">
-              @if (acquirerMode() === 'system') {
-                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-                  <div>
-                    <p class="text-xs font-semibold text-text-primary">Datos fiscales del destinatario</p>
-                    <p class="text-[11px] text-text-secondary">
-                      Precargados desde su ficha. Lo que quede acá es lo que se declara en el documento.
-                    </p>
+            @if (selectedTenant()) {
+              @if (showAcquirerSummary()) {
+                <!-- Resumen compacto de solo lectura: completo para emitir. -->
+                <div class="mt-3 rounded-lg border border-border bg-surface-secondary/40 p-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="truncate text-sm font-semibold text-text-primary">{{ acquirerCard().name }}</p>
+                      <p class="truncate text-xs text-text-secondary">{{ acquirerCard().document }}</p>
+                    </div>
+                    <span class="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-primary">
+                      <app-icon name="check-circle" [size]="13" />
+                      Listo para emitir
+                    </span>
                   </div>
-                  @if (acquirerFiscalIncomplete()) {
-                    <app-badge variant="warning" size="sm">Faltan identificación o razón social</app-badge>
-                  } @else {
-                    <app-badge variant="success" size="sm">Identificación completa</app-badge>
+                  <dl class="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+                    @for (row of acquirerCard().rows; track row.label) {
+                      <div class="flex min-w-0 gap-1.5">
+                        <dt class="shrink-0 text-text-secondary">{{ row.label }}:</dt>
+                        <dd class="truncate text-text-primary" [title]="row.value">{{ row.value }}</dd>
+                      </div>
+                    }
+                  </dl>
+                  <div class="mt-3">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                      (click)="acquirerEditing.set(true)"
+                    >
+                      <app-icon name="pencil" [size]="13" />
+                      Editar
+                    </button>
+                  </div>
+                  @if (selectedTenant()?.kind === 'customer') {
+                    <p class="mt-2 text-[11px] text-text-secondary">
+                      Cliente de la plataforma: lo que cambies aquí actualiza su registro al emitir.
+                    </p>
                   }
                 </div>
+              } @else {
+                <div class="mt-4 space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                    <div>
+                      <p class="text-xs font-semibold text-text-primary">Datos fiscales del destinatario</p>
+                      <p class="text-[11px] text-text-secondary">
+                        Precargados desde su ficha. Lo que quede acá es lo que se declara en el documento.
+                      </p>
+                    </div>
+                    @if (acquirerMissing().length === 0) {
+                      <button
+                        type="button"
+                        class="text-xs font-semibold text-primary hover:underline"
+                        (click)="acquirerEditing.set(false)"
+                      >
+                        Listo
+                      </button>
+                    }
+                  </div>
+                  @if (acquirerMissing().length > 0) {
+                    <p class="text-xs text-[var(--color-destructive)]" role="status">
+                      Para emitir falta: {{ acquirerMissingLabels() }}.
+                    </p>
+                  }
+                  <ng-container [ngTemplateOutlet]="acquirerFields"></ng-container>
+                </div>
               }
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div class="space-y-1">
-                  <label class="text-xs font-medium text-text-secondary">Tipo de documento</label>
-                  <app-selector
-                    [options]="documentTypeOptions"
-                    formControlName="external_document_type"
-                  ></app-selector>
-                </div>
-                <div class="space-y-1">
-                  <app-input
-                    label="Número de documento / NIT"
-                    formControlName="external_tax_id"
+            }
+          } @else {
+            <p class="mb-3 flex items-start gap-2 text-xs text-text-secondary">
+              <app-icon name="info" [size]="14" class="mt-0.5 shrink-0" />
+              <span>
+                Al emitir, este cliente queda registrado como cliente de la plataforma y lo
+                encontrarás en «Registrado en la plataforma» para las próximas facturas.
+              </span>
+            </p>
+
+            @if (!externalFormOpen()) {
+              <!-- Paso 1: NIT / documento → plataforma → RUES. -->
+              <div class="space-y-2">
+                <label for="platform-external-doc" class="block text-xs font-medium text-text-secondary">
+                  NIT o documento del cliente
+                </label>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    id="platform-external-doc"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    class="w-full sm:max-w-xs px-3 py-2 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
                     placeholder="Ej. 900123456"
-                    [required]="true"
-                  ></app-input>
-                </div>
-                <div class="space-y-1">
-                  <app-input
-                    label="DV (Dígito de verificación)"
-                    formControlName="external_tax_id_dv"
-                    placeholder="Auto"
-                  ></app-input>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div class="space-y-1">
-                  <app-input
-                    label="Razón social / Nombre completo"
-                    formControlName="external_legal_name"
-                    placeholder="Nombre del cliente o empresa"
-                    [required]="true"
-                  ></app-input>
-                </div>
-                <div class="space-y-1">
-                  <label class="text-xs font-medium text-text-secondary">Tipo de persona</label>
-                  <app-selector
-                    [options]="personTypeOptions"
-                    formControlName="external_person_type"
-                  ></app-selector>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div class="space-y-1">
-                  <label class="text-xs font-medium text-text-secondary">Régimen tributario</label>
-                  <app-selector
-                    [options]="taxRegimeOptions"
-                    formControlName="external_tax_regime_code"
-                  ></app-selector>
-                </div>
-                <div class="space-y-1">
-                  <app-input
-                    label="Correo electrónico"
-                    formControlName="external_email"
-                    type="email"
-                    placeholder="facturacion@cliente.com"
-                  ></app-input>
-                </div>
-                <div class="space-y-1">
-                  <app-input
-                    label="Teléfono"
-                    formControlName="external_phone"
-                    placeholder="Ej. 3001234567"
-                  ></app-input>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div class="sm:col-span-2 space-y-1">
-                  <app-input
-                    label="Dirección fiscal"
-                    formControlName="external_address_line"
-                    placeholder="Calle, carrera, número, oficina..."
-                  ></app-input>
-                </div>
-                <div class="space-y-1">
-                  <label class="text-xs font-medium text-text-secondary">Municipio (DANE)</label>
-                  <app-dian-municipality-select
-                    formControlName="external_city_code"
-                    placeholder="Busca por nombre o código DANE..."
-                    (municipalitySelected)="onCustomerMunicipality($event)"
+                    [value]="externalQuery()"
+                    (input)="onExternalQuery($event)"
+                    (keydown.enter)="$event.preventDefault(); searchExternalDocument()"
                   />
+                  <app-button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    [loading]="externalSearching()"
+                    [disabled]="externalSearching()"
+                    (clicked)="searchExternalDocument()"
+                  >
+                    <app-icon slot="icon" name="search" [size]="14" />
+                    Buscar
+                  </app-button>
+                  <button
+                    type="button"
+                    class="text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary sm:ml-2"
+                    (click)="openExternalForm()"
+                  >
+                    Escribir los datos a mano
+                  </button>
                 </div>
-                <div class="space-y-1">
-                  <label class="text-xs font-medium text-text-secondary">Departamento</label>
-                  <app-selector
-                    [options]="departmentOptions"
-                    formControlName="external_department_code"
-                    [searchable]="true"
-                  ></app-selector>
-                </div>
+
+                @if (externalSearching()) {
+                  <p class="flex items-center gap-2 text-xs text-text-secondary" role="status">
+                    <app-icon name="loader-2" [size]="14" class="animate-spin" />
+                    Buscando en la plataforma, RUES y fuentes públicas…
+                  </p>
+                } @else if (externalMatch(); as match) {
+                  <div class="mt-2 rounded-lg border border-border bg-surface p-3">
+                    <p class="text-xs text-text-secondary">Este documento ya está registrado en la plataforma:</p>
+                    <p class="mt-1 text-sm font-semibold text-text-primary">
+                      {{ match.legal_name || match.name }}
+                      <span class="ml-1 text-xs font-normal text-text-secondary">· {{ kindLabel(match.kind) }}</span>
+                    </p>
+                    <p class="text-xs text-text-secondary">
+                      NIT/Doc: {{ match.tax_id }}{{ match.tax_id_dv ? '-' + match.tax_id_dv : '' }}
+                    </p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <app-button type="button" variant="primary" size="sm" (clicked)="useExternalMatch()">
+                        Usar este
+                      </app-button>
+                      <app-button type="button" variant="ghost" size="sm" (clicked)="dismissExternalMatch()">
+                        Es otro cliente
+                      </app-button>
+                    </div>
+                  </div>
+                } @else if (externalLookup()?.found && externalLookup()?.identity) {
+                  <app-rues-identity-card
+                    [identity]="externalLookup()!.identity!"
+                    (createWithData)="onUseRuesIdentity()"
+                    (createManual)="openExternalForm(externalSearchedDoc())"
+                  />
+                }
               </div>
-            </div>
+            } @else {
+              <!-- Paso 2: sólo lo que la DIAN exige y falta. -->
+              <div class="space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                  <p class="text-xs font-semibold text-text-primary">Datos fiscales del cliente nuevo</p>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
+                    (click)="restartExternalSearch()"
+                  >
+                    <app-icon name="repeat" [size]="13" />
+                    Buscar otro documento
+                  </button>
+                </div>
+                @if (acquirerMissing().length > 0) {
+                  <p class="text-xs text-[var(--color-destructive)]" role="status">
+                    Para emitir falta: {{ acquirerMissingLabels() }}.
+                  </p>
+                }
+                <ng-container [ngTemplateOutlet]="acquirerFields"></ng-container>
+              </div>
+            }
           }
         </app-platform-section-wrapper>
+        </div>
 
-        <!-- 4. Líneas de Factura y Tributos -->
+        <!-- 3. Líneas de Factura y Tributos -->
+        <div id="platform-invoice-lineas">
         <app-platform-section-wrapper
-          title="4. Líneas de factura y tributos"
+          title="3. Líneas de factura y tributos"
           icon="list"
           [expanded]="sectionExpanded()['lineas']"
           (expandedChange)="toggleSection('lineas', $event)"
@@ -271,6 +546,7 @@
             [rowPaths]="lineasRowPaths"
             [rowErrors]="lineasRowErrors()"
             [rowSummaries]="lineasRowSummaries()"
+            [rowMarks]="lineasRowMarks()"
             [unitCodeOptions]="unitCodeOptions"
             [availableTaxes]="availableTaxes"
             [isAiu]="false"
@@ -284,10 +560,11 @@
             (removeLine)="removeLine($event)"
           ></vendix-invoice-section-lineas>
         </app-platform-section-wrapper>
+        </div>
 
-        <!-- 5. Impuestos (agregado por tarifa) -->
+        <!-- 4. Impuestos (agregado por tarifa) -->
         <app-platform-section-wrapper
-          title="5. Impuestos"
+          title="4. Impuestos"
           icon="percent"
           [expanded]="sectionExpanded()['impuestos']"
           (expandedChange)="toggleSection('impuestos', $event)"
@@ -300,9 +577,9 @@
           ></vendix-invoice-section-impuestos>
         </app-platform-section-wrapper>
 
-        <!-- 6. Retenciones (opcional) -->
+        <!-- 5. Retenciones (opcional) -->
         <app-platform-section-wrapper
-          title="6. Retenciones (opcional)"
+          title="5. Retenciones (opcional)"
           icon="scale"
           [expanded]="sectionExpanded()['retenciones']"
           (expandedChange)="toggleSection('retenciones', $event)"
@@ -325,9 +602,9 @@
           ></vendix-invoice-section-retenciones>
         </app-platform-section-wrapper>
 
-        <!-- 7. Contabilidad (opcional) -->
+        <!-- 6. Contabilidad (opcional) -->
         <app-platform-section-wrapper
-          title="7. Contabilidad (opcional)"
+          title="6. Contabilidad (opcional)"
           icon="book-open"
           [expanded]="sectionExpanded()['contabilidad']"
           (expandedChange)="toggleSection('contabilidad', $event)"
@@ -393,9 +670,9 @@
           </div>
         </app-platform-section-wrapper>
 
-        <!-- 8. Divisa extranjera (opcional) -->
+        <!-- 7. Divisa extranjera (opcional) -->
         <app-platform-section-wrapper
-          title="8. Divisa extranjera (opcional)"
+          title="7. Divisa extranjera (opcional)"
           icon="banknote"
           [expanded]="sectionExpanded()['divisa']"
           (expandedChange)="toggleSection('divisa', $event)"
@@ -411,9 +688,9 @@
           ></vendix-invoice-section-divisa>
         </app-platform-section-wrapper>
 
-        <!-- 9. Notas y Observaciones -->
+        <!-- 8. Notas y Observaciones -->
         <app-platform-section-wrapper
-          title="9. Notas y términos legales"
+          title="8. Notas y términos legales"
           icon="sticky-note"
           [expanded]="sectionExpanded()['notas']"
           (expandedChange)="toggleSection('notas', $event)"
@@ -425,7 +702,7 @@
           ></vendix-invoice-section-notas>
         </app-platform-section-wrapper>
 
-        <!-- 10. Guardar como Perfil -->
+        <!-- Guardar como Perfil -->
         <div class="p-4 rounded-xl border border-border bg-surface-secondary/30 space-y-3">
           <div class="flex items-center gap-2">
             <input
@@ -438,7 +715,7 @@
               Guardar esta configuración como un nuevo Perfil de Facturación
             </label>
           </div>
-          @if (invoiceForm.value.save_as_profile_enabled) {
+          @if (rawValue()['save_as_profile_enabled']) {
             <div class="pl-6 pt-1 max-w-md">
               <app-input
                 label="Nombre del nuevo perfil"
@@ -484,6 +761,91 @@
 
       <!-- Columna Lateral Sticky: Resumen Financiero y Acciones (4 cols) -->
       <div class="lg:col-span-4 space-y-4 sticky top-6">
+
+        <!--
+          PERFIL DE FACTURACIÓN COMO CHIP OPCIONAL. Arriba del resumen porque
+          es un atajo, no un paso: sin tocarlo se aplica el predeterminado (o el
+          único activo) sin pisar lo ya escrito. Al pulsarlo se despliega la
+          lista para elegir otro o quitarlo.
+        -->
+        <div class="rounded-xl border border-border bg-surface">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+            [attr.aria-expanded]="sectionExpanded()['perfil']"
+            aria-controls="platform-invoice-profile-panel"
+            title="Un perfil autocompleta resolución, forma y medio de pago, notas, retenciones y líneas modelo."
+            (click)="toggleSection('perfil', !sectionExpanded()['perfil'])"
+          >
+            <span class="flex min-w-0 items-center gap-2 text-xs">
+              <app-icon name="layers" [size]="14" class="shrink-0 text-text-secondary" />
+              <span class="truncate text-text-primary">
+                Perfil: <strong>{{ profileSummary() }}</strong>
+              </span>
+            </span>
+            <app-icon
+              [name]="sectionExpanded()['perfil'] ? 'chevron-up' : 'chevron-down'"
+              [size]="14"
+              class="shrink-0 text-text-secondary"
+            />
+          </button>
+          <div
+            id="platform-invoice-profile-panel"
+            class="border-t border-border px-3 py-3 space-y-2"
+            [hidden]="!sectionExpanded()['perfil']"
+          >
+            @if (profilesForOperationType().length === 0) {
+              <p class="text-xs text-text-secondary">
+                No hay perfiles activos para factura estándar. La factura se llena a mano y se emite igual.
+              </p>
+              <a routerLink="/super-admin/fiscal/invoicing/profiles/new" class="inline-block text-xs font-semibold text-primary hover:underline">
+                Crear perfil →
+              </a>
+            } @else {
+              @if (profileAutoSelected() && selectedProfile()) {
+                <p class="text-xs leading-relaxed text-text-primary">
+                  Usando el perfil predeterminado <strong>{{ selectedProfile()?.name }}</strong>. Lo que ya
+                  habías escrito se conservó. Elige otro abajo si esta factura va distinta.
+                </p>
+              } @else {
+                <p class="text-xs text-text-secondary">
+                  Elegir uno autocompleta la resolución, los medios de pago, las notas y las retenciones.
+                </p>
+              }
+              <div class="space-y-1.5">
+                @for (p of profilesForOperationType(); track p.id) {
+                  <button
+                    type="button"
+                    class="w-full rounded-lg border px-3 py-2 text-left transition-colors flex items-center justify-between gap-2"
+                    [class.border-primary]="selectedProfile()?.id === p.id"
+                    [class.border-border]="selectedProfile()?.id !== p.id"
+                    [attr.aria-pressed]="selectedProfile()?.id === p.id"
+                    (click)="applyProfile(p.id)"
+                  >
+                    <span class="min-w-0">
+                      <span class="block truncate text-xs font-semibold text-text-primary">{{ p.name }}</span>
+                      <span class="block text-[11px] text-text-secondary">
+                        {{ p.is_default ? 'Predeterminado · ' : '' }}Versión {{ p.current_version }}
+                      </span>
+                    </span>
+                    @if (selectedProfile()?.id === p.id) {
+                      <app-icon name="check-circle" [size]="14" class="shrink-0 text-primary" />
+                    }
+                  </button>
+                }
+              </div>
+              @if (selectedProfile()) {
+                <button
+                  type="button"
+                  class="text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary"
+                  (click)="clearProfile()"
+                >
+                  Quitar perfil
+                </button>
+              }
+            }
+          </div>
+        </div>
 
         <!-- Tarjeta de Resumen Financiero -->
         <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm space-y-4">
@@ -551,6 +913,33 @@
             <p class="text-[11px] text-danger" role="alert">{{ backendPreviewError() }}</p>
           }
 
+          <!--
+            LO QUE FALTA PARA EMITIR, antes de emitir. Cada fila lleva al
+            campo; «Emitir» revisa esta misma lista y enfoca el primero.
+          -->
+          @if (emitMissing().length > 0) {
+            <div class="rounded-lg border border-border bg-surface-secondary/40 p-3" role="status">
+              <p class="text-xs font-semibold text-[var(--color-destructive)]">
+                Falta para emitir ({{ emitMissing().length }})
+              </p>
+              <ul class="mt-1.5 space-y-1">
+                @for (item of emitMissing(); track item.key) {
+                  <li>
+                    <button
+                      type="button"
+                      class="flex w-full items-start gap-1.5 text-left text-xs text-text-primary hover:underline"
+                      [title]="item.reason"
+                      (click)="focusMissing(item)"
+                    >
+                      <app-icon name="alert-triangle" [size]="12" class="mt-0.5 shrink-0 text-[var(--color-destructive)]" />
+                      <span>{{ item.label }}</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+
           <div class="pt-2 space-y-2">
             <app-button
               type="button"
@@ -558,7 +947,7 @@
               size="md"
               class="w-full justify-center"
               [loading]="submitting()"
-              [disabled]="submitting() || (itemsArray.length === 0)"
+              [disabled]="submitting()"
               (clicked)="submit()"
             >
               <app-icon slot="icon" name="send" [size]="16"></app-icon>
@@ -604,6 +993,13 @@
   para una sola acción, y el operador teniendo que adivinar en cuál está lo que
   busca.
 -->
+
+<!-- «Cargar documentos»: el modal sólo lee; aplicar es de la página. -->
+<vendix-invoice-draft-scan-modal
+  [(isOpen)]="draftScanOpen"
+  [endpoint]="draftScanEndpoint"
+  (scanned)="onDraftScanned($event)"
+/>
 
 <!-- Modal de previsualización de totales (cálculo del backend) -->
 <app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización de totales" size="xl">

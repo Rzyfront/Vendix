@@ -4,9 +4,12 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
+  input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
@@ -30,7 +33,37 @@ import {
   SelectorComponent,
 } from '../../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
-import { PlatformAcquirer } from '../../state';
+import { AcquirerKind, PlatformAcquirer } from '../../state';
+
+/** Etiqueta del tipo de destinatario («Cliente» = cliente de plataforma guardado). */
+export function acquirerKindLabel(kind: AcquirerKind | null | undefined): string {
+  switch (kind) {
+    case 'organization':
+      return 'Organización';
+    case 'user':
+      return 'Usuario';
+    case 'customer':
+      return 'Cliente';
+    case 'external':
+      return 'Externo';
+    default:
+      return 'Tienda';
+  }
+}
+
+/** Icono del tipo de destinatario. */
+export function acquirerKindIcon(kind: AcquirerKind | null | undefined): string {
+  switch (kind) {
+    case 'organization':
+      return 'building';
+    case 'user':
+      return 'user';
+    case 'customer':
+      return 'user-check';
+    default:
+      return 'store';
+  }
+}
 
 interface SearchResponse {
   success: boolean;
@@ -62,15 +95,15 @@ interface SearchResponse {
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div class="flex items-start gap-3">
               <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
-                <app-icon [name]="tenant.kind === 'organization' ? 'building' : tenant.kind === 'user' ? 'user' : 'store'" [size]="20" />
+                <app-icon [name]="kindIcon(tenant.kind)" [size]="20" />
               </div>
               <div class="space-y-1">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-sm font-bold text-text-primary">
                     {{ tenant.legal_name || tenant.name }}
                   </span>
-                  <app-badge [variant]="tenant.kind === 'organization' ? 'service' : tenant.kind === 'user' ? 'neutral' : 'primary'" size="sm">
-                    {{ tenant.kind === 'organization' ? 'Organización' : tenant.kind === 'user' ? 'Usuario' : 'Tienda' }}
+                  <app-badge variant="neutral" size="sm">
+                    {{ kindLabel(tenant.kind) }}
                   </app-badge>
                   @if (tenant.fiscal_data_complete) {
                     <app-badge variant="success" size="sm">
@@ -186,7 +219,7 @@ interface SearchResponse {
               } @else if (results().length === 0) {
                 <div class="p-4 text-center text-xs text-text-secondary">
                   @if (searchQuery().trim().length > 0) {
-                    No se encontraron tiendas u organizaciones que coincidan con "{{ searchQuery() }}".
+                    No se encontraron tiendas, organizaciones, usuarios ni clientes que coincidan con "{{ searchQuery() }}".
                   } @else {
                     No hay registros disponibles para el filtro seleccionado.
                   }
@@ -204,8 +237,8 @@ interface SearchResponse {
                           <span class="text-sm font-semibold text-text-primary group-hover:text-primary transition-colors truncate">
                             {{ tenant.legal_name || tenant.name }}
                           </span>
-                          <app-badge [variant]="tenant.kind === 'organization' ? 'service' : 'primary'" size="xsm">
-                            {{ tenant.kind === 'organization' ? 'Org' : 'Tienda' }}
+                          <app-badge variant="neutral" size="xsm">
+                            {{ kindLabel(tenant.kind) }}
                           </app-badge>
                           @if (!tenant.fiscal_data_complete) {
                             <app-badge variant="warning" size="xsm">Incompleto</app-badge>
@@ -261,11 +294,32 @@ export class TenantPickerComponent implements OnInit {
 
   readonly tenantPicked = output<PlatformAcquirer | null>();
 
+  /**
+   * Selección impuesta por la página (p. ej. el adquiriente que reconoció el
+   * escáner IA). Sólo se aplica cuando cambia de destinatario: la propia
+   * selección del operador vuelve por aquí con el mismo id y no hace nada.
+   * No emite `tenantPicked`: quien la impone ya sabe lo que eligió.
+   */
+  readonly preselected = input<PlatformAcquirer | null>(null);
+
+  readonly kindLabel = acquirerKindLabel;
+  readonly kindIcon = acquirerKindIcon;
+
+  private readonly syncPreselected = effect(() => {
+    const tenant = this.preselected();
+    untracked(() => {
+      if ((tenant?.id ?? null) === (this.selectedTenant()?.id ?? null)) return;
+      this.selectedTenant.set(tenant);
+      this.isOpen.set(!tenant);
+    });
+  });
+
   readonly kindOptions: SelectorOption[] = [
     { value: '', label: 'Todos los tipos' },
     { value: 'store', label: 'Solo Tiendas' },
     { value: 'organization', label: 'Solo Organizaciones' },
     { value: 'user', label: 'Solo Usuarios' },
+    { value: 'customer', label: 'Solo Clientes' },
   ];
 
   ngOnInit(): void {

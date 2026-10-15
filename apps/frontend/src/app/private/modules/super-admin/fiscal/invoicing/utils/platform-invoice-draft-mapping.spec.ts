@@ -1,0 +1,419 @@
+import { PLATFORM_TAX_CATALOG } from '../../../../../../shared/components/invoice-sections';
+import { computeNitDv } from '../../../../../../shared/utils/nit.util';
+import type {
+  DraftField,
+  InvoiceDraftAcquirer,
+  InvoiceDraftLine,
+  InvoiceDraftScanResult,
+} from '../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
+import {
+  dropPlatformRowMarkField,
+  draftToPlatformAcquirerPatch,
+  draftToPlatformInvoicePatch,
+  isCapturedPlatformLine,
+  planPlatformInvoiceDraft,
+  platformAcquirerMissing,
+  platformPaymentMeansCode,
+  platformTaxRegimeCode,
+  platformTaxRegimeFromResponsibilities,
+  toPlatformControl,
+} from './platform-invoice-draft-mapping';
+
+/**
+ * Adaptador del borrador IA a la «Nueva factura» de PLATAFORMA. Mismas
+ * fixtures que `invoice-draft-mapping.spec.ts` (forma EXACTA del backend,
+ * confianza 0-100); aquí se prueba sólo la traducción al vocabulario de la
+ * pantalla de plataforma (`external_*`, '1'/'2', '48'/'49', divisa).
+ */
+const f = <T>(value: T | null, confidence = 95, warning: string | null = null): DraftField<T> => ({
+  value,
+  confidence,
+  warning,
+});
+const none = <T>(): DraftField<T> => f<T>(null, 0);
+
+const NIT = '900123456';
+const NIT_DV = computeNitDv(NIT)!;
+const TODAY = '2026-10-14';
+
+function acquirer(overrides: Partial<InvoiceDraftAcquirer> = {}): InvoiceDraftAcquirer {
+  return {
+    document_type: f('NIT'),
+    document_number: f(NIT),
+    verification_digit: f(NIT_DV),
+    person_type: f('JURIDICA' as const),
+    name: f('Constructora Andina S.A.S.'),
+    email: f('compras@andina.co'),
+    phone: f('6015551234'),
+    address_line: f('Cra 7 # 71-21'),
+    city_name: f('Bogotá'),
+    department_name: f('Cundinamarca'),
+    municipality_code: f('11001'),
+    tax_regime: f('COMUN'),
+    fiscal_responsibilities: f(['O-13', 'O-15']),
+    existing_customer_id: null,
+    existing_acquirer: null,
+    ...overrides,
+  };
+}
+
+function line(overrides: Partial<InvoiceDraftLine> = {}): InvoiceDraftLine {
+  return {
+    description: f('Suscripción anual Vendix Pro'),
+    quantity: f(1),
+    unit_price: f(1200000),
+    discount_percent: f(0),
+    tax_rate: f(19),
+    sku: null,
+    product_id: null,
+    product_variant_id: null,
+    match_status: 'none',
+    match_confidence: 0,
+    ...overrides,
+  };
+}
+
+function result(overrides: Partial<InvoiceDraftScanResult> = {}): InvoiceDraftScanResult {
+  return {
+    acquirer: acquirer(),
+    invoice: {
+      issue_date: f(TODAY),
+      due_date: none(),
+      currency: f('COP'),
+      reference: none(),
+      notes: none(),
+    },
+    payment: {
+      payment_form: none(),
+      payment_term_days: none(),
+      payment_method_hint: none(),
+    },
+    lines: [line()],
+    totals: { subtotal: null, tax_total: null, total: null, consistent: null },
+    note_applied: null,
+    missing_fields: [],
+    requires_review: [],
+    extraction_notes: null,
+    documents_scanned: 1,
+    ...overrides,
+  };
+}
+
+const ctx = (overrides: Partial<Parameters<typeof planPlatformInvoiceDraft>[1]> = {}) => ({
+  today: TODAY,
+  currentNotes: '',
+  notesLimit: 500,
+  foreignCurrencies: ['USD', 'EUR'],
+  taxes: PLATFORM_TAX_CATALOG,
+  currentItems: [],
+  maxLines: 100,
+  descriptionLimit: 300,
+  ...overrides,
+});
+
+describe('platform-invoice-draft-mapping', () => {
+  describe('vocabulario', () => {
+    it('renombra los controles de la tienda a los de plataforma', () => {
+      expect(toPlatformControl('customer_name')).toBe('external_legal_name');
+      expect(toPlatformControl('customer_municipality_code')).toBe('external_city_code');
+      expect(toPlatformControl('foreign_currency')).toBe('foreign_currency_code');
+      expect(toPlatformControl('issue_date')).toBe('issue_date');
+      expect(toPlatformControl('lines.0.unit_price')).toBe('lines.0.unit_price');
+    });
+
+    it('régimen: código DIAN, vocabulario de tienda y frases del RUT', () => {
+      expect(platformTaxRegimeCode('48')).toBe('48');
+      expect(platformTaxRegimeCode('COMUN')).toBe('48');
+      expect(platformTaxRegimeCode('Responsable de IVA')).toBe('48');
+      expect(platformTaxRegimeCode('GRAN_CONTRIBUYENTE')).toBe('48');
+      expect(platformTaxRegimeCode('SIMPLIFICADO')).toBe('49');
+      expect(platformTaxRegimeCode('No responsable de IVA')).toBe('49');
+      expect(platformTaxRegimeCode('ESPECIAL')).toBe('');
+      expect(platformTaxRegimeCode('')).toBe('');
+    });
+
+    it('régimen desde responsabilidades cuando no se leyó', () => {
+      expect(platformTaxRegimeFromResponsibilities(['O-13', 'O-48'])).toBe('48');
+      expect(platformTaxRegimeFromResponsibilities(['R-99-PN'])).toBe('49');
+      expect(platformTaxRegimeFromResponsibilities(['O-13'])).toBe('');
+    });
+
+    it('medio de pago: los de la lista pasan, las transferencias caen en 42', () => {
+      expect(platformPaymentMeansCode('48')).toBe('48');
+      expect(platformPaymentMeansCode('47')).toBe('42');
+      expect(platformPaymentMeansCode('45')).toBe('42');
+      expect(platformPaymentMeansCode('20')).toBeNull();
+      expect(platformPaymentMeansCode('ZZZ')).toBeNull();
+    });
+  });
+
+  describe('adquiriente', () => {
+    it('vuelca a external_* con DV derivado, persona 1/2, departamento y régimen', () => {
+      const { patch, aiPaths, documentDigits } = draftToPlatformAcquirerPatch(acquirer());
+      expect(documentDigits).toBe(NIT);
+      expect(patch).toEqual(
+        jasmine.objectContaining({
+          external_document_type: '31',
+          external_tax_id: NIT,
+          external_tax_id_dv: NIT_DV,
+          external_person_type: '1',
+          external_legal_name: 'Constructora Andina S.A.S.',
+          external_email: 'compras@andina.co',
+          external_phone: '6015551234',
+          external_address_line: 'Cra 7 # 71-21',
+          external_city_code: '11001',
+          external_city: 'Bogotá',
+          external_department_code: '11',
+          external_tax_regime_code: '48',
+          external_fiscal_responsibilities: ['O-13', 'O-15'],
+        }),
+      );
+      expect(aiPaths).toContain('external_legal_name');
+      expect(aiPaths).toContain('external_tax_regime_code');
+      // El DV se deriva: no es una propuesta de la IA.
+      expect(aiPaths).not.toContain('external_tax_id_dv');
+    });
+
+    it('cédula ⇒ persona natural y sin DV', () => {
+      const { patch } = draftToPlatformAcquirerPatch(
+        acquirer({
+          document_type: f('CC'),
+          document_number: f('1020304050'),
+          verification_digit: none(),
+          person_type: none(),
+        }),
+      );
+      expect(patch['external_document_type']).toBe('13');
+      expect(patch['external_person_type']).toBe('2');
+      expect(patch['external_tax_id_dv']).toBe('');
+    });
+
+    it('acepta el tipo de documento ya en código DIAN', () => {
+      const { patch } = draftToPlatformAcquirerPatch(
+        acquirer({ document_type: f('31'), verification_digit: none() }),
+      );
+      expect(patch['external_document_type']).toBe('31');
+      expect(patch['external_tax_id_dv']).toBe(NIT_DV);
+    });
+
+    it('tipo de documento que la plataforma no ofrece ⇒ revisar, sin escribirlo', () => {
+      const { patch, pendingPaths, unresolved } = draftToPlatformAcquirerPatch(
+        acquirer({ document_type: f('TI'), verification_digit: none() }),
+      );
+      expect(patch['external_document_type']).toBeUndefined();
+      expect(pendingPaths).toContain('external_document_type');
+      expect(unresolved.length).toBe(1);
+    });
+
+    it('régimen ilegible ⇒ se deduce de O-48 / R-99-PN; si no, revisar', () => {
+      const deduced = draftToPlatformAcquirerPatch(
+        acquirer({ tax_regime: f('ESPECIAL'), fiscal_responsibilities: f(['R-99-PN']) }),
+      );
+      expect(deduced.patch['external_tax_regime_code']).toBe('49');
+
+      const unknown = draftToPlatformAcquirerPatch(
+        acquirer({ tax_regime: f('ESPECIAL'), fiscal_responsibilities: none() }),
+      );
+      expect(unknown.patch['external_tax_regime_code']).toBeUndefined();
+      expect(unknown.pendingPaths).toContain('external_tax_regime_code');
+    });
+
+    it('municipio sin código DANE de 5 dígitos no viaja', () => {
+      const { patch } = draftToPlatformAcquirerPatch(
+        acquirer({ municipality_code: f('Bogotá') }),
+      );
+      expect(patch['external_city_code']).toBeUndefined();
+      expect(patch['external_department_code']).toBeUndefined();
+    });
+  });
+
+  describe('cabecera y pago', () => {
+    it('crédito con plazo, transferencia ⇒ 42, divisa renombrada', () => {
+      const out = draftToPlatformInvoicePatch(
+        {
+          invoice: {
+            issue_date: f(TODAY),
+            due_date: none(),
+            currency: f('USD'),
+            reference: f('OC-77'),
+            notes: none(),
+          },
+          payment: {
+            payment_form: f('credit' as const),
+            payment_term_days: f(30),
+            payment_method_hint: f('transferencia Bancolombia'),
+          },
+        },
+        { today: TODAY, currentNotes: '', notesLimit: 500, foreignCurrencies: ['USD'] },
+      );
+      expect(out.patch['payment_form']).toBe('2');
+      expect(out.patch['payment_means_code']).toBe('42');
+      expect(out.patch['declare_foreign']).toBeTrue();
+      expect(out.patch['foreign_currency_code']).toBe('USD');
+      expect(out.patch['use_foreign_currency']).toBeUndefined();
+      expect(out.patch['notes']).toBe('Referencia: OC-77');
+      expect(out.dueDate).toBe('2026-11-13');
+      expect(out.aiPaths).toContain('foreign_currency_code');
+      expect(out.aiPaths).toContain('payment_means_code');
+    });
+
+    it('medio de pago fuera de la lista de plataforma ⇒ no se escribe y se avisa', () => {
+      const out = draftToPlatformInvoicePatch(
+        {
+          invoice: result().invoice,
+          payment: {
+            payment_form: none(),
+            payment_term_days: none(),
+            payment_method_hint: f('cheque'),
+          },
+        },
+        { today: TODAY, currentNotes: '', notesLimit: 500, foreignCurrencies: [] },
+      );
+      expect(out.patch['payment_means_code']).toBeUndefined();
+      expect(out.aiPaths).not.toContain('payment_means_code');
+      expect(out.unresolved.some((u) => u.includes('medio de pago'))).toBeTrue();
+    });
+  });
+
+  describe('plan completo', () => {
+    it('líneas sin catálogo: IVA 19 % del catálogo de plataforma y descuento % → importe', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({
+          lines: [line({ quantity: f(2), unit_price: f(100000), discount_percent: f(10) })],
+        }),
+        ctx(),
+      );
+      expect(plan.replaceLines).toBeTrue();
+      expect(plan.lines.length).toBe(1);
+      const value = plan.lines[0].value;
+      expect(value.discount_amount).toBe(20000);
+      expect(value.taxes.length).toBe(1);
+      expect(value.taxes[0].tax_rate_id).toBe(PLATFORM_TAX_CATALOG[0].id);
+      expect(value.taxes[0].is_inclusive).toBeFalse();
+      // Sin catálogo de productos no se dice «ítem libre» en cada fila.
+      expect(plan.lines[0].mark.note).toBeNull();
+      expect(plan.lines[0].mark.pending).not.toContain('product');
+    });
+
+    it('tarifa sin equivalente ⇒ sin impuesto y por revisar', () => {
+      const plan = planPlatformInvoiceDraft(result({ lines: [line({ tax_rate: f(16) })] }), ctx());
+      expect(plan.lines[0].value.taxes).toEqual([]);
+      expect(plan.lines[0].mark.pending).toContain('taxes');
+      expect(plan.lines[0].mark.note).toContain('16');
+    });
+
+    it('con líneas capturadas agrega al final y respeta el tope', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ lines: [line(), line(), line()] }),
+        ctx({
+          currentItems: [{ description: 'Hecha a mano', unit_price: 5 }, { description: '' }],
+          maxLines: 3,
+        }),
+      );
+      expect(plan.replaceLines).toBeFalse();
+      expect(plan.lines.length).toBe(2);
+      expect(plan.droppedLines).toBe(1);
+      expect(plan.notice.unresolved.some((u) => u.includes('1 línea'))).toBeTrue();
+    });
+
+    it('marcas: lo leído es IA y lo que el backend pide revisar gana', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ requires_review: ['acquirer.address_line', 'lines.0.sku'] }),
+        ctx(),
+      );
+      expect(plan.headerMarks['external_legal_name']).toBe('ai');
+      expect(plan.headerMarks['external_address_line']).toBe('pending');
+      expect(plan.headerMarks['issue_date']).toBe('ai');
+      // `sku` no tiene representación en plataforma: no ensucia el aviso.
+      expect(plan.notice.pending).toEqual(['Dirección fiscal']);
+    });
+
+    it('adquiriente reconocido por el backend viaja en existingAcquirer', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({
+          acquirer: acquirer({
+            existing_acquirer: { kind: 'customer', tenant_id: 4, id: 'customer:4' },
+          }),
+        }),
+        ctx(),
+      );
+      expect(plan.existingAcquirer).toEqual({ kind: 'customer', tenant_id: 4, id: 'customer:4' });
+      expect(plan.hasAcquirer).toBeTrue();
+    });
+
+    it('sin adquiriente leído no se toca el adquiriente', () => {
+      const empty = acquirer({
+        document_type: none(),
+        document_number: none(),
+        verification_digit: none(),
+        name: none(),
+      });
+      const plan = planPlatformInvoiceDraft(result({ acquirer: empty }), ctx());
+      expect(plan.hasAcquirer).toBeFalse();
+      expect(plan.existingAcquirer).toBeNull();
+    });
+  });
+
+  describe('filas', () => {
+    it('una fila con descripción o precio es trabajo del operador', () => {
+      expect(isCapturedPlatformLine({ description: 'x' })).toBeTrue();
+      expect(isCapturedPlatformLine({ unit_price: 1 })).toBeTrue();
+      expect(isCapturedPlatformLine({ description: '  ', unit_price: 0 })).toBeFalse();
+    });
+
+    it('editar un campo suelta su marca; sin nada más, la fila queda sin marca', () => {
+      const mark = { ai: ['description', 'unit_price'], pending: [], note: null };
+      const next = dropPlatformRowMarkField(mark, 'description');
+      expect(next?.ai).toEqual(['unit_price']);
+      expect(dropPlatformRowMarkField(next!, 'unit_price')).toBeNull();
+    });
+  });
+
+  describe('faltantes para emitir', () => {
+    const complete = {
+      external_document_type: '31',
+      external_tax_id: NIT,
+      external_tax_id_dv: NIT_DV,
+      external_legal_name: 'Constructora Andina S.A.S.',
+      external_person_type: '1',
+      external_tax_regime_code: '48',
+      external_email: 'compras@andina.co',
+      external_address_line: 'Cra 7 # 71-21',
+      external_city_code: '11001',
+    };
+
+    it('completo ⇒ nada falta', () => {
+      expect(platformAcquirerMissing(complete)).toEqual([]);
+    });
+
+    it('vacío ⇒ los obligatorios, en orden de la pantalla', () => {
+      const fields = platformAcquirerMissing({}).map((m) => m.field);
+      expect(fields).toEqual([
+        'external_document_type',
+        'external_tax_id',
+        'external_legal_name',
+        'external_person_type',
+        'external_tax_regime_code',
+        'external_email',
+        'external_address_line',
+        'external_city_code',
+      ]);
+    });
+
+    it('correo mal escrito y municipio sin código DANE', () => {
+      const fields = platformAcquirerMissing({
+        ...complete,
+        external_email: 'compras@',
+        external_city_code: 'Bogotá',
+      }).map((m) => m.field);
+      expect(fields).toEqual(['external_email', 'external_city_code']);
+    });
+
+    it('NIT sin DV', () => {
+      const fields = platformAcquirerMissing({ ...complete, external_tax_id_dv: '' }).map(
+        (m) => m.field,
+      );
+      expect(fields).toEqual(['external_tax_id_dv']);
+    });
+  });
+});

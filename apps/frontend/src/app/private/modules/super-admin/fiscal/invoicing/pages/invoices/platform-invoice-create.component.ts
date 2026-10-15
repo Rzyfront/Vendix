@@ -20,9 +20,17 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
-import { Observable, firstValueFrom, of } from 'rxjs';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { catchError, debounceTime, distinctUntilChanged, map, startWith, switchMap } from 'rxjs/operators';
+import { Observable, Subscription, firstValueFrom, of } from 'rxjs';
+import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  map,
+  startWith,
+  switchMap,
+  take,
+} from 'rxjs/operators';
 
 import { environment } from '../../../../../../../../environments/environment';
 import {
@@ -33,7 +41,6 @@ import {
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   AlertBannerComponent,
-  BadgeComponent,
   ButtonComponent,
   DianMunicipalitySelectComponent,
   IconComponent,
@@ -49,6 +56,26 @@ import type { SelectorOption } from '../../../../../../../shared/components/sele
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { AccountCodeSelectComponent } from '../../../../../store/products/components/account-code-select.component';
 import type { InvoiceResolution } from '../../../../../store/invoicing/interfaces/invoice.interface';
+// Reutilizados TAL CUAL de la tienda (Tandas A/B): tarjeta RUES, escáner IA y
+// su mapeo puro. Mismo criterio que `AccountCodeSelectComponent` arriba.
+import {
+  RuesIdentityCardComponent,
+  ruesIdentityToPrefill,
+} from '../../../../../store/customers/components/rues-identity-card/rues-identity-card.component';
+import type { ExternalCustomerLookupResult } from '../../../../../store/customers/models/customer.model';
+import { InvoiceDraftScanModalComponent } from '../../../../../store/invoicing/components/invoice-create/invoice-draft-scan-modal.component';
+import { INVOICE_DRAFT_SCAN_PLATFORM_PATH } from '../../../../../store/invoicing/services/invoice-draft-scanner.service';
+import type { InvoiceDraftScanResult } from '../../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
+import {
+  DRAFT_LOW_CONFIDENCE,
+  draftDocumentDigits,
+} from '../../../../../store/invoicing/utils/invoice-draft-mapping';
+import { CONFIG_LIMITS } from '../../../../../../../core/utils/invoice-profile-config.contract';
+import {
+  FISCAL_RESPONSIBILITIES,
+  FISCAL_RESPONSIBILITY_LABELS,
+} from '../../../../../../../shared/constants/fiscal-responsibilities.constants';
+import { getDianSchemeIdForDocumentType } from '../../../../../../../shared/constants/dian-document-types.constants';
 
 // Secciones Compartidas
 import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
@@ -69,12 +96,19 @@ import {
   RetencionesRowPaths,
   TaxBreakdownRow,
   DEFAULT_UNIT_CODE,
+  InvoiceFieldMark,
+  InvoiceFieldMarks,
+  LineasRowMark,
+  invoiceFieldMarkClass,
   PLATFORM_FOREIGN_CURRENCY_OPTIONS,
   PLATFORM_TAX_CATALOG,
   UNIT_CODE_OPTIONS,
 } from '../../../../../../../shared/components/invoice-sections';
 
-import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
+import {
+  TenantPickerComponent,
+  acquirerKindLabel,
+} from '../../components/tenant-picker/tenant-picker.component';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   DOCUMENT_TYPE_OPTIONS,
@@ -87,6 +121,18 @@ import type {
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformAcquirer } from '../../state';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
+import {
+  PlatformAcquirerMissingField,
+  PlatformInvoiceDraftNotice,
+  PlatformInvoiceDraftPlan,
+  PLATFORM_DOCUMENT_TYPE_CODES,
+  dropPlatformRowMarkField,
+  isCapturedPlatformLine,
+  isWeakDraftField,
+  planPlatformInvoiceDraft,
+  platformAcquirerMissing,
+  platformTaxRegimeFromResponsibilities,
+} from '../../utils/platform-invoice-draft-mapping';
 
 /**
  * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
@@ -203,6 +249,38 @@ interface PlatformInvoiceTotalsPreview {
   net_after_withholdings: string;
 }
 
+/** Tope de líneas del `FormArray` `items` (el mismo de la tienda). */
+const PLATFORM_INVOICE_MAX_LINES = 100;
+
+/** Campos del adquiriente que viven plegados en «Más datos». */
+const ACQUIRER_MORE_FIELDS: ReadonlySet<string> = new Set([
+  'external_phone',
+  'external_department_code',
+  'external_fiscal_responsibilities',
+]);
+
+/**
+ * Algo que impide emitir, con dónde está: la sección a desplegar y el id del
+ * nodo al que se lleva el foco.
+ */
+export interface PlatformEmitMissingItem {
+  key: string;
+  label: string;
+  reason: string;
+  section: string;
+  target: string;
+  /** Control `external_*` cuando es un dato del adquiriente. */
+  field?: string;
+}
+
+/** Respuesta del buscador de destinatarios (sobre anidado o arreglo directo). */
+function unwrapAcquirerRows(res: unknown): PlatformAcquirer[] {
+  const payload = (res as { data?: unknown } | null)?.data ?? res;
+  if (Array.isArray(payload)) return payload as PlatformAcquirer[];
+  const nested = (payload as { data?: unknown } | null)?.data;
+  return Array.isArray(nested) ? (nested as PlatformAcquirer[]) : [];
+}
+
 @Component({
   selector: 'app-platform-invoice-create',
   standalone: true,
@@ -213,7 +291,6 @@ interface PlatformInvoiceTotalsPreview {
     ReactiveFormsModule,
     RouterLink,
     AlertBannerComponent,
-    BadgeComponent,
     ButtonComponent,
     DianMunicipalitySelectComponent,
     IconComponent,
@@ -221,6 +298,8 @@ interface PlatformInvoiceTotalsPreview {
     ModalComponent,
     SelectorComponent,
     TenantPickerComponent,
+    RuesIdentityCardComponent,
+    InvoiceDraftScanModalComponent,
     VendixCurrencyPipe,
     AccountCodeSelectComponent,
     PlatformSectionWrapperComponent,
@@ -264,19 +343,6 @@ export class PlatformInvoiceCreateComponent implements OnInit {
    */
   readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
-  /**
-   * La DIAN rechaza el documento sin identificacion del adquiriente. Es lo
-   * unico que se marca como bloqueante en el bloque fiscal; el resto (correo,
-   * telefono, direccion) el anexo lo admite ausente.
-   */
-  readonly acquirerFiscalIncomplete = computed(() => {
-    const v = this.rawValue();
-    return (
-      !String(v['external_legal_name'] ?? '').trim() ||
-      !String(v['external_tax_id'] ?? '').trim()
-    );
-  });
-
   // ── Formulario Principal ────────────────────────────────────────
   readonly invoiceForm = this.fb.group({
     profile_id: [null as number | null],
@@ -303,13 +369,18 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     external_tax_id_dv: [''],
     external_document_type: ['31'], // 31 = NIT, 13 = CC, 22 = CE
     external_person_type: ['1'], // 1 = Jurídica, 2 = Natural
-    external_tax_regime_code: ['48'], // 48 = Resp IVA, 49 = No resp
+    // 48 = Resp IVA, 49 = No resp. Vacío hasta que el operador o la ficha lo
+    // digan: un '48' por omisión declaraba responsable de IVA a cualquiera.
+    external_tax_regime_code: [''],
     external_email: [''],
     external_phone: [''],
     external_address_line: [''],
-    external_city: ['Bogotá, D.C.'],
-    external_city_code: ['11001'],
-    external_department_code: ['11'],
+    // Sin municipio por omisión: Bogotá «de fábrica» pasaba por dato real.
+    external_city: [''],
+    external_city_code: [''],
+    external_department_code: [''],
+    // Códigos del RUT (casilla 53). Viajan como `fiscal_responsibilities`.
+    external_fiscal_responsibilities: [[] as string[]],
 
     // Contabilidad
     counterpart_account_code: [null as string | null],
@@ -695,7 +766,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
   // ── Estado de UI ────────────────────────────────────────────────
   readonly sectionExpanded = signal<Record<string, boolean>>({
-    perfil: true,
+    // El perfil es un chip OPCIONAL sobre el resumen: plegado por omisión.
+    perfil: false,
     documento: true,
     adquiriente: true,
     lineas: true,
@@ -724,19 +796,331 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   /** Lo mismo, para la previsualización: es otra respuesta y otro momento. */
   readonly previewBlockers = signal<ApiBlocker[]>([]);
 
+
+  // ── Adquiriente: resumen, faltantes y búsqueda por NIT ──────────
+
+  /** Catálogo del RUT (casilla 53), el mismo que usa la tienda. */
+  readonly fiscalResponsibilities = FISCAL_RESPONSIBILITIES;
+  readonly responsibilityLabels: Record<string, string> = FISCAL_RESPONSIBILITY_LABELS;
+  readonly kindLabel = acquirerKindLabel;
+
+  /**
+   * El operador pidió ver los campos de un destinatario completo («Editar» del
+   * resumen). Un destinatario con faltantes abre la edición solo.
+   */
+  readonly acquirerEditing = signal(false);
+  /** «Más datos» (teléfono, departamento, responsabilidades) desplegado. */
+  readonly acquirerMoreOpen = signal(false);
+
+  /** Cliente nuevo, paso 1: documento a buscar. */
+  readonly externalQuery = signal('');
+  /** Documento (sólo dígitos) de la última búsqueda lanzada. */
+  readonly externalSearchedDoc = signal('');
+  readonly externalSearching = signal(false);
+  /** Destinatario ya registrado en la plataforma con ese documento. */
+  readonly externalMatch = signal<PlatformAcquirer | null>(null);
+  /** Consulta a RUES / fuentes públicas del documento buscado. */
+  readonly externalLookup = signal<ExternalCustomerLookupResult | null>(null);
+  /** Cliente nuevo, paso 2: el formulario de datos fiscales a la vista. */
+  readonly externalFormOpen = signal(false);
+
+  /**
+   * Lo que le falta al adquiriente PARA EMITIR, ahora mismo. Misma función pura
+   * para el borde rojo, el «Requerido para emitir» de cada campo, la lista
+   * junto al botón y el bloqueo de «Emitir».
+   */
+  readonly acquirerMissing = computed<PlatformAcquirerMissingField[]>(() => {
+    if (this.acquirerMode() === 'system' && !this.selectedTenant()) return [];
+    return platformAcquirerMissing(this.rawValue());
+  });
+
+  /** «correo para el envío, municipio (dane)» para la línea bajo el título. */
+  readonly acquirerMissingLabels = computed<string>(() =>
+    this.acquirerMissing()
+      .map((missing) => missing.label.charAt(0).toLowerCase() + missing.label.slice(1))
+      .join(', '),
+  );
+
+  private readonly acquirerMissingByField = computed<Map<string, PlatformAcquirerMissingField>>(
+    () => new Map(this.acquirerMissing().map((missing) => [missing.field, missing])),
+  );
+
+  /** Borde rojo del contenedor de un campo que falta para emitir. */
+  private static readonly MISSING_FIELD_CLASS =
+    '[&_input]:!border-[var(--color-destructive)] [&_select]:!border-[var(--color-destructive)] [&_textarea]:!border-[var(--color-destructive)] [&_[role=button]]:!border-[var(--color-destructive)]';
+
+  /** «Requerido para emitir» (o el motivo) junto al campo; vacío si no falta. */
+  missingHint(field: string): string {
+    const missing = this.acquirerMissingByField().get(field);
+    if (!missing) return '';
+    return missing.reason.startsWith('El correo no')
+      ? missing.reason
+      : 'Requerido para emitir';
+  }
+
+  /**
+   * Borde del campo del adquiriente: el rojo de «falta para emitir» manda
+   * sobre la marca del borrador IA; sin faltante, la marca «IA»/«Revisar».
+   */
+  acquirerFieldClass(field: string): string {
+    if (this.acquirerMissingByField().has(field)) {
+      return PlatformInvoiceCreateComponent.MISSING_FIELD_CLASS;
+    }
+    return invoiceFieldMarkClass(this.draftHeaderMarks()[field]);
+  }
+
+  /** ¿El documento del adquiriente es NIT? Sólo entonces hay DV y se pregunta la persona. */
+  readonly isNitAcquirer = computed(() => this.rawValue()['external_document_type'] === '31');
+
+  /**
+   * Resumen compacto de solo lectura: destinatario elegido, completo y sin
+   * «Editar» pulsado.
+   */
+  readonly showAcquirerSummary = computed<boolean>(
+    () =>
+      this.acquirerMode() === 'system' &&
+      !!this.selectedTenant() &&
+      !this.acquirerEditing() &&
+      this.acquirerMissing().length === 0,
+  );
+
+  /** Lo que pinta el resumen compacto del adquiriente. */
+  readonly acquirerCard = computed(() => {
+    const raw = this.rawValue();
+    const value = (key: string): string => String(raw[key] ?? '').trim();
+    const docLabel =
+      this.documentTypeOptions
+        .find((o) => String(o.value) === value('external_document_type'))
+        ?.label.replace(/\s*\(.*\)$/, '') ?? '';
+    const dv = value('external_tax_id_dv');
+    const taxId = value('external_tax_id');
+    const document = taxId
+      ? `${docLabel ? docLabel + ' ' : ''}${taxId}${this.isNitAcquirer() && dv ? '-' + dv : ''}`
+      : 'Sin documento';
+    const person = value('external_person_type') === '2' ? 'Persona natural' : 'Persona jurídica';
+    const regime =
+      this.taxRegimeOptions.find((o) => String(o.value) === value('external_tax_regime_code'))
+        ?.label ?? 'Régimen sin declarar';
+    const code = value('external_city_code');
+    const city = value('external_city');
+    const responsibilities = Array.isArray(raw['external_fiscal_responsibilities'])
+      ? (raw['external_fiscal_responsibilities'] as string[])
+      : [];
+    const rows: Array<{ label: string; value: string }> = [
+      { label: 'Régimen', value: `${regime} · ${person}` },
+      { label: 'Correo', value: value('external_email') || '—' },
+      { label: 'Teléfono', value: value('external_phone') || '—' },
+      { label: 'Dirección', value: value('external_address_line') || '—' },
+      { label: 'Municipio', value: city ? `${city}${code ? ' (' + code + ')' : ''}` : code || '—' },
+      { label: 'Responsabilidades', value: responsibilities.join(', ') || '—' },
+    ];
+    return { name: value('external_legal_name'), document, rows };
+  });
+
+  hasResponsibility(code: string): boolean {
+    const current = this.rawValue()['external_fiscal_responsibilities'];
+    return Array.isArray(current) && current.includes(code);
+  }
+
+  toggleResponsibility(code: string): void {
+    const control = this.invoiceForm.get('external_fiscal_responsibilities');
+    if (!control) return;
+    const current: string[] = Array.isArray(control.value) ? [...control.value] : [];
+    const next = current.includes(code)
+      ? current.filter((entry) => entry !== code)
+      : [...current, code];
+    control.setValue(next);
+    control.markAsDirty();
+  }
+
+  // ── Lo que impide emitir ────────────────────────────────────────
+
+  /**
+   * TODO lo que falta para emitir, con su sección y su nodo. Se pinta como
+   * lista junto a «Emitir» y es lo que el botón revisa antes del POST: lo que
+   * se marca en rojo y lo que bloquea son la misma lista.
+   */
+  readonly emitMissing = computed<PlatformEmitMissingItem[]>(() => {
+    const raw = this.rawValue();
+    const out: PlatformEmitMissingItem[] = [];
+    if (!raw['resolution_id']) {
+      out.push({
+        key: 'resolution_id',
+        label: 'Resolución DIAN',
+        reason: 'Elige la resolución con la que se numera la factura.',
+        section: 'documento',
+        target: 'platform-invoice-documento',
+      });
+    }
+    if (this.acquirerMode() === 'system' && !this.selectedTenant()) {
+      out.push({
+        key: 'acquirer',
+        label: 'Destinatario',
+        reason: 'Elige una tienda, organización, usuario o cliente, o pasa a «Cliente nuevo».',
+        section: 'adquiriente',
+        target: 'platform-invoice-acquirer',
+      });
+    } else {
+      for (const missing of this.acquirerMissing()) {
+        out.push({
+          key: missing.field,
+          label: missing.label,
+          reason: missing.reason,
+          section: 'adquiriente',
+          target: `pf-${missing.field}`,
+          field: missing.field,
+        });
+      }
+    }
+    const items = (raw['items'] || []) as any[];
+    if (items.length === 0) {
+      out.push({
+        key: 'items',
+        label: 'Al menos una línea',
+        reason: 'La factura necesita al menos una línea.',
+        section: 'lineas',
+        target: 'platform-invoice-lineas',
+      });
+    }
+    items.forEach((item, i) => {
+      if (!String(item?.description ?? '').trim()) {
+        out.push({
+          key: `items.${i}.description`,
+          label: `Línea ${i + 1}: descripción`,
+          reason: 'La descripción es obligatoria.',
+          section: 'lineas',
+          target: 'platform-invoice-lineas',
+        });
+      }
+      if (!(Number(item?.quantity) > 0)) {
+        out.push({
+          key: `items.${i}.quantity`,
+          label: `Línea ${i + 1}: cantidad`,
+          reason: 'La cantidad debe ser mayor que cero.',
+          section: 'lineas',
+          target: 'platform-invoice-lineas',
+        });
+      }
+    });
+    for (const issue of this.blockingIssues()) {
+      const isLine = issue.startsWith('Línea');
+      out.push({
+        key: issue,
+        label: issue,
+        reason: issue,
+        section: isLine ? 'lineas' : 'documento',
+        target: isLine ? 'platform-invoice-lineas' : 'platform-invoice-documento',
+      });
+    }
+    return out;
+  });
+
+  /**
+   * Lleva al operador al faltante: despliega su sección (y la edición del
+   * adquiriente o «Más datos» si hace falta), desplaza y enfoca el control.
+   */
+  focusMissing(item: PlatformEmitMissingItem): void {
+    this.toggleSection(item.section, true);
+    if (item.section === 'adquiriente' && item.field) {
+      if (this.acquirerMode() === 'external') this.externalFormOpen.set(true);
+      else this.acquirerEditing.set(true);
+      if (ACQUIRER_MORE_FIELDS.has(item.field)) this.acquirerMoreOpen.set(true);
+    }
+    if (typeof document === 'undefined') return;
+    setTimeout(() => {
+      const node = document.getElementById(item.target);
+      if (!node) return;
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const focusable = node.matches('input, select, textarea, button')
+        ? node
+        : node.querySelector<HTMLElement>(
+            'input:not([disabled]):not([readonly]), select, textarea, [role=button], button',
+          );
+      focusable?.focus({ preventScroll: true });
+    }, 80);
+  }
+
+  // ── Perfil (chip opcional del panel lateral) ─────────────────────
+
+  /** `true` si el perfil lo aplicó la pantalla sola (predeterminado / único). */
+  readonly profileAutoSelected = signal(false);
+
+  readonly selectedProfile = computed(() => {
+    const id = Number(this.rawValue()['profile_id']);
+    return this.profilesForOperationType().find((p) => p.id === id) ?? null;
+  });
+
+  readonly profileSummary = computed(() => {
+    if (this.store.loadingProfiles() && this.profilesForOperationType().length === 0) {
+      return 'Cargando…';
+    }
+    if (this.profilesForOperationType().length === 0) return 'Sin perfiles';
+    return this.selectedProfile()?.name ?? 'Ninguno';
+  });
+
+  /**
+   * Si el operador no toca el chip, se aplica el perfil PREDETERMINADO (o el
+   * único activo), igual que en la tienda. Una sola vez, y sin pisar lo que
+   * el operador ya haya escrito (ver `applyProfileConfig`).
+   */
+  private profileAutoApplyDone = false;
+  private readonly autoApplyDefaultProfile = effect(() => {
+    const profiles = this.profilesForOperationType();
+    if (this.profileAutoApplyDone || profiles.length === 0) return;
+    untracked(() => {
+      this.profileAutoApplyDone = true;
+      if (this.invoiceForm.get('profile_id')?.value) return;
+      const pick =
+        profiles.find((p) => p.is_default) ?? (profiles.length === 1 ? profiles[0] : null);
+      if (pick) this.applyProfile(pick.id, { auto: true });
+    });
+  });
+
+  // ── Borrador IA («Cargar documentos») ────────────────────────────
+
+  readonly draftScanEndpoint = INVOICE_DRAFT_SCAN_PLATFORM_PATH;
+  readonly draftScanOpen = signal(false);
+  /** Aviso tras aplicar un borrador; `null` = cerrado o sin borrador. */
+  readonly draftNotice = signal<PlatformInvoiceDraftNotice | null>(null);
+  /** `true` mientras se resuelve el adquiriente del borrador. */
+  readonly draftAcquirerResolving = signal(false);
+  /** Marcas «IA»/«Revisar» de cabecera y adquiriente, por nombre de control. */
+  readonly draftHeaderMarks = signal<InvoiceFieldMarks>({});
+  /** Marcas de fila por `row_uid`: borrar una línea no corre la marca a la vecina. */
+  private readonly draftRowMarks = signal<ReadonlyMap<string, LineasRowMark>>(new Map());
+  readonly lineasRowMarks = computed<readonly (LineasRowMark | null)[]>(() => {
+    const marks = this.draftRowMarks();
+    if (marks.size === 0) return [];
+    return this.itemControls().map((row) => marks.get(String(row.get('row_uid')?.value)) ?? null);
+  });
+  /** Suscripciones que sueltan una marca cuando el operador edita el campo. */
+  private draftMarkSubs = new Subscription();
+  /** Turno del último borrador: una respuesta asíncrona vieja se descarta. */
+  private draftApplyToken = 0;
+
   ngOnInit() {
     this.store.loadResolutions();
     this.store.loadProfiles();
     this.loadWithholdingConcepts();
 
-    // Auto-cálculo del DV cuando se escribe el NIT externo
+    this.destroyRef.onDestroy(() => this.draftMarkSubs.unsubscribe());
+
+    // El DV NUNCA se digita: se deriva del número con el módulo 11 de la DIAN
+    // mientras se teclea, y sólo existe cuando el documento es NIT.
     this.invoiceForm
       .get('external_tax_id')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((nit) => {
-        if (nit && this.invoiceForm.get('external_document_type')?.value === '31') {
-          const dv = calculateDianDv(nit);
-          this.invoiceForm.patchValue({ external_tax_id_dv: dv }, { emitEvent: false });
+      .subscribe(() => this.syncDv());
+
+    // Cambiar el tipo de documento recalcula (o vacía) el DV, y un documento
+    // que no es NIT es SIEMPRE persona natural.
+    this.invoiceForm
+      .get('external_document_type')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => {
+        this.syncDv();
+        if (type && type !== '31' && this.invoiceForm.get('external_person_type')?.value !== '2') {
+          this.invoiceForm.get('external_person_type')?.setValue('2');
         }
       });
 
@@ -1048,17 +1432,41 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     };
   }
 
+  /**
+   * DV derivado del número (módulo 11) cuando el documento es NIT; vacío si
+   * no lo es. Se escribe sin eventos para no volver a disparar el cálculo.
+   */
+  private syncDv(): void {
+    const type = this.invoiceForm.get('external_document_type')?.value;
+    const taxId = String(this.invoiceForm.get('external_tax_id')?.value ?? '');
+    const dv = type === '31' && taxId.trim() ? calculateDianDv(taxId) : '';
+    if ((this.invoiceForm.get('external_tax_id_dv')?.value ?? '') !== dv) {
+      // Con eventos: `rawValue` deriva de `valueChanges`.
+      this.invoiceForm.get('external_tax_id_dv')?.setValue(dv);
+    }
+  }
+
   // ── Conmutador de Modo de Adquiriente ────────────────────────────
   setAcquirerMode(mode: 'system' | 'external'): void {
     this.acquirerMode.set(mode);
-    if (mode === 'external') {
-      this.invoiceForm.patchValue({ customer_tenant: null });
-      this.selectedTenant.set(null);
-    }
+    this.invoiceForm.patchValue({ customer_tenant: null });
+    this.selectedTenant.set(null);
+    this.acquirerEditing.set(false);
+    this.acquirerMoreOpen.set(false);
+    this.resetExternalSearch();
     // Cambiar de pestaña limpia los campos fiscales en los dos sentidos: los
     // datos del tenant anterior no pueden quedar colgados como si fueran los
     // que tecleó el operador para un cliente externo, ni al revés.
     this.resetAcquirerFiscalFields();
+  }
+
+  private resetExternalSearch(): void {
+    this.externalQuery.set('');
+    this.externalSearchedDoc.set('');
+    this.externalSearching.set(false);
+    this.externalMatch.set(null);
+    this.externalLookup.set(null);
+    this.externalFormOpen.set(false);
   }
 
   // ── Adquiriente del Sistema ──────────────────────────────────────
@@ -1077,22 +1485,43 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     // moria en el backend con «Captura los campos faltantes en el formulario
     // antes de emitir» y en el formulario no habia ningun campo que capturar.
     // Ahora se ven, se pueden completar y se mandan como override.
-    const personType = tenant.person_type === '2' ? '2' : '1';
+    const documentType = this.normalizeDocumentType(tenant.document_type);
+    const personType =
+      tenant.person_type === '2' || documentType !== '31' ? '2' : '1';
     const cityCode = tenant.address?.city_code || '';
+    const responsibilities = Array.isArray(tenant.fiscal_responsibilities)
+      ? [...tenant.fiscal_responsibilities]
+      : [];
     this.invoiceForm.patchValue({
       external_legal_name: tenant.legal_name || tenant.name || '',
       external_tax_id: tenant.tax_id ?? '',
       external_tax_id_dv: tenant.tax_id_dv ?? '',
-      external_document_type: this.normalizeDocumentType(tenant.document_type),
+      external_document_type: documentType,
       external_person_type: personType,
-      external_tax_regime_code: tenant.tax_regime_code || '48',
+      // Sin régimen en la ficha se deduce del RUT (O-48 / R-99-PN); si
+      // tampoco, queda vacío y se marca como faltante en vez de inventarlo.
+      external_tax_regime_code:
+        tenant.tax_regime_code ||
+        platformTaxRegimeFromResponsibilities(responsibilities) ||
+        '',
       external_email: tenant.email ?? '',
       external_phone: tenant.phone ?? '',
       external_address_line: tenant.address?.line ?? '',
       external_city: tenant.address?.city ?? '',
       external_city_code: cityCode,
-      external_department_code: tenant.address?.department_code || '11',
+      external_department_code:
+        tenant.address?.department_code || (cityCode ? cityCode.slice(0, 2) : ''),
+      external_fiscal_responsibilities: responsibilities,
     });
+    this.syncDv();
+
+    // Resumen compacto si está completo; si falta algo para emitir, la
+    // edición se abre sola con los faltantes en rojo.
+    this.acquirerMoreOpen.set(false);
+    this.acquirerEditing.set(
+      platformAcquirerMissing(this.invoiceForm.getRawValue() as Record<string, unknown>)
+        .length > 0,
+    );
 
     if (!cityCode && tenant.address?.city && tenant.address?.department_code) {
       this.dianLookup
@@ -1125,6 +1554,165 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     }
   }
 
+  // ── Cliente nuevo: búsqueda por NIT → plataforma → RUES ─────────
+
+  onExternalQuery(event: Event): void {
+    this.externalQuery.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  /**
+   * Paso 1 del cliente nuevo. Primero los destinatarios YA registrados en la
+   * plataforma (tiendas, organizaciones, usuarios y clientes de facturas
+   * anteriores) con coincidencia EXACTA de documento; si no hay, RUES y
+   * fuentes públicas. Sin nada, el formulario se abre con el documento.
+   */
+  searchExternalDocument(): void {
+    const digits = draftDocumentDigits(this.externalQuery());
+    if (digits.length < 5) {
+      this.toast.warning('Escribe el NIT o documento del cliente (mínimo 5 dígitos).');
+      return;
+    }
+    this.externalSearchedDoc.set(digits);
+    this.externalSearching.set(true);
+    this.externalMatch.set(null);
+    this.externalLookup.set(null);
+
+    this.findPlatformAcquirerByDocument(digits)
+      .pipe(
+        switchMap((match) =>
+          match
+            ? of({ match, lookup: null as ExternalCustomerLookupResult | null })
+            : this.lookupExternalIdentity(digits).pipe(map((lookup) => ({ match: null, lookup }))),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ match, lookup }) => {
+        // Respuesta rancia: el operador lanzó otra búsqueda.
+        if (this.externalSearchedDoc() !== digits) return;
+        this.externalSearching.set(false);
+        this.externalMatch.set(match);
+        this.externalLookup.set(lookup);
+        if (!match && !(lookup?.found && lookup.identity)) {
+          this.openExternalForm(digits);
+        }
+      });
+  }
+
+  /**
+   * Destinatario de la plataforma con ESE documento (sólo dígitos, sin DV).
+   * `null` si no hay o si el buscador falla: la búsqueda sigue hacia RUES.
+   */
+  private findPlatformAcquirerByDocument(
+    digits: string,
+    kind?: string,
+  ): Observable<PlatformAcquirer | null> {
+    let params = new HttpParams().set('q', digits);
+    if (kind) params = params.set('kind', kind);
+    return this.http
+      .get<unknown>(`${environment.apiUrl}/superadmin/subscriptions/fiscal/customers/search`, {
+        params,
+      })
+      .pipe(
+        map(
+          (res) =>
+            unwrapAcquirerRows(res).find(
+              (row) => draftDocumentDigits(row.tax_id) === digits,
+            ) ?? null,
+        ),
+        catchError(() => of(null)),
+      );
+  }
+
+  /**
+   * RUES / fuentes públicas por documento. Misma forma que
+   * `CustomersService.lookupExternalByDocument` de la tienda y, como aquel,
+   * nunca lanza: un fallo es `{ found: false, unavailable: true }`.
+   */
+  private lookupExternalIdentity(digits: string): Observable<ExternalCustomerLookupResult> {
+    const params = new HttpParams().set('document_number', digits);
+    return this.http
+      .get<any>(
+        `${environment.apiUrl}/superadmin/subscriptions/fiscal/customers/lookup/external`,
+        { params },
+      )
+      .pipe(
+        map((response): ExternalCustomerLookupResult => {
+          const data = response?.data ?? response;
+          if (!data || typeof data.found !== 'boolean') {
+            return { found: false, unavailable: true };
+          }
+          return data as ExternalCustomerLookupResult;
+        }),
+        catchError(() => of<ExternalCustomerLookupResult>({ found: false, unavailable: true })),
+      );
+  }
+
+  /** «Usar este»: el documento ya es de un destinatario de la plataforma. */
+  useExternalMatch(): void {
+    const match = this.externalMatch();
+    if (!match) return;
+    this.setAcquirerMode('system');
+    this.onTenantPicked(match);
+  }
+
+  /** «Es otro»: se ignora la coincidencia y se consulta RUES. */
+  dismissExternalMatch(): void {
+    const digits = this.externalSearchedDoc();
+    this.externalMatch.set(null);
+    if (!digits) return;
+    this.externalSearching.set(true);
+    this.lookupExternalIdentity(digits)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((lookup) => {
+        if (this.externalSearchedDoc() !== digits) return;
+        this.externalSearching.set(false);
+        this.externalLookup.set(lookup);
+        if (!(lookup.found && lookup.identity)) this.openExternalForm(digits);
+      });
+  }
+
+  /**
+   * «Crear con estos datos» de la tarjeta RUES: rellena la identidad AQUÍ y
+   * abre el formulario para lo que la DIAN exige y RUES no trae (régimen,
+   * correo, dirección y municipio), que queda marcado en rojo.
+   */
+  onUseRuesIdentity(): void {
+    const identity = this.externalLookup()?.identity;
+    if (!identity) return;
+    const prefill = ruesIdentityToPrefill(identity);
+    const name =
+      prefill.legal_name ||
+      [prefill.first_name, prefill.last_name].filter(Boolean).join(' ');
+    const code = getDianSchemeIdForDocumentType(identity.document_type);
+    this.invoiceForm.patchValue({
+      external_document_type: PLATFORM_DOCUMENT_TYPE_CODES.includes(code) ? code : '31',
+      external_tax_id: draftDocumentDigits(identity.document_number) || this.externalSearchedDoc(),
+      external_person_type: identity.person_type === 'NATURAL' ? '2' : '1',
+      external_legal_name: name ?? '',
+    });
+    this.syncDv();
+    this.externalLookup.set(null);
+    this.externalFormOpen.set(true);
+  }
+
+  /** «Crear manualmente» / sin coincidencias: formulario con el documento. */
+  openExternalForm(digits?: string): void {
+    const doc = digits ?? draftDocumentDigits(this.externalQuery());
+    if (doc && !String(this.invoiceForm.get('external_tax_id')?.value ?? '').trim()) {
+      this.invoiceForm.patchValue({ external_tax_id: doc });
+      this.syncDv();
+    }
+    this.externalLookup.set(null);
+    this.externalFormOpen.set(true);
+  }
+
+  /** «Buscar otro documento»: vuelve al paso 1 con los campos vacíos. */
+  restartExternalSearch(): void {
+    this.resetExternalSearch();
+    this.acquirerMoreOpen.set(false);
+    this.resetAcquirerFiscalFields();
+  }
+
   /**
    * `document_type` llega de la base como codigo DIAN ('31') o como etiqueta
    * ('NIT', 'CC'). El selector del formulario trabaja con codigos, asi que una
@@ -1154,13 +1742,14 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       external_tax_id_dv: '',
       external_document_type: '31',
       external_person_type: '1',
-      external_tax_regime_code: '48',
+      external_tax_regime_code: '',
       external_email: '',
       external_phone: '',
       external_address_line: '',
       external_city: '',
       external_city_code: '',
-      external_department_code: '11',
+      external_department_code: '',
+      external_fiscal_responsibilities: [],
     });
   }
 
@@ -1276,7 +1865,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       .filter(
         (p) =>
           p.operation_type ===
-          PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
+            PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD &&
+          p.state !== 'inactive',
       ),
   );
 
@@ -1287,9 +1877,11 @@ export class PlatformInvoiceCreateComponent implements OnInit {
    * Por eso el perfil se aplica en dos tiempos: `profile_id` de inmediato desde
    * la fila del listado, y el resto del snapshot cuando llega el detalle.
    */
-  applyProfile(profileId: number): void {
+  applyProfile(profileId: number, opts: { auto?: boolean } = {}): void {
     const p = this.store.profiles().find((x) => x.id === profileId);
     if (!p) return;
+    const auto = opts.auto === true;
+    this.profileAutoSelected.set(auto);
 
     this.invoiceForm.patchValue({ profile_id: p.id });
 
@@ -1298,9 +1890,11 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (detail) => {
+          // Si el operador eligió otro perfil mientras llegaba éste, manda él.
+          if (Number(this.invoiceForm.get('profile_id')?.value) !== p.id) return;
           const cfg = detail.current_config as Record<string, any> | null;
-          if (cfg) this.applyProfileConfig(cfg);
-          this.toast.success(`Perfil «${p.name}» aplicado correctamente.`);
+          if (cfg) this.applyProfileConfig(cfg, auto);
+          if (!auto) this.toast.success(`Perfil «${p.name}» aplicado correctamente.`);
         },
         error: () => {
           this.toast.error(
@@ -1323,7 +1917,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
    * campo, incluida la resolución DIAN, que es justamente lo que se fija en el
    * perfil para no tener que elegirla en cada emisión.
    */
-  private applyProfileConfig(cfg: Record<string, any>): void {
+  private applyProfileConfig(cfg: Record<string, any>, auto = false): void {
     const dian = (cfg['dian'] ?? {}) as Record<string, any>;
     const general = (cfg['general'] ?? {}) as Record<string, any>;
     const currency = (cfg['currency'] ?? {}) as Record<string, any>;
@@ -1345,12 +1939,22 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       patch['foreign_currency_code'] = currency['code'];
     }
 
+    // Aplicado SOLO (perfil predeterminado al cargar): no pisa lo que el
+    // operador ya escribió. Un control tocado a mano queda `dirty`.
+    if (auto) {
+      for (const key of Object.keys(patch)) {
+        if (this.invoiceForm.get(key)?.dirty) delete patch[key];
+      }
+    }
+
     if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
 
     // `taxes` y `withholdings` viajan como `{ rules: [...] }` — es la forma
     // canónica de `invoice-profile-config.contract`. Se acepta también el
     // arreglo suelto por snapshots viejos.
-    this.applyProfileWithholdings(this.configRules(cfg['withholdings']));
+    if (!(auto && this.withholdingsArray.length > 0)) {
+      this.applyProfileWithholdings(this.configRules(cfg['withholdings']));
+    }
     this.applyProfileModelLines(cfg['model_lines'], this.configRules(cfg['taxes']));
   }
 
@@ -1446,6 +2050,332 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
   clearProfile(): void {
     this.invoiceForm.patchValue({ profile_id: null });
+    this.profileAutoSelected.set(false);
+  }
+
+  // ── Borrador IA («Cargar documentos») ───────────────────────────
+
+  /**
+   * Vuelca el borrador del escáner al formulario. NADA se emite ni se crea:
+   * el cliente nuevo viaja como `kind: 'external'` al emitir y la factura
+   * sale por el botón de siempre.
+   *
+   * Orden fijo: cabecera (forma de pago → vencimiento, porque la forma de
+   * pago reescribe el validador del vencimiento), líneas, marcas, aviso y, al
+   * final, el adquiriente, que es asíncrono y se descarta si entretanto llega
+   * otro borrador.
+   */
+  onDraftScanned(result: InvoiceDraftScanResult): void {
+    this.clearDraftMarks();
+    this.draftApplyToken += 1;
+    const token = this.draftApplyToken;
+    const raw = this.invoiceForm.getRawValue() as Record<string, unknown>;
+    const plan = planPlatformInvoiceDraft(result, {
+      today: toLocalDateString(),
+      currentNotes: String(raw['notes'] ?? ''),
+      notesLimit: CONFIG_LIMITS.header_note,
+      foreignCurrencies: this.currencyOptions.map((option) => String(option.value)),
+      taxes: PLATFORM_TAX_CATALOG,
+      currentItems: (Array.isArray(raw['items']) ? raw['items'] : []) as {
+        description?: unknown;
+        unit_price?: unknown;
+      }[],
+      maxLines: PLATFORM_INVOICE_MAX_LINES,
+      descriptionLimit: CONFIG_LIMITS.line_description,
+    });
+
+    // Cabecera y pago.
+    if (Object.keys(plan.invoice.patch).length > 0) {
+      this.invoiceForm.patchValue(plan.invoice.patch);
+    }
+    if (plan.invoice.dueDate) {
+      this.invoiceForm.get('due_date')?.setValue(plan.invoice.dueDate);
+    }
+    if (plan.invoice.patch['declare_foreign'] === true) {
+      this.toggleSection('divisa', true);
+    }
+
+    // Líneas.
+    const rowMarks = this.applyDraftLines(plan);
+
+    // Marcas. Las del adquiriente esperan a saber si es un destinatario ya
+    // registrado (sus datos vienen de la ficha, no de la IA) o uno nuevo.
+    const documentMarks: Record<string, InvoiceFieldMark> = {};
+    for (const [path, mark] of Object.entries(plan.headerMarks)) {
+      if (!path.startsWith('external_')) documentMarks[path] = mark;
+    }
+    this.addDraftHeaderMarks(documentMarks);
+    this.setDraftRowMarks(rowMarks);
+
+    this.toggleSection('documento', true);
+    if (plan.lines.length > 0) this.toggleSection('lineas', true);
+    if (plan.hasAcquirer) this.toggleSection('adquiriente', true);
+
+    this.draftNotice.set(plan.notice);
+
+    if (plan.existingAcquirer) {
+      this.resolveExistingDraftAcquirer(result, plan, token);
+    } else if (plan.hasAcquirer) {
+      this.applyDraftExternalAcquirer(result, plan, token);
+    }
+  }
+
+  /**
+   * Escribe las líneas del plan y devuelve sus marcas por `row_uid`. Al
+   * AGREGAR se descartan antes las filas en blanco.
+   */
+  private applyDraftLines(plan: PlatformInvoiceDraftPlan): Map<string, LineasRowMark> {
+    const marks = new Map<string, LineasRowMark>();
+    if (plan.lines.length === 0) return marks;
+    if (plan.replaceLines) {
+      this.itemsArray.clear();
+    } else {
+      for (let i = this.itemsArray.length - 1; i >= 0; i--) {
+        if (!isCapturedPlatformLine(this.itemsArray.at(i).getRawValue())) {
+          this.itemsArray.removeAt(i);
+        }
+      }
+    }
+    for (const line of plan.lines) {
+      if (this.itemsArray.length >= PLATFORM_INVOICE_MAX_LINES) break;
+      const group = this.buildLineGroup(
+        {
+          description: line.value.description,
+          quantity: line.value.quantity,
+          unit_price: line.value.unit_price,
+          discount_amount: line.value.discount_amount,
+          unit_code: DEFAULT_UNIT_CODE,
+        },
+        line.value.taxes.map((tax) => ({
+          tax_rate_id: tax.tax_rate_id,
+          rate: Number(tax.rate) || 0,
+          tax_type: tax.tax_type,
+          name: tax.name,
+          is_inclusive: Boolean(tax.is_inclusive),
+        })),
+      );
+      this.itemsArray.push(group);
+      marks.set(String(group.get('row_uid')?.value), line.mark);
+    }
+    return marks;
+  }
+
+  /**
+   * El backend ya reconoció al destinatario (`acquirer.existing_acquirer`):
+   * se lee su ficha (`GET customers/:kind/:tenant_id`) y se elige como si el
+   * operador lo hubiera hecho. Sin marcas IA: los datos son los de su ficha.
+   * Si no aparece (404, error), se sigue con lo leído como cliente nuevo.
+   */
+  private resolveExistingDraftAcquirer(
+    result: InvoiceDraftScanResult,
+    plan: PlatformInvoiceDraftPlan,
+    token: number,
+  ): void {
+    const existing = plan.existingAcquirer;
+    if (!existing) return;
+    this.draftAcquirerResolving.set(true);
+    this.http
+      .get<unknown>(
+        `${environment.apiUrl}/superadmin/subscriptions/fiscal/customers/${encodeURIComponent(existing.kind)}/${Number(existing.tenant_id)}`,
+      )
+      .pipe(
+        map((res) => {
+          const payload = ((res as { data?: unknown } | null)?.data ?? res) as
+            | PlatformAcquirer
+            | null;
+          return payload && typeof payload === 'object' && 'tenant_id' in payload
+            ? payload
+            : null;
+        }),
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((found) => {
+        if (token !== this.draftApplyToken) return;
+        this.draftAcquirerResolving.set(false);
+        if (!found) {
+          if (plan.acquirer.documentDigits || plan.acquirer.patch['external_legal_name']) {
+            this.applyDraftExternalAcquirer(result, plan, token);
+          }
+          return;
+        }
+        const tenant: PlatformAcquirer = {
+          ...found,
+          id: found.id || existing.id,
+          kind: found.kind || existing.kind,
+          tenant_id: Number(found.tenant_id) || existing.tenant_id,
+          address: found.address ?? { line: null, city: null, department_code: null },
+          organization: found.organization ?? { id: null, name: null },
+          fiscal_responsibilities: found.fiscal_responsibilities ?? [],
+        };
+        this.setAcquirerMode('system');
+        this.onTenantPicked(tenant);
+        this.setDraftAcquirerNotice(
+          `Adquiriente: ${tenant.legal_name || tenant.name} (${acquirerKindLabel(tenant.kind).toLowerCase()} ya registrado). Se usaron sus datos guardados.`,
+        );
+      });
+  }
+
+  /**
+   * Cliente NUEVO con lo leído: los controles `external_*` y sus marcas. Con
+   * documento, RUES completa después lo que falte.
+   */
+  private applyDraftExternalAcquirer(
+    result: InvoiceDraftScanResult,
+    plan: PlatformInvoiceDraftPlan,
+    token: number,
+  ): void {
+    this.setAcquirerMode('external');
+    this.invoiceForm.patchValue(plan.acquirer.patch);
+    this.syncDv();
+    this.externalFormOpen.set(true);
+    if (plan.acquirer.documentDigits) {
+      this.externalQuery.set(plan.acquirer.documentDigits);
+      this.externalSearchedDoc.set(plan.acquirer.documentDigits);
+    }
+
+    const acquirerMarks: Record<string, InvoiceFieldMark> = {};
+    for (const [path, mark] of Object.entries(plan.headerMarks)) {
+      if (path.startsWith('external_')) acquirerMarks[path] = mark;
+    }
+    // Una marca plegada en «Más datos» es una marca que nadie ve.
+    if (Object.keys(acquirerMarks).some((path) => ACQUIRER_MORE_FIELDS.has(path))) {
+      this.acquirerMoreOpen.set(true);
+    }
+    this.addDraftHeaderMarks(acquirerMarks);
+
+    const name = String(plan.acquirer.patch['external_legal_name'] ?? '').trim();
+    this.setDraftAcquirerNotice(
+      `Adquiriente nuevo: ${name || 'sin nombre'}. Al emitir quedará registrado como cliente de la plataforma.`,
+    );
+
+    if (plan.acquirer.documentDigits) {
+      this.completeDraftAcquirerFromRues(result, plan, token);
+    }
+  }
+
+  /**
+   * RUES completa el adquiriente nuevo SIN pisar lo que la IA leyó con buena
+   * confianza: nombre y tipo de persona sólo si la IA no los trajo o los trajo
+   * con confianza baja. Lo que RUES escribe suelta su marca (dato oficial).
+   */
+  private completeDraftAcquirerFromRues(
+    result: InvoiceDraftScanResult,
+    plan: PlatformInvoiceDraftPlan,
+    token: number,
+  ): void {
+    const digits = plan.acquirer.documentDigits;
+    this.draftAcquirerResolving.set(true);
+    this.lookupExternalIdentity(digits)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((response) => {
+        if (token !== this.draftApplyToken) return;
+        this.draftAcquirerResolving.set(false);
+        const identity = response.found ? response.identity : null;
+        if (!identity) return;
+        // Se descarta si el operador cambió de adquiriente entretanto.
+        if (this.acquirerMode() !== 'external') return;
+        if (draftDocumentDigits(this.invoiceForm.get('external_tax_id')?.value) !== digits) {
+          return;
+        }
+
+        const acquirer = result.acquirer;
+        const prefill = ruesIdentityToPrefill(identity);
+        const ruesName = (
+          prefill.legal_name ||
+          [prefill.first_name, prefill.last_name].filter(Boolean).join(' ')
+        ).trim();
+        const current = this.invoiceForm.getRawValue() as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if (
+          ruesName &&
+          (!String(current['external_legal_name'] ?? '').trim() ||
+            isWeakDraftField(acquirer.name, DRAFT_LOW_CONFIDENCE))
+        ) {
+          patch['external_legal_name'] = ruesName;
+        }
+        if (
+          identity.person_type &&
+          current['external_document_type'] === '31' &&
+          isWeakDraftField(acquirer.person_type, DRAFT_LOW_CONFIDENCE)
+        ) {
+          patch['external_person_type'] = identity.person_type === 'NATURAL' ? '2' : '1';
+        }
+        if (Object.keys(patch).length === 0) return;
+        this.invoiceForm.patchValue(patch);
+        const name = String(this.invoiceForm.get('external_legal_name')?.value ?? '').trim();
+        this.setDraftAcquirerNotice(
+          `Adquiriente nuevo: ${name || 'sin nombre'}. Completado con RUES; al emitir quedará registrado como cliente de la plataforma.`,
+        );
+      });
+  }
+
+  private setDraftAcquirerNotice(text: string): void {
+    this.draftNotice.update((notice) => (notice ? { ...notice, acquirer: text } : notice));
+  }
+
+  /**
+   * Agrega marcas de cabecera/adquiriente y suelta cada una la PRIMERA vez
+   * que su control cambia. Se suscribe DESPUÉS de escribir el borrador, así
+   * que el propio patch no la suelta.
+   */
+  private addDraftHeaderMarks(marks: Record<string, InvoiceFieldMark>): void {
+    const paths = Object.keys(marks);
+    if (paths.length === 0) return;
+    this.draftHeaderMarks.update((current) => ({ ...current, ...marks }));
+    for (const path of paths) {
+      const control = this.invoiceForm.get(path);
+      if (!control) continue;
+      this.draftMarkSubs.add(
+        control.valueChanges.pipe(take(1)).subscribe(() => this.dropDraftHeaderMark(path)),
+      );
+    }
+  }
+
+  private dropDraftHeaderMark(path: string): void {
+    this.draftHeaderMarks.update((current) => {
+      if (!(path in current)) return current;
+      const next: Record<string, InvoiceFieldMark> = { ...current };
+      delete next[path];
+      return next;
+    });
+  }
+
+  /** Marcas de fila + el mismo «se suelta al editar» por campo de la fila. */
+  private setDraftRowMarks(marks: Map<string, LineasRowMark>): void {
+    this.draftRowMarks.set(marks);
+    for (const [uid, mark] of marks) {
+      const row = this.itemsArray.controls.find(
+        (control) => String(control.get('row_uid')?.value) === uid,
+      );
+      if (!row) continue;
+      for (const field of new Set([...mark.ai, ...mark.pending])) {
+        const control = row.get(field);
+        if (!control) continue;
+        this.draftMarkSubs.add(
+          control.valueChanges.pipe(take(1)).subscribe(() => this.dropDraftRowMark(uid, field)),
+        );
+      }
+    }
+  }
+
+  private dropDraftRowMark(uid: string, field: string): void {
+    this.draftRowMarks.update((current) => {
+      const mark = current.get(uid);
+      if (!mark) return current;
+      const next = new Map(current);
+      const updated = dropPlatformRowMarkField(mark, field);
+      if (updated) next.set(uid, updated);
+      else next.delete(uid);
+      return next;
+    });
+  }
+
+  private clearDraftMarks(): void {
+    this.draftMarkSubs.unsubscribe();
+    this.draftMarkSubs = new Subscription();
+    this.draftHeaderMarks.set({});
+    this.draftRowMarks.set(new Map());
   }
 
   // ── Previsualizar & Emitir ──────────────────────────────────────
@@ -1641,39 +2571,22 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     }
 
     let customerPayload: any;
-    if (this.acquirerMode() === 'external') {
+    const tenant = val['customer_tenant'] as PlatformAcquirer | null;
+    if (this.acquirerMode() === 'system' && !tenant) {
+      this.toast.error('Selecciona una tienda, organización, usuario o cliente como destinatario.');
+      return null;
+    }
+    // Un cliente de PLATAFORMA guardado (`customer`) no es un tenant con ficha
+    // propia: se emite como externo con todos sus datos, y el backend lo
+    // actualiza como cliente de la plataforma.
+    if (this.acquirerMode() === 'external' || tenant?.kind === 'customer') {
       if (!val['external_legal_name']?.trim() || !val['external_tax_id']?.trim()) {
-        this.toast.error('Completa el nombre o razón social y el NIT/documento del cliente externo.');
+        this.toast.error('Completa el nombre o razón social y el NIT/documento del cliente.');
         return null;
       }
-      const personType = val['external_person_type'] || '1';
-      customerPayload = {
-        kind: 'external',
-        legal_name: val['external_legal_name'].trim(),
-        tax_id: val['external_tax_id'].trim(),
-        tax_id_dv: val['external_tax_id_dv'] || undefined,
-        document_type: val['external_document_type'] || '31',
-        person_type: personType,
-        tax_regime_code: val['external_tax_regime_code'] || '48',
-        // La responsabilidad fiscal se deriva del tipo de persona en vez de
-        // mandar siempre `R-99-PN` («no responsable», persona natural), que
-        // declaraba mal a toda persona jurídica.
-        fiscal_responsibilities: [personType === '1' ? 'O-13' : 'R-99-PN'],
-        email: val['external_email']?.trim() || undefined,
-        phone: val['external_phone']?.trim() || undefined,
-        address: {
-          line: val['external_address_line']?.trim() || undefined,
-          city: val['external_city']?.trim() || undefined,
-          city_code: val['external_city_code']?.trim() || undefined,
-          department_code: val['external_department_code']?.trim() || undefined,
-        },
-      };
+      customerPayload = this.buildExternalCustomerPayload(val);
     } else {
-      const tenant = val['customer_tenant'] as PlatformAcquirer;
-      if (!tenant) {
-        this.toast.error('Selecciona una tienda, usuario u organización como destinatario.');
-        return null;
-      }
+      const current = tenant as PlatformAcquirer;
       // Se manda el tenant_id Y los datos fiscales que quedaron en pantalla.
       // El backend resuelve la ficha por `tenant_id` y aplica encima lo que
       // venga en estos campos, que es lo que permite emitirle a una tienda a
@@ -1688,9 +2601,10 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       const addressCity = trimmed('external_city');
       const addressCityCode = trimmed('external_city_code');
       const addressDepartment = trimmed('external_department_code');
+      const responsibilities = this.selectedResponsibilities(val);
       customerPayload = {
-        kind: tenant.kind,
-        tenant_id: tenant.tenant_id,
+        kind: current.kind,
+        tenant_id: current.tenant_id,
         legal_name: trimmed('external_legal_name'),
         tax_id: trimmed('external_tax_id'),
         tax_id_dv: trimmed('external_tax_id_dv'),
@@ -1702,6 +2616,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         document_type: trimmed('external_document_type'),
         person_type: val['external_person_type'] === '2' ? '2' : '1',
         tax_regime_code: trimmed('external_tax_regime_code'),
+        fiscal_responsibilities: responsibilities.length > 0 ? responsibilities : undefined,
         email: trimmed('external_email'),
         phone: trimmed('external_phone'),
         address:
@@ -1760,10 +2675,67 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     return dto;
   }
 
+  /** Responsabilidades marcadas, sin vacíos ni duplicados. */
+  private selectedResponsibilities(val: Record<string, any>): string[] {
+    const raw = val['external_fiscal_responsibilities'];
+    if (!Array.isArray(raw)) return [];
+    return Array.from(
+      new Set(raw.map((code) => String(code ?? '').trim()).filter(Boolean)),
+    );
+  }
+
+  /**
+   * Adquiriente externo (cliente nuevo o cliente de plataforma guardado) con
+   * TODO lo que muestra la pantalla. Al emitir, el backend lo registra o
+   * actualiza como cliente de la plataforma.
+   */
+  private buildExternalCustomerPayload(val: Record<string, any>): any {
+    const personType = val['external_person_type'] === '2' ? '2' : '1';
+    const responsibilities = this.selectedResponsibilities(val);
+    return {
+      kind: 'external',
+      legal_name: String(val['external_legal_name'] ?? '').trim(),
+      tax_id: String(val['external_tax_id'] ?? '').trim(),
+      tax_id_dv: val['external_tax_id_dv'] || undefined,
+      document_type: val['external_document_type'] || '31',
+      person_type: personType,
+      tax_regime_code: val['external_tax_regime_code'] || undefined,
+      // Lo que el operador marcó (RUT). Sin nada marcado va R-99-PN («No
+      // aplica»): el antiguo O-13 para jurídicas declaraba «gran contribuyente»
+      // sin que nadie lo afirmara, y ahora además quedaría guardado en la ficha
+      // del cliente de plataforma.
+      fiscal_responsibilities:
+        responsibilities.length > 0 ? responsibilities : ['R-99-PN'],
+      email: String(val['external_email'] ?? '').trim() || undefined,
+      phone: String(val['external_phone'] ?? '').trim() || undefined,
+      address: {
+        line: String(val['external_address_line'] ?? '').trim() || undefined,
+        city: String(val['external_city'] ?? '').trim() || undefined,
+        city_code: String(val['external_city_code'] ?? '').trim() || undefined,
+        department_code: String(val['external_department_code'] ?? '').trim() || undefined,
+      },
+    };
+  }
+
   async submit(): Promise<void> {
     // Guarda de doble clic: el botón se deshabilita con `submitting`, pero un
     // segundo clic puede entrar antes de que la plantilla se repinte.
     if (this.submitting()) return;
+    // Faltantes en pantalla ANTES de ir al backend: se lleva al operador al
+    // primero en vez de dejar que la DIAN lo rechace.
+    const missing = this.emitMissing();
+    if (missing.length > 0) {
+      this.invoiceForm.markAllAsTouched();
+      this.issueBlockers.set([]);
+      this.errorMessage.set('');
+      this.toast.error(
+        missing.length === 1
+          ? `Falta para emitir: ${missing[0].label}.`
+          : `Faltan ${missing.length} datos para emitir. Empieza por: ${missing[0].label}.`,
+      );
+      this.focusMissing(missing[0]);
+      return;
+    }
     // Antes se emitía sin mirar la validez: el selector de resolución era
     // `Validators.required` y aun así se podía disparar el POST sin ninguna.
     this.invoiceForm.markAllAsTouched();
