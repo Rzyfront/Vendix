@@ -125,7 +125,11 @@ describe('CustomersService.resolveInlineCustomer', () => {
     // 1ª búsqueda: por documento (sin coincidencia). 2ª: por correo en create().
     prisma.users.findFirst
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 12 });
+      .mockResolvedValueOnce({
+        id: 12,
+        document_number: '900123456',
+        document_type: 'NIT',
+      });
 
     const promise = service.resolveInlineCustomer(7, {
       email: 'compras@tecnicell.co',
@@ -138,10 +142,99 @@ describe('CustomersService.resolveInlineCustomer', () => {
     await promise.catch((err: VendixHttpException) => {
       expect(err.errorCode).toBe('SYS_CONFLICT_001');
       expect(err.getStatus()).toBe(409);
+      expect(err.getResponse()).toEqual({
+        error_code: 'SYS_CONFLICT_001',
+        message: 'Ya existe un cliente con ese correo; selecciónalo.',
+        details: {
+          kind: 'email',
+          value: 'compras@tecnicell.co',
+          existing_customer_id: 12,
+          existing_customer_document_number: '900123456',
+          existing_customer_document_type: 'NIT',
+          existing_customer: expect.objectContaining({
+            id: 12,
+            document_number: '900123456',
+            document_type: 'NIT',
+            addresses: [],
+            billing_address: null,
+          }),
+        },
+      });
     });
     await expect(promise).rejects.toBeInstanceOf(VendixHttpException);
     expect(prisma.users.create).not.toHaveBeenCalled();
+    expect(prisma.users.findFirst.mock.calls[1][0].where).toMatchObject({
+      organization_id: 3,
+      email: { equals: 'compras@tecnicell.co', mode: 'insensitive' },
+      state: { not: 'archived' },
+    });
   });
+
+  it('correo de cliente sin documento de otra tienda: snapshot público seleccionable sin vincular ni filtrar secretos', async () => {
+    prisma.users.findFirst.mockResolvedValueOnce({
+      id: 12,
+      first_name: 'Ana',
+      last_name: 'Pérez',
+      email: 'ana@cliente.co',
+      document_type: null,
+      document_number: null,
+      person_type: 'NATURAL',
+      phone: '3001234567',
+      store_users: [{ store_id: 99 }],
+      password: 'NEVER_RETURN_HASH',
+      two_factor_secret: 'NEVER_RETURN_TOTP',
+      addresses: [
+        { id: 90, type: 'shipping', address_line1: 'NO EXPONER ENVIO', is_primary: true },
+        {
+          id: 91,
+          type: 'billing',
+          address_line1: 'Calle fiscal 12',
+          city: 'Bogotá',
+          country_code: 'CO',
+          municipality_code: '11001',
+          is_primary: true,
+        },
+      ],
+    });
+
+    let failure: VendixHttpException | undefined;
+    await service.resolveInlineCustomer(7, {
+      email: 'ana@cliente.co',
+      first_name: 'Otra persona',
+    } as CreateCustomerDto).catch((error: VendixHttpException) => { failure = error; });
+
+    expect(failure).toBeInstanceOf(VendixHttpException);
+    expect(failure?.getStatus()).toBe(409);
+    const details = (failure?.getResponse() as { details: Record<string, any> }).details;
+    expect(details.existing_customer_document_number).toBeNull();
+    expect(details.existing_customer).toMatchObject({
+      id: 12,
+      first_name: 'Ana',
+      last_name: 'Pérez',
+      email: 'ana@cliente.co',
+      document_number: null,
+      person_type: 'NATURAL',
+      phone: '3001234567',
+      addresses: [],
+      billing_address: {
+        type: 'billing',
+        address_line1: 'Calle fiscal 12',
+        municipality_code: '11001',
+      },
+    });
+    for (const field of ['password', 'two_factor_secret', 'store_users']) {
+      expect(details.existing_customer).not.toHaveProperty(field);
+    }
+    expect(JSON.stringify(details)).not.toContain('NO EXPONER ENVIO');
+    expect(prisma.store_users.upsert).not.toHaveBeenCalled();
+    expect(prisma.users.create).not.toHaveBeenCalled();
+    const query = prisma.users.findFirst.mock.calls[0][0];
+    expect(query.where.organization_id).toBe(3);
+    expect(query.select).not.toHaveProperty('password');
+    expect(query.select).not.toHaveProperty('two_factor_secret');
+    expect(query.select.addresses.where).toEqual({ type: 'billing' });
+  });
+
   describe('dirección fiscal de la factura (6b)', () => {
     const natural = {
       document_type: 'CC',

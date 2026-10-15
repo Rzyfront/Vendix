@@ -281,7 +281,7 @@ describe('PlatformTenantsService', () => {
         email: 'juan@x.co',
         phone: null,
         organization_id: 3,
-        addresses: [{ ...billing, type: 'shipping' }],
+        addresses: [billing],
       });
       expect(r.document_type).toBe('13');
       expect(r.person_type).toBe('2');
@@ -289,6 +289,64 @@ describe('PlatformTenantsService', () => {
       expect(r.address.line).toBe('Cra 7 # 71-21 Of 301');
       expect(r.address.city_code).toBe('11001');
       expect(r.phone).toBe('6015551234');
+    });
+
+    it('sin document_type conserva CC/13 persona natural sin inventar DV', () => {
+      const r = service.userToTenantResult({
+        id: 7,
+        username: 'juan',
+        document_number: '1020304050',
+        document_type: null,
+        addresses: [],
+      });
+      expect(r.document_type).toBe('13');
+      expect(r.person_type).toBe('2');
+      expect(r.tax_id).toBe('1020304050');
+      expect(r.tax_id_dv).toBeNull();
+    });
+
+    it('una dirección shipping, incluso primaria, nunca se usa como fiscal', () => {
+      const r = service.userToTenantResult({
+        id: 7,
+        username: 'juan',
+        addresses: [{ ...billing, type: 'shipping', is_primary: true }],
+      });
+      expect(r.address).toEqual({
+        line: null,
+        city: null,
+        city_code: null,
+        department_code: null,
+      });
+      expect(r.phone).toBeNull();
+    });
+
+    it('sin billing sólo acepta legal primaria; billing siempre tiene prioridad', () => {
+      const user = { id: 7, username: 'juan' };
+      const legal = { ...billing, type: 'legal', is_primary: true };
+      expect(service.userToTenantResult({
+        ...user,
+        addresses: [{ ...legal, is_primary: false }],
+      }).address.line).toBeNull();
+      expect(service.userToTenantResult({
+        ...user,
+        addresses: [legal],
+      }).address.line).toBe('Cra 7 # 71-21 Of 301');
+      expect(service.userToTenantResult({
+        ...user,
+        addresses: [legal, { ...billing, address_line1: 'Calle fiscal', address_line2: '' }],
+      }).address.line).toBe('Calle fiscal');
+    });
+
+    it('filtra direcciones fiscales antes del take para no ocultar billing detrás de envíos', async () => {
+      const findFirst = jest.fn().mockResolvedValue({
+        id: 7, username: 'juan', addresses: [],
+      });
+      await service.getTenantByKindAndId({ users: { findFirst } }, {
+        organizationId: 3, kind: 'user', id: 7,
+      });
+      expect(findFirst.mock.calls[0][0].include.addresses.where).toEqual({
+        OR: [{ type: 'billing' }, { type: 'legal', is_primary: true }],
+      });
     });
 
     it('JURIDICA → 1; sin régimen ni responsabilidades → tax_regime_code null', () => {

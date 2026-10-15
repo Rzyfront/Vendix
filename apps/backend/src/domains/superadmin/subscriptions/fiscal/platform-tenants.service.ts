@@ -408,7 +408,8 @@ export class PlatformTenantsService {
 
   userToTenantResult(user: any): TenantSearchResult {
     const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-    const documentType = toDianDocumentType(user.document_type);
+    // Un usuario sin tipo declarado es persona natural (CC), no NIT.
+    const documentType = toDianDocumentType(user.document_type) ?? '13';
     const responsibilities = normalizeResponsibilities(user.fiscal_responsibilities);
     const billing = pickAddress(user.addresses);
     const address = this.buildAddress(billing, {});
@@ -524,6 +525,12 @@ export class PlatformTenantsService {
 /* ── Includes ─────────────────────────────────────────────────────────── */
 
 const ADDRESS_PICK = {
+  where: {
+    OR: [
+      { type: 'billing' as const },
+      { type: 'legal' as const, is_primary: true },
+    ],
+  },
   orderBy: [{ is_primary: 'desc' as const }, { id: 'desc' as const }],
   take: 10,
 };
@@ -607,10 +614,11 @@ export function toDianDepartmentCode(value: unknown): string | null {
   return null;
 }
 
-/** Prefiere la dirección `billing`; si no hay, la primaria / más reciente. */
+/** Prefiere `billing`; sólo una `legal` primaria puede ser respaldo fiscal. */
 function pickAddress(addresses: any[] | null | undefined): any | null {
   if (!Array.isArray(addresses) || !addresses.length) return null;
-  return addresses.find((a) => a?.type === 'billing') ?? addresses[0] ?? null;
+  return addresses.find((a) => a?.type === 'billing') ??
+    addresses.find((a) => a?.type === 'legal' && a.is_primary === true) ?? null;
 }
 
 /**

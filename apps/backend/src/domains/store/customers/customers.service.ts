@@ -1358,13 +1358,45 @@ export class CustomersService {
     if (effectiveEmail) {
       const existingUser = await this.prisma.users.findFirst({
         where: {
-          email: effectiveEmail,
+          email: { equals: effectiveEmail, mode: 'insensitive' },
           organization_id: store.organization_id,
           // Archived customers are not "in use" — allow re-creating a new
           // customer that re-uses the same email after the old row was
           // archived (mirrors the document dedup filter in
           // findByDocumentInOrganization).
           state: { not: user_state_enum.archived },
+        },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          legal_name: true,
+          email: true,
+          phone: true,
+          document_type: true,
+          document_number: true,
+          verification_digit: true,
+          person_type: true,
+          tax_regime: true,
+          fiscal_responsibilities: true,
+          addresses: {
+            where: { type: address_type_enum.billing },
+            orderBy: [{ is_primary: 'desc' }, { id: 'desc' }],
+            take: 1,
+            select: {
+              id: true,
+              address_line1: true,
+              address_line2: true,
+              city: true,
+              state_province: true,
+              country_code: true,
+              postal_code: true,
+              municipality_code: true,
+              phone_number: true,
+              type: true,
+              is_primary: true,
+            },
+          },
         },
       });
 
@@ -1374,8 +1406,34 @@ export class CustomersService {
         // genérico "Resource conflict" en inglés.
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
-          'El correo electrónico ya está registrado en la organización',
-          { kind: 'email', value: effectiveEmail },
+          'Ya existe un cliente con ese correo; selecciónalo.',
+          {
+            kind: 'email',
+            value: effectiveEmail,
+            existing_customer_id: existingUser.id,
+            existing_customer_document_number: existingUser.document_number ?? null,
+            existing_customer_document_type: existingUser.document_type ?? null,
+            // Snapshot público explícito: permite seleccionar una ficha de
+            // otra tienda, incluso sin documento, sin enlazar ni editar nada.
+            // Nunca propagar la fila users cruda (password/TOTP incluidos).
+            existing_customer: withBillingAddress({
+              id: existingUser.id,
+              first_name: existingUser.first_name ?? '',
+              last_name: existingUser.last_name ?? '',
+              legal_name: existingUser.legal_name ?? null,
+              email: existingUser.email ?? null,
+              phone: existingUser.phone ?? null,
+              document_type: existingUser.document_type ?? null,
+              document_number: existingUser.document_number ?? null,
+              verification_digit: existingUser.verification_digit ?? null,
+              person_type: existingUser.person_type ?? null,
+              tax_regime: existingUser.tax_regime ?? null,
+              fiscal_responsibilities: existingUser.fiscal_responsibilities ?? [],
+              addresses: (existingUser.addresses ?? []).filter(
+                (address) => address.type === address_type_enum.billing,
+              ),
+            }),
+          },
         );
       }
     }

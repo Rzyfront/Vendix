@@ -22,6 +22,7 @@ import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian
 import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
 import { localDateString } from '../../../../common/utils/store-timezone.util';
+import { dianPartyId, normalizeNit } from '../../../../common/utils/nit.util';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.1
@@ -124,7 +125,9 @@ export class PlatformInvoicingService {
   }> {
     let tenant: any;
     if (args.dto.customer?.kind === 'external') {
-      if (!args.dto.customer.legal_name?.trim() || !args.dto.customer.tax_id?.trim()) {
+      const documentType = toDianDocumentType(args.dto.customer.document_type) ?? '31';
+      const taxId = dianPartyId(args.dto.customer.tax_id, documentType);
+      if (!args.dto.customer.legal_name?.trim() || !taxId) {
         throw new VendixHttpException(
           ErrorCodes.SYS_VALIDATION_001,
           'El cliente externo requiere nombre o razón social y NIT / documento válido.',
@@ -135,13 +138,10 @@ export class PlatformInvoicingService {
         tenant_id: 0,
         name: args.dto.customer.legal_name,
         legal_name: args.dto.customer.legal_name,
-        tax_id: args.dto.customer.tax_id,
-        tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
-        // Default '31' (NIT, código DIAN) — NO 'NIT' (etiqueta). El XML exige
-// el código; una etiqueta donde va código es rechazo silencioso del
-// provider. Si el operador eligió CC/CE/Pasaporte en el form, ese valor
-// ya viaja en `args.dto.customer.document_type` y pisa el default.
-document_type: args.dto.customer.document_type ?? '31',
+        tax_id: taxId,
+        // El DV es un checksum del NIT; nunca inventar '0' ni pegarlo al número.
+        tax_id_dv: documentType === '31' ? normalizeNit(taxId).dv : null,
+        document_type: documentType,
         person_type: args.dto.customer.person_type ?? '2',
         tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
         fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
@@ -286,7 +286,7 @@ document_type: args.dto.customer.document_type ?? '31',
     // El documento ya existe (aceptado o rechazado por la DIAN, el número quedó
     // quemado): el adquiriente externo se recuerda para la próxima factura.
     if (args.dto.customer?.kind === 'external') {
-      await this.rememberExternalCustomer(tenant);
+      await this.rememberExternalCustomer(tenant, args.dto.customer);
     }
 
     if (args.dto.save_as_profile?.name) {
@@ -380,10 +380,17 @@ document_type: args.dto.customer.document_type ?? '31',
    * Actualiza los datos con lo facturado y mueve `last_invoiced_at`; un campo
    * opcional vacío en esta factura NO borra el valor que ya estaba guardado.
    */
-  private async rememberExternalCustomer(tenant: any): Promise<void> {
-    const taxId = typeof tenant?.tax_id === 'string' ? tenant.tax_id.trim() : '';
-    if (!taxId) return;
+  private async rememberExternalCustomer(
+    tenant: any,
+    input: {
+      person_type?: string | null;
+      tax_regime_code?: string | null;
+      fiscal_responsibilities?: string[] | null;
+    },
+  ): Promise<void> {
     const documentType = toDianDocumentType(tenant.document_type) ?? '31';
+    const taxId = dianPartyId(tenant?.tax_id, documentType);
+    if (!taxId) return;
     const legalName = String(tenant.legal_name ?? '').trim();
     if (!legalName) return;
 
@@ -398,7 +405,7 @@ document_type: args.dto.customer.document_type ?? '31',
         )
       : [];
     const fields = {
-      tax_id_dv: documentType === '31' ? opt(tenant.tax_id_dv) : null,
+      tax_id_dv: documentType === '31' ? normalizeNit(taxId).dv : null,
       person_type: opt(tenant.person_type),
       tax_regime_code: opt(tenant.tax_regime_code),
       email: opt(tenant.email),
@@ -413,6 +420,10 @@ document_type: args.dto.customer.document_type ?? '31',
     const updateFields = Object.fromEntries(
       Object.entries(fields).filter(([, v]) => v !== null),
     );
+    // El tenant lleva defaults para emitir; no son una elección del operador
+    // y no deben degradar una ficha fiscal ya conocida al volver a facturar.
+    if (!opt(input.person_type)) delete updateFields.person_type;
+    if (!opt(input.tax_regime_code)) delete updateFields.tax_regime_code;
 
     try {
       await (this.prismaClient as PrismaClient).platform_customers.upsert({
@@ -430,7 +441,7 @@ document_type: args.dto.customer.document_type ?? '31',
         update: {
           legal_name: legalName,
           ...updateFields,
-          ...(responsibilities.length
+          ...(Array.isArray(input.fiscal_responsibilities) && responsibilities.length
             ? { fiscal_responsibilities: responsibilities }
             : {}),
           last_invoiced_at: now,
@@ -1000,11 +1011,13 @@ document_type: args.dto.customer.document_type ?? '31',
   private mapToStoreCreateInvoiceDto(dto: any, tenant: any): any {
     const customer = this.mapTenantToCustomerFields(tenant, dto);
 
-    // El riel tienda exige `customer_tax_id` y `customer_verification_digit`
-    // SIEMPRE para `document_type='sales_invoice'` (cliente nominativo).
-    // Validamos aca (no en DTO) por consistencia con `INVOICING_VALIDATE_001`
-    // que es el tipo de error que veria el operador.
-    if (!customer.customer_tax_id || !customer.customer_verification_digit) {
+    // Sólo un NIT lleva DV. Exigirlo para CC obliga a inventar un '0' y
+    // bloquea usuarios persona natural que no deben declarar ese checksum.
+    const documentType = toDianDocumentType(customer.customer_document_type) ?? '31';
+    if (
+      !customer.customer_tax_id ||
+      (documentType === '31' && !customer.customer_verification_digit)
+    ) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_TENANT_FISCAL_DATA_INCOMPLETE,
         `El destinatario ${tenant.kind}:${tenant.tenant_id ?? tenant.id} no tiene tax_id+DV en la base de datos. Captura los campos faltantes en el formulario antes de emitir.`,
