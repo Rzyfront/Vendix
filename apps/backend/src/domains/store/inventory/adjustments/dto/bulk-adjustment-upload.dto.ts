@@ -17,6 +17,7 @@ const VALID_ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 export class BulkAdjustmentUploadDto {

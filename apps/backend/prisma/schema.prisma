@@ -4835,6 +4835,7 @@ enum adjustment_type_enum {
   expiration
   count_variance
   manual_correction
+  initial_load
 }
 
 // `reserved_for_id` NO es único por sí solo: es un id de otra tabla y sólo
