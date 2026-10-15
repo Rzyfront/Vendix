@@ -46,6 +46,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
+import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
@@ -174,6 +175,9 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // después del commit de la venta.
     PosFiscalEmissionService,
     OneShotEmissionService,
+    // Creación manual + emisión opcional (`emit_immediately`) reusando
+    // `InvoiceFlowService.validate` + `send`.
+    ManualInvoiceEmissionService,
     PosSaleCompletedListener,
   ],
   exports: [

@@ -278,6 +278,8 @@ describe('InvoicingController — cableado de la compuerta de correo', () => {
       {} as any,
       { success: jest.fn((data) => ({ data })) } as any,
       {} as any,
+      // ManualInvoiceEmissionService: sólo corre con `emit_immediately`.
+      {} as any,
     );
 
   it('POST store/invoicing activa require_acquirer_email', async () => {

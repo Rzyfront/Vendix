@@ -20,6 +20,7 @@ import {
 } from '../../../common/guards/module-flow.guard';
 import { InvoicingService } from './invoicing.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
+import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
@@ -67,6 +68,7 @@ export class InvoicingController {
     private readonly dian_events_service: DianEventsService,
     private readonly response_service: ResponseService,
     private readonly one_shot_emission: OneShotEmissionService,
+    private readonly manual_emission: ManualInvoiceEmissionService,
   ) {}
 
   @Get()
@@ -157,6 +159,23 @@ export class InvoicingController {
     const result = await this.invoicing_service.create(create_dto, {
       require_acquirer_email: true,
     });
+
+    // `emit_immediately: true` — la factura YA está creada; acá se intenta
+    // validar + enviar con los mismos métodos de los botones del detalle. Un
+    // fallo de emisión NO cambia el 201: viaja en `emission` junto a la
+    // factura tal como quedó (ver `ManualInvoiceEmissionService`). Sin el flag
+    // esta rama no corre y la respuesta es idéntica a la de siempre.
+    if (create_dto.emit_immediately === true) {
+      const { invoice, emission } =
+        await this.manual_emission.emitCreated(result);
+      return this.response_service.success(
+        { ...invoice, emission },
+        emission.success
+          ? 'Invoice created and issued successfully'
+          : 'Invoice created; immediate emission failed',
+      );
+    }
+
     return this.response_service.success(
       result,
       'Invoice created successfully',
