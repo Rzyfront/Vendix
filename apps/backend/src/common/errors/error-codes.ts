@@ -868,6 +868,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado',
   },
+  PROD_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'PROD_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Esta carga contiene inventario inicial: debes confirmar que eres consciente de que es una carga inicial.',
+  },
   PROD_CREATE_001: {
     code: 'PROD_CREATE_001',
     httpStatus: 400,
@@ -1644,6 +1650,12 @@ export const ErrorCodes = {
     code: 'INV_ADJ_001',
     httpStatus: 404,
     devMessage: 'Adjustment not found',
+  },
+  INV_ADJ_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'INV_ADJ_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Este ajuste crea productos nuevos: debes confirmar que es una carga inicial.',
   },
   INV_BULK_001: {
     code: 'INV_BULK_001',

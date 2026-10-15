@@ -52,6 +52,12 @@ export class AdjustmentItemDto {
   quantity_after: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unit_cost?: number;
+
+  @IsOptional()
   @IsString()
   reason_code?: string;
 

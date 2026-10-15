@@ -9,6 +9,7 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
+import { StoreSkuGeneratorService } from './store-sku-generator.service';
 import { SettingsModule } from '../../settings/settings.module';
 
 @Module({
@@ -18,6 +19,7 @@ import { SettingsModule } from '../../settings/settings.module';
     InventoryAdjustmentsBulkService,
     InventoryCountScannerService,
     StockLevelManager,
+    StoreSkuGeneratorService,
   ],
   imports: [
     InventoryTransactionsModule,
@@ -27,6 +29,6 @@ import { SettingsModule } from '../../settings/settings.module';
     SettingsModule,
     S3Module,
   ],
-  exports: [InventoryAdjustmentsService],
+  exports: [InventoryAdjustmentsService, StoreSkuGeneratorService],
 })
 export class InventoryAdjustmentsModule {}

@@ -276,6 +276,10 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Anticipos a proveedores',
   },
   'inventory.adjusted.inventory': { code: '1435', description: 'Inventario' },
+  'inventory.initial_load.equity': {
+    code: '3105',
+    description: 'Capital suscrito y pagado (carga inicial de inventario)',
+  },
   'inventory.adjusted.shrinkage': {
     code: '5295',
     description: 'Faltantes de Inventario',

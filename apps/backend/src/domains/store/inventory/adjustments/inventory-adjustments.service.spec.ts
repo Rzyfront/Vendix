@@ -37,6 +37,8 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
       {} as any,
       {} as any,
       mockSearchPath as any,
+      {} as any,
+      {} as any,
     );
     jest
       .spyOn(RequestContextService, 'getStoreId')
@@ -153,5 +155,122 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
       mockPrisma.stock_levels.findMany.mock.calls[1][0].where.products.OR,
     ).toHaveLength(3);
     expect(result).toHaveLength(1);
+  });
+});
+
+describe('InventoryAdjustmentsService — initial_load', () => {
+  const tx: any = {
+    stock_levels: { findFirst: jest.fn() },
+    inventory_adjustments: { create: jest.fn() },
+    products: { findFirst: jest.fn() },
+    product_variants: { findFirst: jest.fn() },
+  };
+  const stockManager = { updateStock: jest.fn() };
+  const costing = { calculateCostOnReceipt: jest.fn() };
+  const resolver = { resolveCostingMethod: jest.fn() };
+  let service: InventoryAdjustmentsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new InventoryAdjustmentsService(
+      {} as any,
+      stockManager as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      costing as any,
+      resolver as any,
+    );
+    jest.spyOn(RequestContextService, 'getOrganizationId').mockReturnValue(1);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(9);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(3);
+    resolver.resolveCostingMethod.mockResolvedValue('weighted_average');
+    costing.calculateCostOnReceipt.mockResolvedValue({
+      new_cost_per_unit: 4100,
+    });
+    stockManager.updateStock.mockResolvedValue({ cost_snapshot: null });
+    tx.inventory_adjustments.create.mockImplementation(async ({ data }: any) => ({
+      id: 5,
+      ...data,
+    }));
+  });
+
+  it('positivo: costea la entrada y mueve stock como initial', async () => {
+    tx.stock_levels.findFirst.mockResolvedValue({ quantity_on_hand: 0 });
+
+    const res = await service.createAdjustmentInTransaction(tx, {
+      product_id: 1,
+      location_id: 2,
+      type: 'initial_load',
+      quantity_after: 10,
+      unit_cost: 3800,
+    } as any);
+
+    expect(costing.calculateCostOnReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product_id: 1,
+        location_id: 2,
+        quantity_received: 10,
+        unit_cost: 3800,
+        costing_method: 'weighted_average',
+      }),
+      tx,
+    );
+    expect(stockManager.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        movement_type: 'initial',
+        unit_cost: 4100,
+        movement_unit_cost: 3800,
+        validate_availability: false,
+      }),
+      tx,
+    );
+    expect(res.cost_amount).toBe(38000);
+    expect(res.adjustment_type).toBe('initial_load');
+  });
+
+  it('sin stock_level no lanza y parte de quantity_before 0', async () => {
+    tx.stock_levels.findFirst.mockResolvedValue(null);
+    tx.products.findFirst.mockResolvedValue({ cost_price: 500 });
+
+    const res = await service.createAdjustmentInTransaction(tx, {
+      product_id: 1,
+      location_id: 2,
+      type: 'initial_load',
+      quantity_after: 4,
+    } as any);
+
+    expect(tx.inventory_adjustments.create.mock.calls[0][0].data.quantity_before).toBe(0);
+    expect(costing.calculateCostOnReceipt.mock.calls[0][0].unit_cost).toBe(500);
+    expect(res.cost_amount).toBe(2000);
+  });
+
+  it('count_variance se mantiene: sin costeo de recepción y movement adjustment', async () => {
+    tx.stock_levels.findFirst.mockResolvedValue({ quantity_on_hand: 3 });
+    stockManager.updateStock.mockResolvedValue({
+      cost_snapshot: { total_cost: 70 },
+    });
+
+    const res = await service.createAdjustmentInTransaction(tx, {
+      product_id: 1,
+      location_id: 2,
+      type: 'count_variance',
+      quantity_after: 10,
+    } as any);
+
+    expect(costing.calculateCostOnReceipt).not.toHaveBeenCalled();
+    expect(stockManager.updateStock.mock.calls[0][0].movement_type).toBe('adjustment');
+    expect(res.cost_amount).toBe(70);
+  });
+
+  it('count_variance sin stock_level sigue lanzando INV_FIND_001', async () => {
+    tx.stock_levels.findFirst.mockResolvedValue(null);
+    await expect(
+      service.createAdjustmentInTransaction(tx, {
+        product_id: 1,
+        location_id: 2,
+        type: 'count_variance',
+        quantity_after: 1,
+      } as any),
+    ).rejects.toBeDefined();
   });
 });
