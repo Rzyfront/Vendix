@@ -21,6 +21,9 @@ import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
 import { FiscalScanHandlersRegistrar } from './fiscal-scan-handlers.registrar';
+import { InvoiceDraftScannerService } from './invoice-draft-scan/invoice-draft-scanner.service';
+import { InvoiceDraftScanController } from './invoice-draft-scan/invoice-draft-scan.controller';
+import { SettingsModule } from '../settings/settings.module';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
@@ -66,6 +69,10 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // delega en `CustomersService`. Sin ciclo: `CustomersModule` sólo importa
     // Response/Metadata/Email.
     CustomersModule,
+    // Escáner IA de borrador de factura: moneda de la tienda + decimales
+    // (`SettingsService.getStoreCurrencyInfo`). Sin ciclo: SettingsModule no
+    // importa InvoicingModule.
+    SettingsModule,
     // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
     // `DianTestService` en sus providers, porque Nest instancia el servicio una
     // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
@@ -101,6 +108,9 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     StoreDocumentReceptionConnectionsController,
     StoreDocumentEmailReceptionController,
     StoreReceivedDocumentsController,
+    // `store/invoicing/scan-draft/async` ANTES de `InvoicingController`, que
+    // monta `@Post(':id/...')` sobre el mismo prefijo.
+    InvoiceDraftScanController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene
@@ -125,6 +135,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     ResolutionsService,
     ResolutionScannerService,
     DianHabilitationScannerService,
+    InvoiceDraftScannerService,
     FiscalScanHandlersRegistrar,
     InvoiceNumberGenerator,
     // Motor aritmético único del documento, puerta de identidad fiscal del

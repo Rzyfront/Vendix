@@ -34,6 +34,7 @@ import {
 } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
+import { fuzzyScore } from '../../../../ai-engine/utils/ocr-fuzzy-score.util';
 import {
   buildCurrencyInstruction,
   checkTotalsConsistency,
@@ -1053,29 +1054,9 @@ export class InvoiceScannerService {
     return { candidates: candidates.slice(0, 5), archivedDiscards };
   }
 
+  /** Delegado al util compartido (mismo criterio que el escáner de borrador de factura). */
   private fuzzyScore(query: string, target: string): number {
-    const q = query.toLowerCase().trim();
-    const t = target.toLowerCase().trim();
-
-    if (q === t) return 100;
-    if (t.includes(q) || q.includes(t)) return 85;
-
-    const qWords = q.split(/\s+/).filter((w) => w.length > 2);
-    const tWords = t.split(/\s+/).filter((w) => w.length > 2);
-
-    if (qWords.length === 0 || tWords.length === 0) return 0;
-
-    let matches = 0;
-    for (const qw of qWords) {
-      for (const tw of tWords) {
-        if (tw.includes(qw) || qw.includes(tw)) {
-          matches++;
-          break;
-        }
-      }
-    }
-
-    return Math.round((matches / qWords.length) * 80);
+    return fuzzyScore(query, target);
   }
 
   private async preprocessImage(

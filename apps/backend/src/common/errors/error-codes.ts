@@ -4983,6 +4983,41 @@ export const ErrorCodes = {
     devMessage: 'Too many files — the habilitation scanner accepts up to 3',
   },
 
+  // Escáner IA de borrador de factura de venta («Nueva factura» → leer con IA).
+  // Nada se crea ni se emite: el resultado es un borrador para revisar.
+  INVOICE_DRAFT_SCAN_NO_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_NO_FILES',
+    httpStatus: 400,
+    devMessage: 'No file provided for the invoice draft scan',
+  },
+  INVOICE_DRAFT_SCAN_TOO_MANY_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_TOO_MANY_FILES',
+    httpStatus: 400,
+    devMessage: 'Too many files — the invoice draft scanner accepts up to 6',
+  },
+  INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE: {
+    code: 'INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE',
+    httpStatus: 400,
+    devMessage:
+      'Unsupported file type — only JPEG, PNG, WebP and PDF are accepted (Word/Excel are not)',
+  },
+  INVOICE_DRAFT_SCAN_PARSE_FAIL: {
+    code: 'INVOICE_DRAFT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse the AI invoice draft response as valid JSON',
+  },
+  INVOICE_DRAFT_SCAN_AI_FAILED: {
+    code: 'INVOICE_DRAFT_SCAN_AI_FAILED',
+    httpStatus: 502,
+    devMessage: 'AI invoice draft extraction failed',
+  },
+  INVOICE_DRAFT_SCAN_NOT_READY: {
+    code: 'INVOICE_DRAFT_SCAN_NOT_READY',
+    httpStatus: 409,
+    devMessage:
+      'The invoice draft scanner AI application is missing, inactive or has no vision model linked',
+  },
+
   // Monitoring
   MON_CW_001: {
     code: 'MON_CW_001',
