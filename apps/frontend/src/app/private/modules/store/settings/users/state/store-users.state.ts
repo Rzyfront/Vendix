@@ -21,6 +21,7 @@ export interface StoreUsersState {
     page: number;
     limit: number;
     totalPages: number;
+    total_pages?: number;
   } | null;
   error: string | null;
 

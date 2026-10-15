@@ -109,5 +109,6 @@ export interface PaginatedStoreUsersResponse {
     limit: number;
     total: number;
     total_pages: number;
+    totalPages?: number;
   };
 }
