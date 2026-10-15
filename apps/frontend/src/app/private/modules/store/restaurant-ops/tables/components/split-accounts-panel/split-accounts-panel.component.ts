@@ -20,7 +20,7 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { interval, firstValueFrom, of, switchMap } from 'rxjs';
+import { interval, firstValueFrom, map, of, switchMap } from 'rxjs';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -34,6 +34,7 @@ import {
   ToastService,
 } from '../../../../../../../shared/components';
 import type {
+  AddressPayload,
   PaymentSubmit,
   StepsLineItem,
 } from '../../../../../../../shared/components';
@@ -209,6 +210,10 @@ export class SplitAccountsPanelComponent {
   readonly createCustomerLoading = signal(false);
   readonly createCustomerInitialValues =
     signal<Partial<CreateCustomerRequest> | null>(null);
+  /** Dirección emitida por el modal en crear-mode; se persiste tras crear el cliente. */
+  private readonly pendingCreateCustomerAddress = signal<AddressPayload | null>(
+    null,
+  );
   readonly pickerDraftIndex = signal<number | null>(null);
   readonly pickerAccount = signal<SplitFinancialAccount | null>(null);
   readonly gatewayUrl = signal<string | null>(null);
@@ -770,6 +775,11 @@ export class SplitAccountsPanelComponent {
   closeCreateCustomer(): void {
     this.createCustomerOpen.set(false);
     this.createCustomerInitialValues.set(null);
+    this.pendingCreateCustomerAddress.set(null);
+  }
+  /** Guarda la dirección del modal (llega antes que `save`). */
+  onCreateCustomerAddress(payload: AddressPayload): void {
+    this.pendingCreateCustomerAddress.set(payload);
   }
   /** Busca por documento, si no existe lo crea (resolve) y lo asigna. */
   onCreateCustomerSave(data: CreateCustomerRequest): void {
@@ -786,16 +796,25 @@ export class SplitAccountsPanelComponent {
       .pipe(
         switchMap((found) =>
           found
-            ? of({ customer: found } as ResolveCustomerResult)
-            : this.customersService.resolveCustomer(
-                data as ResolveCustomerRequest,
-              ),
+            ? of({ customer: found, viaResolve: false })
+            : this.customersService
+                .resolveCustomer(data as ResolveCustomerRequest)
+                .pipe(
+                  map((r: ResolveCustomerResult) => ({
+                    customer: r.customer,
+                    viaResolve: true,
+                  })),
+                ),
         ),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (resolved) => {
           this.createCustomerLoading.set(false);
+          // Solo si se creó vía resolve: un cliente existente ya tiene su dirección.
+          if (resolved.viaResolve) {
+            this.persistCreateCustomerAddress(Number(resolved.customer.id));
+          }
           this.closeCreateCustomer();
           void this.selectCustomer(resolved.customer);
         },
@@ -803,6 +822,39 @@ export class SplitAccountsPanelComponent {
           this.createCustomerLoading.set(false);
           this.showError(error);
         },
+      });
+  }
+  /**
+   * Persiste la dirección del modal contra el cliente recién creado
+   * (`POST /store/addresses`). Best-effort: un fallo solo avisa.
+   */
+  private persistCreateCustomerAddress(customerId: number): void {
+    const addr = this.pendingCreateCustomerAddress();
+    this.pendingCreateCustomerAddress.set(null);
+    if (!addr?.address_line1 || !addr.city) return;
+    this.customersService
+      .createCustomerAddress({
+        address_line_1: addr.address_line1,
+        address_line_2: addr.address_line2 ?? undefined,
+        city: addr.city,
+        state: addr.state_province ?? '',
+        country: addr.country_code ?? '',
+        postal_code: addr.postal_code ?? undefined,
+        municipality_code: addr.municipality_code ?? undefined,
+        type: 'shipping',
+        is_primary: true,
+        customer_id: customerId,
+        ...(addr.latitude != null ? { latitude: String(addr.latitude) } : {}),
+        ...(addr.longitude != null
+          ? { longitude: String(addr.longitude) }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        error: () =>
+          this.toast.warning(
+            'Cliente asignado, pero no se pudo guardar su dirección.',
+          ),
       });
   }
   async selectCustomer(customer: Customer): Promise<void> {

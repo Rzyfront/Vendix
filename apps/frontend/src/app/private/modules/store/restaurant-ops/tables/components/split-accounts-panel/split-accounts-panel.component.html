@@ -329,6 +329,7 @@
   [initialValues]="createCustomerInitialValues()"
   [loading]="createCustomerLoading()"
   (closed)="closeCreateCustomer()"
+  (addressData)="onCreateCustomerAddress($event)"
   (save)="onCreateCustomerSave($event)"
 ></app-customer-modal>
 
