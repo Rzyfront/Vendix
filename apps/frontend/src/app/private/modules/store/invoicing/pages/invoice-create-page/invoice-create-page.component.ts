@@ -4,6 +4,7 @@ import {
   DestroyRef,
   ElementRef,
   OnInit,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -99,6 +100,7 @@ import {
   InvoiceSummaryAsideComponent,
   InvoiceSummaryTotals,
 } from '../../components/invoice-create/invoice-summary-aside.component';
+import { InvoiceHelpPopoverComponent } from '../../components/invoice-create/invoice-help-popover.component';
 import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
 import {
   compareResolutionsForSelection,
@@ -264,6 +266,7 @@ import {
   draftToInlineCustomerBase,
   draftToInvoicePatch,
   hasDraftValue,
+  isFinalConsumerDocument,
   type DraftAcquirerPatch,
   type DraftInvoicePatch,
   type DraftLineValue,
@@ -1734,6 +1737,8 @@ export interface AcquirerEmissionState {
   customer_document_type: unknown;
   customer_address: unknown;
   customer_municipality_code: unknown;
+  /** Correo de entrega de la factura electrónica. */
+  customer_email: unknown;
   /** Exportación: un municipio DANE colombiano no aplica. */
   isExport: boolean;
 }
@@ -1743,7 +1748,8 @@ export type AcquirerEmissionField =
   | 'customer_name'
   | 'customer_document_type'
   | 'customer_address'
-  | 'customer_municipality_code';
+  | 'customer_municipality_code'
+  | 'customer_email';
 
 export interface AcquirerMissingField {
   field: AcquirerEmissionField;
@@ -1767,8 +1773,12 @@ export interface AcquirerMissingField {
  *  - dirección fiscal de un adquiriente NOMBRADO (sólo un consumidor final
  *    sin documento puede omitirla) y su municipio DANE — salvo exportación.
  *
- * Régimen, responsabilidades, correo y teléfono NO están: el validador los
- * trata como avisos, no como bloqueos.
+ *  - correo del adquiriente, salvo consumidor final (sin documento o con el
+ *    genérico 222222222222): en la captura manual es el canal de entrega de la
+ *    factura electrónica y se exige antes de gastar el consecutivo.
+ *
+ * Régimen, responsabilidades y teléfono NO están: el validador los trata como
+ * avisos, no como bloqueos.
  */
 export function missingAcquirerEmissionFields(
   state: AcquirerEmissionState,
@@ -1825,6 +1835,17 @@ export function missingAcquirerEmissionFields(
           'La dirección fiscal necesita su municipio DANE: búscalo por nombre y selecciónalo.',
       });
     }
+  }
+  if (
+    !isFinalConsumerDocument(state.customer_tax_id) &&
+    !text(state.customer_email)
+  ) {
+    missing.push({
+      field: 'customer_email',
+      label: 'Correo del adquiriente',
+      reason:
+        'Requerido para emitir: es la dirección a la que se entrega la factura electrónica. Sólo una venta a consumidor final puede omitirlo.',
+    });
   }
   return missing;
 }
@@ -2207,6 +2228,22 @@ export function dropRowMarkField(
  * los impuestos viven DENTRO del `FormGroup` de la línea (no en un `Map`
  * paralelo que se desincroniza al borrar una fila).
  */
+/**
+ * Primer ancestro que desplaza verticalmente (el <main> del layout privado),
+ * o null si desplaza la ventana.
+ */
+function findScrollContainer(node: HTMLElement): HTMLElement | null {
+  let current = node.parentElement;
+  while (current && current !== document.body) {
+    const overflowY = getComputedStyle(current).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
 @Component({
   selector: 'vendix-invoice-create-page',
   standalone: true,
@@ -2241,6 +2278,7 @@ export function dropRowMarkField(
     InvoiceSectionNotasComponent,
     InvoiceSummaryAsideComponent,
     InvoiceDraftScanModalComponent,
+    InvoiceHelpPopoverComponent,
     ModalComponent,
   ],
   template: `
@@ -2282,7 +2320,7 @@ export function dropRowMarkField(
         («space-y-4» = 1 rem, la misma que usan los formularios de producto y
         ajustes), sin valores sueltos.
       -->
-      <div class="px-2 md:px-4 pb-6 grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <div class="px-2 md:px-4 pb-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         <div class="lg:col-span-9 min-w-0 space-y-4">
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
@@ -2310,22 +2348,31 @@ export function dropRowMarkField(
           </app-alert-banner>
         }
 
-        <!-- Modo: manual vs desde pedido -->
-        <div class="flex gap-2">
+        <!-- Modo: manual vs desde pedido. Control segmentado: el estado se
+             lee por relleno Y por aria-pressed, no sólo por color. -->
+        <div
+          class="flex gap-1 rounded-xl border border-border bg-surface p-1 shadow-sm"
+          role="group"
+          aria-label="Cómo crear la factura"
+        >
           <button
             type="button"
-            class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
+            class="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
             [ngClass]="modeClass('manual')"
+            [attr.aria-pressed]="mode() === 'manual'"
             (click)="setMode('manual')"
           >
+            <app-icon name="file-text" [size]="15" />
             Factura manual
           </button>
           <button
             type="button"
-            class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
+            class="inline-flex min-h-[40px] flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
             [ngClass]="modeClass('from_order')"
+            [attr.aria-pressed]="mode() === 'from_order'"
             (click)="setMode('from_order')"
           >
+            <app-icon name="shopping-cart" [size]="15" />
             Desde pedido
           </button>
         </div>
@@ -2363,16 +2410,21 @@ export function dropRowMarkField(
             de emisión sigue siendo el de siempre.
           -->
           <div
-            class="flex flex-col gap-2 rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <p
-              class="flex items-start gap-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+              class="flex items-center gap-2.5 text-xs leading-relaxed text-text-secondary"
             >
-              <app-icon
-                name="sparkles"
-                [size]="14"
-                class="mt-0.5 shrink-0 text-[var(--color-primary)]"
-              />
+              <span
+                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                aria-hidden="true"
+              >
+                @if (draftAcquirerResolving()) {
+                  <app-icon name="loader-2" [size]="15" [spin]="true" />
+                } @else {
+                  <app-icon name="sparkles" [size]="15" />
+                }
+              </span>
               @if (draftAcquirerResolving()) {
                 <span role="status">Buscando al adquiriente del borrador…</span>
               } @else {
@@ -2400,8 +2452,8 @@ export function dropRowMarkField(
               {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Revisa
               los campos marcados antes de emitir.
               <span class="mt-1 block text-xs font-normal">
-                Borde de acento: lo leyó la IA. Borde ámbar: no lo encontró o
-                no está segura.
+                Etiqueta «IA» con borde de acento: lo leyó la IA. Etiqueta
+                «Revisar» con borde ámbar: no lo encontró o no está segura.
               </span>
               @if (notice.acquirer) {
                 <span class="mt-1 block text-xs font-normal">
@@ -2520,7 +2572,8 @@ export function dropRowMarkField(
                   (tienda → organización → RUES). Lo que RUES encuentre se
                   rellena aquí mismo, sin modal; el modal de alta queda como
                   camino secundario.
-              Correo, teléfono, régimen y responsabilidades son AVISOS para la
+              El correo es OBLIGATORIO (salvo consumidor final) y va junto al
+              nombre. Teléfono, régimen y responsabilidades son AVISOS para la
               DIAN, no bloqueos: viven plegados en «Más datos».
             -->
             <vendix-invoice-form-section
@@ -2728,9 +2781,19 @@ export function dropRowMarkField(
               }
 
               @if (acquirerMissing().length > 0) {
-                <p class="mb-2 text-xs text-error" role="status">
-                  Para emitir falta:
-                  {{ acquirerMissingLabels() }}.
+                <p
+                  class="mb-3 flex items-start gap-1.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-xs text-text-primary"
+                  role="status"
+                >
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="14"
+                    class="mt-0.5 shrink-0 text-error"
+                  />
+                  <span>
+                    <span class="font-semibold">Para emitir falta:</span>
+                    {{ acquirerMissingLabels() }}.
+                  </span>
                 </p>
               }
 
@@ -2799,17 +2862,42 @@ export function dropRowMarkField(
                 }
               </div>
 
-              <div class="mt-3" [ngClass]="acquirerFieldClass('customer_name')">
-                <app-input
-                  [label]="customerNameLabel()"
-                  [placeholder]="customerNamePlaceholder()"
-                  formControlName="customer_name"
-                  [control]="control('customer_name')"
-                  [error]="fieldError('customer_name') ?? emissionHint('customer_name')"
-                  [required]="true"
-                  [readonly]="isLinkedToExistingCustomer()"
-                  size="sm"
-                ></app-input>
+              <!--
+                Nombre y correo en la misma fila: los dos son obligatorios para
+                emitir. El correo salió de «Más datos» porque es el canal de
+                entrega de la factura electrónica; sólo el consumidor final
+                (sin documento o 222222222222) queda exento.
+              -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <div [ngClass]="acquirerFieldClass('customer_name')">
+                  <app-input
+                    [label]="customerNameLabel()"
+                    [placeholder]="customerNamePlaceholder()"
+                    formControlName="customer_name"
+                    [control]="control('customer_name')"
+                    [error]="fieldError('customer_name') ?? emissionHint('customer_name')"
+                    [required]="true"
+                    [readonly]="isLinkedToExistingCustomer()"
+                    size="sm"
+                  ></app-input>
+                </div>
+                <div [ngClass]="acquirerFieldClass('customer_email')">
+                  <app-input
+                    label="Correo"
+                    type="email"
+                    formControlName="customer_email"
+                    [control]="control('customer_email')"
+                    [error]="fieldError('customer_email') ?? emissionHint('customer_email')"
+                    [required]="!isEmailExemptAcquirer()"
+                    placeholder="cliente@dominio.com"
+                    [helperText]="
+                      isEmailExemptAcquirer()
+                        ? 'Opcional para consumidor final. Es la dirección a la que se entrega la factura electrónica.'
+                        : 'Es la dirección a la que se entrega la factura electrónica.'
+                    "
+                    size="sm"
+                  ></app-input>
+                </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
@@ -2869,7 +2957,7 @@ export function dropRowMarkField(
                   />
                   Más datos
                   <span class="font-normal">
-                    (correo, teléfono, régimen y responsabilidades)
+                    (teléfono, régimen y responsabilidades)
                   </span>
                 </button>
                 <div
@@ -2879,17 +2967,6 @@ export function dropRowMarkField(
                 >
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <app-input
-                      label="Correo"
-                      type="email"
-                      formControlName="customer_email"
-                      [ngClass]="acquirerFieldClass('customer_email')"
-                      [control]="control('customer_email')"
-                      [error]="fieldError('customer_email')"
-                      placeholder="cliente@dominio.com"
-                      helperText="Es la dirección a la que se entrega la factura electrónica."
-                      size="sm"
-                    ></app-input>
-                    <app-input
                       label="Teléfono"
                       formControlName="customer_phone"
                       [ngClass]="acquirerFieldClass('customer_phone')"
@@ -2897,8 +2974,6 @@ export function dropRowMarkField(
                       [error]="fieldError('customer_phone')"
                       size="sm"
                     ></app-input>
-                  </div>
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <app-selector
                       label="Régimen tributario"
                       formControlName="customer_tax_regime"
@@ -3019,7 +3094,7 @@ export function dropRowMarkField(
               @if (aiuGuidance(); as guide) {
                 <!-- Régimen efectivo de la tienda: qué se grava y por qué -->
                 <div
-                  class="rounded-xl border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-4 py-3.5"
+                  class="rounded-xl border border-primary/25 bg-primary/5 px-4 py-3.5"
                 >
                   <div class="flex flex-wrap items-center gap-2">
                     <span
@@ -3935,11 +4010,24 @@ export function dropRowMarkField(
         }
         </div>
 
-        <!-- Resumen lateral: totales, checklist viva y acciones. En móvil queda debajo del contenido. -->
+        <!--
+          Resumen lateral: totales, checklist viva y acciones. En móvil queda
+          debajo del contenido, en flujo normal (sin sticky ni scroll propio).
+
+          Desde lg queda pegado justo DEBAJO del sticky header de la página: el
+          contenedor que desplaza es el <main> del layout (ya debajo de la
+          barra superior), así que lo único encima es app-sticky-header. Su
+          alto se MIDE (observeAsideStickyOffsets) y llega como variables CSS;
+          los valores de respaldo cubren el primer pintado. Si el contenido
+          excede el alto visible, desplaza por dentro; el padding deja aire
+          para sombras y anillos de foco que el overflow recortaría.
+        -->
         <aside
           id="invoice-summary-aside"
           tabindex="-1"
-          class="lg:col-span-3 lg:sticky lg:top-24 lg:self-start outline-none"
+          class="outline-none lg:col-span-3 lg:sticky lg:self-start lg:top-[var(--invoice-aside-top,5.5rem)] lg:max-h-[var(--invoice-aside-max-h,calc(100dvh_-_9rem))] lg:overflow-y-auto lg:overscroll-contain lg:p-1 lg:pb-4 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--color-border)_transparent]"
+          [style.--invoice-aside-top]="asideStickyTop()"
+          [style.--invoice-aside-max-h]="asideStickyMaxHeight()"
           aria-label="Resumen y acciones de la factura"
         >
           <!--
@@ -3954,11 +4042,18 @@ export function dropRowMarkField(
           -->
           @if (mode() === 'manual') {
             <div
-              class="mb-3 rounded-xl border border-border bg-[var(--color-surface)]"
+              class="mb-4 rounded-2xl border border-border bg-surface shadow-sm"
             >
+              <!--
+                Cabecera del chip: el botón que pliega/despliega y, a su lado
+                (hermano, no anidado: un botón no puede vivir dentro de otro),
+                el ícono de ayuda con la explicación que antes ocupaba un
+                párrafo fijo dentro del panel.
+              -->
+              <div class="flex items-center gap-1 pr-2">
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                class="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                 [attr.aria-expanded]="isSectionOpen('perfil')"
                 aria-controls="invoice-profile-panel"
                 [title]="profileSectionHelp"
@@ -3986,19 +4081,25 @@ export function dropRowMarkField(
                   class="shrink-0 text-[var(--color-text-secondary)]"
                 />
               </button>
+              @if (hasProfiles()) {
+                <vendix-invoice-help-popover
+                  label="Qué hace el perfil de facturación"
+                  heading="Perfil de facturación"
+                >
+                  <p>
+                    Elegirlo preconfigura el documento completo —empezando por
+                    la resolución— y reemplaza lo que ya hubiera escrito. Si la
+                    factura ya está modificada, se pregunta antes.
+                  </p>
+                </vendix-invoice-help-popover>
+              }
+              </div>
               <div
                 id="invoice-profile-panel"
                 class="border-t border-border px-3 py-3"
                 [hidden]="!isSectionOpen('perfil')"
               >
             @if (hasProfiles()) {
-              <p
-                class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]"
-              >
-                Elegirlo preconfigura el documento completo —empezando por la
-                resolución— y reemplaza lo que ya hubiera escrito. Si la factura
-                ya está modificada, se pregunta antes.
-              </p>
               <app-selector
                 label="Perfil de facturación"
                 [formControl]="profileControl"
@@ -4009,7 +4110,7 @@ export function dropRowMarkField(
 
               @if (profileAutoSelected()) {
                 <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5"
                 >
                   <app-icon
                     name="check-circle"
@@ -4057,7 +4158,7 @@ export function dropRowMarkField(
               -->
               @if (pendingModelLines() > 0) {
                 <div
-                  class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  class="mt-3 flex flex-col gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <p class="text-xs leading-relaxed text-text-primary">
                     Este perfil trae
@@ -4763,6 +4864,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     customer_person_type: ['JURIDICA' as 'NATURAL' | 'JURIDICA'],
     customer_tax_regime: [''],
     customer_fiscal_responsibilities: [[] as string[]],
+    // Obligatorio salvo consumidor final: lo fija syncCustomerEmailRequirement.
     customer_email: ['', [Validators.email]],
     customer_phone: [''],
     customer_address: [''],
@@ -5867,7 +5969,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * exige se muestra como tarjeta compacta.
    */
   readonly acquirerEditing = signal(false);
-  /** «Más datos» del adquiriente (correo, teléfono, régimen, RUT) desplegado. */
+  /** «Más datos» del adquiriente (teléfono, régimen, RUT) desplegado. */
   readonly acquirerMoreOpen = signal(false);
 
   // ── Borrador IA («Cargar documentos») ───────────────────────
@@ -5918,6 +6020,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       customer_document_type: raw['customer_document_type'],
       customer_address: raw['customer_address'],
       customer_municipality_code: raw['customer_municipality_code'],
+      customer_email: raw['customer_email'],
       isExport: this.isExportInvoice(),
     });
   });
@@ -5940,7 +6043,6 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   /** Campos del adquiriente que viven plegados en «Más datos». */
   private static readonly ACQUIRER_MORE_FIELDS: ReadonlySet<string> = new Set([
-    'customer_email',
     'customer_phone',
     'customer_tax_regime',
     'customer_fiscal_responsibilities',
@@ -6112,6 +6214,27 @@ export class InvoiceCreatePageComponent implements OnInit {
     } else {
       control.clearValidators();
     }
+    control.updateValueAndValidity();
+  });
+
+  /**
+   * El correo del adquiriente es OBLIGATORIO en la captura manual, salvo
+   * consumidor final (sin documento o con el genérico 222222222222). El
+   * formato se valida siempre. Mismo patrón que la dirección fiscal: el
+   * validador acompaña a `missingAcquirerEmissionFields`, que es quien bloquea
+   * y marca «Requerido para emitir»; esto sólo deja el control en `invalid`.
+   */
+  readonly isEmailExemptAcquirer = computed(() =>
+    isFinalConsumerDocument(this.rawValue()['customer_tax_id']),
+  );
+
+  private readonly syncCustomerEmailRequirement = effect(() => {
+    const required = !this.isEmailExemptAcquirer();
+    const control = this.invoiceForm.get('customer_email');
+    if (!control) return;
+    control.setValidators(
+      required ? [Validators.required, Validators.email] : [Validators.email],
+    );
     control.updateValueAndValidity();
   });
 
@@ -8214,6 +8337,55 @@ export class InvoiceCreatePageComponent implements OnInit {
   private backendErrorSubs = new Subscription();
   private erroredControls: { path: string; control: AbstractControl }[] = [];
 
+  // ── Resumen lateral pegajoso ────────────────────────────────
+
+  /** Host de app-sticky-header: lo único que hay encima del aside al desplazar. */
+  private readonly stickyHeaderEl = viewChild(StickyHeaderComponent, {
+    read: ElementRef,
+  });
+  private readonly asideTopPx = signal<number | null>(null);
+  private readonly asideMaxHeightPx = signal<number | null>(null);
+  readonly asideStickyTop = computed(() => {
+    const top = this.asideTopPx();
+    return top === null ? null : top + 'px';
+  });
+  readonly asideStickyMaxHeight = computed(() => {
+    const max = this.asideMaxHeightPx();
+    return max === null ? null : max + 'px';
+  });
+
+  /**
+   * Mide el alto real del sticky header y del contenedor que desplaza (el
+   * <main> del layout) y lo publica como variables CSS del aside. Se re-mide
+   * con ResizeObserver: el header cambia de alto con el metadato del submit y
+   * el contenedor con el tamaño de la ventana.
+   */
+  private readonly asideStickyMeasure = afterNextRender(() =>
+    this.observeAsideStickyOffsets(),
+  );
+
+  private observeAsideStickyOffsets(): void {
+    if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const header = this.stickyHeaderEl()?.nativeElement as HTMLElement | undefined;
+    if (!header) return;
+    const scroller = findScrollContainer(header);
+    const GAP = 16;
+    const BOTTOM = 16;
+    const measure = (): void => {
+      const top = Math.round(header.getBoundingClientRect().height + GAP);
+      const viewport = scroller ? scroller.clientHeight : window.innerHeight;
+      this.asideTopPx.set(top);
+      this.asideMaxHeightPx.set(Math.max(240, Math.round(viewport - top - BOTTOM)));
+    };
+    measure();
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(header);
+    observer.observe(scroller ?? document.documentElement);
+    this.destroyRef.onDestroy(() => observer.disconnect());
+  }
+
   constructor() {
     this.currencyService.loadCurrency();
     this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
@@ -9272,8 +9444,8 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   modeClass(mode: 'manual' | 'from_order'): string {
     return this.mode() === mode
-      ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
-      : 'bg-[var(--color-surface)] text-text-primary border-border';
+      ? 'bg-primary text-[var(--color-text-on-primary)] shadow-sm'
+      : 'text-text-secondary hover:bg-[var(--color-surface-secondary)] hover:text-text-primary';
   }
 
   // `productLabel` se retiró de aquí: ahora vive DENTRO de
@@ -10813,10 +10985,10 @@ export class InvoiceCreatePageComponent implements OnInit {
         ),
       );
     }
-    // OJO: la FALTA de correo NO entra aquí. Una venta a consumidor final se
-    // factura sin él y bloquearla dejaría sin emitir el caso más común del
-    // comercio. Ese hallazgo lo reporta la puerta de emisión con su severidad
-    // real, sobre el documento ya persistido.
+    // La FALTA de correo ya entró arriba con el resto del adquiriente
+    // (`acquirerMissing` → «Requerido para emitir»): es obligatorio en la
+    // captura manual. Sólo el consumidor final queda exento, y para él queda
+    // un aviso en `collectAdvisories()`.
 
     return blockers;
   }
@@ -10832,12 +11004,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     const advisories: SaveRequirement[] = [];
     const raw = this.rawValue();
 
-    if (!String(raw['customer_email'] ?? '').trim()) {
+    // Sólo consumidor final: para cualquier otro adquiriente la falta de
+    // correo es un BLOQUEO (`collectBlockers` vía `acquirerMissing`).
+    if (
+      this.isEmailExemptAcquirer() &&
+      !String(raw['customer_email'] ?? '').trim()
+    ) {
       advisories.push(
         localRequirement(
           'advisory_customer_email',
           'Correo del adquiriente',
-          'El adquiriente no tiene correo: la factura se emite igual, pero no hay a dónde entregarla electrónicamente.',
+          'Venta a consumidor final sin correo: la factura se emite igual, pero no hay a dónde entregarla electrónicamente.',
           'customer_email',
           { severity: 'required' },
         ),

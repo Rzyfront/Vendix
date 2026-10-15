@@ -757,6 +757,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Falta la entidad fiscal de la tienda. Completa los datos legales (NIT y razon social) antes de crear el plan de cuentas.',
 
   // Invoicing
+  INVOICING_ACQUIRER_EMAIL_REQUIRED:
+    'El correo del cliente es obligatorio para crear la factura electrónica.',
+  INVOICING_ACQUIRER_EMAIL_INVALID:
+    'El correo del cliente no es válido (ej. cliente@dominio.com).',
   INVOICING_FIND_001: 'No se encontro la factura.',
   INVOICING_FIND_002: 'No se encontro la resolucion de facturacion.',
   INVOICING_FIND_003: 'No se encontro la orden asociada.',
