@@ -89,92 +89,136 @@ interface BulkUploadResult {
     >
       <div class="p-4 md:p-6">
         <!-- Step Indicator -->
-        <div class="flex items-center justify-center gap-2 mb-6">
-          @for (s of [1, 2, 3, 4]; track s) {
-            <div
-              class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
-              [class.bg-primary]="step() >= s"
-              [class.text-white]="step() >= s"
-              [class.bg-gray-200]="step() < s"
-              [class.text-gray-500]="step() < s"
-            >{{ s }}</div>
-            @if (s < 4) {
-              <div
-                class="w-12 h-0.5 transition-colors"
-                [class.bg-primary]="step() > s"
-                [class.bg-gray-200]="step() <= s"
-              ></div>
-            }
+        <ol class="flex items-center justify-center mb-6" aria-label="Progreso">
+          @for (s of stepLabels; track s.n; let last = $last) {
+            <li class="flex items-center" [attr.aria-current]="step() === s.n ? 'step' : null">
+              <div class="flex flex-col items-center gap-1 w-16 sm:w-20">
+                <span
+                  class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold border transition-colors"
+                  [class]="step() >= s.n ? 'bg-primary border-primary text-white' : 'bg-surface border-border text-text-secondary'"
+                >
+                  @if (step() > s.n) {
+                    <app-icon name="check" [size]="16"></app-icon>
+                  } @else {
+                    {{ s.n }}
+                  }
+                </span>
+                <span
+                  class="text-[11px] leading-tight text-center"
+                  [class]="step() === s.n ? 'text-text-primary font-medium' : 'text-text-secondary'"
+                >{{ s.label }}</span>
+              </div>
+              @if (!last) {
+                <span
+                  class="h-0.5 w-6 sm:w-12 -mt-5 rounded transition-colors"
+                  [class]="step() > s.n ? 'bg-primary' : 'bg-border'"
+                ></span>
+              }
+            </li>
           }
-        </div>
+        </ol>
 
         <!-- Step 1: Configuration -->
         @if (step() === 1) {
-          <div class="space-y-4">
-            <h3 class="text-base font-semibold text-gray-800">Configuración</h3>
+          <div class="space-y-5">
+            <h3 class="text-base font-semibold text-text-primary">Configuración</h3>
 
-            <app-selector
-              label="Ubicación / Bodega"
-              [options]="locations()"
-              [ngModel]="selectedLocationId()"
-              (ngModelChange)="selectedLocationId.set($event)"
-              placeholder="Seleccione una ubicación"
-              [required]="true"
-            ></app-selector>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <app-selector
+                label="Ubicación / Bodega"
+                [options]="locations()"
+                [ngModel]="selectedLocationId()"
+                (ngModelChange)="selectedLocationId.set($event)"
+                placeholder="Seleccione una ubicación"
+                [required]="true"
+              ></app-selector>
 
-            <app-selector
-              label="Tipo de ajuste (global)"
-              [options]="adjustmentTypeOptions"
-              [ngModel]="selectedAdjustmentType()"
-              (ngModelChange)="selectedAdjustmentType.set($event)"
-            ></app-selector>
+              <app-selector
+                label="Tipo de ajuste (global)"
+                [options]="adjustmentTypeOptions"
+                [ngModel]="selectedAdjustmentType()"
+                (ngModelChange)="selectedAdjustmentType.set($event)"
+              ></app-selector>
 
-            <app-textarea
-              label="Descripción general (opcional)"
-              [ngModel]="description()"
-              (ngModelChange)="description.set($event)"
-              placeholder="Ej: Conteo físico mensual de marzo"
-              [rows]="2"
-            ></app-textarea>
+              <div class="sm:col-span-2">
+                <app-textarea
+                  label="Descripción general (opcional)"
+                  [ngModel]="description()"
+                  (ngModelChange)="description.set($event)"
+                  placeholder="Ej: Conteo físico mensual de marzo"
+                  [rows]="2"
+                ></app-textarea>
+              </div>
+            </div>
 
-            <div class="pt-2 space-y-2">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Tipo de plantilla">
+            <div class="space-y-3 pt-4 border-t border-border">
+              <p class="text-sm font-medium text-text-primary" id="bulk-adj-template-label">Plantilla</p>
+              <div
+                class="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                role="radiogroup"
+                aria-labelledby="bulk-adj-template-label"
+              >
                 <button
                   type="button"
                   role="radio"
                   [attr.aria-checked]="templateMode() === 'existing'"
-                  class="text-left rounded-lg border p-3 transition-colors"
-                  [class]="templateMode() === 'existing' ? 'border-primary bg-primary/5' : 'border-gray-200'"
+                  class="flex items-start gap-3 text-left rounded-lg border p-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                  [class]="templateMode() === 'existing' ? 'border-primary bg-primary/5' : 'border-border bg-surface hover:border-primary/40'"
                   (click)="templateMode.set('existing')"
                 >
-                  <span class="block text-sm font-medium text-gray-800">Productos existentes con stock actual</span>
+                  <app-icon
+                    name="package-search"
+                    [size]="20"
+                    class="mt-0.5 shrink-0"
+                    [class]="templateMode() === 'existing' ? 'text-primary' : 'text-text-secondary'"
+                  ></app-icon>
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-text-primary">Productos existentes</span>
+                    <span class="block text-xs text-text-secondary mt-0.5">Con el stock actual de la ubicación.</span>
+                  </span>
                 </button>
                 <button
                   type="button"
                   role="radio"
                   [attr.aria-checked]="templateMode() === 'example'"
-                  class="text-left rounded-lg border p-3 transition-colors"
-                  [class]="templateMode() === 'example' ? 'border-primary bg-primary/5' : 'border-gray-200'"
+                  class="flex items-start gap-3 text-left rounded-lg border p-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                  [class]="templateMode() === 'example' ? 'border-primary bg-primary/5' : 'border-border bg-surface hover:border-primary/40'"
                   (click)="templateMode.set('example')"
                 >
-                  <span class="block text-sm font-medium text-gray-800">Plantilla de ejemplo</span>
+                  <app-icon
+                    name="file-text"
+                    [size]="20"
+                    class="mt-0.5 shrink-0"
+                    [class]="templateMode() === 'example' ? 'text-primary' : 'text-text-secondary'"
+                  ></app-icon>
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-text-primary">Plantilla de ejemplo</span>
+                    <span class="block text-xs text-text-secondary mt-0.5">Filas de muestra para ver el formato.</span>
+                  </span>
                 </button>
               </div>
-              <app-button
-                variant="outline"
-                size="sm"
-                [disabled]="isDownloading() || (templateMode() === 'existing' && !selectedLocationId())"
-                [loading]="isDownloading()"
-                (clicked)="downloadTemplate()"
-              >
-                <div class="flex items-center gap-2">
-                  <app-icon slot="icon" name="download" [size]="16"></app-icon>
-                  <span>Descargar plantilla</span>
-                </div>
-              </app-button>
-              <p class="text-xs text-gray-500 mt-1">
+
+              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [disabled]="isDownloading() || (templateMode() === 'existing' && !selectedLocationId())"
+                  [loading]="isDownloading()"
+                  (clicked)="downloadTemplate()"
+                >
+                  <div class="flex items-center gap-2">
+                    <app-icon slot="icon" name="download" [size]="16"></app-icon>
+                    <span>Descargar plantilla</span>
+                  </div>
+                </app-button>
+                @if (templateMode() === 'existing' && !selectedLocationId()) {
+                  <span class="text-xs text-text-secondary">Seleccione una ubicación para habilitar la descarga.</span>
+                }
+              </div>
+
+              <p class="text-xs text-text-secondary leading-relaxed">
                 @if (templateMode() === 'existing') {
-                  Incluye todos los productos con inventario de la ubicación y su stock actual. Edita «Cantidad Nueva»; agrega filas con Nombre, Precio Venta y Precio Compra para crear productos nuevos (deja el SKU vacío para generarlo). Requiere seleccionar una ubicación.
+                  Edite «Cantidad Nueva». Para crear productos nuevos agregue filas con Nombre, Precio Venta y Precio Compra (deje el SKU vacío para generarlo).
                 } @else {
                   Archivo con filas de ejemplo para ver el formato esperado.
                 }
@@ -186,14 +230,12 @@ interface BulkUploadResult {
         <!-- Step 2: File Upload -->
         @if (step() === 2) {
           <div class="space-y-4">
-            <h3 class="text-base font-semibold text-gray-800">Subir archivo</h3>
+            <h3 class="text-base font-semibold text-text-primary">Subir archivo</h3>
 
             <!-- Drop zone -->
             <div
-              class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
-              [class.border-gray-300]="!selectedFile()"
-              [class.border-primary]="selectedFile()"
-              [class.bg-primary-50]="selectedFile()"
+              class="border-2 border-dashed rounded-lg p-6 sm:p-8 text-center transition-colors cursor-pointer bg-surface hover:border-primary hover:bg-primary/5"
+              [class]="selectedFile() ? 'border-primary bg-primary/5' : 'border-border'"
               (click)="fileInput.click()"
               (dragover)="onDragOver($event)"
               (drop)="onDrop($event)"
@@ -207,21 +249,22 @@ interface BulkUploadResult {
               />
 
               @if (!selectedFile()) {
-                <app-icon name="upload-cloud" [size]="40" class="mx-auto mb-3 text-gray-400"></app-icon>
-                <p class="text-sm text-gray-600 font-medium">
+                <app-icon name="upload-cloud" [size]="36" class="mx-auto mb-3 text-text-secondary"></app-icon>
+                <p class="text-sm text-text-primary font-medium">
                   Haga clic o arrastre un archivo aquí
                 </p>
-                <p class="text-xs text-gray-400 mt-1">
-                  Formatos aceptados: Excel (.xlsx, .xls) o CSV · Máx. 10.000 filas · 20 MB
+                <p class="text-xs text-text-secondary mt-1">
+                  Excel (.xlsx, .xls) o CSV · Máx. 10.000 filas · 20 MB
                 </p>
               } @else {
-                <app-icon name="file-spreadsheet" [size]="40" class="mx-auto mb-3 text-primary"></app-icon>
-                <p class="text-sm font-medium text-gray-800">{{ selectedFile()!.name }}</p>
-                <p class="text-xs text-gray-500 mt-1">
+                <app-icon name="file-spreadsheet" [size]="36" class="mx-auto mb-3 text-primary"></app-icon>
+                <p class="text-sm font-medium text-text-primary break-all">{{ selectedFile()!.name }}</p>
+                <p class="text-xs text-text-secondary mt-1">
                   {{ formatFileSize(selectedFile()!.size) }}
                 </p>
                 <button
-                  class="text-xs text-red-500 hover:text-red-700 mt-2 underline"
+                  type="button"
+                  class="text-xs text-text-secondary hover:text-[var(--color-error,#dc2626)] mt-2 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded"
                   (click)="removeFile($event)"
                 >
                   Eliminar archivo
@@ -234,29 +277,35 @@ interface BulkUploadResult {
         <!-- Step 3: Review analysis -->
         @if (step() === 3 && analysis()) {
           <div class="space-y-4">
-            <h3 class="text-base font-semibold text-gray-800">Revisión</h3>
+            <h3 class="text-base font-semibold text-text-primary">Revisión</h3>
             <div class="grid grid-cols-3 gap-3">
-              <div class="bg-gray-50 rounded-lg p-3 text-center">
-                <p class="text-2xl font-bold text-gray-800">{{ analysis()!.total }}</p>
-                <p class="text-xs text-gray-500">Filas</p>
+              <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                <p class="text-2xl font-semibold text-text-primary tabular-nums">{{ analysis()!.total }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">Total</p>
               </div>
-              <div class="bg-green-50 rounded-lg p-3 text-center">
-                <p class="text-2xl font-bold text-green-600">{{ analysis()!.valid }}</p>
-                <p class="text-xs text-gray-500">Válidas</p>
+              <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                <p class="text-2xl font-semibold text-text-primary tabular-nums">{{ analysis()!.valid }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">Válidas</p>
               </div>
-              <div class="bg-red-50 rounded-lg p-3 text-center">
-                <p class="text-2xl font-bold text-red-600">{{ analysis()!.failed }}</p>
-                <p class="text-xs text-gray-500">Con errores</p>
+              <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                <p
+                  class="text-2xl font-semibold tabular-nums"
+                  [class]="analysis()!.failed > 0 ? 'text-[var(--color-error,#dc2626)]' : 'text-text-primary'"
+                >{{ analysis()!.failed }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">Con errores</p>
               </div>
             </div>
             @if (analysis()!.errors.length > 0) {
-              <div class="max-h-48 overflow-y-auto bg-red-50 border border-red-200 rounded-lg p-3">
-                <p class="text-sm font-medium text-red-800 mb-2">Errores por fila:</p>
-                @for (e of analysis()!.errors; track $index) {
-                  <p class="text-xs text-red-700">
-                    Fila {{ e.row_number }} ({{ e.sku || '-' }}): {{ e.message }}
-                  </p>
-                }
+              <div class="max-h-60 overflow-y-auto bg-surface border border-border rounded-lg p-3">
+                <p class="text-sm font-medium text-text-primary mb-2">Errores por fila</p>
+                <ul class="space-y-1">
+                  @for (e of analysis()!.errors; track $index) {
+                    <li class="text-xs text-text-secondary">
+                      <span class="font-medium text-text-primary">Fila {{ e.row_number }}</span>
+                      <span class="font-mono"> ({{ e.sku || '-' }})</span>: {{ e.message }}
+                    </li>
+                  }
+                </ul>
               </div>
             }
             @if (analysis()!.requires_initial_load_ack) {
@@ -270,23 +319,31 @@ interface BulkUploadResult {
                 stock se registrará como Carga inicial e incrementará el costo de
                 inventario.
                 @if (newProductPreview().length > 0) {
-                  <ul class="mt-2 list-disc pl-5 text-xs">
+                  <ul class="mt-3 divide-y divide-border rounded-md border border-border bg-surface text-text-primary">
                     @for (r of newProductPreview(); track r.row_number) {
-                      <li>{{ r.name }} · {{ r.quantity }}</li>
+                      <li class="flex items-center gap-2 px-3 py-1.5 text-xs">
+                        <span class="flex-1 min-w-0 truncate">{{ r.name }}</span>
+                        <span class="tabular-nums font-medium">{{ r.quantity }}</span>
+                        @if (!r.sku) {
+                          <span class="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-text-secondary">SKU auto</span>
+                        }
+                      </li>
                     }
                   </ul>
                   @if (newProductsExtra() > 0) {
-                    <p class="mt-1 text-xs">y {{ newProductsExtra() }} más</p>
+                    <p class="mt-1.5 text-xs">y {{ newProductsExtra() }} más</p>
                   }
                 }
               </app-alert-banner>
-              <app-ai-review-ack
-                #initialLoadAckBlock
-                [(acknowledged)]="initialLoadAck"
-                [message]="'Estoy de acuerdo con crear estos productos y registrar su stock como carga inicial.'"
-              />
+              <div class="pt-1">
+                <app-ai-review-ack
+                  #initialLoadAckBlock
+                  [(acknowledged)]="initialLoadAck"
+                  [message]="'Estoy de acuerdo con crear estos productos y registrar su stock como carga inicial.'"
+                />
+              </div>
             }
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-text-secondary">
               Se aplicarán las {{ analysis()!.valid }} filas válidas en lotes de {{ pageSize }}.
             </p>
           </div>
@@ -295,7 +352,7 @@ interface BulkUploadResult {
         <!-- Step 4: Results -->
         @if (step() === 4) {
           <div class="space-y-4">
-            <h3 class="text-base font-semibold text-gray-800">Resultado</h3>
+            <h3 class="text-base font-semibold text-text-primary">Resultado</h3>
 
             @if (isUploading()) {
               <div class="flex flex-col items-center justify-center py-8 gap-3">
@@ -304,15 +361,15 @@ interface BulkUploadResult {
                   [size]="36"
                   class="text-primary animate-spin"
                 ></app-icon>
-                <p class="text-sm text-gray-900 font-medium">
+                <p class="text-sm text-text-primary font-medium">
                   Guardando {{ progress().doneRows }} de {{ progress().totalRows }}
                 </p>
-                <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-                  <div class="flex items-center justify-between text-[11px] text-gray-600">
+                <div class="w-full rounded-lg border border-border bg-surface px-3 py-2">
+                  <div class="flex items-center justify-between text-[11px] text-text-secondary">
                     <span>Lotes de {{ pageSize }} filas</span>
                     <span class="font-semibold text-primary">{{ progressPercent() }}%</span>
                   </div>
-                  <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                  <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border">
                     <div
                       class="h-full rounded-full bg-primary transition-all"
                       [style.width.%]="progressPercent()"
@@ -323,7 +380,7 @@ interface BulkUploadResult {
             }
 
             @if (uploadError() && !isUploading()) {
-              <div class="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 text-xs text-red-700">
+              <div class="bg-surface border border-[var(--color-error,#dc2626)] rounded-lg p-3 flex flex-col sm:flex-row sm:items-start gap-2 text-xs text-text-primary">
                 <p class="flex-1">{{ uploadError() }}</p>
                 @if (retryOffset() !== null) {
                   <app-button variant="outline" size="sm" (clicked)="retryUpload()">
@@ -336,55 +393,53 @@ interface BulkUploadResult {
             @if (uploadResult() && !isUploading()) {
               <!-- Summary -->
               <div class="grid grid-cols-3 gap-3">
-                <div class="bg-gray-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-gray-800">{{ uploadResult()!.total_processed }}</p>
-                  <p class="text-xs text-gray-500">Total</p>
+                <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                  <p class="text-2xl font-semibold text-text-primary tabular-nums">{{ uploadResult()!.total_processed }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">Total</p>
                 </div>
-                <div class="bg-green-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-green-600">{{ uploadResult()!.successful }}</p>
-                  <p class="text-xs text-gray-500">Exitosos</p>
+                <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                  <p class="text-2xl font-semibold text-text-primary tabular-nums">{{ uploadResult()!.successful }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">Exitosos</p>
                 </div>
-                <div class="bg-red-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-red-600">{{ uploadResult()!.failed }}</p>
-                  <p class="text-xs text-gray-500">Fallidos</p>
+                <div class="bg-surface border border-border rounded-lg p-3 text-center">
+                  <p
+                    class="text-2xl font-semibold tabular-nums"
+                    [class]="uploadResult()!.failed > 0 ? 'text-[var(--color-error,#dc2626)]' : 'text-text-primary'"
+                  >{{ uploadResult()!.failed }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">Fallidos</p>
                 </div>
               </div>
 
               <!-- Results Table -->
-              <div class="max-h-64 overflow-y-auto border rounded-lg">
+              <div class="max-h-64 overflow-auto border border-border rounded-lg">
                 <table class="w-full text-xs">
-                  <thead class="bg-gray-50 sticky top-0">
+                  <thead class="bg-surface sticky top-0">
                     <tr>
-                      <th class="px-3 py-2 text-left font-medium text-gray-600">Fila</th>
-                      <th class="px-3 py-2 text-left font-medium text-gray-600">SKU</th>
-                      <th class="px-3 py-2 text-left font-medium text-gray-600">Producto</th>
-                      <th class="px-3 py-2 text-center font-medium text-gray-600">Cambio</th>
-                      <th class="px-3 py-2 text-center font-medium text-gray-600">Estado</th>
+                      <th class="px-3 py-2 text-left font-medium text-text-secondary">Fila</th>
+                      <th class="px-3 py-2 text-left font-medium text-text-secondary">SKU</th>
+                      <th class="px-3 py-2 text-left font-medium text-text-secondary">Producto</th>
+                      <th class="px-3 py-2 text-center font-medium text-text-secondary">Cambio</th>
+                      <th class="px-3 py-2 text-center font-medium text-text-secondary">Estado</th>
                     </tr>
                   </thead>
                   <tbody>
                     @for (item of uploadResult()!.results; track item.row_number) {
-                      <tr
-                        class="border-t"
-                        [class.bg-red-50]="item.status === 'error'"
-                      >
-                        <td class="px-3 py-2 text-gray-500">{{ item.row_number }}</td>
+                      <tr class="border-t border-border text-text-primary">
+                        <td class="px-3 py-2 text-text-secondary">{{ item.row_number }}</td>
                         <td class="px-3 py-2 font-mono">{{ item.sku }}</td>
                         <td class="px-3 py-2">{{ item.product_name || '-' }}</td>
-                        <td class="px-3 py-2 text-center">
+                        <td class="px-3 py-2 text-center tabular-nums">
                           @if (item.status === 'success' && item.quantity_change !== undefined) {
-                            <span [class.text-green-600]="item.quantity_change! > 0" [class.text-red-600]="item.quantity_change! < 0" [class.text-gray-400]="item.quantity_change === 0">
-                              {{ item.quantity_change! > 0 ? '+' : '' }}{{ item.quantity_change }}
-                            </span>
+                            <span>{{ item.quantity_change! > 0 ? '+' : '' }}{{ item.quantity_change }}</span>
                           } @else {
-                            <span class="text-gray-400">-</span>
+                            <span class="text-text-secondary">-</span>
                           }
                         </td>
                         <td class="px-3 py-2 text-center">
                           @if (item.status === 'success') {
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">OK</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border border-border text-text-secondary">OK</span>
                           } @else {
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800" [title]="item.message || ''">Error</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border border-[var(--color-error,#dc2626)] text-[var(--color-error,#dc2626)]" [title]="item.message || ''">Error</span>
                           }
                         </td>
                       </tr>
@@ -395,13 +450,16 @@ interface BulkUploadResult {
 
               @if (uploadResult()!.failed > 0) {
                 <!-- Error details -->
-                <div class="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <p class="text-sm font-medium text-red-800 mb-2">Errores encontrados:</p>
-                  @for (item of failedItems(); track item.row_number) {
-                    <p class="text-xs text-red-700">
-                      Fila {{ item.row_number }} ({{ item.sku }}): {{ item.message }}
-                    </p>
-                  }
+                <div class="max-h-60 overflow-y-auto bg-surface border border-border rounded-lg p-3">
+                  <p class="text-sm font-medium text-text-primary mb-2">Errores encontrados</p>
+                  <ul class="space-y-1">
+                    @for (item of failedItems(); track item.row_number) {
+                      <li class="text-xs text-text-secondary">
+                        <span class="font-medium text-text-primary">Fila {{ item.row_number }}</span>
+                        <span class="font-mono"> ({{ item.sku }})</span>: {{ item.message }}
+                      </li>
+                    }
+                  </ul>
                 </div>
               }
             }
@@ -411,15 +469,15 @@ interface BulkUploadResult {
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <div>
+        <div class="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 p-3 bg-surface rounded-b-xl border-t border-border">
+          <div class="flex flex-col sm:flex-row">
             @if (step() > 1 && step() < 4 && !isAnalyzing()) {
               <app-button variant="outline" (clicked)="previousStep()">
                 Atrás
               </app-button>
             }
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-col-reverse sm:flex-row sm:items-center gap-2 sm:gap-3">
             <app-button variant="outline" [disabled]="isUploading()" (clicked)="onClose()">
               {{ step() === 4 && !isUploading() ? 'Cerrar' : 'Cancelar' }}
             </app-button>
@@ -471,6 +529,12 @@ export class BulkAdjustmentModalComponent {
   private destroyRef = inject(DestroyRef);
 
   readonly step = signal(1);
+  readonly stepLabels = [
+    { n: 1, label: 'Config.' },
+    { n: 2, label: 'Archivo' },
+    { n: 3, label: 'Revisión' },
+    { n: 4, label: 'Resultado' },
+  ];
   readonly isDownloading = signal(false);
   readonly templateMode = signal<'example' | 'existing'>('existing');
   readonly initialLoadAck = signal(false);
