@@ -5017,6 +5017,12 @@ export const ErrorCodes = {
     devMessage:
       'The invoice draft scanner AI application is missing, inactive or has no vision model linked',
   },
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN: {
+    code: 'INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'The platform invoice draft scan requires a super-admin context without store',
+  },
 
   // Monitoring
   MON_CW_001: {

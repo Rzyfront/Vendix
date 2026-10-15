@@ -6,7 +6,10 @@ import {
   isValidFiscalResponsibility,
   normalizeFiscalResponsibilityCode,
 } from '@common/constants/fiscal-responsibilities';
-import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import {
+  AiScanFile,
+  AiScanJobContext,
+} from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import {
   AIMessage,
@@ -21,6 +24,8 @@ import {
 } from '../../../../ai-engine/utils/ocr-money.util';
 import { fuzzyScore } from '../../../../ai-engine/utils/ocr-fuzzy-score.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
 import { SettingsService } from '../../settings/settings.service';
 import { CustomersService } from '../../customers/customers.service';
 import {
@@ -30,6 +35,8 @@ import {
   DraftPersonType,
   INVOICE_DRAFT_LOW_CONFIDENCE_THRESHOLD,
   INVOICE_DRAFT_SCAN_APP_KEY,
+  InvoiceDraftExistingAcquirer,
+  InvoiceDraftScanContext,
   InvoiceDraftScanLine,
   InvoiceDraftScanResult,
   MAX_INVOICE_DRAFT_SCAN_NOTE_LENGTH,
@@ -113,7 +120,17 @@ type Raw = Record<string, unknown>;
 
 export interface InvoiceDraftScanOptions {
   note?: string | null;
+  /** `store` (default) o `platform` (riel super-admin: Vendix factura). */
+  context?: InvoiceDraftScanContext;
+  /**
+   * Contexto del job de la cola (`AiScanJobContext`). Si falta, se lee el
+   * `RequestContextService` que el processor restableció.
+   */
+  job_context?: AiScanJobContext | null;
 }
+
+/** Moneda del borrador de plataforma: Vendix factura en pesos. */
+const PLATFORM_CURRENCY: StoreCurrencyInfo = { code: 'COP', decimal_places: 0 };
 
 /**
  * Escáner IA de borrador de factura de venta.
@@ -126,6 +143,15 @@ export interface InvoiceDraftScanOptions {
  *
  * Nunca escribe: ni crea el cliente, ni lo vincula a la tienda, ni crea la
  * factura. `existing_customer_id` es una lectura.
+ *
+ * DOS CONTEXTOS (`options.context`):
+ * - `store` (default): moneda de la tienda, cliente existente de la
+ *   organización y cruce con el catálogo de productos (StorePrismaService).
+ * - `platform`: el riel super-admin, donde el VENDEDOR es Vendix. Exige
+ *   super-admin sin tienda; moneda COP; líneas libres (sin catálogo:
+ *   `match_status: 'none'`); el adquiriente conocido se busca en tenants y en
+ *   `platform_customers` (GlobalPrismaService) y sale en `existing_acquirer`.
+ *   Nunca toca StorePrismaService, SettingsService ni CustomersService.
  */
 @Injectable()
 export class InvoiceDraftScannerService {
@@ -136,6 +162,7 @@ export class InvoiceDraftScannerService {
     private readonly prisma: StorePrismaService,
     private readonly settingsService: SettingsService,
     private readonly customersService: CustomersService,
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   /**
@@ -169,17 +196,26 @@ export class InvoiceDraftScannerService {
     options: InvoiceDraftScanOptions = {},
   ): Promise<InvoiceDraftScanResult> {
     const note = this.sanitizeNote(options.note);
+    const scope: InvoiceDraftScanContext =
+      options.context === 'platform' ? 'platform' : 'store';
+    if (scope === 'platform') {
+      this.assertPlatformContext(options.job_context);
+    }
     this.logger.debug(
       `[InvoiceDraftScan] ${files.length} file(s): ${files
         .map((f) => `${f.mimeType}/${f.size}b`)
-        .join(', ')}; note=${note ? note.length : 0} chars`,
+        .join(', ')}; note=${note ? note.length : 0} chars; context=${scope}`,
     );
 
     await this.assertReady();
-    const currency = await this.resolveCurrency();
+    const currency =
+      scope === 'platform' ? PLATFORM_CURRENCY : await this.resolveCurrency();
 
     const content: AIMessageContentPart[] = [
-      { type: 'text', text: this.buildInstruction(files.length, currency, note) },
+      {
+        type: 'text',
+        text: this.buildInstruction(files.length, currency, note, scope),
+      },
     ];
     for (const file of files) {
       const { base64, mimeType } = await this.prepareFile(file);
@@ -226,8 +262,14 @@ export class InvoiceDraftScannerService {
 
     // Enriquecimientos de solo lectura: un fallo de base de datos degrada el
     // borrador (sin cliente / sin emparejar) pero nunca tumba el escaneo.
-    await this.attachExistingCustomer(result);
-    await this.matchCatalog(result);
+    if (scope === 'platform') {
+      // Sin catálogo: Vendix factura servicios libres; las líneas quedan
+      // `match_status: 'none'` tal como salen de `normalize`.
+      await this.attachExistingAcquirer(result);
+    } else {
+      await this.attachExistingCustomer(result);
+      await this.matchCatalog(result);
+    }
 
     result.missing_fields = this.collectMissing(result);
     result.requires_review = this.collectReview(result, note);
@@ -242,6 +284,7 @@ export class InvoiceDraftScannerService {
     fileCount: number,
     currency: StoreCurrencyInfo,
     note: string | null,
+    scope: InvoiceDraftScanContext = 'store',
   ): string {
     const parts = [
       fileCount > 1
@@ -249,8 +292,16 @@ export class InvoiceDraftScannerService {
         : 'Build a sales-invoice draft from this document.',
       'Return ONLY the JSON object matching the schema defined in your system instructions.',
       buildCurrencyInstruction(currency),
-      `The store currency is ${currency.code}; use it for "invoice.currency" unless a document explicitly prints another one.`,
+      `The ${scope === 'platform' ? 'default invoice' : 'store'} currency is ${currency.code}; use it for "invoice.currency" unless a document explicitly prints another one.`,
     ];
+    if (scope === 'platform') {
+      // Riel super-admin: el vendedor es Vendix, no un comercio. Sin esto el
+      // modelo podría tomar los datos de Vendix (membrete de la cotización)
+      // como si fueran del adquiriente.
+      parts.push(
+        'SELLER CONTEXT: the seller/issuer of this invoice is Vendix (the software platform itself), not a store or merchant. "acquirer" is ALWAYS the customer Vendix is billing; never fill it with Vendix\'s own identity (name, NIT, address) even if it appears as letterhead. Lines are free-form services: leave "sku" null unless a document prints one.',
+      );
+    }
     parts.push(
       note
         ? `USER NOTE (it has PRIORITY over the documents; apply it and explain how in "note_applied", in Spanish):\n"""\n${note}\n"""`
@@ -376,6 +427,7 @@ export class InvoiceDraftScannerService {
         scoreOf('acquirer.fiscal_responsibilities'),
       ),
       existing_customer_id: null,
+      existing_acquirer: null,
     };
 
     // --- Factura -------------------------------------------------------------
@@ -907,6 +959,84 @@ export class InvoiceDraftScannerService {
   // ---------------------------------------------------------------------------
   // Enriquecimientos de solo lectura
   // ---------------------------------------------------------------------------
+
+  /**
+   * Contexto `platform`: solo super-admin y sin tienda. Lo que llega por la
+   * cola es el contexto del job (quien encoló); si falta, el del request
+   * restablecido por el processor.
+   */
+  private assertPlatformContext(jobContext?: AiScanJobContext | null): void {
+    const ctx = jobContext ?? RequestContextService.getContext();
+    if (!ctx?.is_super_admin || ctx.store_id != null) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN,
+      );
+    }
+  }
+
+  /**
+   * Contexto `platform`: ¿la plataforma ya conoce a este adquiriente? Busca
+   * por documento exacto, en orden: organización, tienda, cliente externo
+   * (`platform_customers`, mismo tipo de documento si se leyó) y usuario. Los
+   * tenants van primero porque son la entidad canónica; el cliente externo
+   * es lo que quedó de facturas anteriores. Lectura pura vía
+   * GlobalPrismaService; un fallo degrada a null.
+   */
+  private async attachExistingAcquirer(result: InvoiceDraftScanResult): Promise<void> {
+    result.acquirer.existing_customer_id = null;
+    result.acquirer.existing_acquirer = null;
+    const number = result.acquirer.document_number.value;
+    if (!number) return;
+    const literal = result.acquirer.document_type.value;
+    const documentCode = literal ? (DIAN_ID_TYPES[literal] ?? null) : null;
+    const found = (
+      kind: InvoiceDraftExistingAcquirer['kind'],
+      id: number,
+    ): InvoiceDraftExistingAcquirer => ({
+      kind,
+      tenant_id: id,
+      id: `${kind === 'organization' ? 'org' : kind}:${id}`,
+    });
+    try {
+      const org = await this.globalPrisma.organizations.findFirst({
+        where: { tax_id: number, state: 'active', is_platform: false },
+        select: { id: true },
+      });
+      if (org) {
+        result.acquirer.existing_acquirer = found('organization', org.id);
+        return;
+      }
+      const store = await this.globalPrisma.stores.findFirst({
+        where: { tax_id: number, is_active: true },
+        select: { id: true },
+      });
+      if (store) {
+        result.acquirer.existing_acquirer = found('store', store.id);
+        return;
+      }
+      const customer = await this.globalPrisma.platform_customers.findFirst({
+        where: {
+          tax_id: number,
+          ...(documentCode ? { document_type: documentCode } : {}),
+        },
+        orderBy: { last_invoiced_at: { sort: 'desc', nulls: 'last' } },
+        select: { id: true },
+      });
+      if (customer) {
+        result.acquirer.existing_acquirer = found('customer', customer.id);
+        return;
+      }
+      const user = await this.globalPrisma.users.findFirst({
+        where: { document_number: number },
+        select: { id: true },
+      });
+      if (user) {
+        result.acquirer.existing_acquirer = found('user', user.id);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[InvoiceDraftScan] Platform acquirer lookup failed: ${err?.message}`);
+    }
+  }
 
   private async attachExistingCustomer(result: InvoiceDraftScanResult): Promise<void> {
     const number = result.acquirer.document_number.value;

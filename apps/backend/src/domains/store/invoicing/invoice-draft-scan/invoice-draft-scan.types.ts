@@ -54,8 +54,24 @@ export interface InvoiceDraftScanAcquirer {
   tax_regime: DraftField<string>;
   /** Códigos RUT casilla 53 (`O-13`, `R-99-PN`, ...). */
   fiscal_responsibilities: DraftField<string[]>;
-  /** Cliente existente en la organización con ese documento (solo lectura). */
+  /** Cliente existente en la organización con ese documento (solo lectura). En plataforma: null. */
   existing_customer_id: number | null;
+  /**
+   * Solo contexto `platform`: adquiriente ya conocido por la plataforma con ese
+   * documento (tenant o cliente externo). `id` usa el formato del picker de
+   * `customers/search` (`org:<n>`, `store:<n>`, `user:<n>`, `customer:<n>`).
+   * En tienda siempre null.
+   */
+  existing_acquirer: InvoiceDraftExistingAcquirer | null;
+}
+
+/** Contexto del escaneo: borrador de tienda (default) o de la plataforma (super-admin). */
+export type InvoiceDraftScanContext = 'store' | 'platform';
+
+export interface InvoiceDraftExistingAcquirer {
+  kind: 'store' | 'organization' | 'user' | 'customer';
+  tenant_id: number;
+  id: string;
 }
 
 export interface InvoiceDraftScanInvoice {
@@ -63,7 +79,7 @@ export interface InvoiceDraftScanInvoice {
   issue_date: DraftField<string>;
   /** YYYY-MM-DD */
   due_date: DraftField<string>;
-  /** ISO 4217; por defecto la moneda de la tienda. */
+  /** ISO 4217; por defecto la moneda de la tienda (COP en plataforma). */
   currency: DraftField<string>;
   reference: DraftField<string>;
   notes: DraftField<string>;
