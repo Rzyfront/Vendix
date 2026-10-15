@@ -3,7 +3,7 @@ import { invoiceCreateFailurePolicy, mustConfirmInvoiceCreate, resolveInvoiceCre
 describe('Nueva factura — reintentos sin duplicados', () => {
   const KEY = '3dd5fe96-659c-4ef7-b489-753007e411ca';
   it('genera una sola clave y la reutiliza en todos los reintentos', () => {
-    const generate = jest.fn(() => KEY);
+    const generate = jasmine.createSpy('generate').and.returnValue(KEY);
     const first = resolveInvoiceCreateRequestKey(null, null, generate);
     const retry = resolveInvoiceCreateRequestKey(first.key, KEY, generate);
     expect(retry.key).toBe(KEY);
@@ -11,31 +11,35 @@ describe('Nueva factura — reintentos sin duplicados', () => {
   });
 
   it('recargar recupera la incertidumbre y no genera UUID nuevo', () => {
-    const generate = jest.fn(() => 'otro');
+    const generate = jasmine.createSpy('generate').and.returnValue('otro');
     const reloaded = resolveInvoiceCreateRequestKey(null, KEY, generate);
     expect(reloaded).toEqual({ key: KEY, recoveredUncertainty: true });
     expect(generate).not.toHaveBeenCalled();
     expect(mustConfirmInvoiceCreate(false, false, KEY)).toBe(true);
   });
 
-  it.each([undefined, 0, 408, 500, 502, 504])('HTTP %s conserva clave y payload', (status) => {
-    expect(invoiceCreateFailurePolicy(status, false)).toMatchObject({
-      releasePayload: false, preserveRequestKey: true, resultUncertain: true,
+  for (const status of [undefined, 0, 408, 500, 502, 504]) {
+    it(`HTTP ${status} conserva clave y payload`, () => {
+      expect(invoiceCreateFailurePolicy(status, false)).toEqual(jasmine.objectContaining({
+        releasePayload: false, preserveRequestKey: true, resultUncertain: true,
+      }));
     });
-  });
+  }
 
-  it.each([400, 403, 409, 422])('timeout → recarga → HTTP %s permite corregir SIN liberar UUID', (status) => {
-    const restored = resolveInvoiceCreateRequestKey(null, KEY, () => 'otro');
-    const policy = invoiceCreateFailurePolicy(status, restored.recoveredUncertainty);
-    expect(policy).toMatchObject({ releasePayload: true, preserveRequestKey: true, resultUncertain: true });
-    expect(resolveInvoiceCreateRequestKey(restored.key, KEY, () => 'otro').key).toBe(KEY);
-    expect(mustConfirmInvoiceCreate(false, policy.resultUncertain, KEY)).toBe(true);
-  });
+  for (const status of [400, 403, 409, 422]) {
+    it(`timeout → recarga → HTTP ${status} permite corregir SIN liberar UUID`, () => {
+      const restored = resolveInvoiceCreateRequestKey(null, KEY, () => 'otro');
+      const policy = invoiceCreateFailurePolicy(status, restored.recoveredUncertainty);
+      expect(policy).toEqual(jasmine.objectContaining({ releasePayload: true, preserveRequestKey: true, resultUncertain: true }));
+      expect(resolveInvoiceCreateRequestKey(restored.key, KEY, () => 'otro').key).toBe(KEY);
+      expect(mustConfirmInvoiceCreate(false, policy.resultUncertain, KEY)).toBe(true);
+    });
+  }
 
   it('un 409 inicial permite seleccionar cliente y corregir sin payload inline congelado', () => {
-    expect(invoiceCreateFailurePolicy(409, false)).toMatchObject({
+    expect(invoiceCreateFailurePolicy(409, false)).toEqual(jasmine.objectContaining({
       releasePayload: true, preserveRequestKey: false, resultUncertain: false,
-    });
+    }));
   });
 
   it('con almacenamiento bloqueado sigue impidiendo descartar el UUID incierto en memoria', () => {
