@@ -12,7 +12,7 @@ import { VendixHttpException } from '../../../common/errors';
  *     cliente en línea o tomar consecutivo;
  *   - formato inválido → 400 `INVOICING_ACQUIRER_EMAIL_INVALID`;
  *   - correo heredado de la ficha vinculada o del `inline_customer` → pasa;
- *   - consumidor final (222222222222 o sin adquiriente) → exento;
+ *   - consumidor final (222222222222 o sin número de documento) → exento;
  *   - `create(dto)` sin la opción (notas plataforma) y `createFromOrder` no
  *     exigen correo; el controller sí activa la opción.
  *
@@ -210,6 +210,18 @@ describe('InvoicingService.create — correo del adquiriente (factura manual)', 
           customer_name: undefined,
           customer_tax_id: undefined,
           customer_document_type: undefined,
+        }),
+      ),
+    ).rejects.toBe(PAST_GATE);
+  });
+
+  it('sin número de documento pero con tipo por defecto y nombre (convención de la pantalla) → exenta', async () => {
+    await expect(
+      manual(
+        baseDto({
+          customer_name: 'Mostrador',
+          customer_tax_id: undefined,
+          customer_document_type: 'NIT',
         }),
       ),
     ).rejects.toBe(PAST_GATE);

@@ -24,9 +24,12 @@ import { DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER } from '../validators/customer-fisc
  *
  * ## Exento: consumidor final
  *
- * Mismo criterio que `DianDirectProvider.buildCustomerData`: el documento
- * declara consumidor final cuando trae el número oficial `222222222222`, o
- * cuando no declara adquiriente alguno (ni tipo, ni número, ni nombre).
+ * El adquiriente es consumidor final cuando trae el número oficial
+ * `222222222222` o cuando no trae número de documento. Es la convención de la
+ * pantalla «Nueva factura» (sin documento = consumidor final), que siempre
+ * envía un tipo de documento por defecto: exigir además «sin tipo ni nombre»
+ * (criterio de `DianDirectProvider.buildCustomerData`) haría que el servidor
+ * rechazara con 400 una factura que la pantalla deja crear.
  */
 
 /** Tipos de documento de venta con adquiriente a quien entregar la factura. */
@@ -65,12 +68,7 @@ export function isFinalConsumerAcquirer(input: {
   name?: string | null;
 }): boolean {
   const number = blankToNull(input.document_number);
-  if (number && onlyDigits(number) === DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER) {
-    return true;
-  }
-  return (
-    !number && !blankToNull(input.document_type) && !blankToNull(input.name)
-  );
+  return !number || onlyDigits(number) === DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER;
 }
 
 /**
