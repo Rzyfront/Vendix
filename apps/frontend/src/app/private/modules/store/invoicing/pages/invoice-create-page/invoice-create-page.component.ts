@@ -131,6 +131,7 @@ import {
   SaveRequirementsModalComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
+  type AddressPayload,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 /**
@@ -175,6 +176,8 @@ import { CustomersService } from '../../../customers/services/customers.service'
 import {
   CreateCustomerRequest as CustomerModalPrefill,
   Customer,
+  CustomerAddress,
+  ExternalCustomerIdentity,
   ExternalCustomerLookupResult,
   UpdateCustomerRequest,
 } from '../../../customers/models/customer.model';
@@ -1513,6 +1516,366 @@ export function isDocumentLikeTerm(term: string): boolean {
   return /^(?=(?:\D*\d){5})[\d.\-\s]+$/.test(term.trim());
 }
 
+// ─────────────────────────────────────────────────────────────
+// Adquiriente: precarga desde la ficha y faltantes para emitir
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Los controles del adquiriente que rellena un cliente existente. Los nombres
+ * son EXACTAMENTE los del `invoiceForm`, así que el resultado se pasa tal cual
+ * a `patchValue`.
+ */
+export interface AcquirerPrefill {
+  customer_id: number;
+  customer_name: string;
+  customer_document_type: string;
+  customer_tax_id: string;
+  customer_verification_digit: string;
+  customer_person_type: 'NATURAL' | 'JURIDICA';
+  customer_tax_regime: string;
+  customer_fiscal_responsibilities: string[];
+  customer_email: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_municipality_code: string;
+  customer_city_name: string;
+  customer_department_name: string;
+}
+
+/**
+ * La dirección que declara la factura: la de FACTURACIÓN de la ficha y, si no
+ * existe, la primera de envío. Es el mismo orden de respaldo que usa la
+ * emisión, para que la pantalla no muestre una dirección y el XML lleve otra.
+ */
+export function customerInvoiceAddress(
+  customer: Pick<Customer, 'billing_address' | 'addresses'>,
+): CustomerAddress | null {
+  return customer.billing_address ?? customer.addresses?.[0] ?? null;
+}
+
+/** Nombre legible de la ficha: razón social, o nombres, o correo, o id. */
+export function customerLegalDisplayName(customer: Customer): string {
+  return (
+    customer.legal_name ||
+    [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
+    customer.email ||
+    'Cliente #' + customer.id
+  );
+}
+
+/**
+ * Traduce una ficha de cliente a los controles del adquiriente, con TODO lo
+ * que la ficha tenga.
+ *
+ * La dirección viaja SÓLO con sus líneas (`address_line1` + `address_line2`):
+ * ciudad y departamento ya tienen su propio control (municipio DANE), y
+ * pegarlos a la línea — como hacía la versión anterior — duplicaba la ciudad
+ * dentro del `cac:AddressLine` del XML.
+ *
+ * El `document_type` de la ficha es la sigla interna (`CC`, `NIT`); el
+ * formulario quiere el CÓDIGO DIAN. Sin tipo reconocible cae a NIT, como
+ * siempre hizo esta pantalla.
+ */
+export function customerToAcquirerPrefill(customer: Customer): AcquirerPrefill {
+  const address = customerInvoiceAddress(customer);
+  const documentType =
+    getDianSchemeIdForDocumentType(customer.document_type) ||
+    DOCUMENT_TYPE_NIT_CODE;
+  const personType: 'NATURAL' | 'JURIDICA' =
+    customer.person_type ??
+    (documentType === DOCUMENT_TYPE_NIT_CODE ? 'JURIDICA' : 'NATURAL');
+  const addressLine = address
+    ? joinAddressLines(address.address_line1, address.address_line2)
+    : '';
+  return {
+    customer_id: customer.id,
+    customer_name: customerLegalDisplayName(customer),
+    customer_document_type: documentType,
+    customer_tax_id: customer.document_number ?? '',
+    customer_verification_digit: customer.verification_digit ?? '',
+    customer_person_type: personType,
+    customer_tax_regime: customer.tax_regime ?? '',
+    customer_fiscal_responsibilities: [
+      ...(customer.fiscal_responsibilities ?? []),
+    ],
+    customer_email: customer.email ?? '',
+    customer_phone: customer.phone || address?.phone_number || '',
+    customer_address: addressLine,
+    customer_municipality_code: address?.municipality_code ?? '',
+    customer_city_name: address?.city ?? '',
+    customer_department_name: address?.state_province ?? '',
+  };
+}
+
+/**
+ * ¿La ficha que llegó (normalmente de la búsqueda paginada) puede no traer
+ * todo? La lista no siempre incluye direcciones; sin ninguna, o con una sin
+ * municipio, vale la pena pedir la ficha completa antes de marcar faltantes.
+ */
+export function customerNeedsFullRecord(customer: Customer): boolean {
+  const address = customerInvoiceAddress(customer);
+  return !address || !String(address.municipality_code ?? '').trim();
+}
+
+/**
+ * Línea de dirección fiscal: `address_line1` + `address_line2` (apto, oficina)
+ * y NADA más — ciudad y departamento viajan en sus propios campos.
+ */
+export function joinAddressLines(
+  line1: string | null | undefined,
+  line2: string | null | undefined,
+): string {
+  return [line1, line2]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** Controles de dirección del adquiriente que llena el modal de alta. */
+export interface AcquirerAddressPatch {
+  customer_address: string;
+  customer_municipality_code: string;
+  customer_city_name: string;
+  customer_department_name: string;
+}
+
+/**
+ * `addressData` del modal de clientes (claves del schema: `address_line1`,
+ * `state_province`…) → controles de dirección del adquiriente.
+ */
+export function addressPayloadToAcquirerAddress(
+  address: Pick<
+    AddressPayload,
+    'address_line1' | 'address_line2' | 'city' | 'state_province' | 'municipality_code'
+  >,
+): AcquirerAddressPatch {
+  return {
+    customer_address: joinAddressLines(address.address_line1, address.address_line2),
+    customer_municipality_code: String(address.municipality_code ?? '').trim(),
+    customer_city_name: String(address.city ?? '').trim(),
+    customer_department_name: String(address.state_province ?? '').trim(),
+  };
+}
+
+/**
+ * Lo que la ficha completa aporta SIN pisar nada: sólo los controles que hoy
+ * están vacíos (cadena vacía, `null` o arreglo vacío) y para los que la ficha
+ * sí trae valor. `customer_id` nunca entra: ya está puesto.
+ */
+export function fillEmptyAcquirerFields(
+  current: Record<string, unknown>,
+  prefill: AcquirerPrefill,
+): Record<string, unknown> {
+  const isEmpty = (value: unknown): boolean =>
+    value == null ||
+    (typeof value === 'string' && value.trim() === '') ||
+    (Array.isArray(value) && value.length === 0);
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(prefill)) {
+    if (key === 'customer_id') continue;
+    if (isEmpty(value)) continue;
+    if (isEmpty(current[key])) patch[key] = value;
+  }
+  return patch;
+}
+
+/**
+ * `GET /store/customers/:id` responde la ficha a secas, pero otros endpoints
+ * del módulo la envuelven en `{ data }`. Se acepta cualquiera de las dos
+ * formas; lo que no parezca una ficha es `null`.
+ */
+export function unwrapCustomerResponse(response: unknown): Customer | null {
+  if (!response || typeof response !== 'object') return null;
+  const candidate = response as { id?: unknown; data?: unknown };
+  if (typeof candidate.id === 'number') return response as Customer;
+  const data = candidate.data as { id?: unknown } | null | undefined;
+  if (data && typeof data === 'object' && typeof data.id === 'number') {
+    return data as Customer;
+  }
+  return null;
+}
+
+/** Estado mínimo del adquiriente para decidir qué falta antes de emitir. */
+export interface AcquirerEmissionState {
+  customer_id: unknown;
+  customer_name: unknown;
+  customer_tax_id: unknown;
+  customer_document_type: unknown;
+  customer_address: unknown;
+  customer_municipality_code: unknown;
+  /** Exportación: un municipio DANE colombiano no aplica. */
+  isExport: boolean;
+}
+
+/** Campo del adquiriente que la emisión exige y está vacío. */
+export type AcquirerEmissionField =
+  | 'customer_name'
+  | 'customer_document_type'
+  | 'customer_address'
+  | 'customer_municipality_code';
+
+export interface AcquirerMissingField {
+  field: AcquirerEmissionField;
+  label: string;
+  reason: string;
+}
+
+/**
+ * Qué datos del adquiriente faltan PARA EMITIR, sin red.
+ *
+ * Es la ÚNICA definición: la consumen `collectBlockers` (la checklist y el
+ * modal de requisitos) y la plantilla (borde rojo + «Requerido para emitir»
+ * junto al campo), así que lo que se marca en pantalla y lo que bloquea el
+ * botón no pueden divergir.
+ *
+ * Espejo de los bloqueantes de `customer-fiscal-identity.validator.ts`
+ * (backend) que esta pantalla puede saber sin preguntar:
+ *  - nombre/razón social de un adquiriente identificado con documento y sin
+ *    ficha (con ficha manda el nombre guardado);
+ *  - tipo de documento cuando hay número;
+ *  - dirección fiscal de un adquiriente NOMBRADO (sólo un consumidor final
+ *    sin documento puede omitirla) y su municipio DANE — salvo exportación.
+ *
+ * Régimen, responsabilidades, correo y teléfono NO están: el validador los
+ * trata como avisos, no como bloqueos.
+ */
+export function missingAcquirerEmissionFields(
+  state: AcquirerEmissionState,
+): AcquirerMissingField[] {
+  const text = (value: unknown): string => String(value ?? '').trim();
+  const missing: AcquirerMissingField[] = [];
+  const hasCustomerId = state.customer_id != null && state.customer_id !== '';
+  const hasTaxId = text(state.customer_tax_id) !== '';
+
+  if (hasTaxId && !hasCustomerId && !text(state.customer_name)) {
+    missing.push({
+      field: 'customer_name',
+      label: 'Nombre del adquiriente',
+      reason: 'El adquiriente necesita nombre o razón social.',
+    });
+  }
+  if (hasTaxId && !text(state.customer_document_type)) {
+    missing.push({
+      field: 'customer_document_type',
+      label: 'Tipo de identificación del adquiriente',
+      reason: 'Con número de documento hace falta su tipo (NIT, cédula…).',
+    });
+  }
+  if (!state.isExport) {
+    const addressLine = text(state.customer_address);
+    const cityCode = text(state.customer_municipality_code);
+    if (!addressLine && hasTaxId) {
+      missing.push({
+        field: 'customer_address',
+        label: 'Dirección fiscal del adquiriente',
+        reason:
+          'El adquiriente tiene documento declarado y necesita dirección fiscal. Sólo un consumidor final (sin documento) puede omitirla.',
+      });
+    } else if (!addressLine && cityCode) {
+      missing.push({
+        field: 'customer_address',
+        label: 'Dirección fiscal del adquiriente',
+        reason:
+          'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
+      });
+    }
+    if (addressLine && !cityCode) {
+      missing.push({
+        field: 'customer_municipality_code',
+        label: 'Municipio (DANE) del adquiriente',
+        reason:
+          'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
+      });
+    } else if (!addressLine && hasTaxId && !cityCode) {
+      missing.push({
+        field: 'customer_municipality_code',
+        label: 'Municipio (DANE) del adquiriente',
+        reason:
+          'La dirección fiscal necesita su municipio DANE: búscalo por nombre y selecciónalo.',
+      });
+    }
+  }
+  return missing;
+}
+
+/**
+ * El `inline_customer` que viaja con la factura, con la PANTALLA como última
+ * palabra.
+ *
+ * `base` es lo que trajo la fuente (RUES o el modal de alta) y conserva lo que
+ * la pantalla no expone (sigla del tipo de documento, CIIU, agente retenedor,
+ * nombres separados). Lo que sí se ve y se puede corregir aquí —correo,
+ * teléfono, régimen, responsabilidades, documento y el nombre— sale del
+ * formulario: si el operador lo cambió, viaja lo que vio.
+ *
+ * Los vacíos se OMITEN en vez de mandarse como `''`: `CreateCustomerDto`
+ * valida `@IsEmail`/`@IsEnum` y `@IsOptional` no salta la cadena vacía.
+ */
+export function buildInlineCustomerFromForm(
+  base: CreateCustomerRequest,
+  raw: Record<string, unknown>,
+  derived: { taxIdBase: string; dv: string; isNit: boolean },
+): CreateCustomerRequest {
+  const text = (key: string): string => String(raw[key] ?? '').trim();
+  const personType = derived.isNit
+    ? text('customer_person_type') || base.person_type || 'JURIDICA'
+    : 'NATURAL';
+  const name = text('customer_name');
+  const baseFullName = [base.first_name, base.last_name]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+
+  const result: CreateCustomerRequest = { ...base, person_type: personType };
+  if (personType === 'JURIDICA') {
+    result.legal_name = name || base.legal_name || null;
+  } else if (name && name !== baseFullName) {
+    // El operador corrigió el nombre: la pantalla tiene UN solo campo, así
+    // que va entero al nombre y el apellido queda vacío (aviso, no bloqueo).
+    result.first_name = name;
+    result.last_name = '';
+  }
+  if (derived.taxIdBase) result.document_number = derived.taxIdBase;
+  result.verification_digit = derived.isNit ? derived.dv || null : null;
+  const email = text('customer_email');
+  if (email) result.email = email;
+  else delete result.email;
+  const phone = text('customer_phone');
+  if (phone) result.phone = phone;
+  else delete result.phone;
+  const regime = text('customer_tax_regime');
+  if (regime) result.tax_regime = regime;
+  else delete result.tax_regime;
+  const responsibilities = Array.isArray(raw['customer_fiscal_responsibilities'])
+    ? (raw['customer_fiscal_responsibilities'] as string[])
+    : [];
+  if (responsibilities.length > 0) {
+    result.fiscal_responsibilities = [...responsibilities];
+  } else {
+    delete result.fiscal_responsibilities;
+  }
+  return result;
+}
+
+/**
+ * Identidad pública (RUES/SECOP/RNT) → base del `inline_customer`. Reutiliza
+ * `ruesIdentityToPrefill`, que ya decide razón social vs. nombres.
+ */
+export function externalIdentityToInlineCustomer(
+  identity: ExternalCustomerIdentity,
+): CreateCustomerRequest {
+  const prefill = ruesIdentityToPrefill(identity);
+  return {
+    first_name: prefill.first_name ?? '',
+    last_name: prefill.last_name ?? '',
+    legal_name: prefill.legal_name ?? null,
+    document_type: prefill.document_type ?? null,
+    document_number: prefill.document_number ?? null,
+    verification_digit: prefill.verification_digit ?? null,
+    person_type: prefill.person_type ?? null,
+  };
+}
+
 /**
  * VISTA DE FACTURA AVANZADA (superficie fiscal).
  *
@@ -1727,200 +2090,10 @@ export function isDocumentLikeTerm(term: string): boolean {
 
         @if (mode() === 'manual') {
           <!--
-            EL PERFIL VA PRIMERO, ANTES QUE CUALQUIER DATO DEL DOCUMENTO.
-
-            Estaba dentro de «Documento», debajo de la resolución. Es el orden
-            equivocado: elegir un perfil REESCRIBE la resolución, los códigos de
-            pago, las notas de cabecera, las líneas y el bloque AIU, así que
-            ponerlo después de esos campos invita a llenarlos para verlos cambiar
-            solos. Arriba del todo se lee como lo que es: el punto de partida del
-            documento, no un ajuste más de la cabecera.
-
-            El selector va FUERA del «form», así que se enlaza con
-            «[formControl]» y no con «formControlName» —sin un «formGroup»
-            ancestro el nombre no resolvería contra nada—. El control sigue
-            siendo el mismo del formulario, así que el payload, el reset y los
-            computed que leen el valor crudo no cambian.
-
-            SE PINTA SIEMPRE, TAMBIÉN SIN PERFILES DEL TIPO ELEGIDO.
-
-            Antes se escondía cuando la lista quedaba vacía, y eso hacía
-            indistinguibles dos cosas muy distintas: «esta tienda no tiene
-            perfiles de operación Estándar» y «esta pantalla no trabaja con
-            perfiles». Quien nunca ve el control no descubre que existe.
-
-            Lo que NO se hace es ofrecer perfiles de otro tipo de operación: el
-            backend responde «INVOICING_PROFILE_008» a un perfil cuyo
-            «operation_type» no coincide con el del documento, así que cruzarlos
-            sería ofrecer un 409 tras llenar la factura entera. Sin perfiles del
-            tipo elegido se dice eso mismo, con el tipo por su nombre, y se
-            ofrece crear uno.
-
-            El tipo de operación se queda en «Documento»: es el filtro de esta
-            lista, no parte de ella, y moverlo dejaría su contador de errores
-            señalando una sección que ya no lo contiene.
-
-            Es una «vendix-invoice-form-section» y no un «<section>» propio para
-            que se pliegue como todas las demás y para que la cabecera se lea
-            igual. El cuerpo de esa sección se OCULTA al plegarse, no se
-            desmonta, así que «profileControl» sigue registrado con la sección
-            cerrada.
+            El «Perfil de facturación» ya no es una sección de esta columna: es
+            un chip OPCIONAL arriba del panel «Crear factura» (columna lateral).
+            Sin tocarlo, el perfil predeterminado se aplica igual que antes.
           -->
-          <vendix-invoice-form-section
-            title="Perfil de facturación"
-            icon="wand-2"
-            [summary]="profileSummary()"
-            [help]="profileSectionHelp"
-            [expanded]="isSectionOpen('perfil')"
-            (expandedChange)="setSection('perfil', $event)"
-          >
-            @if (hasProfiles()) {
-              <p
-                class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]"
-              >
-                Elegirlo preconfigura el documento completo —empezando por la
-                resolución— y reemplaza lo que ya hubiera escrito. Si la factura
-                ya está modificada, se pregunta antes.
-              </p>
-              <app-selector
-                label="Perfil de facturación"
-                [formControl]="profileControl"
-                [options]="profileOptions()"
-                size="sm"
-                (valueChange)="onProfileChange()"
-              ></app-selector>
-
-              @if (profileAutoSelected()) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
-                >
-                  <app-icon
-                    name="check-circle"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
-                  />
-                  <p class="text-xs leading-relaxed text-text-primary">
-                    Usando perfil predeterminado
-                    <strong>{{ selectedProfile()?.name }}</strong
-                    >. Es el único activo para este tipo de operación, y sus
-                    reglas quedan congeladas en la factura al emitirla.
-                    Cámbialo en el selector si este documento va con la
-                    configuración de la tienda.
-                  </p>
-                </div>
-              }
-
-              <!--
-                LO QUE EL PERFIL RELLENÓ. Va aquí, pegado al selector, y no
-                al pie: quien acaba de elegir un perfil está mirando este
-                punto de la pantalla, y es donde tiene que enterarse de qué
-                campos cambiaron sin que él los tocara.
-
-                Todo lo listado queda EDITABLE en su propia sección. Esto
-                informa, no bloquea.
-              -->
-              @if (prefillSummary().length > 0) {
-                <app-alert-banner
-                  class="mt-3"
-                  variant="info"
-                  icon="wand-2"
-                  tone="token"
-                >
-                  El perfil precargó
-                  <strong>{{ prefillSummary().join(', ') }}</strong
-                  >. Todo queda editable: si cambias un campo a mano, el perfil
-                  no lo vuelve a pisar.
-                </app-alert-banner>
-              }
-
-              <!--
-                LÍNEAS DEL PERFIL NO SEMBRADAS. El usuario ya había
-                capturado líneas, así que reemplazarlas sin preguntar
-                borraría trabajo que no se recupera. Se ofrece.
-              -->
-              @if (pendingModelLines() > 0) {
-                <div
-                  class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <p class="text-xs leading-relaxed text-text-primary">
-                    Este perfil trae
-                    <strong>{{ pendingModelLines() }}</strong> línea(s)
-                    modelo. No se cargaron porque ya capturaste líneas
-                    propias: cargarlas las reemplaza.
-                  </p>
-                  <button
-                    type="button"
-                    class="shrink-0 rounded-lg border border-[var(--color-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-primary)]"
-                    (click)="applyModelLines()"
-                  >
-                    Reemplazar por las del perfil
-                  </button>
-                </div>
-              }
-
-              @if (profileConfigFailed()) {
-                <!--
-                  Migrado a «app-alert-banner» (encargo del orquestador,
-                  2026-08-24): el div a mano nunca llevó role=alert, así que un
-                  lector de pantalla no lo anunciaba. El componente compartido
-                  lo trae fijo en su plantilla.
-                -->
-                <app-alert-banner
-                  class="mt-3"
-                  variant="warning"
-                  icon="alert-triangle"
-                  tone="token"
-                  heading="No se pudieron leer las reglas del perfil"
-                >
-                  La factura se puede emitir igual: el servidor la timbra con
-                  la versión vigente del perfil, no con lo que muestre esta
-                  pantalla. Lo que falta es el instructivo del AIU —y no se
-                  sustituye por el de la tienda, porque instruiría sobre otra
-                  base gravable—.
-                  <button
-                    bannerActions
-                    type="button"
-                    class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
-                    (click)="retryProfileConfig()"
-                  >
-                    Reintentar
-                  </button>
-                </app-alert-banner>
-              }
-            } @else {
-              <!--
-                ESTADO VACÍO, NO SECCIÓN AUSENTE.
-
-                Nombra el tipo de operación —«Estándar (10)», no «este tipo»—
-                porque la razón de que la lista esté vacía ES el tipo, y sin
-                decirlo la frase se lee como una avería. Y no ofrece los perfiles
-                de otro tipo: ver «INVOICING_PROFILE_008».
-              -->
-              <div class="flex items-start gap-2.5">
-                <app-icon
-                  name="wand-2"
-                  [size]="16"
-                  class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
-                />
-                <div class="min-w-0">
-                  <p class="text-xs leading-relaxed text-text-primary">
-                    No hay perfiles activos para la operación
-                    <strong>{{ operationTypeLabel() }}</strong>. Esta factura se
-                    llena a mano y se emite igual: el perfil sólo ahorra
-                    escribir lo que se repite.
-                  </p>
-                  <button
-                    type="button"
-                    class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)] underline underline-offset-2"
-                    (click)="goToProfileCreate()"
-                  >
-                    <app-icon name="plus" [size]="13" />
-                    Crear un perfil para esta operación
-                  </button>
-                </div>
-              </div>
-            }
-          </vendix-invoice-form-section>
 
 
           <!--
@@ -1988,6 +2161,19 @@ export function isDocumentLikeTerm(term: string): boolean {
             </vendix-invoice-form-section>
 
             <!-- ── ADQUIRIENTE ───────────────────────────────────── -->
+            <!--
+              Tres estados, de más a menos resuelto:
+               1. Cliente vinculado y COMPLETO para emitir: tarjeta compacta de
+                  solo lectura con «Editar» y «Cambiar cliente».
+               2. Cliente vinculado con faltantes (o en edición): los campos,
+                  con lo que falta para emitir marcado en rojo.
+               3. Sin cliente: el primer paso es buscar por NIT/documento
+                  (tienda → organización → RUES). Lo que RUES encuentre se
+                  rellena aquí mismo, sin modal; el modal de alta queda como
+                  camino secundario.
+              Correo, teléfono, régimen y responsabilidades son AVISOS para la
+              DIAN, no bloqueos: viven plegados en «Más datos».
+            -->
             <vendix-invoice-form-section
               title="Adquiriente"
               [help]="help('adquiriente')"
@@ -1997,32 +2183,90 @@ export function isDocumentLikeTerm(term: string): boolean {
               [expanded]="isSectionOpen('adquiriente')"
               (expandedChange)="setSection('adquiriente', $event)"
             >
-              <!-- Búsqueda real contra el módulo de clientes -->
+              @if (showAcquirerSummaryCard()) {
+                <div
+                  class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-3"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="truncate text-sm font-semibold text-text-primary">
+                        {{ acquirerCard().name }}
+                      </p>
+                      <p class="truncate text-xs text-[var(--color-text-secondary)]">
+                        {{ acquirerCard().document }}
+                      </p>
+                    </div>
+                    <span
+                      class="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-[var(--color-primary)]"
+                    >
+                      <app-icon name="check-circle" [size]="13" />
+                      Listo para emitir
+                    </span>
+                  </div>
+                  <dl
+                    class="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2"
+                  >
+                    @for (row of acquirerCard().rows; track row.label) {
+                      <div class="flex min-w-0 gap-1.5">
+                        <dt class="shrink-0 text-[var(--color-text-secondary)]">
+                          {{ row.label }}:
+                        </dt>
+                        <dd class="truncate text-text-primary" [title]="row.value">
+                          {{ row.value }}
+                        </dd>
+                      </div>
+                    }
+                  </dl>
+                  <div class="mt-3 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)] hover:underline"
+                      (click)="acquirerEditing.set(true)"
+                    >
+                      <app-icon name="pencil" [size]="13" />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-text-primary"
+                      (click)="changeCustomer()"
+                    >
+                      <app-icon name="repeat" [size]="13" />
+                      Cambiar cliente
+                    </button>
+                  </div>
+                </div>
+              } @else {
+              @if (!isLinkedToExistingCustomer()) {
+              <!-- Paso 1: búsqueda por NIT/documento o nombre. Tienda →
+                   organización (lookup) → RUES y fuentes públicas. -->
               <div class="relative mb-3">
                 <div class="flex items-end gap-2">
                   <div class="flex-1">
                     <label
+                      for="invoice-customer-search"
                       class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1"
                     >
-                      Buscar cliente existente
+                      Buscar cliente por NIT, documento o nombre
                     </label>
                     <input
+                      id="invoice-customer-search"
                       type="text"
                       class="w-full px-3 py-2 text-sm border border-border rounded-lg bg-[var(--color-surface)] text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                      placeholder="Nombre, correo o documento..."
+                      placeholder="Ej. 900123456 o Tecnicell"
                       autocomplete="off"
                       [value]="customerQuery()"
                       (input)="onCustomerQuery($event)"
                     />
                   </div>
                   <app-button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     type="button"
                     (clicked)="openCustomerCreate()"
                   >
                     <app-icon slot="icon" name="plus" [size]="14" />
-                    Crear
+                    Alta completa
                   </app-button>
                 </div>
 
@@ -2033,7 +2277,7 @@ export function isDocumentLikeTerm(term: string): boolean {
                     @for (found of customerResults(); track found.id) {
                       <button
                         type="button"
-                        class="w-full px-3 py-2 text-left hover:bg-primary-50 transition-colors"
+                        class="w-full px-3 py-2 text-left hover:bg-[var(--color-surface-secondary)] transition-colors"
                         (click)="selectCustomer(found)"
                       >
                         <span
@@ -2051,32 +2295,39 @@ export function isDocumentLikeTerm(term: string): boolean {
                   </div>
                 }
 
-                <!-- Documento sin cliente en la organización: consulta RUES y
-                     fuentes públicas (misma tarjeta que POS / Cambiar titular).
-                     «Crear con estos datos» abre el modal de clientes
-                     prellenado; el alta sigue viajando como inline_customer. -->
+                <!-- Documento sin cliente en la tienda ni en la organización:
+                     consulta RUES y fuentes públicas (misma tarjeta que POS /
+                     Cambiar titular). «Crear con estos datos» rellena AQUÍ la
+                     identidad —sin modal— y el alta viaja como inline_customer
+                     al emitir; «Crear manualmente» abre el modal de alta. -->
                 @if (externalLoading()) {
                   <div
                     class="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
                   >
-                    <app-icon name="loader-2" [size]="14" class="animate-spin" />
-                    Consultando RUES y fuentes públicas…
+                    <app-icon name="loader-2" [size]="14" [spin]="true" />
+                    Buscando en la organización, RUES y fuentes públicas…
                   </div>
                 } @else if (
                   externalResult()?.found && externalResult()?.identity
                 ) {
                   <app-rues-identity-card
                     [identity]="externalResult()!.identity!"
-                    (createWithData)="onCreateFromExternal()"
+                    (createWithData)="onUseExternalIdentity()"
                     (createManual)="onCreateFromDocument()"
                   />
                 } @else if (externalResult()?.unavailable) {
                   <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
-                    Fuentes públicas no disponibles en este momento. Puedes
-                    crear el cliente manualmente.
+                    Fuentes públicas no disponibles en este momento. Escribe los
+                    datos abajo o usa «Alta completa».
+                  </p>
+                } @else if (externalResult() && !externalResult()!.found) {
+                  <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                    Sin coincidencias en RUES. Escribe los datos abajo o usa
+                    «Alta completa».
                   </p>
                 }
               </div>
+              }
 
               @if (linkedCustomerLabel(); as linked) {
                 <div
@@ -2099,7 +2350,23 @@ export function isDocumentLikeTerm(term: string): boolean {
                       >
                         Editar ficha del cliente
                       </button>
+                      @if (acquirerEditing() && acquirerMissing().length === 0) {
+                        <button
+                          type="button"
+                          class="text-xs text-[var(--color-text-secondary)] hover:text-text-primary"
+                          (click)="acquirerEditing.set(false)"
+                        >
+                          Listo
+                        </button>
+                      }
                     }
+                    <button
+                      type="button"
+                      class="text-xs text-[var(--color-text-secondary)] hover:text-text-primary"
+                      (click)="changeCustomer()"
+                    >
+                      Cambiar cliente
+                    </button>
                     <button
                       type="button"
                       class="text-xs text-[var(--color-text-secondary)] hover:text-error"
@@ -2111,30 +2378,14 @@ export function isDocumentLikeTerm(term: string): boolean {
                 </div>
               }
 
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <app-input
-                  [label]="customerNameLabel()"
-                  [placeholder]="customerNamePlaceholder()"
-                  formControlName="customer_name"
-                  [control]="control('customer_name')"
-                  [error]="fieldError('customer_name')"
-                  [required]="true"
-                  [readonly]="isLinkedToExistingCustomer()"
-                  size="sm"
-                ></app-input>
-                <app-input
-                  label="Correo"
-                  type="email"
-                  formControlName="customer_email"
-                  [control]="control('customer_email')"
-                  [error]="fieldError('customer_email')"
-                  placeholder="cliente@dominio.com"
-                  helperText="Es la dirección a la que se entrega la factura electrónica."
-                  size="sm"
-                ></app-input>
-              </div>
+              @if (acquirerMissing().length > 0) {
+                <p class="mb-2 text-xs text-error" role="status">
+                  Para emitir falta:
+                  {{ acquirerMissingLabels() }}.
+                </p>
+              }
 
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <!--
                   P2 — el candado de identidad para un adquiriente vinculado
                   NO se aplica con [disabled]: FormControlName declara su
@@ -2144,13 +2395,15 @@ export function isDocumentLikeTerm(term: string): boolean {
                   fija syncLinkedCustomerIdentityLock con
                   control.disable()/enable().
                 -->
-                <app-selector
-                  label="Tipo de identificación"
-                  formControlName="customer_document_type"
-                  [options]="documentTypeOptions"
-                  [errorText]="fieldError('customer_document_type') ?? ''"
-                  size="sm"
-                ></app-selector>
+                <div [ngClass]="missingFieldClass('customer_document_type')">
+                  <app-selector
+                    label="Tipo de identificación"
+                    formControlName="customer_document_type"
+                    [options]="documentTypeOptions"
+                    [errorText]="fieldError('customer_document_type') ?? emissionHint('customer_document_type')"
+                    size="sm"
+                  ></app-selector>
+                </div>
                 <app-input
                   label="Número de documento"
                   formControlName="customer_tax_id"
@@ -2163,10 +2416,7 @@ export function isDocumentLikeTerm(term: string): boolean {
                 <!--
                   A.8 — el DV NUNCA se digita. Se deriva del número con el
                   mismo módulo 11 que aplica el backend, en vivo mientras se
-                  teclea, y sólo existe cuando el documento es NIT: una
-                  cédula o un pasaporte no llevan checksum, así que el campo
-                  desaparece por completo (antes estorbaba deshabilitado).
-                  Misma conducta que el checkout de suscripciones.
+                  teclea, y sólo existe cuando el documento es NIT.
                 -->
                 @if (isNitCustomer()) {
                   <label class="flex flex-col gap-1">
@@ -2183,58 +2433,49 @@ export function isDocumentLikeTerm(term: string): boolean {
                       class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface-secondary)] text-text-secondary cursor-not-allowed"
                     />
                   </label>
-                }
-                <app-input
-                  label="Teléfono"
-                  formControlName="customer_phone"
-                  [control]="control('customer_phone')"
-                  [error]="fieldError('customer_phone')"
-                  size="sm"
-                ></app-input>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                <app-selector
-                  label="Régimen tributario"
-                  formControlName="customer_tax_regime"
-                  [options]="taxRegimeOptions"
-                  [errorText]="fieldError('customer_tax_regime') ?? ''"
-                  placeholder="Sin declarar"
-                  size="sm"
-                ></app-selector>
-                <!--
-                  A.8 - tipo de persona. Solo se pregunta con NIT: una cedula
-                  ES una persona natural y fijarla a mano seria un paso que el
-                  formulario puede dar solo (buildPayload manda NATURAL en
-                  cuanto el documento deja de ser NIT).
-                -->
-                @if (isNitCustomer()) {
-                  <!-- P2 — mismo motivo que customer_document_type arriba:
-                       el candado es syncLinkedCustomerIdentityLock, no [disabled]. -->
+                  <!--
+                    A.8 - tipo de persona. Solo se pregunta con NIT: una cedula
+                    ES una persona natural (buildPayload manda NATURAL en cuanto
+                    el documento deja de ser NIT). P2 — el candado es
+                    syncLinkedCustomerIdentityLock, no [disabled].
+                  -->
                   <app-selector
                     label="Tipo de persona"
                     formControlName="customer_person_type"
                     [options]="customerPersonTypeOptions"
-                    helpText="Natural con NIT (independiente) o Jurídica (empresa)."
                     size="sm"
                   ></app-selector>
                 }
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div class="mt-3" [ngClass]="missingFieldClass('customer_name')">
                 <app-input
-                  label="Dirección fiscal"
-                  formControlName="customer_address"
-                  [control]="control('customer_address')"
-                  [error]="fieldError('customer_address')"
-                  [required]="isNamedAcquirer()"
+                  [label]="customerNameLabel()"
+                  [placeholder]="customerNamePlaceholder()"
+                  formControlName="customer_name"
+                  [control]="control('customer_name')"
+                  [error]="fieldError('customer_name') ?? emissionHint('customer_name')"
+                  [required]="true"
+                  [readonly]="isLinkedToExistingCustomer()"
                   size="sm"
                 ></app-input>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <div [ngClass]="missingFieldClass('customer_address')">
+                  <app-input
+                    label="Dirección fiscal"
+                    placeholder="Ej. Cra 10 # 20-30, Of. 401"
+                    formControlName="customer_address"
+                    [control]="control('customer_address')"
+                    [error]="fieldError('customer_address') ?? emissionHint('customer_address')"
+                    [required]="isNamedAcquirer()"
+                    size="sm"
+                  ></app-input>
+                </div>
                 <!--
-                  A.8 — municipio DANE por NOMBRE. El código de ciudad era el
-                  otro rechazo clásico de la DIAN: aquí ya no se teclea ni se
-                  adivina, se busca contra el catálogo Divipola y el valor del
-                  control es el código de 5 dígitos exacto que exige el XML.
+                  A.8 — municipio DANE por NOMBRE. El valor del control es el
+                  código de 5 dígitos exacto que exige el XML.
                 -->
                 <div>
                   <label
@@ -2242,16 +2483,78 @@ export function isDocumentLikeTerm(term: string): boolean {
                   >
                     Municipio (DANE)
                   </label>
-                  <app-dian-municipality-select
-                    formControlName="customer_municipality_code"
-                    placeholder="Busca por nombre o código DANE..."
-                    (municipalitySelected)="onCustomerMunicipality($event)"
-                  />
-                  @if (customerMunicipalityError(); as municipalityErr) {
+                  <div
+                    id="customer_municipality_code"
+                    [ngClass]="missingFieldClass('customer_municipality_code')"
+                  >
+                    <app-dian-municipality-select
+                      formControlName="customer_municipality_code"
+                      placeholder="Busca por nombre o código DANE..."
+                      (municipalitySelected)="onCustomerMunicipality($event)"
+                    />
+                  </div>
+                  @if (
+                    customerMunicipalityError() ||
+                      emissionHint('customer_municipality_code');
+                    as municipalityErr
+                  ) {
                     <p class="mt-1 text-xs text-error">{{ municipalityErr }}</p>
                   }
                 </div>
               </div>
+
+              <!-- Más datos: avisos DIAN, no bloqueos. -->
+              <div class="mt-3 border-t border-border pt-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-text-primary"
+                  [attr.aria-expanded]="showAcquirerMoreData()"
+                  aria-controls="invoice-acquirer-more"
+                  (click)="acquirerMoreOpen.set(!showAcquirerMoreData())"
+                >
+                  <app-icon
+                    [name]="showAcquirerMoreData() ? 'chevron-up' : 'chevron-down'"
+                    [size]="14"
+                  />
+                  Más datos
+                  <span class="font-normal">
+                    (correo, teléfono, régimen y responsabilidades)
+                  </span>
+                </button>
+                <div
+                  id="invoice-acquirer-more"
+                  class="mt-3"
+                  [hidden]="!showAcquirerMoreData()"
+                >
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <app-input
+                      label="Correo"
+                      type="email"
+                      formControlName="customer_email"
+                      [control]="control('customer_email')"
+                      [error]="fieldError('customer_email')"
+                      placeholder="cliente@dominio.com"
+                      helperText="Es la dirección a la que se entrega la factura electrónica."
+                      size="sm"
+                    ></app-input>
+                    <app-input
+                      label="Teléfono"
+                      formControlName="customer_phone"
+                      [control]="control('customer_phone')"
+                      [error]="fieldError('customer_phone')"
+                      size="sm"
+                    ></app-input>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <app-selector
+                      label="Régimen tributario"
+                      formControlName="customer_tax_regime"
+                      [options]="taxRegimeOptions"
+                      [errorText]="fieldError('customer_tax_regime') ?? ''"
+                      placeholder="Sin declarar"
+                      size="sm"
+                    ></app-selector>
+                  </div>
 
               <!--
                 El «id» no es decorativo: es el ancla del CTA «Ir a
@@ -2322,6 +2625,9 @@ export function isDocumentLikeTerm(term: string): boolean {
                   <p class="mt-1 text-xs text-error">{{ err }}</p>
                 }
               </fieldset>
+                </div>
+              </div>
+              }
             </vendix-invoice-form-section>
 
             <!-- ── AIU ───────────────────────────────────────────── -->
@@ -3277,6 +3583,204 @@ export function isDocumentLikeTerm(term: string): boolean {
           class="lg:col-span-3 lg:sticky lg:top-24 lg:self-start outline-none"
           aria-label="Resumen y acciones de la factura"
         >
+          <!--
+            PERFIL DE FACTURACIÓN COMO CHIP OPCIONAL. Arriba de «Crear factura»
+            porque es un atajo, no un paso: sin tocarlo, el perfil
+            predeterminado (o el único activo) se aplica exactamente igual que
+            cuando era una sección. Al pulsarlo se despliega el MISMO selector,
+            con sus avisos, confirmación, reintento y estado vacío.
+
+            El cuerpo se OCULTA con «hidden», no se desmonta: así el control del
+            perfil sigue registrado con el chip plegado, igual que antes.
+          -->
+          @if (mode() === 'manual') {
+            <div
+              class="mb-3 rounded-xl border border-border bg-[var(--color-surface)]"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                [attr.aria-expanded]="isSectionOpen('perfil')"
+                aria-controls="invoice-profile-panel"
+                [title]="profileSectionHelp"
+                (click)="setSection('perfil', !isSectionOpen('perfil'))"
+              >
+                <span class="flex min-w-0 items-center gap-2 text-xs">
+                  <app-icon
+                    name="layers"
+                    [size]="14"
+                    class="shrink-0 text-[var(--color-text-secondary)]"
+                  />
+                  <span class="truncate text-text-primary">
+                    Perfil: <strong>{{ profileSummary() }}</strong>
+                  </span>
+                  @if (profileNeedsAttention()) {
+                    <span
+                      class="shrink-0 rounded-full bg-[var(--color-primary)] h-1.5 w-1.5"
+                      aria-label="El perfil tiene una acción pendiente"
+                    ></span>
+                  }
+                </span>
+                <app-icon
+                  [name]="isSectionOpen('perfil') ? 'chevron-up' : 'chevron-down'"
+                  [size]="14"
+                  class="shrink-0 text-[var(--color-text-secondary)]"
+                />
+              </button>
+              <div
+                id="invoice-profile-panel"
+                class="border-t border-border px-3 py-3"
+                [hidden]="!isSectionOpen('perfil')"
+              >
+            @if (hasProfiles()) {
+              <p
+                class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+              >
+                Elegirlo preconfigura el documento completo —empezando por la
+                resolución— y reemplaza lo que ya hubiera escrito. Si la factura
+                ya está modificada, se pregunta antes.
+              </p>
+              <app-selector
+                label="Perfil de facturación"
+                [formControl]="profileControl"
+                [options]="profileOptions()"
+                size="sm"
+                (valueChange)="onProfileChange()"
+              ></app-selector>
+
+              @if (profileAutoSelected()) {
+                <div
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
+                >
+                  <app-icon
+                    name="check-circle"
+                    [size]="15"
+                    class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
+                  />
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    Usando perfil predeterminado
+                    <strong>{{ selectedProfile()?.name }}</strong
+                    >. Es el único activo para este tipo de operación, y sus
+                    reglas quedan congeladas en la factura al emitirla.
+                    Cámbialo en el selector si este documento va con la
+                    configuración de la tienda.
+                  </p>
+                </div>
+              }
+
+              <!--
+                LO QUE EL PERFIL RELLENÓ. Va aquí, pegado al selector, y no
+                al pie: quien acaba de elegir un perfil está mirando este
+                punto de la pantalla, y es donde tiene que enterarse de qué
+                campos cambiaron sin que él los tocara.
+
+                Todo lo listado queda EDITABLE en su propia sección. Esto
+                informa, no bloquea.
+              -->
+              @if (prefillSummary().length > 0) {
+                <app-alert-banner
+                  class="mt-3"
+                  variant="info"
+                  icon="layers"
+                  tone="token"
+                >
+                  El perfil precargó
+                  <strong>{{ prefillSummary().join(', ') }}</strong
+                  >. Todo queda editable: si cambias un campo a mano, el perfil
+                  no lo vuelve a pisar.
+                </app-alert-banner>
+              }
+
+              <!--
+                LÍNEAS DEL PERFIL NO SEMBRADAS. El usuario ya había
+                capturado líneas, así que reemplazarlas sin preguntar
+                borraría trabajo que no se recupera. Se ofrece.
+              -->
+              @if (pendingModelLines() > 0) {
+                <div
+                  class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    Este perfil trae
+                    <strong>{{ pendingModelLines() }}</strong> línea(s)
+                    modelo. No se cargaron porque ya capturaste líneas
+                    propias: cargarlas las reemplaza.
+                  </p>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-lg border border-[var(--color-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-primary)]"
+                    (click)="applyModelLines()"
+                  >
+                    Reemplazar por las del perfil
+                  </button>
+                </div>
+              }
+
+              @if (profileConfigFailed()) {
+                <!--
+                  Migrado a «app-alert-banner» (encargo del orquestador,
+                  2026-08-24): el div a mano nunca llevó role=alert, así que un
+                  lector de pantalla no lo anunciaba. El componente compartido
+                  lo trae fijo en su plantilla.
+                -->
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="No se pudieron leer las reglas del perfil"
+                >
+                  La factura se puede emitir igual: el servidor la timbra con
+                  la versión vigente del perfil, no con lo que muestre esta
+                  pantalla. Lo que falta es el instructivo del AIU —y no se
+                  sustituye por el de la tienda, porque instruiría sobre otra
+                  base gravable—.
+                  <button
+                    bannerActions
+                    type="button"
+                    class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
+                    (click)="retryProfileConfig()"
+                  >
+                    Reintentar
+                  </button>
+                </app-alert-banner>
+              }
+            } @else {
+              <!--
+                ESTADO VACÍO, NO SECCIÓN AUSENTE.
+
+                Nombra el tipo de operación —«Estándar (10)», no «este tipo»—
+                porque la razón de que la lista esté vacía ES el tipo, y sin
+                decirlo la frase se lee como una avería. Y no ofrece los perfiles
+                de otro tipo: ver «INVOICING_PROFILE_008».
+              -->
+              <div class="flex items-start gap-2.5">
+                <app-icon
+                  name="layers"
+                  [size]="16"
+                  class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
+                />
+                <div class="min-w-0">
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    No hay perfiles activos para la operación
+                    <strong>{{ operationTypeLabel() }}</strong>. Esta factura se
+                    llena a mano y se emite igual: el perfil sólo ahorra
+                    escribir lo que se repite.
+                  </p>
+                  <button
+                    type="button"
+                    class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)] underline underline-offset-2"
+                    (click)="goToProfileCreate()"
+                  >
+                    <app-icon name="plus" [size]="13" />
+                    Crear un perfil para esta operación
+                  </button>
+                </div>
+              </div>
+            }
+              </div>
+            </div>
+          }
           <vendix-invoice-summary-aside
             [totals]="summaryTotals()"
             [showTotals]="mode() === 'manual'"
@@ -3303,6 +3807,7 @@ export function isDocumentLikeTerm(term: string): boolean {
       [initialValues]="customerModalPrefill()"
       (isOpenChange)="customerModalOpen.set($event)"
       (save)="onCustomerCreated($event)"
+      (addressData)="onCustomerAddressData($event)"
     />
 
     <!--
@@ -3680,7 +4185,9 @@ export class InvoiceCreatePageComponent implements OnInit {
     // AIU va abierta por lo mismo que va antes de Líneas: decide qué porción
     // lleva cada línea. Cuando la operación no es AIU la sección no se pinta,
     // así que tenerla en el conjunto no cuesta nada.
-    new Set<SectionId>(['perfil', 'documento', 'adquiriente', 'aiu', 'lineas']),
+    // 'perfil' NO va: el perfil es un chip opcional del panel lateral que
+    // arranca plegado; el predeterminado se aplica igual sin abrirlo.
+    new Set<SectionId>(['documento', 'adquiriente', 'aiu', 'lineas']),
   );
 
   readonly submitError = signal<string | null>(null);
@@ -3903,6 +4410,12 @@ export class InvoiceCreatePageComponent implements OnInit {
      */
     customer_municipality_code: [''],
     customer_city_name: [''],
+    /**
+     * Nombre del departamento del municipio elegido (o de la dirección de la
+     * ficha). Sólo viaja como `department_name` de la dirección estructurada:
+     * sin él el validador fiscal deja el aviso DEPARTMENT_NAME_REQUIRED.
+     */
+    customer_department_name: [''],
 
     // Retenciones (los tres primeros son SÓLO UI)
     manual_withholding: [false],
@@ -4982,6 +5495,142 @@ export class InvoiceCreatePageComponent implements OnInit {
   /** Consulta RUES/fuentes públicas del documento buscado sin coincidencias. */
   readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
   readonly externalLoading = signal(false);
+
+  /**
+   * El operador pidió ver los campos de un cliente vinculado completo
+   * («Editar» de la tarjeta). Sin esto, un cliente con todo lo que la emisión
+   * exige se muestra como tarjeta compacta.
+   */
+  readonly acquirerEditing = signal(false);
+  /** «Más datos» del adquiriente (correo, teléfono, régimen, RUT) desplegado. */
+  readonly acquirerMoreOpen = signal(false);
+
+  /**
+   * Lo que le falta al adquiriente PARA EMITIR, ahora mismo. Misma función
+   * pura que alimenta `collectBlockers`, así que lo marcado en rojo junto al
+   * campo y lo que bloquea el botón son la misma lista.
+   */
+  readonly acquirerMissing = computed<AcquirerMissingField[]>(() => {
+    const raw = this.rawValue();
+    return missingAcquirerEmissionFields({
+      customer_id: raw['customer_id'],
+      customer_name: raw['customer_name'],
+      customer_tax_id: raw['customer_tax_id'],
+      customer_document_type: raw['customer_document_type'],
+      customer_address: raw['customer_address'],
+      customer_municipality_code: raw['customer_municipality_code'],
+      isExport: this.isExportInvoice(),
+    });
+  });
+
+  private readonly acquirerMissingFields = computed<Set<string>>(
+    () => new Set(this.acquirerMissing().map((missing) => missing.field)),
+  );
+
+  readonly acquirerMissingLabels = computed<string>(() =>
+    this.acquirerMissing()
+      .map((missing) =>
+        missing.label.replace(/ del adquiriente$/, '').toLowerCase(),
+      )
+      .join(', '),
+  );
+
+  /** Clases del contenedor de un campo que falta para emitir: borde rojo. */
+  private static readonly MISSING_FIELD_CLASS =
+    '[&_input]:!border-[var(--color-destructive)] [&_select]:!border-[var(--color-destructive)] [&_[role=button]]:!border-[var(--color-destructive)]';
+
+  /** Campos del adquiriente que viven plegados en «Más datos». */
+  private static readonly ACQUIRER_MORE_FIELDS: ReadonlySet<string> = new Set([
+    'customer_email',
+    'customer_phone',
+    'customer_tax_regime',
+    'customer_fiscal_responsibilities',
+  ]);
+
+  isEmissionMissing(field: string): boolean {
+    return this.acquirerMissingFields().has(field);
+  }
+
+  /** «Requerido para emitir» junto al campo, o vacío si no falta. */
+  emissionHint(field: string): string {
+    return this.isEmissionMissing(field) ? 'Requerido para emitir' : '';
+  }
+
+  missingFieldClass(field: string): string {
+    return this.isEmissionMissing(field)
+      ? InvoiceCreatePageComponent.MISSING_FIELD_CLASS
+      : '';
+  }
+
+  /**
+   * «Más datos» se abre solo cuando uno de sus campos trae un error (rechazo
+   * del servidor o correo mal escrito ya tocado): un error plegado es un error
+   * que nadie encuentra.
+   */
+  readonly showAcquirerMoreData = computed<boolean>(() => {
+    if (this.acquirerMoreOpen()) return true;
+    this.formStatus();
+    const backend = this.backendFieldErrors();
+    for (const field of InvoiceCreatePageComponent.ACQUIRER_MORE_FIELDS) {
+      if (backend[field]) return true;
+      const control = this.invoiceForm.get(field);
+      if (control && control.invalid && control.touched) return true;
+    }
+    return false;
+  });
+
+  /**
+   * Tarjeta compacta: cliente vinculado, sin faltantes para emitir, sin
+   * rechazos del servidor sobre el adquiriente y sin «Editar» pulsado.
+   */
+  readonly showAcquirerSummaryCard = computed<boolean>(() => {
+    if (!this.isLinkedToExistingCustomer()) return false;
+    if (this.acquirerEditing()) return false;
+    if (this.acquirerMissing().length > 0) return false;
+    const backend = this.backendFieldErrors();
+    return !Object.keys(backend).some((path) => path.startsWith('customer_'));
+  });
+
+  /** Lo que pinta la tarjeta compacta del adquiriente. */
+  readonly acquirerCard = computed(() => {
+    const raw = this.rawValue();
+    const text = (key: string): string => String(raw[key] ?? '').trim();
+    const docLabel =
+      this.documentTypeOptions.find(
+        (option) => option.value === raw['customer_document_type'],
+      )?.label ?? '';
+    const dv = this.computedCustomerDv();
+    const base = this.customerTaxIdBase();
+    const document = base
+      ? (docLabel ? docLabel + ' ' : '') + base + (dv ? '-' + dv : '')
+      : 'Sin documento (consumidor final)';
+    const person = this.isNitCustomer()
+      ? raw['customer_person_type'] === 'NATURAL'
+        ? 'Persona natural'
+        : 'Persona jurídica'
+      : 'Persona natural';
+    const regime =
+      this.taxRegimeOptions.find(
+        (option) => option.value === raw['customer_tax_regime'],
+      )?.label ?? 'Régimen sin declarar';
+    const municipality = [text('customer_city_name'), text('customer_department_name')]
+      .filter(Boolean)
+      .join(', ');
+    const code = text('customer_municipality_code');
+    const rows: Array<{ label: string; value: string }> = [
+      { label: 'Régimen', value: regime + ' · ' + person },
+      { label: 'Correo', value: text('customer_email') || '—' },
+      { label: 'Teléfono', value: text('customer_phone') || '—' },
+      { label: 'Dirección', value: text('customer_address') || '—' },
+      {
+        label: 'Municipio',
+        value: municipality
+          ? municipality + (code ? ' (' + code + ')' : '')
+          : code || '—',
+      },
+    ];
+    return { name: text('customer_name'), document, rows };
+  });
   /**
    * `true` cuando el adquiriente es una ficha real ya persistida
    * (`customer_id` truthy) — NO un `inline_customer` recién tecleado que
@@ -6779,6 +7428,15 @@ export class InvoiceCreatePageComponent implements OnInit {
   });
 
   /**
+   * El chip plegado del perfil esconde dos avisos que piden una ACCIÓN
+   * (líneas modelo sin cargar, reglas que no se pudieron leer). Un punto en
+   * el chip los delata sin abrirlo por la fuerza.
+   */
+  readonly profileNeedsAttention = computed<boolean>(
+    () => this.pendingModelLines() > 0 || this.profileConfigFailed(),
+  );
+
+  /**
    * Etiqueta del tipo de operación tal como la ve el comerciante.
    *
    * Sale del MISMO catálogo que alimenta el selector, no de un mapa paralelo:
@@ -7268,7 +7926,7 @@ export class InvoiceCreatePageComponent implements OnInit {
         // Sin cliente local y el término parece un documento → RUES.
         const term = this.customerQuery().trim();
         if (results.length === 0 && isDocumentLikeTerm(term)) {
-          this.lookupExternal(term);
+          this.lookupDocumentThenExternal(term);
         }
       });
   }
@@ -8232,12 +8890,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   customerDisplayName(customer: Customer): string {
-    return (
-      customer.legal_name ||
-      [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
-      customer.email ||
-      'Cliente #' + customer.id
-    );
+    return customerLegalDisplayName(customer);
   }
 
   formatCurrency(value: number): string {
@@ -8465,6 +9118,31 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   /**
+   * Documento sin coincidencia en la tienda: primero la ORGANIZACIÓN
+   * (`GET /store/customers/lookup`, que además lo vincula a la tienda) y sólo
+   * si tampoco existe ahí, RUES y fuentes públicas. Mismo orden que POS y
+   * «Cambiar titular». Lo encontrado se ofrece en la lista de resultados para
+   * que el operador lo confirme; vincularlo solo mientras escribe sería una
+   * sorpresa.
+   */
+  private lookupDocumentThenExternal(doc: string): void {
+    this.externalLoading.set(true);
+    const digits = doc.split('-')[0].replace(/\D/g, '');
+    this.customersService
+      .lookupByDocument(digits)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((found) => {
+        if (this.customerQuery().trim() !== doc) return;
+        if (found) {
+          this.externalLoading.set(false);
+          this.customerResults.set([found]);
+          return;
+        }
+        this.lookupExternal(doc);
+      });
+  }
+
+  /**
    * Una consulta a fuentes públicas por documento buscado; el service nunca
    * lanza (error → `{ found:false, unavailable:true }`).
    */
@@ -8479,13 +9157,6 @@ export class InvoiceCreatePageComponent implements OnInit {
         this.externalResult.set(res);
         this.externalLoading.set(false);
       });
-  }
-
-  /** «Crear con estos datos»: alta prellenada desde la identidad pública. */
-  onCreateFromExternal(): void {
-    const identity = this.externalResult()?.identity;
-    if (!identity) return;
-    this.openCustomerCreateWith(ruesIdentityToPrefill(identity));
   }
 
   /** «Crear manualmente»: alta con el documento digitado. */
@@ -8514,45 +9185,53 @@ export class InvoiceCreatePageComponent implements OnInit {
    * último dígito sólo cuando el tipo es NIT).
    */
   selectCustomer(customer: Customer): void {
-    const address = customer.addresses?.[0];
-    this.invoiceForm.patchValue({
-      customer_id: customer.id,
-      customer_name: this.customerDisplayName(customer),
-      customer_document_type:
-        getDianSchemeIdForDocumentType(customer.document_type) ||
-        DOCUMENT_TYPE_NIT_CODE,
-      customer_tax_id: customer.document_number ?? '',
-      customer_verification_digit: customer.verification_digit ?? '',
-      // Incidente Óptica Panorama SAS — sin este patch la persona quedaba en
-      // el default 'JURIDICA' del form (o en lo que hubiera dejado el
-      // adquiriente anterior) en vez de la de la ficha real. Inofensivo para
-      // el payload (con `customer_id` el backend usa el `person_type` YA
-      // guardado, nunca este control — ver `buildPayload`), pero sin esto la
-      // pantalla mostraba una persona que no era la de la ficha.
-      customer_person_type: (customer.person_type ??
-        'JURIDICA') as 'NATURAL' | 'JURIDICA',
-      customer_tax_regime: customer.tax_regime ?? '',
-      customer_fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
-      customer_email: customer.email ?? '',
-      customer_phone: customer.phone ?? '',
-      customer_address: address
-        ? [address.address_line1, address.city, address.state_province]
-            .filter(Boolean)
-            .join(', ')
-        : '',
-      // A.8 — el código DANE guardado en la dirección primaria del cliente
-      // hidrata el buscador (el componente resuelve el chip por su cuenta);
-      // si el cliente no lo tiene, queda vacío y la regla de bloqueo avisa.
-      customer_municipality_code: address?.municipality_code ?? '',
-      customer_city_name: address?.city ?? '',
-    });
+    // TODO lo que la ficha tenga: dirección de FACTURACIÓN (o la primera de
+    // envío) sin la ciudad pegada, municipio DANE con su nombre y
+    // departamento, persona, régimen, responsabilidades, correo, teléfono, DV
+    // y razón social. Ver `customerToAcquirerPrefill`. Con `customer_id` el
+    // backend usa el `person_type` YA guardado (ver `buildPayload`); el patch
+    // existe para que la pantalla muestre la ficha real.
+    this.invoiceForm.patchValue(customerToAcquirerPrefill(customer));
     this.inlineCustomer.set(null);
     this.linkedCustomer.set(customer);
     this.linkedCustomerLabel.set(this.customerDisplayName(customer));
+    this.acquirerEditing.set(false);
     this.customerResults.set([]);
     this.customerQuery.set('');
     this.externalResult.set(null);
     this.externalLoading.set(false);
+    // La búsqueda paginada no siempre trae la dirección: se pide la ficha
+    // completa antes de dar por faltante lo que sí está guardado.
+    if (customerNeedsFullRecord(customer)) {
+      this.hydrateLinkedCustomer(customer.id);
+    }
+  }
+
+  /**
+   * Completa con la ficha COMPLETA (`GET /store/customers/:id`) sólo los
+   * campos que siguen vacíos: lo que el operador ya escribió mientras llegaba
+   * la respuesta no se pisa. Se descarta si entretanto cambió el cliente.
+   */
+  private hydrateLinkedCustomer(customerId: number): void {
+    this.customersService
+      .getCustomer(customerId)
+      .pipe(
+        map((response) => unwrapCustomerResponse(response)),
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((full) => {
+        if (!full) return;
+        if (Number(this.invoiceForm.get('customer_id')?.value) !== customerId) {
+          return;
+        }
+        this.linkedCustomer.set(full);
+        const patch = fillEmptyAcquirerFields(
+          this.invoiceForm.getRawValue() as Record<string, unknown>,
+          customerToAcquirerPrefill(full),
+        );
+        if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
+      });
   }
 
   /**
@@ -8564,6 +9243,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   onCustomerMunicipality(municipality: DianMunicipalityOption | null): void {
     this.invoiceForm.patchValue({
       customer_city_name: municipality?.name ?? '',
+      customer_department_name: municipality?.department_name ?? '',
     });
   }
 
@@ -8572,6 +9252,85 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.inlineCustomer.set(null);
     this.linkedCustomer.set(null);
     this.linkedCustomerLabel.set(null);
+    this.acquirerEditing.set(false);
+  }
+
+  /**
+   * «Cambiar cliente»: a diferencia de «Desvincular» (que deja los datos
+   * escritos para seguir a mano), vacía la identidad y vuelve al paso 1, la
+   * búsqueda.
+   */
+  changeCustomer(): void {
+    this.unlinkCustomer();
+    this.invoiceForm.patchValue({
+      customer_name: '',
+      customer_document_type: DOCUMENT_TYPE_NIT_CODE,
+      customer_tax_id: '',
+      customer_verification_digit: '',
+      customer_person_type: 'JURIDICA',
+      customer_tax_regime: '',
+      customer_fiscal_responsibilities: [],
+      customer_email: '',
+      customer_phone: '',
+      customer_address: '',
+      customer_municipality_code: '',
+      customer_city_name: '',
+      customer_department_name: '',
+    });
+    this.acquirerMoreOpen.set(false);
+    this.customerQuery.set('');
+    this.customerResults.set([]);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+  }
+
+  /**
+   * «Crear con estos datos» de la tarjeta RUES: rellena la identidad AQUÍ
+   * (nombre/razón social, tipo y número, DV, tipo de persona) sin abrir el
+   * modal. El cliente se crea al emitir como `inline_customer`, con lo que la
+   * pantalla muestre en ese momento (`buildInlineCustomerFromForm`). Lo que
+   * la DIAN exige y RUES no trae —dirección y municipio— queda marcado.
+   */
+  onUseExternalIdentity(): void {
+    const identity = this.externalResult()?.identity;
+    if (!identity) return;
+    const base = externalIdentityToInlineCustomer(identity);
+    const name =
+      base.legal_name ||
+      [base.first_name, base.last_name].filter(Boolean).join(' ');
+    this.invoiceForm.patchValue({
+      customer_id: null,
+      customer_name: name,
+      customer_document_type:
+        getDianSchemeIdForDocumentType(identity.document_type) ||
+        DOCUMENT_TYPE_NIT_CODE,
+      customer_tax_id: identity.document_number ?? '',
+      customer_verification_digit: identity.verification_digit ?? '',
+      customer_person_type: identity.person_type,
+    });
+    this.inlineCustomer.set(base);
+    this.linkedCustomer.set(null);
+    this.linkedCustomerLabel.set(name ? name + ' (se creará al emitir)' : null);
+    this.customerQuery.set('');
+    this.customerResults.set([]);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+  }
+
+  /**
+   * Dirección capturada en el modal de ALTA (`addressData`). Antes el output
+   * no estaba enlazado y lo escrito en el modal se perdía: ahora llena la
+   * dirección fiscal, el municipio DANE y sus nombres. El backend persiste la
+   * `customer_address` de la factura como dirección de facturación del
+   * cliente creado al emitir.
+   */
+  onCustomerAddressData(address: AddressPayload): void {
+    const patch: Record<string, unknown> = {
+      ...addressPayloadToAcquirerAddress(address),
+    };
+    const phone = String(this.invoiceForm.get('customer_phone')?.value ?? '').trim();
+    if (!phone && address.phone_number) patch['customer_phone'] = address.phone_number;
+    this.invoiceForm.patchValue(patch);
   }
 
   openCustomerCreate(): void {
@@ -9004,67 +9763,20 @@ export class InvoiceCreatePageComponent implements OnInit {
     const blockers: SaveRequirement[] = [];
     const raw = this.rawValue();
 
-    // Sin documento ni nombre la factura sale a Consumidor Final (el backend
-    // lo resuelve; `customer_name` es opcional en el DTO). El nombre sólo se
-    // exige cuando se identificó al adquiriente con un número: emitir con
-    // mínima información es la regla, no la excepción.
-    const hasCustomerId =
-      raw['customer_id'] != null && raw['customer_id'] !== '';
-    const hasTaxId = String(raw['customer_tax_id'] ?? '').trim() !== '';
-    if (!raw['customer_name'] && hasTaxId && !hasCustomerId) {
+    // ADQUIRIENTE — la lista sale de `missingAcquirerEmissionFields`, la MISMA
+    // función que marca en rojo cada campo en la plantilla (`acquirerMissing`).
+    // Sin documento ni nombre la factura sale a Consumidor Final; con número,
+    // nombre, tipo, dirección fiscal y municipio DANE son obligatorios (salvo
+    // exportación). El DV no se verifica: se DERIVA del NIT con el módulo 11.
+    for (const missing of this.acquirerMissing()) {
       blockers.push(
         localRequirement(
-          'customer_name',
-          'Nombre del adquiriente',
-          'El adquiriente necesita nombre o razón social.',
-          'customer_name',
+          missing.field,
+          missing.label,
+          missing.reason,
+          missing.field,
         ),
       );
-    }
-    // A.8 — el DV ya no se verifica aquí porque ya no se DIGITA: la pantalla
-    // lo deriva del NIT con el mismo módulo 11 que `@NitDvMatches()` en el
-    // backend (ver `computedCustomerDv` y `buildPayload`), así que una
-    // incoherencia NIT↔DV es inalcanzable desde este formulario. Verificar el
-    // valor guardado de un cliente vinculado sería un falso bloqueo: el
-    // payload viaja con el derivado, que es el correcto por construcción.
-    //
-    // Lo que SÍ se puede dejar a medias es el código DANE del municipio: es
-    // el otro rechazo clásico y aquí se descubre antes del viaje.
-    if (!this.isExportInvoice()) {
-      const addressLine = String(raw['customer_address'] ?? '').trim();
-      const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
-      // Incidente Óptica Panorama SAS — un adquiriente NOMBRADO (con
-      // documento) sin dirección fiscal es la misma identidad a medias que
-      // llevó a facturar mal: "consumidor final" (sin documento) sigue sin
-      // necesitarla, ver `collectAdvisories`.
-      if (!addressLine && this.isNamedAcquirer()) {
-        blockers.push(
-          localRequirement(
-            'customer_address',
-            'Dirección fiscal del adquiriente',
-            'El adquiriente tiene documento declarado y necesita dirección fiscal. Sólo un consumidor final (sin documento) puede omitirla.',
-            'customer_address',
-          ),
-        );
-      } else if (addressLine && !cityCode) {
-        blockers.push(
-          localRequirement(
-            'customer_municipality_code',
-            'Municipio (DANE) del adquiriente',
-            'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
-            'customer_municipality_code',
-          ),
-        );
-      } else if (!addressLine && cityCode) {
-        blockers.push(
-          localRequirement(
-            'customer_address',
-            'Dirección fiscal del adquiriente',
-            'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
-            'customer_address',
-          ),
-        );
-      }
     }
     if (this.itemsArray.length === 0) {
       blockers.push(
@@ -9566,12 +10278,15 @@ export class InvoiceCreatePageComponent implements OnInit {
       // manda sobre el que trajera el modal: el selector es la última palabra
       // visible antes de emitir. Con documento no-NIT se fija NATURAL sin
       // preguntar (una cédula ES una persona natural).
-      payload.inline_customer = {
-        ...inline,
-        person_type: this.isNitCustomer()
-          ? String(raw['customer_person_type'] || 'JURIDICA')
-          : 'NATURAL',
-      };
+      //
+      // Lo mismo vale para el resto de lo visible (nombre, correo, teléfono,
+      // régimen, responsabilidades, documento): ver
+      // `buildInlineCustomerFromForm`.
+      payload.inline_customer = buildInlineCustomerFromForm(inline, raw, {
+        taxIdBase: this.customerTaxIdBase(),
+        dv: computeNitDv(this.customerTaxIdBase()) ?? '',
+        isNit: this.isNitCustomer(),
+      });
     }
     const name = String(raw['customer_name'] ?? '').trim();
     if (name) payload.customer_name = name;
@@ -9617,6 +10332,10 @@ export class InvoiceCreatePageComponent implements OnInit {
         structuredAddress.department_code = cityCode.slice(0, 2);
       }
       if (cityName) structuredAddress.city_name = cityName;
+      const departmentName = String(raw['customer_department_name'] ?? '').trim();
+      if (cityCode && departmentName) {
+        structuredAddress.department_name = departmentName;
+      }
       payload.customer_address = structuredAddress;
     } else if (cityCode) {
       // Alcanzado sólo si el bloqueo correspondiente fue ignorado (no debería
@@ -9958,6 +10677,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     const lineIndex = line ? Number(line[1]) : 0;
 
     this.setSection(this.sectionOfTarget(target), true);
+    // Un campo del adquiriente puede estar detrás de la tarjeta compacta o
+    // plegado en «Más datos»: se despliega antes de buscar el nodo.
+    if (controlName.startsWith('customer_')) {
+      this.acquirerEditing.set(true);
+      if (InvoiceCreatePageComponent.ACQUIRER_MORE_FIELDS.has(controlName)) {
+        this.acquirerMoreOpen.set(true);
+      }
+    }
 
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return;
@@ -10192,6 +10919,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       customer_address: '',
       customer_municipality_code: '',
       customer_city_name: '',
+      customer_department_name: '',
       manual_withholding: false,
       withholding_amount: 0,
       use_foreign_currency: false,
@@ -10216,6 +10944,9 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.customerResults.set([]);
     this.externalResult.set(null);
     this.externalLoading.set(false);
+    this.linkedCustomer.set(null);
+    this.acquirerEditing.set(false);
+    this.acquirerMoreOpen.set(false);
     this.openSections.set(
       new Set<SectionId>(['documento', 'adquiriente', 'lineas']),
     );
