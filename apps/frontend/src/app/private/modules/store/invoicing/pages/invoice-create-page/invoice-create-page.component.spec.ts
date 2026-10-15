@@ -35,7 +35,17 @@ import {
   type AiuAutoApplyState,
   type AiuContratoSplit,
   type SubmitHintState,
+  INVOICE_MAX_LINES,
+  dropRowMarkField,
+  isCapturedInvoiceLine,
+  planInvoiceDraft,
+  type InvoiceDraftPlanContext,
 } from './invoice-create-page.component';
+import type {
+  DraftField,
+  InvoiceDraftLine,
+  InvoiceDraftScanResult,
+} from '../../interfaces/invoice-draft-scan.interface';
 
 /**
  * Paso 1 del plan AIU — `deriveAiuTotals`, probado donde es PURO.
@@ -1291,5 +1301,252 @@ describe('invoice-create-page · alta inline del adquiriente', () => {
       customer_city_name: 'Medellín',
       customer_department_name: 'Antioquia',
     });
+  });
+});
+
+/**
+ * «Cargar documentos» (escáner IA) — `planInvoiceDraft`, probado donde es
+ * PURO, y aplicado sobre un `FormGroup` real con los MISMOS nombres de
+ * control que `invoiceForm`. El componente de página no se instancia aquí por
+ * lo mismo que el resto de este spec (harness completo de store y servicios);
+ * lo que se custodia es que el plan escribe los controles correctos y deja
+ * las marcas «IA»/«Revisar» donde corresponde.
+ */
+describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
+  const field = <T>(value: T | null, confidence = 95): DraftField<T> => ({
+    value,
+    confidence,
+    warning: null,
+  });
+  const empty = <T>(): DraftField<T> => field<T>(null, 0);
+
+  const iva19: TaxOption = { id: 1, name: 'IVA 19%', rate: 19, tax_type: 'iva' };
+
+  const draftLine = (
+    description: string,
+    quantity: number,
+    unitPrice: number,
+    taxRate: number,
+  ): InvoiceDraftLine => ({
+    description: field(description),
+    quantity: field(quantity),
+    unit_price: field(unitPrice),
+    discount_percent: empty<number>(),
+    tax_rate: field(taxRate),
+    sku: null,
+    product_id: null,
+    product_variant_id: null,
+    match_status: 'none',
+    match_confidence: 0,
+  });
+
+  const sample = (): InvoiceDraftScanResult => ({
+    acquirer: {
+      document_type: field('NIT'),
+      document_number: field('900123456'),
+      verification_digit: empty<string>(),
+      person_type: field<'NATURAL' | 'JURIDICA'>('JURIDICA'),
+      name: field('Constructora Andina SAS'),
+      // Confianza baja ⇒ «Revisar».
+      email: field('compras@andina.co', 40),
+      phone: empty<string>(),
+      address_line: field('Cra 10 # 20-30'),
+      city_name: field('Bogotá'),
+      department_name: field('Bogotá D.C.'),
+      municipality_code: field('11001'),
+      tax_regime: empty<string>(),
+      fiscal_responsibilities: empty<string[]>(),
+      existing_customer_id: null,
+    },
+    invoice: {
+      issue_date: field('2026-10-14'),
+      due_date: empty<string>(),
+      currency: field('COP'),
+      reference: field('OC-77'),
+      notes: field('Anticipo del 50 %'),
+    },
+    payment: {
+      payment_form: field<'cash' | 'credit'>('credit'),
+      payment_term_days: field(30),
+      payment_method_hint: field('transferencia'),
+    },
+    lines: [
+      draftLine('Diseño estructural', 1, 1000000, 19),
+      // 7 % no existe en el catálogo ⇒ sin impuesto y «Revisar: impuesto».
+      draftLine('Visita técnica', 2, 150000, 7),
+    ],
+    totals: { subtotal: 1300000, tax_total: 190000, total: 1490000, consistent: false },
+    note_applied: 'Se facturó el 50 % del anticipo.',
+    missing_fields: ['acquirer.phone'],
+    requires_review: ['lines.1.unit_price'],
+    extraction_notes: null,
+    documents_scanned: 2,
+  });
+
+  const ctx = (
+    overrides: Partial<InvoiceDraftPlanContext> = {},
+  ): InvoiceDraftPlanContext => ({
+    today: '2026-10-14',
+    currentNotes: '',
+    notesLimit: 500,
+    foreignCurrencies: ['USD', 'EUR'],
+    taxes: [iva19],
+    currentItems: [{ description: '', unit_price: 0, product_id: null }],
+    maxLines: INVOICE_MAX_LINES,
+    descriptionLimit: 300,
+    ...overrides,
+  });
+
+  /** Los controles de `invoiceForm` que toca el borrador, con sus nombres reales. */
+  const buildForm = (): FormGroup =>
+    new FormGroup({
+      customer_id: new FormControl<number | null>(null),
+      customer_name: new FormControl(''),
+      customer_document_type: new FormControl('31'),
+      customer_tax_id: new FormControl(''),
+      customer_verification_digit: new FormControl(''),
+      customer_person_type: new FormControl('JURIDICA'),
+      customer_tax_regime: new FormControl(''),
+      customer_fiscal_responsibilities: new FormControl<string[]>([]),
+      customer_email: new FormControl(''),
+      customer_phone: new FormControl(''),
+      customer_address: new FormControl(''),
+      customer_municipality_code: new FormControl(''),
+      customer_city_name: new FormControl(''),
+      customer_department_name: new FormControl(''),
+      issue_date: new FormControl('2026-10-14'),
+      due_date: new FormControl({ value: '2026-10-14', disabled: true }),
+      payment_form: new FormControl('1'),
+      payment_means_code: new FormControl('10'),
+      notes: new FormControl(''),
+      use_foreign_currency: new FormControl(false),
+      foreign_currency: new FormControl(''),
+      items: new FormArray<FormGroup>([]),
+    });
+
+  const lineGroup = () =>
+    new FormGroup({
+      product_id: new FormControl<number | null>(null),
+      product_name: new FormControl(''),
+      description: new FormControl(''),
+      quantity: new FormControl(1),
+      unit_price: new FormControl(0),
+      discount_amount: new FormControl(0),
+      taxes: new FormControl<TaxSelection[]>([]),
+    });
+
+  it('precarga adquiriente, cabecera, pago y líneas en los controles reales', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+    const form = buildForm();
+
+    // Mismo orden que la página: patch → syncDueDate (habilita en crédito) → vencimiento.
+    form.patchValue({ ...plan.acquirer.patch, customer_id: null });
+    form.patchValue(plan.invoice.patch);
+    form.get('due_date')!.enable();
+    form.get('due_date')!.setValue(plan.invoice.dueDate);
+    const items = form.get('items') as FormArray<FormGroup>;
+    if (plan.replaceLines) items.clear();
+    for (const line of plan.lines) {
+      const group = lineGroup();
+      group.patchValue(line.value);
+      items.push(group);
+    }
+
+    const raw = form.getRawValue();
+    expect(raw.customer_document_type).toBe('31');
+    expect(raw.customer_tax_id).toBe('900123456');
+    expect(raw.customer_name).toBe('Constructora Andina SAS');
+    expect(raw.customer_address).toBe('Cra 10 # 20-30');
+    expect(raw.customer_municipality_code).toBe('11001');
+    expect(raw.customer_city_name).toBe('Bogotá');
+    expect(raw.payment_form).toBe('2');
+    expect(raw.due_date).toBe('2026-11-13');
+    expect(raw.payment_means_code).toBe('47');
+    expect(raw.notes).toContain('Anticipo del 50 %');
+    expect(raw.notes).toContain('Referencia: OC-77');
+    // COP no enciende la conversión.
+    expect(raw.use_foreign_currency).toBe(false);
+
+    expect(plan.replaceLines).toBe(true);
+    expect(items.length).toBe(2);
+    expect(items.at(0).get('description')!.value).toBe('Diseño estructural');
+    expect(items.at(0).get('unit_price')!.value).toBe(1000000);
+    expect(items.at(0).get('taxes')!.value[0].tax_rate_id).toBe(1);
+    expect(items.at(1).get('quantity')!.value).toBe(2);
+    expect(items.at(1).get('taxes')!.value).toEqual([]);
+
+    // La base del alta inline lleva la sigla, que la pantalla no expone.
+    expect(plan.inlineBase.document_type).toBe('NIT');
+    expect(plan.inlineBase.legal_name).toBe('Constructora Andina SAS');
+  });
+
+  it('marca lo leído como IA y lo dudoso como Revisar (pending gana)', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+
+    expect(plan.headerMarks['customer_name']).toBe('ai');
+    expect(plan.headerMarks['customer_tax_id']).toBe('ai');
+    expect(plan.headerMarks['payment_form']).toBe('ai');
+    expect(plan.headerMarks['due_date']).toBe('ai');
+    expect(plan.headerMarks['notes']).toBe('ai');
+    // Confianza 40 < 75: lo escribió la IA, pero hay que revisarlo.
+    expect(plan.headerMarks['customer_email']).toBe('pending');
+    // `missing_fields` del backend.
+    expect(plan.headerMarks['customer_phone']).toBe('pending');
+
+    const [first, second] = plan.lines;
+    expect(first.mark.ai).toEqual(
+      jasmine.arrayContaining(['description', 'quantity', 'unit_price', 'taxes']),
+    );
+    expect(first.mark.pending).toEqual([]);
+    expect(second.mark.pending).toEqual(
+      jasmine.arrayContaining(['taxes', 'unit_price']),
+    );
+    expect(second.mark.note).toContain('7 %');
+  });
+
+  it('el aviso nombra pendientes, nota aplicada y totales que no cuadran', () => {
+    const { notice } = planInvoiceDraft(sample(), ctx());
+    expect(notice.documents).toBe(2);
+    expect(notice.pending).toEqual(
+      jasmine.arrayContaining(['Teléfono del adquiriente', 'Línea 2: precio unitario']),
+    );
+    expect(notice.noteApplied).toBe('Se facturó el 50 % del anticipo.');
+    expect(notice.totalsInconsistent).toBe(true);
+    expect(notice.documentTotal).toBe(1490000);
+  });
+
+  it('con líneas capturadas AGREGA al final y respeta el tope', () => {
+    const plan = planInvoiceDraft(
+      sample(),
+      ctx({
+        currentItems: [
+          { description: 'Línea del operador', unit_price: 5000, product_id: null },
+          { description: '', unit_price: 0, product_id: null },
+        ],
+        maxLines: 2,
+      }),
+    );
+    expect(plan.replaceLines).toBe(false);
+    // Una capturada ocupa un lugar de dos: cabe una sola leída.
+    expect(plan.lines.length).toBe(1);
+    expect(plan.droppedLines).toBe(1);
+    expect(plan.notice.unresolved.join(' ')).toContain('no se cargaron');
+  });
+
+  it('isCapturedInvoiceLine: descripción, precio o producto cuentan como trabajo', () => {
+    expect(isCapturedInvoiceLine({ description: '', unit_price: 0, product_id: null })).toBe(false);
+    expect(isCapturedInvoiceLine({ description: ' x ' })).toBe(true);
+    expect(isCapturedInvoiceLine({ unit_price: 10 })).toBe(true);
+    expect(isCapturedInvoiceLine({ product_id: 7 })).toBe(true);
+  });
+
+  it('dropRowMarkField suelta el campo editado y la fila cuando no queda nada', () => {
+    const mark = { ai: ['description'], pending: ['taxes'], note: 'n' };
+    expect(dropRowMarkField(mark, 'taxes')).toEqual({
+      ai: ['description'],
+      pending: [],
+      note: 'n',
+    });
+    expect(dropRowMarkField({ ai: ['description'], pending: [] }, 'description')).toBeNull();
   });
 });
