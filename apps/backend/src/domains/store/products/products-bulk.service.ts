@@ -461,6 +461,17 @@ export class ProductsBulkService {
               return;
             }
 
+            // Un SKU numérico (p. ej. 675493067) llega como number desde Excel;
+            // todo el flujo lo trata como texto (toLowerCase, match exacto).
+            if (key === 'sku' || key === 'parent_sku') {
+              product[key] =
+                typeof val === 'number' && Number.isInteger(val)
+                  ? val.toFixed(0)
+                  : strVal;
+              hasData = true;
+              return;
+            }
+
             if (key === 'barcode') {
               const coerced = this.coerceBarcodeCell(val);
               if (coerced.error) {
