@@ -257,8 +257,11 @@ import type {
 } from '../../interfaces/invoice-draft-scan.interface';
 import {
   DRAFT_LOW_CONFIDENCE,
+  countDraftFilledFields,
+  draftAiuPatch,
   draftDocumentDigits,
   draftLinesToLineInputs,
+  draftWithholdingsToRows,
   draftNitDvMismatch,
   draftPathLabel,
   draftPendingPaths,
@@ -268,8 +271,13 @@ import {
   hasDraftValue,
   isFinalConsumerDocument,
   type DraftAcquirerPatch,
+  type DraftAiuContext,
+  type DraftAiuPatch,
+  type DraftFillSummary,
   type DraftInvoicePatch,
   type DraftLineValue,
+  type DraftWithholdingConcept,
+  type DraftWithholdingRow,
 } from '../../utils/invoice-draft-mapping';
 /**
  * SECCIÓN IMPUESTOS COMPARTIDA con la matriz por porción del editor de
@@ -1983,6 +1991,12 @@ export interface InvoiceDraftPlanContext {
   }[];
   maxLines: number;
   descriptionLimit: number;
+  /** Catálogo de conceptos de retención (vacío ⇒ las leídas van al aviso). */
+  withholdingConcepts?: readonly DraftWithholdingConcept[];
+  /** Filas de retención que el formulario ya tiene: con alguna, no se tocan. */
+  currentWithholdings?: number;
+  /** Estado AIU del documento; sin él, el AIU leído sólo se avisa. */
+  aiu?: DraftAiuContext;
 }
 
 export interface InvoiceDraftPlanLine {
@@ -2006,6 +2020,16 @@ export interface InvoiceDraftPlan {
   lines: InvoiceDraftPlanLine[];
   /** Líneas leídas que no cupieron por el tope de 100. */
   droppedLines: number;
+  /** Filas de `withholdings` a escribir (vacío si el formulario ya tenía). */
+  withholdings: DraftWithholdingRow[];
+  /** Copia de trabajo del AIU a escribir (`patch` vacío si no aplica). */
+  aiu: DraftAiuPatch;
+  /**
+   * Conteo para «FacturIA completó N campos · revisa los marcados», contando
+   * el adquiriente como NUEVO. Si resulta un cliente existente, recalcular con
+   * `countDraftFilledFields(plan, { includeAcquirer: false })`.
+   */
+  filled: DraftFillSummary;
   notice: InvoiceDraftNotice;
 }
 
@@ -2045,6 +2069,24 @@ export function planInvoiceDraft(
   for (const path of pendingPaths) {
     if (!path.startsWith('lines.')) headerMarks[path] = 'pending';
   }
+
+  // ── AIU (sólo con el documento ya en operación AIU) y retenciones
+  const aiu = draftAiuPatch(
+    result.aiu,
+    ctx.aiu ?? {
+      isAiu: false,
+      current: { administracion: '', imprevistos: '', utilidad: '' },
+      currentContractObject: '',
+    },
+  );
+  for (const path of aiu.aiPaths) headerMarks[path] = 'ai';
+  for (const path of aiu.pendingPaths) headerMarks[path] = 'pending';
+  const withholdingPlan = draftWithholdingsToRows(
+    result.withholdings,
+    ctx.withholdingConcepts ?? [],
+  );
+  const keepWithholdings = (ctx.currentWithholdings ?? 0) > 0;
+  const withholdings = keepWithholdings ? [] : withholdingPlan.rows;
 
   // ── Pendientes de fila que señaló el backend (`lines.N.<control>` / `lines.N`)
   const rowPending = new Map<number, Set<string>>();
@@ -2096,7 +2138,14 @@ export function planInvoiceDraft(
       ),
     ),
   );
-  const unresolved = [...invoice.unresolved];
+  const unresolved = [...invoice.unresolved, ...aiu.unresolved];
+  if (keepWithholdings && withholdingPlan.rows.length > 0) {
+    unresolved.push(
+      `${withholdingPlan.rows.length} retención(es) leída(s) no se cargaron: el documento ya tiene retenciones.`,
+    );
+  } else {
+    unresolved.push(...withholdingPlan.unresolved);
+  }
   if (draftNitDvMismatch(result.acquirer)) {
     unresolved.push(
       'El dígito de verificación leído no corresponde al NIT: revisa el número del documento.',
@@ -2110,6 +2159,14 @@ export function planInvoiceDraft(
 
   const hasAcquirer =
     !!acquirer.documentDigits || hasDraftValue(result.acquirer.name);
+  const filled = countDraftFilledFields({
+    acquirer,
+    invoice,
+    headerMarks,
+    lines,
+    withholdings,
+    aiu,
+  });
 
   return {
     acquirer,
@@ -2120,6 +2177,9 @@ export function planInvoiceDraft(
     replaceLines,
     lines,
     droppedLines,
+    withholdings,
+    aiu,
+    filled,
     notice: {
       documents: Math.max(1, Number(result.documents_scanned) || 1),
       pending,
@@ -9933,11 +9993,35 @@ export class InvoiceCreatePageComponent implements OnInit {
         : []) as InvoiceDraftPlanContext['currentItems'],
       maxLines: INVOICE_MAX_LINES,
       descriptionLimit: this.itemDescriptionLimit,
+      withholdingConcepts: this.withholdingConcepts().map((concept) => ({
+        id: concept.id,
+        label: concept.code + ' · ' + concept.name,
+        name: concept.name,
+        ratePercent: concept.ratePercent,
+        type: concept.withholdingType,
+      })),
+      // En modo «importe a mano» las filas no cuentan: no se siembran.
+      currentWithholdings:
+        raw['manual_withholding'] === true ? 1 : this.withholdingsArray.length,
+      aiu: {
+        isAiu: isAiuOperation(raw['operation_type']),
+        current: {
+          administracion: (raw['aiu'] as Record<string, unknown> | undefined)?.['administracion'],
+          imprevistos: (raw['aiu'] as Record<string, unknown> | undefined)?.['imprevistos'],
+          utilidad: (raw['aiu'] as Record<string, unknown> | undefined)?.['utilidad'],
+        },
+        currentContractObject: raw['aiu_contract_object'],
+      },
     });
 
     // b. Cabecera y pago.
     if (Object.keys(plan.invoice.patch).length > 0) {
       this.invoiceForm.patchValue(plan.invoice.patch);
+    }
+    // AIU leído: sólo llega con el documento ya en operación AIU.
+    if (Object.keys(plan.aiu.patch).length > 0) {
+      this.invoiceForm.patchValue(plan.aiu.patch);
+      this.setSection('aiu', true);
     }
     this.syncDueDate();
     if (plan.invoice.dueDate) {
@@ -9948,8 +10032,22 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.onExchangeRateInputsChanged();
     }
 
-    // c. Líneas.
+    // c. Líneas y retenciones.
     const rowMarks = this.applyDraftLines(plan);
+    if (plan.withholdings.length > 0) {
+      for (const row of plan.withholdings) {
+        this.addWithholding();
+        this.withholdingsArray
+          .at(this.withholdingsArray.length - 1)
+          .patchValue({
+            concept_id: row.concept_id,
+            concept: row.concept,
+            role: row.role,
+            rate: row.rate,
+          });
+      }
+      this.setSection('retenciones', true);
+    }
 
     // d. Marcas. Las del adquiriente esperan a saber si es un cliente
     // existente (sus datos vienen de la ficha, no de la IA) o uno nuevo.

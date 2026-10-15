@@ -40,13 +40,19 @@ import type {
   InvoiceDraftScanResult,
 } from '../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
 import {
+  countDraftFilledFields,
+  draftAiuPatch,
   draftLinesToLineInputs,
   draftNitDvMismatch,
   draftPathLabel,
   draftPendingPaths,
   draftToAcquirerPatch,
   draftToInvoicePatch,
+  draftWithholdingsToRows,
   hasDraftValue,
+  type DraftFillSummary,
+  type DraftWithholdingConcept,
+  type DraftWithholdingRow,
 } from '../../../../store/invoicing/utils/invoice-draft-mapping';
 
 const text = (value: unknown): string =>
@@ -335,6 +341,8 @@ export interface PlatformDraftLineValue {
   unit_price: number;
   discount_amount: number;
   taxes: TaxSelection[];
+  /** UN/ECE rec. 20 (la leída si la pantalla la ofrece, si no `NIU`). */
+  unit_code: string;
 }
 
 export interface PlatformDraftPlanLine {
@@ -407,6 +415,13 @@ export interface PlatformInvoiceDraftPlanContext extends PlatformDraftInvoiceCon
   currentItems: readonly { description?: unknown; unit_price?: unknown }[];
   maxLines: number;
   descriptionLimit: number;
+  /**
+   * Catálogo de conceptos de retención de la plataforma (la clase se deduce
+   * del nombre). Vacío ⇒ las retenciones leídas van al aviso.
+   */
+  withholdingConcepts?: readonly DraftWithholdingConcept[];
+  /** Filas de retención que el formulario ya tiene: con alguna, no se tocan. */
+  currentWithholdings?: number;
 }
 
 export interface PlatformInvoiceDraftPlan {
@@ -422,6 +437,14 @@ export interface PlatformInvoiceDraftPlan {
   replaceLines: boolean;
   lines: PlatformDraftPlanLine[];
   droppedLines: number;
+  /** Filas de `withholdings` a escribir (rol `suffered`, tarifa en %). */
+  withholdings: DraftWithholdingRow[];
+  /**
+   * Conteo para «FacturIA completó N campos · revisa los marcados», contando
+   * el adquiriente como NUEVO. Con un destinatario ya registrado, recalcular
+   * con `countDraftFilledFields(plan, { includeAcquirer: false })`.
+   */
+  filled: DraftFillSummary;
   notice: PlatformInvoiceDraftNotice;
 }
 
@@ -507,6 +530,7 @@ export function planPlatformInvoiceDraft(
         unit_price: input.value.unit_price,
         discount_amount: input.value.discount_amount,
         taxes: input.value.taxes,
+        unit_code: input.value.unit_code,
       },
       mark: {
         ai: input.aiFields.filter((field) => field !== 'product'),
@@ -524,7 +548,34 @@ export function planPlatformInvoiceDraft(
         .map((path) => draftPathLabel(path)),
     ),
   );
+  const withholdingPlan = draftWithholdingsToRows(
+    result.withholdings,
+    ctx.withholdingConcepts ?? [],
+  );
+  const keepWithholdings = (ctx.currentWithholdings ?? 0) > 0;
+  const withholdings = keepWithholdings ? [] : withholdingPlan.rows;
+
   const unresolved = [...invoice.unresolved, ...acquirer.unresolved];
+  if (keepWithholdings && withholdingPlan.rows.length > 0) {
+    unresolved.push(
+      `${withholdingPlan.rows.length} retención(es) leída(s) no se cargaron: el documento ya tiene retenciones.`,
+    );
+  } else {
+    unresolved.push(...withholdingPlan.unresolved);
+  }
+  // La plataforma emite siempre operación estándar (10): el AIU leído se
+  // cuenta, no se aplica.
+  if (
+    draftAiuPatch(result.aiu, {
+      isAiu: false,
+      current: { administracion: '', imprevistos: '', utilidad: '' },
+      currentContractObject: '',
+    }).unresolved.length > 0
+  ) {
+    unresolved.push(
+      'Los documentos traen reparto AIU: la factura de plataforma no emite operación AIU, revisa los valores de las líneas.',
+    );
+  }
   if (draftNitDvMismatch(result.acquirer)) {
     unresolved.push(
       'El dígito de verificación leído no corresponde al NIT: revisa el número del documento.',
@@ -536,6 +587,14 @@ export function planPlatformInvoiceDraft(
     );
   }
 
+  const filled = countDraftFilledFields({
+    acquirer,
+    invoice,
+    headerMarks,
+    lines,
+    withholdings,
+  });
+
   return {
     acquirer,
     hasAcquirer,
@@ -545,6 +604,8 @@ export function planPlatformInvoiceDraft(
     replaceLines,
     lines,
     droppedLines,
+    withholdings,
+    filled,
     notice: {
       documents: Math.max(1, Number(result.documents_scanned) || 1),
       pending,

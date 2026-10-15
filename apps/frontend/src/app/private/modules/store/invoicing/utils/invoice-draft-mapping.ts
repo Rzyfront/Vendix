@@ -32,12 +32,17 @@ import {
   PAYMENT_FORM_CREDIT,
   PAYMENT_MEANS_OPTIONS,
   TAX_REGIME_OPTIONS,
+  UNIT_CODE_DEFAULT,
+  UNIT_CODE_OPTIONS,
 } from '../components/invoice-create/invoice-dian-catalogs';
 import type {
   DraftField,
+  DraftWithholdingType,
   InvoiceDraftAcquirer,
+  InvoiceDraftAiu,
   InvoiceDraftLine,
   InvoiceDraftScanResult,
+  InvoiceDraftWithholding,
 } from '../interfaces/invoice-draft-scan.interface';
 import { normalizeRatePercent } from './invoice-line-math';
 
@@ -367,7 +372,8 @@ export interface DraftInvoicePatch {
  * - Vencimiento: el leído; si no, emisión + plazo en días (sólo en crédito).
  * - La REFERENCIA no tiene control propio: viaja dentro de las notas
  *   («Referencia: OC-123»), que se agregan a las que ya hubiera, con el tope.
- * - COP no toca nada; otra divisa sólo si el selector la ofrece.
+ * - COP no toca nada; otra divisa sólo si el selector la ofrece, y con ella
+ *   la TRM y su fecha si el documento las imprime.
  */
 export function draftToInvoicePatch(
   result: Pick<InvoiceDraftScanResult, 'invoice' | 'payment'>,
@@ -450,6 +456,18 @@ export function draftToInvoicePatch(
         patch['use_foreign_currency'] = true;
         patch['foreign_currency'] = code;
         aiPaths.push('foreign_currency');
+        // TRM impresa: la pantalla sólo consulta la oficial si el control está
+        // vacío, así que la leída se respeta y queda marcada para revisión.
+        const rate = invoice.exchange_rate;
+        if (hasDraftValue(rate) && Number(rate.value) > 0) {
+          patch['exchange_rate'] = Number(rate.value);
+          aiPaths.push('exchange_rate');
+          const rateDate = invoice.exchange_rate_date;
+          if (hasDraftValue(rateDate) && isDateOnly(rateDate.value)) {
+            patch['exchange_rate_date'] = text(rateDate.value);
+            aiPaths.push('exchange_rate_date');
+          }
+        }
       } else {
         unresolved.push(
           `Moneda ${code} no disponible en la factura: queda en pesos (COP).`,
@@ -506,7 +524,14 @@ export interface DraftLineValue {
   unit_price: number;
   discount_amount: number;
   taxes: TaxSelection[];
+  /** UN/ECE rec. 20; la leída si la pantalla la ofrece, si no `NIU`. */
+  unit_code: string;
 }
+
+/** Códigos de unidad que ofrece el selector de la fila. */
+const UNIT_CODE_VALUES: ReadonlySet<string> = new Set(
+  UNIT_CODE_OPTIONS.map((option) => String(option.value)),
+);
 
 export interface DraftLineInput {
   /** Índice de la línea en el borrador (para cruzar `lines.N.*`). */
@@ -534,6 +559,7 @@ const formatRate = (rate: number): string =>
  * - Tarifa 0 ⇒ sin impuestos. Tarifa sin equivalente en el catálogo ⇒ sin
  *   impuestos y «Revisar: impuesto»: inventar un tributo sería peor.
  * - Cantidad ≤ 0 o ausente ⇒ 1, y por revisar; precio ausente ⇒ 0, por revisar.
+ * - Unidad leída del selector (`KGM`, `HUR`…) o `NIU` por defecto.
  * - Lo escrito con confianza baja también queda por revisar.
  */
 export function draftLinesToLineInputs(
@@ -617,6 +643,17 @@ export function draftLinesToLineInputs(
       }
     }
 
+    // Unidad: sólo si es una de las del selector. Una leída que no se reconoce
+    // deja `NIU` y lo dice en la nota (la fila no tiene marca de unidad).
+    let unitCode = UNIT_CODE_DEFAULT;
+    const unit = line.unit_code;
+    if (hasDraftValue(unit) && UNIT_CODE_VALUES.has(text(unit.value).toUpperCase())) {
+      unitCode = text(unit.value).toUpperCase();
+      aiFields.push('unit_code');
+    } else if (unit && !hasDraftValue(unit) && unit.warning) {
+      notes.push('Unidad leída no reconocida: quedó «Unidad»');
+    }
+
     return {
       draftIndex,
       value: {
@@ -631,6 +668,7 @@ export function draftLinesToLineInputs(
         unit_price: unitPrice,
         discount_amount: discountAmount,
         taxes: lineTaxes,
+        unit_code: unitCode,
       },
       aiFields,
       pendingFields,
@@ -665,6 +703,8 @@ const INVOICE_PATH_TO_CONTROL: Readonly<Record<string, string>> = {
   currency: 'foreign_currency',
   reference: 'notes',
   notes: 'notes',
+  exchange_rate: 'exchange_rate',
+  exchange_rate_date: 'exchange_rate_date',
 };
 
 const PAYMENT_PATH_TO_CONTROL: Readonly<Record<string, string>> = {
@@ -672,6 +712,12 @@ const PAYMENT_PATH_TO_CONTROL: Readonly<Record<string, string>> = {
   payment_term_days: 'due_date',
   payment_method_hint: 'payment_means_code',
 };
+
+/**
+ * Campos de fila SIN marca propia en la pantalla: no se marcan (ni la fila
+ * entera). La unidad no reconocida ya va en la nota de la fila.
+ */
+const UNMARKED_LINE_FIELDS: ReadonlySet<string> = new Set(['unit_code']);
 
 const LINE_PATH_TO_CONTROL: Readonly<Record<string, string>> = {
   description: 'description',
@@ -698,6 +744,7 @@ export function draftPathToControl(path: string): string | null {
   if (root === 'payment') return PAYMENT_PATH_TO_CONTROL[second] ?? null;
   if (root === 'lines' && /^\d+$/.test(second ?? '')) {
     if (!third) return `lines.${second}`;
+    if (UNMARKED_LINE_FIELDS.has(third)) return null;
     const control = LINE_PATH_TO_CONTROL[third];
     return control ? `lines.${second}.${control}` : `lines.${second}`;
   }
@@ -768,7 +815,9 @@ export function draftPendingPaths(
     }
   }
   for (const [key, control] of Object.entries(INVOICE_PATH_TO_CONTROL)) {
-    const field = result.invoice[key as keyof typeof result.invoice];
+    const field = result.invoice[key as keyof typeof result.invoice] as
+      | DraftField<unknown>
+      | undefined;
     if (hasDraftValue(field) && isLowConfidence(field)) out.add(control);
   }
   for (const [key, control] of Object.entries(PAYMENT_PATH_TO_CONTROL)) {
@@ -817,6 +866,12 @@ const DRAFT_PATH_LABELS: Readonly<Record<string, string>> = {
   'invoice.currency': 'Moneda',
   'invoice.reference': 'Referencia',
   'invoice.notes': 'Notas',
+  'invoice.exchange_rate': 'Tasa de cambio (TRM)',
+  'invoice.exchange_rate_date': 'Fecha de la TRM',
+  'aiu.administracion_percent': 'AIU: administración',
+  'aiu.imprevistos_percent': 'AIU: imprevistos',
+  'aiu.utilidad_percent': 'AIU: utilidad',
+  'aiu.contract_object': 'AIU: objeto del contrato',
   'payment.payment_form': 'Forma de pago',
   'payment.payment_term_days': 'Plazo de pago',
   'payment.payment_method_hint': 'Medio de pago',
@@ -835,6 +890,12 @@ const LINE_FIELD_LABELS: Readonly<Record<string, string>> = {
   product_variant_id: 'variante',
   sku: 'referencia (SKU)',
   match_status: 'producto',
+  unit_code: 'unidad',
+};
+
+const WITHHOLDING_FIELD_LABELS: Readonly<Record<string, string>> = {
+  type: 'clase',
+  rate: 'tarifa',
 };
 
 /** `lines.1.tax_rate` ⇒ «Línea 2: impuesto». Lo desconocido se muestra tal cual. */
@@ -848,5 +909,336 @@ export function draftPathLabel(path: string): string {
       ? `Línea ${n}: ${LINE_FIELD_LABELS[match[2]] ?? match[2]}`
       : `Línea ${n}`;
   }
+  const withholding = /^withholdings\.(\d+)(?:\.(\w+))?$/.exec(path);
+  if (withholding) {
+    const n = Number(withholding[1]) + 1;
+    return withholding[2]
+      ? `Retención ${n}: ${WITHHOLDING_FIELD_LABELS[withholding[2]] ?? withholding[2]}`
+      : `Retención ${n}`;
+  }
   return path;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Retenciones
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Concepto de retención del catálogo de la pantalla, en una forma común a las
+ * dos superficies. `type` es `retefuente` / `reteiva` / `reteica` cuando se
+ * conoce (la tienda lo trae; la plataforma lo deduce del nombre).
+ */
+export interface DraftWithholdingConcept {
+  id: number;
+  /** Lo que la fila muestra como concepto (`'2307 · Servicios'`). */
+  label: string;
+  name: string;
+  /** Tarifa del catálogo en PORCENTAJE, o `null` si no la trae. */
+  ratePercent: number | null;
+  type: string | null;
+}
+
+/** Fila de `withholdings` que la página escribe. */
+export interface DraftWithholdingRow {
+  /** Índice en `result.withholdings` (para cruzar `withholdings.N.*`). */
+  draftIndex: number;
+  concept_id: number;
+  concept: string;
+  /** El ADQUIRIENTE retiene a quien factura: retención sufrida. */
+  role: 'suffered';
+  /** PORCENTAJE leído (la pantalla lo guarda en porcentaje). */
+  rate: number;
+  /**
+   * `true` si el concepto se eligió sólo por la clase (ninguno del catálogo
+   * tiene esa tarifa, o hubo varios iguales y decidió el texto impreso).
+   */
+  needsReview: boolean;
+}
+
+export interface DraftWithholdingsPlan {
+  rows: DraftWithholdingRow[];
+  /** Lo leído que no se pudo cruzar con el catálogo, en palabras. */
+  unresolved: string[];
+}
+
+const WITHHOLDING_TYPE_LABELS: Readonly<Record<DraftWithholdingType, string>> = {
+  retefuente: 'Retención en la fuente',
+  reteiva: 'ReteIVA',
+  reteica: 'ReteICA',
+};
+
+/** Clase de un concepto por su tipo declarado o, si falta, por su nombre/código. */
+export function draftWithholdingConceptType(concept: {
+  type?: string | null;
+  name?: string | null;
+  label?: string | null;
+}): DraftWithholdingType | null {
+  const declared = stripAccents(text(concept.type).toLowerCase());
+  if (declared === 'retefuente' || declared === 'reteiva' || declared === 'reteica') {
+    return declared;
+  }
+  if (declared === 'withholding') return 'retefuente';
+  const haystack = stripAccents(`${text(concept.name)} ${text(concept.label)}`.toLowerCase());
+  if (!haystack.trim()) return null;
+  if (/\bica\b|reteica/.test(haystack)) return 'reteica';
+  if (/\biva\b|reteiva/.test(haystack)) return 'reteiva';
+  if (/fuente|retefuente|renta/.test(haystack)) return 'retefuente';
+  return null;
+}
+
+const sameRate = (a: number, b: number): boolean => Math.abs(a - b) < 0.0001;
+
+const formatPercent = (rate: number): string =>
+  `${String(Math.round(rate * 10000) / 10000).replace('.', ',')} %`;
+
+/**
+ * Retenciones leídas ⇒ filas del `FormArray` `withholdings`.
+ *
+ * - Desde quien factura, la retención impresa por el comprador es SUFRIDA.
+ * - Concepto: de la MISMA clase y con la MISMA tarifa del catálogo. Si hay
+ *   varios, decide el concepto impreso (nombre que lo contiene); si sigue
+ *   ambiguo, o si ninguno tiene esa tarifa pero hay uno solo de la clase, se
+ *   elige con `needsReview`. Sin candidato, no se inventa: va a `unresolved`.
+ * - La tarifa escrita es la LEÍDA (la del documento manda; la del catálogo
+ *   sólo se propone al elegir concepto a mano).
+ * - Una fila sin clase o sin tarifa válida no se escribe.
+ */
+export function draftWithholdingsToRows(
+  withholdings: readonly InvoiceDraftWithholding[] | null | undefined,
+  concepts: readonly DraftWithholdingConcept[],
+): DraftWithholdingsPlan {
+  const rows: DraftWithholdingRow[] = [];
+  const unresolved: string[] = [];
+  (withholdings ?? []).forEach((entry, draftIndex) => {
+    const type = hasDraftValue(entry?.type) ? entry.type.value : null;
+    const rate =
+      hasDraftValue(entry?.rate) && Number(entry.rate.value) > 0
+        ? Number(entry.rate.value)
+        : null;
+    if (!type || rate === null) {
+      if (type || rate !== null || entry?.concept_hint) {
+        unresolved.push(
+          `Retención ${draftIndex + 1} sin clase o tarifa legible: agrégala a mano.`,
+        );
+      }
+      return;
+    }
+    const label = `${WITHHOLDING_TYPE_LABELS[type]} ${formatPercent(rate)}`;
+    if (concepts.length === 0) {
+      unresolved.push(`${label}: el catálogo de conceptos no está disponible, agrégala a mano.`);
+      return;
+    }
+    const ofType = concepts.filter((concept) => draftWithholdingConceptType(concept) === type);
+    const sameTariff = ofType.filter(
+      (concept) => concept.ratePercent != null && sameRate(Number(concept.ratePercent), rate),
+    );
+    const hint = stripAccents(text(entry.concept_hint).toLowerCase());
+    const byHint = (list: readonly DraftWithholdingConcept[]): DraftWithholdingConcept[] =>
+      hint
+        ? list.filter((concept) =>
+            stripAccents(`${concept.name} ${concept.label}`.toLowerCase()).includes(hint),
+          )
+        : [];
+
+    let pick: DraftWithholdingConcept | null = null;
+    let needsReview = false;
+    if (sameTariff.length === 1) {
+      pick = sameTariff[0];
+    } else if (sameTariff.length > 1) {
+      const hinted = byHint(sameTariff);
+      pick = hinted.length === 1 ? hinted[0] : sameTariff[0];
+      needsReview = hinted.length !== 1;
+    } else {
+      const hinted = byHint(ofType);
+      if (hinted.length === 1) pick = hinted[0];
+      else if (ofType.length === 1) pick = ofType[0];
+      needsReview = true;
+    }
+    if (!pick) {
+      unresolved.push(`${label} sin concepto equivalente en el catálogo: agrégala a mano.`);
+      return;
+    }
+    if (isLowConfidence(entry.type) || isLowConfidence(entry.rate)) needsReview = true;
+    rows.push({
+      draftIndex,
+      concept_id: pick.id,
+      concept: pick.label,
+      role: 'suffered',
+      rate,
+      needsReview,
+    });
+  });
+  return { rows, unresolved };
+}
+
+// ─────────────────────────────────────────────────────────────
+// AIU
+// ─────────────────────────────────────────────────────────────
+
+export interface DraftAiuContext {
+  /** ¿El documento ya está en operación AIU (`'09'`)? */
+  isAiu: boolean;
+  /** Valores actuales de `aiu.administracion|imprevistos|utilidad` (texto `'10.00'`). */
+  current: { administracion: unknown; imprevistos: unknown; utilidad: unknown };
+  /** Valor actual de `aiu_contract_object`. */
+  currentContractObject: unknown;
+}
+
+export interface DraftAiuPatch {
+  /** Para `patchValue`: `{ aiu: { administracion: '10.00', … }, aiu_contract_object }`. */
+  patch: Record<string, unknown>;
+  /** Rutas escritas: `aiu.administracion`, …, `aiu_contract_object`. */
+  aiPaths: string[];
+  /** Rutas a revisar (confianza baja). */
+  pendingPaths: string[];
+  unresolved: string[];
+}
+
+const AIU_COMPONENT_KEYS = ['administracion', 'imprevistos', 'utilidad'] as const;
+
+/** Componente del control ⇒ campo del borrador. */
+const AIU_DRAFT_FIELD = {
+  administracion: 'administracion_percent',
+  imprevistos: 'imprevistos_percent',
+  utilidad: 'utilidad_percent',
+} as const;
+
+/**
+ * Reparto AIU leído ⇒ copia de trabajo del AIU del documento.
+ *
+ * - Sólo con el documento YA en operación AIU: cambiar la operación cambia la
+ *   base gravable y el perfil que aplica, y eso lo decide el operador. Si no
+ *   lo está, lo leído se cuenta en `unresolved`.
+ * - Sólo llena porcentajes VACÍOS: los que vienen del perfil no se pisan; si
+ *   el documento dice otra cosa, se avisa.
+ * - Porcentaje en el formato del control (`'10.00'`, dos decimales).
+ */
+export function draftAiuPatch(
+  aiu: InvoiceDraftAiu | null | undefined,
+  ctx: DraftAiuContext,
+): DraftAiuPatch {
+  const empty: DraftAiuPatch = { patch: {}, aiPaths: [], pendingPaths: [], unresolved: [] };
+  if (!aiu) return empty;
+  const read: Partial<Record<(typeof AIU_COMPONENT_KEYS)[number], number>> = {};
+  for (const key of AIU_COMPONENT_KEYS) {
+    const field = aiu[AIU_DRAFT_FIELD[key]];
+    if (hasDraftValue(field) && Number(field.value) >= 0 && Number(field.value) <= 100) {
+      read[key] = Math.round(Number(field.value) * 100) / 100;
+    }
+  }
+  const contract = hasDraftValue(aiu.contract_object) ? text(aiu.contract_object.value) : '';
+  const summary = AIU_COMPONENT_KEYS.filter((key) => read[key] !== undefined)
+    .map((key) => `${key[0].toUpperCase()} ${formatPercent(read[key] as number)}`)
+    .join(', ');
+  if (!summary && !contract) return empty;
+
+  if (!ctx.isAiu) {
+    return {
+      ...empty,
+      unresolved: [
+        `Los documentos traen AIU${summary ? ` (${summary})` : ''}: elige la operación AIU (09) para aplicarlo.`,
+      ],
+    };
+  }
+
+  const out: DraftAiuPatch = { patch: {}, aiPaths: [], pendingPaths: [], unresolved: [] };
+  const aiuPatch: Record<string, string> = {};
+  for (const key of AIU_COMPONENT_KEYS) {
+    const value = read[key];
+    if (value === undefined) continue;
+    const current = text(ctx.current[key]);
+    const formatted = value.toFixed(2);
+    if (!current) {
+      aiuPatch[key] = formatted;
+      out.aiPaths.push(`aiu.${key}`);
+      if (isLowConfidence(aiu[AIU_DRAFT_FIELD[key]])) out.pendingPaths.push(`aiu.${key}`);
+    } else if (Number(current) !== value) {
+      out.unresolved.push(
+        `AIU ${key}: el documento dice ${formatPercent(value)} y el documento en curso trae ${formatPercent(Number(current))}; se dejó el actual.`,
+      );
+    }
+  }
+  if (Object.keys(aiuPatch).length > 0) out.patch['aiu'] = aiuPatch;
+  if (contract && !text(ctx.currentContractObject)) {
+    out.patch['aiu_contract_object'] = contract;
+    out.aiPaths.push('aiu_contract_object');
+    if (isLowConfidence(aiu.contract_object)) out.pendingPaths.push('aiu_contract_object');
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conteo para el aviso «FacturIA completó N campos»
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Lo mínimo de un plan (de tienda o de plataforma) que hace falta para contar.
+ * Los dos `InvoiceDraftPlan` / `PlatformInvoiceDraftPlan` lo cumplen.
+ */
+export interface DraftFillSource {
+  acquirer: { aiPaths: readonly string[] };
+  invoice: { aiPaths: readonly string[] };
+  /** Marcas de cabecera y adquiriente (`'ai' | 'pending'`). */
+  headerMarks: Readonly<Record<string, string>>;
+  lines: readonly { mark: { ai: readonly string[]; pending: readonly string[] } }[];
+  withholdings?: readonly { needsReview?: boolean }[];
+  aiu?: { aiPaths: readonly string[] } | null;
+}
+
+/** Resultado de {@link countDraftFilledFields}. */
+export interface DraftFillSummary {
+  /** Total de campos escritos por la IA (lo que dice el aviso). */
+  filled: number;
+  /** De ellos, del adquiriente (`customer_*` / `external_*`). */
+  acquirer: number;
+  /** Cabecera, pago, divisa, notas y AIU. */
+  document: number;
+  /** Campos de línea (descripción, cantidad, precio, unidad, descuento, impuestos, producto). */
+  lines: number;
+  /** Filas de retención escritas (cada una cuenta como un campo). */
+  withholdings: number;
+  /** Campos marcados «Revisar» (cabecera + filas + retenciones dudosas). */
+  review: number;
+}
+
+const isAcquirerControl = (path: string): boolean =>
+  path.startsWith('customer_') || path.startsWith('external_');
+
+/**
+ * Cuenta PURA de lo que el borrador precargó, para «FacturIA completó N
+ * campos · revisa los marcados». No mira el formulario: cuenta el plan.
+ *
+ * `includeAcquirer: false` cuando el adquiriente resultó un cliente YA
+ * existente: sus datos salen de la ficha, no de la IA, y no se cuentan (ni sus
+ * «Revisar»). Las rutas repetidas cuentan una vez.
+ */
+export function countDraftFilledFields(
+  plan: DraftFillSource,
+  options: { includeAcquirer?: boolean } = {},
+): DraftFillSummary {
+  const includeAcquirer = options.includeAcquirer !== false;
+  const acquirer = includeAcquirer
+    ? new Set(plan.acquirer.aiPaths.filter(isAcquirerControl)).size
+    : 0;
+  const document = new Set([
+    ...plan.invoice.aiPaths.filter((path) => !isAcquirerControl(path)),
+    ...(plan.aiu?.aiPaths ?? []),
+  ]).size;
+  const lines = plan.lines.reduce((sum, line) => sum + new Set(line.mark.ai).size, 0);
+  const withholdings = plan.withholdings?.length ?? 0;
+  const headerReview = Object.entries(plan.headerMarks).filter(
+    ([path, mark]) => mark === 'pending' && (includeAcquirer || !isAcquirerControl(path)),
+  ).length;
+  const review =
+    headerReview +
+    plan.lines.reduce((sum, line) => sum + new Set(line.mark.pending).size, 0) +
+    (plan.withholdings ?? []).filter((row) => row.needsReview).length;
+  return {
+    filled: acquirer + document + lines + withholdings,
+    acquirer,
+    document,
+    lines,
+    withholdings,
+    review,
+  };
 }

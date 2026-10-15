@@ -2,6 +2,8 @@ import type { TaxOption } from '../../../../../shared/components/tax-selector';
 import { computeNitDv } from '../../../../../shared/utils/nit.util';
 import type {
   DraftField,
+  InvoiceDraftAiu,
+  InvoiceDraftWithholding,
   InvoiceDraftAcquirer,
   InvoiceDraftLine,
   InvoiceDraftScanResult,
@@ -22,6 +24,11 @@ import {
   draftToInvoicePatch,
   isDateOnly,
   isFinalConsumerDocument,
+  countDraftFilledFields,
+  draftAiuPatch,
+  draftWithholdingConceptType,
+  draftWithholdingsToRows,
+  type DraftWithholdingConcept,
 } from './invoice-draft-mapping';
 
 /**
@@ -473,6 +480,258 @@ describe('invoice-draft-mapping', () => {
     it('etiquetas legibles', () => {
       expect(draftPathLabel('acquirer.address_line')).toBe('Dirección fiscal');
       expect(draftPathLabel('lines.1.tax_rate')).toBe('Línea 2: impuesto');
+    });
+  });
+
+  describe('campos v2 del escáner', () => {
+    const ctx = {
+      today: '2026-10-14',
+      currentNotes: '',
+      notesLimit: 500,
+      foreignCurrencies: ['USD'],
+    };
+
+    it('unidad leída del selector ⇒ unit_code con marca IA; ausente ⇒ NIU sin marca', () => {
+      const [kg, noUnit, unknown] = draftLinesToLineInputs(
+        [
+          line({ unit_code: f('kgm') }),
+          line(),
+          line({ unit_code: f<string>(null, 90, 'Unidad «ML» no reconocida') }),
+        ],
+        TAXES,
+      );
+      expect(kg.value.unit_code).toBe('KGM');
+      expect(kg.aiFields).toContain('unit_code');
+      expect(noUnit.value.unit_code).toBe('NIU');
+      expect(noUnit.aiFields).not.toContain('unit_code');
+      expect(unknown.value.unit_code).toBe('NIU');
+      expect(unknown.note).toContain('Unidad leída no reconocida');
+      expect(unknown.pendingFields).not.toContain('unit_code');
+    });
+
+    it('una unidad fuera del selector no se escribe', () => {
+      const [row] = draftLinesToLineInputs([line({ unit_code: f('XYZ') })], TAXES);
+      expect(row.value.unit_code).toBe('NIU');
+      expect(row.aiFields).not.toContain('unit_code');
+    });
+
+    it('la unidad por revisar del backend no marca la fila (no tiene marca propia)', () => {
+      expect(draftPathToControl('lines.0.unit_code')).toBeNull();
+      expect(draftPathLabel('lines.0.unit_code')).toBe('Línea 1: unidad');
+    });
+
+    it('divisa ofrecida con TRM y fecha ⇒ exchange_rate y exchange_rate_date', () => {
+      const { patch, aiPaths } = draftToInvoicePatch(
+        {
+          invoice: {
+            ...result().invoice,
+            currency: f('USD'),
+            exchange_rate: f(4123.46),
+            exchange_rate_date: f('2026-10-13'),
+          },
+          payment: result().payment,
+        },
+        ctx,
+      );
+      expect(patch['foreign_currency']).toBe('USD');
+      expect(patch['exchange_rate']).toBe(4123.46);
+      expect(patch['exchange_rate_date']).toBe('2026-10-13');
+      expect(aiPaths).toEqual(
+        jasmine.arrayContaining(['foreign_currency', 'exchange_rate', 'exchange_rate_date']),
+      );
+    });
+
+    it('TRM sin divisa ofrecida, o en COP, no se escribe', () => {
+      const cop = draftToInvoicePatch(
+        {
+          invoice: { ...result().invoice, exchange_rate: f(4000) },
+          payment: result().payment,
+        },
+        ctx,
+      );
+      expect(cop.patch['exchange_rate']).toBeUndefined();
+      const eur = draftToInvoicePatch(
+        {
+          invoice: { ...result().invoice, currency: f('EUR'), exchange_rate: f(4500) },
+          payment: result().payment,
+        },
+        ctx,
+      );
+      expect(eur.patch['exchange_rate']).toBeUndefined();
+    });
+
+    it('TRM con confianza baja queda pendiente', () => {
+      const pending = draftPendingPaths(
+        result({
+          invoice: {
+            ...result().invoice,
+            currency: f('USD'),
+            exchange_rate: f(4123, 40),
+          },
+        }),
+        { today: '2026-10-14' },
+      );
+      expect(pending).toContain('exchange_rate');
+    });
+
+    const CONCEPTS: DraftWithholdingConcept[] = [
+      { id: 1, label: '2304 · Compras', name: 'Compras', ratePercent: 2.5, type: 'retefuente' },
+      { id: 2, label: '2307 · Servicios', name: 'Servicios', ratePercent: 4, type: 'retefuente' },
+      { id: 3, label: '2308 · Honorarios', name: 'Honorarios', ratePercent: 11, type: 'retefuente' },
+      { id: 4, label: 'RIVA · ReteIVA', name: 'ReteIVA', ratePercent: 15, type: 'reteiva' },
+      { id: 5, label: 'ICA1 · Industria', name: 'Industria', ratePercent: 0.966, type: 'reteica' },
+      { id: 6, label: 'ICA2 · Comercio', name: 'Comercio', ratePercent: 0.966, type: 'reteica' },
+    ];
+    const wh = (
+      type: InvoiceDraftWithholding['type']['value'],
+      rate: number | null,
+      concept_hint: string | null = null,
+      confidence = 95,
+    ): InvoiceDraftWithholding => ({
+      type: f(type, confidence) as InvoiceDraftWithholding['type'],
+      rate: f(rate, confidence) as InvoiceDraftWithholding['rate'],
+      concept_hint,
+    });
+
+    it('retenciones: misma clase y tarifa ⇒ concepto, rol sufrida y tarifa leída', () => {
+      const { rows, unresolved } = draftWithholdingsToRows(
+        [wh('retefuente', 2.5), wh('reteiva', 15)],
+        CONCEPTS,
+      );
+      expect(rows).toEqual([
+        { draftIndex: 0, concept_id: 1, concept: '2304 · Compras', role: 'suffered', rate: 2.5, needsReview: false },
+        { draftIndex: 1, concept_id: 4, concept: 'RIVA · ReteIVA', role: 'suffered', rate: 15, needsReview: false },
+      ]);
+      expect(unresolved).toEqual([]);
+    });
+
+    it('retenciones: empate de tarifa lo decide el concepto impreso; sin él, la primera y por revisar', () => {
+      const hinted = draftWithholdingsToRows([wh('reteica', 0.966, 'comercio')], CONCEPTS);
+      expect(hinted.rows[0]).toEqual(jasmine.objectContaining({ concept_id: 6, needsReview: false }));
+      const blind = draftWithholdingsToRows([wh('reteica', 0.966)], CONCEPTS);
+      expect(blind.rows[0]).toEqual(jasmine.objectContaining({ concept_id: 5, needsReview: true }));
+    });
+
+    it('retenciones: tarifa sin concepto igual ⇒ el impreso o nada, nunca se inventa', () => {
+      const byHint = draftWithholdingsToRows([wh('retefuente', 6, 'Honorarios')], CONCEPTS);
+      expect(byHint.rows[0]).toEqual(
+        jasmine.objectContaining({ concept_id: 3, rate: 6, needsReview: true }),
+      );
+      const unmatched = draftWithholdingsToRows([wh('retefuente', 6)], CONCEPTS);
+      expect(unmatched.rows).toEqual([]);
+      expect(unmatched.unresolved[0]).toContain('Retención en la fuente 6 %');
+    });
+
+    it('retenciones: sin catálogo, sin clase o con confianza baja', () => {
+      expect(draftWithholdingsToRows([wh('retefuente', 2.5)], []).unresolved[0]).toContain(
+        'catálogo de conceptos no está disponible',
+      );
+      expect(draftWithholdingsToRows([wh(null, 2.5)], CONCEPTS).unresolved[0]).toContain(
+        'sin clase o tarifa',
+      );
+      expect(draftWithholdingsToRows([wh('retefuente', 2.5, null, 40)], CONCEPTS).rows[0].needsReview).toBeTrue();
+      expect(draftWithholdingsToRows(undefined, CONCEPTS)).toEqual({ rows: [], unresolved: [] });
+    });
+
+    it('clase del concepto por tipo declarado o por su nombre', () => {
+      expect(draftWithholdingConceptType({ type: 'withholding' })).toBe('retefuente');
+      expect(draftWithholdingConceptType({ name: 'Retención de ICA Bogotá' })).toBe('reteica');
+      expect(draftWithholdingConceptType({ name: 'ReteIVA 15%' })).toBe('reteiva');
+      expect(draftWithholdingConceptType({ name: 'Retención en la fuente servicios' })).toBe('retefuente');
+      expect(draftWithholdingConceptType({ name: 'Otro' })).toBeNull();
+    });
+
+    const AIU: InvoiceDraftAiu = {
+      administracion_percent: f(10),
+      imprevistos_percent: f(5),
+      utilidad_percent: f(5, 50),
+      contract_object: f('Obra civil bodega norte'),
+    };
+    const emptyAiu = {
+      isAiu: true,
+      current: { administracion: '', imprevistos: '', utilidad: '' },
+      currentContractObject: '',
+    };
+
+    it('AIU con documento en operación AIU ⇒ porcentajes con dos decimales y objeto', () => {
+      const out = draftAiuPatch(AIU, emptyAiu);
+      expect(out.patch).toEqual({
+        aiu: { administracion: '10.00', imprevistos: '5.00', utilidad: '5.00' },
+        aiu_contract_object: 'Obra civil bodega norte',
+      });
+      expect(out.aiPaths).toEqual([
+        'aiu.administracion',
+        'aiu.imprevistos',
+        'aiu.utilidad',
+        'aiu_contract_object',
+      ]);
+      expect(out.pendingPaths).toEqual(['aiu.utilidad']);
+    });
+
+    it('AIU sin operación AIU ⇒ no escribe y avisa', () => {
+      const out = draftAiuPatch(AIU, { ...emptyAiu, isAiu: false });
+      expect(out.patch).toEqual({});
+      expect(out.unresolved[0]).toContain('operación AIU (09)');
+      expect(draftAiuPatch(null, emptyAiu).unresolved).toEqual([]);
+    });
+
+    it('AIU no pisa porcentajes del perfil; si difieren, avisa', () => {
+      const out = draftAiuPatch(AIU, {
+        ...emptyAiu,
+        current: { administracion: '8.00', imprevistos: '5.00', utilidad: '' },
+        currentContractObject: 'Contrato vigente',
+      });
+      expect(out.patch).toEqual({ aiu: { utilidad: '5.00' } });
+      expect(out.unresolved.length).toBe(1);
+      expect(out.unresolved[0]).toContain('administracion');
+    });
+
+    it('conteo: cabecera + adquiriente + campos de línea + retenciones, sin duplicados', () => {
+      const summary = countDraftFilledFields({
+        acquirer: { aiPaths: ['customer_name', 'customer_tax_id', 'customer_name'] },
+        invoice: { aiPaths: ['issue_date', 'payment_form', 'due_date'] },
+        headerMarks: {
+          customer_name: 'ai',
+          customer_tax_id: 'pending',
+          issue_date: 'pending',
+          payment_form: 'ai',
+        },
+        lines: [
+          { mark: { ai: ['description', 'quantity', 'unit_price'], pending: ['taxes'] } },
+          { mark: { ai: ['description'], pending: [] } },
+        ],
+        withholdings: [{ needsReview: true }],
+        aiu: { aiPaths: ['aiu.administracion'] },
+      });
+      expect(summary).toEqual({
+        filled: 2 + 4 + 4 + 1,
+        acquirer: 2,
+        document: 4,
+        lines: 4,
+        withholdings: 1,
+        review: 2 + 1 + 1,
+      });
+    });
+
+    it('conteo sin adquiriente (cliente existente): no cuenta sus campos ni sus «Revisar»', () => {
+      const summary = countDraftFilledFields(
+        {
+          acquirer: { aiPaths: ['external_legal_name'] },
+          invoice: { aiPaths: ['issue_date'] },
+          headerMarks: { external_email: 'pending', issue_date: 'ai' },
+          lines: [],
+        },
+        { includeAcquirer: false },
+      );
+      expect(summary.filled).toBe(1);
+      expect(summary.acquirer).toBe(0);
+      expect(summary.review).toBe(0);
+    });
+
+    it('etiquetas de retenciones, TRM y AIU', () => {
+      expect(draftPathLabel('withholdings.0.rate')).toBe('Retención 1: tarifa');
+      expect(draftPathLabel('invoice.exchange_rate')).toBe('Tasa de cambio (TRM)');
+      expect(draftPathLabel('aiu.utilidad_percent')).toBe('AIU: utilidad');
     });
   });
 });

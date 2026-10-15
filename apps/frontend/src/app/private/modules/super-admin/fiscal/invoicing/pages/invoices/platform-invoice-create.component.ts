@@ -2126,6 +2126,16 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       }[],
       maxLines: PLATFORM_INVOICE_MAX_LINES,
       descriptionLimit: CONFIG_LIMITS.line_description,
+      withholdingConcepts: this.withholdingConcepts().map((concept) => ({
+        id: concept.id,
+        label: concept.code ? `${concept.code} · ${concept.name}` : concept.name,
+        name: concept.name,
+        // El catálogo trae la tarifa en FRACCIÓN; la fila la pinta en %.
+        ratePercent:
+          concept.rate != null ? Number((Number(concept.rate) * 100).toFixed(4)) : null,
+        type: null,
+      })),
+      currentWithholdings: this.withholdingsArray.length,
     });
 
     // Cabecera y pago.
@@ -2139,8 +2149,17 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       this.toggleSection('divisa', true);
     }
 
-    // Líneas.
+    // Líneas y retenciones (sufridas: las practica el adquiriente).
     const rowMarks = this.applyDraftLines(plan);
+    if (plan.withholdings.length > 0) {
+      for (const row of plan.withholdings) {
+        this.addWithholding();
+        this.withholdingsArray
+          .at(this.withholdingsArray.length - 1)
+          .patchValue({ concept_id: row.concept_id, role: row.role, rate: row.rate });
+      }
+      this.toggleSection('retenciones', true);
+    }
 
     // Marcas. Las del adquiriente esperan a saber si es un destinatario ya
     // registrado (sus datos vienen de la ficha, no de la IA) o uno nuevo.
@@ -2188,7 +2207,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
           quantity: line.value.quantity,
           unit_price: line.value.unit_price,
           discount_amount: line.value.discount_amount,
-          unit_code: DEFAULT_UNIT_CODE,
+          unit_code: line.value.unit_code || DEFAULT_UNIT_CODE,
         },
         line.value.taxes.map((tax) => ({
           tax_rate_id: tax.tax_rate_id,

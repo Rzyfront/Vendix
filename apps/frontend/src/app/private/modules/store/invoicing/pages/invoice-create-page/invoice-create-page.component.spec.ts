@@ -1596,6 +1596,38 @@ describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
     expect(plan.notice.unresolved.join(' ')).toContain('no se cargaron');
   });
 
+  it('retenciones leídas ⇒ filas sufridas; con filas ya capturadas no se tocan; conteo del aviso', () => {
+    const draft: InvoiceDraftScanResult = {
+      ...sample(),
+      withholdings: [
+        {
+          type: field('retefuente' as const),
+          rate: field(4),
+          concept_hint: 'Servicios',
+        },
+      ],
+    };
+    const concepts = [
+      { id: 9, label: '2307 · Servicios', name: 'Servicios', ratePercent: 4, type: 'retefuente' },
+    ];
+    const plan = planInvoiceDraft(draft, ctx({ withholdingConcepts: concepts }));
+    expect(plan.withholdings).toEqual([
+      jasmine.objectContaining({ concept_id: 9, role: 'suffered', rate: 4 }),
+    ]);
+    expect(plan.filled.withholdings).toBe(1);
+    expect(plan.filled.filled).toBe(
+      plan.filled.acquirer + plan.filled.document + plan.filled.lines + 1,
+    );
+    expect(plan.filled.lines).toBeGreaterThan(0);
+
+    const kept = planInvoiceDraft(
+      draft,
+      ctx({ withholdingConcepts: concepts, currentWithholdings: 1 }),
+    );
+    expect(kept.withholdings).toEqual([]);
+    expect(kept.notice.unresolved.join(' ')).toContain('ya tiene retenciones');
+  });
+
   it('isCapturedInvoiceLine: descripción, precio o producto cuentan como trabajo', () => {
     expect(isCapturedInvoiceLine({ description: '', unit_price: 0, product_id: null })).toBe(false);
     expect(isCapturedInvoiceLine({ description: ' x ' })).toBe(true);

@@ -7,6 +7,7 @@ import type {
   InvoiceDraftLine,
   InvoiceDraftScanResult,
 } from '../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
+import { countDraftFilledFields } from '../../../../store/invoicing/utils/invoice-draft-mapping';
 import {
   dropPlatformRowMarkField,
   draftToPlatformAcquirerPatch,
@@ -535,6 +536,102 @@ describe('platform-invoice-draft-mapping', () => {
         }
         expect(control.invalid).withContext(`«${email}»`).toBe(listed);
       }
+    });
+  });
+
+  describe('campos v2 del escáner', () => {
+    it('unidad leída viaja en la fila; sin unidad queda NIU', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ lines: [line({ unit_code: f('HUR') }), line()] }),
+        ctx(),
+      );
+      expect(plan.lines.map((row) => row.value.unit_code)).toEqual(['HUR', 'NIU']);
+      expect(plan.lines[0].mark.ai).toContain('unit_code');
+    });
+
+    it('USD con TRM impresa ⇒ declare_foreign, foreign_currency_code y exchange_rate', () => {
+      const { patch, aiPaths } = draftToPlatformInvoicePatch(
+        {
+          invoice: {
+            ...result().invoice,
+            currency: f('USD'),
+            exchange_rate: f(4100.5),
+            exchange_rate_date: f('2026-10-10'),
+          },
+          payment: result().payment,
+        },
+        { today: TODAY, currentNotes: '', notesLimit: 500, foreignCurrencies: ['USD'] },
+      );
+      expect(patch['declare_foreign']).toBeTrue();
+      expect(patch['foreign_currency_code']).toBe('USD');
+      expect(patch['exchange_rate']).toBe(4100.5);
+      expect(patch['exchange_rate_date']).toBe('2026-10-10');
+      expect(aiPaths).toEqual(
+        jasmine.arrayContaining(['foreign_currency_code', 'exchange_rate', 'exchange_rate_date']),
+      );
+    });
+
+    it('retenciones: la clase sale del nombre del concepto y la fila es sufrida', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({
+          withholdings: [
+            { type: f('retefuente' as const), rate: f(4), concept_hint: null },
+            { type: f('reteica' as const), rate: f(0.966), concept_hint: null },
+          ],
+        }),
+        ctx({
+          withholdingConcepts: [
+            { id: 1, label: 'Retención en la fuente servicios', name: 'Retención en la fuente servicios', ratePercent: 4, type: null },
+            { id: 2, label: 'ReteIVA', name: 'ReteIVA', ratePercent: 15, type: null },
+          ],
+        }),
+      );
+      expect(plan.withholdings).toEqual([
+        jasmine.objectContaining({ concept_id: 1, role: 'suffered', rate: 4, needsReview: false }),
+      ]);
+      expect(plan.notice.unresolved.join(' ')).toContain('ReteICA 0,966 %');
+      expect(plan.filled.withholdings).toBe(1);
+    });
+
+    it('retenciones: con filas ya capturadas no se agregan', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({ withholdings: [{ type: f('retefuente' as const), rate: f(4), concept_hint: null }] }),
+        ctx({
+          withholdingConcepts: [
+            { id: 1, label: 'Retefuente', name: 'Retención en la fuente', ratePercent: 4, type: null },
+          ],
+          currentWithholdings: 2,
+        }),
+      );
+      expect(plan.withholdings).toEqual([]);
+      expect(plan.notice.unresolved.join(' ')).toContain('ya tiene retenciones');
+    });
+
+    it('AIU leído no se aplica en plataforma: se avisa', () => {
+      const plan = planPlatformInvoiceDraft(
+        result({
+          aiu: {
+            administracion_percent: f(10),
+            imprevistos_percent: f(5),
+            utilidad_percent: f(5),
+            contract_object: none(),
+          },
+        }),
+        ctx(),
+      );
+      expect(plan.notice.unresolved.join(' ')).toContain('no emite operación AIU');
+    });
+
+    it('conteo del aviso: adquiriente nuevo vs. destinatario registrado', () => {
+      const plan = planPlatformInvoiceDraft(result(), ctx());
+      expect(plan.filled.acquirer).toBe(new Set(plan.acquirer.aiPaths).size);
+      expect(plan.filled.lines).toBe(plan.lines[0].mark.ai.length);
+      expect(plan.filled.filled).toBe(
+        plan.filled.acquirer + plan.filled.document + plan.filled.lines,
+      );
+      const withoutAcquirer = countDraftFilledFields(plan, { includeAcquirer: false });
+      expect(withoutAcquirer.acquirer).toBe(0);
+      expect(withoutAcquirer.filled).toBe(plan.filled.filled - plan.filled.acquirer);
     });
   });
 });

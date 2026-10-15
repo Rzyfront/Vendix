@@ -50,6 +50,13 @@ export interface InvoiceDraftHeader {
   currency: DraftField<string>;
   reference: DraftField<string>;
   notes: DraftField<string>;
+  /**
+   * TRM: pesos por UNA unidad de `currency`. Sólo con moneda extranjera y si
+   * el documento la imprime. Opcional: los borradores del prompt v1 no la traen.
+   */
+  exchange_rate?: DraftField<number>;
+  /** `YYYY-MM-DD` de la TRM. */
+  exchange_rate_date?: DraftField<string>;
 }
 
 export interface InvoiceDraftPayment {
@@ -64,11 +71,34 @@ export interface InvoiceDraftLine {
   unit_price: DraftField<number>;
   discount_percent: DraftField<number>;
   tax_rate: DraftField<number>;
+  /** Unidad UN/ECE rec. 20 (`NIU`, `KGM`, `HUR`…) o `null`. Opcional (prompt v1). */
+  unit_code?: DraftField<string>;
   sku: string | null;
   product_id: number | null;
   product_variant_id: number | null;
   match_status: DraftLineMatchStatus;
   match_confidence: number;
+}
+
+/** Clase de retención que el ADQUIRIENTE practica sobre la venta. */
+export type DraftWithholdingType = 'retefuente' | 'reteiva' | 'reteica';
+
+/** Retención impresa en los documentos: desde quien factura es SUFRIDA. */
+export interface InvoiceDraftWithholding {
+  type: DraftField<DraftWithholdingType>;
+  /** PORCENTAJE (2.5 = 2,5 %). */
+  rate: DraftField<number>;
+  /** Concepto tal como se imprimió («Servicios», «Compras»…). */
+  concept_hint: string | null;
+}
+
+/** Reparto AIU impreso (cotizaciones y contratos de obra). */
+export interface InvoiceDraftAiu {
+  /** Porcentajes 0-100. */
+  administracion_percent: DraftField<number>;
+  imprevistos_percent: DraftField<number>;
+  utilidad_percent: DraftField<number>;
+  contract_object: DraftField<string>;
 }
 
 export interface InvoiceDraftTotals {
@@ -95,6 +125,10 @@ export interface InvoiceDraftScanResult {
   invoice: InvoiceDraftHeader;
   payment: InvoiceDraftPayment;
   lines: InvoiceDraftLine[];
+  /** Retenciones impresas. Opcional: el prompt v1 no las trae. */
+  withholdings?: InvoiceDraftWithholding[];
+  /** Reparto AIU impreso o `null`. Opcional: el prompt v1 no lo trae. */
+  aiu?: InvoiceDraftAiu | null;
   totals: InvoiceDraftTotals;
   /** Cómo interpretó la IA la nota del usuario (p. ej. «50 % del anticipo»). */
   note_applied: string | null;
