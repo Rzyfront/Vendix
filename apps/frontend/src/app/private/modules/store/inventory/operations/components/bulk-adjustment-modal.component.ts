@@ -448,7 +448,7 @@ interface BulkUploadResult {
             @if (step() === 3) {
               <app-button
                 variant="primary"
-                [disabled]="!analysis() || analysis()!.valid === 0 || (analysis()!.requires_initial_load_ack && !initialLoadAck())"
+                [disabled]="!analysis() || analysis()!.valid === 0 || (!!analysis()!.requires_initial_load_ack && !initialLoadAck())"
                 (clicked)="confirmUpload()"
               >
                 Aplicar {{ analysis()?.valid || 0 }} ajustes
