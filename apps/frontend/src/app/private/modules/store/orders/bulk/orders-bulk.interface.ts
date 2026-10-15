@@ -148,11 +148,13 @@ export interface BulkPrintOrdersRequest {
  * Motivo por el que una orden quedó fuera de la impresión. Espeja
  * `BulkPrintSkipReason` del backend.
  *
- * `render_error` ya no lo emite el backend (dejó de dibujar): es el motivo que
- * el FRONTEND usaría si `PosTicketService` no pudiera dibujar una orden. Hoy
- * `printTicketsBatch` es todo-o-nada a propósito, así que un fallo de render se
- * reporta como lote caído (`failureMessage` + `failedIds`) y no como omisión
- * silenciosa de una orden que el operador sí seleccionó.
+ * `render_error` ya no lo emite el backend (dejó de dibujar) y el frontend
+ * tampoco lo usa. `printTicketsBatch` imprime por tandas (una por formato o
+ * papel) y es parcial: las órdenes que no resolvieron o cuya tanda no se pudo
+ * enviar vuelven como fallidas (`failedIds` + `failureMessage`, y
+ * `failedWithoutIdCount` si no traían id), nunca como omisión silenciosa de
+ * una orden que el operador sí seleccionó. Solo si NADA se envió rechaza, y el
+ * desenlace es `rendered: 0`.
  */
 export type BulkPrintSkipReason =
   | 'not_found'
@@ -234,7 +236,10 @@ export interface BulkPrintPayload {
  * operador (antes lo era `blob === null`, cuando el backend devolvía el PDF).
  */
 export interface BulkPrintOutcome {
-  /** Tiquetes efectivamente dibujados en el documento enviado a la impresora. */
+  /**
+   * Tiquetes entregados al diálogo de impresión. No garantiza papel: el
+   * navegador no avisa si el operador canceló el diálogo.
+   */
   rendered: number;
   /** Hojas resultantes (`rendered × copias`), para confirmar el gasto de papel. */
   pages: number;
@@ -244,6 +249,11 @@ export interface BulkPrintOutcome {
   failureMessage?: string;
   /** Ids que no llegaron a dibujarse por un lote caído o un render fallido. */
   failedIds: number[];
+  /**
+   * Tiquetes fallidos que no traían id de orden, así que no caben en
+   * `failedIds`. Se suman al conteo de fallidas que ve el operador.
+   */
+  failedWithoutIdCount?: number;
   /**
    * Documentos (diálogos) en que salió la impresión. Mayor que 1 cuando la
    * selección mezcla formatos que no caben en un solo documento (factura

@@ -14,6 +14,7 @@
 import { firstValueFrom, of } from 'rxjs';
 import {
   PosTicketService,
+  TicketBatchPrintCancelledError,
   TicketBatchPrintError,
   resolveFiscalQualitiesLine,
 } from './pos-ticket.service';
@@ -208,6 +209,7 @@ describe('PosTicketService — gateway batch copies', () => {
 
     expect(result).toEqual({
       rendered: 2, pages: 5, groups: 1, groupFormats: ['pos_sale_ticket'], failedOrderIds: [],
+      failedWithoutIdCount: 0,
     });
     expect(gatewayClient.renderDocument).toHaveBeenCalledTimes(2);
     expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
@@ -261,6 +263,7 @@ describe('PosTicketService — gateway batch copies', () => {
       groups: 2,
       groupFormats: ['pos_sale_ticket', 'pos_electronic_invoice'],
       failedOrderIds: [],
+      failedWithoutIdCount: 0,
     });
     expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(2);
     const [first, second] = documentPrint.printGatewayHtml.calls.allArgs()
@@ -316,7 +319,109 @@ describe('PosTicketService — gateway batch copies', () => {
     await expectAsync(service.printTicketsBatch([
       { id: '11', orderId: 11 } as TicketData,
       { id: '22', orderId: 22 } as TicketData,
-    ])).toBeRejectedWith(jasmine.any(TicketBatchPrintError));
+    ])).toBeRejectedWithError(
+      TicketBatchPrintError,
+      'No se pudo enviar el documento a la impresora. Vuelve a intentarlo.',
+    );
+  });
+
+  it('names the number of groups when none of several groups reaches the printer', async () => {
+    spyOn(console, 'warn');
+    const { service, documentPrint } = createBatchService({
+      11: { width_mm: 80 },
+      22: { width_mm: 58 },
+    });
+    documentPrint.printGatewayHtml.and.returnValue(Promise.reject(new Error('sin documento')));
+
+    await expectAsync(service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ])).toBeRejectedWithError(
+      TicketBatchPrintError,
+      'No se pudo enviar ninguna de las 2 tandas a la impresora. Vuelve a intentarlo.',
+    );
+  });
+
+  it('counts failed tickets without an order id apart from failedOrderIds', async () => {
+    spyOn(console, 'warn');
+    const { service } = createBatchService({ 11: {} });
+    const result = await service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: 'sin-id' } as TicketData,
+    ]);
+
+    expect(result.rendered).toBe(1);
+    expect(result.failedOrderIds).toEqual([]);
+    expect(result.failedWithoutIdCount).toBe(1);
+    expect(result.failureMessage).toBe('1 orden no se pudo preparar para imprimir.');
+  });
+
+  it('returns the full result shape on the single-order path (no group formats)', async () => {
+    const { service, documentPrint, gatewayClient } = createBatchService({});
+    documentPrint.resolveAndPrint.and.returnValue(Promise.resolve({ pages: 2 }));
+
+    const result = await service.printTicketsBatch([{ id: '11', orderId: 11 } as TicketData]);
+
+    expect(result).toEqual({
+      rendered: 1,
+      pages: 2,
+      groups: 1,
+      groupFormats: [],
+      failedOrderIds: [],
+      failedWithoutIdCount: 0,
+    });
+    expect(documentPrint.resolveAndPrint).toHaveBeenCalledOnceWith({
+      documentType: 'pos_order',
+      documentId: 11,
+    });
+    expect(gatewayClient.renderDocument).not.toHaveBeenCalled();
+  });
+
+  it('stops before the next group once cancelled while a dialog is open', async () => {
+    const { service, documentPrint } = createBatchService({
+      11: { width_mm: 80 },
+      22: { width_mm: 58 },
+    });
+    const controller = new AbortController();
+    documentPrint.printGatewayHtml.and.callFake(async () => {
+      // El operador navega fuera con el primer diálogo abierto.
+      controller.abort();
+    });
+
+    await expectAsync(service.printTicketsBatch(
+      [11, 22].map((id) => ({ id: String(id), orderId: id }) as TicketData),
+      { signal: controller.signal },
+    )).toBeRejectedWith(jasmine.any(TicketBatchPrintCancelledError));
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops rendering and reporting progress once cancelled mid-render', async () => {
+    const { service, documentPrint, gatewayClient } = createBatchService({});
+    const controller = new AbortController();
+    const onProgress = jasmine.createSpy('onProgress').and.callFake((done: number) => {
+      if (done === 2) controller.abort();
+    });
+
+    await expectAsync(service.printTicketsBatch(
+      [11, 22, 33, 44].map((id) => ({ id: String(id), orderId: id }) as TicketData),
+      { signal: controller.signal, onProgress },
+    )).toBeRejectedWith(jasmine.any(TicketBatchPrintCancelledError));
+    expect(gatewayClient.renderDocument).toHaveBeenCalledTimes(2);
+    expect(onProgress.calls.allArgs()).toEqual([[1, 4], [2, 4]]);
+    expect(documentPrint.printGatewayHtml).not.toHaveBeenCalled();
+  });
+
+  it('does not start when the signal is already aborted', async () => {
+    const { service, documentPrint, gatewayClient } = createBatchService({});
+    const controller = new AbortController();
+    controller.abort();
+
+    await expectAsync(service.printTicketsBatch(
+      [{ id: '11', orderId: 11 } as TicketData],
+      { signal: controller.signal },
+    )).toBeRejectedWith(jasmine.any(TicketBatchPrintCancelledError));
+    expect(documentPrint.resolveAndPrint).not.toHaveBeenCalled();
+    expect(gatewayClient.resolveDocument).not.toHaveBeenCalled();
   });
 
   it('rejects with a domain error when no order resolves', async () => {
@@ -352,6 +457,7 @@ describe('PosTicketService — gateway batch copies', () => {
       groups: 1,
       groupFormats: ['pos_sale_ticket'],
       failedOrderIds: [22],
+      failedWithoutIdCount: 0,
       failureMessage: '1 orden no se pudo preparar para imprimir.',
     });
     expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);

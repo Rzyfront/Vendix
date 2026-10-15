@@ -91,16 +91,26 @@ const BATCH_YIELD_EVERY = 20;
  * `@page`, así que mezclarlos en uno solo imprimiría mal la mitad del lote.
  */
 export interface TicketBatchPrintResult {
-  /** Tiquetes que llegaron a un documento enviado a la impresora. */
+  /**
+   * Tiquetes que llegaron a un documento entregado al diálogo de impresión.
+   * `window.print()` no informa si el operador canceló el diálogo, así que esto
+   * NO garantiza papel: solo que el documento se le presentó.
+   */
   rendered: number;
-  /** Hojas resultantes (suma de copias de los documentos impresos). */
+  /** Hojas resultantes (suma de copias de los documentos enviados al diálogo). */
   pages: number;
-  /** Documentos (diálogos) enviados a la impresora. */
+  /** Documentos (diálogos) abiertos. */
   groups: number;
-  /** `format_type` de cada tanda impresa, en el orden en que salieron. */
+  /** `format_type` de cada tanda enviada, en el orden en que salieron. */
   groupFormats: PrintFormatType[];
-  /** Órdenes que NO llegaron al papel: no resolvieron o su tanda falló. */
+  /** Órdenes que NO llegaron al diálogo: no resolvieron o su tanda falló. */
   failedOrderIds: number[];
+  /**
+   * Tiquetes fallidos sin id de orden (ni `orderId` ni `id` numérico). No caben
+   * en `failedOrderIds`, pero cuentan como no enviados: sin este conteo el
+   * total de fallidas quedaría corto.
+   */
+  failedWithoutIdCount: number;
   /** Mensaje legible para el operador del primer fallo, si hubo alguno. */
   failureMessage?: string;
 }
@@ -117,6 +127,17 @@ export class TicketBatchPrintError extends Error {
   ) {
     super(message);
     this.name = 'TicketBatchPrintError';
+  }
+}
+
+/**
+ * La impresión por lote se canceló desde fuera (el operador navegó a otra
+ * pantalla). No es un fallo que mostrar: quien canceló ya no escucha.
+ */
+export class TicketBatchPrintCancelledError extends Error {
+  constructor() {
+    super('La impresión por lote se canceló.');
+    this.name = 'TicketBatchPrintCancelledError';
   }
 }
 
@@ -894,6 +915,12 @@ export class PosTicketService {
    * A group that fails to print does not abort the rest: its orders go to
    * `failedOrderIds`. Only when nothing at all reaches the printer does this
    * reject, with a {@link TicketBatchPrintError}.
+   *
+   * `signal` cancels the loop: it is checked before every render request,
+   * before every group's dialog and before every `onProgress`, so a caller
+   * that went away (navigation) never opens another dialog nor writes
+   * progress. Aborting rejects with {@link TicketBatchPrintCancelledError}.
+   * A dialog already open cannot be closed; the loop stops after it.
    */
   async printTicketsBatch(
     tickets: readonly TicketData[],
@@ -909,12 +936,24 @@ export class PosTicketService {
        */
       copiesOverride?: number;
       onProgress?: (done: number, total: number) => void;
+      signal?: AbortSignal;
     },
   ): Promise<TicketBatchPrintResult> {
+    const signal = options?.signal;
+    const throwIfCancelled = (): void => {
+      if (signal?.aborted) throw new TicketBatchPrintCancelledError();
+    };
+    const reportProgress = (done: number, total: number): void => {
+      if (!signal?.aborted) options?.onProgress?.(done, total);
+    };
+
     const total = tickets.length;
     if (!total) {
-      return { rendered: 0, pages: 0, groups: 0, groupFormats: [], failedOrderIds: [] };
+      return {
+        rendered: 0, pages: 0, groups: 0, groupFormats: [], failedOrderIds: [], failedWithoutIdCount: 0,
+      };
     }
+    throwIfCancelled();
 
     if (tickets.length === 1) {
       const candidateDocId =
@@ -936,6 +975,7 @@ export class PosTicketService {
           groups: 1,
           groupFormats: [],
           failedOrderIds: [],
+          failedWithoutIdCount: 0,
         };
       }
     }
@@ -958,6 +998,7 @@ export class PosTicketService {
 
     let done = 0;
     for (const ticket of tickets) {
+      throwIfCancelled();
       const candidateDocId =
         ticket.orderId ??
         (Number.isInteger(Number(ticket.id)) && Number(ticket.id) > 0
@@ -972,7 +1013,7 @@ export class PosTicketService {
           error: 'sin orderId ni id numérico',
         });
         done++;
-        options?.onProgress?.(done, total);
+        reportProgress(done, total);
         continue;
       }
 
@@ -1017,7 +1058,7 @@ export class PosTicketService {
       }
 
       done++;
-      options?.onProgress?.(done, total);
+      reportProgress(done, total);
 
       // Yield al main thread para que la barra de progreso no se congele.
       if (done % BATCH_YIELD_EVERY === 0 && done < total) {
@@ -1038,6 +1079,7 @@ export class PosTicketService {
     const failedOrderIds = failed
       .map((f) => f.orderId)
       .filter((id): id is number => id !== null);
+    let failedWithoutIdCount = failed.length - failedOrderIds.length;
     const failureDetails = failed.map(
       (f) => `doc ${f.orderId ?? '?'}: ${f.error}`,
     );
@@ -1075,6 +1117,7 @@ export class PosTicketService {
     // Secuencial a propósito: cada tanda abre su propio diálogo, y dos
     // diálogos simultáneos se pisan en el navegador.
     for (const group of groups.values()) {
+      throwIfCancelled();
       let bodies = '';
       for (const result of group) {
         for (let copy = 0; copy < result.copies; copy++) {
@@ -1095,6 +1138,7 @@ export class PosTicketService {
         groupFailures++;
         for (const result of group) {
           if (result.orderId !== null) failedOrderIds.push(result.orderId);
+          else failedWithoutIdCount++;
           failureDetails.push(
             `doc ${result.orderId ?? '?'}: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -1146,6 +1190,7 @@ export class PosTicketService {
       groups: groups.size - groupFailures,
       groupFormats,
       failedOrderIds,
+      failedWithoutIdCount,
       ...(failureParts.length ? { failureMessage: failureParts.join(' ') } : {}),
     };
   }

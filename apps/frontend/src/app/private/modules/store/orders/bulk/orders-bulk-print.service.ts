@@ -57,7 +57,6 @@ import {
   Observable,
   catchError,
   finalize,
-  from,
   map,
   of,
   switchMap,
@@ -96,6 +95,92 @@ const PRINT_JOB_LABELS: Partial<Record<PrintFormatType, string>> = {
 const GENERIC_RENDER_FAILURE =
   'No se pudieron dibujar los tiquetes de la selección, así que no se envió nada a la impresora. ' +
   'Vuelve a intentarlo; si persiste, imprime en grupos más pequeños para aislar la orden que falla.';
+
+/** Toast que resume la impresión masiva para el operador. */
+export interface BulkPrintOutcomeMessage {
+  level: 'success' | 'warning' | 'error';
+  message: string;
+}
+
+/**
+ * Traduce el resultado de la impresión a lo que ve el operador. Función pura
+ * (fuera del componente) para poder fijar el texto con tests.
+ *
+ * Tres desenlaces, y ninguno puede quedar mudo:
+ *
+ * 1. **Nada enviado** (`rendered === 0`) — se muestra el mensaje REAL
+ *    (`failureMessage`), del backend o del render.
+ * 2. **Parcial** — se envió, pero hubo órdenes omitidas por el backend
+ *    (canceladas, reembolsadas, inexistentes) y/o fallidas (lote caído, render
+ *    o tanda que no se pudo enviar). Cada grupo lleva SU conteo y SU motivo:
+ *    mezclarlos le atribuiría a las omitidas el error de las fallidas.
+ * 3. **Completo** — se confirma con el conteo de tiquetes y de hojas.
+ *
+ * El texto dice "enviadas al diálogo de impresión" y no "impresas":
+ * `window.print()` no avisa si el operador canceló el diálogo, así que no hay
+ * forma de afirmar que salió papel. En 2 y 3, si hubo varias tandas, se explica
+ * por qué el operador vio más de un diálogo.
+ */
+export function describeBulkPrintOutcome(
+  outcome: BulkPrintOutcome,
+  requested: number,
+): BulkPrintOutcomeMessage {
+  if (outcome.rendered === 0) {
+    return {
+      level: 'error',
+      message:
+        outcome.failureMessage ??
+        'No se pudo imprimir ninguna de las órdenes seleccionadas.',
+    };
+  }
+
+  const jobsNote = printJobsNote(outcome);
+  const sent = `${outcome.rendered} de ${requested} órdenes enviadas al diálogo de impresión`;
+  const skippedCount = outcome.skipped.length;
+  const failedCount =
+    outcome.failedIds.length + (outcome.failedWithoutIdCount ?? 0);
+
+  if (skippedCount === 0 && failedCount === 0) {
+    return {
+      level: 'success',
+      message:
+        `${sent} (${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'}).` +
+        jobsNote,
+    };
+  }
+
+  const parts = [`${sent}.`];
+  if (skippedCount > 0) {
+    // Se nombran hasta 3 órdenes concretas: la lista completa puede ser de 80
+    // y un toast no es un informe. El conteo sí es siempre el total real.
+    const named = outcome.skipped
+      .slice(0, 3)
+      .map((s) => s.order_number ?? `#${s.id}`)
+      .join(', ');
+    parts.push(
+      `${skippedCount} ${skippedCount === 1 ? 'omitida' : 'omitidas'} ` +
+        `(${named}${skippedCount > 3 ? '…' : ''}): canceladas, reembolsadas o no disponibles.`,
+    );
+  }
+  if (failedCount > 0) {
+    parts.push(
+      `${failedCount} ${failedCount === 1 ? 'no se pudo enviar' : 'no se pudieron enviar'}: ` +
+        (outcome.failureMessage ?? 'falló su preparación o su envío a la impresora.'),
+    );
+  }
+
+  return { level: 'warning', message: parts.join(' ') + jobsNote };
+}
+
+/** Explica por qué el operador vio más de un diálogo de impresión. */
+export function printJobsNote(outcome: BulkPrintOutcome): string {
+  const jobs = outcome.printJobs ?? 1;
+  if (jobs <= 1) return '';
+  const labels = outcome.printJobLabels ?? [];
+  return labels.length > 1
+    ? ` Se enviaron en ${jobs} tandas (un diálogo por tanda) porque las órdenes usan formatos distintos (${labels.join(' / ')}).`
+    : ` Se enviaron en ${jobs} tandas (un diálogo por tanda) porque las órdenes usan diseños o papeles distintos.`;
+}
 
 @Injectable({ providedIn: 'root' })
 export class OrdersBulkPrintService {
@@ -170,12 +255,31 @@ export class OrdersBulkPrintService {
 
     this.renderProgressState.set({ done: 0, total: tickets.length });
 
-    return from(
-      this.posTicket.printTicketsBatch(tickets, {
-        onProgress: (done, total) =>
-          this.renderProgressState.set({ done, total }),
-      }),
-    ).pipe(
+    // `new Observable` y no `from(promise)`: la Promise no se cancela, así que
+    // si el operador navega fuera (el `takeUntilDestroyed` del componente
+    // desuscribe) el bucle de tandas seguiría abriendo diálogos en otra
+    // pantalla y escribiendo el avance después del `finalize`. El teardown
+    // aborta la señal y `printTicketsBatch` corta antes del siguiente render,
+    // de la siguiente tanda y de cada `onProgress`.
+    const batch$ = new Observable<TicketBatchPrintResult>((subscriber) => {
+      const controller = new AbortController();
+      this.posTicket
+        .printTicketsBatch(tickets, {
+          signal: controller.signal,
+          onProgress: (done, total) =>
+            this.renderProgressState.set({ done, total }),
+        })
+        .then(
+          (result) => {
+            subscriber.next(result);
+            subscriber.complete();
+          },
+          (error: unknown) => subscriber.error(error),
+        );
+      return () => controller.abort();
+    });
+
+    return batch$.pipe(
       // El reset del avance lo hace el `finalize` de `printSelection`, que cubre
       // también la cancelación; repetirlo aquí solo daría dos dueños del mismo
       // estado.
@@ -239,6 +343,9 @@ export class OrdersBulkPrintService {
       skipped: payload.skipped ?? [],
       failureMessage,
       failedIds: [...(payload.failedIds ?? []), ...result.failedOrderIds],
+      ...(result.failedWithoutIdCount > 0
+        ? { failedWithoutIdCount: result.failedWithoutIdCount }
+        : {}),
       printJobs: result.groups,
       printJobLabels: labels,
     };
