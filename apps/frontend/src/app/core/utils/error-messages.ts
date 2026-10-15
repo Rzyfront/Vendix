@@ -830,10 +830,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   HABILITATION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
   // Escáner IA de «Nueva factura» (cotizaciones, órdenes de compra, RUT del
-  // cliente…). Sólo arma un BORRADOR: un fallo significa «no pude leerlo», el
-  // formulario sigue disponible para capturarlo a mano.
+  // cliente…). FacturIA sólo completa el formulario: un fallo significa «no
+  // pude leerlo», el formulario sigue disponible para capturarlo a mano.
   INVOICE_DRAFT_SCAN_NO_FILES:
-    'Sube al menos un documento (PDF o imagen) para armar el borrador.',
+    'Sube al menos un documento (PDF o imagen) para que FacturIA complete la factura.',
   INVOICE_DRAFT_SCAN_TOO_MANY_FILES:
     'Máximo 6 documentos por escaneo. Quita alguno e inténtalo de nuevo.',
   INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE:

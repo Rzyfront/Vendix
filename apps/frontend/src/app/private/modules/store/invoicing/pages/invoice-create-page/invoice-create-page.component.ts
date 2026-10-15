@@ -83,6 +83,7 @@ import {
   CreateCustomerRequest,
   CreateInvoiceDto,
   Invoice,
+  InvoiceEmissionOutcome,
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
 import { canEditContractInvoice } from '../../interfaces/invoice-contract-editability';
@@ -258,6 +259,7 @@ import type {
 import {
   DRAFT_LOW_CONFIDENCE,
   countDraftFilledFields,
+  facturiaFilledHeadline,
   draftAiuPatch,
   draftDocumentDigits,
   draftLinesToLineInputs,
@@ -1434,6 +1436,60 @@ const DIAN_TECHNICAL_KEY_LENGTHS = [40, 64] as const;
 /** Destino único al salir de la captura, se emita o no. */
 const INVOICES_LIST_ROUTE = '/admin/invoicing/invoices';
 
+// ─────────────────────────────────────────────────────────────
+// «Emitir directamente» (emit_immediately)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Payload de CREAR con «Emitir directamente». Sólo la creación lo lleva:
+ * «Validar» y la vista previa siguen mandando `buildPayload()` tal cual.
+ * Apagado devuelve el MISMO objeto, sin la clave (el contrato de siempre).
+ */
+export function withEmitImmediately(
+  payload: CreateInvoiceDto,
+  emitImmediately: boolean,
+): CreateInvoiceDto {
+  return emitImmediately ? { ...payload, emit_immediately: true } : payload;
+}
+
+/**
+ * Desenlace de la emisión inmediata adjunta a la factura creada:
+ *  - `none`: no se pidió emitir (o el backend no lo intentó) ⇒ flujo de siempre.
+ *  - `emitted`: creada y emitida ⇒ toast de éxito y salida al listado.
+ *  - `failed`: creada SIN emitir ⇒ toast de advertencia con el motivo y
+ *    detalle de la factura, donde se reintenta. La factura nunca se pierde.
+ */
+export type InvoiceEmissionResult =
+  | { kind: 'none' }
+  | { kind: 'emitted' }
+  | { kind: 'failed'; message: string };
+
+export function resolveEmissionResult(
+  emission: InvoiceEmissionOutcome | null | undefined,
+): InvoiceEmissionResult {
+  if (!emission || !emission.attempted) return { kind: 'none' };
+  if (emission.success) return { kind: 'emitted' };
+  const reason = String(emission.message ?? '').trim();
+  return {
+    kind: 'failed',
+    message: reason
+      ? `La factura se creó pero no se pudo emitir: ${reason}`
+      : 'La factura se creó pero no se pudo emitir. Ábrela para reintentar la emisión.',
+  };
+}
+
+/** Detalle de una factura: el listado abre su modal con `?invoiceId=`. */
+export function invoiceDetailNavigation(invoiceId: number): {
+  commands: string[];
+  extras: { queryParams: { invoiceId: number } };
+} {
+  return {
+    commands: [INVOICES_LIST_ROUTE],
+    extras: { queryParams: { invoiceId } },
+  };
+}
+
+
 /**
  * Las secciones de esta pantalla NO se enumeran aquí: se derivan del orden
  * canónico compartido con el editor de perfiles
@@ -1975,6 +2031,11 @@ export interface InvoiceDraftNotice {
   documentTotal: number | null;
   /** Cómo quedó el adquiriente; lo completa la página al resolverlo. */
   acquirer: string | null;
+  /**
+   * N de «FacturIA completó N campos». Nace contando el adquiriente como
+   * nuevo; la página lo recalcula sin él si resulta un cliente existente.
+   */
+  filled: number;
 }
 
 export interface InvoiceDraftPlanContext {
@@ -2190,6 +2251,7 @@ export function planInvoiceDraft(
       documentTotal:
         typeof result.totals?.total === 'number' ? result.totals.total : null,
       acquirer: null,
+      filled: filled.filled,
     },
   };
 }
@@ -2463,56 +2525,59 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
             distinto haría que la segunda no se leyera como espejo de la primera.
           -->
           <!--
-            «CARGAR DOCUMENTOS» (escáner IA). Un atajo, no un paso: la IA lee
-            la cotización, la orden de compra o el RUT del cliente y arma un
-            BORRADOR sobre este mismo formulario. Nada se emite ni se crea:
-            lo leído queda marcado (acento = IA, ámbar = revisar) y el botón
-            de emisión sigue siendo el de siempre.
+            FACTURIA (escáner IA). Un atajo, no un paso: FacturIA lee la
+            cotización, la orden de compra, el contrato o el RUT del cliente y
+            completa este mismo formulario. Nada se emite ni se crea: lo leído
+            queda marcado (acento = IA, ámbar = revisar) y el botón de emisión
+            sigue siendo el de siempre.
           -->
-          <div
-            class="flex flex-col gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+          <button
+            type="button"
+            class="vx-ai-surface group flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="facturia-entry"
+            title="Autocompleta la factura desde tus documentos"
+            aria-label="FacturIA: autocompleta la factura desde tus documentos"
+            [disabled]="draftCreated()"
+            (click)="draftScanOpen.set(true)"
           >
-            <p
-              class="flex items-center gap-2.5 text-xs leading-relaxed text-text-secondary"
+            <span
+              class="vx-ai-badge inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+              aria-hidden="true"
             >
-              <span
-                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
-                aria-hidden="true"
-              >
-                @if (draftAcquirerResolving()) {
-                  <app-icon name="loader-2" [size]="15" [spin]="true" />
-                } @else {
-                  <app-icon name="sparkles" [size]="15" />
-                }
+              @if (draftAcquirerResolving()) {
+                <app-icon name="loader-2" [size]="17" [spin]="true" />
+              } @else {
+                <app-icon name="sparkles" [size]="17" />
+              }
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold text-text-primary">
+                Factur<span class="vx-ai-text">IA</span>
               </span>
               @if (draftAcquirerResolving()) {
-                <span role="status">Buscando al adquiriente del borrador…</span>
+                <span role="status" class="block text-xs text-text-secondary">
+                  FacturIA está identificando al adquiriente…
+                </span>
               } @else {
-                <span>
-                  ¿Tienes la cotización, la orden de compra o el RUT del cliente?
-                  La IA arma el borrador por ti.
+                <span class="block text-xs text-text-secondary">
+                  Autocompleta la factura desde tus documentos
                 </span>
               }
-            </p>
-            <app-button
-              variant="outline"
-              size="sm"
-              type="button"
-              [disabled]="draftCreated()"
-              (clicked)="draftScanOpen.set(true)"
-            >
-              <app-icon slot="icon" name="upload" [size]="14" />
-              Cargar documentos
-            </app-button>
-          </div>
+            </span>
+            <app-icon
+              name="chevron-right"
+              [size]="16"
+              class="shrink-0 text-text-secondary transition-transform group-hover:translate-x-0.5"
+            />
+          </button>
 
           @if (draftNotice(); as notice) {
             <app-alert-banner variant="info" icon="sparkles" tone="token">
-              Borrador cargado con IA desde {{ notice.documents }}
-              {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Revisa
-              los campos marcados antes de emitir.
+              <span data-testid="facturia-notice-headline">{{ draftNoticeHeadline() }}</span>
               <span class="mt-1 block text-xs font-normal">
-                Etiqueta «IA» con borde de acento: lo leyó la IA. Etiqueta
+                Analizó {{ notice.documents }}
+                {{ notice.documents === 1 ? 'documento' : 'documentos' }}.
+                Etiqueta «IA» con borde de acento: lo leyó FacturIA. Etiqueta
                 «Revisar» con borde ámbar: no lo encontró o no está segura.
               </span>
               @if (notice.acquirer) {
@@ -4309,6 +4374,8 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
             [checking]="readinessChecking() || validatingDraft()"
             [busy]="submitting() || checkingEmitReadiness()"
             [submitLabel]="mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura'"
+            [showEmitToggle]="mode() === 'manual'"
+            [(emitImmediately)]="emitImmediately"
             [canSubmit]="!draftCreated()"
             (submit)="onSubmit()"
             (validate)="onValidateDraft()"
@@ -4358,7 +4425,7 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
       (closed)="customItemOpen.set(false)"
     />
 
-    <!-- «Cargar documentos»: el modal sólo lee; aplicar es de la página. -->
+    <!-- FacturIA: el modal sólo lee; aplicar es de la página. -->
     <vendix-invoice-draft-scan-modal
       [(isOpen)]="draftScanOpen"
       (scanned)="onDraftScanned($event)"
@@ -4689,6 +4756,12 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Estado de UI ────────────────────────────────────────────
   readonly mode = signal<'manual' | 'from_order'>('manual');
   readonly submitting = signal(false);
+  /**
+   * «Emitir directamente» del resumen. Dueño: esta página. Siempre arranca
+   * apagado y NO se persiste (ni localStorage ni settings): `resetForm()` lo
+   * vuelve a apagar para la siguiente factura.
+   */
+  readonly emitImmediately = signal(false);
   /** Keeps every editor control unmounted while a requested invoice is checked. */
   readonly contractInvoiceEditRedirecting = signal(false);
   readonly customerModalOpen = signal(false);
@@ -6037,6 +6110,11 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly draftScanOpen = signal(false);
   /** Aviso tras aplicar un borrador; `null` = cerrado o sin borrador. */
   readonly draftNotice = signal<InvoiceDraftNotice | null>(null);
+  /** Titular del aviso: «FacturIA completó N campos · revisa los marcados». */
+  readonly draftNoticeHeadline = computed(() => {
+    const notice = this.draftNotice();
+    return notice ? facturiaFilledHeadline(notice.filled) : '';
+  });
   /** `true` mientras se busca el adquiriente del borrador (tienda → org → RUES). */
   readonly draftAcquirerResolving = signal(false);
   /**
@@ -10152,6 +10230,11 @@ export class InvoiceCreatePageComponent implements OnInit {
           this.setDraftAcquirerNotice(
             `Adquiriente: ${this.customerDisplayName(found)}, cliente existente. Se usaron los datos de su ficha.`,
           );
+          // Los datos del adquiriente salen de la ficha, no de la IA: no cuentan
+          // en «FacturIA completó N campos».
+          this.setDraftFilled(
+            countDraftFilledFields(plan, { includeAcquirer: false }).filled,
+          );
           return;
         }
         this.applyDraftInlineAcquirer(result, plan, token, !!digits);
@@ -10311,6 +10394,12 @@ export class InvoiceCreatePageComponent implements OnInit {
   private setDraftAcquirerNotice(text: string): void {
     this.draftNotice.update((notice) =>
       notice ? { ...notice, acquirer: text } : notice,
+    );
+  }
+
+  private setDraftFilled(filled: number): void {
+    this.draftNotice.update((notice) =>
+      notice ? { ...notice, filled } : notice,
     );
   }
 
@@ -10749,7 +10838,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (this.contractInvoiceEditRedirecting()) return;
     if (this.submitting()) return;
     this.submitting.set(true);
-    this.store.dispatch(createInvoice({ invoice: payload }));
+    // Sólo la captura manual lleva el flag (el aside no pinta el conmutador
+    // desde pedido). «Validar» y la vista previa nunca lo mandan.
+    const emit = this.mode() === 'manual' && this.emitImmediately();
+    this.store.dispatch(
+      createInvoice({ invoice: withEmitImmediately(payload, emit) }),
+    );
   }
 
   /**
@@ -11511,6 +11605,28 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.clearSubmitError();
 
     const invoiceId = Number(invoice?.id);
+    // «Emitir directamente»: el backend ya intentó validar y enviar. Con
+    // desenlace no hay puerta de emisión que consultar: o salió, o la factura
+    // quedó creada sin emitir y se reintenta desde su detalle.
+    const emission = resolveEmissionResult(invoice?.emission);
+    if (emission.kind === 'emitted') {
+      this.toastService.success('Factura creada y emitida');
+      this.finishAndClose();
+      return;
+    }
+    if (emission.kind === 'failed') {
+      this.toastService.warning(emission.message, undefined, 7000);
+      if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
+        this.finishAndClose();
+        return;
+      }
+      this.resetForm();
+      this.createdInvoiceId.set(null);
+      const target = invoiceDetailNavigation(invoiceId);
+      void this.router.navigate(target.commands, target.extras);
+      return;
+    }
+
     if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
       // Sin id no hay puerta que consultar. Se conserva EXACTAMENTE el cierre
       // de siempre: esta puerta es asesora y no puede dejar el modal colgado.
@@ -11936,6 +12052,8 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   private resetForm(): void {
+    // «Emitir directamente» no se hereda: cada factura arranca apagada.
+    this.emitImmediately.set(false);
     // Formulario limpio = sin borrador IA: ni marcas, ni aviso, ni respuestas
     // asíncronas pendientes del adquiriente.
     this.clearDraftMarks();

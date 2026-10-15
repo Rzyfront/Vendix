@@ -9,38 +9,57 @@
     se va a emitir.
   -->
   <!--
-    «CARGAR DOCUMENTOS» (escáner IA). Mismo modal y mismo mapeo que la «Nueva
-    factura» de la tienda, contra el endpoint de plataforma. Nada se emite ni
-    se crea: lo leído queda marcado (acento = IA, ámbar = revisar) y el botón
-    de emisión sigue siendo el de siempre.
+    FACTURIA (escáner IA). Mismo modal y mismo mapeo que la «Nueva factura» de
+    la tienda, contra el endpoint de plataforma. Nada se emite ni se crea: lo
+    leído queda marcado (acento = IA, ámbar = revisar) y el botón de emisión
+    sigue siendo el de siempre.
   -->
-  <div
-    class="flex flex-col gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+  <button
+    type="button"
+    class="vx-ai-surface group flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+    data-testid="facturia-entry"
+    title="Autocompleta la factura desde tus documentos"
+    aria-label="FacturIA: autocompleta la factura desde tus documentos"
+    (click)="draftScanOpen.set(true)"
   >
-    <p class="flex items-start gap-2 text-xs leading-relaxed text-text-secondary">
-      <app-icon name="sparkles" [size]="14" class="mt-0.5 shrink-0 text-primary" />
+    <span
+      class="vx-ai-badge inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+      aria-hidden="true"
+    >
       @if (draftAcquirerResolving()) {
-        <span role="status">Buscando al adquiriente del borrador…</span>
+        <app-icon name="loader-2" [size]="17" [spin]="true" />
       } @else {
-        <span>
-          ¿Tienes la cotización, la orden de compra o el RUT del cliente? La IA arma el
-          borrador por ti.
+        <app-icon name="sparkles" [size]="17" />
+      }
+    </span>
+    <span class="min-w-0 flex-1">
+      <span class="block text-sm font-semibold text-text-primary">
+        Factur<span class="vx-ai-text">IA</span>
+      </span>
+      @if (draftAcquirerResolving()) {
+        <span role="status" class="block text-xs text-text-secondary">
+          FacturIA está identificando al adquiriente…
+        </span>
+      } @else {
+        <span class="block text-xs text-text-secondary">
+          Autocompleta la factura desde tus documentos
         </span>
       }
-    </p>
-    <app-button variant="outline" size="sm" type="button" (clicked)="draftScanOpen.set(true)">
-      <app-icon slot="icon" name="upload" [size]="14" />
-      Cargar documentos
-    </app-button>
-  </div>
+    </span>
+    <app-icon
+      name="chevron-right"
+      [size]="16"
+      class="shrink-0 text-text-secondary transition-transform group-hover:translate-x-0.5"
+    />
+  </button>
 
   @if (draftNotice(); as notice) {
     <app-alert-banner variant="info" icon="sparkles" tone="token">
-      Borrador cargado con IA desde {{ notice.documents }}
-      {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Revisa los campos marcados
-      antes de emitir.
+      <span data-testid="facturia-notice-headline">{{ draftNoticeHeadline() }}</span>
       <span class="mt-1 block text-xs font-normal">
-        Borde de acento: lo leyó la IA. Borde ámbar: no lo encontró o no está segura.
+        Analizó {{ notice.documents }}
+        {{ notice.documents === 1 ? 'documento' : 'documentos' }}. Borde de acento: lo leyó
+        FacturIA. Borde ámbar: no lo encontró o no está segura.
       </span>
       @if (notice.acquirer) {
         <span class="mt-1 block text-xs font-normal">{{ notice.acquirer }}</span>
@@ -1053,10 +1072,15 @@
         </section>
 
         <!--
-          ACCIONES: la primaria a todo el ancho; «Previsualizar totales» como
-          secundaria; «Cancelar» (vuelve a la lista de facturas) terciaria.
+          ACCIONES: sección propia (fondo y borde sólidos). La primaria a todo
+          el ancho; «Previsualizar totales» outline; «Cancelar» (vuelve a la
+          lista de facturas) outline-danger.
         -->
-        <div class="space-y-2">
+        <section
+          class="space-y-2 rounded-2xl border border-border bg-surface p-4 shadow-sm"
+          aria-label="Acciones de la factura"
+          data-testid="platform-invoice-actions"
+        >
           <app-button
             type="button"
             variant="primary"
@@ -1083,7 +1107,7 @@
           </app-button>
           <app-button
             type="button"
-            variant="ghost"
+            variant="outline-danger"
             size="sm"
             [fullWidth]="true"
             class="w-full justify-center"
@@ -1092,7 +1116,7 @@
           >
             Cancelar
           </app-button>
-        </div>
+        </section>
 
         <!-- Nota de cumplimiento fiscal DIAN: informativa, subordinada. -->
         <p class="flex items-start gap-2 px-1 text-[11px] leading-relaxed text-text-secondary">
@@ -1118,7 +1142,7 @@
   busca.
 -->
 
-<!-- «Cargar documentos»: el modal sólo lee; aplicar es de la página. -->
+<!-- FacturIA: el modal sólo lee; aplicar es de la página. -->
 <vendix-invoice-draft-scan-modal
   [(isOpen)]="draftScanOpen"
   [endpoint]="draftScanEndpoint"

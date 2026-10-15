@@ -408,6 +408,11 @@ export interface PlatformInvoiceDraftNotice {
   documentTotal: number | null;
   /** Cómo quedó el adquiriente; lo completa la página al resolverlo. */
   acquirer: string | null;
+  /**
+   * N de «FacturIA completó N campos». Nace contando el adquiriente como
+   * nuevo; la página lo recalcula sin él si resulta un cliente existente.
+   */
+  filled: number;
 }
 
 export interface PlatformInvoiceDraftPlanContext extends PlatformDraftInvoiceContext {
@@ -616,6 +621,7 @@ export function planPlatformInvoiceDraft(
       documentTotal:
         typeof result.totals?.total === 'number' ? result.totals.total : null,
       acquirer: null,
+      filled: filled.filled,
     },
   };
 }

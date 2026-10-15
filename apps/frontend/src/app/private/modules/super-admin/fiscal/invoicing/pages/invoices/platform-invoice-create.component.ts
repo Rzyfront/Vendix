@@ -74,7 +74,9 @@ import { INVOICE_DRAFT_SCAN_PLATFORM_PATH } from '../../../../../store/invoicing
 import type { InvoiceDraftScanResult } from '../../../../../store/invoicing/interfaces/invoice-draft-scan.interface';
 import {
   DRAFT_LOW_CONFIDENCE,
+  countDraftFilledFields,
   draftDocumentDigits,
+  facturiaFilledHeadline,
 } from '../../../../../store/invoicing/utils/invoice-draft-mapping';
 import { CONFIG_LIMITS } from '../../../../../../../core/utils/invoice-profile-config.contract';
 import {
@@ -1126,6 +1128,11 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   readonly draftScanOpen = signal(false);
   /** Aviso tras aplicar un borrador; `null` = cerrado o sin borrador. */
   readonly draftNotice = signal<PlatformInvoiceDraftNotice | null>(null);
+  /** Titular del aviso: «FacturIA completó N campos · revisa los marcados». */
+  readonly draftNoticeHeadline = computed(() => {
+    const notice = this.draftNotice();
+    return notice ? facturiaFilledHeadline(notice.filled) : '';
+  });
   /** `true` mientras se resuelve el adquiriente del borrador. */
   readonly draftAcquirerResolving = signal(false);
   /** Marcas «IA»/«Revisar» de cabecera y adquiriente, por nombre de control. */
@@ -2276,6 +2283,9 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         this.setDraftAcquirerNotice(
           `Adquiriente: ${tenant.legal_name || tenant.name} (${acquirerKindLabel(tenant.kind).toLowerCase()} ya registrado). Se usaron sus datos guardados.`,
         );
+        // Datos de la ficha, no de la IA: no cuentan en «FacturIA completó N».
+        const filled = countDraftFilledFields(plan, { includeAcquirer: false }).filled;
+        this.draftNotice.update((notice) => (notice ? { ...notice, filled } : notice));
       });
   }
 

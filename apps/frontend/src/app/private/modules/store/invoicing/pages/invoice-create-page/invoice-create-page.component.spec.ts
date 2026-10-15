@@ -40,7 +40,15 @@ import {
   isCapturedInvoiceLine,
   planInvoiceDraft,
   type InvoiceDraftPlanContext,
+  withEmitImmediately,
+  resolveEmissionResult,
+  invoiceDetailNavigation,
 } from './invoice-create-page.component';
+import {
+  countDraftFilledFields,
+  facturiaFilledHeadline,
+} from '../../utils/invoice-draft-mapping';
+import type { CreateInvoiceDto } from '../../interfaces/invoice.interface';
 import type {
   DraftField,
   InvoiceDraftLine,
@@ -1578,6 +1586,18 @@ describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
     expect(notice.documentTotal).toBe(1490000);
   });
 
+  it('el aviso trae el N de «FacturIA completó N campos» (adquiriente como nuevo)', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+    expect(plan.notice.filled).toBe(plan.filled.filled);
+    expect(plan.notice.filled).toBeGreaterThan(0);
+    // Cliente existente: el adquiriente sale de la ficha y no cuenta.
+    const withoutAcquirer = countDraftFilledFields(plan, { includeAcquirer: false });
+    expect(withoutAcquirer.filled).toBe(plan.filled.filled - plan.filled.acquirer);
+    expect(facturiaFilledHeadline(plan.notice.filled)).toBe(
+      `FacturIA completó ${plan.notice.filled} campos · revisa los marcados`,
+    );
+  });
+
   it('con líneas capturadas AGREGA al final y respeta el tope', () => {
     const plan = planInvoiceDraft(
       sample(),
@@ -1643,5 +1663,89 @@ describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
       note: 'n',
     });
     expect(dropRowMarkField({ ai: ['description'], pending: [] }, 'description')).toBeNull();
+  });
+});
+
+/**
+ * «Emitir directamente» y aviso de FacturIA, probados donde son PUROS (la
+ * página exige el harness completo del store; ver la nota del primer bloque).
+ */
+describe('invoice-create-page · «Emitir directamente» (emit_immediately)', () => {
+  const payload = {
+    invoice_type: 'sales_invoice',
+    issue_date: '2026-10-14',
+    items: [],
+  } as unknown as CreateInvoiceDto;
+
+  it('apagado: el payload sale igual, sin la clave', () => {
+    const out = withEmitImmediately(payload, false);
+    expect(out).toBe(payload);
+    expect('emit_immediately' in out).toBeFalse();
+  });
+
+  it('encendido: agrega emit_immediately=true sin mutar el original', () => {
+    const out = withEmitImmediately(payload, true);
+    expect(out.emit_immediately).toBeTrue();
+    expect(out.items).toBe(payload.items);
+    expect('emit_immediately' in payload).toBeFalse();
+  });
+
+  it('sin emission (o no intentada) ⇒ flujo de siempre', () => {
+    expect(resolveEmissionResult(undefined)).toEqual({ kind: 'none' });
+    expect(resolveEmissionResult(null)).toEqual({ kind: 'none' });
+    expect(
+      resolveEmissionResult({ attempted: false, success: false, phase: null }),
+    ).toEqual({ kind: 'none' });
+  });
+
+  it('emission.success ⇒ «emitted»', () => {
+    expect(
+      resolveEmissionResult({ attempted: true, success: true, phase: null, status: 'sent' }),
+    ).toEqual({ kind: 'emitted' });
+  });
+
+  it('emission.success === false ⇒ advertencia con el motivo del backend', () => {
+    expect(
+      resolveEmissionResult({
+        attempted: true,
+        success: false,
+        phase: 'send',
+        message: 'La DIAN no respondió a tiempo.',
+      }),
+    ).toEqual({
+      kind: 'failed',
+      message: 'La factura se creó pero no se pudo emitir: La DIAN no respondió a tiempo.',
+    });
+  });
+
+  it('fallo sin mensaje ⇒ advertencia genérica que invita a reintentar', () => {
+    const result = resolveEmissionResult({
+      attempted: true,
+      success: false,
+      phase: 'validate',
+      message: '  ',
+    });
+    expect(result.kind).toBe('failed');
+    expect(result.kind === 'failed' && result.message).toBe(
+      'La factura se creó pero no se pudo emitir. Ábrela para reintentar la emisión.',
+    );
+  });
+
+  it('el detalle de la factura creada se abre en el listado con ?invoiceId=', () => {
+    expect(invoiceDetailNavigation(321)).toEqual({
+      commands: ['/admin/invoicing/invoices'],
+      extras: { queryParams: { invoiceId: 321 } },
+    });
+  });
+});
+
+describe('invoice-create-page · aviso de FacturIA', () => {
+  it('N campos, singular y cero sin la palabra «borrador»', () => {
+    expect(facturiaFilledHeadline(12)).toBe('FacturIA completó 12 campos · revisa los marcados');
+    expect(facturiaFilledHeadline(1)).toBe('FacturIA completó 1 campo · revisa los marcados');
+    const zero = facturiaFilledHeadline(0);
+    expect(zero).toContain('FacturIA');
+    expect(zero.toLowerCase()).not.toContain('borrador');
+    expect(facturiaFilledHeadline(Number.NaN)).toBe(zero);
   });
 });

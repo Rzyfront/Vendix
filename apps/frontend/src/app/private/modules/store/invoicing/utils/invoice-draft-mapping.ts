@@ -1242,3 +1242,17 @@ export function countDraftFilledFields(
     review,
   };
 }
+
+/**
+ * Aviso de FacturIA tras aplicar lo leído. `filled` = campos que escribió
+ * (recalculado sin el adquiriente si resultó un cliente existente).
+ */
+export function facturiaFilledHeadline(filled: number): string {
+  const n = Math.max(0, Math.floor(Number(filled) || 0));
+  if (n === 0) {
+    return 'FacturIA no encontró datos para completar · revisa la factura y complétala a mano';
+  }
+  return n === 1
+    ? 'FacturIA completó 1 campo · revisa los marcados'
+    : `FacturIA completó ${n} campos · revisa los marcados`;
+}

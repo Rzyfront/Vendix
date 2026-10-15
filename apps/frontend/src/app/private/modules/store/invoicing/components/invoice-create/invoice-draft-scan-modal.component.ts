@@ -46,12 +46,24 @@ const MAX_FILE_MB = Math.round(INVOICE_DRAFT_SCAN_MAX_FILE_BYTES / (1024 * 1024)
 const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
 
 /**
- * ESCÁNER IA DE «NUEVA FACTURA» — cargar documentos y leerlos con IA.
+ * Mensajes del progreso rotativo mientras FacturIA analiza (la cola no
+ * informa porcentaje: se rota cada `FACTURIA_PROGRESS_INTERVAL_MS`).
+ */
+export const FACTURIA_PROGRESS_MESSAGES = [
+  'Leyendo documentos…',
+  'Identificando al adquiriente…',
+  'Extrayendo líneas de cobro…',
+  'Completando la factura…',
+] as const;
+export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
+
+/**
+ * FACTURIA — análisis inteligente de documentos de «Nueva factura».
  *
- * Un solo paso: elegir los documentos (cotización, orden de compra, RUT del
- * cliente, factura anterior…), escribir una nota opcional y «Leer con IA».
- * Todos viajan en UNA petición: el modelo arma un único borrador con lo que
- * haya en cada uno.
+ * Un solo paso: elegir los documentos (cotización, orden de compra, contrato,
+ * RUT del cliente…), escribir una nota opcional y «Analizar y autocompletar».
+ * Todos viajan en UNA petición: el modelo arma un único resultado con lo que
+ * haya en cada uno. Los textos visibles nunca dicen «borrador».
  *
  * NO precarga nada por su cuenta ni muestra una revisión campo por campo: el
  * resultado sale por `scanned` y la página lo vuelca al formulario con las
@@ -73,11 +85,24 @@ const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
       (isOpenChange)="isOpen.set($event)"
       (closed)="reset()"
       size="lg"
-      title="Cargar documentos"
-      subtitle="La IA arma un borrador de la factura; nada se emite ni se crea hasta que tú lo hagas"
+      title="FacturIA · Análisis inteligente de documentos"
     >
+      <span
+        slot="header"
+        class="vx-ai-badge inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg md:h-9 md:w-9"
+        aria-hidden="true"
+      >
+        <app-icon name="sparkles" [size]="16" />
+      </span>
       @if (!scanning()) {
         <div class="space-y-4">
+          <p class="text-sm leading-relaxed text-[var(--color-text-secondary)]" data-testid="facturia-description">
+            Sube RUT, cotizaciones, contratos u órdenes de compra.
+            <span class="font-semibold text-text-primary">Factur<span class="vx-ai-text">IA</span></span>
+            los analiza y completa automáticamente esta factura para que solo
+            revises y emitas.
+          </p>
+
           <!-- Zona de carga: clic o arrastrar, varios a la vez. -->
           <button
             type="button"
@@ -170,7 +195,7 @@ const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
               for="invoice-draft-scan-note"
               class="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]"
             >
-              Indicaciones para la IA (opcional)
+              Indicaciones para FacturIA (opcional)
             </label>
             <textarea
               id="invoice-draft-scan-note"
@@ -191,36 +216,53 @@ const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
               variant="danger"
               icon="alert-triangle"
               tone="token"
-              heading="No se pudo leer los documentos"
+              heading="FacturIA no pudo analizar los documentos"
             >
               {{ scanError() }}
             </app-alert-banner>
           }
         </div>
       } @else {
-        <!-- Leyendo: progreso honesto (la cola no informa porcentaje). -->
+        <!-- Analizando: escena IA + progreso rotativo (la cola no informa
+             porcentaje). El movimiento se apaga con reduced-motion desde el
+             sistema global. -->
         <div
-          class="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-xl border border-border bg-[var(--color-surface-secondary)] p-6 text-center"
+          class="vx-ai-stage is-analyzing relative flex min-h-[300px] flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-border p-6 text-center"
           role="status"
           aria-live="polite"
+          data-testid="facturia-progress"
         >
-          <app-icon
-            name="loader-2"
-            [size]="28"
-            [spin]="true"
-            class="text-[var(--color-primary)]"
-          />
-          <p class="text-sm font-semibold text-text-primary">
-            Leyendo {{ files().length }}
-            {{ files().length === 1 ? 'documento' : 'documentos' }} con IA…
+          <div class="vx-ai-holo-aurora"></div>
+          <div class="vx-ai-holo-grid"></div>
+          <div class="vx-ai-stage__halo"></div>
+          <div class="vx-ai-stage__scan"></div>
+          <div class="vx-ai-stage__shimmer"></div>
+          <span class="vx-ai-sparkle vx-ai-sparkle--a"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--b"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--c"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--d"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--e"></span>
+
+          <div class="vx-ai-stage__icon">
+            <app-icon name="sparkles" [size]="32" />
+          </div>
+          <p class="relative z-10 text-base font-semibold text-text-primary">
+            Factur<span class="vx-ai-text">IA</span> está analizando
+            {{ files().length }}
+            {{ files().length === 1 ? 'documento' : 'documentos' }}
           </p>
-          <p class="max-w-sm text-xs text-[var(--color-text-secondary)]">
+          <p
+            class="vx-ai-stage__caption relative z-10 max-w-[300px] text-sm"
+            data-testid="facturia-progress-message"
+          >
+            {{ progressMessage() }}
+          </p>
+          <p class="relative z-10 max-w-sm text-xs text-[var(--color-text-secondary)]">
             @if (stalled()) {
               Está tardando más de lo normal; seguimos procesando. Puedes
               cancelar y capturar la factura a mano.
             } @else {
-              Extrayendo adquiriente, fechas, forma de pago y líneas. Suele
-              tardar menos de un minuto.
+              Suele tardar menos de un minuto.
             }
           </p>
         </div>
@@ -229,19 +271,19 @@ const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
       <div slot="footer" class="flex flex-wrap justify-end gap-3">
         @if (scanning()) {
           <app-button variant="outline" (clicked)="cancelScan()">
-            Cancelar lectura
+            Cancelar análisis
           </app-button>
         } @else {
           <app-button variant="outline" (clicked)="isOpen.set(false)">
             Cancelar
           </app-button>
           <app-button
-            variant="primary"
+            variant="ai"
             [disabled]="files().length === 0"
             (clicked)="startScan()"
           >
             <app-icon slot="icon" name="sparkles" [size]="16" />
-            Leer con IA
+            Analizar y autocompletar
           </app-button>
         }
       </div>
@@ -258,7 +300,7 @@ export class InvoiceDraftScanModalComponent {
    * de plataforma pasa `INVOICE_DRAFT_SCAN_PLATFORM_PATH`.
    */
   readonly endpoint = input<string>(INVOICE_DRAFT_SCAN_STORE_PATH);
-  /** Borrador leído. El modal ya se cerró cuando esto sale. */
+  /** Resultado del análisis. El modal ya se cerró cuando esto sale. */
   readonly scanned = output<InvoiceDraftScanResult>();
 
   readonly maxFiles = INVOICE_DRAFT_SCAN_MAX_FILES;
@@ -277,6 +319,16 @@ export class InvoiceDraftScanModalComponent {
 
   readonly isFull = computed(() => this.files().length >= this.maxFiles);
 
+  /** Paso del progreso rotativo mientras `scanning()`. */
+  readonly progressIndex = signal(0);
+  readonly progressMessage = computed(
+    () =>
+      FACTURIA_PROGRESS_MESSAGES[
+        this.progressIndex() % FACTURIA_PROGRESS_MESSAGES.length
+      ],
+  );
+  private progressTimer: ReturnType<typeof setInterval> | null = null;
+
   /** Borde de la zona de carga: acento al arrastrar encima, neutro si no. */
   readonly dropzoneClass = computed(() => {
     if (this.isFull()) return 'border-border opacity-60 cursor-not-allowed';
@@ -289,7 +341,29 @@ export class InvoiceDraftScanModalComponent {
   private scanSub: Subscription | null = null;
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.scanSub?.unsubscribe());
+    this.destroyRef.onDestroy(() => {
+      this.scanSub?.unsubscribe();
+      this.stopProgress();
+    });
+  }
+
+  // ── Progreso rotativo ───────────────────────────────────────
+
+  private startProgress(): void {
+    this.stopProgress();
+    this.progressIndex.set(0);
+    // Zoneless: la señal agenda la detección de cambios; no hace falta Zone.
+    this.progressTimer = setInterval(
+      () => this.progressIndex.update((i) => i + 1),
+      FACTURIA_PROGRESS_INTERVAL_MS,
+    );
+  }
+
+  private stopProgress(): void {
+    if (this.progressTimer !== null) {
+      clearInterval(this.progressTimer);
+      this.progressTimer = null;
+    }
   }
 
   // ── Archivos ────────────────────────────────────────────────
@@ -404,6 +478,7 @@ export class InvoiceDraftScanModalComponent {
     this.scanError.set(null);
     this.stalled.set(false);
     this.scanning.set(true);
+    this.startProgress();
 
     this.scanSub = this.scanner
       .scanDraft(
@@ -415,6 +490,7 @@ export class InvoiceDraftScanModalComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
+          this.stopProgress();
           this.scanning.set(false);
           this.scanSub = null;
           this.scanned.emit(result);
@@ -422,6 +498,7 @@ export class InvoiceDraftScanModalComponent {
           this.isOpen.set(false);
         },
         error: (err: unknown) => {
+          this.stopProgress();
           this.scanning.set(false);
           this.stalled.set(false);
           this.scanSub = null;
@@ -434,6 +511,7 @@ export class InvoiceDraftScanModalComponent {
   cancelScan(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
+    this.stopProgress();
     this.scanning.set(false);
     this.stalled.set(false);
   }
