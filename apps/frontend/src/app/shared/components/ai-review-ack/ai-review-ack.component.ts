@@ -90,11 +90,15 @@ let ackInstanceCounter = 0;
             class="text-text-secondary mt-1 leading-relaxed"
             [class]="descriptionClasses()"
           >
-            Comprendo que debo revisar la información precargada por la inteligencia
-            artificial y que no debo confiar plenamente en los datos extraídos
-            automáticamente.
-            @if (reviewedLine()) {
-              <span class="font-medium text-text-primary">{{ reviewedLine() }}</span>
+            @if (message()) {
+              {{ message() }}
+            } @else {
+              Comprendo que debo revisar la información precargada por la inteligencia
+              artificial y que no debo confiar plenamente en los datos extraídos
+              automáticamente.
+              @if (reviewedLine()) {
+                <span class="font-medium text-text-primary">{{ reviewedLine() }}</span>
+              }
             }
           </p>
         </div>
@@ -157,6 +161,9 @@ export class AiReviewAckComponent {
 
   /** `compact` reduce padding y tipografía para formularios densos. */
   readonly variant = input<'default' | 'compact'>('default');
+
+  /** Texto personalizado que reemplaza el texto fijo de revisión de IA. */
+  readonly message = input<string | null>(null);
 
   /** Bloquea el check mientras hay una operación en vuelo. */
   readonly disabled = input<boolean>(false);

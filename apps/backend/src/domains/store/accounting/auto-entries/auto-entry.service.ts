@@ -6068,16 +6068,22 @@ export class AutoEntryService {
     store_id?: number;
     cost_amount: number;
     quantity_change: number;
+    adjustment_type?: string;
     user_id?: number;
   }) {
     let lines: (AutoEntryLine | null)[];
+    const is_initial_load = data.adjustment_type === 'initial_load';
+    // Carga inicial: la contrapartida es patrimonio (3105), no faltante/sobrante.
+    const counter_key = is_initial_load
+      ? 'inventory.initial_load.equity'
+      : 'inventory.adjusted.shrinkage';
 
     if (data.quantity_change < 0) {
       // Shrinkage: DR Shrinkage, CR Inventory
       lines = await Promise.all([
         this.resolveAccountLine(
           data.organization_id,
-          'inventory.adjusted.shrinkage',
+          counter_key,
           'Inventory Shrinkage',
           data.cost_amount,
           0,
@@ -6105,7 +6111,7 @@ export class AutoEntryService {
         ),
         this.resolveAccountLine(
           data.organization_id,
-          'inventory.adjusted.shrinkage',
+          counter_key,
           'Inventory Surplus',
           0,
           data.cost_amount,
@@ -6118,7 +6124,10 @@ export class AutoEntryService {
       source_type: 'inventory.adjusted',
       source_id: data.adjustment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Inventory adjustment #${data.adjustment_id}`,
+      store_id: data.store_id,
+      description: is_initial_load
+        ? `Carga inicial de inventario #${data.adjustment_id}`
+        : `Inventory adjustment #${data.adjustment_id}`,
       lines,
       user_id: data.user_id,
     });

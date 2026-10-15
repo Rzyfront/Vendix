@@ -368,8 +368,11 @@ export class InventoryService {
   // BULK ADJUSTMENTS
   // ============================================================
 
-  downloadAdjustmentTemplate(location_id?: number): Observable<Blob> {
-    let params = new HttpParams();
+  downloadAdjustmentTemplate(
+    location_id?: number,
+    mode: 'example' | 'existing' = 'existing',
+  ): Observable<Blob> {
+    let params = new HttpParams().set('mode', mode);
     if (location_id) params = params.set('location_id', location_id.toString());
 
     return this.http
@@ -429,6 +432,7 @@ export class InventoryService {
     limit: number,
     adjustment_type?: string,
     description?: string,
+    initial_load_ack?: boolean,
   ): Observable<ApiResponse<any>> {
     const body: Record<string, unknown> = {
       session_id,
@@ -438,6 +442,7 @@ export class InventoryService {
     };
     if (adjustment_type) body['adjustment_type'] = adjustment_type;
     if (description) body['description'] = description;
+    if (initial_load_ack) body['initial_load_ack'] = true;
 
     return this.http
       .post<ApiResponse<any>>(

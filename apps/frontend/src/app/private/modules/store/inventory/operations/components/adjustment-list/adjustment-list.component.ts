@@ -75,6 +75,7 @@ export class AdjustmentListComponent {
         { value: 'expiration', label: 'Vencido' },
         { value: 'count_variance', label: 'Conteo' },
         { value: 'manual_correction', label: 'Corrección' },
+        { value: 'initial_load', label: 'Carga inicial' },
       ],
     },
   ];
@@ -184,6 +185,7 @@ export class AdjustmentListComponent {
         expiration: '#6b7280',
         count_variance: '#3b82f6',
         manual_correction: '#22c55e',
+        initial_load: '#8b5cf6',
       },
     },
     badgeTransform: (val: AdjustmentType) => this.getTypeLabel(val),
@@ -249,6 +251,7 @@ export class AdjustmentListComponent {
       expiration: 'Vencido',
       count_variance: 'Conteo',
       manual_correction: 'Corrección',
+      initial_load: 'Carga inicial',
     };
     return labels[type] || type;
   }

@@ -65,11 +65,14 @@ export class InventoryAdjustmentsController {
   @RequirePermissions('store:inventory:adjustments:read')
   async downloadBulkTemplate(
     @Query('location_id') location_id: string,
+    @Query('mode') mode: string,
     @Res() res: Response,
   ) {
     const parsed_location_id = location_id ? parseInt(location_id) : undefined;
-    const buffer =
-      await this.bulkService.generateExcelTemplate(parsed_location_id);
+    const buffer = await this.bulkService.generateExcelTemplate(
+      parsed_location_id,
+      mode,
+    );
 
     const filename = `plantilla_ajuste_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
 
@@ -150,7 +153,7 @@ export class InventoryAdjustmentsController {
     const { session_id, offset, limit, ...upload_dto } = body;
     const result = await this.bulkService.uploadFromSession(
       session_id,
-      upload_dto as BulkAdjustmentUploadDto,
+      upload_dto as BulkAdjustmentUploadDto & { initial_load_ack?: boolean },
       { offset, limit },
     );
 
