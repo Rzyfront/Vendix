@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 const MAX_ATTEMPTS = 20;
 const SUFFIX_DIGITS = 6;
