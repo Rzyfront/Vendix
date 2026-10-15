@@ -59,7 +59,10 @@ export type InvoiceSectionScreen = 'invoice' | 'profile' | 'both';
  * Pertenencia por sección, y el porqué de cada exclusión.
  *
  *  - `perfil` — el selector de perfil sólo existe al emitir: un perfil no se
- *    preconfigura con otro perfil.
+ *    preconfigura con otro perfil. En «Nueva factura» ya no se pinta como
+ *    sección de la columna principal sino como chip opcional del panel
+ *    lateral; conserva su id aquí porque su plegado sigue siendo el estado
+ *    de sección `'perfil'`.
  *  - `adquiriente` — el cliente es del documento, no de la configuración.
  *    Precargar un adquiriente sería el peor default imaginable en una pantalla
  *    que gasta numeración autorizada.

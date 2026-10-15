@@ -39,6 +39,7 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     },
     store_users: {
       upsert: jest.fn(),
@@ -743,6 +744,104 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.total_orders).toBe(2);
       expect(result.total_spend).toBe(0); // null → 0, no null
       expect(result.last_order_date).toBeNull();
+    });
+  });
+
+  /**
+   * Nueva factura precarga la dirección FISCAL del cliente. `addresses` sigue
+   * siendo sólo shipping (contrato de POS/checkout/despacho); `billing_address`
+   * se agrega aparte: billing primaria, si no la más reciente, o null.
+   */
+  describe('CustomersService — billing_address en las lecturas', () => {
+    const ship = (id: number, is_primary = false) => ({
+      id,
+      type: 'shipping',
+      is_primary,
+      address_line1: `Envío ${id}`,
+      city: 'Bogotá',
+      country_code: 'CO',
+    });
+    const bill = (id: number, is_primary = false) => ({
+      id,
+      type: 'billing',
+      is_primary,
+      address_line1: `Fiscal ${id}`,
+      address_line2: null,
+      city: 'Medellín',
+      state_province: 'Antioquia',
+      country_code: 'CO',
+      postal_code: null,
+      municipality_code: '05001',
+      phone_number: null,
+      latitude: null,
+    });
+
+    it('findAll: una sola consulta trae shipping+billing; addresses queda sólo shipping', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        { id: 1, addresses: [ship(10, true), bill(11), bill(12, true), ship(13)] },
+        { id: 2, addresses: [ship(20, true)] },
+      ]);
+      mockPrismaService.users.count.mockResolvedValue(2);
+
+      const result = await service.findAll(7, {});
+
+      const include = mockPrismaService.users.findMany.mock.calls[0][0].include;
+      expect(include.addresses.where).toEqual({
+        type: { in: ['shipping', 'billing'] },
+      });
+      expect(include.addresses.orderBy).toEqual({ is_primary: 'desc' });
+
+      const [first, second] = result.data as any[];
+      expect(first.addresses.map((a: any) => a.id)).toEqual([10, 13]);
+      expect(first.billing_address).toEqual({
+        id: 12,
+        address_line1: 'Fiscal 12',
+        address_line2: null,
+        city: 'Medellín',
+        state_province: 'Antioquia',
+        country_code: 'CO',
+        postal_code: null,
+        municipality_code: '05001',
+        phone_number: null,
+        type: 'billing',
+        is_primary: true,
+      });
+      expect(second.addresses.map((a: any) => a.id)).toEqual([20]);
+      expect(second.billing_address).toBeNull();
+      expect(result.meta.total).toBe(2);
+    });
+
+    it('sin billing primaria toma la más reciente', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 5,
+        addresses: [bill(30), bill(31)],
+      });
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+      const result: any = await service.findOne(7, 5);
+
+      expect(result.billing_address.id).toBe(31);
+      expect(result.addresses).toEqual([]);
+    });
+
+    it('findByDocumentInOrganization (lookup por documento) también expone billing_address', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 6,
+        store_users: [],
+        addresses: [ship(40, true), bill(41, true)],
+      });
+
+      const result = await service.findByDocumentInOrganization(100, '1020304050', 'CC');
+
+      expect(result.addresses.map((a: any) => a.id)).toEqual([40]);
+      expect(result.billing_address.id).toBe(41);
+    });
+
+    it('findByDocumentInOrganization sin coincidencia sigue devolviendo null', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+      await expect(
+        service.findByDocumentInOrganization(100, '1020304050', 'CC'),
+      ).resolves.toBeNull();
     });
   });
 

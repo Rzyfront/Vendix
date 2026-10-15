@@ -5,7 +5,18 @@ import type {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
+import type { Customer } from '../../../customers/models/customer.model';
 import {
+  addressPayloadToAcquirerAddress,
+  buildInlineCustomerFromForm,
+  customerInvoiceAddress,
+  customerNeedsFullRecord,
+  customerToAcquirerPrefill,
+  externalIdentityToInlineCustomer,
+  fillEmptyAcquirerFields,
+  missingAcquirerEmissionFields,
+  unwrapCustomerResponse,
+  type AcquirerEmissionState,
   aiuDocumentFingerprint,
   aiuLineTaxableShare,
   applyAiuMarkingToRows,
@@ -980,5 +991,305 @@ describe('invoice-create-page · isDocumentLikeTerm (consulta RUES del adquirien
     expect(isDocumentLikeTerm('Tecnicell')).toBe(false);
     expect(isDocumentLikeTerm('compras@tecnicell.co')).toBe(false);
     expect(isDocumentLikeTerm('1234')).toBe(false);
+  });
+});
+
+describe('invoice-create-page · customerToAcquirerPrefill (precarga del adquiriente)', () => {
+  const base = (overrides: Partial<Customer> = {}): Customer => ({
+    id: 42,
+    email: 'compras@acme.co',
+    first_name: '',
+    last_name: '',
+    legal_name: 'ACME S.A.S.',
+    phone: '6015550000',
+    document_type: 'NIT',
+    document_number: '900123456',
+    verification_digit: '8',
+    fiscal_responsibilities: ['O-13'],
+    tax_regime: 'COMUN',
+    person_type: 'JURIDICA',
+    ...overrides,
+  });
+
+  it('prefiere la dirección de facturación y no pega la ciudad a la línea', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        billing_address: {
+          id: 1,
+          address_line1: 'Cra 10 # 20-30',
+          address_line2: 'Of. 401',
+          city: 'Medellín',
+          state_province: 'Antioquia',
+          municipality_code: '05001',
+        },
+        addresses: [
+          { id: 2, address_line1: 'Calle 1', city: 'Bogotá', municipality_code: '11001' },
+        ],
+      }),
+    );
+    expect(prefill.customer_address).toBe('Cra 10 # 20-30, Of. 401');
+    expect(prefill.customer_municipality_code).toBe('05001');
+    expect(prefill.customer_city_name).toBe('Medellín');
+    expect(prefill.customer_department_name).toBe('Antioquia');
+  });
+
+  it('cae a la primera dirección de envío sin facturación', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        billing_address: null,
+        addresses: [
+          { id: 2, address_line1: 'Calle 1 # 2-3', city: 'Bogotá', state_province: 'Bogotá D.C.', municipality_code: '11001' },
+        ],
+      }),
+    );
+    expect(prefill.customer_address).toBe('Calle 1 # 2-3');
+    expect(prefill.customer_municipality_code).toBe('11001');
+  });
+
+  it('rellena identidad, régimen, responsabilidades y contacto de la ficha', () => {
+    const prefill = customerToAcquirerPrefill(base());
+    expect(prefill.customer_id).toBe(42);
+    expect(prefill.customer_name).toBe('ACME S.A.S.');
+    expect(prefill.customer_document_type).toBe('31');
+    expect(prefill.customer_tax_id).toBe('900123456');
+    expect(prefill.customer_verification_digit).toBe('8');
+    expect(prefill.customer_person_type).toBe('JURIDICA');
+    expect(prefill.customer_tax_regime).toBe('COMUN');
+    expect(prefill.customer_fiscal_responsibilities).toEqual(['O-13']);
+    expect(prefill.customer_email).toBe('compras@acme.co');
+    expect(prefill.customer_phone).toBe('6015550000');
+    expect(prefill.customer_address).toBe('');
+  });
+
+  it('persona sin tipo guardado: natural con cédula, nombre por nombres', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        legal_name: null,
+        first_name: 'Keilin',
+        last_name: 'Sierra',
+        document_type: 'CC',
+        person_type: null,
+        phone: null,
+        addresses: [{ id: 3, address_line1: 'Mz 4 Casa 2', phone_number: '3001112233' }],
+      }),
+    );
+    expect(prefill.customer_person_type).toBe('NATURAL');
+    expect(prefill.customer_name).toBe('Keilin Sierra');
+    expect(prefill.customer_phone).toBe('3001112233');
+  });
+
+  it('pide la ficha completa sólo si falta dirección o municipio', () => {
+    expect(customerNeedsFullRecord(base())).toBe(true);
+    expect(
+      customerNeedsFullRecord(
+        base({ billing_address: { id: 1, address_line1: 'x', municipality_code: '' } }),
+      ),
+    ).toBe(true);
+    expect(
+      customerNeedsFullRecord(
+        base({ billing_address: { id: 1, address_line1: 'x', municipality_code: '05001' } }),
+      ),
+    ).toBe(false);
+    expect(customerInvoiceAddress(base())).toBeNull();
+  });
+});
+
+describe('invoice-create-page · fillEmptyAcquirerFields / unwrapCustomerResponse', () => {
+  it('sólo completa lo vacío y nunca toca customer_id', () => {
+    const prefill = customerToAcquirerPrefill({
+      id: 7,
+      email: 'a@b.co',
+      first_name: 'Ana',
+      last_name: 'Ruiz',
+      document_type: 'CC',
+      document_number: '1020304050',
+      billing_address: { id: 1, address_line1: 'Cra 1', city: 'Cali', municipality_code: '76001' },
+    });
+    const patch = fillEmptyAcquirerFields(
+      {
+        customer_id: 7,
+        customer_email: 'escrito@mano.co',
+        customer_address: '',
+        customer_municipality_code: null,
+        customer_fiscal_responsibilities: [],
+      },
+      prefill,
+    );
+    expect(patch['customer_id']).toBeUndefined();
+    expect(patch['customer_email']).toBeUndefined();
+    expect(patch['customer_address']).toBe('Cra 1');
+    expect(patch['customer_municipality_code']).toBe('76001');
+    expect(patch['customer_fiscal_responsibilities']).toBeUndefined();
+  });
+
+  it('acepta la ficha a secas o envuelta en data', () => {
+    expect(unwrapCustomerResponse({ id: 3, email: '' })?.id).toBe(3);
+    expect(unwrapCustomerResponse({ data: { id: 4 } })?.id).toBe(4);
+    expect(unwrapCustomerResponse({ success: false })).toBeNull();
+    expect(unwrapCustomerResponse(null)).toBeNull();
+  });
+});
+
+describe('invoice-create-page · missingAcquirerEmissionFields (validación en pantalla)', () => {
+  const state = (overrides: Partial<AcquirerEmissionState> = {}): AcquirerEmissionState => ({
+    customer_id: null,
+    customer_name: '',
+    customer_tax_id: '',
+    customer_document_type: '31',
+    customer_address: '',
+    customer_municipality_code: '',
+    isExport: false,
+    ...overrides,
+  });
+  const fields = (s: AcquirerEmissionState) =>
+    missingAcquirerEmissionFields(s).map((missing) => missing.field);
+
+  it('consumidor final (sin documento) no exige nada', () => {
+    expect(fields(state())).toEqual([]);
+  });
+
+  it('con documento y sin ficha exige nombre, dirección y municipio', () => {
+    expect(fields(state({ customer_tax_id: '900123456' }))).toEqual([
+      'customer_name',
+      'customer_address',
+      'customer_municipality_code',
+    ]);
+  });
+
+  it('con ficha vinculada el nombre lo pone el servidor; la dirección sigue', () => {
+    expect(
+      fields(state({ customer_id: 9, customer_tax_id: '900123456', customer_address: 'Cra 1' })),
+    ).toEqual(['customer_municipality_code']);
+  });
+
+  it('dirección completa con municipio no deja faltantes', () => {
+    expect(
+      fields(
+        state({
+          customer_tax_id: '900123456',
+          customer_name: 'ACME',
+          customer_address: 'Cra 1',
+          customer_municipality_code: '05001',
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('municipio sin dirección pide la dirección; sin tipo de documento lo pide', () => {
+    expect(fields(state({ customer_municipality_code: '05001' }))).toEqual([
+      'customer_address',
+    ]);
+    expect(
+      fields(
+        state({
+          customer_tax_id: '1',
+          customer_name: 'X',
+          customer_document_type: '',
+          customer_address: 'a',
+          customer_municipality_code: '05001',
+        }),
+      ),
+    ).toEqual(['customer_document_type']);
+  });
+
+  it('exportación no exige dirección ni municipio DANE', () => {
+    expect(
+      fields(state({ customer_tax_id: '900123456', customer_name: 'ACME', isExport: true })),
+    ).toEqual([]);
+  });
+});
+
+describe('invoice-create-page · alta inline del adquiriente', () => {
+  it('RUES jurídica → base con razón social y sigla del documento', () => {
+    const inline = externalIdentityToInlineCustomer({
+      source: 'rues',
+      document_type: 'NIT',
+      document_number: '900123456',
+      verification_digit: '8',
+      person_type: 'JURIDICA',
+      legal_name: 'ACME S.A.S.',
+      first_name: null,
+      last_name: null,
+      registration_status: 'ACTIVA',
+      is_active: true,
+      last_renewed_year: 2026,
+      chamber: 'Bogotá',
+      source_updated_at: null,
+    });
+    expect(inline.legal_name).toBe('ACME S.A.S.');
+    expect(inline.document_type).toBe('NIT');
+    expect(inline.person_type).toBe('JURIDICA');
+    expect(inline.first_name).toBe('');
+  });
+
+  it('la pantalla manda: correo, régimen y documento salen del formulario; vacíos se omiten', () => {
+    const result = buildInlineCustomerFromForm(
+      {
+        first_name: '',
+        last_name: '',
+        legal_name: 'ACME S.A.S.',
+        document_type: 'NIT',
+        document_number: '900123456',
+        verification_digit: '8',
+        person_type: 'JURIDICA',
+        ciiu_code: '4711',
+      },
+      {
+        customer_name: 'ACME SAS',
+        customer_person_type: 'JURIDICA',
+        customer_email: 'compras@acme.co',
+        customer_phone: '',
+        customer_tax_regime: '',
+        customer_fiscal_responsibilities: ['O-13'],
+      },
+      { taxIdBase: '900123456', dv: '8', isNit: true },
+    );
+    expect(result.legal_name).toBe('ACME SAS');
+    expect(result.email).toBe('compras@acme.co');
+    expect('phone' in result).toBe(false);
+    expect('tax_regime' in result).toBe(false);
+    expect(result.fiscal_responsibilities).toEqual(['O-13']);
+    expect(result.ciiu_code).toBe('4711');
+    expect(result.verification_digit).toBe('8');
+  });
+
+  it('cédula: persona natural, sin DV, nombre corregido va entero', () => {
+    const result = buildInlineCustomerFromForm(
+      { first_name: 'Keilin', last_name: 'Sierra', document_type: 'CC', person_type: 'NATURAL' },
+      { customer_name: 'Keilin Luz Sierra Toro', customer_person_type: 'JURIDICA' },
+      { taxIdBase: '1118860902', dv: '', isNit: false },
+    );
+    expect(result.person_type).toBe('NATURAL');
+    expect(result.verification_digit).toBeNull();
+    expect(result.first_name).toBe('Keilin Luz Sierra Toro');
+    expect(result.last_name).toBe('');
+    expect(result.document_number).toBe('1118860902');
+  });
+
+  it('nombre sin cambios conserva nombres y apellidos separados', () => {
+    const result = buildInlineCustomerFromForm(
+      { first_name: 'Keilin', last_name: 'Sierra', person_type: 'NATURAL' },
+      { customer_name: 'Keilin Sierra' },
+      { taxIdBase: '1118860902', dv: '', isNit: false },
+    );
+    expect(result.first_name).toBe('Keilin');
+    expect(result.last_name).toBe('Sierra');
+  });
+
+  it('dirección del modal de alta: líneas sin ciudad, municipio y nombres', () => {
+    expect(
+      addressPayloadToAcquirerAddress({
+        address_line1: 'Cra 10 # 20-30',
+        address_line2: null,
+        city: 'Medellín',
+        state_province: 'Antioquia',
+        municipality_code: '05001',
+      }),
+    ).toEqual({
+      customer_address: 'Cra 10 # 20-30',
+      customer_municipality_code: '05001',
+      customer_city_name: 'Medellín',
+      customer_department_name: 'Antioquia',
+    });
   });
 });

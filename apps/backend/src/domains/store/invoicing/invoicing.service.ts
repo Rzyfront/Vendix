@@ -23,6 +23,7 @@ import {
 } from './dto/create-invoice.dto';
 import { TaxFiscalType } from '../taxes/dto';
 import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
+import { InvoiceAddressDto } from './dto/invoice-address.dto';
 import { CustomersService } from '../customers/customers.service';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
@@ -1783,6 +1784,7 @@ export class InvoicingService {
       resolved_customer_id = await this.createInlineCustomer(
         context,
         dto.inline_customer,
+        dto.customer_address,
       );
     } else {
       // Sólo el id que llegó del cliente necesita puerta: el creado en línea
@@ -2880,6 +2882,7 @@ export class InvoicingService {
       store_id?: number;
     },
     dto: CreateCustomerDto,
+    invoice_address?: Partial<InvoiceAddressDto> | null,
   ): Promise<number> {
     const store_id = Number(context.store_id);
 
@@ -2896,9 +2899,28 @@ export class InvoicingService {
       );
     }
 
+    // 6b — la dirección fiscal de la factura se ofrece como `billing` del
+    // cliente. `resolveInlineCustomer` sólo la graba si el cliente NACE aquí
+    // (un cliente existente conserva su ficha) y nunca bloquea por ella.
+    const address_line =
+      typeof invoice_address?.address_line === 'string'
+        ? invoice_address.address_line.trim()
+        : '';
     const { customer_id } = await this.customersService.resolveInlineCustomer(
       store_id,
       dto,
+      address_line
+        ? {
+            billing_address: {
+              address_line1: address_line,
+              city: invoice_address?.city_name ?? null,
+              state_province: invoice_address?.department_name ?? null,
+              municipality_code: invoice_address?.city_code ?? null,
+              country_code: invoice_address?.country_code ?? 'CO',
+              postal_code: invoice_address?.postal_code ?? null,
+            },
+          }
+        : undefined,
     );
     return customer_id;
   }

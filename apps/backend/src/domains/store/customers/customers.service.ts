@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { user_state_enum, persona_type_enum } from '@prisma/client';
+import {
+  address_type_enum,
+  user_state_enum,
+  persona_type_enum,
+} from '@prisma/client';
 
 // Local alias mirroring `create-customer.dto.ts`'s own PascalCase alias for
 // `persona_type_enum` — the DTO does not export it, so it is redeclared here.
@@ -44,6 +48,96 @@ const CUSTOMER_PRIVATE_COLUMNS = {
   failed_login_attempts: true,
   locked_until: true,
 } as const;
+
+/**
+ * Dirección FISCAL (type `billing`) expuesta junto a la ficha del cliente.
+ *
+ * Las lecturas de clientes siempre devolvieron `addresses` filtrado a
+ * `shipping` (POS, checkout, despacho y Vexi leen `addresses[0]` como
+ * dirección de envío) y la de facturación nunca salía. `billing_address` se
+ * AGREGA sin tocar `addresses`: Nueva factura precarga con ella la dirección
+ * fiscal completa (municipio DANE incluido).
+ */
+export interface CustomerBillingAddress {
+  id: number;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state_province: string | null;
+  country_code: string;
+  postal_code: string | null;
+  municipality_code: string | null;
+  phone_number: string | null;
+  type: 'billing';
+  is_primary: boolean;
+}
+
+/**
+ * Dirección fiscal capturada en otro flujo (Nueva factura) para persistirla
+ * como `billing` del cliente recién creado. Forma neutra: el llamador mapea
+ * su propio DTO a ésta para que clientes no dependa de facturación.
+ */
+export interface InlineCustomerBillingAddressInput {
+  address_line1: string;
+  city?: string | null;
+  state_province?: string | null;
+  municipality_code?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+}
+
+/**
+ * Include de `addresses` para las lecturas de clientes: shipping (contrato
+ * histórico) + billing (para `billing_address`) en UNA sola consulta anidada.
+ * Va por la relación `users.addresses` a propósito: una consulta top-level a
+ * `addresses` queda store-scoped y perdería las direcciones con
+ * `store_id = null`. El `orderBy` es el mismo de siempre para no alterar el
+ * orden de `addresses`; el desempate de billing se hace en memoria.
+ */
+const CUSTOMER_ADDRESSES_INCLUDE = {
+  where: {
+    type: { in: [address_type_enum.shipping, address_type_enum.billing] },
+  },
+  orderBy: { is_primary: 'desc' as const },
+};
+
+/**
+ * Separa las direcciones leídas con `CUSTOMER_ADDRESSES_INCLUDE`:
+ * `addresses` queda IDÉNTICO al contrato previo (sólo shipping, mismo orden) y
+ * `billing_address` es la billing primaria, si no la más reciente, o `null`.
+ */
+function withBillingAddress<T extends { addresses?: any[] | null }>(
+  user: T,
+): T & { billing_address: CustomerBillingAddress | null } {
+  const all = Array.isArray(user.addresses) ? user.addresses : [];
+  const shipping = all.filter((a) => a?.type === 'shipping');
+  const billing = all
+    .filter((a) => a?.type === 'billing')
+    .sort(
+      (a, b) =>
+        Number(!!b.is_primary) - Number(!!a.is_primary) ||
+        Number(b.id) - Number(a.id),
+    )[0];
+  return {
+    ...user,
+    addresses: shipping,
+    billing_address: billing
+      ? {
+          id: billing.id,
+          address_line1: billing.address_line1,
+          address_line2: billing.address_line2 ?? null,
+          city: billing.city,
+          state_province: billing.state_province ?? null,
+          country_code: billing.country_code,
+          postal_code: billing.postal_code ?? null,
+          municipality_code: billing.municipality_code ?? null,
+          phone_number: billing.phone_number ?? null,
+          type: 'billing',
+          is_primary: !!billing.is_primary,
+        }
+      : null,
+  };
+}
 
 @Injectable()
 export class CustomersService {
@@ -1126,6 +1220,7 @@ export class CustomersService {
   async resolveInlineCustomer(
     storeId: number,
     dto: CreateCustomerDto,
+    options?: { billing_address?: InlineCustomerBillingAddressInput | null },
   ): Promise<{ customer_id: number; was_created: boolean }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -1184,7 +1279,64 @@ export class CustomersService {
     }
 
     const created = await this.create(store.id, dto);
+    // 6b — el cliente NUEVO nace con la dirección fiscal de la factura que lo
+    // creó, para que la próxima factura la precargue (`billing_address`). Un
+    // cliente existente (rama de arriba) NO se toca: su ficha manda.
+    await this.persistInlineBillingAddress(
+      store.id,
+      created.id,
+      options?.billing_address ?? null,
+    );
     return { customer_id: created.id, was_created: true };
+  }
+
+  /**
+   * Graba la dirección fiscal capturada en línea como `billing` primaria del
+   * cliente recién creado. Best-effort: la factura ya tiene su propio snapshot
+   * `customer_address`, así que un fallo aquí sólo se registra y nunca tumba
+   * el flujo que la invocó. Sin `address_line1` no se graba nada.
+   */
+  private async persistInlineBillingAddress(
+    storeId: number,
+    userId: number,
+    input: InlineCustomerBillingAddressInput | null,
+  ): Promise<void> {
+    const line1 = this.normalizeOptionalString(input?.address_line1);
+    if (!input || !line1) return;
+    try {
+      const municipality = this.normalizeOptionalString(
+        input.municipality_code,
+      );
+      await this.prisma.addresses.create({
+        data: {
+          address_line1: line1,
+          city: (this.normalizeOptionalString(input.city) ?? '').slice(0, 100),
+          state_province:
+            this.normalizeOptionalString(input.state_province)?.slice(0, 100) ??
+            null,
+          country_code: (
+            this.normalizeOptionalString(input.country_code) ?? 'CO'
+          )
+            .toUpperCase()
+            .slice(0, 3),
+          postal_code:
+            this.normalizeOptionalString(input.postal_code)?.slice(0, 20) ??
+            null,
+          municipality_code:
+            municipality && /^\d{5}$/.test(municipality) ? municipality : null,
+          type: address_type_enum.billing,
+          is_primary: true,
+          store_id: storeId,
+          organization_id: null,
+          user_id: userId,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `resolveInlineCustomer: billing address not saved for customer ${userId} store ${storeId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   async create(storeId: number, dto: CreateCustomerDto) {
@@ -1460,17 +1612,14 @@ export class CustomersService {
         orderBy: { created_at: 'desc' },
         omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
-          addresses: {
-            where: { type: 'shipping' },
-            orderBy: { is_primary: 'desc' },
-          },
+          addresses: CUSTOMER_ADDRESSES_INCLUDE,
         },
       }),
       this.prisma.users.count({ where }),
     ]);
 
     return {
-      data,
+      data: data.map((u) => withBillingAddress(u)),
       meta: {
         total,
         page,
@@ -1540,14 +1689,13 @@ export class CustomersService {
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
 
-    const usersById = new Map(users.map((u) => [u.id, u]));
+    const usersById = new Map(
+      users.map((u) => [u.id, withBillingAddress(u)]),
+    );
 
     // Preserva el orden del ranking del groupBy y adjunta order_count.
     return ranking
@@ -1578,10 +1726,7 @@ export class CustomersService {
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
 
@@ -1614,7 +1759,7 @@ export class CustomersService {
 
     const row = stats[0];
     return {
-      ...user,
+      ...withBillingAddress(user),
       total_orders: row?._count?.id ?? 0,
       total_spend: row?._sum?.grand_total
         ? Number(row._sum.grand_total)
@@ -2039,18 +2184,16 @@ export class CustomersService {
       where.document_type = normalized.type;
     }
 
-    return this.prisma.users.findFirst({
+    const user = await this.prisma.users.findFirst({
       where,
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         user_roles: true,
         store_users: true,
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
+    return user ? withBillingAddress(user) : null;
   }
 
   /**
