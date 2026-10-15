@@ -962,6 +962,9 @@ export class OrdersBulkPageComponent {
    *    reembolsadas, inexistentes). Se imprime Y se advierte, porque un operador
    *    que pidió 20 y recibe 17 tiene que enterarse ahí, no contando hojas.
    * 3. **Completo** — se confirma con el conteo real de tiquetes y de hojas.
+   *
+   * En 2 y 3, si la impresión salió en varias tandas (formatos mezclados), se
+   * dice por qué: el operador acaba de ver más de un diálogo de impresión.
    */
   private reportPrintOutcome(
     outcome: BulkPrintOutcome,
@@ -975,11 +978,13 @@ export class OrdersBulkPageComponent {
       return;
     }
 
+    const jobsNote = this.printJobsNote(outcome);
     const omitted = outcome.skipped.length + outcome.failedIds.length;
     if (omitted === 0) {
       this.toastService.success(
         `${outcome.rendered} de ${requested} órdenes enviadas a la impresora ` +
-          `(${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'})`,
+          `(${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'})` +
+          (jobsNote ? `.${jobsNote}` : ''),
       );
       return;
     }
@@ -991,11 +996,29 @@ export class OrdersBulkPageComponent {
       .map((s) => s.order_number ?? `#${s.id}`)
       .join(', ');
 
+    // Las fallidas (lote caído o render) traen su propio motivo; las omitidas
+    // por el backend, el de siempre.
+    const reason =
+      outcome.failedIds.length > 0 && outcome.failureMessage
+        ? outcome.failureMessage
+        : 'canceladas, reembolsadas o no disponibles.';
+
     this.toastService.warning(
       `${outcome.rendered} de ${requested} órdenes impresas. ` +
         `${omitted} omitidas${detail ? ` (${detail}${omitted > 3 ? '…' : ''})` : ''}: ` +
-        'canceladas, reembolsadas o no disponibles.',
+        reason +
+        jobsNote,
     );
+  }
+
+  /** Explica por qué el operador vio más de un diálogo de impresión. */
+  private printJobsNote(outcome: BulkPrintOutcome): string {
+    const jobs = outcome.printJobs ?? 1;
+    if (jobs <= 1) return '';
+    const labels = outcome.printJobLabels ?? [];
+    return labels.length > 1
+      ? ` Se imprimieron en ${jobs} tandas porque las órdenes usan formatos distintos (${labels.join(' / ')}).`
+      : ` Se imprimieron en ${jobs} tandas porque las órdenes usan diseños o papeles distintos.`;
   }
 
   private onOperationDone(result: BulkOrdersResult, label: string): void {

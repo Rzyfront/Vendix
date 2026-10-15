@@ -38,11 +38,18 @@
  *
  * ## Un render fallido NO se traga
  *
- * `printTicketsBatch` no envuelve cada tiquete en su propio `try/catch` a
- * propósito: un `TicketData` malformado rechaza TODO el lote en vez de saltarse
- * en silencio una orden que el operador seleccionó. El `catchError` de aquí es
- * el que captura ese rechazo y lo convierte en un desenlace con el mensaje real
- * y los ids afectados — nunca en un "listo" mentiroso.
+ * Las órdenes que `printTicketsBatch` no pudo resolver o imprimir vuelven en
+ * `failedOrderIds` y se suman a `failedIds` del desenlace: nunca se omiten en
+ * silencio. Si NADA llegó al papel, `printTicketsBatch` rechaza; el
+ * `catchError` de aquí convierte ese rechazo en un desenlace con el mensaje y
+ * los ids afectados — nunca en un "listo" mentiroso.
+ *
+ * ## Formatos mezclados ⇒ varias tandas
+ *
+ * El backend decide el formato de cada orden (factura electrónica o tiquete
+ * POS, cada uno con su papel). Lo que no cabe en un solo documento sale en
+ * tandas separadas, un diálogo por tanda; `printJobs` / `printJobLabels` le
+ * permiten al componente explicarle al operador por qué vio más de un diálogo.
  */
 
 import { Injectable, inject, signal } from '@angular/core';
@@ -56,7 +63,12 @@ import {
   switchMap,
 } from 'rxjs';
 
-import { PosTicketService } from '../../pos/services/pos-ticket.service';
+import type { PrintFormatType } from '../../../../../core/models/print-formats.model';
+import {
+  PosTicketService,
+  TicketBatchPrintError,
+  type TicketBatchPrintResult,
+} from '../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../services/order-ticket.service';
 import { OrdersBulkService } from './orders-bulk.service';
 import type {
@@ -71,6 +83,19 @@ export interface BulkPrintRenderProgress {
 }
 
 const IDLE_RENDER_PROGRESS: BulkPrintRenderProgress = { done: 0, total: 0 };
+
+/** Nombre que ve el operador para cada formato que puede resolver una orden. */
+const PRINT_JOB_LABELS: Partial<Record<PrintFormatType, string>> = {
+  pos_sale_ticket: 'tiquete POS',
+  pos_electronic_invoice: 'factura electrónica',
+  fiscal_electronic_invoice: 'factura electrónica',
+  sales_order_invoice: 'factura de venta',
+};
+
+/** Mensaje cuando el render cae por algo que no es un error de dominio. */
+const GENERIC_RENDER_FAILURE =
+  'No se pudieron dibujar los tiquetes de la selección, así que no se envió nada a la impresora. ' +
+  'Vuelve a intentarlo; si persiste, imprime en grupos más pequeños para aislar la orden que falla.';
 
 @Injectable({ providedIn: 'root' })
 export class OrdersBulkPrintService {
@@ -154,37 +179,30 @@ export class OrdersBulkPrintService {
       // El reset del avance lo hace el `finalize` de `printSelection`, que cubre
       // también la cancelación; repetirlo aquí solo daría dos dueños del mismo
       // estado.
-      map(
-        ({ rendered, pages }) =>
-          ({
-            rendered,
-            pages,
-            skipped: payload.skipped ?? [],
-            failureMessage: payload.failureMessage,
-            failedIds: payload.failedIds ?? [],
-          }) satisfies BulkPrintOutcome,
-      ),
+      map((result) => this.toOutcome(payload, result)),
       catchError((error: unknown) => {
-        // El detalle técnico va a la consola y NO al toast: aquí el error es un
-        // `TypeError` del render, no un mensaje del backend redactado para el
-        // operador. `extractApiErrorMessage` devolvería el texto crudo de la
-        // excepción ("Cannot read properties of undefined…"), que no le dice
-        // nada a quien está en el mostrador.
+        // El detalle técnico va a la consola y NO al toast. Solo un
+        // `TicketBatchPrintError` trae un mensaje redactado para el operador;
+        // cualquier otro (un `TypeError` del render) se cambia por el genérico,
+        // porque "Cannot read properties of undefined…" no le dice nada a quien
+        // está en el mostrador.
         console.error(
           '[orders-bulk-print] el render del lote falló; no se imprimió nada',
           error,
+          error instanceof TicketBatchPrintError ? error.detail : undefined,
         );
-        // Todo-o-nada: si el render se cayó, NADA llegó al papel, así que los
-        // ids de las órdenes que sí eran imprimibles pasan a fallidos. El
-        // mensaje del render pisa el del backend: es el fallo que el operador
-        // acaba de ver, y el otro ya quedó en la consola.
+        // Si `printTicketsBatch` rechazó, NADA llegó al papel, así que los ids
+        // de las órdenes que sí eran imprimibles pasan a fallidos. El mensaje
+        // del render pisa el del backend: es el fallo que el operador acaba de
+        // ver, y el otro ya quedó en la consola.
         return of({
           rendered: 0,
           pages: 0,
           skipped: payload.skipped ?? [],
           failureMessage:
-            'No se pudieron dibujar los tiquetes de la selección, así que no se envió nada a la impresora. ' +
-            'Vuelve a intentarlo; si persiste, imprime en grupos más pequeños para aislar la orden que falla.',
+            error instanceof TicketBatchPrintError
+              ? error.message
+              : GENERIC_RENDER_FAILURE,
           failedIds: [
             ...(payload.failedIds ?? []),
             ...orders.map((order) => order.id),
@@ -192,6 +210,38 @@ export class OrdersBulkPrintService {
         } satisfies BulkPrintOutcome);
       }),
     );
+  }
+
+  /**
+   * Funde el resultado del render con lo que ya traía el payload. Las órdenes
+   * que no llegaron al papel se suman a `failedIds`; el mensaje del backend
+   * (lote HTTP caído) va primero porque ocurrió antes.
+   */
+  private toOutcome(
+    payload: BulkPrintPayload,
+    result: TicketBatchPrintResult,
+  ): BulkPrintOutcome {
+    const failureMessage =
+      [payload.failureMessage, result.failureMessage]
+        .filter((message): message is string => !!message)
+        .join(' ') || undefined;
+    const labels = [
+      ...new Set(
+        result.groupFormats
+          .map((format) => PRINT_JOB_LABELS[format])
+          .filter((label): label is string => !!label),
+      ),
+    ];
+
+    return {
+      rendered: result.rendered,
+      pages: result.pages,
+      skipped: payload.skipped ?? [],
+      failureMessage,
+      failedIds: [...(payload.failedIds ?? []), ...result.failedOrderIds],
+      printJobs: result.groups,
+      printJobLabels: labels,
+    };
   }
 
   private emptyOutcome(payload: BulkPrintPayload): BulkPrintOutcome {

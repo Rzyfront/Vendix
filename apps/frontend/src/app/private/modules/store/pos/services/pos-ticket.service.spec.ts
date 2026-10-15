@@ -12,7 +12,11 @@
  * tributaria que no tiene.
  */
 import { firstValueFrom, of } from 'rxjs';
-import { PosTicketService, resolveFiscalQualitiesLine } from './pos-ticket.service';
+import {
+  PosTicketService,
+  TicketBatchPrintError,
+  resolveFiscalQualitiesLine,
+} from './pos-ticket.service';
 import type { TicketData } from '../models/ticket.model';
 
 describe('resolveFiscalQualitiesLine (num. 12 art. 11 Res. 000165/2023)', () => {
@@ -152,6 +156,7 @@ describe('PosTicketService — gateway batch copies', () => {
     copies?: number;
     width_mm?: number;
     is_roll?: boolean;
+    format_type?: string;
     fail?: boolean;
   }>) => {
     const documentPrint = {
@@ -166,7 +171,7 @@ describe('PosTicketService — gateway batch copies', () => {
     const gatewayClient = {
       resolveDocument: jasmine.createSpy('resolveDocument').and.callFake(
         (_type: string, id: number) => of({
-          format_type: 'pos_sale_ticket', document_id: id, engine: 'html',
+          format_type: configs[id]?.format_type ?? 'pos_sale_ticket', document_id: id, engine: 'html',
         }),
       ),
       renderDocument: jasmine.createSpy('renderDocument').and.callFake(
@@ -201,7 +206,9 @@ describe('PosTicketService — gateway batch copies', () => {
       { id: '22', orderId: 22 } as TicketData,
     ]);
 
-    expect(result).toEqual({ rendered: 2, pages: 5 });
+    expect(result).toEqual({
+      rendered: 2, pages: 5, groups: 1, groupFormats: ['pos_sale_ticket'], failedOrderIds: [],
+    });
     expect(gatewayClient.renderDocument).toHaveBeenCalledTimes(2);
     expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
     const assembled = documentPrint.printGatewayHtml.calls.argsFor(0)[0] as string;
@@ -229,18 +236,103 @@ describe('PosTicketService — gateway batch copies', () => {
     expect(assembled.match(/<p>doc-22<\/p>/g)?.length).toBe(1);
   });
 
-  it('rejects incompatible head or paper before printing anything', async () => {
+  it('splits incompatible heads/paper into one document per group, in first-appearance order', async () => {
+    const ticketHead = '<style>.ticket{}</style>';
+    const invoiceHead = '<style>.invoice{}</style>';
+    const { service, documentPrint } = createBatchService({
+      11: { html: html(ticketHead, '<p>T11</p>'), format_type: 'pos_sale_ticket' },
+      22: {
+        html: html(invoiceHead, '<p>F22</p>'), copies: 2,
+        format_type: 'pos_electronic_invoice',
+      },
+      33: { html: html(ticketHead, '<p>T33</p>'), format_type: 'pos_sale_ticket' },
+      44: {
+        html: html(invoiceHead, '<p>F44</p>'),
+        format_type: 'pos_electronic_invoice',
+      },
+    });
+    const result = await service.printTicketsBatch([11, 22, 33, 44].map(
+      (id) => ({ id: String(id), orderId: id }) as TicketData,
+    ));
+
+    expect(result).toEqual({
+      rendered: 4,
+      pages: 5,
+      groups: 2,
+      groupFormats: ['pos_sale_ticket', 'pos_electronic_invoice'],
+      failedOrderIds: [],
+    });
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(2);
+    const [first, second] = documentPrint.printGatewayHtml.calls.allArgs()
+      .map((args) => args[0] as string);
+    expect(first).toContain(ticketHead);
+    expect(first).not.toContain(invoiceHead);
+    expect(Array.from(first.matchAll(/<p>(\w+)<\/p>/g), (m) => m[1])).toEqual(['T11', 'T33']);
+    expect(second).toContain(invoiceHead);
+    expect(Array.from(second.matchAll(/<p>(\w+)<\/p>/g), (m) => m[1])).toEqual(['F22', 'F22', 'F44']);
+  });
+
+  it('groups by paper even when the head is identical', async () => {
+    const { service, documentPrint } = createBatchService({
+      11: { width_mm: 80 },
+      22: { width_mm: 58 },
+      33: { width_mm: 80, is_roll: false },
+    });
+    const result = await service.printTicketsBatch([11, 22, 33].map(
+      (id) => ({ id: String(id), orderId: id }) as TicketData,
+    ));
+
+    expect(result.groups).toBe(3);
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps printing the remaining groups when one group fails to print', async () => {
+    spyOn(console, 'warn');
     const { service, documentPrint } = createBatchService({
       11: { html: html('<style>.a{}</style>', '<p>A</p>') },
-      22: { html: html('<style>.b{}</style>', '<p>B</p>'), width_mm: 58, is_roll: true },
+      22: { html: html('<style>.b{}</style>', '<p>B</p>'), copies: 3 },
+      33: { html: html('<style>.a{}</style>', '<p>C</p>') },
+    });
+    documentPrint.printGatewayHtml.and.callFake((doc: string) =>
+      doc.includes('.a{}') ? Promise.reject(new Error('iframe muerto')) : Promise.resolve(),
+    );
+    const result = await service.printTicketsBatch([11, 22, 33].map(
+      (id) => ({ id: String(id), orderId: id }) as TicketData,
+    ));
+
+    expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(2);
+    expect(result.rendered).toBe(1);
+    expect(result.pages).toBe(3);
+    expect(result.groups).toBe(1);
+    expect(result.failedOrderIds).toEqual([11, 33]);
+    expect(result.failureMessage).toBe('Una de las tandas no se pudo enviar a la impresora.');
+  });
+
+  it('rejects with a domain error when no group reaches the printer', async () => {
+    spyOn(console, 'warn');
+    const { service, documentPrint } = createBatchService({ 11: {}, 22: {} });
+    documentPrint.printGatewayHtml.and.returnValue(Promise.reject(new TypeError('boom')));
+
+    await expectAsync(service.printTicketsBatch([
+      { id: '11', orderId: 11 } as TicketData,
+      { id: '22', orderId: 22 } as TicketData,
+    ])).toBeRejectedWith(jasmine.any(TicketBatchPrintError));
+  });
+
+  it('rejects with a domain error when no order resolves', async () => {
+    const { service, documentPrint } = createBatchService({
+      11: { fail: true },
+      22: { fail: true },
     });
 
     await expectAsync(service.printTicketsBatch([
       { id: '11', orderId: 11 } as TicketData,
       { id: '22', orderId: 22 } as TicketData,
-    ])).toBeRejectedWithError(/diseños o papeles incompatibles; imprima por separado/);
+    ])).toBeRejectedWithError(
+      TicketBatchPrintError,
+      /Ninguna de las 2 órdenes se pudo preparar para imprimir/,
+    );
     expect(documentPrint.printGatewayHtml).not.toHaveBeenCalled();
-    expect(documentPrint.print).not.toHaveBeenCalled();
   });
 
   it('prints successful documents and retains failed ids as a partial result', async () => {
@@ -254,7 +346,14 @@ describe('PosTicketService — gateway batch copies', () => {
       { id: '22', orderId: 22 } as TicketData,
     ]);
 
-    expect(result).toEqual({ rendered: 1, pages: 2 });
+    expect(result).toEqual({
+      rendered: 1,
+      pages: 2,
+      groups: 1,
+      groupFormats: ['pos_sale_ticket'],
+      failedOrderIds: [22],
+      failureMessage: '1 orden no se pudo preparar para imprimir.',
+    });
     expect(documentPrint.printGatewayHtml).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalled();
   });

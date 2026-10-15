@@ -244,6 +244,17 @@ export interface BulkPrintOutcome {
   failureMessage?: string;
   /** Ids que no llegaron a dibujarse por un lote caído o un render fallido. */
   failedIds: number[];
+  /**
+   * Documentos (diálogos) en que salió la impresión. Mayor que 1 cuando la
+   * selección mezcla formatos que no caben en un solo documento (factura
+   * electrónica vs tiquete POS, o papeles distintos). Ausente si nada se envió.
+   */
+  printJobs?: number;
+  /**
+   * Nombre legible de cada tanda impresa ('factura electrónica', 'tiquete
+   * POS'…), sin repetidos, para explicarle al operador por qué salió en varias.
+   */
+  printJobLabels?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
