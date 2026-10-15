@@ -265,6 +265,7 @@ export class ProductsBulkController {
         storeId,
         req.user,
         { offset: body.offset, limit: body.limit },
+        { initialLoadAck: body.initial_load_ack === true },
       );
 
       if (result.failed > 0) {
