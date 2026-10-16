@@ -1,5 +1,7 @@
+import { createLegalDocumentMetadata } from './legal-document-metadata';
 import {
   Component,
+  DestroyRef,
   inject,
   computed,
   signal,
@@ -7,8 +9,8 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { ViewportScroller } from '@angular/common';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { DOCUMENT, ViewportScroller } from '@angular/common';
+import { DomSanitizer, SafeHtml, Meta, Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, of } from 'rxjs';
 
@@ -147,6 +149,9 @@ export class LegalDocumentViewerComponent {
   });
 
   constructor() {
+    const metadata = createLegalDocumentMetadata(inject(DOCUMENT), inject(Title), inject(Meta));
+    effect(() => metadata.update(this.document(), this.result().loaded));
+    inject(DestroyRef).onDestroy(() => metadata.restore());
     // After content renders, scroll to the URL fragment anchor if present.
     effect(() => {
       const doc = this.document();
