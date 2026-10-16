@@ -1,3 +1,5 @@
+import { normalizeEmail } from '@common/utils/email.util';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -8,6 +10,9 @@ export class LoginDto {
   })
   @IsEmail({}, { message: 'Debe ser un email válido' })
   @IsNotEmpty({ message: 'El email es requerido' })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeEmail(value) : value,
+  )
   email: string;
 
   @ApiProperty({

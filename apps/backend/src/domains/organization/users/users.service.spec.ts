@@ -1,17 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { AuditService } from '../../../common/audit/audit.service';
+import {
+  AuditResource,
+  AuditService,
+} from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '@common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { EmailService } from '../../../email/email.service';
-import {
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { RequestContextService } from '@common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { ConflictException, BadRequestException } from '@nestjs/common';
 
 // Mock the problematic import
 jest.mock('../../../prisma/services/organization-prisma.service', () => ({
@@ -29,21 +30,36 @@ describe('UsersService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
       findFirst: jest.fn(),
+      create: jest.fn(),
     },
+    roles: { findFirst: jest.fn() },
+    organizations: { findUnique: jest.fn() },
+    user_roles: { findFirst: jest.fn(), create: jest.fn() },
     email_verification_tokens: {
       deleteMany: jest.fn(),
+      create: jest.fn(),
     },
     user_settings: {
       findFirst: jest.fn(),
+      create: jest.fn(),
     },
+    withoutScope: jest.fn(),
+    $transaction: jest.fn(),
+  };
+  const mockStaffProvisioning = {
+    assertEmailAvailableForStaff: jest.fn(),
+    provisionStaffMembership: jest.fn(),
   };
 
   const mockAuditService = {
     log: jest.fn(),
+    logUpdate: jest.fn(),
   };
 
   const mockEmailService = {
     sendEmailVerificationEmail: jest.fn(),
+    sendVerificationEmail: jest.fn(),
+    sendInvitationEmail: jest.fn(),
   };
 
   const mockUser = {
@@ -82,10 +98,7 @@ describe('UsersService', () => {
           // staff salieron de UsersService a un servicio compartido, porque la
           // misma regla la aplican el panel de organización y el de tienda.
           provide: StaffProvisioningService,
-          useValue: {
-            assertEmailAvailableForStaff: jest.fn(),
-            provisionStaffMembership: jest.fn(),
-          },
+          useValue: mockStaffProvisioning,
         },
         {
           // La asignación de roles también se centralizó: es la que respeta el
@@ -114,6 +127,121 @@ describe('UsersService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  describe('email normalization', () => {
+    beforeEach(() => {
+      mockStaffProvisioning.assertEmailAvailableForStaff.mockReset();
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        ...mockUser,
+        email: 'Test@Example.COM',
+        user_roles: [{ roles: { name: 'employee' } }],
+      });
+      mockPrismaService.users.create.mockResolvedValue(mockUser);
+      mockPrismaService.users.update.mockResolvedValue(mockUser);
+      mockPrismaService.roles.findFirst.mockResolvedValue({
+        id: 2,
+        name: 'owner',
+      });
+      mockPrismaService.user_roles.findFirst.mockResolvedValue(null);
+      mockPrismaService.organizations.findUnique.mockResolvedValue({
+        slug: 'org',
+      });
+      mockPrismaService.withoutScope.mockReturnValue(mockPrismaService);
+      mockPrismaService.$transaction.mockImplementation((callback) =>
+        callback(mockPrismaService),
+      );
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        organization_id: 1,
+        is_owner: true,
+        is_super_admin: false,
+      });
+    });
+
+    it('normalizes the staff email before availability checks and create', async () => {
+      await service.create({
+        first_name: 'John',
+        last_name: 'Doe',
+        username: 'john',
+        email: ' Test@Example.COM ',
+        password: 'SecurePassword123!',
+        role_id: 2,
+      });
+
+      expect(
+        mockStaffProvisioning.assertEmailAvailableForStaff,
+      ).toHaveBeenCalledWith('test@example.com');
+      expect(mockPrismaService.users.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ email: 'test@example.com' }),
+        }),
+      );
+    });
+
+    it('allows a casing-only edit and excludes the current staff account', async () => {
+      await service.update(1, { email: ' TEST@EXAMPLE.com ' });
+
+      expect(
+        mockStaffProvisioning.assertEmailAvailableForStaff,
+      ).toHaveBeenCalledWith('test@example.com', { excludeUserId: 1 });
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ email: 'test@example.com' }),
+      });
+    });
+
+    it('does not update a staff email when the shared availability guard rejects it', async () => {
+      mockStaffProvisioning.assertEmailAvailableForStaff.mockRejectedValueOnce(
+        new ConflictException('Email already exists'),
+      );
+
+      await expect(
+        service.update(1, { email: ' Taken@Example.COM ' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps customer emails organization-local instead of applying the staff guard', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        ...mockUser,
+        user_roles: [{ roles: { name: 'customer' } }],
+      });
+
+      await service.update(1, { email: ' Customer@Example.COM ' });
+
+      expect(
+        mockStaffProvisioning.assertEmailAvailableForStaff,
+      ).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ email: 'customer@example.com' }),
+      });
+    });
+
+    it('normalizes invitations without changing their app or pending state', async () => {
+      await service.invite({
+        first_name: 'John',
+        last_name: 'Doe',
+        email: ' Test@Example.COM ',
+        app: 'ORG_ADMIN',
+      });
+
+      expect(
+        mockStaffProvisioning.assertEmailAvailableForStaff,
+      ).toHaveBeenCalledWith('test@example.com');
+      expect(mockPrismaService.users.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'test@example.com',
+            state: 'pending_verification',
+          }),
+        }),
+      );
+      expect(mockPrismaService.user_settings.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ app_type: 'ORG_ADMIN' }),
+      });
+    });
   });
 
   describe('verifyEmail', () => {
@@ -145,6 +273,7 @@ describe('UsersService', () => {
         where: { id: userId },
         data: {
           state: 'active',
+          email_verified: true,
           updated_at: expect.any(Date),
         },
       });
@@ -155,14 +284,16 @@ describe('UsersService', () => {
         where: { user_id: userId },
       });
 
-      expect(auditService.log).toHaveBeenCalledWith(
-        'USER_EMAIL_VERIFIED',
+      expect(auditService.logUpdate).toHaveBeenCalledWith(
         userId,
-        expect.objectContaining({
+        AuditResource.USERS,
+        userId,
+        { state: 'pending_verification' },
+        { state: 'active', email_verified: true },
+        {
           action: 'verify_email',
-          old_state: 'pending_verification',
-          new_state: 'active',
-        }),
+          verified_by: 'admin',
+        },
       );
 
       expect(result).toEqual({
@@ -171,14 +302,16 @@ describe('UsersService', () => {
       });
     });
 
-    it('should throw NotFoundException when user does not exist', async () => {
+    it('should throw ORG_USER_001 when user does not exist', async () => {
       const userId = 999;
 
       mockPrismaService.users.findUnique.mockResolvedValue(null);
 
-      await expect(service.verifyEmail(userId)).rejects.toThrow(
-        NotFoundException,
-      );
+      const result = service.verifyEmail(userId);
+      await expect(result).rejects.toBeInstanceOf(VendixHttpException);
+      await expect(result).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORG_USER_001.code,
+      });
 
       expect(prismaService.users.findUnique).toHaveBeenCalledWith({
         where: { id: userId },
@@ -199,6 +332,7 @@ describe('UsersService', () => {
         where: { id: userId },
         data: {
           state: 'active',
+          email_verified: true,
           updated_at: expect.any(Date),
         },
       });
@@ -268,26 +402,31 @@ describe('UsersService', () => {
         },
       });
 
-      expect(auditService.log).toHaveBeenCalledWith(
-        'USER_PASSWORD_RESET',
+      expect(auditService.logUpdate).toHaveBeenCalledWith(
         userId,
-        expect.objectContaining({
+        AuditResource.USERS,
+        userId,
+        { password: '[REDACTED]' },
+        { password: '[REDACTED]' },
+        {
           action: 'reset_password',
           reset_by_admin: true,
-        }),
+        },
       );
 
       expect(result).toEqual(mockUser);
     });
 
-    it('should throw NotFoundException when user does not exist', async () => {
+    it('should throw ORG_USER_001 when user does not exist', async () => {
       const userId = 999;
 
       mockPrismaService.users.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.resetPassword(userId, resetPasswordDto),
-      ).rejects.toThrow(NotFoundException);
+      const result = service.resetPassword(userId, resetPasswordDto);
+      await expect(result).rejects.toBeInstanceOf(VendixHttpException);
+      await expect(result).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORG_USER_001.code,
+      });
 
       expect(prismaService.users.update).not.toHaveBeenCalled();
     });
@@ -342,14 +481,15 @@ describe('UsersService', () => {
 
       mockPrismaService.users.findUnique.mockResolvedValue(mockUser);
 
-      // Mock bcrypt to throw an error
-      jest.doMock('bcrypt', () => ({
-        hash: jest.fn().mockRejectedValue(new Error('Hashing failed')),
-      }));
+      // The service imports bcryptjs; replacing bcrypt after importing the
+      // service never exercised the hashing failure branch.
+      jest
+        .spyOn(jest.requireActual('bcryptjs'), 'hash')
+        .mockRejectedValueOnce(new Error('Hashing failed'));
 
       await expect(
         service.resetPassword(userId, resetPasswordDto),
-      ).rejects.toThrow();
+      ).rejects.toThrow('Hashing failed');
     });
 
     it('should handle database errors during password reset', async () => {
@@ -399,16 +539,22 @@ describe('UsersService', () => {
 
       await service.resetPassword(userId, resetPasswordDto);
 
-      expect(auditService.log).toHaveBeenCalledTimes(2);
-      expect(auditService.log).toHaveBeenCalledWith(
-        'USER_EMAIL_VERIFIED',
+      expect(auditService.logUpdate).toHaveBeenCalledTimes(2);
+      expect(auditService.logUpdate).toHaveBeenCalledWith(
         userId,
-        expect.any(Object),
+        AuditResource.USERS,
+        userId,
+        { state: 'pending_verification' },
+        { state: 'active', email_verified: true },
+        { action: 'verify_email', verified_by: 'admin' },
       );
-      expect(auditService.log).toHaveBeenCalledWith(
-        'USER_PASSWORD_RESET',
+      expect(auditService.logUpdate).toHaveBeenCalledWith(
         userId,
-        expect.any(Object),
+        AuditResource.USERS,
+        userId,
+        { password: '[REDACTED]' },
+        { password: '[REDACTED]' },
+        { action: 'reset_password', reset_by_admin: true },
       );
     });
 

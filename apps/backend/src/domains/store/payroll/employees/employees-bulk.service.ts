@@ -23,6 +23,7 @@ import {
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
+import { normalizeEmail } from '@common/utils/email.util';
 
 @Injectable()
 export class EmployeesBulkService {
@@ -973,7 +974,7 @@ export class EmployeesBulkService {
               data: {
                 first_name: empData.first_name.trim(),
                 last_name: empData.last_name.trim(),
-                email: empData.email.trim().toLowerCase(),
+                email: normalizeEmail(empData.email),
                 username,
                 password: hashedPassword,
                 organization_id: organizationId,

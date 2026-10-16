@@ -16,6 +16,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
+import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
@@ -171,7 +172,10 @@ export class CustomersService {
   }): { type: string | null; number: string | null } {
     const type = input.type ? input.type.trim().toUpperCase() : null;
     const number = input.number
-      ? input.number.trim().toUpperCase().replace(/[\s\-.]/g, '')
+      ? input.number
+          .trim()
+          .toUpperCase()
+          .replace(/[\s\-.]/g, '')
       : null;
     return { type, number };
   }
@@ -209,7 +213,10 @@ export class CustomersService {
     // El número traía el DV pegado Y además vino un DV aparte: si no son el
     // mismo dígito, el comerciante declaró dos verdades distintas.
     const inlineConflict =
-      raw.includes('-') && !!dv && result.provided_dv !== null && result.provided_dv !== dv;
+      raw.includes('-') &&
+      !!dv &&
+      result.provided_dv !== null &&
+      result.provided_dv !== dv;
 
     return {
       number: result.number || null,
@@ -266,7 +273,11 @@ export class CustomersService {
       `person_type 'JURIDICA' requiere document_type 'NIT'; '${documentType}' ` +
         'es un tipo de documento de persona natural y no puede combinarse con ' +
         'persona jurídica.',
-      { field: 'person_type', person_type: personType, document_type: documentType },
+      {
+        field: 'person_type',
+        person_type: personType,
+        document_type: documentType,
+      },
     );
   }
 
@@ -280,7 +291,7 @@ export class CustomersService {
   private resolveCustomerEmail(
     email: string | null | undefined,
   ): string | null {
-    const trimmed = (email ?? '').trim().toLowerCase();
+    const trimmed = normalizeEmail(email ?? '');
     return trimmed ? trimmed : null;
   }
 
@@ -290,9 +301,7 @@ export class CustomersService {
    * instancia, `cliente`. El contador del while garantiza unicidad real contra
    * la tabla `users`.
    */
-  private async generateUniqueUsername(
-    seed: string | null,
-  ): Promise<string> {
+  private async generateUniqueUsername(seed: string | null): Promise<string> {
     const rawBase = seed ? seed.split('@')[0] : '';
     // Eliminar caracteres especiales
     let baseUsername = rawBase.replace(/[^a-zA-Z0-9]/g, '');
@@ -355,7 +364,7 @@ export class CustomersService {
     customerRoleId: number;
   }) {
     return {
-      email: args.email,
+      email: this.resolveCustomerEmail(args.email),
       password: args.hashedPassword,
       first_name: args.firstName,
       last_name: args.lastName,
@@ -411,7 +420,7 @@ export class CustomersService {
   } | null> {
     if (!guest) return null;
 
-    const normalizedEmail = guest.email?.toLowerCase().trim() || null;
+    const normalizedEmail = this.resolveCustomerEmail(guest.email);
     const normalizedPhone = guest.phone?.replace(/\s+/g, '').trim() || null;
     const normalizedDoc = this.normalizeDocument({
       type: guest.document_type ?? null,
@@ -434,7 +443,7 @@ export class CustomersService {
     if (normalizedEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: normalizedEmail, mode: 'insensitive' },
+          email: emailEquals(normalizedEmail),
           store_users: { some: { store_id: storeId } },
           user_roles: { some: { roles: { name: 'customer' } } },
           // Treat archived customers as "no longer exists" so a guest with
@@ -462,7 +471,11 @@ export class CustomersService {
       if (!normalizedEmail) return null;
 
       const customerRole = await this.prisma.roles.findFirst({
-        where: { name: 'customer', organization_id: null, is_system_role: true },
+        where: {
+          name: 'customer',
+          organization_id: null,
+          is_system_role: true,
+        },
       });
 
       if (!customerRole) {
@@ -636,7 +649,7 @@ export class CustomersService {
     if (effectiveEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: effectiveEmail, mode: 'insensitive' },
+          email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
           user_roles: { some: { roles: { name: 'customer' } } },
           state: { not: user_state_enum.archived },
@@ -682,10 +695,20 @@ export class CustomersService {
           // acentos — "Ana" y "ANA" son la misma fila, "Ana" y
           // "Anabella" no.
           ...(dto.first_name?.trim()
-            ? { first_name: { equals: dto.first_name.trim(), mode: 'insensitive' as const } }
+            ? {
+                first_name: {
+                  equals: dto.first_name.trim(),
+                  mode: 'insensitive' as const,
+                },
+              }
             : {}),
           ...(dto.last_name?.trim()
-            ? { last_name: { equals: dto.last_name.trim(), mode: 'insensitive' as const } }
+            ? {
+                last_name: {
+                  equals: dto.last_name.trim(),
+                  mode: 'insensitive' as const,
+                },
+              }
             : {}),
         },
         omit: CUSTOMER_PRIVATE_COLUMNS,
@@ -736,11 +759,7 @@ export class CustomersService {
           type: existing.document_type ?? null,
           number: existing.document_number ?? null,
         });
-        if (
-          !existingDoc.number &&
-          normalizedDoc.number &&
-          normalizedDoc.type
-        ) {
+        if (!existingDoc.number && normalizedDoc.number && normalizedDoc.type) {
           updateData.document_type = normalizedDoc.type;
           updateData.document_number = normalizedDoc.number;
         } else if (
@@ -952,8 +971,18 @@ export class CustomersService {
       data[field] = candidate;
     };
 
-    maybeWrite(incoming.first_name, 'first_name', toTitleCase, existing.first_name);
-    maybeWrite(incoming.last_name, 'last_name', toTitleCase, existing.last_name);
+    maybeWrite(
+      incoming.first_name,
+      'first_name',
+      toTitleCase,
+      existing.first_name,
+    );
+    maybeWrite(
+      incoming.last_name,
+      'last_name',
+      toTitleCase,
+      existing.last_name,
+    );
     maybeWrite(incoming.phone, 'phone', undefined, existing.phone);
 
     // Task 2 (QUI-728 follow-up) — ficha completion, FILL-IF-BLANK semantics.
@@ -966,7 +995,7 @@ export class CustomersService {
     // blank/null, so a customer resolved by email/document/name at checkout
     // walks away with a more complete ficha instead of one perpetually stuck
     // at whatever the very first sale happened to capture.
-    const maybeComplete = <T,>(
+    const maybeComplete = <T>(
       incomingValue: T | null | undefined,
       field:
         | 'person_type'
@@ -1049,7 +1078,7 @@ export class CustomersService {
       document_number?: string;
     },
   ): Promise<{ customer_id: number; name: string; was_created: boolean }> {
-    const normalizedEmail = data.email?.toLowerCase().trim() || null;
+    const normalizedEmail = this.resolveCustomerEmail(data.email);
     const normalizedPhone = data.phone?.replace(/\s+/g, '').trim() || null;
     const normalizedDoc = this.normalizeDocument({
       type: data.document_type ?? null,
@@ -1076,7 +1105,7 @@ export class CustomersService {
     if (normalizedEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: normalizedEmail, mode: 'insensitive' },
+          email: emailEquals(normalizedEmail),
           store_users: { some: { store_id } },
           user_roles: { some: { roles: { name: 'customer' } } },
           // Skip archived rows so a new guest is created instead of attaching
@@ -1358,7 +1387,7 @@ export class CustomersService {
     if (effectiveEmail) {
       const existingUser = await this.prisma.users.findFirst({
         where: {
-          email: { equals: effectiveEmail, mode: 'insensitive' },
+          email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
           // Archived customers are not "in use" — allow re-creating a new
           // customer that re-uses the same email after the old row was
@@ -1411,7 +1440,8 @@ export class CustomersService {
             kind: 'email',
             value: effectiveEmail,
             existing_customer_id: existingUser.id,
-            existing_customer_document_number: existingUser.document_number ?? null,
+            existing_customer_document_number:
+              existingUser.document_number ?? null,
             existing_customer_document_type: existingUser.document_type ?? null,
             // Snapshot público explícito: permite seleccionar una ficha de
             // otra tienda, incluso sin documento, sin enlazar ni editar nada.
@@ -1428,7 +1458,8 @@ export class CustomersService {
               verification_digit: existingUser.verification_digit ?? null,
               person_type: existingUser.person_type ?? null,
               tax_regime: existingUser.tax_regime ?? null,
-              fiscal_responsibilities: existingUser.fiscal_responsibilities ?? [],
+              fiscal_responsibilities:
+                existingUser.fiscal_responsibilities ?? [],
               addresses: (existingUser.addresses ?? []).filter(
                 (address) => address.type === address_type_enum.billing,
               ),
@@ -1515,7 +1546,7 @@ export class CustomersService {
       ? null
       : toTitleCase(dto.last_name || '') || null;
     const formatted_legal_name = isJuridica
-      ? (dto.legal_name?.trim() || null)
+      ? dto.legal_name?.trim() || null
       : null;
 
     // NIT + verification_digit split. If the merchant typed a DV that
@@ -1526,10 +1557,7 @@ export class CustomersService {
     let finalDocumentNumber: string | null = normalizedDoc.number;
     let finalVerificationDigit: string | null = null;
 
-    if (
-      normalizedDoc.type === 'NIT' &&
-      normalizedDoc.number
-    ) {
+    if (normalizedDoc.type === 'NIT' && normalizedDoc.number) {
       const nitResult = this.splitNitAndDv(
         dto.document_number,
         normalizedDoc.number,
@@ -1751,9 +1779,7 @@ export class CustomersService {
       },
     });
 
-    const usersById = new Map(
-      users.map((u) => [u.id, withBillingAddress(u)]),
-    );
+    const usersById = new Map(users.map((u) => [u.id, withBillingAddress(u)]));
 
     // Preserva el orden del ranking del groupBy y adjunta order_count.
     return ranking
@@ -1819,9 +1845,7 @@ export class CustomersService {
     return {
       ...withBillingAddress(user),
       total_orders: row?._count?.id ?? 0,
-      total_spend: row?._sum?.grand_total
-        ? Number(row._sum.grand_total)
-        : 0,
+      total_spend: row?._sum?.grand_total ? Number(row._sum.grand_total) : 0,
       last_order_date: row?._max?.created_at ?? null,
     };
   }
@@ -1993,6 +2017,28 @@ export class CustomersService {
 
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {
     const user = await this.findOne(storeId, id);
+    const effectiveEmail =
+      dto.email !== undefined
+        ? this.resolveCustomerEmail(dto.email)
+        : undefined;
+
+    if (effectiveEmail && user.organization_id) {
+      const emailConflict = await this.prisma.users.findFirst({
+        where: {
+          email: emailEquals(effectiveEmail),
+          organization_id: user.organization_id,
+          id: { not: user.id },
+          state: { not: user_state_enum.archived },
+        },
+        select: { id: true },
+      });
+      if (emailConflict) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un cliente con este correo en la organización',
+        );
+      }
+    }
 
     // Effective document pair to validate: payload overrides take precedence;
     // when a payload field is undefined we fall back to the current stored value.
@@ -2136,11 +2182,15 @@ export class CustomersService {
     return this.prisma.users.update({
       where: { id: user.id },
       data: {
-        first_name: firstNameUpdate !== undefined ? firstNameUpdate : (dto.first_name ?? ''),
-        last_name: lastNameUpdate !== undefined ? lastNameUpdate : (dto.last_name ?? ''),
+        first_name:
+          firstNameUpdate !== undefined
+            ? firstNameUpdate
+            : (dto.first_name ?? ''),
+        last_name:
+          lastNameUpdate !== undefined ? lastNameUpdate : (dto.last_name ?? ''),
         legal_name:
           dto.legal_name !== undefined
-            ? (dto.legal_name?.trim() || null)
+            ? dto.legal_name?.trim() || null
             : dto.person_type === 'NATURAL' && user.person_type === 'JURIDICA'
               ? null
               : undefined,
@@ -2148,9 +2198,13 @@ export class CustomersService {
         document_number:
           nextDocumentNumber !== undefined ? nextDocumentNumber : undefined,
         document_type:
-          dto.document_type !== undefined ? (normalizedDoc.type as any) : undefined,
+          dto.document_type !== undefined
+            ? (normalizedDoc.type as any)
+            : undefined,
         verification_digit:
-          nextVerificationDigit !== undefined ? nextVerificationDigit : undefined,
+          nextVerificationDigit !== undefined
+            ? nextVerificationDigit
+            : undefined,
         tax_regime:
           dto.tax_regime !== undefined
             ? (this.normalizeOptionalString(dto.tax_regime) as any)
@@ -2172,10 +2226,7 @@ export class CustomersService {
             : undefined,
         // Email opcional: si viene en el payload lo normalizamos (null cuando
         // queda vacío, sin placeholders). Si no viene (undefined) no se toca.
-        email:
-          dto.email !== undefined
-            ? dto.email?.trim().toLowerCase() || null
-            : undefined,
+        email: effectiveEmail,
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
     });
@@ -2273,7 +2324,7 @@ export class CustomersService {
    * Conflicto de correo para `upsert_customer` (réplica de lectura de la
    * unicidad que `update`/`create` exigen). `users` NO está scopeado, así que
    * el filtro `organization_id` va escrito a mano; `excludeUserId` excluye al
-   * cliente que se está editando. El correo llega ya en minúsculas.
+   * cliente que se está editando. Tolera correos históricos con mayúsculas.
    */
   async findUserByEmailInOrganizationForAgent(
     email: string,
@@ -2282,7 +2333,7 @@ export class CustomersService {
   ): Promise<any> {
     return this.prisma.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: organizationId,
         ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
       },
