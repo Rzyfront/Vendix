@@ -1,3 +1,6 @@
+import { registerLocaleData } from '@angular/common';
+import localeEsCO from '@angular/common/locales/es-CO';
+import localeEsCOExtra from '@angular/common/locales/extra/es-CO';
 import { ChangeDetectionStrategy, Component, mergeApplicationConfig } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
@@ -8,6 +11,8 @@ import { VendixLandingComponent } from './app/public/landing/vendix-landing/vend
 import { PublicPlansService } from './app/public/pricing/services/public-plans.service';
 import { environment } from './environments/environment';
 import { loadMarketingPreviewPlans } from './marketing-preview-plans';
+
+registerLocaleData(localeEsCO, 'es-CO', localeEsCOExtra);
 
 // Build-only entry. Never used by main.server.ts or the shared neutral shell.
 @Component({
