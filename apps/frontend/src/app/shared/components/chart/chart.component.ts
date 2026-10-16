@@ -1,8 +1,11 @@
+import { isPlatformBrowser } from '@angular/common';
 import {
   Component,
   input,
   output,
   computed,
+  inject,
+  PLATFORM_ID,
 } from '@angular/core';
 
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
@@ -116,6 +119,7 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
           <div class="loading-spinner"></div>
         </div>
       }
+@if (isBrowser) {
 <div
       echarts
       [options]="mergedOptions()"
@@ -123,6 +127,7 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
       (chartClick)="onChartClick($event)"
       (chartMouseOver)="onChartHover($event)"
     ></div>
+      }
     </div>
     `,
   styles: [
@@ -197,6 +202,8 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
   ],
 })
 export class ChartComponent {
+  // ngx-echarts accesses window during initialization and teardown.
+  readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
   // New Input for ECharts options
   readonly options = input<EChartsOption>({});
 

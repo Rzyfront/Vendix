@@ -113,6 +113,14 @@
               "sourceMap": false,
               "outputHashing": "none",
               "progress": false
+            },
+            "marketing-preview": {
+              "server": "src/main.marketing-preview.server.ts",
+              "index": {
+                "input": "src/index.marketing-preview.html",
+                "output": "index.html"
+              },
+              "outputPath": "dist/marketing-preview"
             }
           },
           "defaultConfiguration": "production"
