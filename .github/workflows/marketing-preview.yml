@@ -1,0 +1,35 @@
+name: Marketing HTML preview
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/marketing-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  marketing-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --test apps/frontend/scripts/marketing-preview.test.cjs
+      - name: Produce neutral production artifact
+        run: npm run build:prod -w apps/frontend
+      - name: Produce separate marketing preview
+        run: npm run build:marketing-preview -w apps/frontend
+      - run: node apps/frontend/scripts/check-marketing-preview.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marketing-html-preview
+          path: apps/frontend/dist/marketing-preview/browser/
+          retention-days: 7
