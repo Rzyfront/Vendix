@@ -278,6 +278,7 @@ jobs:
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
           --include='**/interceptors/auth.interceptor.spec.ts'
+          --include='**/legal/document-viewer/legal-document-metadata.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
           --include='**/pos/services/pos-cart.service.spec.ts'
