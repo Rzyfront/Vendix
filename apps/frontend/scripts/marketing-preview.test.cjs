@@ -35,3 +35,32 @@ test('production keeps its neutral server entry and preview is opt-in', () => {
   assert.match(html, /<app-root ngSkipHydration>/);
   assert.doesNotMatch(html, /vendix-prerender-hidden/);
 });
+
+const ts = require('typescript');
+const vm = require('node:vm');
+const source = fs.readFileSync(path.join(root, 'src/marketing-preview-plans.ts'), 'utf8');
+const transpiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const sandbox = { exports: {}, AbortSignal, fetch: globalThis.fetch };
+vm.runInNewContext(transpiled, sandbox);
+const loadPlans = sandbox.exports.loadMarketingPreviewPlans;
+test('plans resolve before bootstrap, with timeout and no credentials', async () => {
+  let observed;
+  const payload = { success: true, data: [{ id: 1, name: 'Public plan', price: 69900 }] };
+  const result = await loadPlans('https://public.example/api', async (url, options) => {
+    observed = { url, options };
+    return { ok: true, json: async () => payload };
+  });
+  assert.equal(result, payload);
+  assert.equal(observed.url, 'https://public.example/api/public/plans');
+  assert.equal(observed.options.headers.Accept, 'application/json');
+  assert.ok(observed.options.signal);
+  assert.equal(observed.options.credentials, undefined);
+});
+test('network, HTTP, JSON and empty or malformed plans reject instead of serializing fallback', async () => {
+  for (const payload of [null, {}, {success: false, data: [{}]}, {success: true, data: []}, {success: true, data: [null]}, {success: true, data: ['injected']}]) {
+    await assert.rejects(loadPlans('https://public.example/api', async () => ({ ok: true, json: async () => payload })));
+  }
+  await assert.rejects(loadPlans('https://public.example/api', async () => ({ ok: false })));
+  await assert.rejects(loadPlans('https://public.example/api', async () => { throw new Error('timeout'); }));
+  await assert.rejects(loadPlans('https://public.example/api', async () => ({ ok: true, json: async () => { throw new Error('invalid JSON'); } })));
+});
