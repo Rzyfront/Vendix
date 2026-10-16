@@ -1,3 +1,5 @@
+import { normalizeEmail } from '@common/utils/email.util';
+import { Transform } from 'class-transformer';
 import {
   IsString,
   IsEmail,
@@ -34,6 +36,9 @@ export class CreateStoreUserDto {
 
   @IsEmail()
   @MaxLength(255)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeEmail(value) : value,
+  )
   email: string;
 
   @IsString()

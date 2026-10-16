@@ -4,6 +4,7 @@ import { GlobalPrismaService } from '../../prisma/services/global-prisma.service
 import { DefaultPanelUIService } from './default-panel-ui.service';
 import { UserRoleAssignmentService } from './user-role-assignment.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
+import { emailEquals } from '../utils/email.util';
 
 /**
  * StaffProvisioningService
@@ -71,12 +72,11 @@ export class StaffProvisioningService {
     email: string,
     opts?: { excludeUserId?: number; client?: Prisma.TransactionClient },
   ): Promise<void> {
-    const normalized = email.toLowerCase().trim();
     const db: any = opts?.client ?? this.prismaService.withoutScope();
 
     const collisions = await db.users.findMany({
       where: {
-        email: normalized,
+        email: emailEquals(email),
         ...(opts?.excludeUserId ? { id: { not: opts.excludeUserId } } : {}),
         // Al menos un rol distinto de 'customer' => es una cuenta staff/owner.
         user_roles: {

@@ -107,7 +107,6 @@ describe('AuthService Login Flow', () => {
   };
   const mockEventEmitter = { emit: jest.fn() };
 
-
   /**
    * Fila de `users` tal como la trae findUserAccountsByEmail: con la
    * organización embebida y `user_roles.roles.role_permissions.permissions`,
@@ -305,5 +304,84 @@ describe('AuthService Login Flow', () => {
     } catch (error) {
       expectUnauthorized(error);
     }
+  });
+
+  it.each(['admin@example.com', 'ADMIN@EXAMPLE.COM', ' Admin@Example.com '])(
+    'finds a legacy mixed-case staff account for %s',
+    async (email) => {
+      const legacy = accountRow({
+        email: 'Admin@Example.COM',
+        user_roles: [{ roles: { name: 'admin', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockImplementation(async ({ where }) => {
+        const filter = where.email;
+        const matches =
+          typeof filter === 'string'
+            ? legacy.email === filter
+            : filter.mode === 'insensitive' &&
+              legacy.email.toLowerCase() === filter.equals;
+        return matches ? [legacy] : [];
+      });
+
+      const result = await service.findUserAccountsByEmail(email);
+
+      expect(result.matchType).toBe('single_account');
+      expect(result.user?.id).toBe(legacy.id);
+      expect(mockPrismaService.users.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: {
+            email: { equals: 'admin@example.com', mode: 'insensitive' },
+            state: { notIn: ['suspended', 'archived'] },
+          },
+        }),
+      );
+    },
+  );
+
+  it('keeps customer-only accounts out of the staff login after case folding', async () => {
+    mockPrismaService.users.findMany.mockResolvedValue([
+      accountRow({ user_roles: [{ roles: { name: 'customer' } }] }),
+    ]);
+    expect(
+      (await service.findUserAccountsByEmail(' TEST@TEST.COM ')).matchType,
+    ).toBe('not_found');
+  });
+
+  it('normalizes recovery lookups without losing organization scope', async () => {
+    mockPrismaService.organizations.findUnique.mockResolvedValue({ id: 12 });
+    mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+    await service.forgotPassword(' Staff@Example.COM ', 'org-a');
+
+    expect(mockPrismaService.users.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        email: { equals: 'staff@example.com', mode: 'insensitive' },
+        organization_id: 12,
+      },
+    });
+  });
+
+  it('normalizes customer login lookup without widening the tenant', async () => {
+    mockPrismaService.stores.findUnique.mockResolvedValue({
+      id: 22,
+      organization_id: 12,
+    });
+    mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.loginCustomer({
+        email: ' Customer@Example.COM ',
+        password: 'incorrect',
+        store_id: 22,
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(mockPrismaService.users.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          email: { equals: 'customer@example.com', mode: 'insensitive' },
+          organization_id: 12,
+        },
+      }),
+    );
   });
 });

@@ -1,3 +1,5 @@
+import { normalizeEmail } from '@common/utils/email.util';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -18,5 +20,8 @@ export class ResendVerificationDto {
   })
   @IsEmail()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeEmail(value) : value,
+  )
   email: string;
 }

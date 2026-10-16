@@ -31,6 +31,7 @@ import { StaffProvisioningService } from '@common/services/staff-provisioning.se
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
 import { toTitleCase } from '@common/utils/format.util';
+import { normalizeEmail } from '@common/utils/email.util';
 
 @Injectable()
 export class UsersService {
@@ -74,11 +75,7 @@ export class UsersService {
    * pantalla de roles. Ambas direcciones delegan en el MISMO
    * `UserRoleAssignmentService`, así que no pueden divergir.
    */
-  async assignRole(
-    user_id: number,
-    role_id: number,
-    store_id?: number | null,
-  ) {
+  async assignRole(user_id: number, role_id: number, store_id?: number | null) {
     const actor = this.getRoleActor();
     return this.userRoleAssignment.assign({
       user_id,
@@ -88,11 +85,7 @@ export class UsersService {
     });
   }
 
-  async removeRole(
-    user_id: number,
-    role_id: number,
-    store_id?: number | null,
-  ) {
+  async removeRole(user_id: number, role_id: number, store_id?: number | null) {
     const actor = this.getRoleActor();
     return this.userRoleAssignment.remove({
       user_id,
@@ -111,7 +104,7 @@ export class UsersService {
   async create(createUserDto: CreateUserDto) {
     const {
       organization_id,
-      email,
+      email: inputEmail,
       password,
       role_id,
       main_store_id,
@@ -120,6 +113,7 @@ export class UsersService {
       app: _app,
       ...rest
     } = createUserDto;
+    const email = normalizeEmail(inputEmail);
 
     // Validar contexto de organización
     const context = RequestContextService.getContext();
@@ -409,13 +403,28 @@ export class UsersService {
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
-    await this.findOne(id);
+    const user = await this.findOne(id);
+    const updateData = { ...updateUserDto };
+    if (typeof updateUserDto.email === 'string') {
+      updateData.email = normalizeEmail(updateUserDto.email);
+      const isCustomer =
+        user.user_roles.length > 0 &&
+        user.user_roles.every(
+          (assignment) => assignment.roles?.name === 'customer',
+        );
+      if (!isCustomer) {
+        await this.staffProvisioning.assertEmailAvailableForStaff(
+          updateData.email,
+          { excludeUserId: id },
+        );
+      }
+    }
     if (updateUserDto.password) {
-      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
+      updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
     return this.prisma.users.update({
       where: { id },
-      data: { ...updateUserDto, updated_at: new Date() },
+      data: { ...updateData, updated_at: new Date() },
     });
   }
 
@@ -836,7 +845,13 @@ export class UsersService {
   }
 
   async invite(inviteDto: InviteUserDto) {
-    const { first_name, last_name, email, app = 'VENDIX_LANDING' } = inviteDto;
+    const {
+      first_name,
+      last_name,
+      email: inputEmail,
+      app = 'VENDIX_LANDING',
+    } = inviteDto;
+    const email = normalizeEmail(inputEmail);
 
     const context = RequestContextService.getContext();
     const organization_id = context?.organization_id;

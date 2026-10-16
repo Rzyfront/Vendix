@@ -1,3 +1,5 @@
+import { normalizeEmail } from '@common/utils/email.util';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsString,
@@ -16,6 +18,9 @@ export class ForgotPasswordDto {
   })
   @IsEmail()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeEmail(value) : value,
+  )
   email: string;
 
   @ApiProperty({
@@ -35,6 +40,9 @@ export class ForgotPasswordCustomerDto {
   })
   @IsEmail()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeEmail(value) : value,
+  )
   email: string;
 
   @ApiProperty({
@@ -73,7 +81,8 @@ export class ResetPasswordDto {
    */
   @ApiProperty({
     example: 10,
-    description: 'ID de la tienda ecommerce donde el cliente recupera su cuenta',
+    description:
+      'ID de la tienda ecommerce donde el cliente recupera su cuenta',
     required: false,
   })
   @IsOptional()

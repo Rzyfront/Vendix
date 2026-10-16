@@ -29,6 +29,7 @@ import {
 } from './dto';
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
+import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 
 @Injectable()
 export class StoreUserManagementService {
@@ -79,16 +80,17 @@ export class StoreUserManagementService {
     if (!store_id || !organization_id) {
       throw new BadRequestException('Store and organization context required');
     }
+    const email = normalizeEmail(dto.email);
 
     // A1 (hard check): a staff/owner account must have a globally-unique email.
     // Throws VendixHttpException ORG_USER_002 (409) if a non-customer account
     // already uses this email anywhere in Vendix.
-    await this.staffProvisioning.assertEmailAvailableForStaff(dto.email);
+    await this.staffProvisioning.assertEmailAvailableForStaff(email);
 
     // UX-only guard: also reject if a user with this email is already linked to
     // this store (friendlier message than the generic uniqueness error).
     const existing_user = await this.prisma.users.findFirst({
-      where: { email: dto.email },
+      where: { email: emailEquals(email) },
     });
 
     if (existing_user) {
@@ -133,7 +135,7 @@ export class StoreUserManagementService {
         data: {
           first_name: formatted_first_name,
           last_name: formatted_last_name,
-          email: dto.email,
+          email,
           username,
           password: hashed_password,
           phone: normalized_phone,
@@ -346,9 +348,21 @@ export class StoreUserManagementService {
 
   async update(userId: number, dto: UpdateStoreUserDto) {
     // Verify user belongs to this store
-    await this.findOne(userId);
+    const user = await this.findOne(userId);
 
     const update_data: any = { ...dto, updated_at: new Date() };
+    if (typeof dto.email === 'string') {
+      const email = normalizeEmail(dto.email);
+      update_data.email = email;
+      const isCustomer =
+        user.roles.length > 0 &&
+        user.roles.every((role) => role.name === 'customer');
+      if (!isCustomer) {
+        await this.staffProvisioning.assertEmailAvailableForStaff(email, {
+          excludeUserId: userId,
+        });
+      }
+    }
 
     if (dto.first_name) {
       update_data.first_name = toTitleCase(dto.first_name);

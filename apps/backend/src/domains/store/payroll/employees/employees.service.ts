@@ -7,6 +7,7 @@ import { UserRole } from '../../../../domains/auth/enums/user-role.enum';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeeDto } from './dto/query-employee.dto';
+import { normalizeEmail } from '@common/utils/email.util';
 
 const EMPLOYEE_INCLUDE = {
   employee_stores: {
@@ -79,7 +80,9 @@ export class EmployeesService {
         department: { contains: department, mode: 'insensitive' as const },
       }),
       ...(date_from && { hire_date: { gte: new Date(date_from) } }),
-      ...(date_to && { hire_date: { lte: new Date(date_to + 'T23:59:59.999Z') } }),
+      ...(date_to && {
+        hire_date: { lte: new Date(date_to + 'T23:59:59.999Z') },
+      }),
     };
 
     const [data, total] = await Promise.all([
@@ -234,7 +237,7 @@ export class EmployeesService {
           await tx.users.update({
             where: { id: dto.user_id },
             data: {
-              ...(dto.email && { email: dto.email }),
+              ...(dto.email && { email: normalizeEmail(dto.email) }),
               ...(dto.phone && { phone: dto.phone }),
             },
           });
