@@ -79,3 +79,12 @@ export const selectRejectedPlanActive = createSelector(
   selectVexiState,
   (state) => state.rejectedPlanActive,
 );
+
+export const selectObjective = createSelector(
+  selectVexiState,
+  (state) => state.objective,
+);
+export const selectObjectiveLoading = createSelector(
+  selectVexiState,
+  (state) => state.objectiveLoading,
+);

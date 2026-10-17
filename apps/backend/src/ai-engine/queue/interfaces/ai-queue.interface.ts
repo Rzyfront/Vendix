@@ -24,6 +24,8 @@ export interface AIEmbeddingJob {
 }
 
 export interface AIAgentJob {
+  /** Optional durable reference; never decides the BullMQ job state. */
+  objective_id?: string;
   goal: string;
   tools?: string[];
   organization_id?: number;
@@ -40,8 +42,8 @@ export interface AIAgentJob {
    * catalog is filtered by exactly this list — so omitting them does not fail
    * loudly, it silently hands the agent an empty toolset and the task returns
    * "no pude hacer nada". Snapshotted at enqueue time on purpose: the task must
-   * run with the authority the person had when they approved it, not with
-   * whatever their role became in the meantime.
+   * never exceed that snapshot. With durable objectives enabled, current DB
+   * permissions are intersected with this ceiling, so revocation is respected.
    */
   permissions?: string[];
   roles?: string[];

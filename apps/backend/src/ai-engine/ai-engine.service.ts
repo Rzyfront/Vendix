@@ -11,6 +11,10 @@ import {
   hashTraceValue,
 } from './observability/agent-trace.service';
 import { ProviderAttemptObserver } from './provider-attempt-observer';
+import {
+  objectiveProviderMeter,
+  objectiveMeteredFetch,
+} from './tasks/agent-budget-context';
 import { randomUUID } from 'crypto';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
@@ -159,8 +163,12 @@ export class AIEngineService implements OnModuleInit {
       baseUrl: config.base_url || undefined,
       modelType: config.model_type || undefined,
       settings: config.settings as Record<string, any>,
+      fetch: objectiveMeteredFetch(
+        this.providerObserver
+          ? this.providerObserver.wrapFetch(globalThis.fetch)
+          : globalThis.fetch,
+      ),
       ...(this.providerObserver && {
-        fetch: this.providerObserver.wrapFetch(globalThis.fetch),
         observeUsage: (usage) => this.providerObserver!.observeUsage(usage),
       }),
     };
@@ -1631,22 +1639,45 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
-  private observeProviderAttempt(
+  private async observeProviderAttempt(
     configId: number | null,
     messages: AIMessage[],
     options: AIRequestOptions | undefined,
     callback: () => Promise<AIResponse>,
     dispatchNumber = 1,
   ): Promise<AIResponse> {
-    if (!this.providerObserver || !this.trace?.currentSpan()) return callback();
-    return this.providerObserver.attempt(
-      configId ? this.configSettings.get(configId) : undefined,
-      {
-        ...this.providerAttributes(configId, messages, options),
-        dispatch_number: dispatchNumber,
-      },
-      callback,
-    );
+    const execute = () =>
+      !this.providerObserver || !this.trace?.currentSpan()
+        ? callback()
+        : this.providerObserver.attempt(
+            configId ? this.configSettings.get(configId) : undefined,
+            {
+              ...this.providerAttributes(configId, messages, options),
+              dispatch_number: dispatchNumber,
+            },
+            callback,
+          );
+    const meter = objectiveProviderMeter.getStore();
+    if (meter) await meter.dispatch();
+    const response = await execute();
+    if (meter) {
+      meter.observed = true;
+      const usage = response.usage;
+      const settings = configId ? this.configSettings.get(configId) : undefined;
+      await meter.usage(
+        usage,
+        usage && settings?.pricing
+          ? this.aiLoggingService.calculateCost(
+              settings,
+              usage.promptTokens,
+              usage.completionTokens,
+              usage.cacheReadTokens,
+              usage.cacheCreationTokens,
+            )
+          : null,
+      );
+    }
+    return response;
   }
 
   private providerAttributes(

@@ -20,6 +20,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
 | -- | `vendix-address-geocoding` |
+| -- | `vendix-agent-durable-tasks` |
 | -- | `vendix-agent-evals-observability` |
 | -- | `vendix-agent-execution-contract` |
 | -- | `vendix-ai-agent-tools` |
@@ -149,8 +150,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Cambiando TRUST_PROXY_HOPS o el valor de trust proxy de Express | `vendix-trust-proxy-chain` |
 | Cambiando la topología de red de producción (nginx, Route53, CloudFront) | `vendix-trust-proxy-chain` |
+| Changing AgentPlan storage, objective leases or resume semantics | `vendix-agent-durable-tasks` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
+| Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |

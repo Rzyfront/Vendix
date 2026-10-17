@@ -2,7 +2,8 @@
  * Internal task list of an agent turn chain.
  *
  * The plan is cognitive scaffolding, never product surface: it is persisted in
- * `ai_conversations.metadata.agent_plan` so it survives the turn boundaries a
+ * the objective repository (or legacy conversation metadata with the flag OFF),
+ * so it survives the turn boundaries a
  * write approval or a clarifying question impose, and it is fed back to the
  * model on every turn so the model never re-derives what is left. It is never
  * rendered, streamed or narrated to the person.
@@ -89,6 +90,10 @@ export interface AgentPlanToolOutcome {
  * bridge), where the planning tools fall back to their stateless handlers.
  */
 export interface AgentPlanHook {
+  /** Durable identity only; never an approval or credential. */
+  readonly objectiveId?: string;
+  /** Releases a hook-owned lease; shared turn sessions release at their boundary. */
+  release?(): Promise<void>;
   execute(
     name: AgentPlanToolName,
     args: Record<string, any>,

@@ -1,18 +1,19 @@
 import { createReducer, on } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
+import { objectiveProgress } from './vexi-objective.utils';
 import { vexiToolStepStatus } from './vexi-execution.utils';
-import type {
-  ToolStep,
-  VexiContinuation,
-  VexiProposal,
-} from './vexi.actions';
+import type { ToolStep, VexiContinuation, VexiProposal } from './vexi.actions';
 import {
   AIConversation,
   AIMessage,
   VexiTask,
+  VexiObjective,
 } from '../../services/vexi-api.service';
 
 export interface VexiState {
+  objective: VexiObjective | null;
+  objectiveLoading: boolean;
+  objectiveRequestId: string | null;
   conversations: AIConversation[];
   activeConversationId: number | null;
   messages: AIMessage[];
@@ -62,6 +63,9 @@ export interface VexiState {
 }
 
 export const initialVexiState: VexiState = {
+  objective: null,
+  objectiveLoading: false,
+  objectiveRequestId: null,
   conversations: [],
   activeConversationId: null,
   messages: [],
@@ -82,6 +86,57 @@ export const initialVexiState: VexiState = {
 
 export const vexiReducer = createReducer(
   initialVexiState,
+
+  on(VexiActions.loadObjective, (state, { objectiveId }) => ({
+    ...state,
+    objectiveLoading: true,
+    objectiveRequestId: objectiveId,
+    error: null,
+  })),
+  on(VexiActions.resumeObjective, (state, { objectiveId }) => ({
+    ...state,
+    objectiveLoading: true,
+    objectiveRequestId: objectiveId,
+    error: null,
+  })),
+  on(VexiActions.objectiveReceived, (state, { objective, requestedId }) => {
+    if (
+      objective.conversation_id !== state.activeConversationId ||
+      (requestedId && state.objectiveRequestId !== requestedId) ||
+      (state.objective?.id === objective.id &&
+        state.objective.version > objective.version)
+    )
+      return state;
+    return {
+      ...state,
+      objective,
+      objectiveLoading: false,
+      objectiveRequestId: null,
+    };
+  }),
+  on(
+    VexiActions.resumeObjectiveSuccess,
+    (state, { objective, requestedId }) => {
+      if (
+        objective.conversation_id !== state.activeConversationId ||
+        (requestedId && state.objectiveRequestId !== requestedId) ||
+        (state.objective?.id === objective.id &&
+          state.objective.version > objective.version)
+      )
+        return state;
+      return {
+        ...state,
+        objective,
+        objectiveLoading: false,
+        objectiveRequestId: null,
+      };
+    },
+  ),
+  on(VexiActions.objectiveFailure, (state, { error }) => ({
+    ...state,
+    objectiveLoading: false,
+    error,
+  })),
 
   on(VexiActions.loadConversations, (state) => ({
     ...state,
@@ -109,6 +164,9 @@ export const vexiReducer = createReducer(
     ...state,
     conversations: [conversation, ...state.conversations],
     activeConversationId: conversation.id,
+    objective: null,
+    objectiveLoading: false,
+    objectiveRequestId: null,
     messages: [],
     streamingContent: '',
   })),
@@ -116,6 +174,9 @@ export const vexiReducer = createReducer(
   on(VexiActions.selectConversation, (state, { conversationId }) => ({
     ...state,
     activeConversationId: conversationId,
+    objective: null,
+    objectiveLoading: false,
+    objectiveRequestId: null,
     messages: [],
     streamingContent: '',
     isStreaming: false,
@@ -253,28 +314,31 @@ export const vexiReducer = createReducer(
     ],
   })),
 
-  on(VexiActions.toolCallFinished, (state, { id, name, summary, failed, execution }) => {
-    const index = state.toolSteps.findIndex((step) => step.id === id);
-    const resolved: ToolStep = {
-      id,
-      name,
-      arguments: index >= 0 ? state.toolSteps[index].arguments : undefined,
-      summary,
-      status: vexiToolStepStatus(execution, failed),
-      ...(execution ? { execution } : {}),
-    };
+  on(
+    VexiActions.toolCallFinished,
+    (state, { id, name, summary, failed, execution }) => {
+      const index = state.toolSteps.findIndex((step) => step.id === id);
+      const resolved: ToolStep = {
+        id,
+        name,
+        arguments: index >= 0 ? state.toolSteps[index].arguments : undefined,
+        summary,
+        status: vexiToolStepStatus(execution, failed),
+        ...(execution ? { execution } : {}),
+      };
 
-    // A result with no matching call happens when the stream drops the
-    // `tool_call` frame (reconnect mid-turn). Appending rather than discarding
-    // keeps the trace truthful about what ran.
-    return {
-      ...state,
-      toolSteps:
-        index >= 0
-          ? state.toolSteps.map((step, i) => (i === index ? resolved : step))
-          : [...state.toolSteps, resolved],
-    };
-  }),
+      // A result with no matching call happens when the stream drops the
+      // `tool_call` frame (reconnect mid-turn). Appending rather than discarding
+      // keeps the trace truthful about what ran.
+      return {
+        ...state,
+        toolSteps:
+          index >= 0
+            ? state.toolSteps.map((step, i) => (i === index ? resolved : step))
+            : [...state.toolSteps, resolved],
+      };
+    },
+  ),
 
   on(
     VexiActions.proposalReceived,
@@ -350,36 +414,64 @@ export const vexiReducer = createReducer(
   // names the target so the thread stays readable later: "no lo apliqué" on its
   // own is unreadable once two proposals have gone by.
   //
-  // Nothing is sent to the server. There is no reject endpoint and there should
-  // not be: the token is single-use and short-lived, so declining is simply never
-  // spending it. A revocation call would be a second way to fail at doing nothing.
-  on(VexiActions.rejectProposal, (state) => {
-    const target = state.pendingProposal?.preview?.target;
-    const text = target
-      ? `Listo, no toqué nada en ${target}.`
-      : 'Listo, no apliqué el cambio.';
+  // Legacy declines need no network call; durable approval wait must be released
+  // under API guards before hiding the card. Neither path spends a write token.
+  on(VexiActions.rejectProposal, (state) => ({
+    ...state,
+    objectiveLoading: !!state.pendingProposal,
+    error: null,
+  })),
+  on(
+    VexiActions.rejectProposalFailure,
+    (state, { conversationId, confirmationToken, error }) =>
+      state.activeConversationId !== conversationId ||
+      state.pendingProposal?.confirmationToken !== confirmationToken
+        ? state
+        : { ...state, objectiveLoading: false, error },
+  ),
+  on(
+    VexiActions.rejectProposalSuccess,
+    (state, { conversationId, confirmationToken, objective }) => {
+      if (
+        state.activeConversationId !== conversationId ||
+        state.pendingProposal?.confirmationToken !== confirmationToken
+      )
+        return state;
+      const target = state.pendingProposal?.preview?.target;
+      const text = target
+        ? `Listo, no toqué nada en ${target}.`
+        : 'Listo, no apliqué el cambio.';
 
-    return {
-      ...state,
-      pendingProposal: null,
-      messages: state.activeConversationId
-        ? [
-            ...state.messages,
-            {
-              id: -Date.now(),
-              conversation_id: state.activeConversationId,
-              role: 'assistant' as const,
-              content: text,
-              tool_calls: null,
-              tokens_used: 0,
-              cost_usd: 0,
-              metadata: null,
-              created_at: new Date().toISOString(),
-            },
-          ]
-        : state.messages,
-    };
-  }),
+      return {
+        ...state,
+        pendingProposal: null,
+        rejectedPlanActive: state.pendingProposal.planActive === true,
+        objectiveLoading: false,
+        ...(objective &&
+        (!state.objective ||
+          state.objective.id !== objective.id ||
+          state.objective.version <= objective.version)
+          ? { objective, objectiveRequestId: null }
+          : {}),
+        messages: state.activeConversationId
+          ? [
+              ...state.messages,
+              {
+                id: -Date.now(),
+                conversation_id: state.activeConversationId,
+                role: 'assistant' as const,
+                content: text,
+                tool_calls: null,
+                tokens_used: 0,
+                cost_usd: 0,
+                metadata: null,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : state.messages,
+      };
+    },
+  ),
 
   on(VexiActions.planContinueReceived, (state) => ({
     ...state,
@@ -396,8 +488,7 @@ export const vexiReducer = createReducer(
             id: -Date.now(),
             conversation_id: state.activeConversationId,
             role: 'assistant' as const,
-            content:
-              'Voy avanzando pero esto está tomando más de lo normal. ¿Sigo?',
+            content: objectiveProgress(state.objective),
             tool_calls: null,
             tokens_used: 0,
             cost_usd: 0,
@@ -419,7 +510,13 @@ export const vexiReducer = createReducer(
         streamingContent: '',
       };
     }
-    if (!state.activeConversationId) return { ...state, isStreaming: false, isSending: false, streamingContent: '' };
+    if (!state.activeConversationId)
+      return {
+        ...state,
+        isStreaming: false,
+        isSending: false,
+        streamingContent: '',
+      };
     return {
       ...state,
       isStreaming: false,
@@ -483,6 +580,9 @@ export const vexiReducer = createReducer(
   on(VexiActions.clearActiveConversation, (state) => ({
     ...state,
     activeConversationId: null,
+    objective: null,
+    objectiveLoading: false,
+    objectiveRequestId: null,
     messages: [],
     streamingContent: '',
     isStreaming: false,

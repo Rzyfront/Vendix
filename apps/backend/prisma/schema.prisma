@@ -5858,6 +5858,7 @@ model ai_conversations {
   updated_at      DateTime                    @default(now()) @db.Timestamp(6)
 
   messages ai_messages[]
+  objectives ai_agent_objectives[]
 
   @@index([store_id])
   @@index([store_id, user_id])
@@ -5955,6 +5956,7 @@ model ai_agent_tasks {
   organization_id Int
   user_id         Int
   conversation_id Int?
+  objective_id    String?   @db.Uuid
   goal            String    @db.Text
   plan            Json?
   status          String    @default("queued") @db.VarChar(20)
@@ -5964,9 +5966,107 @@ model ai_agent_tasks {
   created_at      DateTime  @default(now()) @db.Timestamp(6)
   finished_at     DateTime? @db.Timestamp(6)
 
+  tool_results ai_agent_tool_results[]
+  objective ai_agent_objectives? @relation(fields: [objective_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([objective_id])
   @@index([store_id])
   @@index([store_id, status])
   @@index([job_id])
+}
+
+
+/// D1 durable fact/checkpoint authority; a queue job is not an objective.
+model ai_agent_objectives {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id              Int
+  organization_id       Int
+  user_id               Int
+  conversation_id       Int
+  agent_id              String?  @db.VarChar(100)
+  legacy_plan_id        String   @db.VarChar(100)
+  goal                  String   @db.Text
+  plan                  Json?
+  entities              Json     @default("[]")
+  step_hashes           Json?
+  next_step             String?  @db.Text
+  semantic_status       String   @default("active") @db.VarChar(32)
+  version               Int      @default(1)
+  lease_generation      Int      @default(0)
+  lease_until           DateTime? @db.Timestamptz(6)
+  budget                Json
+  authority_snapshot    Json     @default("[]")
+  requires_revalidation Boolean  @default(true)
+  expires_at            DateTime @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  conversation ai_conversations @relation(fields: [conversation_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tasks        ai_agent_tasks[]
+  results      ai_agent_tool_results[]
+  effects      ai_agent_effects[]
+
+  @@unique([store_id, organization_id, user_id, conversation_id, legacy_plan_id], map: "ai_agent_objectives_legacy_uq")
+  @@unique([id, store_id, organization_id, user_id], map: "ai_agent_objectives_scope_uq")
+  @@index([store_id, organization_id, user_id, conversation_id], map: "ai_agent_objectives_owner_conversation_idx")
+  @@index([store_id, organization_id, user_id, semantic_status, expires_at], map: "ai_agent_objectives_owner_status_expiry_idx")
+}
+
+/// Full bounded JSON artifacts, recoverable by owner/objective/call; not a display summary.
+model ai_agent_tool_results {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id         Int
+  organization_id  Int
+  user_id          Int
+  objective_id     String   @db.Uuid
+  task_id          Int?
+  tool_call_id     String   @db.VarChar(200)
+  tool_name        String   @db.VarChar(200)
+  tool_version     String   @db.VarChar(50)
+  args_hash        String   @db.VarChar(64)
+  receipt          Json
+  data             Json?
+  pagination       Json?
+  freshness        String   @db.VarChar(20)
+  resource_ids     Json
+  evidence_refs    Json
+  lease_generation Int?
+  stale_lease      Boolean  @default(false)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  task ai_agent_tasks? @relation(fields: [task_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence_effects ai_agent_effects[]
+  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_tool_results_objective_scope_fkey")
+
+  @@unique([objective_id, tool_call_id])
+  @@index([store_id, organization_id, user_id, objective_id, created_at, id], map: "ai_agent_tool_results_owner_page_idx")
+  @@index([task_id])
+}
+
+/// Intention-before-dispatch + domain identity; a consumed approval token is not exactly-once.
+model ai_agent_effects {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id           Int
+  organization_id    Int
+  user_id            Int
+  objective_id       String   @db.Uuid
+  operation_id       String   @unique @db.VarChar(200)
+  proposal_hash      String   @db.VarChar(64)
+  step_id            String   @db.VarChar(200)
+  status             String   @default("proposed") @db.VarChar(20)
+  domain_receipt     Json?
+  domain_reference   String?  @db.VarChar(300)
+  evidence_result_id String?  @db.Uuid
+  history            Json     @default("[]")
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
+
+  @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
+  @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
+  @@index([evidence_result_id])
 }
 
 model ai_embeddings {

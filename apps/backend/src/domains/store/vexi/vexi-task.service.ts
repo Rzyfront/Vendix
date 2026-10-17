@@ -1,5 +1,5 @@
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -7,6 +7,8 @@ import { AIQueueService } from '../../../ai-engine/queue/ai-queue.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { AgentObjectiveRepository } from '../../../ai-engine/tasks/agent-objective.repository';
+import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
 
 /** Past this, the "goal" is a document, not an instruction. */
 const MAX_GOAL_CHARS = 2000;
@@ -46,8 +48,8 @@ export interface TaskSnapshot {
  *     every write refuses and every confirmation gate still fires. A task prepares
  *     and reports; approving what it found is a conversation.
  *  2. **The task inherits the authority of the moment it was queued**, snapshotted
- *     into the job. A role revoked afterwards does not retroactively widen it, and
- *     one granted afterwards does not silently extend it.
+ *     into the job. D1 workers intersect that ceiling with current DB authority:
+ *     revocation stops work and a later grant never silently extends it.
  */
 @Injectable()
 export class VexiTaskService {
@@ -58,6 +60,7 @@ export class VexiTaskService {
     private readonly globalPrisma: GlobalPrismaService,
     private readonly queue: AIQueueService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly objectives?: AgentObjectiveRepository,
   ) {}
 
   /**
@@ -73,8 +76,13 @@ export class VexiTaskService {
     plan?: unknown;
     conversationId?: number;
     tools?: string[];
+    /** Reference only. An objective does not occupy another background-job slot. */
+    objectiveId?: string;
   }): Promise<TaskSnapshot> {
-    const context = RequestContextService.getContext();
+    const durableEnabled = durableObjectivesEnabled();
+    const context = durableEnabled
+      ? RequestContextService.asyncLocalStorage.getStore()
+      : RequestContextService.getContext();
     const storeId = context?.store_id;
     const organizationId = context?.organization_id;
     const userId = context?.user_id;
@@ -92,6 +100,24 @@ export class VexiTaskService {
         ErrorCodes.AI_AGENT_003,
         'Un trabajo de fondo necesita un objetivo concreto.',
       );
+    }
+
+    let objectiveId: string | undefined;
+    if (durableEnabled && (params.objectiveId || params.conversationId)) {
+      if (!this.objectives)
+        throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
+      const objective = params.objectiveId
+        ? await this.objectives.get(params.objectiveId)
+        : await this.objectives.getForConversation(params.conversationId!);
+      if (objective) {
+        if (objective.conversation_id !== params.conversationId) {
+          throw new VendixHttpException(
+            ErrorCodes.AI_AGENT_003,
+            'Ese objetivo no corresponde a este trabajo.',
+          );
+        }
+        objectiveId = objective.id;
+      }
     }
 
     const active = await this.prisma.ai_agent_tasks.count({
@@ -114,6 +140,7 @@ export class VexiTaskService {
         goal: goal.slice(0, MAX_GOAL_CHARS),
         plan: (params.plan as any) ?? undefined,
         status: 'queued',
+        ...(objectiveId ? { objective_id: objectiveId } : {}),
       },
       select: this.selection(),
     });
@@ -127,7 +154,8 @@ export class VexiTaskService {
         user_id: userId,
         conversation_id: params.conversationId,
         task_id: task.id,
-        // Snapshotted, not re-resolved. See the class docblock.
+        ...(objectiveId ? { objective_id: objectiveId } : {}),
+        // Snapshot is a ceiling. D1 workers also intersect current DB authority.
         permissions: context?.permissions,
         roles: context?.roles,
         app_key: 'chat_assistant',
@@ -163,8 +191,28 @@ export class VexiTaskService {
    * panel from showing "en curso" on a task that already finished.
    */
   async get(id: number): Promise<TaskSnapshot & { live_status?: string }> {
+    const strictContext = durableObjectivesEnabled()
+      ? RequestContextService.asyncLocalStorage.getStore()
+      : undefined;
+    if (
+      durableObjectivesEnabled() &&
+      (!strictContext?.store_id ||
+        !strictContext.organization_id ||
+        !strictContext.user_id)
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
+    }
     const task = await this.prisma.ai_agent_tasks.findFirst({
-      where: { id },
+      where: {
+        id,
+        ...(strictContext
+          ? {
+              user_id: strictContext.user_id,
+              store_id: strictContext.store_id,
+              organization_id: strictContext.organization_id,
+            }
+          : {}),
+      },
       select: this.selection(),
     });
 
@@ -180,8 +228,14 @@ export class VexiTaskService {
     try {
       const job = await this.queue.getJobStatus('ai-agent', task.job_id);
       if (job.result?.execution?.schema_version === '1') {
-        return { ...task, live_status: job.status,
-          result: { content: job.result.content ?? '', execution: job.result.execution } };
+        return {
+          ...task,
+          live_status: job.status,
+          result: {
+            content: job.result.content ?? '',
+            execution: job.result.execution,
+          },
+        };
       }
       return { ...task, live_status: job.status };
     } catch {
@@ -193,7 +247,14 @@ export class VexiTaskService {
 
   /** The person's recent tasks, newest first, for the panel's task strip. */
   async listRecent(limit = 5): Promise<TaskSnapshot[]> {
-    const userId = RequestContextService.getContext()?.user_id;
+    const context = durableObjectivesEnabled()
+      ? RequestContextService.asyncLocalStorage.getStore()
+      : RequestContextService.getContext();
+    const userId =
+      !durableObjectivesEnabled() ||
+      (context?.store_id && context?.organization_id)
+        ? context?.user_id
+        : undefined;
     if (!userId) return [];
 
     return this.prisma.ai_agent_tasks.findMany({
@@ -233,9 +294,15 @@ export class VexiTaskService {
           where: { id: payload.task_id },
           data: {
             status: payload.success ? 'completed' : 'failed',
-            result: payload.success || payload.execution
-              ? ({ content: payload.content ?? '', ...(payload.execution ? { execution: payload.execution } : {}) } as any)
-              : undefined,
+            result:
+              payload.success || payload.execution
+                ? ({
+                    content: payload.content ?? '',
+                    ...(payload.execution
+                      ? { execution: payload.execution }
+                      : {}),
+                  } as any)
+                : undefined,
             error: payload.success ? null : (payload.error ?? 'Error'),
             finished_at: new Date(),
           },
@@ -253,9 +320,15 @@ export class VexiTaskService {
       payload.store_id,
       payload.user_id,
       payload.success ? 'vexi_task_completed' : 'vexi_task_failed',
-      payload.execution ? 'Vexi dejó un resultado para revisar' : payload.success ? 'Vexi terminó tu trabajo' : 'Vexi no pudo terminar',
+      payload.execution
+        ? 'Vexi dejó un resultado para revisar'
+        : payload.success
+          ? 'Vexi terminó tu trabajo'
+          : 'Vexi no pudo terminar',
       payload.success
-        ? this.summarize(payload.content) || payload.execution?.next_action || payload.goal
+        ? this.summarize(payload.content) ||
+            payload.execution?.next_action ||
+            payload.goal
         : `${payload.goal} — ${payload.error ?? 'no se pudo completar'}`,
       { kind: 'vexi_task', task_id: payload.task_id },
     );

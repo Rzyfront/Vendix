@@ -1,14 +1,16 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
-import { Observable, interval, of, timer } from 'rxjs';
+import { EMPTY, Observable, interval, of, timer } from 'rxjs';
 import {
   switchMap,
+  exhaustMap,
   map,
   catchError,
   filter,
   mergeMap,
   startWith,
+  take,
   takeUntil,
   takeWhile,
   withLatestFrom,
@@ -16,6 +18,11 @@ import {
 import * as VexiActions from './vexi.actions';
 import type { VexiProposalPreview } from './vexi.actions';
 import * as VexiSelectors from './vexi.selectors';
+import {
+  canResumeObjective,
+  objectivePointer,
+  persistedObjective,
+} from './vexi-objective.utils';
 import { vexiToolFailed } from './vexi-execution.utils';
 import {
   VexiApiService,
@@ -158,11 +165,22 @@ export class VexiEffects {
       ofType(VexiActions.selectConversation),
       switchMap(({ conversationId }) =>
         this.chatApi.getConversation(conversationId).pipe(
-          map((conversation) =>
-            VexiActions.loadMessagesSuccess({
-              messages: conversation.messages || [],
-            }),
-          ),
+          switchMap((conversation) => {
+            const pointer =
+              objectivePointer(conversation.metadata) ??
+              [...(conversation.messages ?? [])]
+                .reverse()
+                .map((message) => objectivePointer(message.metadata))
+                .find(Boolean);
+            return of(
+              VexiActions.loadMessagesSuccess({
+                messages: conversation.messages || [],
+              }),
+              ...(pointer
+                ? [VexiActions.loadObjective({ objectiveId: pointer })]
+                : []),
+            );
+          }),
           catchError((error) =>
             of(
               VexiActions.selectConversationFailure({
@@ -172,6 +190,72 @@ export class VexiEffects {
           ),
         ),
       ),
+    ),
+  );
+
+  loadObjective$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.loadObjective),
+      switchMap(({ objectiveId }) =>
+        this.chatApi.getObjective(objectiveId).pipe(
+          map((objective) =>
+            VexiActions.objectiveReceived({
+              objective,
+              requestedId: objectiveId,
+            }),
+          ),
+          catchError(() =>
+            of(
+              VexiActions.objectiveFailure({
+                error: 'No pude consultar el objetivo.',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  resumeObjective$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.resumeObjective),
+      withLatestFrom(this.store.select(VexiSelectors.selectObjective)),
+      // Explicit objective + current version. No generic resume of whichever plan is latest.
+      exhaustMap(([{ objectiveId, confirmExpired }, objective]) => {
+        if (
+          !objective ||
+          objective.id !== objectiveId ||
+          !canResumeObjective(objective, confirmExpired)
+        ) {
+          return of(
+            VexiActions.objectiveFailure({
+              error:
+                'Revisa y selecciona el objetivo antes de reanudarlo; si expiró, confirma esa elección.',
+            }),
+          );
+        }
+        return this.chatApi
+          .resumeObjective(objectiveId, {
+            expected_version: objective.version,
+            ...(confirmExpired ? { confirm_expired: true } : {}),
+          })
+          .pipe(
+            map((resumed) =>
+              VexiActions.resumeObjectiveSuccess({
+                objective: resumed,
+                requestedId: objectiveId,
+              }),
+            ),
+            catchError(() =>
+              of(
+                VexiActions.objectiveFailure({
+                  error:
+                    'No se reanudó el objetivo. Actualiza su estado antes de intentarlo de nuevo.',
+                }),
+              ),
+            ),
+          );
+      }),
     ),
   );
 
@@ -274,6 +358,15 @@ export class VexiEffects {
             if (last?.role === 'assistant') {
               return of(
                 VexiActions.loadMessagesSuccess({ messages }),
+                ...(() => {
+                  const objective = persistedObjective(
+                    last.metadata,
+                    drop.conversationId,
+                  );
+                  return objective
+                    ? [VexiActions.objectiveReceived({ objective })]
+                    : [];
+                })(),
                 VexiActions.streamReconciled(),
               );
             }
@@ -392,7 +485,9 @@ export class VexiEffects {
     this.actions$.pipe(
       ofType(VexiActions.confirmProposalSuccess),
       filter(({ planActive }) => planActive === true),
-      withLatestFrom(this.store.select(VexiSelectors.selectActiveConversationId)),
+      withLatestFrom(
+        this.store.select(VexiSelectors.selectActiveConversationId),
+      ),
       filter(([, conversationId]) => conversationId !== null),
       map(([{ speak }, conversationId]) =>
         VexiActions.sendMessage({
@@ -405,6 +500,72 @@ export class VexiEffects {
     ),
   );
 
+  rejectProposal$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.rejectProposal),
+      withLatestFrom(
+        this.facadeProposal$,
+        this.store.select(VexiSelectors.selectActiveConversationId),
+      ),
+      exhaustMap(([, proposal, conversationId]) => {
+        if (!proposal) return EMPTY;
+        const identity = {
+          conversationId,
+          confirmationToken: proposal.confirmationToken,
+        };
+        // A first D1 proposal arrives just before done.objective. Wait for that
+        // terminal snapshot before deciding that absent metadata means legacy.
+        return this.store.select(VexiSelectors.selectIsStreaming).pipe(
+          filter((streaming) => !streaming),
+          take(1),
+          withLatestFrom(
+            this.store.select(VexiSelectors.selectObjective),
+            this.store.select(VexiSelectors.selectActiveConversationId),
+            this.facadeProposal$,
+          ),
+          switchMap(([, objective, selectedConversation, currentProposal]) => {
+            if (
+              selectedConversation !== conversationId ||
+              currentProposal?.confirmationToken !== proposal.confirmationToken
+            )
+              return EMPTY;
+            // Legacy/default-OFF never probes a new endpoint.
+            if (!objective || objective.conversation_id !== conversationId) {
+              return of(VexiActions.rejectProposalSuccess(identity));
+            }
+            return this.chatApi
+              .rejectObjectiveProposal(objective.id, objective.version)
+              .pipe(
+                map((updated) =>
+                  VexiActions.rejectProposalSuccess({
+                    ...identity,
+                    objective: updated,
+                  }),
+                ),
+                catchError(() =>
+                  of(
+                    VexiActions.rejectProposalFailure({
+                      ...identity,
+                      error:
+                        'No se confirmó el rechazo. Actualiza el objetivo antes de intentarlo de nuevo.',
+                    }),
+                  ),
+                ),
+              );
+          }),
+          takeUntil(
+            this.actions$.pipe(
+              ofType(
+                VexiActions.selectConversation,
+                VexiActions.clearActiveConversation,
+              ),
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+
   /**
    * Same for a rejection. The reducer has already cleared the proposal by the
    * time effects run, so it leaves `rejectedPlanActive` behind for this to read;
@@ -412,13 +573,16 @@ export class VexiEffects {
    */
   continueAfterRejection$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(VexiActions.rejectProposal),
+      ofType(VexiActions.rejectProposalSuccess),
       withLatestFrom(
         this.store.select(VexiSelectors.selectRejectedPlanActive),
         this.store.select(VexiSelectors.selectActiveConversationId),
         this.store.select(VexiSelectors.selectLastTurn),
       ),
-      filter(([, planActive, conversationId]) => planActive && conversationId !== null),
+      filter(
+        ([, planActive, conversationId]) =>
+          planActive && conversationId !== null,
+      ),
       map(([, , conversationId, lastTurn]) =>
         VexiActions.sendMessage({
           conversationId: conversationId as number,
@@ -442,10 +606,17 @@ export class VexiEffects {
         this.store.select(VexiSelectors.selectAutoContinuations),
         this.store.select(VexiSelectors.selectActiveConversationId),
         this.store.select(VexiSelectors.selectLastTurn),
+        this.store.select(VexiSelectors.selectObjective),
       ),
-      filter(([, pending, , conversationId]) => pending && conversationId !== null),
-      map(([, , count, conversationId, lastTurn]) =>
-        count < VexiEffects.MAX_AUTO_CONTINUATIONS
+      filter(
+        ([, pending, , conversationId]) => pending && conversationId !== null,
+      ),
+      map(([, , count, conversationId, lastTurn, objective]) =>
+        count < VexiEffects.MAX_AUTO_CONTINUATIONS &&
+        (!objective ||
+          (!objective.requires_revalidation &&
+            ['active', 'partial'].includes(objective.semantic_status) &&
+            canResumeObjective(objective)))
           ? VexiActions.sendMessage({
               conversationId: conversationId as number,
               content: '',
@@ -590,7 +761,9 @@ export class VexiEffects {
                       // this the trace narrates it in the past tense of
                       // success ("Añadí Cafe sello rojo") over a refusal.
                       failed: this.uiCommandFailed(summary),
-                      ...(chunk.tool?.execution ? { execution: chunk.tool.execution } : {}),
+                      ...(chunk.tool?.execution
+                        ? { execution: chunk.tool.execution }
+                        : {}),
                     }),
                   );
                 })
@@ -613,7 +786,9 @@ export class VexiEffects {
                       name,
                       summary: 'El comando de interfaz falló.',
                       failed: true,
-                      ...(chunk.tool?.execution ? { execution: chunk.tool.execution } : {}),
+                      ...(chunk.tool?.execution
+                        ? { execution: chunk.tool.execution }
+                        : {}),
                     }),
                   );
                 });
@@ -654,9 +829,13 @@ export class VexiEffects {
               VexiActions.toolCallFinished({
                 id: chunk.tool.id,
                 name: chunk.tool.name,
-                summary: proposal ? undefined : chunk.tool.execution?.next_action ?? chunk.tool.summary,
+                summary: proposal
+                  ? undefined
+                  : (chunk.tool.execution?.next_action ?? chunk.tool.summary),
                 failed: vexiToolFailed(chunk.tool.execution, chunk.tool.failed),
-                ...(chunk.tool.execution ? { execution: chunk.tool.execution } : {}),
+                ...(chunk.tool.execution
+                  ? { execution: chunk.tool.execution }
+                  : {}),
               }),
             );
             break;
@@ -690,6 +869,10 @@ export class VexiEffects {
             break;
 
           case 'done':
+            if (chunk.objective)
+              subscriber.next(
+                VexiActions.objectiveReceived({ objective: chunk.objective }),
+              );
             // Before completing: lets the player stop waiting on an index that a
             // failed synthesis means will never arrive, instead of holding the
             // remaining segments behind the gap.
@@ -894,9 +1077,7 @@ export class VexiEffects {
       ofType(VexiActions.archiveConversation),
       mergeMap(({ conversationId }) =>
         this.chatApi.archiveConversation(conversationId).pipe(
-          map(() =>
-            VexiActions.archiveConversationSuccess({ conversationId }),
-          ),
+          map(() => VexiActions.archiveConversationSuccess({ conversationId })),
           catchError((error) =>
             of(
               VexiActions.archiveConversationFailure({

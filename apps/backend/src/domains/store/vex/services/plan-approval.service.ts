@@ -6,6 +6,8 @@ import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VexiPlanStateService } from '../../vexi/vexi-plan-state.service';
+import { requireObjectiveScope } from '../../../../ai-engine/tasks/agent-objective.repository';
+import { durableObjectivesEnabled } from '../../../../ai-engine/tasks/interfaces/agent-objective.interface';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /** One approval covers the whole plan; 15 minutes to run it before re-asking. */
@@ -223,7 +225,10 @@ export class PlanApprovalService {
       const createdAt = record.created_at
         ? new Date(record.created_at).getTime()
         : NaN;
-      if (!Number.isFinite(createdAt) || Date.now() - createdAt >= PLAN_MAX_AGE_MS) {
+      if (
+        !Number.isFinite(createdAt) ||
+        Date.now() - createdAt >= PLAN_MAX_AGE_MS
+      ) {
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Este plan venció. Vuelve a pedirle a Vex que lo proponga.',
@@ -257,8 +262,18 @@ export class PlanApprovalService {
       );
     }
 
-    const { covered, reconfirm } = this.classifySteps(verified);
-    const token = await this.issuePlanToken(planId, userId, verified);
+    // D1 preserves the existing token circuit but never grants a batch of writes.
+    // Only this selected change is covered; every later write gets its own card.
+    const selected = durableObjectivesEnabled()
+      ? verified.slice(0, 1)
+      : verified;
+    const classified = this.classifySteps(selected);
+    const covered = classified.covered;
+    const reconfirm = [
+      ...classified.reconfirm,
+      ...(durableObjectivesEnabled() ? verified.slice(1) : []),
+    ];
+    const token = await this.issuePlanToken(planId, userId, selected);
     if (loaded) {
       await this.savePlan(conversationId, loaded, {
         ...loaded.plan,
@@ -281,11 +296,16 @@ export class PlanApprovalService {
     userId: number | undefined,
   ): Promise<void> {
     // `user_id: undefined` lo ignora Prisma: sin usuario no hay dueño posible.
+    const scope = durableObjectivesEnabled()
+      ? requireObjectiveScope()
+      : undefined;
     const conversation =
-      userId === undefined || userId === null
+      userId === undefined ||
+      userId === null ||
+      (scope && scope.user_id !== userId)
         ? null
         : await this.prisma.ai_conversations.findFirst({
-            where: { id: conversationId },
+            where: { id: conversationId, ...(scope ?? {}) },
             select: { user_id: true },
           });
     if (!conversation || conversation.user_id !== userId) {
@@ -323,9 +343,15 @@ export class PlanApprovalService {
         );
       }
       await this.planState.clearStepHashes(conversationId);
+      if (durableObjectivesEnabled())
+        await this.planState.rejectPendingObjective(conversationId);
       return { plan_id: planId, status: 'rejected' };
     }
-    if (loaded.plan.status === 'applied' || loaded.plan.status === 'partially_applied' || loaded.plan.status === 'rejected') {
+    if (
+      loaded.plan.status === 'applied' ||
+      loaded.plan.status === 'partially_applied' ||
+      loaded.plan.status === 'rejected'
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_CONFLICT_001,
         loaded.plan.status === 'rejected'
@@ -344,6 +370,8 @@ export class PlanApprovalService {
       ),
     });
     await this.planState.clearStepHashes(conversationId);
+    if (durableObjectivesEnabled())
+      await this.planState.rejectPendingObjective(conversationId);
     return { plan_id: planId, status: 'rejected' };
   }
 
@@ -360,7 +388,7 @@ export class PlanApprovalService {
     userId: number | undefined;
   }): Promise<VexPlanStepRecord> {
     const step = await this.resolveOpenStep(input);
-    if (!step.irreversible) {
+    if (!step.irreversible && !durableObjectivesEnabled()) {
       throw new VendixHttpException(
         ErrorCodes.SYS_CONFLICT_001,
         'Ese paso está cubierto por la aprobación del plan y no necesita confirmación aparte.',
@@ -500,6 +528,11 @@ export class PlanApprovalService {
     conversationId: number,
     planId: string,
   ): Promise<LoadedPlan | null> {
+    if (durableObjectivesEnabled())
+      await this.assertConversationOwner(
+        conversationId,
+        requireObjectiveScope().user_id,
+      );
     const messages = await this.prisma.ai_messages.findMany({
       where: { conversation_id: conversationId, role: 'assistant' },
       orderBy: { id: 'desc' },
@@ -544,10 +577,21 @@ export class PlanApprovalService {
     // `updateMany` y no `update`: `ai_messages` es relational-scoped y la
     // extensión funde `conversation: {...}` en el `where`, lo que rompe el
     // `WhereUniqueInput` de `update`.
-    await this.prisma.ai_messages.updateMany({
-      where: { id: loaded.message_id, conversation_id: conversationId },
+    const saved = await this.prisma.ai_messages.updateMany({
+      where: {
+        id: loaded.message_id,
+        conversation_id: conversationId,
+        ...(durableObjectivesEnabled()
+          ? { metadata: { equals: loaded.metadata as any } }
+          : {}),
+      },
       data: { metadata: { ...loaded.metadata, plan } as any },
     });
+    if (durableObjectivesEnabled() && saved.count !== 1)
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        'El estado de la propuesta cambió; vuelve a consultarlo.',
+      );
   }
 
   private normalizePlanStatus(raw: unknown): VexPlanStatus {

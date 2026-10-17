@@ -5,6 +5,7 @@ import {
   Logger,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   UploadedFile,
@@ -34,6 +35,11 @@ import { VexiSpeechService } from './vexi-speech.service';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  AgentObjectiveResultsQueryDto,
+  ResumeAgentObjectiveDto,
+  RejectAgentObjectiveProposalDto,
+} from './dto/resume-agent-objective.dto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
 /**
@@ -106,11 +112,36 @@ export class VexiController {
    */
   @Post('confirmations/apply')
   async applyConfirmation(@Body() dto: ApplyConfirmationDto) {
-    const output = await this.toolRegistry.executeTool(
-      dto.tool,
-      dto.arguments as Record<string, any>,
-      { confirmationToken: dto.confirmation_token },
+    const execution = await this.planState.applyDurableEffect(
+      {
+        conversationId: dto.conversation_id,
+        tool: dto.tool,
+        args: dto.arguments,
+      },
+      () =>
+        this.toolRegistry.executeTool(
+          dto.tool,
+          dto.arguments as Record<string, any>,
+          {
+            confirmationToken: dto.confirmation_token,
+          },
+        ),
     );
+    const { output, result } = execution;
+    if (
+      result &&
+      (result.status !== 'ok' || result.effect_status !== 'applied')
+    ) {
+      return this.responseService.success(
+        {
+          tool: dto.tool,
+          output,
+          summary: result.next_action,
+          execution: result,
+        },
+        'Resultado pendiente de verificación',
+      );
+    }
 
     // Recorded HERE and not in the agent loop, because this is the only place an
     // applied write exists. The loop persists the PROPOSAL; the approval arrives on
@@ -318,6 +349,63 @@ export class VexiController {
         gaps: this.capabilities.gaps(),
       },
       'Capacidades de Vexi para este usuario',
+    );
+  }
+
+  /** Progress only. No route below starts inference or changes the work budget. */
+  @Get('objectives/:id')
+  async getObjective(@Param('id', ParseUUIDPipe) id: string) {
+    return this.responseService.success(
+      await this.planState.getObjectiveProgress(id),
+      'Estado del objetivo',
+    );
+  }
+
+  @Post('objectives/:id/resume')
+  async resumeObjective(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResumeAgentObjectiveDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.resumeObjective(id, {
+        expected_version: dto.expected_version,
+        allow_expired: dto.confirm_expired === true,
+      }),
+      'Objetivo seleccionado; requiere revalidación antes de continuar',
+    );
+  }
+
+  @Post('objectives/:id/reject-proposal')
+  async rejectObjectiveProposal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectAgentObjectiveProposalDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.rejectObjectiveProposal(id, dto.expected_version),
+      'Propuesta rechazada; no se aplicó ningún cambio',
+    );
+  }
+
+  @Get('objectives/:id/results')
+  async getObjectiveResults(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: AgentObjectiveResultsQueryDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.listObjectiveResults(id, query),
+      'Resultados del objetivo',
+    );
+  }
+
+  @Get('objectives/:id/results/:resultId')
+  async getObjectiveResult(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('resultId', ParseUUIDPipe) resultId: string,
+    @Query() query: AgentObjectiveResultsQueryDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.getObjectiveArtifact(id, resultId, query),
+      'Resultado observado del objetivo',
     );
   }
 

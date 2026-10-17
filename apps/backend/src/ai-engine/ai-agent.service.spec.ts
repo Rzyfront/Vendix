@@ -1,4 +1,7 @@
-import { normalizeToolException, normalizeToolResult } from './tools/tool-result.normalizer';
+import {
+  normalizeToolException,
+  normalizeToolResult,
+} from './tools/tool-result.normalizer';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { AIAgentService } from './ai-agent.service';
 import { AgentTraceService } from './observability/agent-trace.service';
@@ -1479,17 +1482,26 @@ describe('AIAgentService.runAgentStream', () => {
         normalizeToolResult(await executeTool(name, args), {
           evidenceRef: options.evidenceRef,
           write: name === 'create_expense',
-        }));
+        }),
+      );
     });
     afterEach(() => {
-      if (previous === undefined) delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
+      if (previous === undefined)
+        delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
       else process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = previous;
     });
     it('resolved business errors are partial, not quota success, and identical retries never execute', async () => {
       configureStorePlan(['list_things']);
-      executeTool.mockResolvedValue('{"error":"no encontrado","error_code":"NOT_FOUND","next_step":"Indica otro documento o confirma si deseas crear uno."}');
-      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things', { id: 1 })] }))
-        .mockResolvedValueOnce(ok({ tool_calls: [call('t2', 'list_things', { id: 1 })] }))
+      executeTool.mockResolvedValue(
+        '{"error":"no encontrado","error_code":"NOT_FOUND","next_step":"Indica otro documento o confirma si deseas crear uno."}',
+      );
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('t1', 'list_things', { id: 1 })] }),
+        )
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('t2', 'list_things', { id: 1 })] }),
+        )
         .mockResolvedValueOnce(ok({ content: 'Ya quedó completado' }));
       const { chunks, result } = await drain({});
       expect(executeTool).toHaveBeenCalledTimes(1);
@@ -1497,61 +1509,110 @@ describe('AIAgentService.runAgentStream', () => {
       expect(result.execution).toMatchObject({ outcome: 'partial' });
       expect(result.content).not.toContain('Ya quedó');
       expect(result.content).toContain('otro documento');
-      expect(chunks.find(c => c.type === 'done')?.execution).toEqual(result.execution);
-      expect(chunks.filter(c => c.type === 'tool_result').every(c => c.tool?.execution?.status === 'recoverable_error')).toBe(true);
+      expect(chunks.find((c) => c.type === 'done')?.execution).toEqual(
+        result.execution,
+      );
+      expect(
+        chunks
+          .filter((c) => c.type === 'tool_result')
+          .every((c) => c.tool?.execution?.status === 'recoverable_error'),
+      ).toBe(true);
     });
     it('allows one changed argument correction; successful read counts once with the original dedup ID', async () => {
       configureStorePlan(['list_things']);
-      executeTool.mockResolvedValueOnce('{"error":"id","error_code":"INVALID_ARGS","next_step":"Corrige el id."}')
+      executeTool
+        .mockResolvedValueOnce(
+          '{"error":"id","error_code":"INVALID_ARGS","next_step":"Corrige el id."}',
+        )
         .mockResolvedValueOnce('{"id":"O-QA1"}');
-      chat.mockResolvedValueOnce(ok({ tool_calls: [call('bad', 'list_things', { id: 0 })] }))
-        .mockResolvedValueOnce(ok({ tool_calls: [call('fixed', 'list_things', { id: 1 })] }))
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('bad', 'list_things', { id: 0 })] }),
+        )
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('fixed', 'list_things', { id: 1 })] }),
+        )
         .mockResolvedValueOnce(ok({ content: 'Encontré O-QA1' }));
       const { result } = await drain({});
-      expect(executeTool).toHaveBeenCalledTimes(2); expect(consumeAIQuota).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(consumeAIQuota.mock.calls)).toContain(':tool:fixed');
+      expect(executeTool).toHaveBeenCalledTimes(2);
+      expect(consumeAIQuota).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(consumeAIQuota.mock.calls)).toContain(
+        ':tool:fixed',
+      );
       expect(result.execution?.resource_ids).toEqual({ id: 'O-QA1' });
       expect(result.execution?.outcome).toBe('partial');
     });
     it('clock exhaustion never starts a closing inference and emits useful partial outcome', async () => {
-      let now = 0; jest.spyOn(Date, 'now').mockImplementation(() => now);
-      chat.mockImplementation(async () => { now = 2000; return ok({ tool_calls: [call('t1', 'list_things')] }); });
+      let now = 0;
+      jest.spyOn(Date, 'now').mockImplementation(() => now);
+      chat.mockImplementation(async () => {
+        now = 2000;
+        return ok({ tool_calls: [call('t1', 'list_things')] });
+      });
       executeTool.mockResolvedValue('{"id":"O-QA1"}');
-      const { chunks, result } = await drain({ timeout_ms: 1000, max_iterations: 1 });
+      const { chunks, result } = await drain({
+        timeout_ms: 1000,
+        max_iterations: 1,
+      });
       expect(chat).toHaveBeenCalledTimes(1);
       expect(result.execution?.outcome).toBe('partial');
       expect(result.content).toContain('O-QA1');
-      expect(result.content).not.toMatch(/reformula|otras palabras|otra forma/i);
-      expect(chunks.filter(c => c.type === 'done')).toHaveLength(1);
+      expect(result.content).not.toMatch(
+        /reformula|otras palabras|otra forma/i,
+      );
+      expect(chunks.filter((c) => c.type === 'done')).toHaveLength(1);
     });
     it('iteration exhaustion uses no closing inference even with time left', async () => {
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'list_things')] }));
       const { result } = await drain({ max_iterations: 1 });
-      expect(chat).toHaveBeenCalledTimes(1); expect(result.execution?.next_action).toBeTruthy();
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(result.execution?.next_action).toBeTruthy();
     });
     it('unknown write halts the batch and plan continuation, without retry or successful tool quota', async () => {
       configureStorePlan(['create_expense', 'list_things']);
-      registry.executeToolResult.mockResolvedValue(normalizeToolException({ code: 'ETIMEDOUT' }, { write: true, handlerStarted: true }));
-      const hook = { snapshot: jest.fn().mockResolvedValue(makePlan()), execute: jest.fn() };
-      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'create_expense'), call('t2', 'list_things')] }));
+      registry.executeToolResult.mockResolvedValue(
+        normalizeToolException(
+          { code: 'ETIMEDOUT' },
+          { write: true, handlerStarted: true },
+        ),
+      );
+      const hook = {
+        snapshot: jest.fn().mockResolvedValue(makePlan()),
+        execute: jest.fn(),
+      };
+      chat.mockResolvedValue(
+        ok({
+          tool_calls: [call('t1', 'create_expense'), call('t2', 'list_things')],
+        }),
+      );
       const { chunks, result } = await drain({ plan: hook });
-      expect(chat).toHaveBeenCalledTimes(1); expect(registry.executeToolResult).toHaveBeenCalledTimes(1);
-      expect(consumeAIQuota).not.toHaveBeenCalled(); expect(chunks.some(c => c.type === 'plan_continue')).toBe(false);
-      expect(result.execution?.outcome).toBe('unknown_effect'); expect(result.content).toContain('No repetiré');
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(registry.executeToolResult).toHaveBeenCalledTimes(1);
+      expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(chunks.some((c) => c.type === 'plan_continue')).toBe(false);
+      expect(result.execution?.outcome).toBe('unknown_effect');
+      expect(result.content).toContain('No repetiré');
     });
     it('not-offered UI is blocked before dispatch, with an alternative and terminal metadata', async () => {
       configureStorePlan(['list_things']);
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_navigate')] }));
       const { chunks, result } = await drain({});
-      expect(result.execution?.outcome).toBe('blocked'); expect(result.content).toContain('administrador');
-      expect(chunks.some(c => c.type === 'tool_call')).toBe(false); expect(awaitResult).not.toHaveBeenCalled();
+      expect(result.execution?.outcome).toBe('blocked');
+      expect(result.content).toContain('administrador');
+      expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+      expect(awaitResult).not.toHaveBeenCalled();
     });
     it('UI user input is not an error or tool success and is never optimistically narrated', async () => {
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_go')] }));
-      awaitResult.mockResolvedValue('{"status":"needs_user_input","next_action":"¿Cuál variante deseas?"}');
+      awaitResult.mockResolvedValue(
+        '{"status":"needs_user_input","next_action":"¿Cuál variante deseas?"}',
+      );
       const { chunks, result } = await drain({ stream_id: 's1' });
-      expect(result.execution?.outcome).toBe('needs_user_input'); expect(result.content).toContain('variante');
-      expect(chunks.find(c => c.type === 'tool_result')?.tool?.failed).toBe(false);
+      expect(result.execution?.outcome).toBe('needs_user_input');
+      expect(result.content).toContain('variante');
+      expect(chunks.find((c) => c.type === 'tool_result')?.tool?.failed).toBe(
+        false,
+      );
       expect(consumeAIQuota).not.toHaveBeenCalled();
     });
     it('sync shares the same semantic result as SSE', async () => {
@@ -1559,147 +1620,560 @@ describe('AIAgentService.runAgentStream', () => {
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'list_things')] }));
       const streamed = await drain({});
       const sync = await service.runAgent({ goal: 'hola' });
-      expect(sync.execution).toEqual(streamed.result.execution); expect(sync.content).toEqual(streamed.result.content);
+      expect(sync.execution).toEqual(streamed.result.execution);
+      expect(sync.content).toEqual(streamed.result.content);
     });
     it('malformed JSON never reaches a defaulting handler', async () => {
-      chat.mockResolvedValueOnce(ok({ tool_calls: [{ ...call('t1', 'list_things'), function: { name: 'list_things', arguments: '{broken' } }] }))
+      chat
+        .mockResolvedValueOnce(
+          ok({
+            tool_calls: [
+              {
+                ...call('t1', 'list_things'),
+                function: { name: 'list_things', arguments: '{broken' },
+              },
+            ],
+          }),
+        )
         .mockResolvedValueOnce(ok({ content: 'terminado' }));
       const { result } = await drain({});
-      expect(registry.executeToolResult).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('partial');
+      expect(registry.executeToolResult).not.toHaveBeenCalled();
+      expect(result.execution?.outcome).toBe('partial');
     });
     it('a real registry preserves approval as pending and never runs a write handler', async () => {
       const handler = jest.fn();
-      const realRegistry = new AIToolRegistry({ issue: jest.fn().mockResolvedValue('qa-token'), redeem: jest.fn() } as any);
-      realRegistry.register({ name: 'create_expense', domain: 'expenses', description: 'qa', parameters: {}, requiresConfirmation: true, handler });
-      service = new AIAgentService({ chat } as any, {} as any, realRegistry, { emit } as any,
-        { awaitResult } as any, { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any);
-      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'create_expense')] }));
+      const realRegistry = new AIToolRegistry({
+        issue: jest.fn().mockResolvedValue('qa-token'),
+        redeem: jest.fn(),
+      } as any);
+      realRegistry.register({
+        name: 'create_expense',
+        domain: 'expenses',
+        description: 'qa',
+        parameters: {},
+        requiresConfirmation: true,
+        handler,
+      });
+      service = new AIAgentService(
+        { chat } as any,
+        {} as any,
+        realRegistry,
+        { emit } as any,
+        { awaitResult } as any,
+        { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any,
+      );
+      chat.mockResolvedValue(
+        ok({ tool_calls: [call('t1', 'create_expense')] }),
+      );
       const { result, chunks } = await drain({});
       expect(result.execution?.outcome).toBe('pending_confirmation');
-      expect(chunks.find(c => c.type === 'tool_result')?.tool).toMatchObject({ failed: false, execution: { status: 'pending_confirmation' } });
+      expect(chunks.find((c) => c.type === 'tool_result')?.tool).toMatchObject({
+        failed: false,
+        execution: { status: 'pending_confirmation' },
+      });
       expect(result.pending_confirmation?.confirmation_token).toBe('qa-token');
-      expect(handler).not.toHaveBeenCalled(); expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+      expect(consumeAIQuota).not.toHaveBeenCalled();
     });
     it('real registry-to-loop HTTP200 business failure never counts as successful tool quota', async () => {
-      const handler = jest.fn().mockResolvedValue('{"success":false,"statusCode":200,"message":"rejected"}');
+      const handler = jest
+        .fn()
+        .mockResolvedValue(
+          '{"success":false,"statusCode":200,"message":"rejected"}',
+        );
       const realRegistry = new AIToolRegistry({} as any);
-      realRegistry.register({ name: 'list_things', domain: 'qa', description: 'qa', parameters: {}, readOnly: true, handler });
+      realRegistry.register({
+        name: 'list_things',
+        domain: 'qa',
+        description: 'qa',
+        parameters: {},
+        readOnly: true,
+        handler,
+      });
       configureStorePlan(['*']);
-      service = new AIAgentService({ chat } as any, {} as any, realRegistry, { emit } as any,
-        { awaitResult } as any, { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any);
-      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+      service = new AIAgentService(
+        { chat } as any,
+        {} as any,
+        realRegistry,
+        { emit } as any,
+        { awaitResult } as any,
+        { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any,
+      );
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
         .mockResolvedValueOnce(ok({ content: 'Todo aplicado.' }));
       const { result } = await drain({});
-      expect(handler).toHaveBeenCalledTimes(1); expect(consumeAIQuota).not.toHaveBeenCalled();
-      expect(result.execution?.outcome).toBe('partial'); expect(result.content).not.toContain('Todo aplicado');
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(result.execution?.outcome).toBe('partial');
+      expect(result.content).not.toContain('Todo aplicado');
     });
     it('provider transient emits a terminal failed outcome without another retry layer or lost usage', async () => {
-      chat.mockResolvedValue({ success: false, error: 'secret provider diagnostic', error_code: 'PROVIDER_TRANSIENT', retryable: true, usage: { totalTokens: 7 } });
+      chat.mockResolvedValue({
+        success: false,
+        error: 'secret provider diagnostic',
+        error_code: 'PROVIDER_TRANSIENT',
+        retryable: true,
+        usage: { totalTokens: 7 },
+      });
       const { chunks, result } = await drain({});
-      expect(chat).toHaveBeenCalledTimes(1); expect(result.total_tokens).toBe(7);
-      expect(result.execution).toMatchObject({ outcome: 'failed', error_code: 'PROVIDER_TRANSIENT' });
-      expect(result.content).not.toContain('secret'); expect(chunks.at(-1)?.type).toBe('done');
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(result.total_tokens).toBe(7);
+      expect(result.execution).toMatchObject({
+        outcome: 'failed',
+        error_code: 'PROVIDER_TRANSIENT',
+      });
+      expect(result.content).not.toContain('secret');
+      expect(chunks.at(-1)?.type).toBe('done');
     });
     it('aborted turn remains silent and cancelled with no inferred progress', async () => {
-      const { chunks, result } = await drain({ shouldAbort: jest.fn().mockResolvedValue(true) });
-      expect(chunks).toEqual([]); expect(result.execution?.outcome).toBe('cancelled');
+      const { chunks, result } = await drain({
+        shouldAbort: jest.fn().mockResolvedValue(true),
+      });
+      expect(chunks).toEqual([]);
+      expect(result.execution?.outcome).toBe('cancelled');
       expect(chat).not.toHaveBeenCalled();
     });
     it('legacy text is preserved but cannot consume tool success quota or certify a completed objective', async () => {
-      configureStorePlan(['list_things']); executeTool.mockResolvedValue('Ya quedó');
-      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+      configureStorePlan(['list_things']);
+      executeTool.mockResolvedValue('Ya quedó');
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
         .mockResolvedValueOnce(ok({ content: 'Todo completado' }));
       const { result } = await drain({});
-      expect(consumeAIQuota).not.toHaveBeenCalled(); expect(result.tools_used[0].execution?.freshness).toBe('unknown');
+      expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(result.tools_used[0].execution?.freshness).toBe('unknown');
       expect(result.content).not.toContain('Todo completado');
     });
   });
-
 });
 
 describe('AIAgentService B routed catalog boundary', () => {
-  const saved = [process.env.AI_TOOL_ROUTING_ENABLED, process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED];
-  let registry: AIToolRegistry; let router: import('./tools/tool-router.service').ToolRouterService;
-  let chat: jest.Mock; let handler: jest.Mock; let ui: jest.Mock; let service: AIAgentService; let access: any;
+  const saved = [
+    process.env.AI_TOOL_ROUTING_ENABLED,
+    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED,
+  ];
+  let registry: AIToolRegistry;
+  let router: import('./tools/tool-router.service').ToolRouterService;
+  let chat: jest.Mock;
+  let handler: jest.Mock;
+  let ui: jest.Mock;
+  let service: AIAgentService;
+  let access: any;
   beforeEach(async () => {
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true'; process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
-    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, organization_id: 2, user_id: 3, roles: [], permissions: [], is_owner: true, is_super_admin: false });
-    registry = new AIToolRegistry({ issue: jest.fn().mockResolvedValue('single-use-token') } as any);
-    const { createDiscoveryTools } = await import('./tools/domains/discovery.tools');
+    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
+    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 1,
+      organization_id: 2,
+      user_id: 3,
+      roles: [],
+      permissions: [],
+      is_owner: true,
+      is_super_admin: false,
+    });
+    registry = new AIToolRegistry({
+      issue: jest.fn().mockResolvedValue('single-use-token'),
+    } as any);
+    const { createDiscoveryTools } =
+      await import('./tools/domains/discovery.tools');
     const { ToolRouterService } = await import('./tools/tool-router.service');
     const { localToolRanking } = await import('./tools/tool-catalog');
-    registry.registerMany(createDiscoveryTools()); handler = jest.fn().mockResolvedValue('{"id":1}');
-    for (let i = 0; i < 50; i++) registry.register({ name: `operation_${String(i).padStart(2, '0')}`, domain: 'inventory', description: `operation_${i}`,
-      parameters: { type: 'object', properties: {} }, handler, readOnly: true });
-    router = new ToolRouterService(registry, { rank: async (q, docs, _s, d) => ({ names: localToolRanking(q, docs, d), degraded: [] }) } as any);
-    chat = jest.fn().mockResolvedValue(ok({ content: 'Revisión' })); ui = jest.fn();
-    access = { canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }), getAIFeatureConfig: jest.fn().mockResolvedValue({ tools_allowed: ['*'] }), consumeAIQuota: jest.fn(),
-      checkExtraQuota: jest.fn().mockResolvedValue({ exceeded: false }), consumeExtraQuota: jest.fn() };
-    service = new AIAgentService({ chat } as any, {} as any, registry, { emit: jest.fn() } as any, { awaitResult: ui } as any, access, undefined, router);
+    registry.registerMany(createDiscoveryTools());
+    handler = jest.fn().mockResolvedValue('{"id":1}');
+    for (let i = 0; i < 50; i++)
+      registry.register({
+        name: `operation_${String(i).padStart(2, '0')}`,
+        domain: 'inventory',
+        description: `operation_${i}`,
+        parameters: { type: 'object', properties: {} },
+        handler,
+        readOnly: true,
+      });
+    router = new ToolRouterService(registry, {
+      rank: async (q, docs, _s, d) => ({
+        names: localToolRanking(q, docs, d),
+        degraded: [],
+      }),
+    } as any);
+    chat = jest.fn().mockResolvedValue(ok({ content: 'Revisión' }));
+    ui = jest.fn();
+    access = {
+      canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+      getAIFeatureConfig: jest.fn().mockResolvedValue({ tools_allowed: ['*'] }),
+      consumeAIQuota: jest.fn(),
+      checkExtraQuota: jest.fn().mockResolvedValue({ exceeded: false }),
+      consumeExtraQuota: jest.fn(),
+    };
+    service = new AIAgentService(
+      { chat } as any,
+      {} as any,
+      registry,
+      { emit: jest.fn() } as any,
+      { awaitResult: ui } as any,
+      access,
+      undefined,
+      router,
+    );
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    ['AI_TOOL_ROUTING_ENABLED', 'AI_TOOL_EXECUTION_CONTRACT_ENABLED'].forEach((key, i) => { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; });
+    ['AI_TOOL_ROUTING_ENABLED', 'AI_TOOL_EXECUTION_CONTRACT_ENABLED'].forEach(
+      (key, i) => {
+        if (saved[i] === undefined) delete process.env[key];
+        else process.env[key] = saved[i];
+      },
+    );
   });
   async function drain(params: Record<string, unknown> = {}) {
-    const gen = service.runAgentStream({ goal: 'operation_00', max_iterations: 6, ...params }); const chunks: AIStreamChunk[] = [];
-    let next = await gen.next(); while (!next.done) { chunks.push(next.value); next = await gen.next(); }
+    const gen = service.runAgentStream({
+      goal: 'operation_00',
+      max_iterations: 6,
+      ...params,
+    });
+    const chunks: AIStreamChunk[] = [];
+    let next = await gen.next();
+    while (!next.done) {
+      chunks.push(next.value);
+      next = await gen.next();
+    }
     return { result: next.value, chunks };
   }
-  const names = (index: number) => chat.mock.calls[index][1].tools.map((d: any) => d.function.name);
+  const names = (index: number) =>
+    chat.mock.calls[index][1].tools.map((d: any) => d.function.name);
   it('enables discovered definitions ONLY on the next inference and same args then execute despite D0 recovery', async () => {
-    chat.mockResolvedValueOnce(ok({ tool_calls: [call('s1', 'search_tools', { query: 'operation_49' }), call('bad-batch', 'operation_49', { id: 1 })] }))
-      .mockResolvedValueOnce(ok({ tool_calls: [call('next', 'operation_49', { id: 1 })] })).mockResolvedValueOnce(ok({ content: 'Leído' }));
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('s1', 'search_tools', { query: 'operation_49' }),
+            call('bad-batch', 'operation_49', { id: 1 }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('next', 'operation_49', { id: 1 })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'Leído' }));
     const { result, chunks } = await drain();
-    expect(names(0)).toHaveLength(13); expect(names(0)).not.toContain('operation_49'); expect(names(1)).toHaveLength(25); expect(names(1)).toContain('operation_49');
-    expect(handler).toHaveBeenCalledTimes(1); expect(chunks.some((c) => c.type === 'tool_call' && c.tool?.id === 'bad-batch')).toBe(false);
-    expect(result.tools_used.map((t) => t.name)).toContain('operation_49'); expect(result.execution?.outcome).not.toBe('blocked');
+    expect(names(0)).toHaveLength(13);
+    expect(names(0)).not.toContain('operation_49');
+    expect(names(1)).toHaveLength(25);
+    expect(names(1)).toContain('operation_49');
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(
+      chunks.some((c) => c.type === 'tool_call' && c.tool?.id === 'bad-batch'),
+    ).toBe(false);
+    expect(result.tools_used.map((t) => t.name)).toContain('operation_49');
+    expect(result.execution?.outcome).not.toBe('blocked');
     expect(access.consumeAIQuota).toHaveBeenCalledTimes(1); // Discovery itself is not a business-success unit.
   });
   it('never emits an unoffered UI tool_call nor dispatches to the browser', async () => {
-    registry.register({ name: 'zz_ui', domain: 'ui', description: 'UI', parameters: {}, clientSide: true });
-    chat.mockResolvedValueOnce(ok({ tool_calls: [call('forged', 'zz_ui')] })).mockResolvedValueOnce(ok({ content: 'No se ejecutó' }));
-    const { chunks } = await drain({ stream_id: 's' }); expect(ui).not.toHaveBeenCalled(); expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+    registry.register({
+      name: 'zz_ui',
+      domain: 'ui',
+      description: 'UI',
+      parameters: {},
+      clientSide: true,
+    });
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('forged', 'zz_ui')] }))
+      .mockResolvedValueOnce(ok({ content: 'No se ejecutó' }));
+    const { chunks } = await drain({ stream_id: 's' });
+    expect(ui).not.toHaveBeenCalled();
+    expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
     expect(access.consumeAIQuota).not.toHaveBeenCalled();
   });
   it('excludes denied descriptions and revalidates the plan/caller/agent intersection', async () => {
-    registry.register({ name: 'secret_tool', domain: 'admin', description: 'RESTRICTED BODY', parameters: {}, requiredPermissions: ['admin'], handler });
-    await drain({ agent_allowed_tools: ['inventory', 'discovery'], agent_denied_tools: ['operation_00'], tools: ['inventory', 'discovery'] });
-    expect(JSON.stringify(chat.mock.calls[0][1])).not.toContain('RESTRICTED BODY'); expect(names(0)).not.toContain('operation_00');
-    expect(names(0)).toContain('search_tools'); expect(handler).not.toHaveBeenCalled();
+    registry.register({
+      name: 'secret_tool',
+      domain: 'admin',
+      description: 'RESTRICTED BODY',
+      parameters: {},
+      requiredPermissions: ['admin'],
+      handler,
+    });
+    await drain({
+      agent_allowed_tools: ['inventory', 'discovery'],
+      agent_denied_tools: ['operation_00'],
+      tools: ['inventory', 'discovery'],
+    });
+    expect(JSON.stringify(chat.mock.calls[0][1])).not.toContain(
+      'RESTRICTED BODY',
+    );
+    expect(names(0)).not.toContain('operation_00');
+    expect(names(0)).toContain('search_tools');
+    expect(handler).not.toHaveBeenCalled();
   });
   it('revokes a tool between provider response and execution, including cached working sets', async () => {
     chat.mockImplementationOnce(async () => {
-      access.getAIFeatureConfig.mockResolvedValue({ tools_allowed: ['search_tools'] });
+      access.getAIFeatureConfig.mockResolvedValue({
+        tools_allowed: ['search_tools'],
+      });
       return ok({ tool_calls: [call('revoked', 'operation_00')] });
     });
-    const { result, chunks } = await drain(); expect(handler).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('blocked');
+    const { result, chunks } = await drain();
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.execution?.outcome).toBe('blocked');
     expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
   });
   it('fails authorization closed on plan lookup outage with routing ON', async () => {
-    access.getAIFeatureConfig.mockRejectedValue(new Error('redis down')); await drain(); expect(chat.mock.calls[0][1].tools).toBeUndefined();
+    access.getAIFeatureConfig.mockRejectedValue(new Error('redis down'));
+    await drain();
+    expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
   });
   it('does not smuggle a denied planning tool through the plan-hook shortcut', async () => {
-    registry.register({ name: 'ask_user', domain: 'planning', description: 'Pregunta', parameters: {}, readOnly: true });
-    const plan = { execute: jest.fn(), snapshot: jest.fn().mockResolvedValue(null) };
+    registry.register({
+      name: 'ask_user',
+      domain: 'planning',
+      description: 'Pregunta',
+      parameters: {},
+      readOnly: true,
+    });
+    const plan = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(null),
+    };
     chat.mockResolvedValueOnce(ok({ tool_calls: [call('p1', 'ask_user')] }));
-    await drain({ plan, agent_denied_tools: ['ask_user'] }); expect(plan.execute).not.toHaveBeenCalled();
+    await drain({ plan, agent_denied_tools: ['ask_user'] });
+    expect(plan.execute).not.toHaveBeenCalled();
   });
   it('keeps write approvals and never runs the write handler after discovery', async () => {
-    registry.register({ name: 'write_rare', domain: 'orders', description: 'Cambio raro', parameters: {}, requiresConfirmation: true,
-      preview: async () => ({ status: 'ok', target: 'Sintético', changes: [] }), handler });
-    chat.mockResolvedValueOnce(ok({ tool_calls: [call('s', 'search_tools', { query: 'write_rare' })] }))
+    registry.register({
+      name: 'write_rare',
+      domain: 'orders',
+      description: 'Cambio raro',
+      parameters: {},
+      requiresConfirmation: true,
+      preview: async () => ({ status: 'ok', target: 'Sintético', changes: [] }),
+      handler,
+    });
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [call('s', 'search_tools', { query: 'write_rare' })],
+        }),
+      )
       .mockResolvedValueOnce(ok({ tool_calls: [call('w', 'write_rare')] }));
-    const { result } = await drain(); expect(handler).not.toHaveBeenCalled(); expect(result.pending_confirmation?.confirmation_token).toBe('single-use-token');
-    expect(result.execution?.outcome).toBe('pending_confirmation'); expect(access.consumeAIQuota).not.toHaveBeenCalled();
+    const { result } = await drain();
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.pending_confirmation?.confirmation_token).toBe(
+      'single-use-token',
+    );
+    expect(result.execution?.outcome).toBe('pending_confirmation');
+    expect(access.consumeAIQuota).not.toHaveBeenCalled();
   });
   it('does not start inference if routing exhausted the clock', async () => {
-    let now = 1; jest.spyOn(Date, 'now').mockImplementation(() => now);
-    const original = router.select.bind(router); jest.spyOn(router, 'select').mockImplementation(async (...args) => { const result = await original(...args); now = 5000; return result; });
-    const { result } = await drain({ timeout_ms: 1000 }); expect(chat).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('partial');
+    let now = 1;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const original = router.select.bind(router);
+    jest.spyOn(router, 'select').mockImplementation(async (...args) => {
+      const result = await original(...args);
+      now = 5000;
+      return result;
+    });
+    const { result } = await drain({ timeout_ms: 1000 });
+    expect(chat).not.toHaveBeenCalled();
+    expect(result.execution?.outcome).toBe('partial');
   });
   it('retains full-catalog legacy behavior with flag OFF and does not invoke routing', async () => {
-    delete process.env.AI_TOOL_ROUTING_ENABLED; const select = jest.spyOn(router, 'select'); await drain(); expect(names(0)).toHaveLength(51); expect(select).not.toHaveBeenCalled();
+    delete process.env.AI_TOOL_ROUTING_ENABLED;
+    const select = jest.spyOn(router, 'select');
+    await drain();
+    expect(names(0)).toHaveLength(51);
+    expect(select).not.toHaveBeenCalled();
+  });
+});
+
+describe('D1 durable loop seam', () => {
+  const context = {
+    store_id: 1,
+    organization_id: 2,
+    user_id: 3,
+    permissions: ['read'],
+    roles: ['owner'],
+    is_super_admin: false,
+    is_owner: true,
+  };
+  let registry: AIToolRegistry;
+  let chat: jest.Mock;
+  let handler: jest.Mock;
+  let service: AIAgentService;
+  let durable: any;
+  beforeEach(() => {
+    registry = new AIToolRegistry({ issue: jest.fn() } as any);
+    handler = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        id: 42,
+        rows: Array.from({ length: 900 }, (_, id) => ({
+          id,
+          quantity: id + 1,
+        })),
+      }),
+    );
+    registry.register({
+      name: 'read_rows',
+      domain: 'inventory',
+      description: 'Read',
+      parameters: {},
+      requiredPermissions: ['read'],
+      readOnly: true,
+      handler,
+    });
+    registry.register({
+      name: 'restricted',
+      domain: 'admin',
+      description: 'secret',
+      parameters: {},
+      requiredPermissions: ['new_permission'],
+      readOnly: true,
+      handler,
+    });
+    chat = jest
+      .fn()
+      .mockResolvedValue(ok({ content: 'Resultado pendiente de verificar.' }));
+    service = new AIAgentService(
+      { chat } as any,
+      {} as any,
+      registry,
+      { emit: jest.fn() } as any,
+      { awaitResult: jest.fn() } as any,
+      {
+        canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+        getAIFeatureConfig: jest
+          .fn()
+          .mockResolvedValue({ tools_allowed: ['*'] }),
+        consumeAIQuota: jest.fn(),
+      } as any,
+    );
+    durable = {
+      objective_id: 'obj1',
+      objective: { authority_snapshot: ['read'] },
+      assertBudget: jest.fn(),
+      assertCurrent: jest.fn(),
+      excludeWait: jest.fn(),
+      runProvider: jest.fn(async (fn) => fn()),
+      runTool: jest.fn(async (fn) => fn()),
+      addBudget: jest.fn(),
+      checkpointTool: jest.fn().mockResolvedValue('result1'),
+      proposeWrite: jest.fn(),
+      finish: jest.fn(async () => ({
+        id: 'obj1',
+        version: 9,
+        semantic_status: 'partial',
+      })),
+      close: jest.fn(),
+    };
+  });
+  afterEach(() => jest.restoreAllMocks());
+  const run = (fn: () => Promise<any>) =>
+    RequestContextService.runIsolated(context, fn);
+  it('captures full raw result before compaction and exposes recoverable artifact, not Vex blocks', async () => {
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }));
+    const result = await run(() =>
+      service.runAgent({ goal: 'lee', conversation_id: 7, durable }),
+    );
+    expect(handler).toHaveBeenCalledTimes(1);
+    const persisted = durable.checkpointTool.mock.calls[0][3];
+    expect(persisted.data.rows).toHaveLength(900);
+    expect(persisted.freshness).toBe('observed');
+    expect(result.tools_used[0].result).toContain('artifact_ref');
+    expect(result.tools_used[0].result).not.toContain('vex_block_read');
+    expect(result.tools_used[0].result.length).toBeLessThan(6000);
+    expect(result.objective).toMatchObject({ version: 9 });
+    expect(durable.finish).toHaveBeenCalledTimes(1);
+    expect(durable.close).toHaveBeenCalledTimes(1);
+  });
+  it('persists proposed intent before showing a card and stops the rest of the batch without dispatch', async () => {
+    registry.register({
+      name: 'create_product',
+      domain: 'products',
+      description: 'Crear',
+      parameters: {},
+      requiresConfirmation: true,
+      preview: async () => ({ status: 'ok', target: 'Sintético', changes: [] }),
+      handler,
+    });
+    (registry as any).confirmations.issue.mockResolvedValue('ephemeral-token');
+    chat.mockResolvedValueOnce(
+      ok({
+        tool_calls: [
+          call('write', 'create_product', { name: 'Sintético' }),
+          call('after', 'read_rows'),
+        ],
+      }),
+    );
+    const result = await run(() => service.runAgent({ goal: 'crea', durable }));
+    expect(handler).not.toHaveBeenCalled();
+    expect(durable.proposeWrite).toHaveBeenCalledWith(
+      'create_product',
+      { name: 'Sintético' },
+      undefined,
+    );
+    expect(result.pending_confirmation?.confirmation_token).toBe(
+      'ephemeral-token',
+    );
+    expect(durable.checkpointTool.mock.calls[0][3].status).toBe(
+      'pending_confirmation',
+    );
+    expect(result.execution?.outcome).toBe('pending_confirmation');
+  });
+  it('binds queue_task to the server conversation, so background work inherits this objective without trusting a model ID', async () => {
+    const enqueue = jest.fn().mockResolvedValue('{"queued":true}');
+    registry.register({
+      name: 'queue_task',
+      domain: 'tasks',
+      description: 'Revisar',
+      parameters: {},
+      readOnly: true,
+      handler: enqueue,
+    });
+    chat.mockResolvedValueOnce(
+      ok({
+        tool_calls: [
+          call('queue', 'queue_task', {
+            goal: 'Revisar',
+            conversation_id: 999,
+          }),
+        ],
+      }),
+    );
+    await run(() =>
+      service.runAgent({ goal: 'revisa', durable, conversation_id: 7 }),
+    );
+    expect(enqueue.mock.calls[0][0]).toEqual({
+      goal: 'Revisar',
+      conversation_id: 7,
+    });
+  });
+  it('new current permission never expands the saved authority ceiling', async () => {
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'restricted')] }));
+    const result = await RequestContextService.runIsolated(
+      { ...context, permissions: ['read', 'new_permission'] },
+      () => service.runAgent({ goal: 'lee', durable }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(JSON.stringify(chat.mock.calls[0][1])).not.toContain('secret');
+    expect(result.execution?.outcome).toBe('blocked');
+  });
+  it('lease replaced during a provider call cannot dispatch another tool', async () => {
+    chat.mockImplementationOnce(async () => {
+      durable.assertBudget.mockRejectedValue(new Error('STALE_EXECUTOR'));
+      return ok({ tool_calls: [call('late', 'read_rows')] });
+    });
+    await run(() => service.runAgent({ goal: 'lee', durable }));
+    expect(handler).not.toHaveBeenCalled();
+    expect(durable.close).toHaveBeenCalledTimes(1);
+  });
+  it('client generator return closes session without claiming semantic completion', async () => {
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }));
+    await run(async () => {
+      const gen = service.runAgentStream({ goal: 'lee', durable });
+      await gen.next();
+      await gen.return(undefined as never);
+    });
+    expect(durable.close).toHaveBeenCalledTimes(1);
+    expect(durable.finish).not.toHaveBeenCalled();
   });
 });

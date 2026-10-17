@@ -8,13 +8,16 @@ import {
   AIConversation,
   AIMessage,
   VexiTask,
+  VexiObjective,
 } from '../../services/vexi-api.service';
 
 @Injectable({ providedIn: 'root' })
 export class VexiFacade {
   private store = inject(Store);
 
-  readonly conversations$ = this.store.select(VexiSelectors.selectConversations);
+  readonly conversations$ = this.store.select(
+    VexiSelectors.selectConversations,
+  );
   readonly activeConversationId$ = this.store.select(
     VexiSelectors.selectActiveConversationId,
   );
@@ -32,6 +35,27 @@ export class VexiFacade {
   );
   readonly activeTask$ = this.store.select(VexiSelectors.selectActiveTask);
 
+  readonly objective$ = this.store.select(VexiSelectors.selectObjective);
+  readonly objectiveLoading$ = this.store.select(
+    VexiSelectors.selectObjectiveLoading,
+  );
+  readonly objective = toSignal(this.objective$, {
+    initialValue: null as VexiObjective | null,
+  });
+  readonly objectiveLoading = toSignal(this.objectiveLoading$, {
+    initialValue: false,
+  });
+
+  loadObjective(objectiveId: string): void {
+    this.store.dispatch(VexiActions.loadObjective({ objectiveId }));
+  }
+
+  resumeObjective(objectiveId: string, confirmExpired = false): void {
+    this.store.dispatch(
+      VexiActions.resumeObjective({ objectiveId, confirmExpired }),
+    );
+  }
+
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   readonly conversations = toSignal(this.conversations$, {
     initialValue: [] as AIConversation[],
@@ -42,11 +66,15 @@ export class VexiFacade {
   readonly messages = toSignal(this.messages$, {
     initialValue: [] as AIMessage[],
   });
-  readonly streamingContent = toSignal(this.streamingContent$, { initialValue: '' });
+  readonly streamingContent = toSignal(this.streamingContent$, {
+    initialValue: '',
+  });
   readonly isStreaming = toSignal(this.isStreaming$, { initialValue: false });
   readonly isSending = toSignal(this.isSending$, { initialValue: false });
   readonly loading = toSignal(this.loading$, { initialValue: false });
-  readonly error = toSignal(this.error$, { initialValue: null as string | null });
+  readonly error = toSignal(this.error$, {
+    initialValue: null as string | null,
+  });
   readonly toolSteps = toSignal(this.toolSteps$, {
     initialValue: [] as ToolStep[],
   });
@@ -66,9 +94,7 @@ export class VexiFacade {
   }
 
   selectConversation(conversationId: number): void {
-    this.store.dispatch(
-      VexiActions.selectConversation({ conversationId }),
-    );
+    this.store.dispatch(VexiActions.selectConversation({ conversationId }));
   }
 
   /**
@@ -109,9 +135,7 @@ export class VexiFacade {
   }
 
   archiveConversation(conversationId: number): void {
-    this.store.dispatch(
-      VexiActions.archiveConversation({ conversationId }),
-    );
+    this.store.dispatch(VexiActions.archiveConversation({ conversationId }));
   }
 
   clearActiveConversation(): void {

@@ -29,6 +29,10 @@ import { createCapabilityTools } from './tools/bridge/capability.tools';
 import { createPlanningTools } from './tools/domains/planning.tools';
 import { createReportTools } from './tools/domains/reports.tools';
 import { AIAgentProcessor } from './queue/processors/ai-agent.processor';
+import { AgentObjectiveRepository } from './tasks/agent-objective.repository';
+import { AgentTaskContextService } from './tasks/agent-task-context.service';
+import { AgentEvidenceService } from './tasks/agent-evidence.service';
+import { AgentDurableSessionService } from './tasks/agent-durable-session.service';
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
 
@@ -63,6 +67,10 @@ import { S3Service } from '../common/services/s3.service';
     AILoggingService,
     AgentTraceService,
     AIAgentService,
+    AgentObjectiveRepository,
+    AgentTaskContextService,
+    AgentEvidenceService,
+    AgentDurableSessionService,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -92,6 +100,10 @@ import { S3Service } from '../common/services/s3.service';
     AIAgentProcessor,
   ],
   exports: [
+    AgentObjectiveRepository,
+    AgentTaskContextService,
+    AgentEvidenceService,
+    AgentDurableSessionService,
     AIEngineService,
     AILoggingService,
     AgentTraceService,
@@ -121,7 +133,8 @@ export class AIEngineModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    if (toolRoutingEnabled()) this.toolRegistry.registerMany(createDiscoveryTools());
+    if (toolRoutingEnabled())
+      this.toolRegistry.registerMany(createDiscoveryTools());
     this.toolRegistry.registerMany(
       createSearchTools({ embeddingService: this.embeddingService }),
     );

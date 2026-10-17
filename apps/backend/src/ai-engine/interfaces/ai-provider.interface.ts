@@ -1,4 +1,7 @@
-import type { AgentExecutionSummary, ToolExecutionReceipt } from '../tools/interfaces/tool.interface';
+import type {
+  AgentExecutionSummary,
+  ToolExecutionReceipt,
+} from '../tools/interfaces/tool.interface';
 
 export type SdkType =
   | 'openai_compatible'
@@ -98,6 +101,8 @@ export interface AIResponse {
 }
 
 export interface AIStreamChunk {
+  /** D1 optional durable progress; no credentials or execution authority. */
+  objective?: import('../tasks/interfaces/agent-objective.interface').ObjectiveProgress;
   /**
    * `tool_call` and `tool_result` exist so the UI can narrate an agent turn
    * instead of showing a spinner for 30-40s. They are emitted by the agent

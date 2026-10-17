@@ -95,6 +95,9 @@ export class StorePrismaService extends BasePrismaService {
     // registro.
     'ai_attachments',
     'ai_agent_tasks',
+    'ai_agent_objectives',
+    'ai_agent_tool_results',
+    'ai_agent_effects',
     // Explicit store ownership excludes system-only (NULL tenant) trace spans.
     'ai_agent_trace_spans',
     // Bloques UI de Vex. `store_id` propio y NO nullable: scoping directo por
@@ -1558,6 +1561,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_agent_trace_spans() {
     return this.scoped_client.ai_agent_trace_spans;
+  }
+
+  get ai_agent_objectives() {
+    return this.scoped_client.ai_agent_objectives;
+  }
+
+  get ai_agent_tool_results() {
+    return this.scoped_client.ai_agent_tool_results;
+  }
+
+  get ai_agent_effects() {
+    return this.scoped_client.ai_agent_effects;
   }
 
   get ai_agent_tasks() {

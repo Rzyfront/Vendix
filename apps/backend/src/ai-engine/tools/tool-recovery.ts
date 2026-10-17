@@ -19,6 +19,11 @@ export class ToolRecovery {
   >();
   private readonly corrections = new Map<string, number>();
   private readonly unresolved = new Map<string, ToolExecutionResult>();
+  /** Monotonic work counter; successful recovery may clear active tombstones. */
+  private correctionAttempts = 0;
+  get attempts(): number {
+    return this.correctionAttempts;
+  }
 
   private key(args: unknown): string {
     return createHash('sha256').update(canonical(args)).digest('hex');
@@ -54,6 +59,7 @@ export class ToolRecovery {
     // One changed-argument correction after a recoverable failure, not N
     // guesses at IDs. Identical args never reach the handler twice on failure.
     this.corrections.set(tool, (this.corrections.get(tool) ?? 0) + 1);
+    this.correctionAttempts++;
     return null;
   }
 

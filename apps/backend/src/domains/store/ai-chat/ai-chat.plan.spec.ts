@@ -61,9 +61,10 @@ function build(opts: {
 }) {
   const prisma: any = {
     ai_conversations: {
-      findFirst: jest
-        .fn()
-        .mockResolvedValue({ ...conversation(opts.messages), ...opts.conversation }),
+      findFirst: jest.fn().mockResolvedValue({
+        ...conversation(opts.messages),
+        ...opts.conversation,
+      }),
       update: jest.fn().mockResolvedValue({}),
       create: jest
         .fn()
@@ -77,14 +78,18 @@ function build(opts: {
     },
   };
   const run = opts.run ?? agentGen([{ type: 'done' }], EMPTY_RESULT);
-  const runSync = jest.fn().mockResolvedValue({ content: 'ok', total_tokens: 1 });
+  const runSync = jest
+    .fn()
+    .mockResolvedValue({ content: 'ok', total_tokens: 1 });
   const aiAgent = { runAgentStream: run, runAgent: runSync };
   const findAgent = jest.fn().mockResolvedValue(opts.agentRow ?? null);
-  const findVexSettings = jest.fn().mockResolvedValue(
-    opts.vexEnabled === true
-      ? { settings: { vex: { enabled: true } } }
-      : { settings: { vex: { enabled: false } } },
-  );
+  const findVexSettings = jest
+    .fn()
+    .mockResolvedValue(
+      opts.vexEnabled === true
+        ? { settings: { vex: { enabled: true } } }
+        : { settings: { vex: { enabled: false } } },
+    );
   const canUseAIFeature = jest.fn().mockResolvedValue({
     allowed: true,
     mode: 'allow',
@@ -249,14 +254,23 @@ describe('AIChatService — plan interno de Vexi', () => {
 
   it('continuación approved: fila assistant NUEVA con continuation_of y done con message_id', async () => {
     const run = agentGen(
-      [{ type: 'text', content: 'Listo, reembolso aplicado.' }, { type: 'done' }],
+      [
+        { type: 'text', content: 'Listo, reembolso aplicado.' },
+        { type: 'done' },
+      ],
       { tools_used: [], content: 'Listo, reembolso aplicado.' },
     );
     const b = build({
       plan: PLAN,
       run,
       messages: [
-        { id: 3, role: 'user', content: 'reembolsa', metadata: null, created_at: new Date() },
+        {
+          id: 3,
+          role: 'user',
+          content: 'reembolsa',
+          metadata: null,
+          created_at: new Date(),
+        },
         {
           id: 5,
           role: 'assistant',
@@ -507,7 +521,13 @@ describe('VexiStreamIntentService — claim de turno', () => {
 
 describe('VexiController.applyConfirmation — plan', () => {
   const make = (markImpl: jest.Mock) => {
-    const planState: any = { markCurrentChangeStep: markImpl };
+    const planState: any = {
+      markCurrentChangeStep: markImpl,
+      applyDurableEffect: async (
+        _input: any,
+        dispatch: () => Promise<string>,
+      ) => ({ output: await dispatch() }),
+    };
     const controller = new VexiController(
       {} as any,
       { success: jest.fn((d) => d) } as any,
@@ -1139,10 +1159,13 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ user_id: 9 } as any);
-    const run = agentGen([{ type: 'text', content: 'hola' }, { type: 'done' }], {
-      tools_used: [],
-      content: 'hola',
-    });
+    const run = agentGen(
+      [{ type: 'text', content: 'hola' }, { type: 'done' }],
+      {
+        tools_used: [],
+        content: 'hola',
+      },
+    );
     const b = build({ wireVex: true, run });
     b.streamIntents.consume.mockResolvedValue({
       conversation_id: 7,
@@ -1166,7 +1189,9 @@ describe('AIChatService — persistencia vex (rx6)', () => {
           id: 10,
           role: 'assistant',
           content: 'plan',
-          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+          metadata: {
+            plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' },
+          },
         },
       ],
     });
@@ -1241,7 +1266,9 @@ describe('AIChatService — persistencia vex (rx6)', () => {
           id: 10,
           role: 'assistant',
           content: 'plan',
-          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+          metadata: {
+            plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' },
+          },
         },
       ],
     });
@@ -1269,7 +1296,9 @@ describe('AIChatService — persistencia vex (rx6)', () => {
           id: 10,
           role: 'assistant',
           content: 'plan',
-          metadata: { plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' } },
+          metadata: {
+            plan: { plan_id: 'p1', steps: STEPS, status: 'proposed' },
+          },
         },
       ],
     });
@@ -1284,29 +1313,267 @@ describe('AIChatService — persistencia vex (rx6)', () => {
 });
 
 describe('AIChat D0 receipt persistence', () => {
-  const execution = { schema_version: '1', outcome: 'unknown_effect', next_action: 'Verifica el registro antes de repetir.', evidence_refs: [], resource_ids: {} };
-  beforeEach(() => jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ user_id: 9 } as any));
+  const execution = {
+    schema_version: '1',
+    outcome: 'unknown_effect',
+    next_action: 'Verifica el registro antes de repetir.',
+    evidence_refs: [],
+    resource_ids: {},
+  };
+  beforeEach(() =>
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ user_id: 9 } as any),
+  );
   afterEach(() => jest.restoreAllMocks());
   it('sync persists and returns semantic outcome without turning success into verified completion', async () => {
     const b = build({});
-    b.runSync.mockResolvedValue({ content: 'Falta verificar.', total_tokens: 12, tools_used: [], success: true, execution });
+    b.runSync.mockResolvedValue({
+      content: 'Falta verificar.',
+      total_tokens: 12,
+      tools_used: [],
+      success: true,
+      execution,
+    });
     const response = await b.service.sendMessage(7, { content: 'consulta' });
     expect(response.assistant_message.execution).toEqual(execution);
-    const rows = b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data);
-    expect(rows.find((r: any) => r.role === 'assistant').metadata.execution).toEqual(execution);
+    const rows = b.prisma.ai_messages.create.mock.calls.map(
+      (c: any) => c[0].data,
+    );
+    expect(
+      rows.find((r: any) => r.role === 'assistant').metadata.execution,
+    ).toEqual(execution);
   });
   it('SSE preserves done execution after persistence and stores tool receipt separately from truncated text', async () => {
-    const toolExecution = { schema_version: '1', status: 'unknown_effect', effect_status: 'unknown', evidence_refs: [], resource_ids: {}, freshness: 'unknown', pagination: null, next_action: execution.next_action, retryable: false, error_code: 'ETIMEDOUT' };
-    const run = agentGen([{ type: 'text', content: 'Falta verificar.' }, { type: 'done', execution }], {
-      content: 'Falta verificar.', tools_used: [{ name: 'write_endpoint', args: {}, result: 'x'.repeat(20000), execution: toolExecution }], execution,
-    });
+    const toolExecution = {
+      schema_version: '1',
+      status: 'unknown_effect',
+      effect_status: 'unknown',
+      evidence_refs: [],
+      resource_ids: {},
+      freshness: 'unknown',
+      pagination: null,
+      next_action: execution.next_action,
+      retryable: false,
+      error_code: 'ETIMEDOUT',
+    };
+    const run = agentGen(
+      [
+        { type: 'text', content: 'Falta verificar.' },
+        { type: 'done', execution },
+      ],
+      {
+        content: 'Falta verificar.',
+        tools_used: [
+          {
+            name: 'write_endpoint',
+            args: {},
+            result: 'x'.repeat(20000),
+            execution: toolExecution,
+          },
+        ],
+        execution,
+      },
+    );
     const b = build({ run });
-    b.streamIntents.consume.mockResolvedValue({ conversation_id: 7, user_id: 9, content: 'consulta' });
+    b.streamIntents.consume.mockResolvedValue({
+      conversation_id: 7,
+      user_id: 9,
+      content: 'consulta',
+    });
     const frames = await collect(b.service, null);
-    const row = b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data).find((r: any) => r.role === 'assistant');
+    const row = b.prisma.ai_messages.create.mock.calls
+      .map((c: any) => c[0].data)
+      .find((r: any) => r.role === 'assistant');
     expect(row.metadata.execution).toEqual(execution);
     expect(row.tool_calls[0].execution).toEqual(toolExecution);
     expect(row.tool_calls[0].result.length).toBeLessThan(20000);
-    expect(frames.at(-1)).toMatchObject({ type: 'done', execution, message_id: 1 });
+    expect(frames.at(-1)).toMatchObject({
+      type: 'done',
+      execution,
+      message_id: 1,
+    });
+  });
+});
+
+// Keep the D1 seam REAL: chat -> loop -> session -> plan hook -> repository.
+// Only the provider and the SQL transport are in-memory, no business handler DB.
+import { AgentObjectiveRepository } from '../../../ai-engine/tasks/agent-objective.repository';
+import { AgentTaskContextService } from '../../../ai-engine/tasks/agent-task-context.service';
+import { AgentDurableSessionService } from '../../../ai-engine/tasks/agent-durable-session.service';
+import { ObjectiveMemoryDatabase } from '../../../ai-engine/tasks/testing/objective-memory-db';
+import { VexiPlanStateService } from '../vexi/vexi-plan-state.service';
+import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+
+describe('D1 chat durable real wiring', () => {
+  const scope = {
+    store_id: 1,
+    organization_id: 1,
+    user_id: 9,
+    permissions: ['store:products:read'],
+    roles: ['owner'],
+    is_owner: true,
+    is_super_admin: false,
+  };
+  beforeEach(() => {
+    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
+  });
+  afterEach(() => {
+    delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
+    jest.restoreAllMocks();
+  });
+  function wiring(agentKey = 'vexi') {
+    const db = new ObjectiveMemoryDatabase();
+    db.seedConversation(7, scope, { agent_key: agentKey });
+    const repo = new AgentObjectiveRepository(db.prisma);
+    const plans = new VexiPlanStateService(db.prisma, repo);
+    const sessions = new AgentDurableSessionService(
+      repo,
+      new AgentTaskContextService(repo),
+    );
+    const registry = new AIToolRegistry({ issue: jest.fn() } as any);
+    const read = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        product_id: 42,
+        resource_ids: { product_id: 42 },
+        quantity: 3,
+        unit: 'unidad',
+      }),
+    );
+    registry.register({
+      name: 'find_product',
+      domain: 'products',
+      version: '1',
+      description: 'Producto',
+      parameters: {},
+      readOnly: true,
+      requiredPermissions: ['store:products:read'],
+      handler: read,
+    });
+    const chat = jest.fn();
+    const access: any = {
+      canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+      getAIFeatureConfig: jest.fn().mockResolvedValue({ tools_allowed: ['*'] }),
+      consumeAIQuota: jest.fn(),
+    };
+    const loop = new AIAgentService(
+      {
+        chat,
+        run: (_key: any, _vars: any, m: any, o: any) => chat(m, o),
+      } as any,
+      {} as any,
+      registry,
+      { emit: jest.fn() } as any,
+      { awaitResult: jest.fn() } as any,
+      access,
+    );
+    const b = build({
+      messages: Array.from({ length: 25 }, (_, id) => ({
+        id,
+        role: 'assistant',
+        content: `historia ${id}`,
+      })),
+    });
+    (b.service as any).planState = plans;
+    (b.service as any).durableSessions = sessions;
+    (b.service as any).aiAgent = loop;
+    return { b, db, repo, plans, chat, read, sessions };
+  }
+  const response = (extra: any) => ({
+    success: true,
+    content: '',
+    usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 },
+    ...extra,
+  });
+  it('sync checkpoint survives reload/25 messages and feeds the SAME IDs to SSE without rediscovery', async () => {
+    await RequestContextService.runIsolated(scope, async () => {
+      const w = wiring();
+      w.chat
+        .mockResolvedValueOnce(
+          response({
+            tool_calls: [
+              {
+                id: 'real-call-1',
+                type: 'function',
+                function: { name: 'find_product', arguments: '{}' },
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          response({ content: 'Consultado; falta verificar.' }),
+        )
+        .mockResolvedValueOnce(
+          response({ content: 'Conservo el producto resuelto.' }),
+        );
+      const first = await w.b.service.sendMessage(7, {
+        content: 'Busca el producto',
+      });
+      const objective = await w.repo.getForConversation(7);
+      expect(first.assistant_message.objective?.id).toBe(objective?.id);
+      expect(first.assistant_message.objective?.version).toBe(
+        objective?.version,
+      );
+      expect(
+        (await w.repo.listResults(objective!.id)).items[0].resource_ids,
+      ).toEqual(expect.objectContaining({ product_id: 42 }));
+      // Simulate a new service/session instance (process restart), retain only persisted transport state.
+      (w.b.service as any).durableSessions = new AgentDurableSessionService(
+        w.repo,
+        new AgentTaskContextService(w.repo),
+      );
+      (w.b.service as any).planState = new VexiPlanStateService(
+        w.db.prisma,
+        w.repo,
+      );
+      w.b.streamIntents.consume.mockResolvedValue({
+        conversation_id: 7,
+        user_id: 9,
+        content: '¿Y la cantidad de ese producto?',
+      });
+      const frames = await collect(w.b.service, null);
+      expect(w.read).toHaveBeenCalledTimes(1);
+      const nextMessages = w.chat.mock.calls[2][0];
+      expect(nextMessages.map((m: any) => m.content).join(' ')).toContain(
+        '"product_id":42',
+      );
+      expect(JSON.stringify(nextMessages)).toContain('quantity');
+      expect(frames.at(-1)).toMatchObject({
+        type: 'done',
+        objective: { id: objective!.id, semantic_status: 'partial' },
+      });
+      const final = await w.repo.get(objective!.id);
+      expect(final.budget.provider_attempts).toBe(3);
+      expect(final.lease_until).toBeNull();
+      expect(final.semantic_status).not.toBe('completed_verified');
+    });
+  });
+  it('blocks a foreign owner before inference and never adopts the static ALS fallback', async () => {
+    const w = wiring();
+    await RequestContextService.runIsolated(
+      { ...scope, user_id: 10 },
+      async () => {
+        await expect(
+          w.b.service.sendMessage(7, { content: 'lee' }),
+        ).rejects.toThrow();
+      },
+    );
+    expect(w.chat).not.toHaveBeenCalled();
+    RequestContextService.run(scope, () => undefined);
+    await expect(w.sessions.open(7, 'vexi', 'lee')).rejects.toThrow();
+  });
+  it('Vexi durable context gets no Vex approval hook or block sink', async () => {
+    await RequestContextService.runIsolated(scope, async () => {
+      const w = wiring();
+      w.chat.mockResolvedValue(response({ content: 'Leído' }));
+      const spy = jest.spyOn((w.b.service as any).aiAgent, 'runAgent');
+      await w.b.service.sendMessage(7, { content: 'lee' });
+      const args = spy.mock.calls[0][0] as any;
+      expect(args.durable).toBeDefined();
+      expect(args.plan).toBeDefined();
+      expect(args.plan_approval).toBeUndefined();
+      expect(args.block_sink).toBeUndefined();
+    });
   });
 });

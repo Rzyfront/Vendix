@@ -114,6 +114,7 @@ function makePlanState(
   };
   return {
     state,
+    rejectPendingObjective: jest.fn(async () => null),
     getStepHashRecord: jest.fn(async () => state.record),
     getStepHashes: jest.fn(async () => state.record.steps),
     setStepHashes: jest.fn(async () => state.record.steps),
@@ -281,9 +282,15 @@ describe('PlanApprovalService', () => {
 
   it('rejects an unknown token as missing', async () => {
     await expect(
-      service.redeemPlanStep('never-issued', randomUUID(), 11, 'create_customer', {
-        name: 'Acme',
-      }),
+      service.redeemPlanStep(
+        'never-issued',
+        randomUUID(),
+        11,
+        'create_customer',
+        {
+          name: 'Acme',
+        },
+      ),
     ).resolves.toBe('missing');
   });
 
@@ -425,9 +432,15 @@ describe('PlanApprovalService', () => {
     expect(service.classifySteps(steps).covered).toEqual([]);
     const token = await service.issuePlanToken('plan-exog', 11, steps);
     await expect(
-      service.redeemPlanStep(token, 'plan-exog', 11, 'submit_exogenous_report', {
-        report_id: 3,
-      }),
+      service.redeemPlanStep(
+        token,
+        'plan-exog',
+        11,
+        'submit_exogenous_report',
+        {
+          report_id: 3,
+        },
+      ),
     ).resolves.toBe('irreversible');
   });
 
@@ -470,7 +483,9 @@ describe('PlanApprovalService', () => {
       planId: 'plan-x',
       conversationId: 7,
       userId: 99,
-      clientSteps: [{ order: 1, tool: 'create_customer', args: { name: 'Acme' } }],
+      clientSteps: [
+        { order: 1, tool: 'create_customer', args: { name: 'Acme' } },
+      ],
     };
     await expect(service.approvePlan(input)).rejects.toMatchObject({
       errorCode: 'AUTH_PERM_001',
@@ -507,9 +522,15 @@ describe('PlanApprovalService', () => {
     // Círculo completo: el reversible ejecuta sin reconfirmar, el irreversible
     // queda pendiente de su propia tarjeta.
     await expect(
-      service.redeemPlanStep(out.plan_token, 'plan-mix', 11, 'create_customer', {
-        name: 'Acme',
-      }),
+      service.redeemPlanStep(
+        out.plan_token,
+        'plan-mix',
+        11,
+        'create_customer',
+        {
+          name: 'Acme',
+        },
+      ),
     ).resolves.toBe('ok');
     await expect(
       service.redeemPlanStep(
@@ -544,9 +565,15 @@ describe('PlanApprovalService', () => {
     expect(out.reconfirm_steps).toEqual([]);
     expect(out.ignored_steps).toEqual([2, 3]);
     await expect(
-      service.redeemPlanStep(out.plan_token, 'plan-alt', 11, 'create_customer', {
-        name: 'Acme',
-      }),
+      service.redeemPlanStep(
+        out.plan_token,
+        'plan-alt',
+        11,
+        'create_customer',
+        {
+          name: 'Acme',
+        },
+      ),
     ).resolves.toBe('ok');
     await expect(
       service.redeemPlanStep(out.plan_token, 'plan-alt', 11, 'adjust_stock', {
@@ -748,9 +775,9 @@ describe('PlanApprovalService', () => {
         userId: 11,
       };
       // Plan aún proposed → 409.
-      await expect(
-        service.resolveStepForConfirmation(input),
-      ).rejects.toEqual(conflictWithReason('plan_not_approved'));
+      await expect(service.resolveStepForConfirmation(input)).rejects.toEqual(
+        conflictWithReason('plan_not_approved'),
+      );
 
       await service.approvePlan({
         planId: PLAN,
@@ -767,9 +794,12 @@ describe('PlanApprovalService', () => {
         service.resolveStepForConfirmation({ ...input, userId: 99 }),
       ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
       // Irreversible y pending → devuelve tool + argumentos del servidor.
-      await expect(service.resolveStepForConfirmation(input)).resolves.toMatchObject(
-        { tool: 'send_invoice_dian', arguments: { order_id: 1046 } },
-      );
+      await expect(
+        service.resolveStepForConfirmation(input),
+      ).resolves.toMatchObject({
+        tool: 'send_invoice_dian',
+        arguments: { order_id: 1046 },
+      });
       // Paso inexistente → 404.
       await expect(
         service.resolveStepForConfirmation({ ...input, stepId: 'zzz' }),
@@ -789,7 +819,10 @@ describe('PlanApprovalService', () => {
         stepId: 's1',
         outcome: 'applied',
       });
-      expect(first).toEqual({ step_status: 'applied', plan_status: 'approved' });
+      expect(first).toEqual({
+        step_status: 'applied',
+        plan_status: 'approved',
+      });
       const last = await service.recordStepResult({
         planId: PLAN,
         conversationId: 7,
@@ -834,7 +867,10 @@ describe('PlanApprovalService', () => {
         plan_status: 'partially_applied',
       });
       const stored = prisma.messages[0].metadata.plan.steps[1];
-      expect(stored).toMatchObject({ status: 'failed', error: 'DIAN no respondió' });
+      expect(stored).toMatchObject({
+        status: 'failed',
+        error: 'DIAN no respondió',
+      });
       // Un plan ya resuelto no se puede cancelar.
       await expect(
         service.rejectPlan({ planId: PLAN, conversationId: 7, userId: 11 }),
@@ -864,5 +900,162 @@ describe('PlanApprovalService', () => {
       const plan = await service.getPlan(7, PLAN);
       expect(plan?.steps[0].status).toBe('pending');
     });
+  });
+});
+
+describe('PlanApprovalService D1 single-write consent', () => {
+  const original = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
+  beforeEach(() => {
+    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (original === undefined)
+      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
+    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = original;
+  });
+
+  async function inScope<T>(fn: () => Promise<T>) {
+    const { RequestContextService } =
+      await import('../../../../common/context/request-context.service');
+    return RequestContextService.runIsolated(
+      {
+        store_id: 7,
+        organization_id: 3,
+        user_id: 11,
+        is_owner: true,
+        is_super_admin: false,
+      },
+      fn,
+    );
+  }
+
+  it('covers only one selected write; later writes require their own approval', async () =>
+    inScope(async () => {
+      const redis = makeRedis();
+      const registry = makeRegistry();
+      const planState = makePlanState();
+      const prisma = makePrisma();
+      const svc = new PlanApprovalService(
+        redis as any,
+        registry as any,
+        planState as any,
+        prisma as any,
+      );
+      const planId = randomUUID();
+      const steps = [
+        { order: 1, tool: 'update_product_price', args: { id: 7, price: 5 } },
+        { order: 2, tool: 'create_customer', args: { name: 'Juan' } },
+        { order: 3, tool: 'adjust_stock', args: { id: 7, qty: 2 } },
+      ];
+      seedHashes(planState, planId, steps);
+      const approved = await svc.approvePlan({
+        planId,
+        conversationId: 1,
+        userId: 11,
+        clientSteps: steps,
+      });
+      expect(approved.covered_steps).toEqual([1]);
+      expect(approved.reconfirm_steps).toEqual([2, 3]);
+      expect(
+        await svc.redeemPlanStep(
+          approved.plan_token,
+          planId,
+          11,
+          steps[0].tool,
+          steps[0].args,
+        ),
+      ).toBe('ok');
+      expect(
+        await svc.redeemPlanStep(
+          approved.plan_token,
+          planId,
+          11,
+          steps[1].tool,
+          steps[1].args,
+        ),
+      ).toBe('unknown_step');
+    }));
+
+  it('lets any deferred reversible step request its own single-use card', async () =>
+    inScope(async () => {
+      const prisma = makePrisma();
+      const planId = randomUUID();
+      persistPlan(
+        prisma,
+        planId,
+        [
+          {
+            step_id: 's2',
+            order: 2,
+            tool: 'create_customer',
+            arguments: { name: 'Juan' },
+            irreversible: false,
+          },
+        ],
+        'approved',
+      );
+      const svc = new PlanApprovalService(
+        makeRedis() as any,
+        makeRegistry() as any,
+        makePlanState() as any,
+        prisma as any,
+      );
+      expect(
+        (
+          await svc.resolveStepForConfirmation({
+            planId,
+            conversationId: 1,
+            stepId: 's2',
+            userId: 11,
+          })
+        ).step_id,
+      ).toBe('s2');
+    }));
+
+  it('rejects a pending Vex card and releases its planless durable objective without approving anything', async () =>
+    inScope(async () => {
+      const planState = makePlanState();
+      const prisma = makePrisma();
+      const planId = randomUUID();
+      seedHashes(planState, planId, [
+        { order: 1, tool: 'create_customer', args: { name: 'Juan' } },
+      ]);
+      const svc = new PlanApprovalService(
+        makeRedis() as any,
+        makeRegistry() as any,
+        planState as any,
+        prisma as any,
+      );
+      expect(
+        await svc.rejectPlan({ planId, conversationId: 1, userId: 11 }),
+      ).toEqual({ plan_id: planId, status: 'rejected' });
+      expect(planState.clearStepHashes).toHaveBeenCalledWith(1);
+      expect(planState.rejectPendingObjective).toHaveBeenCalledWith(1);
+    }));
+
+  it('refuses missing ALS even if a stale static request context exists', async () => {
+    const { RequestContextService } =
+      await import('../../../../common/context/request-context.service');
+    RequestContextService.run(
+      {
+        store_id: 7,
+        organization_id: 3,
+        user_id: 11,
+        is_owner: true,
+        is_super_admin: false,
+      },
+      () => undefined,
+    );
+    const prisma = makePrisma();
+    const svc = new PlanApprovalService(
+      makeRedis() as any,
+      makeRegistry() as any,
+      makePlanState() as any,
+      prisma as any,
+    );
+    await expect(svc.assertConversationOwner(1, 11)).rejects.toThrow(
+      'explicit tenant',
+    );
+    expect(prisma.ai_conversations.findFirst).not.toHaveBeenCalled();
   });
 });

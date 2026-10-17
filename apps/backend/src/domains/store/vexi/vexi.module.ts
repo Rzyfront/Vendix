@@ -1,5 +1,4 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { PrismaModule } from '../../../prisma/prisma.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createBusinessTools } from '../../../ai-engine/tools/domains/business.tools';
 import { createTaskTools } from '../../../ai-engine/tools/domains/tasks.tools';
@@ -38,7 +37,6 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
  */
 @Module({
   imports: [
-    PrismaModule,
     ResponseModule,
     AIEngineModule,
     SubscriptionsModule,

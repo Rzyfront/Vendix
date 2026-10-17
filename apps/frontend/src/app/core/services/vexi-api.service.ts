@@ -6,11 +6,23 @@ import { environment } from '../../../environments/environment';
 /** Optional D0 metadata. Older servers/flags OFF keep the existing wire shape. */
 export interface VexiToolExecution {
   schema_version: '1';
-  status: 'ok' | 'recoverable_error' | 'blocked' | 'pending_confirmation' | 'needs_user_input' | 'unknown_effect';
+  status:
+    | 'ok'
+    | 'recoverable_error'
+    | 'blocked'
+    | 'pending_confirmation'
+    | 'needs_user_input'
+    | 'unknown_effect';
   error_code: string | null;
   retryable: boolean;
   next_action: string | null;
-  effect_status: 'not_applicable' | 'unverified' | 'not_applied' | 'pending' | 'applied' | 'unknown';
+  effect_status:
+    | 'not_applicable'
+    | 'unverified'
+    | 'not_applied'
+    | 'pending'
+    | 'applied'
+    | 'unknown';
   freshness: 'observed' | 'unknown' | 'truncated';
   evidence_refs: string[];
   resource_ids: Record<string, string | number>;
@@ -19,10 +31,36 @@ export interface VexiToolExecution {
 export interface VexiExecutionSummary {
   schema_version: '1';
   error_code?: string;
-  outcome: 'partial' | 'blocked' | 'pending_confirmation' | 'needs_user_input' | 'unknown_effect' | 'failed' | 'cancelled';
+  outcome:
+    | 'partial'
+    | 'blocked'
+    | 'pending_confirmation'
+    | 'needs_user_input'
+    | 'unknown_effect'
+    | 'failed'
+    | 'cancelled';
   next_action: string;
   evidence_refs: string[];
   resource_ids: Record<string, string | number>;
+}
+
+/** D1 is optional on the wire: legacy servers and the default-OFF flag omit it. */
+export interface VexiObjective {
+  id: string;
+  conversation_id: number;
+  goal: string;
+  semantic_status: string;
+  version: number;
+  expires_at: string;
+  requires_revalidation?: boolean;
+  next_step?: unknown;
+  budget?: Record<string, unknown>;
+}
+
+export interface ResumeVexiObjective {
+  expected_version: number;
+  /** Explicit choice for THIS objective, never inferred from a generic "sigue". */
+  confirm_expired?: boolean;
 }
 
 export interface AIConversation {
@@ -60,6 +98,7 @@ export interface SendMessageResponse {
     content: string;
     tokens_used: number;
     execution?: VexiExecutionSummary;
+    objective?: VexiObjective;
   };
 }
 
@@ -112,6 +151,7 @@ export interface VexiStreamChunk {
   };
   error?: string;
   execution?: VexiExecutionSummary;
+  objective?: VexiObjective;
   /** Playback order of an `audio` frame. Assigned when the segment was cut. */
   index?: number;
   audio_base64?: string;
@@ -213,10 +253,10 @@ export class VexiApiService {
     // page object. Reading `res.data.data` yields `undefined`, which then
     // poisons the reducer (`[conv, ...undefined]` → "not iterable").
     return this.http
-      .get<{ data: AIConversation[]; meta: PaginatedConversations['meta'] }>(
-        `${this.baseUrl}/conversations`,
-        { params: params as any },
-      )
+      .get<{
+        data: AIConversation[];
+        meta: PaginatedConversations['meta'];
+      }>(`${this.baseUrl}/conversations`, { params: params as any })
       .pipe(
         map((res) => ({
           data: res.data ?? [],
@@ -241,18 +281,64 @@ export class VexiApiService {
     content: string,
   ): Observable<SendMessageResponse> {
     return this.http
-      .post<{ data: SendMessageResponse }>(
-        `${this.baseUrl}/conversations/${conversationId}/messages`,
-        { content },
-      )
+      .post<{
+        data: SendMessageResponse;
+      }>(`${this.baseUrl}/conversations/${conversationId}/messages`, {
+        content,
+      })
       .pipe(map((res) => res.data));
   }
 
   archiveConversation(id: number): Observable<AIConversation> {
     return this.http
-      .patch<{ data: AIConversation }>(
-        `${this.baseUrl}/conversations/${id}/archive`,
-        {},
+      .patch<{
+        data: AIConversation;
+      }>(`${this.baseUrl}/conversations/${id}/archive`, {})
+      .pipe(map((res) => res.data));
+  }
+
+  /** Reads durable progress only. GET never starts or resumes inference. */
+  getObjective(
+    id: string,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .get<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Reopens state under current guards; it neither approves a write nor resets budget. */
+  resumeObjective(
+    id: string,
+    choice: ResumeVexiObjective,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .post<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}/resume`,
+        choice,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Explicit rejection releases durable approval wait; it never spends a write token. */
+  rejectObjectiveProposal(
+    id: string,
+    expectedVersion: number,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .post<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}/reject-proposal`,
+        { expected_version: expectedVersion },
       )
       .pipe(map((res) => res.data));
   }
@@ -319,10 +405,9 @@ export class VexiApiService {
     }
 
     return this.http
-      .post<{ data: VexiAttachment }>(
-        `${environment.apiUrl}/store/vexi/attachments`,
-        form,
-      )
+      .post<{
+        data: VexiAttachment;
+      }>(`${environment.apiUrl}/store/vexi/attachments`, form)
       .pipe(map((res) => res.data));
   }
 
@@ -365,10 +450,11 @@ export class VexiApiService {
    */
   getActivity(limit = 50): Observable<VexiActivityEntry[]> {
     return this.http
-      .get<{ data: VexiActivityEntry[] }>(
-        `${environment.apiUrl}/store/vexi/activity`,
-        { params: { limit: String(limit) } },
-      )
+      .get<{
+        data: VexiActivityEntry[];
+      }>(`${environment.apiUrl}/store/vexi/activity`, {
+        params: { limit: String(limit) },
+      })
       .pipe(map((res) => (Array.isArray(res.data) ? res.data : [])));
   }
 
@@ -402,23 +488,20 @@ export class VexiApiService {
           audio_base64?: string;
           content_type?: string;
         };
-      }>(
-        `${environment.apiUrl}/store/vexi/confirmations/apply`,
-        {
-          tool,
-          arguments: args,
-          confirmation_token: confirmationToken,
-          // Sent so the applied change lands in the audit trail. The approval is a
-          // request of its own, outside the turn, so this is the only thing that
-          // ties the change back to what the person asked for.
-          ...(conversationId ? { conversation_id: conversationId } : {}),
-          // Asks for the acknowledgement as audio too. Omitted rather than sent
-          // as false so a chat-mode approval's body is unchanged, and it carries
-          // no text: the server speaks the summary the tool produced, so this can
-          // never become a general text-to-speech surface.
-          ...(speak ? { speak: true } : {}),
-        },
-      )
+      }>(`${environment.apiUrl}/store/vexi/confirmations/apply`, {
+        tool,
+        arguments: args,
+        confirmation_token: confirmationToken,
+        // Sent so the applied change lands in the audit trail. The approval is a
+        // request of its own, outside the turn, so this is the only thing that
+        // ties the change back to what the person asked for.
+        ...(conversationId ? { conversation_id: conversationId } : {}),
+        // Asks for the acknowledgement as audio too. Omitted rather than sent
+        // as false so a chat-mode approval's body is unchanged, and it carries
+        // no text: the server speaks the summary the tool produced, so this can
+        // never become a general text-to-speech surface.
+        ...(speak ? { speak: true } : {}),
+      })
       .pipe(map((res) => res.data));
   }
 

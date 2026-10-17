@@ -10,6 +10,11 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import {
+  AgentDurableSessionService,
+  ObjectiveProgress,
+} from '../../../ai-engine/tasks/agent-durable-session.service';
+import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
 import type {
   AgentResult,
@@ -225,6 +230,7 @@ export class AIChatService {
     // cannot persist hashes, so approve will ask to re-propose.
     @Optional() private readonly planApproval?: PlanApprovalService,
     @Optional() private readonly confirmations?: VexiConfirmationService,
+    @Optional() private readonly durableSessions?: AgentDurableSessionService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -419,13 +425,12 @@ export class AIChatService {
 
     let responseContent = '';
     let execution: AgentExecutionSummary | undefined;
+    let objective: ObjectiveProgress | undefined;
     let tokensUsed = 0;
     // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
     // el cierre persiste byte-idéntico a hoy.
     const vexTurn: VexTurnCollection | null =
-      agentKey === VEX_AGENT_KEY
-        ? { blocks: new Map(), plan: null }
-        : null;
+      agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
     let vexPlan: VexTurnCollection['plan'] = null;
     let vexToolsUsed: Array<{ name: string; args: any; result: string }> = [];
 
@@ -438,20 +443,31 @@ export class AIChatService {
       // duplicate and every `{{placeholder}}` would reach the model verbatim.
       // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
       // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
+      const variables =
+        agentKey === VEX_AGENT_KEY
+          ? await this.buildVexVariables(conversationId)
+          : await this.vexiContext.buildSnapshot();
+      const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const goal = await this.withBlockSelection(
+        dto.content,
+        agentKey,
+        conversationId,
+      );
+      const durableArgs = await this.durableTurnArgs(
+        conversation,
+        agentKey,
+        goal,
+        base,
+      );
       const agentResult = await this.aiAgent.runAgent({
-        goal: await this.withBlockSelection(
-          dto.content,
-          agentKey,
-          conversationId,
-        ),
-        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
+        goal,
+        ...base,
         messages: this.buildContextWindow(conversation),
-        variables:
-          agentKey === VEX_AGENT_KEY
-            ? await this.buildVexVariables(conversationId)
-            : await this.vexiContext.buildSnapshot(),
+        variables,
+        ...durableArgs,
       });
       execution = agentResult.execution;
+      objective = agentResult.objective;
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
       vexPlan = agentResult.pending_plan ?? null;
@@ -505,7 +521,15 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: 0,
-        ...((vexMetadata || execution) ? { metadata: { ...vexMetadata, ...(execution ? { execution } : {}) } as unknown as Prisma.InputJsonValue } : {}),
+        ...(vexMetadata || execution || objective
+          ? {
+              metadata: {
+                ...vexMetadata,
+                ...(execution ? { execution } : {}),
+                ...(objective ? { objective } : {}),
+              } as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
       },
     });
     await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
@@ -539,6 +563,7 @@ export class AIChatService {
         content: responseContent,
         tokens_used: assistantMessage.tokens_used,
         ...(execution ? { execution } : {}),
+        ...(objective ? { objective } : {}),
       },
     };
   }
@@ -628,9 +653,15 @@ export class AIChatService {
     // cotización recién creada). Esos turnos sí corren el loop.
     let continuationPlan: AgentPlan | null = null;
     if (intent.continuation) {
+      if (durableObjectivesEnabled() && intent.continuation === 'rejected')
+        await this.planState.rejectPendingObjective(conversationId);
       continuationPlan = await this.planState.getActive(conversationId);
+      const durableContinuation =
+        durableObjectivesEnabled() &&
+        (await this.durableSessions?.canContinue(conversationId));
       if (
         !continuationPlan &&
+        !durableContinuation &&
         this.turnAgentKey(conversation) !== VEX_AGENT_KEY
       ) {
         yield { type: 'done' };
@@ -743,6 +774,7 @@ export class AIChatService {
     let totalTokens = 0;
     let toolsUsed: AgentResult['tools_used'] = [];
     let execution: AgentExecutionSummary | undefined;
+    let objective: ObjectiveProgress | undefined;
     /**
      * La ruta que quedó propuesta y sin aplicar, para marcarla en el mensaje
      * que se persiste. El turno siguiente la lee con `findPendingProposal` y
@@ -779,9 +811,27 @@ export class AIChatService {
       const storedPlan = activePlan
         ? null
         : await this.planState.get(conversationId);
+      const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const variables =
+        agentKey === VEX_AGENT_KEY
+          ? await this.buildVexVariables(conversationId, intent.attachment_ids)
+          : await this.vexiContext.buildSnapshot({
+              uiContext: intent.ui_context,
+              attachmentIds: intent.attachment_ids,
+            });
+      const durableArgs = await this.durableTurnArgs(
+        conversation,
+        agentKey,
+        goal,
+        base,
+        {
+          speak: intent.speak,
+          continuation: !!intent.continuation,
+        },
+      );
       const agentStream = this.aiAgent.runAgentStream({
         goal,
-        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
+        ...base,
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
@@ -801,16 +851,7 @@ export class AIChatService {
         // material no confiable compuesto en el navegador — en su lugar trae
         // `vex_blocks`, los bloques vivos de la conversación. Los adjuntos
         // sí viajan: Vex también lee documentos del turno.
-        variables:
-          agentKey === VEX_AGENT_KEY
-            ? await this.buildVexVariables(
-                conversationId,
-                intent.attachment_ids,
-              )
-            : await this.vexiContext.buildSnapshot({
-                uiContext: intent.ui_context,
-                attachmentIds: intent.attachment_ids,
-              }),
+        variables,
         // What lets the loop wait for the browser instead of assuming its UI
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
@@ -818,6 +859,7 @@ export class AIChatService {
         plan: this.planState.createHook(conversation.id),
         shouldAbort: async () =>
           !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
+        ...durableArgs,
       });
 
       let step = await agentStream.next();
@@ -859,6 +901,7 @@ export class AIChatService {
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
       execution = result.execution;
+      objective = result.objective;
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
       // sobre lo capturado por frames si ambos existen.
       vexPlan = result.pending_plan ?? null;
@@ -982,6 +1025,7 @@ export class AIChatService {
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
         ...(execution ? { execution } : {}),
+        ...(objective ? { objective } : {}),
         ...(intent.continuation
           ? {
               continuation: intent.continuation,
@@ -1372,9 +1416,8 @@ export class AIChatService {
     conversationId: number,
   ): Promise<string> {
     if (agentKey !== VEX_AGENT_KEY || !this.vexBlocks) return goal;
-    let selections: Awaited<
-      ReturnType<VexBlockService['recentSelections']>
-    > = [];
+    let selections: Awaited<ReturnType<VexBlockService['recentSelections']>> =
+      [];
     try {
       selections = await this.vexBlocks.recentSelections(conversationId);
     } catch (error) {
@@ -1401,6 +1444,81 @@ export class AIChatService {
       `Si se refiere a "esas", "las seleccionadas" o "lo marcado", usa estos datos, ` +
       `no los adivines ni pidas que los repita.]\n${notes.join('\n')}`
     );
+  }
+
+  /** The same durable plan/context builder for POST and SSE, never Vex hooks in Vexi. */
+  private async durableTurnArgs(
+    conversation: ConversationWithMessages,
+    agentKey: string,
+    goal: string,
+    base: { plan_approval?: AgentPlanApprovalHook },
+    options: { speak?: boolean; continuation?: boolean } = {},
+  ) {
+    if (!durableObjectivesEnabled()) return {};
+    if (!this.durableSessions)
+      throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
+    if (agentKey === VEX_AGENT_KEY && !base.plan_approval)
+      throw new BadRequestException(
+        'No está disponible el circuito de aprobación de este agente.',
+      );
+    const session = await this.durableSessions.open(
+      conversation.id,
+      agentKey,
+      goal,
+      options,
+    );
+    if (!session) throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
+    try {
+      const hook = this.planState.createHook(conversation.id, session);
+      const active = await hook.snapshot();
+      const messages = this.buildContextWindow(
+        conversation,
+        undefined,
+        options.speak,
+        {
+          active,
+          paused:
+            session.objective.plan?.status === 'paused'
+              ? session.objective.plan
+              : null,
+          isContinuation: !!options.continuation,
+        },
+      );
+      // Durable structured facts take precedence; transcript is a bounded secondary window.
+      if (session.context)
+        messages.unshift({ role: 'system', content: session.context });
+      const approval = base.plan_approval;
+      return {
+        durable: session,
+        objective_id: session.objective_id,
+        turn_id: session.turn_id,
+        conversation_id: conversation.id,
+        plan: hook,
+        messages,
+        ...(approval
+          ? {
+              plan_approval: {
+                ...approval,
+                saveProposedSteps: async (
+                  steps: Parameters<
+                    NonNullable<AgentPlanApprovalHook['saveProposedSteps']>
+                  >[0],
+                ) => {
+                  await this.planState.setStepHashes(
+                    conversation.id,
+                    steps,
+                    approval.plan_id,
+                    session,
+                  );
+                },
+              },
+            }
+          : {}),
+      };
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
   }
 
   /**
@@ -1604,13 +1722,15 @@ export class AIChatService {
     conversationId: number,
     attachmentIds?: string[],
   ): Promise<Record<string, string>> {
-    let vexBlocks: Array<{
-      block_id: string;
-      kind: string;
-      version: number;
-      title?: string;
-      rows?: number;
-    }> | undefined;
+    let vexBlocks:
+      | Array<{
+          block_id: string;
+          kind: string;
+          version: number;
+          title?: string;
+          rows?: number;
+        }>
+      | undefined;
     if (this.vexBlocks) {
       try {
         const rows = await this.vexBlocks.listByConversation(conversationId);
@@ -1622,7 +1742,10 @@ export class AIChatService {
             ? { title: row.spec.title as string }
             : {}),
           ...(Array.isArray((row.data as Record<string, any>)?.rows)
-            ? { rows: ((row.data as Record<string, any>).rows as unknown[]).length }
+            ? {
+                rows: ((row.data as Record<string, any>).rows as unknown[])
+                  .length,
+              }
             : {}),
         }));
       } catch (error) {
@@ -1655,11 +1778,7 @@ export class AIChatService {
       });
     }
     const approval = chunk.plan_approval;
-    if (
-      chunk.type === 'plan_approval' &&
-      approval?.plan_id &&
-      approval.steps
-    ) {
+    if (chunk.type === 'plan_approval' && approval?.plan_id && approval.steps) {
       vexTurn.plan = { plan_id: approval.plan_id, steps: approval.steps };
     }
   }
@@ -1790,7 +1909,11 @@ export class AIChatService {
               status: 'proposed',
               steps: plan.steps.map((raw, index) => {
                 const step = (raw ?? {}) as Record<string, any>;
-                return { ...step, order: step.order ?? index + 1, status: 'pending' };
+                return {
+                  ...step,
+                  order: step.order ?? index + 1,
+                  status: 'pending',
+                };
               }),
             },
           }
