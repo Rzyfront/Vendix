@@ -545,3 +545,44 @@ describe('ai-tool-registry · consistent scope matching', () => {
     );
   });
 });
+
+// D0's opt-in API must coexist with the exact legacy string ABI above.
+describe('AIToolRegistry D0 execution contract', () => {
+  const confirmations = { issue: jest.fn().mockResolvedValue('single-use-qa'), redeem: jest.fn().mockResolvedValue('ok') };
+  const make = (handler: jest.Mock, write = false) => {
+    const registry = new AIToolRegistry(confirmations as any);
+    registry.register({ name: 'qa_tool', domain: 'qa', description: 'qa',
+      parameters: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
+      readOnly: !write, requiresConfirmation: write, handler });
+    return registry;
+  };
+  beforeEach(() => jest.clearAllMocks());
+  it('keeps strings/aliases unchanged for legacy callers, but types the opt-in result', async () => {
+    const registry = make(jest.fn().mockResolvedValue('{"id":1}'));
+    registry.registerAlias('qa_old', 'qa_tool');
+    expect(await registry.executeTool('qa_old', { id: 1 })).toBe('{"id":1}');
+    expect(await registry.executeToolResult('default_api.qa_old', { id: 1 }, { evidenceRef: 'tool_call:1' }))
+      .toMatchObject({ status: 'ok', resource_ids: { id: 1 } });
+  });
+  it('labels invalid args before handler, preview or token generation', async () => {
+    const handler = jest.fn(); const registry = make(handler, true);
+    expect(await registry.executeToolResult('qa_tool', {})).toMatchObject({ status: 'recoverable_error', error_code: 'INVALID_ARGS' });
+    expect(handler).not.toHaveBeenCalled(); expect(confirmations.issue).not.toHaveBeenCalled();
+  });
+  it('a write still proposes without running its handler', async () => {
+    const handler = jest.fn(); const registry = make(handler, true);
+    await expect(registry.executeToolResult('qa_tool', { id: 1 })).rejects.toBeInstanceOf(VendixHttpException);
+    expect(confirmations.issue).toHaveBeenCalledTimes(1); expect(handler).not.toHaveBeenCalled();
+  });
+  it('an approved timeout is unknown_effect, not a successful write or permission error', async () => {
+    const handler = jest.fn().mockRejectedValue(Object.assign(new Error('sensitive timeout'), { code: 'ETIMEDOUT' }));
+    const registry = make(handler, true);
+    const result = await registry.executeToolResult('qa_tool', { id: 1 }, { confirmationToken: 'single-use-qa' });
+    expect(result).toMatchObject({ status: 'unknown_effect', retryable: false });
+    expect(JSON.stringify(result)).not.toContain('sensitive'); expect(handler).toHaveBeenCalledTimes(1);
+  });
+  it('does not classify an HTTP200 failure envelope as ok', async () => {
+    const registry = make(jest.fn().mockResolvedValue('{"statusCode":200,"success":false,"message":"rejected"}'));
+    expect((await registry.executeToolResult('qa_tool', { id: 1 })).status).toBe('recoverable_error');
+  });
+});

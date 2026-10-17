@@ -1,5 +1,6 @@
 import { createReducer, on } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
+import { vexiToolStepStatus } from './vexi-execution.utils';
 import type {
   ToolStep,
   VexiContinuation,
@@ -252,14 +253,15 @@ export const vexiReducer = createReducer(
     ],
   })),
 
-  on(VexiActions.toolCallFinished, (state, { id, name, summary, failed }) => {
+  on(VexiActions.toolCallFinished, (state, { id, name, summary, failed, execution }) => {
     const index = state.toolSteps.findIndex((step) => step.id === id);
     const resolved: ToolStep = {
       id,
       name,
       arguments: index >= 0 ? state.toolSteps[index].arguments : undefined,
       summary,
-      status: failed ? 'failed' : 'done',
+      status: vexiToolStepStatus(execution, failed),
+      ...(execution ? { execution } : {}),
     };
 
     // A result with no matching call happens when the stream drops the

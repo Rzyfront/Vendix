@@ -1,3 +1,4 @@
+import { normalizeToolException, normalizeToolResult } from './tools/tool-result.normalizer';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { AIAgentService } from './ai-agent.service';
 import { AgentTraceService } from './observability/agent-trace.service';
@@ -1470,4 +1471,148 @@ describe('AIAgentService.runAgentStream', () => {
       expect(JSON.stringify(args)).not.toContain(byKind('root')[0].trace_id);
     });
   });
+  describe('D0 opt-in semantic outcomes', () => {
+    const previous = process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
+    beforeEach(() => {
+      process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
+      registry.executeToolResult = jest.fn(async (name, args, options) =>
+        normalizeToolResult(await executeTool(name, args), {
+          evidenceRef: options.evidenceRef,
+          write: name === 'create_expense',
+        }));
+    });
+    afterEach(() => {
+      if (previous === undefined) delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
+      else process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = previous;
+    });
+    it('resolved business errors are partial, not quota success, and identical retries never execute', async () => {
+      configureStorePlan(['list_things']);
+      executeTool.mockResolvedValue('{"error":"no encontrado","error_code":"NOT_FOUND","next_step":"Indica otro documento o confirma si deseas crear uno."}');
+      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things', { id: 1 })] }))
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t2', 'list_things', { id: 1 })] }))
+        .mockResolvedValueOnce(ok({ content: 'Ya quedó completado' }));
+      const { chunks, result } = await drain({});
+      expect(executeTool).toHaveBeenCalledTimes(1);
+      expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(result.execution).toMatchObject({ outcome: 'partial' });
+      expect(result.content).not.toContain('Ya quedó');
+      expect(result.content).toContain('otro documento');
+      expect(chunks.find(c => c.type === 'done')?.execution).toEqual(result.execution);
+      expect(chunks.filter(c => c.type === 'tool_result').every(c => c.tool?.execution?.status === 'recoverable_error')).toBe(true);
+    });
+    it('allows one changed argument correction; successful read counts once with the original dedup ID', async () => {
+      configureStorePlan(['list_things']);
+      executeTool.mockResolvedValueOnce('{"error":"id","error_code":"INVALID_ARGS","next_step":"Corrige el id."}')
+        .mockResolvedValueOnce('{"id":"O-QA1"}');
+      chat.mockResolvedValueOnce(ok({ tool_calls: [call('bad', 'list_things', { id: 0 })] }))
+        .mockResolvedValueOnce(ok({ tool_calls: [call('fixed', 'list_things', { id: 1 })] }))
+        .mockResolvedValueOnce(ok({ content: 'Encontré O-QA1' }));
+      const { result } = await drain({});
+      expect(executeTool).toHaveBeenCalledTimes(2); expect(consumeAIQuota).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(consumeAIQuota.mock.calls)).toContain(':tool:fixed');
+      expect(result.execution?.resource_ids).toEqual({ id: 'O-QA1' });
+      expect(result.execution?.outcome).toBe('partial');
+    });
+    it('clock exhaustion never starts a closing inference and emits useful partial outcome', async () => {
+      let now = 0; jest.spyOn(Date, 'now').mockImplementation(() => now);
+      chat.mockImplementation(async () => { now = 2000; return ok({ tool_calls: [call('t1', 'list_things')] }); });
+      executeTool.mockResolvedValue('{"id":"O-QA1"}');
+      const { chunks, result } = await drain({ timeout_ms: 1000, max_iterations: 1 });
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(result.execution?.outcome).toBe('partial');
+      expect(result.content).toContain('O-QA1');
+      expect(result.content).not.toMatch(/reformula|otras palabras|otra forma/i);
+      expect(chunks.filter(c => c.type === 'done')).toHaveLength(1);
+    });
+    it('iteration exhaustion uses no closing inference even with time left', async () => {
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'list_things')] }));
+      const { result } = await drain({ max_iterations: 1 });
+      expect(chat).toHaveBeenCalledTimes(1); expect(result.execution?.next_action).toBeTruthy();
+    });
+    it('unknown write halts the batch and plan continuation, without retry or successful tool quota', async () => {
+      configureStorePlan(['create_expense', 'list_things']);
+      registry.executeToolResult.mockResolvedValue(normalizeToolException({ code: 'ETIMEDOUT' }, { write: true, handlerStarted: true }));
+      const hook = { snapshot: jest.fn().mockResolvedValue(makePlan()), execute: jest.fn() };
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'create_expense'), call('t2', 'list_things')] }));
+      const { chunks, result } = await drain({ plan: hook });
+      expect(chat).toHaveBeenCalledTimes(1); expect(registry.executeToolResult).toHaveBeenCalledTimes(1);
+      expect(consumeAIQuota).not.toHaveBeenCalled(); expect(chunks.some(c => c.type === 'plan_continue')).toBe(false);
+      expect(result.execution?.outcome).toBe('unknown_effect'); expect(result.content).toContain('No repetiré');
+    });
+    it('not-offered UI is blocked before dispatch, with an alternative and terminal metadata', async () => {
+      configureStorePlan(['list_things']);
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_navigate')] }));
+      const { chunks, result } = await drain({});
+      expect(result.execution?.outcome).toBe('blocked'); expect(result.content).toContain('administrador');
+      expect(chunks.some(c => c.type === 'tool_call')).toBe(false); expect(awaitResult).not.toHaveBeenCalled();
+    });
+    it('UI user input is not an error or tool success and is never optimistically narrated', async () => {
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_go')] }));
+      awaitResult.mockResolvedValue('{"status":"needs_user_input","next_action":"¿Cuál variante deseas?"}');
+      const { chunks, result } = await drain({ stream_id: 's1' });
+      expect(result.execution?.outcome).toBe('needs_user_input'); expect(result.content).toContain('variante');
+      expect(chunks.find(c => c.type === 'tool_result')?.tool?.failed).toBe(false);
+      expect(consumeAIQuota).not.toHaveBeenCalled();
+    });
+    it('sync shares the same semantic result as SSE', async () => {
+      executeTool.mockResolvedValue('{"result_unknown":true}');
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'list_things')] }));
+      const streamed = await drain({});
+      const sync = await service.runAgent({ goal: 'hola' });
+      expect(sync.execution).toEqual(streamed.result.execution); expect(sync.content).toEqual(streamed.result.content);
+    });
+    it('malformed JSON never reaches a defaulting handler', async () => {
+      chat.mockResolvedValueOnce(ok({ tool_calls: [{ ...call('t1', 'list_things'), function: { name: 'list_things', arguments: '{broken' } }] }))
+        .mockResolvedValueOnce(ok({ content: 'terminado' }));
+      const { result } = await drain({});
+      expect(registry.executeToolResult).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('partial');
+    });
+    it('a real registry preserves approval as pending and never runs a write handler', async () => {
+      const handler = jest.fn();
+      const realRegistry = new AIToolRegistry({ issue: jest.fn().mockResolvedValue('qa-token'), redeem: jest.fn() } as any);
+      realRegistry.register({ name: 'create_expense', domain: 'expenses', description: 'qa', parameters: {}, requiresConfirmation: true, handler });
+      service = new AIAgentService({ chat } as any, {} as any, realRegistry, { emit } as any,
+        { awaitResult } as any, { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any);
+      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'create_expense')] }));
+      const { result, chunks } = await drain({});
+      expect(result.execution?.outcome).toBe('pending_confirmation');
+      expect(chunks.find(c => c.type === 'tool_result')?.tool).toMatchObject({ failed: false, execution: { status: 'pending_confirmation' } });
+      expect(result.pending_confirmation?.confirmation_token).toBe('qa-token');
+      expect(handler).not.toHaveBeenCalled(); expect(consumeAIQuota).not.toHaveBeenCalled();
+    });
+    it('real registry-to-loop HTTP200 business failure never counts as successful tool quota', async () => {
+      const handler = jest.fn().mockResolvedValue('{"success":false,"statusCode":200,"message":"rejected"}');
+      const realRegistry = new AIToolRegistry({} as any);
+      realRegistry.register({ name: 'list_things', domain: 'qa', description: 'qa', parameters: {}, readOnly: true, handler });
+      configureStorePlan(['*']);
+      service = new AIAgentService({ chat } as any, {} as any, realRegistry, { emit } as any,
+        { awaitResult } as any, { canUseAIFeature, getAIFeatureConfig, consumeAIQuota } as any);
+      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: 'Todo aplicado.' }));
+      const { result } = await drain({});
+      expect(handler).toHaveBeenCalledTimes(1); expect(consumeAIQuota).not.toHaveBeenCalled();
+      expect(result.execution?.outcome).toBe('partial'); expect(result.content).not.toContain('Todo aplicado');
+    });
+    it('provider transient emits a terminal failed outcome without another retry layer or lost usage', async () => {
+      chat.mockResolvedValue({ success: false, error: 'secret provider diagnostic', error_code: 'PROVIDER_TRANSIENT', retryable: true, usage: { totalTokens: 7 } });
+      const { chunks, result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(1); expect(result.total_tokens).toBe(7);
+      expect(result.execution).toMatchObject({ outcome: 'failed', error_code: 'PROVIDER_TRANSIENT' });
+      expect(result.content).not.toContain('secret'); expect(chunks.at(-1)?.type).toBe('done');
+    });
+    it('aborted turn remains silent and cancelled with no inferred progress', async () => {
+      const { chunks, result } = await drain({ shouldAbort: jest.fn().mockResolvedValue(true) });
+      expect(chunks).toEqual([]); expect(result.execution?.outcome).toBe('cancelled');
+      expect(chat).not.toHaveBeenCalled();
+    });
+    it('legacy text is preserved but cannot consume tool success quota or certify a completed objective', async () => {
+      configureStorePlan(['list_things']); executeTool.mockResolvedValue('Ya quedó');
+      chat.mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: 'Todo completado' }));
+      const { result } = await drain({});
+      expect(consumeAIQuota).not.toHaveBeenCalled(); expect(result.tools_used[0].execution?.freshness).toBe('unknown');
+      expect(result.content).not.toContain('Todo completado');
+    });
+  });
+
 });

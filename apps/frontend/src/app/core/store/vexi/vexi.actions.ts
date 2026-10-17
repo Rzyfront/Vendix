@@ -3,6 +3,7 @@ import {
   AIConversation,
   AIMessage,
   VexiTask,
+  VexiToolExecution,
 } from '../../services/vexi-api.service';
 
 /**
@@ -23,7 +24,8 @@ export interface ToolStep {
   name: string;
   arguments?: Record<string, unknown>;
   summary?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'waiting' | 'unknown';
+  execution?: VexiToolExecution;
 }
 
 export interface VexiProposal {
@@ -199,7 +201,7 @@ export const toolCallStarted = createAction(
 
 export const toolCallFinished = createAction(
   '[Vexi] Tool Call Finished',
-  props<{ id: string; name: string; summary?: string; failed?: boolean }>(),
+  props<{ id: string; name: string; summary?: string; failed?: boolean; execution?: VexiToolExecution }>(),
 );
 
 /**

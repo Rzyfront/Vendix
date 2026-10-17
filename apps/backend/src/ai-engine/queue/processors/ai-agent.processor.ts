@@ -81,6 +81,7 @@ export class AIAgentProcessor extends WorkerHost {
         goal,
         success: result.success,
         content: result.content,
+        ...(result.execution ? { execution: result.execution } : {}),
         tools_used: result.tools_used?.length ?? 0,
       });
 

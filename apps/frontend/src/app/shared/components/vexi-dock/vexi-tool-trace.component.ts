@@ -6,6 +6,7 @@ import {
   linkedSignal,
 } from '@angular/core';
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
+import { vexiToolLabel } from '../../../core/store/vexi/vexi-execution.utils';
 import {
   STORE_MODULE_BY_KEY,
   resolveStoreModule,
@@ -120,6 +121,8 @@ function prettifyToolName(name: string): string {
  * the user whether Vexi is still working or already finished.
  */
 function narrate(step: ToolStep): string {
+  const semanticLabel = vexiToolLabel(step.execution);
+  if (semanticLabel) return semanticLabel;
   const running = step.status === 'running';
   const args = step.arguments;
 
@@ -247,6 +250,12 @@ interface TraceRow {
                       <app-icon name="loader-2" [size]="12" [spin]="true" />
                     }
                     @case ('failed') {
+                      <app-icon name="x-circle" [size]="12" />
+                    }
+                    @case ('waiting') {
+                      <app-icon name="loader-2" [size]="12" />
+                    }
+                    @case ('unknown') {
                       <app-icon name="x-circle" [size]="12" />
                     }
                     @default {

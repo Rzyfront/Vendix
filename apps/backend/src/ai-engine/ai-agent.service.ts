@@ -12,6 +12,10 @@ import {
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
+import { AgentExecutionSummary, ToolExecutionReceipt, ToolExecutionResult, toolExecutionContractEnabled } from './tools/interfaces/tool.interface';
+import { countsAsToolSuccess, normalizeToolException, normalizeToolResult, toolReceipt } from './tools/tool-result.normalizer';
+import { ToolRecovery } from './tools/tool-recovery';
+import { semanticToolOutcome, withExecutionContract } from './agent-execution.contract';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
@@ -270,10 +274,14 @@ export interface AgentBlockSink {
 export interface AgentResult {
   content: string;
   iterations: number;
-  tools_used: Array<{ name: string; args: any; result: string }>;
+  tools_used: Array<{ name: string; args: any; result: string; execution?: ToolExecutionReceipt }>;
   total_tokens: number;
   success: boolean;
   error?: string;
+  execution?: AgentExecutionSummary;
+  error_code?: string;
+  exhausted?: boolean;
+  awaiting_input?: boolean;
   /** The turn was superseded by a newer one (`shouldAbort`); nothing was emitted. */
   aborted?: boolean;
   /**
@@ -885,7 +893,7 @@ export class AIAgentService {
         );
       }
     }
-    return JSON.stringify({
+    const compacted = {
       summary: result.slice(0, COMPACT_SUMMARY_CHARS),
       block_id: blockId,
       rows,
@@ -893,7 +901,16 @@ export class AIAgentService {
       next_step: blockId
         ? 'El resultado completo quedó guardado en el bloque block_id: léelo por partes con vex_block_read en vez de repetir la consulta.'
         : 'El resultado venía truncado: refina la consulta si necesitas el resto.',
-    });
+    };
+    if (toolExecutionContractEnabled()) {
+      const normalized = normalizeToolResult(result, {
+        write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
+        evidenceRef: blockId ? `block:${blockId}` : undefined,
+      });
+      return JSON.stringify({ ...toolReceipt(normalized), data: compacted,
+        freshness: 'truncated', next_action: compacted.next_step });
+    }
+    return JSON.stringify(compacted);
   }
 
   /**
@@ -1019,12 +1036,16 @@ export class AIAgentService {
             turn_id: params.turn_id,
           })
         : undefined;
-    if (!root || !this.trace) return yield* this.runAgentLoop(params);
+    const runLoop = (observe?: (outcome: AgentOutcome) => void) => {
+      const loop = this.runAgentLoop(params, observe);
+      return toolExecutionContractEnabled() ? withExecutionContract(loop) : loop;
+    };
+    if (!root || !this.trace) return yield* runLoop();
 
     let outcome: AgentOutcome = 'partial';
     let returned = false;
     const trace = this.trace;
-    const loop = this.runAgentLoop(params, (observed) => {
+    const loop = runLoop((observed) => {
       outcome = observed;
     });
     const observedLoop = async function* (): AsyncGenerator<
@@ -1035,11 +1056,19 @@ export class AIAgentService {
         const result = yield* loop;
         returned = true;
         if (result.aborted) outcome = 'cancelled';
+        else if (result.execution) {
+          outcome = result.execution.outcome === 'pending_confirmation' ? 'awaiting_approval'
+            : result.execution.outcome === 'needs_user_input' ? 'awaiting_input'
+            : result.execution.outcome === 'blocked' ? (outcome === 'blocked_plan' ? 'blocked_plan' : 'blocked_permission')
+            : result.execution.outcome;
+        }
         else if (result.pending_confirmation || result.pending_plan) {
           outcome = 'awaiting_approval';
+        } else if (!result.success) outcome = 'failed';
+        if (outcome === 'awaiting_approval') {
           const wait = trace.startSpan('approval_wait');
           trace.endSpan(wait, { outcome: 'awaiting_approval' });
-        } else if (!result.success) outcome = 'failed';
+        }
         // A successful model response is NOT a business verifier. A does not
         // alter the legacy response; D0/D2 will provide verified receipts.
         return result;
@@ -1085,6 +1114,9 @@ export class AIAgentService {
     observeOutcome: (outcome: AgentOutcome) => void = () => undefined,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     const activeTrace = this.trace?.currentSpan() ? this.trace : undefined;
+    const semantic = toolExecutionContractEnabled();
+    const recovery = new ToolRecovery();
+    let semanticHalt = false;
     const startTime = Date.now();
     const isVex = params.agent_key === 'vex';
     const plannedMax = isVex
@@ -1280,6 +1312,19 @@ export class AIAgentService {
 
     const toolsUsed: AgentResult['tools_used'] = [];
     let pendingConfirmation: AgentResult['pending_confirmation'];
+    const observeResult = (name: string, args: unknown, normalized: ToolExecutionResult) => {
+      recovery.record(name, args, normalized);
+      this.eventEmitter.emit('ai.agent.tool_result', {
+        tool_name: name, status: normalized.status, error_code: normalized.error_code,
+        effect_status: normalized.effect_status,
+        infrastructure_error: normalized.error_code === 'AI_TOOL_INFRASTRUCTURE_ERROR',
+        store_id: context?.store_id,
+      });
+      const outcome = semanticToolOutcome(normalized);
+      observeOutcome(outcome);
+      if (['unknown_effect', 'blocked', 'needs_user_input', 'pending_confirmation'].includes(normalized.status)) semanticHalt = true;
+      return outcome;
+    };
     /**
      * Write proposals recorded by a Vex PROPOSING turn (no plan token yet).
      * They finalize into ONE `plan_approval` frame — never one card per write
@@ -1370,7 +1415,7 @@ export class AIAgentService {
         // turn, so the user asks a question and gets silence. One retry costs a
         // second and turns most of those into real answers; the retry is not
         // repeated so a genuinely mute model still terminates the loop.
-        if (this.isEmptyCompletion(response)) {
+        if (this.isEmptyCompletion(response) && (!semantic || Date.now() - startTime - waitedMs < timeoutMs)) {
           this.logger.warn(
             `Empty completion at iteration ${iteration}; retrying once`,
           );
@@ -1395,6 +1440,7 @@ export class AIAgentService {
           }
         }
 
+        if (semantic && !response.success) totalTokens += response.usage?.totalTokens ?? 0;
         if (!response.success) {
           yield { type: 'error', error: response.error || 'AI request failed' };
           return {
@@ -1404,6 +1450,7 @@ export class AIAgentService {
             total_tokens: totalTokens,
             success: false,
             error: response.error,
+            ...(semantic ? { error_code: response.error_code ?? 'PROVIDER_FAILURE' } : {}),
           };
         }
 
@@ -1538,6 +1585,7 @@ export class AIAgentService {
           const toolName = this.toolRegistry.canonicalName(
             toolCall.function.name,
           );
+          if (semanticHalt) break;
           let toolArgs: Record<string, any>;
           const toolSpan = activeTrace?.startSpan('tool', {
             round: iteration,
@@ -1546,11 +1594,23 @@ export class AIAgentService {
           });
           let toolOutcome: AgentOutcome = 'cancelled';
           let toolErrorCode: string | undefined;
+          let malformedArgs = false;
           try {
             try {
               toolArgs = JSON.parse(toolCall.function.arguments);
             } catch {
               toolArgs = {};
+              malformedArgs = true;
+            }
+            if (semantic && (malformedArgs || !toolArgs || typeof toolArgs !== 'object' || Array.isArray(toolArgs))) {
+              const normalized = normalizeToolResult({ error: 'Argumentos JSON inválidos.', error_code: 'INVALID_ARGS',
+                next_step: 'Corrige los argumentos usando el esquema ofrecido.' });
+              observeResult(toolName, toolCall.function.arguments, normalized);
+              toolOutcome = 'failed'; toolErrorCode = 'INVALID_ARGS';
+              messages.push({ role: 'tool', content: JSON.stringify(normalized), tool_call_id: toolCall.id });
+              yield { type: 'tool_result', tool: { id: toolCall.id, name: toolName,
+                summary: 'Faltan argumentos válidos.', failed: true, execution: toolReceipt(normalized) } };
+              continue;
             }
 
             // Plan tools go to the hook: the task list is internal scaffolding,
@@ -1620,6 +1680,7 @@ export class AIAgentService {
                     tools_used: toolsUsed,
                     total_tokens: totalTokens,
                     success: true,
+                    ...(semantic && toolName === 'ask_user' ? { awaiting_input: true } : {}),
                     ...(pendingPlan ? { pending_plan: pendingPlan } : {}),
                   };
                 }
@@ -1655,6 +1716,9 @@ export class AIAgentService {
               toolOutcome = 'blocked_permission';
               toolErrorCode = 'AI_AGENT_TOOL_NOT_ALLOWED';
               observeOutcome('blocked_permission');
+              const denied = semantic ? normalizeToolResult({ error: 'Catálogo no autorizado.',
+                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED', next_step: 'Puedo preparar una consulta permitida o solicitar revisión al administrador.' }) : undefined;
+              if (denied) observeResult(toolName, toolArgs, denied);
               const notAllowed =
                 `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
                 `está en el catálogo ofrecido en este turno. Usa solo las ` +
@@ -1674,9 +1738,22 @@ export class AIAgentService {
                   name: toolName,
                   summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
                   failed: true,
+                  ...(denied ? { execution: toolReceipt(denied) } : {}),
                 },
               };
               continue;
+            }
+
+            if (semantic) {
+              const suppressed = recovery.beforeCall(toolName, toolArgs);
+              if (suppressed) {
+                toolOutcome = observeResult(toolName, toolArgs, suppressed);
+                messages.push({ role: 'tool', content: JSON.stringify(suppressed), tool_call_id: toolCall.id });
+                yield { type: 'tool_result', tool: { id: toolCall.id, name: toolName,
+                  summary: suppressed.next_action ?? 'No repetiré la llamada sin un cambio útil.',
+                  execution: toolReceipt(suppressed) } };
+                continue;
+              }
             }
 
             this.logger.log(
@@ -1709,6 +1786,9 @@ export class AIAgentService {
                 id: toolCall.id,
                 name: toolName,
                 arguments: toolArgs,
+                ...(semantic && this.toolRegistry.isClientSide(toolName)
+                  ? { execution: toolReceipt(normalizeToolResult({ result_unknown: true }, { clientSide: true })) }
+                  : {}),
                 ...(deprecatedWarning
                   ? { deprecated_warning: deprecatedWarning }
                   : {}),
@@ -1763,7 +1843,7 @@ export class AIAgentService {
               waitedMs += Date.now() - waitStart;
 
               toolOutcome = 'partial';
-              const resultPayload =
+              let resultPayload =
                 uiResult ??
                 JSON.stringify({
                   dispatched: true,
@@ -1777,9 +1857,17 @@ export class AIAgentService {
                   note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos y NO llegó respuesta, así que no sabes si funcionó. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"), y ofrécele verificarlo. Si tu objetivo necesita más pasos, pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo cuyo resultado no viste.`,
                 });
 
+              const uiExecution = semantic ? normalizeToolResult(resultPayload, {
+                clientSide: true, evidenceRef: `tool_call:${toolCall.id}`,
+              }) : undefined;
+              if (uiExecution) {
+                toolOutcome = observeResult(toolName, toolArgs, uiExecution);
+                resultPayload = JSON.stringify(uiExecution);
+              }
               toolsUsed.push({
                 name: toolName,
                 args: toolArgs,
+                ...(uiExecution ? { execution: toolReceipt(uiExecution) } : {}),
                 result: resultPayload,
               });
               messages.push({
@@ -1795,7 +1883,8 @@ export class AIAgentService {
                 tool: {
                   id: toolCall.id,
                   name: toolName,
-                  summary: resultPayload.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  summary: (uiExecution ? JSON.stringify(uiExecution.data) : resultPayload).slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  ...(uiExecution ? { execution: toolReceipt(uiExecution) } : {}),
                 },
               };
               continue;
@@ -1815,12 +1904,20 @@ export class AIAgentService {
                   conversation_id: params.conversation_id,
                 };
               }
-              const execute = () =>
-                this.toolRegistry.executeTool(toolName, toolArgs);
+              const execute = async () => semantic
+                ? JSON.stringify(await this.toolRegistry.executeToolResult(toolName, toolArgs, {
+                    evidenceRef: `tool_call:${toolCall.id}`,
+                  }))
+                : this.toolRegistry.executeTool(toolName, toolArgs);
               const raw = activeTrace
                 ? await activeTrace.run(toolSpan, execute)
                 : await execute();
-              toolOutcome = 'partial';
+              const normalized = semantic ? normalizeToolResult(raw, {
+                write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
+                evidenceRef: `tool_call:${toolCall.id}`,
+              }) : undefined;
+              toolOutcome = normalized ? observeResult(toolName, toolArgs, normalized) : 'partial';
+              toolErrorCode = normalized?.error_code ?? undefined;
               // Oversized results travel compacted from here on: the trace, the
               // persisted transcript and the model all see `{summary, block_id,
               // rows}`, never the full payload twice.
@@ -1829,17 +1926,22 @@ export class AIAgentService {
                 raw,
                 params,
               );
+              if (normalized && result !== raw) {
+                normalized.freshness = 'truncated';
+                normalized.next_action = 'Consulta el bloque completo por partes antes de dar la solicitud por terminada.';
+              }
 
               toolsUsed.push({
                 name: toolName,
                 args: toolArgs,
                 result,
+                ...(normalized ? { execution: toolReceipt(normalized) } : {}),
               });
 
               // F3 — el `tool_result` exitoso suma 1 al contador mensual del
               // periodo, post-ejecución. Va después de `executeTool` a propósito:
               // propuestas, errores y despachos clientSide no consumen.
-              await this.consumeToolCallQuota(
+              if (!normalized || countsAsToolSuccess(normalized)) await this.consumeToolCallQuota(
                 context?.store_id,
                 toolCall.id,
                 toolName,
@@ -1867,7 +1969,8 @@ export class AIAgentService {
                 tool: {
                   id: toolCall.id,
                   name: toolName,
-                  summary: result.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  summary: (normalized ? JSON.stringify(normalized.data) : result).slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  ...(normalized ? { execution: toolReceipt(normalized) } : {}),
                 },
               };
 
@@ -1906,6 +2009,9 @@ export class AIAgentService {
                 // proposal: it is a refusal the model can still fix and retry.
                 if (!details?.confirmation_token) {
                   toolOutcome = 'failed';
+                  const rejected = semantic ? normalizeToolResult({ error: payload.message,
+                    error_code: 'TOOL_PREVIEW_REJECTED', next_step: 'Comprueba los datos o indica el requisito que falta. No hay un cambio pendiente de aprobación.' }) : undefined;
+                  if (rejected) observeResult(toolName, toolArgs, rejected);
                   messages.push({
                     role: 'tool',
                     content: JSON.stringify({
@@ -1924,6 +2030,7 @@ export class AIAgentService {
                       id: toolCall.id,
                       name: toolName,
                       summary: 'No se pudo preparar el cambio.',
+                      ...(rejected ? { execution: toolReceipt(rejected), failed: true } : {}),
                     },
                   };
                   continue;
@@ -1958,25 +2065,31 @@ export class AIAgentService {
                       toolName,
                       toolArgs,
                     );
-                    const apply = () =>
-                      this.toolRegistry.executeTool(toolName, toolArgs, {
-                        confirmationToken: singleUse,
-                      });
+                    const apply = async () => semantic
+                      ? JSON.stringify(await this.toolRegistry.executeToolResult(toolName, toolArgs, {
+                          confirmationToken: singleUse, evidenceRef: `tool_call:${toolCall.id}`,
+                        }))
+                      : this.toolRegistry.executeTool(toolName, toolArgs, { confirmationToken: singleUse });
                     const appliedRaw = activeTrace
                       ? await activeTrace.run(toolSpan, apply)
                       : await apply();
-                    toolOutcome = 'partial';
+                    const normalizedApply = semantic ? normalizeToolResult(appliedRaw, {
+                      write: true, evidenceRef: `tool_call:${toolCall.id}`,
+                    }) : undefined;
+                    toolOutcome = normalizedApply ? observeResult(toolName, toolArgs, normalizedApply) : 'partial';
                     const applied = await this.compactToolResult(
                       toolName,
                       appliedRaw,
                       params,
                     );
+                    if (normalizedApply && applied !== appliedRaw) normalizedApply.freshness = 'truncated';
                     toolsUsed.push({
                       name: toolName,
                       args: toolArgs,
                       result: applied,
+                      ...(normalizedApply ? { execution: toolReceipt(normalizedApply) } : {}),
                     });
-                    await this.consumeToolCallQuota(
+                    if (!normalizedApply || countsAsToolSuccess(normalizedApply)) await this.consumeToolCallQuota(
                       context?.store_id,
                       toolCall.id,
                       toolName,
@@ -1992,7 +2105,8 @@ export class AIAgentService {
                       tool: {
                         id: toolCall.id,
                         name: toolName,
-                        summary: applied.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                        summary: (normalizedApply ? JSON.stringify(normalizedApply.data) : applied).slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                        ...(normalizedApply ? { execution: toolReceipt(normalizedApply) } : {}),
                       },
                     };
                     const appliedBlock = this.uiBlockOf(toolName, appliedRaw);
@@ -2062,6 +2176,7 @@ export class AIAgentService {
                       id: toolCall.id,
                       name: toolName,
                       summary: `Paso ${order} registrado en el plan.`,
+                      ...(semantic ? { execution: toolReceipt(normalizeToolResult({ requires_confirmation: true }, { write: true })) } : {}),
                     },
                   };
                   continue;
@@ -2090,6 +2205,7 @@ export class AIAgentService {
                     id: toolCall.id,
                     name: toolName,
                     summary: 'Esperando confirmación del usuario.',
+                    ...(semantic ? { execution: toolReceipt(normalizeToolResult({ requires_confirmation: true }, { write: true })) } : {}),
                   },
                 };
                 yield {
@@ -2107,7 +2223,8 @@ export class AIAgentService {
                 continue;
               }
 
-              toolOutcome = 'failed';
+              const normalizedError = semantic ? normalizeToolException(error) : undefined;
+              toolOutcome = normalizedError ? observeResult(toolName, toolArgs, normalizedError) : 'failed';
               const errorMsg =
                 error instanceof VendixHttpException
                   ? (payload?.message ?? error.message)
@@ -2115,7 +2232,7 @@ export class AIAgentService {
 
               messages.push({
                 role: 'tool',
-                content: JSON.stringify({ error: errorMsg }),
+                content: JSON.stringify(normalizedError ?? { error: errorMsg }),
                 tool_call_id: toolCall.id,
               });
 
@@ -2126,6 +2243,7 @@ export class AIAgentService {
                   name: toolName,
                   summary: errorMsg.slice(0, TOOL_RESULT_SUMMARY_CHARS),
                   failed: true,
+                  ...(normalizedError ? { execution: toolReceipt(normalizedError) } : {}),
                 },
               };
             }
@@ -2150,6 +2268,8 @@ export class AIAgentService {
             });
           }
         }
+
+        if (semanticHalt) break;
 
         // Vex: la escritura propuesta (una por turno) cierra el turno con su
         // frame `plan_approval` de 1 paso. Lecturas de la misma iteración ya
@@ -2225,7 +2345,7 @@ export class AIAgentService {
       // Budget exhausted (iterations or clock) with the plan still open: do not
       // close with a summary the person did not ask for. Signal the client to
       // fire another turn; the persisted plan carries the state over.
-      if (params.plan && (await params.plan.snapshot())) {
+      if (!semanticHalt && params.plan && (await params.plan.snapshot())) {
         this.eventEmitter.emit('ai.agent.completed', {
           iterations: iteration,
           tools_used: toolsUsed.length,
@@ -2267,7 +2387,7 @@ export class AIAgentService {
       // exactly the pessimistic-but-human close the situation calls for.
       // Failing THAT, the fallback below is still a sentence, never an error.
       let closing = '';
-      if (!timedOut) {
+      if (!timedOut && !semantic) {
         messages.push({
           role: 'user',
           content:
@@ -2319,7 +2439,7 @@ export class AIAgentService {
         closing ||
         (timedOut
           ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
-          : 'Estuve buscando por varios lados y no logré dar con lo que necesitas. ¿Me lo describes de otra forma o me das algún dato más para intentarlo de nuevo?');
+          : 'No tengo evidencia suficiente para dar tu solicitud por terminada. Puedo verificar el estado actual del registro y continuar desde el paso pendiente.');
 
       yield { type: 'text', content };
 
@@ -2330,6 +2450,7 @@ export class AIAgentService {
         total_tokens: totalTokens,
         success: true,
         pending_confirmation: pendingConfirmation,
+        ...(semantic ? { exhausted: true } : {}),
       };
     } catch (error: any) {
       if (error instanceof VendixHttpException) throw error;

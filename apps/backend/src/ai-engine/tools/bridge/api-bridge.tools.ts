@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { RegisteredTool } from '../interfaces/tool.interface';
+import { RegisteredTool, toolExecutionContractEnabled } from '../interfaces/tool.interface';
 import {
   ApiCatalogService,
   type CatalogEntry,
@@ -555,6 +555,7 @@ export function createApiBridgeTools({
           if (!response.ok) {
             return JSON.stringify({
               error: `La consulta a "${entry.path}" devolvió ${response.status}.`,
+              ...(toolExecutionContractEnabled() ? { statusCode: response.status } : {}),
               detail: body.slice(0, 500),
               // El 400 de `forbidNonWhitelisted` nombra el parámetro sobrante y
               // ninguno de los válidos, así que el modelo entraba a adivinar:
@@ -864,6 +865,7 @@ export function createApiBridgeTools({
             return JSON.stringify({
               applied: false,
               status: response.status,
+              ...(toolExecutionContractEnabled() ? { statusCode: response.status } : {}),
               detail: responseBody.slice(0, 800),
               note: 'El cambio NO se aplicó. Dile a la persona qué faltó, en sus términos, y ofrécele reintentarlo con el dato corregido.',
             });

@@ -10,7 +10,9 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
 import type {
+  AgentResult,
   AgentBlockSink,
   AgentPlanApprovalHook,
 } from '../../../ai-engine/ai-agent.service';
@@ -416,6 +418,7 @@ export class AIChatService {
       (app?.metadata && (app.metadata as any).agent_enabled === true);
 
     let responseContent = '';
+    let execution: AgentExecutionSummary | undefined;
     let tokensUsed = 0;
     // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
     // el cierre persiste byte-idéntico a hoy.
@@ -448,6 +451,7 @@ export class AIChatService {
             ? await this.buildVexVariables(conversationId)
             : await this.vexiContext.buildSnapshot(),
       });
+      execution = agentResult.execution;
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
       vexPlan = agentResult.pending_plan ?? null;
@@ -501,7 +505,7 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: 0,
-        ...(vexMetadata ? { metadata: vexMetadata } : {}),
+        ...((vexMetadata || execution) ? { metadata: { ...vexMetadata, ...(execution ? { execution } : {}) } as unknown as Prisma.InputJsonValue } : {}),
       },
     });
     await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
@@ -534,6 +538,7 @@ export class AIChatService {
         role: 'assistant',
         content: responseContent,
         tokens_used: assistantMessage.tokens_used,
+        ...(execution ? { execution } : {}),
       },
     };
   }
@@ -736,7 +741,8 @@ export class AIChatService {
 
     let fullContent = '';
     let totalTokens = 0;
-    let toolsUsed: Array<{ name: string; args: any; result: string }> = [];
+    let toolsUsed: AgentResult['tools_used'] = [];
+    let execution: AgentExecutionSummary | undefined;
     /**
      * La ruta que quedó propuesta y sin aplicar, para marcarla en el mensaje
      * que se persiste. El turno siguiente la lee con `findPendingProposal` y
@@ -852,6 +858,7 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
+      execution = result.execution;
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
       // sobre lo capturado por frames si ambos existen.
       vexPlan = result.pending_plan ?? null;
@@ -871,7 +878,7 @@ export class AIChatService {
         // even that is empty the silence is named rather than shipped.
         fullContent =
           result.content?.trim() ||
-          'No logré completar eso. Vuelve a pedírmelo con otras palabras, o dime el nombre exacto del registro sobre el que quieres que trabaje.';
+          'No tengo evidencia de que la solicitud esté terminada. Puedo verificar el registro y continuar desde el paso pendiente.';
         yield { type: 'text', content: fullContent };
         // Spoken too, fallback included. A turn that only ran tools already got
         // its human filler at the top; leaving the failure text unspoken as well
@@ -974,6 +981,7 @@ export class AIChatService {
       const metadata = {
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
+        ...(execution ? { execution } : {}),
         ...(intent.continuation
           ? {
               continuation: intent.continuation,
@@ -997,7 +1005,8 @@ export class AIChatService {
                 name: tool.name,
                 arguments: tool.args,
                 result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
-              })) as Prisma.InputJsonValue)
+                ...(tool.execution ? { execution: tool.execution } : {}),
+              })) as unknown as Prisma.InputJsonValue)
             : undefined,
           ...(Object.keys(metadata).length > 0
             ? { metadata: metadata as Prisma.InputJsonValue }

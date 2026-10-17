@@ -3,6 +3,28 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
+/** Optional D0 metadata. Older servers/flags OFF keep the existing wire shape. */
+export interface VexiToolExecution {
+  schema_version: '1';
+  status: 'ok' | 'recoverable_error' | 'blocked' | 'pending_confirmation' | 'needs_user_input' | 'unknown_effect';
+  error_code: string | null;
+  retryable: boolean;
+  next_action: string | null;
+  effect_status: 'not_applicable' | 'unverified' | 'not_applied' | 'pending' | 'applied' | 'unknown';
+  freshness: 'observed' | 'unknown' | 'truncated';
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+}
+
+export interface VexiExecutionSummary {
+  schema_version: '1';
+  error_code?: string;
+  outcome: 'partial' | 'blocked' | 'pending_confirmation' | 'needs_user_input' | 'unknown_effect' | 'failed' | 'cancelled';
+  next_action: string;
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+}
+
 export interface AIConversation {
   id: number;
   store_id: number;
@@ -37,6 +59,7 @@ export interface SendMessageResponse {
     role: string;
     content: string;
     tokens_used: number;
+    execution?: VexiExecutionSummary;
   };
 }
 
@@ -80,6 +103,7 @@ export interface VexiStreamChunk {
     arguments?: Record<string, unknown>;
     summary?: string;
     failed?: boolean;
+    execution?: VexiToolExecution;
   };
   usage?: {
     promptTokens: number;
@@ -87,6 +111,7 @@ export interface VexiStreamChunk {
     totalTokens: number;
   };
   error?: string;
+  execution?: VexiExecutionSummary;
   /** Playback order of an `audio` frame. Assigned when the segment was cut. */
   index?: number;
   audio_base64?: string;

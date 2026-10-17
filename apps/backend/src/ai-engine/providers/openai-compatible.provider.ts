@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { providerFailureMetadata } from './provider-failure';
 import {
   AIProvider,
   AIProviderConfig,
@@ -115,6 +116,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       return {
         success: false,
         error: error.message || 'OpenAI-compatible request failed',
+        ...providerFailureMetadata(error),
       };
     }
   }

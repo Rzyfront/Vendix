@@ -7,6 +7,43 @@ import { AIToolDefinition } from '../../interfaces/ai-provider.interface';
  */
 export const DEFAULT_TOOL_VERSION = '1';
 
+/** D0 is opt-in; executeTool/string handlers and MCP keep their legacy ABI. */
+export const toolExecutionContractEnabled = (): boolean =>
+  process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED === 'true';
+
+export type ToolExecutionStatus =
+  | 'ok'
+  | 'recoverable_error'
+  | 'blocked'
+  | 'pending_confirmation'
+  | 'needs_user_input'
+  | 'unknown_effect';
+
+export interface ToolExecutionReceipt {
+  schema_version: '1';
+  status: ToolExecutionStatus;
+  error_code: string | null;
+  retryable: boolean;
+  next_action: string | null;
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+  pagination: { next_cursor?: string | number | null; has_more?: boolean; complete: boolean } | null;
+  freshness: 'observed' | 'unknown' | 'truncated';
+  effect_status: 'not_applicable' | 'unverified' | 'not_applied' | 'pending' | 'applied' | 'unknown';
+}
+
+/** ok means a tool answered, NEVER that the business objective was verified. */
+export type ToolExecutionResult<T = unknown> = ToolExecutionReceipt & { data: T };
+
+export interface AgentExecutionSummary {
+  schema_version: '1';
+  error_code?: string;
+  outcome: 'partial' | 'blocked' | 'pending_confirmation' | 'needs_user_input' | 'unknown_effect' | 'failed' | 'cancelled';
+  next_action: string;
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+}
+
 export interface ToolExecutionContext {
   organization_id?: number;
   store_id?: number;

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { providerFailureMetadata } from './provider-failure';
 import {
   AIProvider,
   AIProviderConfig,
@@ -112,6 +113,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
     if (typeof content !== 'string') return false;
     try {
       const result = JSON.parse(content);
+      if (result?.schema_version === '1') {
+        return ['recoverable_error', 'blocked'].includes(result.status);
+      }
       return (
         result?.success === false ||
         result?.status === 'error' ||
@@ -242,6 +246,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
       return {
         success: false,
         error: error.message || 'Anthropic-compatible request failed',
+        ...providerFailureMetadata(error),
       };
     }
   }

@@ -1282,3 +1282,31 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     expect(b.prisma.ai_messages.updateMany).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('AIChat D0 receipt persistence', () => {
+  const execution = { schema_version: '1', outcome: 'unknown_effect', next_action: 'Verifica el registro antes de repetir.', evidence_refs: [], resource_ids: {} };
+  beforeEach(() => jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ user_id: 9 } as any));
+  afterEach(() => jest.restoreAllMocks());
+  it('sync persists and returns semantic outcome without turning success into verified completion', async () => {
+    const b = build({});
+    b.runSync.mockResolvedValue({ content: 'Falta verificar.', total_tokens: 12, tools_used: [], success: true, execution });
+    const response = await b.service.sendMessage(7, { content: 'consulta' });
+    expect(response.assistant_message.execution).toEqual(execution);
+    const rows = b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data);
+    expect(rows.find((r: any) => r.role === 'assistant').metadata.execution).toEqual(execution);
+  });
+  it('SSE preserves done execution after persistence and stores tool receipt separately from truncated text', async () => {
+    const toolExecution = { schema_version: '1', status: 'unknown_effect', effect_status: 'unknown', evidence_refs: [], resource_ids: {}, freshness: 'unknown', pagination: null, next_action: execution.next_action, retryable: false, error_code: 'ETIMEDOUT' };
+    const run = agentGen([{ type: 'text', content: 'Falta verificar.' }, { type: 'done', execution }], {
+      content: 'Falta verificar.', tools_used: [{ name: 'write_endpoint', args: {}, result: 'x'.repeat(20000), execution: toolExecution }], execution,
+    });
+    const b = build({ run });
+    b.streamIntents.consume.mockResolvedValue({ conversation_id: 7, user_id: 9, content: 'consulta' });
+    const frames = await collect(b.service, null);
+    const row = b.prisma.ai_messages.create.mock.calls.map((c: any) => c[0].data).find((r: any) => r.role === 'assistant');
+    expect(row.metadata.execution).toEqual(execution);
+    expect(row.tool_calls[0].execution).toEqual(toolExecution);
+    expect(row.tool_calls[0].result.length).toBeLessThan(20000);
+    expect(frames.at(-1)).toMatchObject({ type: 'done', execution, message_id: 1 });
+  });
+});

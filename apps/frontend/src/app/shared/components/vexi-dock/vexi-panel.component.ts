@@ -16,6 +16,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
+import { vexiTaskExecution } from '../../../core/store/vexi/vexi-execution.utils';
 import {
   VexiApiService,
   VexiAttachment,
@@ -1461,7 +1462,7 @@ export class VexiPanelComponent {
   });
 
   protected readonly taskIcon = computed(() =>
-    this.taskFailed()
+    this.taskFailed() || (this.taskIsDone() && vexiTaskExecution(this.activeTask()?.result))
       ? 'alert-circle'
       : this.taskIsDone()
         ? 'check-circle'
@@ -1488,6 +1489,8 @@ export class VexiPanelComponent {
       return `No pude terminar ${goal}. ${task.error ?? ''}`.trim();
     }
     if (this.taskIsDone()) {
+      const execution = vexiTaskExecution(task.result);
+      if (execution) return `Resultado para revisar: ${goal}. ${execution.next_action}`;
       return `Terminé: ${goal}. Te lo cuento en la campana.`;
     }
     return `Trabajando en segundo plano: ${goal}`;

@@ -1,3 +1,4 @@
+import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -178,6 +179,10 @@ export class VexiTaskService {
 
     try {
       const job = await this.queue.getJobStatus('ai-agent', task.job_id);
+      if (job.result?.execution?.schema_version === '1') {
+        return { ...task, live_status: job.status,
+          result: { content: job.result.content ?? '', execution: job.result.execution } };
+      }
       return { ...task, live_status: job.status };
     } catch {
       // A completed job is trimmed from the queue after 50 more, so a missing job
@@ -219,6 +224,7 @@ export class VexiTaskService {
     goal: string;
     success: boolean;
     content?: string;
+    execution?: AgentExecutionSummary;
     error?: string;
   }): Promise<void> {
     if (payload.task_id) {
@@ -227,8 +233,8 @@ export class VexiTaskService {
           where: { id: payload.task_id },
           data: {
             status: payload.success ? 'completed' : 'failed',
-            result: payload.success
-              ? ({ content: payload.content ?? '' } as any)
+            result: payload.success || payload.execution
+              ? ({ content: payload.content ?? '', ...(payload.execution ? { execution: payload.execution } : {}) } as any)
               : undefined,
             error: payload.success ? null : (payload.error ?? 'Error'),
             finished_at: new Date(),
@@ -247,9 +253,9 @@ export class VexiTaskService {
       payload.store_id,
       payload.user_id,
       payload.success ? 'vexi_task_completed' : 'vexi_task_failed',
-      payload.success ? 'Vexi terminó tu trabajo' : 'Vexi no pudo terminar',
+      payload.execution ? 'Vexi dejó un resultado para revisar' : payload.success ? 'Vexi terminó tu trabajo' : 'Vexi no pudo terminar',
       payload.success
-        ? this.summarize(payload.content) || payload.goal
+        ? this.summarize(payload.content) || payload.execution?.next_action || payload.goal
         : `${payload.goal} — ${payload.error ?? 'no se pudo completar'}`,
       { kind: 'vexi_task', task_id: payload.task_id },
     );

@@ -1,3 +1,5 @@
+import type { AgentExecutionSummary, ToolExecutionReceipt } from '../tools/interfaces/tool.interface';
+
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
@@ -76,6 +78,9 @@ export interface AIImageRequestOptions {
 
 export interface AIResponse {
   success: boolean;
+  /** Optional D0 transport classification, not a new retry policy. */
+  error_code?: string;
+  retryable?: boolean;
   content?: string;
   usage?: {
     promptTokens: number;
@@ -172,6 +177,8 @@ export interface AIStreamChunk {
     summary?: string;
     /** Only on `tool_result`: the tool threw and the model was told so. */
     failed?: boolean;
+    /** D0 receipt is separate from the truncated display summary. */
+    execution?: ToolExecutionReceipt;
     /**
      * Only on `tool_call`, only when the tool is deprecated (T5): warns the
      * model — and the visible trace — that the name has a sunset. Spanish,
@@ -189,6 +196,8 @@ export interface AIStreamChunk {
     cacheCreationTokens?: number;
   };
   error?: string;
+  /** D0 terminal semantics; `done`/success alone never verifies an objective. */
+  execution?: AgentExecutionSummary;
 }
 
 export interface AIImageResponse {

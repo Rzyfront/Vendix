@@ -348,3 +348,13 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
     expect(JSON.stringify(messages)).toBe(before);
   });
 });
+
+describe('Anthropic D0 discriminated tool results', () => {
+  it.each([
+    ['recoverable_error', true], ['blocked', true], ['pending_confirmation', false],
+    ['needs_user_input', false], ['unknown_effect', false], ['ok', false],
+  ])('%s preserves native is_error semantics', (status, expected) => {
+    const provider = new AnthropicCompatibleProvider({ provider: 'Anthropic', sdkType: 'anthropic_compatible', apiKey: 'test-key', modelId: 'test-model' });
+    expect((provider as any).isToolError(JSON.stringify({ schema_version: '1', status }))).toBe(expected);
+  });
+});

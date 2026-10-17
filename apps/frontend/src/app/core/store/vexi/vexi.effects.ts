@@ -16,6 +16,7 @@ import {
 import * as VexiActions from './vexi.actions';
 import type { VexiProposalPreview } from './vexi.actions';
 import * as VexiSelectors from './vexi.selectors';
+import { vexiToolFailed } from './vexi-execution.utils';
 import {
   VexiApiService,
   VexiStreamChunk,
@@ -589,6 +590,7 @@ export class VexiEffects {
                       // this the trace narrates it in the past tense of
                       // success ("Añadí Cafe sello rojo") over a refusal.
                       failed: this.uiCommandFailed(summary),
+                      ...(chunk.tool?.execution ? { execution: chunk.tool.execution } : {}),
                     }),
                   );
                 })
@@ -611,6 +613,7 @@ export class VexiEffects {
                       name,
                       summary: 'El comando de interfaz falló.',
                       failed: true,
+                      ...(chunk.tool?.execution ? { execution: chunk.tool.execution } : {}),
                     }),
                   );
                 });
@@ -651,8 +654,9 @@ export class VexiEffects {
               VexiActions.toolCallFinished({
                 id: chunk.tool.id,
                 name: chunk.tool.name,
-                summary: proposal ? undefined : chunk.tool.summary,
-                failed: chunk.tool.failed,
+                summary: proposal ? undefined : chunk.tool.execution?.next_action ?? chunk.tool.summary,
+                failed: vexiToolFailed(chunk.tool.execution, chunk.tool.failed),
+                ...(chunk.tool.execution ? { execution: chunk.tool.execution } : {}),
               }),
             );
             break;

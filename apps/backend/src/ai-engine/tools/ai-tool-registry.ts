@@ -5,7 +5,9 @@ import {
   RegisteredTool,
   ToolDeprecation,
   ToolExecutionContext,
+  ToolExecutionResult,
 } from './interfaces/tool.interface';
+import { normalizeToolException, normalizeToolResult } from './tool-result.normalizer';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmation.service';
@@ -335,6 +337,37 @@ export class AIToolRegistry {
     args: Record<string, any>,
     options?: { confirmationToken?: string },
   ): Promise<string> {
+    return this.executeToolRaw(name, args, options);
+  }
+
+  /** Opt-in consumer API. Legacy handlers, aliases and MCP strings stay intact. */
+  async executeToolResult(
+    name: string,
+    args: Record<string, unknown>,
+    options?: { confirmationToken?: string; evidenceRef?: string },
+  ): Promise<ToolExecutionResult> {
+    const tool = this.get(this.canonicalName(name));
+    let handlerStarted = false;
+    const context = { write: tool?.requiresConfirmation === true, evidenceRef: options?.evidenceRef };
+    try {
+      const raw = await this.executeToolRaw(name, args, options,
+        () => { handlerStarted = true; });
+      return normalizeToolResult(raw, context);
+    } catch (error) {
+      const payload = error instanceof VendixHttpException
+        ? error.getResponse() as Record<string, unknown> : null;
+      // Keep the existing proposal/token circuit, including preview refusals.
+      if (payload?.error_code === 'AI_AGENT_005') throw error;
+      return normalizeToolException(error, { ...context, handlerStarted });
+    }
+  }
+
+  private async executeToolRaw(
+    name: string,
+    args: Record<string, any>,
+    options?: { confirmationToken?: string },
+    onHandlerStart?: () => void,
+  ): Promise<string> {
     const resolvedName = this.resolveToolName(name);
     const tool = resolvedName ? this.tools.get(resolvedName) : undefined;
     if (!tool) {
@@ -415,6 +448,7 @@ export class AIToolRegistry {
       return JSON.stringify({
         error: edgeValidation.error,
         next_step: edgeValidation.next_step,
+        ...(onHandlerStart ? { error_code: 'INVALID_ARGS' } : {}),
       });
     }
 
@@ -442,9 +476,11 @@ export class AIToolRegistry {
       this.logger.log(
         `Executing tool: ${name} with args: ${JSON.stringify(args).substring(0, 200)}`,
       );
+      onHandlerStart?.();
       const result = await tool.handler(args, context);
       return result;
     } catch (error: any) {
+      if (onHandlerStart) throw error;
       if (error instanceof VendixHttpException) throw error;
       this.logger.error(`Tool "${name}" execution failed: ${error.message}`);
       throw new VendixHttpException(
