@@ -364,10 +364,21 @@ export interface AIToolDefinition {
   };
 }
 
+/** Transport hook for counting real SDK HTTP attempts, including SDK retries.
+ * It must not inspect or persist request/response bodies, URLs or headers.
+ */
+export type AIProviderFetch = typeof globalThis.fetch;
+
 export interface AIProviderConfig {
   provider: string;
   sdkType: SdkType;
   apiKey: string;
+  /** Optional telemetry transport; omission preserves the SDK default. */
+  fetch?: AIProviderFetch;
+  /** Numeric presence only; keeps legacy response/quota contracts unchanged. */
+  observeUsage?: (
+    usage: Partial<NonNullable<AIResponse['usage']>> | undefined,
+  ) => void;
   modelId: string;
   baseUrl?: string;
   /**

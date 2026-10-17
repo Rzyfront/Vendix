@@ -1,4 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { RequestContextService } from '../common/context/request-context.service';
+import {
+  AgentTraceService,
+  hashTraceValue,
+  normalizeRequestId,
+  redactTraceAttributes,
+} from './observability/agent-trace.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
@@ -27,12 +35,64 @@ export class AILoggingService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    @Optional() private readonly trace?: AgentTraceService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async logRequest(entry: AILogEntry & AICacheLogFields): Promise<void> {
     try {
+      const correlation = this.trace?.currentTraceContext();
+      const tracing = this.tracingEnabled() || correlation !== undefined;
+      const externalId =
+        entry.request_id ??
+        RequestContextService.asyncLocalStorage.getStore()?.request_id;
+      const requestId = normalizeRequestId(
+        externalId ?? correlation?.request_id,
+      );
+      const externalHash =
+        externalId && !this.isUuid(externalId)
+          ? hashTraceValue(externalId)
+          : undefined;
       await this.prisma.ai_engine_logs.create({
+        // OFF remains usable before the additive tracing migration is applied.
+        select: { id: true },
         data: {
+          request_id: requestId,
+          ...(tracing && {
+            trace_id: correlation?.trace_id ?? this.safeUuid(entry.trace_id),
+            span_id: correlation?.span_id ?? this.safeUuid(entry.span_id),
+            objective_id:
+              correlation?.objective_id ?? this.safeUuid(entry.objective_id),
+            conversation_id:
+              correlation?.conversation_id ??
+              this.safeConversationId(entry.conversation_id),
+            turn_id: correlation?.turn_id ?? this.safeUuid(entry.turn_id),
+            provider_call_id:
+              correlation?.provider_call_id ??
+              this.safeUuid(entry.provider_call_id),
+            attempt_id:
+              correlation?.attempt_id ?? this.safeUuid(entry.attempt_id),
+            tool_call_id:
+              correlation?.tool_call_id ?? this.safeUuid(entry.tool_call_id),
+            external_request_id_hash:
+              externalHash ?? this.safeHash(entry.external_request_id_hash),
+            usage_observed: {
+              prompt_tokens: this.tokenCount(
+                entry.usage_observed?.prompt_tokens,
+              ),
+              completion_tokens: this.tokenCount(
+                entry.usage_observed?.completion_tokens,
+              ),
+              cache_read_tokens: this.tokenCount(
+                entry.usage_observed?.cache_read_tokens,
+              ),
+              cache_creation_tokens: this.tokenCount(
+                entry.usage_observed?.cache_creation_tokens,
+              ),
+            },
+            cost_source: 'logical_summary',
+            telemetry_metadata: redactTraceAttributes(entry.telemetry_metadata),
+          }),
           app_key: entry.app_key,
           config_id: entry.config_id,
           organization_id: entry.organization_id,
@@ -46,13 +106,55 @@ export class AILoggingService {
           cost_usd: entry.cost_usd,
           latency_ms: entry.latency_ms,
           status: entry.status,
-          error_message: entry.error_message,
-          input_preview: entry.input_preview?.substring(0, 500),
+          // Provider error messages may echo prompts, URLs and credentials.
+          error_message:
+            tracing && entry.error_message ? '[redacted]' : entry.error_message,
+          input_preview: tracing
+            ? undefined
+            : entry.input_preview?.substring(0, 500),
         },
       });
     } catch (error: any) {
-      this.logger.error(`Failed to log AI request: ${error.message}`);
+      // Prisma errors may contain the rejected data, including legacy previews.
+      this.logger.error('Failed to log AI request');
     }
+  }
+
+  private tracingEnabled(): boolean {
+    const value =
+      this.config?.get('AI_AGENT_TRACING_ENABLED') ??
+      process.env.AI_AGENT_TRACING_ENABLED;
+    return value === true || value === 'true';
+  }
+
+  private safeUuid(value?: string): string | undefined {
+    return value && this.isUuid(value) ? value.toLowerCase() : undefined;
+  }
+
+  private safeHash(value?: string): string | undefined {
+    return value && /^[0-9a-f]{64}$/.test(value) ? value : undefined;
+  }
+
+  private safeConversationId(value?: string): string | undefined {
+    if (!value) return undefined;
+    return this.isUuid(value) || /^\d{1,16}$/.test(value)
+      ? value
+      : hashTraceValue(value);
+  }
+
+  private tokenCount(value?: number | null): number | null {
+    return typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= 2_147_483_647
+      ? value
+      : null;
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
   }
 
   calculateCost(

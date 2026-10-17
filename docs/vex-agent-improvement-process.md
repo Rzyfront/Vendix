@@ -151,3 +151,90 @@ Gate posterior a esta misión: CI full build/DI + E2E con provider real en entor
 propio. Validar consultas, propuesta sin mutar, aprobación single-use, continuación,
 lectura de bloques y errores/tenant isolation. No ejecutar contra servicios de otras
 sesiones ni contra un tenant real de producción.
+
+## Fase A: instrumentación y baseline reproducible
+
+`AI_AGENT_TRACING_ENABLED=true` habilita observabilidad; por omisión está apagado.
+No modifica modelo/configuración, prompts, catálogos ofrecidos, políticas, límites,
+deduplicación de cuotas ni el contrato de respuesta legacy. Revertir el flag es
+el rollback; no borrar datos ni esquema. Aplicar primero la migración aditiva
+`20261018090000_ai_agent_trace_spans` mediante el proceso de release autorizado.
+Nunca aplicar migraciones a una base remota desde una sesión de implementación.
+
+### Qué mide y qué no prueba
+
+- Cada turno instrumentado nace con trace/turn UUID de servidor y scope explícito
+  del ALS autenticado. Sin scope no se adopta el último tenant del fallback global.
+- Spans de contexto/catálogo, inferencias, intentos/retries, cierre, herramientas,
+  espera UI y frontera de aprobación separan la latencia activa de la espera.
+  `tool_executed` histórico es un evento de inicio: **no es éxito**.
+- Fingerprints de catálogo/prompt/config evitan guardar cuerpos sensibles.
+  Tokens de definiciones/contexto no disponibles se representan como desconocidos,
+  no se estiman como si fueran tokens exactos del tokenizer del proveedor.
+- Una respuesta legacy `success:true` sin verificador independiente se registra
+  conservadoramente `partial`. Propuesta = `awaiting_approval`, pregunta explícita
+  = `awaiting_input`. A no implementa el contrato de resultados D0 ni el verificador
+  D2. No fingir completion del negocio a partir del texto de la respuesta.
+- Una frontera de aprobación no mide todo el tiempo humano entre turnos. El
+  consentimiento y su posterior aplicación siguen por las costuras existentes;
+  el checkpoint durable y la vinculación multiturno pertenecen a D1/D2.
+- La fuente canónica de costo es el intento facturable correlacionado. No sumar
+  otra vez `ai_engine_logs.cost_usd`, que conserva su semántica legacy. Usage o
+  tarifas ausentes = costo desconocido; no asumir que un HTTP fallido fue gratis.
+
+### Privacidad y disponibilidad
+
+No se persisten textos de entrada, argumentos/resultados de tools, documentos,
+audio, credenciales, tokens de confirmación ni pensamiento privado en los spans.
+Solo atributos admitidos, acotados y hashes. No hay endpoint nuevo para navegar
+trazas desde una tienda. Soporte autorizado usa acceso de sistema; la tabla nueva
+registra scope y los servicios scoped conservan aislamiento. El buffer de escritura
+es acotado y best-effort; pérdida de trazas dispara alarma, no falla la operación
+comercial, pero **impide promover** una optimización basada en esa muestra.
+
+Retención propuesta: spans 14 días, agregados 90 días. No se crea ningún job de
+purga ni se elimina historia en la migración. Su ejecución posterior requiere
+una tarea acotada autorizada. Los datos históricos de logs no se transforman.
+
+### Corpus, comparación y promoción
+
+El corpus versionado y los oráculos están en `apps/backend/test/agentic/` y el
+runner en `apps/backend/scripts/agentic-eval.ts` (`eval:agentic` del workspace).
+Todos los casos son sintéticos: el brief autoriza no utilizar solicitudes reales.
+Congelar 40 desarrollo/10 holdout y fixtures antes de optimizar; replays usan solo
+receipts sanitizados, sin ejecutar tools. Los adaptadores ausentes se informan
+`not_run` (en particular voz/UI/live), nunca éxito inventado por el fixture.
+El informe de esta fase está en `docs/agentic-baseline-A.md`.
+
+Comparar las mismas versiones y restauración de fixtures, modelo, app, prompts,
+config y caché fría/caliente; tres repeticiones secuenciales/caso, sin superar el
+presupuesto QA explícito. Reportar completion_verified/eligible, outcome_correct,
+falsos éxitos, duplicados/violaciones, latencia activa/wall/humano/UI, intentos,
+tokens/cache y costos conocidos/desconocidos. El denominador incluye fallos y
+`not_run`; negativos no inflan completion. No usar holdout para ajustar prompts.
+
+Gates pendientes de QA real: 100% de 50 casos correlacionables, ≥99% trazas canary
+completas, error de costo agregado <1% con usage y overhead p95 <5% contra flag OFF.
+Los tests unitarios y replays no prueban esos umbrales. No habilitar por defecto ni
+proclamar mejoras de autonomía sin comparaciones y postcondiciones independientes.
+
+### Cobertura técnica de esta entrega y límites operativos
+
+La instrumentación exhaustiva de intentos HTTP cubre el loop buffered de texto y
+el `runStream()` existente para SDK OpenAI/Anthropic compatibles. No introduce el
+streaming del agente de H. Otros modos multimodales conservan logging redactado y
+usage observado, pero **no certifican cobertura exhaustiva de intentos de sus
+transportes HTTP**. Un provider personalizado sin transporte observable se marca
+`provider_dispatch` / `internal_attempts=unknown`.
+
+Los SDK pueden conservar ceros legacy en la respuesta cuando no reportan usage;
+la observación numérica interna preserva `null` sin modificar esa respuesta ni las
+cuotas. Para OpenAI, el prompt fresh observado descuenta cache read informado;
+Anthropic ya reporta input fresh. La semántica del mapper de replay se declara
+explícitamente: un contador sin semántica conocida no se convierte en fresh.
+
+Los índices nuevos sobre logs existentes requieren revisar volumen/locks y ventana
+de despliegue en QA. No se ejecutó SQL ni se validó idempotencia contra DB en esta
+sesión. `prisma generate` solo regeneró el cliente compartido por el symlink; no
+modificó ninguna base. Con flag OFF, el insert de logs selecciona únicamente `id`,
+evitando `RETURNING` de columnas nuevas antes de migrar.

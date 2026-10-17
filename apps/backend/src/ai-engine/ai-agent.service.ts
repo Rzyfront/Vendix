@@ -1,6 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
+import {
+  AgentTraceService,
+  AgentOutcome,
+} from './observability/agent-trace.service';
 import {
   DEGENERATE_OUTPUT_MESSAGE,
   detectDegenerateRepetition,
@@ -182,6 +186,10 @@ export interface AgentRunParams {
   block_sink?: AgentBlockSink;
   /** Conversation the sink stores blocks under. */
   conversation_id?: number;
+  /** Observability only; never grants authority or changes metering IDs. */
+  objective_id?: string;
+  turn_id?: string;
+  trace_surface?: 'text' | 'stt' | 'realtime' | 'worker' | 'mcp';
 }
 
 /**
@@ -327,6 +335,7 @@ export class AIAgentService {
     // y no importa este módulo, así que inyectar el access service no cierra
     // ningún ciclo DI.
     private readonly subscriptionAccess: SubscriptionAccessService,
+    @Optional() private readonly trace?: AgentTraceService,
   ) {}
 
   /**
@@ -422,7 +431,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `VEX_TOKENS_CONSUMED failed for store=${storeId}: ${(err as Error).message}`,
+        `VEX_TOKENS_CONSUMED failed for store=${storeId}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
       );
     }
   }
@@ -492,7 +501,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `AI_TOOLS_GATE lookup failed for store=${storeId}: ${(err as Error).message}`,
+        `AI_TOOLS_GATE lookup failed for store=${storeId}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
       );
       return null;
     }
@@ -541,7 +550,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `AI_TOOL_CONSUMED failed for store=${storeId} tool=${toolName}: ${(err as Error).message}`,
+        `AI_TOOL_CONSUMED failed for store=${storeId} tool=${toolName}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
       );
     }
   }
@@ -872,7 +881,7 @@ export class AIAgentService {
         });
       } catch (err) {
         this.logger.warn(
-          `Compaction sink failed for tool "${toolName}": ${(err as Error).message}`,
+          `Compaction sink failed for tool "${toolName}": ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
         );
       }
     }
@@ -992,6 +1001,90 @@ export class AIAgentService {
   async *runAgentStream(
     params: AgentRunParams,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    // Never adopt RequestContextService's legacy static tenant fallback for
+    // telemetry. A worker must restore its authenticated ALS snapshot itself.
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    const root =
+      context?.store_id && context.organization_id && context.user_id
+        ? this.trace?.startTrace({
+            kind: 'tenant',
+            organization_id: context.organization_id,
+            store_id: context.store_id,
+            user_id: context.user_id,
+            request_id: context.request_id,
+            surface: params.trace_surface ?? 'text',
+            agent: params.agent_key ?? 'vexi',
+            objective_id: params.objective_id,
+            conversation_id: params.conversation_id,
+            turn_id: params.turn_id,
+          })
+        : undefined;
+    if (!root || !this.trace) return yield* this.runAgentLoop(params);
+
+    let outcome: AgentOutcome = 'partial';
+    let returned = false;
+    const trace = this.trace;
+    const loop = this.runAgentLoop(params, (observed) => {
+      outcome = observed;
+    });
+    const observedLoop = async function* (): AsyncGenerator<
+      AIStreamChunk,
+      AgentResult
+    > {
+      try {
+        const result = yield* loop;
+        returned = true;
+        if (result.aborted) outcome = 'cancelled';
+        else if (result.pending_confirmation || result.pending_plan) {
+          outcome = 'awaiting_approval';
+          const wait = trace.startSpan('approval_wait');
+          trace.endSpan(wait, { outcome: 'awaiting_approval' });
+        } else if (!result.success) outcome = 'failed';
+        // A successful model response is NOT a business verifier. A does not
+        // alter the legacy response; D0/D2 will provide verified receipts.
+        return result;
+      } catch (error) {
+        outcome = 'failed';
+        if (error instanceof VendixHttpException) {
+          const body = error.getResponse() as Record<string, unknown>;
+          const code = String(body.error_code ?? '');
+          if (code.startsWith('SUBSCRIPTION_')) outcome = 'blocked_plan';
+          else if (error.getStatus() === 403) outcome = 'blocked_permission';
+        }
+        throw error;
+      } finally {
+        if (
+          !returned &&
+          outcome !== 'failed' &&
+          outcome !== 'blocked_plan' &&
+          outcome !== 'blocked_permission'
+        ) {
+          outcome = 'cancelled';
+        }
+        // return() executes the inner finally too (including existing quota
+        // accounting); abandoning SSE cannot strand an open tool/turn span.
+        try {
+          await loop.return(undefined as never);
+        } finally {
+          trace.finishTrace(root, outcome, {
+            status:
+              outcome === 'failed'
+                ? 'error'
+                : outcome === 'cancelled'
+                  ? 'cancelled'
+                  : 'ok',
+          });
+        }
+      }
+    };
+    return yield* trace.runGenerator(root, observedLoop);
+  }
+
+  private async *runAgentLoop(
+    params: AgentRunParams,
+    observeOutcome: (outcome: AgentOutcome) => void = () => undefined,
+  ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    const activeTrace = this.trace?.currentSpan() ? this.trace : undefined;
     const startTime = Date.now();
     const isVex = params.agent_key === 'vex';
     const plannedMax = isVex
@@ -1058,6 +1151,7 @@ export class AIAgentService {
     const hasAgentScope =
       (params.agent_allowed_tools?.length ?? 0) > 0 ||
       (params.agent_denied_tools?.length ?? 0) > 0;
+    const contextSpan = activeTrace?.startSpan('context');
     const permissionTools =
       hasAgentScope &&
       typeof this.toolRegistry.getAgentDefinitions === 'function'
@@ -1115,6 +1209,17 @@ export class AIAgentService {
         }
       }
     }
+
+    if (contextSpan)
+      activeTrace?.endSpan(contextSpan, {
+        attributes: {
+          tool_count: filteredTools.length,
+          catalog_hash: activeTrace?.hash(JSON.stringify(filteredTools)),
+          catalog_version: '1',
+          definition_tokens: null,
+          context_tokens: null,
+        },
+      });
 
     // An already-active plan (a continuation turn) gets the wide budget from the
     // first iteration instead of waiting for a propose_plan that will not come.
@@ -1269,7 +1374,25 @@ export class AIAgentService {
           this.logger.warn(
             `Empty completion at iteration ${iteration}; retrying once`,
           );
-          response = await callProvider();
+          const retrySpan = activeTrace?.startSpan('provider_retry', {
+            round: iteration,
+            call_reason: 'empty_retry',
+          });
+          try {
+            response = activeTrace
+              ? await activeTrace.run(retrySpan, callProvider)
+              : await callProvider();
+          } catch (error) {
+            activeTrace?.endSpan(retrySpan, {
+              status: 'error',
+              error_code: 'AI_EMPTY_RETRY_FAILED',
+            });
+            throw error;
+          } finally {
+            activeTrace?.endSpan(retrySpan, {
+              status: response.success ? 'ok' : 'error',
+            });
+          }
         }
 
         if (!response.success) {
@@ -1416,480 +1539,131 @@ export class AIAgentService {
             toolCall.function.name,
           );
           let toolArgs: Record<string, any>;
-
-          try {
-            toolArgs = JSON.parse(toolCall.function.arguments);
-          } catch {
-            toolArgs = {};
-          }
-
-          // Plan tools go to the hook: the task list is internal scaffolding,
-          // so no frame, no trace entry and no quota for them. Handled before
-          // any `tool_call` frame is emitted.
-          if (params.plan && isAgentPlanTool(toolName)) {
-            let planContent: string;
-            try {
-              const outcome = await params.plan.execute(toolName, toolArgs);
-              planContent = outcome.result;
-
-              if (toolName === PROPOSE_PLAN_TOOL) {
-                maxIterations = Math.max(maxIterations, plannedBudget);
-                timeoutMs = widenTimeout(timeoutMs);
-              }
-
-              if (outcome.endTurn) {
-                messages.push({
-                  role: 'tool',
-                  content: planContent,
-                  tool_call_id: toolCall.id,
-                });
-                this.eventEmitter.emit('ai.agent.completed', {
-                  iterations: iteration,
-                  tools_used: toolsUsed.length,
-                  total_tokens: totalTokens,
-                  store_id: context?.store_id,
-                });
-                const text = outcome.endTurn.text;
-                // A question asked after recording writes must not drop them:
-                // the frame goes out first, then the question it may answer.
-                let pendingPlan: AgentResult['pending_plan'];
-                if (isVex && vexProposals.length > 0) {
-                  pendingPlan = await this.buildVexPlanProposal(
-                    vexProposals,
-                    params,
-                  );
-                  yield {
-                    type: 'plan_approval',
-                    plan_approval: {
-                      plan_id: pendingPlan.plan_id,
-                      steps: pendingPlan.steps,
-                    },
-                  };
-                }
-                yield { type: 'text', content: text };
-                yield {
-                  type: 'done',
-                  usage: { promptTokens: 0, completionTokens: 0, totalTokens },
-                };
-                return {
-                  content: text,
-                  iterations: iteration,
-                  tools_used: toolsUsed,
-                  total_tokens: totalTokens,
-                  success: true,
-                  ...(pendingPlan ? { pending_plan: pendingPlan } : {}),
-                };
-              }
-            } catch (planError: any) {
-              planContent = JSON.stringify({
-                error: `Plan tool error: ${planError?.message ?? 'unknown'}`,
-              });
-            }
-            messages.push({
-              role: 'tool',
-              content: planContent,
-              tool_call_id: toolCall.id,
-            });
-            continue;
-          }
-
-          // Execution backstop for the offered catalog. The model may only run
-          // tools from the set it was offered this turn (permissions ∩ plan ∩
-          // agent scope − denies). A call outside that set — a hallucinated
-          // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
-          // turn — is rejected HERE, before the clientSide branch and before
-          // `executeTool`: nothing reaches the browser, nothing executes,
-          // nothing consumes quota. The rejection goes back as a tool result
-          // so the model can correct itself on the next iteration.
-          //
-          // R3-A: this runs BEFORE the `ai.agent.tool_executed` event and the
-          // `tool_call` frame. The browser dispatches UI commands off that
-          // frame, so emitting it first let a not-offered `ui_*` reach the
-          // screen even though execution was rejected afterwards. A rejected
-          // call now produces only the error `tool_result`, never a `tool_call`.
-          if (!offeredNames.has(toolName)) {
-            const notAllowed =
-              `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
-              `está en el catálogo ofrecido en este turno. Usa solo las ` +
-              `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
-            messages.push({
-              role: 'tool',
-              content: JSON.stringify({
-                error: notAllowed,
-                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
-              }),
-              tool_call_id: toolCall.id,
-            });
-            yield {
-              type: 'tool_result',
-              tool: {
-                id: toolCall.id,
-                name: toolName,
-                summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-                failed: true,
-              },
-            };
-            continue;
-          }
-
-          this.logger.log(
-            `Agent iteration ${iteration}: executing tool "${toolName}"`,
-          );
-
-          this.eventEmitter.emit('ai.agent.tool_executed', {
-            iteration,
-            tool_name: toolName,
-            store_id: context?.store_id,
+          const toolSpan = activeTrace?.startSpan('tool', {
+            round: iteration,
+            tool_name_hash: activeTrace?.hash(toolName),
+            tool_call_id: toolCall.id,
           });
-
-          // T5: el deprecado se ejecuta igual (el sunset aún no vence) pero el
-          // frame lo dice en voz alta, para que la traza visible y el modelo
-          // migren a `replacedBy` antes de que el nombre desaparezca.
-          const deprecation = this.toolRegistry.getDeprecation(toolName);
-          const deprecatedWarning = deprecation
-            ? `La herramienta "${toolName}" está deprecada desde v${deprecation.since}` +
-              (deprecation.sunset
-                ? ` y se retira en ${deprecation.sunset}`
-                : '') +
-              (deprecation.replacedBy
-                ? `. Usa "${deprecation.replacedBy}" en su lugar.`
-                : '.')
-            : undefined;
-
-          yield {
-            type: 'tool_call',
-            tool: {
-              id: toolCall.id,
-              name: toolName,
-              arguments: toolArgs,
-              ...(deprecatedWarning
-                ? { deprecated_warning: deprecatedWarning }
-                : {}),
-            },
-          };
-
-          // A UI command is dispatched by the browser off the `tool_call`
-          // frame just emitted; there is no router or cart in this process to
-          // run it against. Calling `executeTool()` would be correct-by-
-          // contract and useless here — it rejects client-side tools on
-          // purpose, and the model would read that rejection as a failure and
-          // apologize for something the user is watching happen. That
-          // rejection still guards the surfaces that bypass this loop (voice
-          // bridge, MCP), where a client that cannot dispatch must fail loudly.
-          if (this.toolRegistry.isClientSide(toolName)) {
-            // With a browser on the line, the turn now WAITS for what actually
-            // happened on screen instead of assuming. This is the fix for the
-            // loop's worst honesty defect: the old code pushed
-            // `dispatched_to_client` and moved on, so the model's next thought
-            // was formed with no idea whether the command found the module, hit
-            // a variant picker, or failed outright — and it routinely narrated
-            // success it had never observed. Now `ui_add_to_cart` on a product
-            // with variants comes back `needs_user_input` and the same turn asks
-            // which variant, because the answer arrived before the model spoke.
-            const waitStart = Date.now();
-            const uiResult = params.stream_id
-              ? await this.uiChannel.awaitResult(params.stream_id, toolCall.id)
-              : null;
-            waitedMs += Date.now() - waitStart;
-
-            const resultPayload =
-              uiResult ??
-              JSON.stringify({
-                dispatched: true,
-                command: toolName,
-                result_unknown: true,
-                // Reached in two situations that share one honest answer: no
-                // browser is listening (voice, MCP), or the browser never
-                // answered within the window because the user closed the panel
-                // or navigated away. Either way the outcome is unobserved, and
-                // saying so is the only truthful option left.
-                note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos y NO llegó respuesta, así que no sabes si funcionó. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"), y ofrécele verificarlo. Si tu objetivo necesita más pasos, pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo cuyo resultado no viste.`,
-              });
-
-            toolsUsed.push({
-              name: toolName,
-              args: toolArgs,
-              result: resultPayload,
-            });
-            messages.push({
-              role: 'tool',
-              content: resultPayload,
-              tool_call_id: toolCall.id,
-            });
-
-            // Emitted for the real result too, so the panel's trace shows what
-            // the screen answered and not just what was asked of it.
-            yield {
-              type: 'tool_result',
-              tool: {
-                id: toolCall.id,
-                name: toolName,
-                summary: resultPayload.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-              },
-            };
-            continue;
-          }
-
+          let toolOutcome: AgentOutcome = 'cancelled';
+          let toolErrorCode: string | undefined;
           try {
-            // Las `vex_*` de bloques viven bajo una conversación que el modelo
-            // no conoce: el turno inyecta su id como default para que la
-            // herramienta no tenga que inventarlo (y no falle validación).
-            if (
-              toolName.startsWith('vex_') &&
-              params.conversation_id != null &&
-              !Number.isInteger(toolArgs.conversation_id)
-            ) {
-              toolArgs = {
-                ...toolArgs,
-                conversation_id: params.conversation_id,
-              };
-            }
-            const raw = await this.toolRegistry.executeTool(toolName, toolArgs);
-            // Oversized results travel compacted from here on: the trace, the
-            // persisted transcript and the model all see `{summary, block_id,
-            // rows}`, never the full payload twice.
-            const result = await this.compactToolResult(toolName, raw, params);
-
-            toolsUsed.push({
-              name: toolName,
-              args: toolArgs,
-              result,
-            });
-
-            // F3 — el `tool_result` exitoso suma 1 al contador mensual del
-            // periodo, post-ejecución. Va después de `executeTool` a propósito:
-            // propuestas, errores y despachos clientSide no consumen.
-            await this.consumeToolCallQuota(
-              context?.store_id,
-              toolCall.id,
-              toolName,
-              params.agent_key,
-            );
-
-            // A plan is a promise about the rest of the turn, so the turn is
-            // given room to keep it. Raised here rather than at the top because
-            // the model decides mid-turn whether the request is compound: a
-            // budget set before the first provider call would have to guess, and
-            // guessing high makes every simple question slower.
-            if (toolName === PROPOSE_PLAN_TOOL) {
-              maxIterations = Math.max(maxIterations, plannedBudget);
-              timeoutMs = widenTimeout(timeoutMs);
+            try {
+              toolArgs = JSON.parse(toolCall.function.arguments);
+            } catch {
+              toolArgs = {};
             }
 
-            messages.push({
-              role: 'tool',
-              content: result,
-              tool_call_id: toolCall.id,
-            });
+            // Plan tools go to the hook: the task list is internal scaffolding,
+            // so no frame, no trace entry and no quota for them. Handled before
+            // any `tool_call` frame is emitted.
+            if (params.plan && isAgentPlanTool(toolName)) {
+              let planContent: string;
+              try {
+                const executePlan = () =>
+                  params.plan!.execute(toolName, toolArgs);
+                const outcome = activeTrace
+                  ? await activeTrace.run(toolSpan, executePlan)
+                  : await executePlan();
+                toolOutcome = 'partial';
+                planContent = outcome.result;
 
-            yield {
-              type: 'tool_result',
-              tool: {
-                id: toolCall.id,
-                name: toolName,
-                summary: result.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-              },
-            };
-
-            const uiBlock = this.uiBlockOf(toolName, raw);
-            if (uiBlock) {
-              yield { type: 'ui_block', ui_block: uiBlock };
-            }
-          } catch (error: any) {
-            // A confirmation demand is not a failure — it is the proposal
-            // step of the write protocol. The registry answers `AI_AGENT_005`
-            // carrying the diff and a single-use token; the model needs both
-            // so it can describe the change in the user's own terms, and the
-            // caller needs the token so approving it can actually apply.
-            const payload =
-              error instanceof VendixHttpException
-                ? (error.getResponse() as Record<string, any>)
-                : null;
-
-            if (payload?.error_code === 'AI_AGENT_005') {
-              const details = payload.details as
-                | Record<string, any>
-                | undefined;
-
-              // The token is what separates the two outcomes that share this
-              // error code. `enforceConfirmation` throws it both when a change
-              // is queued for approval AND when the preview already proved the
-              // change impossible — and the second case deliberately mints no
-              // token. Reporting both as `requires_confirmation: true` told the
-              // model a rejected write was waiting on the user, so it narrated
-              // approval cards that did not exist. Without a token there is no
-              // proposal: it is a refusal the model can still fix and retry.
-              if (!details?.confirmation_token) {
-                messages.push({
-                  role: 'tool',
-                  content: JSON.stringify({
-                    requires_confirmation: false,
-                    applied: false,
-                    error: payload.message,
-                    preview: details?.preview,
-                    next_step:
-                      'Este cambio NO quedó propuesto y no hay nada que el usuario pueda aprobar. Corrige lo que falló y vuelve a intentarlo, o dile a la persona qué dato hace falta.',
-                  }),
-                  tool_call_id: toolCall.id,
-                });
-                yield {
-                  type: 'tool_result',
-                  tool: {
-                    id: toolCall.id,
-                    name: toolName,
-                    summary: 'No se pudo preparar el cambio.',
-                  },
-                };
-                continue;
-              }
-
-              // Same-stream plan execution: the turn carries an approved plan
-              // token, so a covered step runs NOW instead of ending the turn
-              // on a card. `redeem` verifies the ordered canonical hashes
-              // server-side; anything but `ok` (altered args, irreversible
-              // step, replay, expired token) falls through to the step's own
-              // proposal below. The inner single-use token keeps the choke
-              // point honest: permissions + roles are re-validated and the
-              // handler re-checks its preconditions on the way through.
-              // Token-gated (not hook-gated): a proposing turn carries the
-              // hook for its classify/save side and must accumulate below.
-              if (params.plan_approval?.token) {
-                let approved: Awaited<
-                  ReturnType<AgentPlanApprovalHook['redeem']>
-                > = 'missing';
-                try {
-                  approved = await params.plan_approval.redeem(
-                    toolName,
-                    toolArgs,
-                  );
-                } catch (redeemError: any) {
-                  this.logger.warn(
-                    `Plan redeem failed for tool "${toolName}": ${redeemError?.message ?? 'unknown'}`,
-                  );
+                if (toolName === PROPOSE_PLAN_TOOL) {
+                  maxIterations = Math.max(maxIterations, plannedBudget);
+                  timeoutMs = widenTimeout(timeoutMs);
                 }
-                if (approved === 'ok') {
-                  const singleUse = await params.plan_approval.issueSingleUse(
-                    toolName,
-                    toolArgs,
-                  );
-                  const appliedRaw = await this.toolRegistry.executeTool(
-                    toolName,
-                    toolArgs,
-                    { confirmationToken: singleUse },
-                  );
-                  const applied = await this.compactToolResult(
-                    toolName,
-                    appliedRaw,
-                    params,
-                  );
-                  toolsUsed.push({
-                    name: toolName,
-                    args: toolArgs,
-                    result: applied,
-                  });
-                  await this.consumeToolCallQuota(
-                    context?.store_id,
-                    toolCall.id,
-                    toolName,
-                    params.agent_key,
-                  );
-                  messages.push({
-                    role: 'tool',
-                    content: applied,
-                    tool_call_id: toolCall.id,
-                  });
-                  yield {
-                    type: 'tool_result',
-                    tool: {
-                      id: toolCall.id,
-                      name: toolName,
-                      summary: applied.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-                    },
-                  };
-                  const appliedBlock = this.uiBlockOf(toolName, appliedRaw);
-                  if (appliedBlock) {
-                    yield { type: 'ui_block', ui_block: appliedBlock };
+
+                if (outcome.endTurn) {
+                  if (toolName === 'ask_user') {
+                    toolOutcome = 'awaiting_input';
+                    observeOutcome('awaiting_input');
                   }
-                  continue;
-                }
-              }
-
-              // Vex proposing turn (no token): the proposal is RECORDED and the
-              // turn keeps going, so one turn yields ONE plan frame with every
-              // write step instead of one card per write. Approval (one click)
-              // and per-step execution happen after, through the plan token.
-              // Executing turns (token present, redeem answered non-ok) fall
-              // through to the single card below — re-planning them would orphan
-              // the approval they run under.
-              if (isVex && !params.plan_approval?.token) {
-                // Una escritura por turno: la PRIMERA se propone (plan de 1
-                // paso) y el turno se pausa tras el for. Las demás escrituras de
-                // la misma iteración NO se registran ni se ejecutan: el modelo
-                // las re-propone en la continuación, después de la aprobación.
-                if (vexProposals.length >= 1) {
                   messages.push({
                     role: 'tool',
-                    content: JSON.stringify({
-                      deferred: true,
-                      message:
-                        'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.',
-                    }),
+                    content: planContent,
                     tool_call_id: toolCall.id,
                   });
+                  this.eventEmitter.emit('ai.agent.completed', {
+                    iterations: iteration,
+                    tools_used: toolsUsed.length,
+                    total_tokens: totalTokens,
+                    store_id: context?.store_id,
+                  });
+                  const text = outcome.endTurn.text;
+                  // A question asked after recording writes must not drop them:
+                  // the frame goes out first, then the question it may answer.
+                  let pendingPlan: AgentResult['pending_plan'];
+                  if (isVex && vexProposals.length > 0) {
+                    pendingPlan = await this.buildVexPlanProposal(
+                      vexProposals,
+                      params,
+                    );
+                    yield {
+                      type: 'plan_approval',
+                      plan_approval: {
+                        plan_id: pendingPlan.plan_id,
+                        steps: pendingPlan.steps,
+                      },
+                    };
+                  }
+                  yield { type: 'text', content: text };
                   yield {
-                    type: 'tool_result',
-                    tool: {
-                      id: toolCall.id,
-                      name: toolName,
-                      summary: 'Pendiente de la aprobación anterior.',
+                    type: 'done',
+                    usage: {
+                      promptTokens: 0,
+                      completionTokens: 0,
+                      totalTokens,
                     },
                   };
-                  continue;
+                  return {
+                    content: text,
+                    iterations: iteration,
+                    tools_used: toolsUsed,
+                    total_tokens: totalTokens,
+                    success: true,
+                    ...(pendingPlan ? { pending_plan: pendingPlan } : {}),
+                  };
                 }
-                const order = vexProposals.length + 1;
-                vexProposals.push({
-                  order,
-                  step_id: `s${order}`,
-                  tool: toolName,
-                  args: toolArgs,
-                  preview: details.preview,
+              } catch (planError: any) {
+                toolOutcome = 'failed';
+                planContent = JSON.stringify({
+                  error: `Plan tool error: ${planError?.message ?? 'unknown'}`,
                 });
-                messages.push({
-                  role: 'tool',
-                  content: JSON.stringify({
-                    requires_confirmation: true,
-                    proposal_recorded: true,
-                    step_order: order,
-                    preview: details?.preview,
-                    next_step:
-                      'Esta escritura quedó propuesta y espera la aprobación de la persona. NO la repitas ni pidas aprobación en palabras; el turno se pausa aquí y continuarás con lo que falte cuando la apruebe.',
-                  }),
-                  tool_call_id: toolCall.id,
-                });
-                yield {
-                  type: 'tool_result',
-                  tool: {
-                    id: toolCall.id,
-                    name: toolName,
-                    summary: `Paso ${order} registrado en el plan.`,
-                  },
-                };
-                continue;
               }
+              messages.push({
+                role: 'tool',
+                content: planContent,
+                tool_call_id: toolCall.id,
+              });
+              continue;
+            }
 
-              pendingConfirmation = {
-                tool: toolName,
-                arguments: toolArgs,
-                confirmation_token: details.confirmation_token,
-                preview: details.preview,
-              };
-
+            // Execution backstop for the offered catalog. The model may only run
+            // tools from the set it was offered this turn (permissions ∩ plan ∩
+            // agent scope − denies). A call outside that set — a hallucinated
+            // name or a tool denied for this agent, e.g. `ui_navigate` in a Vex
+            // turn — is rejected HERE, before the clientSide branch and before
+            // `executeTool`: nothing reaches the browser, nothing executes,
+            // nothing consumes quota. The rejection goes back as a tool result
+            // so the model can correct itself on the next iteration.
+            //
+            // R3-A: this runs BEFORE the `ai.agent.tool_executed` event and the
+            // `tool_call` frame. The browser dispatches UI commands off that
+            // frame, so emitting it first let a not-offered `ui_*` reach the
+            // screen even though execution was rejected afterwards. A rejected
+            // call now produces only the error `tool_result`, never a `tool_call`.
+            if (!offeredNames.has(toolName)) {
+              toolOutcome = 'blocked_permission';
+              toolErrorCode = 'AI_AGENT_TOOL_NOT_ALLOWED';
+              observeOutcome('blocked_permission');
+              const notAllowed =
+                `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
+                `está en el catálogo ofrecido en este turno. Usa solo las ` +
+                `herramientas ofrecidas; si ninguna sirve, dilo y pide lo que falte.`;
               messages.push({
                 role: 'tool',
                 content: JSON.stringify({
-                  requires_confirmation: true,
-                  message: payload.message,
-                  preview: details?.preview,
+                  error: notAllowed,
+                  error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
                 }),
                 tool_call_id: toolCall.id,
               });
@@ -1898,44 +1672,482 @@ export class AIAgentService {
                 tool: {
                   id: toolCall.id,
                   name: toolName,
-                  summary: 'Esperando confirmación del usuario.',
-                },
-              };
-              yield {
-                type: 'plan_approval',
-                plan_approval: {
-                  tool: toolName,
-                  arguments: toolArgs,
-                  confirmation_token: details.confirmation_token,
-                  preview: details?.preview,
-                  ...(params.plan_approval?.plan_id
-                    ? { plan_id: params.plan_approval.plan_id }
-                    : {}),
+                  summary: notAllowed.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  failed: true,
                 },
               };
               continue;
             }
 
-            const errorMsg =
-              error instanceof VendixHttpException
-                ? (payload?.message ?? error.message)
-                : `Tool error: ${error.message}`;
+            this.logger.log(
+              `Agent iteration ${iteration}: executing tool "${toolName}"`,
+            );
 
-            messages.push({
-              role: 'tool',
-              content: JSON.stringify({ error: errorMsg }),
-              tool_call_id: toolCall.id,
+            this.eventEmitter.emit('ai.agent.tool_executed', {
+              iteration,
+              tool_name: toolName,
+              store_id: context?.store_id,
             });
 
+            // T5: el deprecado se ejecuta igual (el sunset aún no vence) pero el
+            // frame lo dice en voz alta, para que la traza visible y el modelo
+            // migren a `replacedBy` antes de que el nombre desaparezca.
+            const deprecation = this.toolRegistry.getDeprecation(toolName);
+            const deprecatedWarning = deprecation
+              ? `La herramienta "${toolName}" está deprecada desde v${deprecation.since}` +
+                (deprecation.sunset
+                  ? ` y se retira en ${deprecation.sunset}`
+                  : '') +
+                (deprecation.replacedBy
+                  ? `. Usa "${deprecation.replacedBy}" en su lugar.`
+                  : '.')
+              : undefined;
+
             yield {
-              type: 'tool_result',
+              type: 'tool_call',
               tool: {
                 id: toolCall.id,
                 name: toolName,
-                summary: errorMsg.slice(0, TOOL_RESULT_SUMMARY_CHARS),
-                failed: true,
+                arguments: toolArgs,
+                ...(deprecatedWarning
+                  ? { deprecated_warning: deprecatedWarning }
+                  : {}),
               },
             };
+
+            // A UI command is dispatched by the browser off the `tool_call`
+            // frame just emitted; there is no router or cart in this process to
+            // run it against. Calling `executeTool()` would be correct-by-
+            // contract and useless here — it rejects client-side tools on
+            // purpose, and the model would read that rejection as a failure and
+            // apologize for something the user is watching happen. That
+            // rejection still guards the surfaces that bypass this loop (voice
+            // bridge, MCP), where a client that cannot dispatch must fail loudly.
+            if (this.toolRegistry.isClientSide(toolName)) {
+              // With a browser on the line, the turn now WAITS for what actually
+              // happened on screen instead of assuming. This is the fix for the
+              // loop's worst honesty defect: the old code pushed
+              // `dispatched_to_client` and moved on, so the model's next thought
+              // was formed with no idea whether the command found the module, hit
+              // a variant picker, or failed outright — and it routinely narrated
+              // success it had never observed. Now `ui_add_to_cart` on a product
+              // with variants comes back `needs_user_input` and the same turn asks
+              // which variant, because the answer arrived before the model spoke.
+              const waitStart = Date.now();
+              const uiWait = activeTrace?.startSpan(
+                'ui_wait',
+                undefined,
+                toolSpan,
+              );
+              let uiResult: string | null = null;
+              try {
+                uiResult = params.stream_id
+                  ? await this.uiChannel.awaitResult(
+                      params.stream_id,
+                      toolCall.id,
+                    )
+                  : null;
+              } catch (error) {
+                activeTrace?.endSpan(uiWait, {
+                  status: 'error',
+                  error_code: 'AI_UI_WAIT_FAILED',
+                });
+                throw error;
+              } finally {
+                activeTrace?.endSpan(uiWait, {
+                  attributes: {
+                    ui_result_known: uiResult !== null,
+                  },
+                });
+              }
+              waitedMs += Date.now() - waitStart;
+
+              toolOutcome = 'partial';
+              const resultPayload =
+                uiResult ??
+                JSON.stringify({
+                  dispatched: true,
+                  command: toolName,
+                  result_unknown: true,
+                  // Reached in two situations that share one honest answer: no
+                  // browser is listening (voice, MCP), or the browser never
+                  // answered within the window because the user closed the panel
+                  // or navigated away. Either way the outcome is unobserved, and
+                  // saying so is the only truthful option left.
+                  note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos y NO llegó respuesta, así que no sabes si funcionó. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"), y ofrécele verificarlo. Si tu objetivo necesita más pasos, pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo cuyo resultado no viste.`,
+                });
+
+              toolsUsed.push({
+                name: toolName,
+                args: toolArgs,
+                result: resultPayload,
+              });
+              messages.push({
+                role: 'tool',
+                content: resultPayload,
+                tool_call_id: toolCall.id,
+              });
+
+              // Emitted for the real result too, so the panel's trace shows what
+              // the screen answered and not just what was asked of it.
+              yield {
+                type: 'tool_result',
+                tool: {
+                  id: toolCall.id,
+                  name: toolName,
+                  summary: resultPayload.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                },
+              };
+              continue;
+            }
+
+            try {
+              // Las `vex_*` de bloques viven bajo una conversación que el modelo
+              // no conoce: el turno inyecta su id como default para que la
+              // herramienta no tenga que inventarlo (y no falle validación).
+              if (
+                toolName.startsWith('vex_') &&
+                params.conversation_id != null &&
+                !Number.isInteger(toolArgs.conversation_id)
+              ) {
+                toolArgs = {
+                  ...toolArgs,
+                  conversation_id: params.conversation_id,
+                };
+              }
+              const execute = () =>
+                this.toolRegistry.executeTool(toolName, toolArgs);
+              const raw = activeTrace
+                ? await activeTrace.run(toolSpan, execute)
+                : await execute();
+              toolOutcome = 'partial';
+              // Oversized results travel compacted from here on: the trace, the
+              // persisted transcript and the model all see `{summary, block_id,
+              // rows}`, never the full payload twice.
+              const result = await this.compactToolResult(
+                toolName,
+                raw,
+                params,
+              );
+
+              toolsUsed.push({
+                name: toolName,
+                args: toolArgs,
+                result,
+              });
+
+              // F3 — el `tool_result` exitoso suma 1 al contador mensual del
+              // periodo, post-ejecución. Va después de `executeTool` a propósito:
+              // propuestas, errores y despachos clientSide no consumen.
+              await this.consumeToolCallQuota(
+                context?.store_id,
+                toolCall.id,
+                toolName,
+                params.agent_key,
+              );
+
+              // A plan is a promise about the rest of the turn, so the turn is
+              // given room to keep it. Raised here rather than at the top because
+              // the model decides mid-turn whether the request is compound: a
+              // budget set before the first provider call would have to guess, and
+              // guessing high makes every simple question slower.
+              if (toolName === PROPOSE_PLAN_TOOL) {
+                maxIterations = Math.max(maxIterations, plannedBudget);
+                timeoutMs = widenTimeout(timeoutMs);
+              }
+
+              messages.push({
+                role: 'tool',
+                content: result,
+                tool_call_id: toolCall.id,
+              });
+
+              yield {
+                type: 'tool_result',
+                tool: {
+                  id: toolCall.id,
+                  name: toolName,
+                  summary: result.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                },
+              };
+
+              const uiBlock = this.uiBlockOf(toolName, raw);
+              if (uiBlock) {
+                yield { type: 'ui_block', ui_block: uiBlock };
+              }
+            } catch (error: any) {
+              // A confirmation demand is not a failure — it is the proposal
+              // step of the write protocol. The registry answers `AI_AGENT_005`
+              // carrying the diff and a single-use token; the model needs both
+              // so it can describe the change in the user's own terms, and the
+              // caller needs the token so approving it can actually apply.
+              const payload =
+                error instanceof VendixHttpException
+                  ? (error.getResponse() as Record<string, any>)
+                  : null;
+
+              if (typeof payload?.error_code === 'string') {
+                toolErrorCode = payload.error_code;
+              } else {
+                toolErrorCode = 'AI_TOOL_EXCEPTION';
+              }
+              if (payload?.error_code === 'AI_AGENT_005') {
+                const details = payload.details as
+                  | Record<string, any>
+                  | undefined;
+
+                // The token is what separates the two outcomes that share this
+                // error code. `enforceConfirmation` throws it both when a change
+                // is queued for approval AND when the preview already proved the
+                // change impossible — and the second case deliberately mints no
+                // token. Reporting both as `requires_confirmation: true` told the
+                // model a rejected write was waiting on the user, so it narrated
+                // approval cards that did not exist. Without a token there is no
+                // proposal: it is a refusal the model can still fix and retry.
+                if (!details?.confirmation_token) {
+                  toolOutcome = 'failed';
+                  messages.push({
+                    role: 'tool',
+                    content: JSON.stringify({
+                      requires_confirmation: false,
+                      applied: false,
+                      error: payload.message,
+                      preview: details?.preview,
+                      next_step:
+                        'Este cambio NO quedó propuesto y no hay nada que el usuario pueda aprobar. Corrige lo que falló y vuelve a intentarlo, o dile a la persona qué dato hace falta.',
+                    }),
+                    tool_call_id: toolCall.id,
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: 'No se pudo preparar el cambio.',
+                    },
+                  };
+                  continue;
+                }
+
+                // Same-stream plan execution: the turn carries an approved plan
+                // token, so a covered step runs NOW instead of ending the turn
+                // on a card. `redeem` verifies the ordered canonical hashes
+                // server-side; anything but `ok` (altered args, irreversible
+                // step, replay, expired token) falls through to the step's own
+                // proposal below. The inner single-use token keeps the choke
+                // point honest: permissions + roles are re-validated and the
+                // handler re-checks its preconditions on the way through.
+                // Token-gated (not hook-gated): a proposing turn carries the
+                // hook for its classify/save side and must accumulate below.
+                if (params.plan_approval?.token) {
+                  let approved: Awaited<
+                    ReturnType<AgentPlanApprovalHook['redeem']>
+                  > = 'missing';
+                  try {
+                    approved = await params.plan_approval.redeem(
+                      toolName,
+                      toolArgs,
+                    );
+                  } catch (redeemError: any) {
+                    this.logger.warn(
+                      `Plan redeem failed for tool "${toolName}": ${activeTrace ? 'PLAN_REDEEM_ERROR' : (redeemError?.message ?? 'unknown')}`,
+                    );
+                  }
+                  if (approved === 'ok') {
+                    const singleUse = await params.plan_approval.issueSingleUse(
+                      toolName,
+                      toolArgs,
+                    );
+                    const apply = () =>
+                      this.toolRegistry.executeTool(toolName, toolArgs, {
+                        confirmationToken: singleUse,
+                      });
+                    const appliedRaw = activeTrace
+                      ? await activeTrace.run(toolSpan, apply)
+                      : await apply();
+                    toolOutcome = 'partial';
+                    const applied = await this.compactToolResult(
+                      toolName,
+                      appliedRaw,
+                      params,
+                    );
+                    toolsUsed.push({
+                      name: toolName,
+                      args: toolArgs,
+                      result: applied,
+                    });
+                    await this.consumeToolCallQuota(
+                      context?.store_id,
+                      toolCall.id,
+                      toolName,
+                      params.agent_key,
+                    );
+                    messages.push({
+                      role: 'tool',
+                      content: applied,
+                      tool_call_id: toolCall.id,
+                    });
+                    yield {
+                      type: 'tool_result',
+                      tool: {
+                        id: toolCall.id,
+                        name: toolName,
+                        summary: applied.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                      },
+                    };
+                    const appliedBlock = this.uiBlockOf(toolName, appliedRaw);
+                    if (appliedBlock) {
+                      yield { type: 'ui_block', ui_block: appliedBlock };
+                    }
+                    continue;
+                  }
+                }
+
+                // Vex proposing turn (no token): the proposal is RECORDED and the
+                // turn keeps going, so one turn yields ONE plan frame with every
+                // write step instead of one card per write. Approval (one click)
+                // and per-step execution happen after, through the plan token.
+                // Executing turns (token present, redeem answered non-ok) fall
+                // through to the single card below — re-planning them would orphan
+                // the approval they run under.
+                if (isVex && !params.plan_approval?.token) {
+                  // Una escritura por turno: la PRIMERA se propone (plan de 1
+                  // paso) y el turno se pausa tras el for. Las demás escrituras de
+                  // la misma iteración NO se registran ni se ejecutan: el modelo
+                  // las re-propone en la continuación, después de la aprobación.
+                  if (vexProposals.length >= 1) {
+                    messages.push({
+                      role: 'tool',
+                      content: JSON.stringify({
+                        deferred: true,
+                        message:
+                          'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.',
+                      }),
+                      tool_call_id: toolCall.id,
+                    });
+                    yield {
+                      type: 'tool_result',
+                      tool: {
+                        id: toolCall.id,
+                        name: toolName,
+                        summary: 'Pendiente de la aprobación anterior.',
+                      },
+                    };
+                    continue;
+                  }
+                  toolOutcome = 'awaiting_approval';
+                  const order = vexProposals.length + 1;
+                  vexProposals.push({
+                    order,
+                    step_id: `s${order}`,
+                    tool: toolName,
+                    args: toolArgs,
+                    preview: details.preview,
+                  });
+                  messages.push({
+                    role: 'tool',
+                    content: JSON.stringify({
+                      requires_confirmation: true,
+                      proposal_recorded: true,
+                      step_order: order,
+                      preview: details?.preview,
+                      next_step:
+                        'Esta escritura quedó propuesta y espera la aprobación de la persona. NO la repitas ni pidas aprobación en palabras; el turno se pausa aquí y continuarás con lo que falte cuando la apruebe.',
+                    }),
+                    tool_call_id: toolCall.id,
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: `Paso ${order} registrado en el plan.`,
+                    },
+                  };
+                  continue;
+                }
+
+                toolOutcome = 'awaiting_approval';
+                pendingConfirmation = {
+                  tool: toolName,
+                  arguments: toolArgs,
+                  confirmation_token: details.confirmation_token,
+                  preview: details.preview,
+                };
+
+                messages.push({
+                  role: 'tool',
+                  content: JSON.stringify({
+                    requires_confirmation: true,
+                    message: payload.message,
+                    preview: details?.preview,
+                  }),
+                  tool_call_id: toolCall.id,
+                });
+                yield {
+                  type: 'tool_result',
+                  tool: {
+                    id: toolCall.id,
+                    name: toolName,
+                    summary: 'Esperando confirmación del usuario.',
+                  },
+                };
+                yield {
+                  type: 'plan_approval',
+                  plan_approval: {
+                    tool: toolName,
+                    arguments: toolArgs,
+                    confirmation_token: details.confirmation_token,
+                    preview: details?.preview,
+                    ...(params.plan_approval?.plan_id
+                      ? { plan_id: params.plan_approval.plan_id }
+                      : {}),
+                  },
+                };
+                continue;
+              }
+
+              toolOutcome = 'failed';
+              const errorMsg =
+                error instanceof VendixHttpException
+                  ? (payload?.message ?? error.message)
+                  : `Tool error: ${error.message}`;
+
+              messages.push({
+                role: 'tool',
+                content: JSON.stringify({ error: errorMsg }),
+                tool_call_id: toolCall.id,
+              });
+
+              yield {
+                type: 'tool_result',
+                tool: {
+                  id: toolCall.id,
+                  name: toolName,
+                  summary: errorMsg.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+                  failed: true,
+                },
+              };
+            }
+          } catch (error) {
+            toolOutcome = 'failed';
+            toolErrorCode ??= 'AI_TOOL_EXCEPTION';
+            throw error;
+          } finally {
+            activeTrace?.endSpan(toolSpan, {
+              outcome: toolOutcome,
+              error_code:
+                toolOutcome === 'failed' || toolOutcome === 'blocked_permission'
+                  ? toolErrorCode
+                  : undefined,
+              status:
+                toolOutcome === 'cancelled'
+                  ? 'cancelled'
+                  : toolOutcome === 'failed' ||
+                      toolOutcome === 'blocked_permission'
+                    ? 'error'
+                    : 'ok',
+            });
           }
         }
 
@@ -2063,22 +2275,42 @@ export class AIAgentService {
         });
 
         try {
-          const lastCall = params.app_key
-            ? await this.aiEngine.run(
-                params.app_key,
-                params.variables,
-                messages,
-                {},
-              )
-            : params.config_id
-              ? await this.aiEngine.chatWith(params.config_id, messages, {})
-              : await this.aiEngine.chat(messages, {});
+          const closingSpan = activeTrace?.startSpan('closing_inference', {
+            round: iteration,
+          });
+          const close = async () =>
+            params.app_key
+              ? await this.aiEngine.run(
+                  params.app_key,
+                  params.variables,
+                  messages,
+                  {},
+                )
+              : params.config_id
+                ? await this.aiEngine.chatWith(params.config_id, messages, {})
+                : await this.aiEngine.chat(messages, {});
 
+          let lastCall: AIResponse | undefined;
+          try {
+            lastCall = activeTrace
+              ? await activeTrace.run(closingSpan, close)
+              : await close();
+          } catch (error) {
+            activeTrace?.endSpan(closingSpan, {
+              status: 'error',
+              error_code: 'AI_CLOSING_FAILED',
+            });
+            throw error;
+          } finally {
+            activeTrace?.endSpan(closingSpan, {
+              status: lastCall?.success ? 'ok' : 'error',
+            });
+          }
           totalTokens += lastCall?.usage?.totalTokens ?? 0;
           closing = (lastCall?.content ?? '').trim();
         } catch (closingError: any) {
           this.logger.warn(
-            `Agent closing turn failed: ${closingError?.message ?? 'unknown'}`,
+            `Agent closing turn failed: ${activeTrace ? 'CLOSING_ERROR' : (closingError?.message ?? 'unknown')}`,
           );
         }
       }
@@ -2102,7 +2334,9 @@ export class AIAgentService {
     } catch (error: any) {
       if (error instanceof VendixHttpException) throw error;
 
-      this.logger.error(`Agent failed: ${error.message}`);
+      this.logger.error(
+        `Agent failed: ${activeTrace ? 'AGENT_ERROR' : error.message}`,
+      );
       yield { type: 'error', error: error.message };
       return {
         content: '',

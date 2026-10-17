@@ -5733,6 +5733,19 @@ model ai_agents {
 model ai_engine_logs {
   id                Int      @id @default(autoincrement())
   request_id        String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Optional phase-A correlations. Historical rows and billing counters stay intact.
+  trace_id                 String? @db.Uuid
+  span_id                  String? @db.Uuid
+  objective_id             String? @db.Uuid
+  conversation_id          String? @db.VarChar(100)
+  turn_id                  String? @db.Uuid
+  provider_call_id         String? @db.Uuid
+  attempt_id               String? @db.Uuid
+  tool_call_id             String? @db.Uuid
+  external_request_id_hash String? @db.VarChar(64)
+  usage_observed           Json?
+  cost_source              String? @db.VarChar(32)
+  telemetry_metadata       Json?
   app_key           String?  @db.VarChar(100)
   config_id         Int?
   organization_id   Int?
@@ -5757,7 +5770,55 @@ model ai_engine_logs {
   @@index([app_key])
   @@index([created_at])
   @@index([config_id])
+  @@index([request_id, created_at])
+  @@index([trace_id, created_at])
 }
+
+// System-owned observability sink. Tenant delegates filter by store/org; no store endpoint.
+// Explicit system scope has no tenant ids and cannot be seen by a tenant-scoped delegate.
+model ai_agent_trace_spans {
+  span_id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  trace_id              String    @db.Uuid
+  parent_span_id        String?   @db.Uuid
+  request_id            String    @db.Uuid
+  objective_id          String?   @db.Uuid
+  conversation_id       String?   @db.VarChar(100)
+  turn_id               String?   @db.Uuid
+  provider_call_id      String?   @db.Uuid
+  attempt_id            String?   @db.Uuid
+  tool_call_id          String?   @db.Uuid
+  scope_kind            String    @db.VarChar(10)
+  system_purpose        String?   @db.VarChar(32)
+  organization_id       Int?
+  store_id              Int?
+  user_id               Int?
+  surface               String?   @db.VarChar(20)
+  agent                 String?   @db.VarChar(20)
+  kind                  String    @db.VarChar(32)
+  status                String    @default("started") @db.VarChar(20)
+  outcome               String?   @db.VarChar(32)
+  error_code            String?   @db.VarChar(100)
+  started_at            DateTime  @default(now()) @db.Timestamptz(6)
+  ended_at              DateTime? @db.Timestamptz(6)
+  duration_ms           Int?
+  // Unknown usage/cost is NULL, including provider failures without a receipt.
+  prompt_tokens         Int?
+  completion_tokens     Int?
+  cache_read_tokens     Int?
+  cache_creation_tokens Int?
+  // Canonical aggregation MUST filter kind='provider_attempt'. Other kinds stay NULL.
+  cost_usd              Decimal?  @db.Decimal(12, 8)
+  attributes            Json      @default("{}")
+  created_at            DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([trace_id, started_at])
+  @@index([store_id, created_at])
+  @@index([organization_id, created_at])
+  @@index([request_id, created_at])
+  @@index([provider_call_id])
+  @@index([kind, created_at])
+}
+
 
 enum ai_conversation_status_enum {
   active

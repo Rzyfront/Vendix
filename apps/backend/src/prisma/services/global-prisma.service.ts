@@ -419,6 +419,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_attachments;
   }
 
+  // System telemetry writer supplies explicit immutable tenant/system scope.
+  get ai_agent_trace_spans() {
+    return this.baseClient.ai_agent_trace_spans;
+  }
+
   get ai_agent_tasks() {
     return this.baseClient.ai_agent_tasks;
   }

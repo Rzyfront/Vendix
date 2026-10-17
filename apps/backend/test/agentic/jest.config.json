@@ -1,0 +1,8 @@
+{
+  "rootDir": "../..",
+  "testRegex": "test/agentic/.*\\.spec\\.ts$",
+  "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "maxWorkers": 1
+}

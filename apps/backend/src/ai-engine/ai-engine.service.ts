@@ -1,5 +1,16 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  AgentTraceService,
+  hashTraceValue,
+} from './observability/agent-trace.service';
+import { ProviderAttemptObserver } from './provider-attempt-observer';
 import { randomUUID } from 'crypto';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
@@ -64,6 +75,8 @@ export class AIEngineService implements OnModuleInit {
   private configSettings: Map<number, Record<string, any>> = new Map();
   private configModelTypes: Map<number, AIModelType> = new Map();
   private defaultConfigId: number | null = null;
+  private readonly configFingerprints = new Map<number, string>();
+  private readonly providerObserver?: ProviderAttemptObserver;
 
   constructor(
     private readonly prisma: GlobalPrismaService,
@@ -73,7 +86,14 @@ export class AIEngineService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly subscriptionAccess: SubscriptionAccessService,
     private readonly gateConfig: SubscriptionGateConfig,
-  ) {}
+    @Optional() private readonly trace?: AgentTraceService,
+  ) {
+    if (trace)
+      this.providerObserver = new ProviderAttemptObserver(
+        trace,
+        aiLoggingService,
+      );
+  }
 
   async onModuleInit() {
     await this.loadConfigurations();
@@ -83,6 +103,7 @@ export class AIEngineService implements OnModuleInit {
     this.providers.clear();
     this.configSettings.clear();
     this.configModelTypes.clear();
+    this.configFingerprints.clear();
     this.defaultConfigId = null;
 
     try {
@@ -138,6 +159,10 @@ export class AIEngineService implements OnModuleInit {
       baseUrl: config.base_url || undefined,
       modelType: config.model_type || undefined,
       settings: config.settings as Record<string, any>,
+      ...(this.providerObserver && {
+        fetch: this.providerObserver.wrapFetch(globalThis.fetch),
+        observeUsage: (usage) => this.providerObserver!.observeUsage(usage),
+      }),
     };
 
     try {
@@ -160,6 +185,16 @@ export class AIEngineService implements OnModuleInit {
       }
 
       this.providers.set(config.id, provider);
+      this.configFingerprints.set(
+        config.id,
+        hashTraceValue({
+          provider: config.provider,
+          sdk_type: config.sdk_type,
+          model_id: config.model_id,
+          base_url: config.base_url,
+          settings: config.settings,
+        }),
+      );
       this.configSettings.set(
         config.id,
         (config.settings as Record<string, any>) || {},
@@ -258,9 +293,15 @@ export class AIEngineService implements OnModuleInit {
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
-    const response = await provider.chat(messages, options);
+    const response = await this.observeProviderCall(undefined, () =>
+      this.observeProviderAttempt(this.defaultConfigId, messages, options, () =>
+        provider.chat(messages, options),
+      ),
+    );
     if (!response.success) {
-      this.logger.error(`AI chat failed: ${response.error}`);
+      this.logger.error(
+        `AI chat failed: ${this.safeProviderError(response.error)}`,
+      );
     }
     const thinking =
       options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
@@ -272,9 +313,18 @@ export class AIEngineService implements OnModuleInit {
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
-    const response = await provider.complete(prompt, options);
+    const response = await this.observeProviderCall(undefined, () =>
+      this.observeProviderAttempt(
+        this.defaultConfigId,
+        [{ role: 'user', content: prompt }],
+        options,
+        () => provider.complete(prompt, options),
+      ),
+    );
     if (!response.success) {
-      this.logger.error(`AI complete failed: ${response.error}`);
+      this.logger.error(
+        `AI complete failed: ${this.safeProviderError(response.error)}`,
+      );
     }
     const thinking =
       options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
@@ -292,7 +342,11 @@ export class AIEngineService implements OnModuleInit {
     }
     const thinking = options?.thinking ?? this.isThinkingEnabled(configId);
     return this.sanitizeResponse(
-      await provider.chat(messages, options),
+      await this.observeProviderCall(undefined, () =>
+        this.observeProviderAttempt(configId, messages, options, () =>
+          provider.chat(messages, options),
+        ),
+      ),
       thinking,
     );
   }
@@ -425,6 +479,17 @@ export class AIEngineService implements OnModuleInit {
     extraMessages?: AIMessage[],
     optionsOverride?: AIRequestOptions,
   ): Promise<AIResponse> {
+    return this.observeProviderCall(appKey, () =>
+      this.runApplication(appKey, variables, extraMessages, optionsOverride),
+    );
+  }
+
+  private async runApplication(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
+  ): Promise<AIResponse> {
     const startTime = Date.now();
     const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
@@ -511,7 +576,13 @@ export class AIEngineService implements OnModuleInit {
       };
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        lastResponse = await provider.chat(messages, options);
+        lastResponse = await this.observeProviderAttempt(
+          resolvedConfigId,
+          messages,
+          options,
+          () => provider.chat(messages, options),
+          attempt + 1,
+        );
 
         if (lastResponse.success) {
           // Sanitize thinking blocks based on config setting
@@ -543,12 +614,16 @@ export class AIEngineService implements OnModuleInit {
           this.logger.warn(
             `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
           );
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          const wait = () =>
+            new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+          if (this.providerObserver)
+            await this.providerObserver.retry(delayMs, wait);
+          else await wait();
         }
       }
 
       this.logger.error(
-        `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${lastResponse.error}`,
+        `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${this.safeProviderError(lastResponse.error)}`,
       );
       logResponse = lastResponse;
       return lastResponse;
@@ -557,7 +632,9 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = this.trace?.isEnabled()
+        ? RequestContextService.asyncLocalStorage.getStore()
+        : RequestContextService.getContext();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -572,6 +649,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(logResponse.usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -600,6 +680,50 @@ export class AIEngineService implements OnModuleInit {
   }
 
   async *runStream(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
+  ): AsyncGenerator<AIStreamChunk> {
+    const factory = () =>
+      this.runApplicationStream(
+        appKey,
+        variables,
+        extraMessages,
+        optionsOverride,
+      );
+    if (!this.providerObserver || !this.trace?.isEnabled()) {
+      yield* factory();
+      return;
+    }
+    const root = this.trace.currentSpan()
+      ? undefined
+      : this.startStandaloneTrace();
+    let completed = false;
+    let failed = false;
+    try {
+      yield* this.providerObserver.callStream(factory, root, (status) => {
+        failed = status === 'error';
+      });
+      completed = true;
+    } catch (error) {
+      this.trace.finishTrace(root, 'failed', {
+        status: 'error',
+        error_code: 'PROVIDER_EXCEPTION',
+      });
+      throw error;
+    } finally {
+      this.trace.finishTrace(
+        root,
+        completed ? (failed ? 'failed' : 'partial') : 'cancelled',
+        {
+          status: completed ? (failed ? 'error' : 'ok') : 'cancelled',
+        },
+      );
+    }
+  }
+
+  private async *runApplicationStream(
     appKey: string,
     variables?: Record<string, string>,
     extraMessages?: AIMessage[],
@@ -696,7 +820,17 @@ export class AIEngineService implements OnModuleInit {
       }
 
       try {
-        for await (const chunk of provider.chatStream(messages, options)) {
+        const stream =
+          this.providerObserver && this.trace?.currentSpan()
+            ? this.providerObserver.attemptStream(
+                resolvedConfigId
+                  ? this.configSettings.get(resolvedConfigId)
+                  : undefined,
+                this.providerAttributes(resolvedConfigId, messages, options),
+                () => provider.chatStream!(messages, options),
+              )
+            : provider.chatStream(messages, options);
+        for await (const chunk of stream) {
           lastChunk = chunk;
           yield chunk;
         }
@@ -719,7 +853,9 @@ export class AIEngineService implements OnModuleInit {
     } finally {
       // Log after stream completes — always runs regardless of early returns
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = this.trace?.isEnabled()
+        ? RequestContextService.asyncLocalStorage.getStore()
+        : RequestContextService.getContext();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -735,6 +871,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -816,7 +955,9 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = this.trace?.isEnabled()
+        ? RequestContextService.asyncLocalStorage.getStore()
+        : RequestContextService.getContext();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -831,6 +972,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(logResponse.usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -979,7 +1123,9 @@ export class AIEngineService implements OnModuleInit {
       yield lastChunk;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = this.trace?.isEnabled()
+        ? RequestContextService.asyncLocalStorage.getStore()
+        : RequestContextService.getContext();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -995,6 +1141,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -1443,6 +1592,117 @@ export class AIEngineService implements OnModuleInit {
     return app;
   }
 
+  private safeProviderError(error: string | undefined): string | undefined {
+    return this.trace?.isEnabled() ? 'PROVIDER_ERROR' : error;
+  }
+
+  private async observeProviderCall(
+    appKey: string | undefined,
+    callback: () => Promise<AIResponse>,
+  ): Promise<AIResponse> {
+    if (!this.providerObserver || !this.trace?.isEnabled()) return callback();
+    if (this.trace.currentSpan()) {
+      return this.providerObserver.call(
+        { call_reason: appKey ? 'application' : 'direct' },
+        callback,
+      );
+    }
+    const root = this.startStandaloneTrace();
+    if (!root) return callback();
+    try {
+      const result = await this.trace.run(root, () =>
+        this.providerObserver!.call(
+          { call_reason: appKey ? 'application' : 'direct' },
+          callback,
+        ),
+      );
+      if (!result.success)
+        this.trace.finishTrace(root, 'failed', { status: 'error' });
+      return result;
+    } catch (error) {
+      this.trace.finishTrace(root, 'failed', {
+        status: 'error',
+        error_code: 'PROVIDER_EXCEPTION',
+      });
+      throw error;
+    } finally {
+      // An inference is not proof of a completed business task.
+      this.trace.finishTrace(root, 'partial');
+    }
+  }
+
+  private observeProviderAttempt(
+    configId: number | null,
+    messages: AIMessage[],
+    options: AIRequestOptions | undefined,
+    callback: () => Promise<AIResponse>,
+    dispatchNumber = 1,
+  ): Promise<AIResponse> {
+    if (!this.providerObserver || !this.trace?.currentSpan()) return callback();
+    return this.providerObserver.attempt(
+      configId ? this.configSettings.get(configId) : undefined,
+      {
+        ...this.providerAttributes(configId, messages, options),
+        dispatch_number: dispatchNumber,
+      },
+      callback,
+    );
+  }
+
+  private providerAttributes(
+    configId: number | null,
+    messages: AIMessage[],
+    options?: AIRequestOptions,
+  ) {
+    const tools = options?.tools ?? [];
+    return {
+      config_hash: configId
+        ? (this.configFingerprints.get(configId) ??
+          hashTraceValue({
+            config_id: configId,
+            settings: this.configSettings.get(configId),
+          }))
+        : null,
+      prompt_hash: hashTraceValue(messages),
+      options_hash: hashTraceValue(options ?? {}),
+      catalog_hash: hashTraceValue(tools),
+      tool_count: tools.length,
+      catalog_version: '1',
+      definition_tokens: null,
+      context_tokens: null,
+    };
+  }
+
+  private startStandaloneTrace() {
+    // Never borrow a tenant from the historical static RequestContext fallback.
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    return context?.organization_id && context.store_id
+      ? this.trace?.startTrace({
+          kind: 'tenant',
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          user_id: context.user_id,
+          request_id: context.request_id,
+          surface: 'api',
+          agent: 'engine',
+        })
+      : undefined;
+  }
+
+  private observedLogFields(usage: AIResponse['usage']) {
+    if (!this.trace?.isEnabled()) return {};
+    const observed = this.providerObserver?.observedUsage(usage);
+    return {
+      cost_source: 'logical_summary' as const,
+      usage_observed: {
+        prompt_tokens: observed?.promptTokens ?? null,
+        completion_tokens: observed?.completionTokens ?? null,
+        cache_read_tokens: observed?.cacheReadTokens ?? null,
+        cache_creation_tokens: observed?.cacheCreationTokens ?? null,
+      },
+    };
+  }
+
   private buildImagePrompt(
     app: any,
     variables?: Record<string, string>,
@@ -1625,7 +1885,9 @@ export class AIEngineService implements OnModuleInit {
     featureCategory?: string | null;
   }): void {
     const latencyMs = Date.now() - params.startTime;
-    const context = RequestContextService.getContext();
+    const context = this.trace?.isEnabled()
+      ? RequestContextService.asyncLocalStorage.getStore()
+      : RequestContextService.getContext();
     const configSettings = params.configId
       ? this.configSettings.get(params.configId)
       : undefined;
@@ -1641,6 +1903,9 @@ export class AIEngineService implements OnModuleInit {
     );
 
     this.aiLoggingService.logRequest({
+      request_id:
+        RequestContextService.asyncLocalStorage.getStore()?.request_id,
+      ...this.observedLogFields(usage),
       app_key: params.appKey,
       config_id: params.configId ?? undefined,
       organization_id: context?.organization_id,
@@ -1807,11 +2072,10 @@ export class AIEngineService implements OnModuleInit {
         }),
       );
       if (this.gateConfig.isEnforce()) {
-        throw new VendixHttpException(
-          ErrorCodes.SUBSCRIPTION_005,
-          undefined,
-          { app_key: appKey, feature_category: featureCategory ?? null },
-        );
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_005, undefined, {
+          app_key: appKey,
+          feature_category: featureCategory ?? null,
+        });
       }
       return;
     }

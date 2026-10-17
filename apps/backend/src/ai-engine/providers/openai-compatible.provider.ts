@@ -36,6 +36,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     };
     this.client = new OpenAI({
       apiKey: config.apiKey,
+      ...(config.fetch && { fetch: config.fetch }),
       ...(clientBaseUrl && { baseURL: clientBaseUrl }),
     });
   }
@@ -65,6 +66,18 @@ export class OpenAICompatibleProvider implements AIProvider {
         }),
       });
 
+      this.config.observeUsage?.(
+        response.usage
+          ? {
+              promptTokens:
+                response.usage.prompt_tokens -
+                (response.usage.prompt_tokens_details?.cached_tokens ?? 0),
+              completionTokens: response.usage.completion_tokens,
+              cacheReadTokens:
+                response.usage.prompt_tokens_details?.cached_tokens,
+            }
+          : undefined,
+      );
       const message = response.choices[0]?.message;
       const finishReason = response.choices[0]?.finish_reason;
 
@@ -475,7 +488,9 @@ export class OpenAICompatibleProvider implements AIProvider {
   ): { headers: Record<string, string>; body: FormData } {
     // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
     // parameter drifts between @types/node majors; a plain view never does.
-    const bytes = new Uint8Array(Buffer.from(options.inputAudio.data, 'base64'));
+    const bytes = new Uint8Array(
+      Buffer.from(options.inputAudio.data, 'base64'),
+    );
 
     const form = new FormData();
     form.append('model', model);
@@ -903,6 +918,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
+      let observedUsage: Partial<NonNullable<AIResponse['usage']>> | undefined;
 
       // Tool calls arrive as deltas keyed by `index`, with `function.arguments`
       // split across chunks — often a few characters at a time. They have to be
@@ -935,11 +951,19 @@ export class OpenAICompatibleProvider implements AIProvider {
 
         // Capture usage from the final chunk
         if (chunk.usage) {
+          observedUsage = {
+            promptTokens:
+              chunk.usage.prompt_tokens -
+              (chunk.usage.prompt_tokens_details?.cached_tokens ?? 0),
+            completionTokens: chunk.usage.completion_tokens,
+            cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens,
+          };
           totalPromptTokens = chunk.usage.prompt_tokens || 0;
           totalCompletionTokens = chunk.usage.completion_tokens || 0;
         }
       }
 
+      this.config.observeUsage?.(observedUsage);
       for (const slot of pending.values()) {
         if (!slot.name) continue;
         yield {

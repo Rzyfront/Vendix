@@ -76,6 +76,7 @@ export class OrganizationPrismaService extends BasePrismaService {
     'stock_levels',
     'print_templates',
     'store_print_format_configs',
+    'ai_agent_trace_spans',
   ];
 
   /**
@@ -261,6 +262,10 @@ export class OrganizationPrismaService extends BasePrismaService {
   }
 
   private scoped_client: any;
+
+  get ai_agent_trace_spans() {
+    return this.scoped_client.ai_agent_trace_spans;
+  }
 
   // Organization-scoped models with automatic filtering
   // Email reception remains scoped to the operational tenant, not a shared NIT.

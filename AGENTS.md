@@ -20,6 +20,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
 | -- | `vendix-address-geocoding` |
+| -- | `vendix-agent-evals-observability` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -332,6 +333,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file | `vendix-bulk-operations` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
+| Instrumenting Vex/Vexi traces or provider attempts | `vendix-agent-evals-observability` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Interpretar un error de compilación de TypeScript, SWC, ngc o tsc | `vendix-known-errors` |
@@ -415,6 +417,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
+| Running or changing agentic evaluation datasets and graders | `vendix-agent-evals-observability` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |

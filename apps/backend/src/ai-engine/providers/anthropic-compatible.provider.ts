@@ -16,6 +16,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
   constructor(private config: AIProviderConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
+      ...(config.fetch && { fetch: config.fetch }),
       ...(config.baseUrl && { baseURL: config.baseUrl }),
     });
   }
@@ -111,8 +112,11 @@ export class AnthropicCompatibleProvider implements AIProvider {
     if (typeof content !== 'string') return false;
     try {
       const result = JSON.parse(content);
-      return result?.success === false || result?.status === 'error' ||
-        (typeof result?.error === 'string' && result.error.length > 0);
+      return (
+        result?.success === false ||
+        result?.status === 'error' ||
+        (typeof result?.error === 'string' && result.error.length > 0)
+      );
     } catch {
       return content.startsWith('Error:');
     }
@@ -122,11 +126,16 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Anthropic.TextBlockParam[] {
-    const prompts = messages.filter((m) => m.role === 'system').map((m) =>
-      typeof m.content === 'string' ? m.content : m.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text ?? '').join('\n'),
-    );
+    const prompts = messages
+      .filter((m) => m.role === 'system')
+      .map((m) =>
+        typeof m.content === 'string'
+          ? m.content
+          : m.content
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text ?? '')
+              .join('\n'),
+      );
     // An explicit prompt overrides the base prompt, not runtime restrictions,
     // active plans or pending confirmations carried by subsequent systems.
     if (options?.systemPrompt) {
@@ -189,6 +198,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
         }
       }
 
+      this.config.observeUsage?.(
+        response.usage
+          ? {
+              promptTokens: response.usage.input_tokens,
+              completionTokens: response.usage.output_tokens,
+              cacheReadTokens:
+                response.usage.cache_read_input_tokens ?? undefined,
+              cacheCreationTokens:
+                response.usage.cache_creation_input_tokens ?? undefined,
+            }
+          : undefined,
+      );
       const finishReason =
         response.stop_reason === 'tool_use'
           ? 'tool_calls'
@@ -288,6 +309,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
       }
 
       const finalMessage = await stream.finalMessage();
+      this.config.observeUsage?.(
+        finalMessage.usage
+          ? {
+              promptTokens: finalMessage.usage.input_tokens,
+              completionTokens: finalMessage.usage.output_tokens,
+              cacheReadTokens:
+                finalMessage.usage.cache_read_input_tokens ?? undefined,
+              cacheCreationTokens:
+                finalMessage.usage.cache_creation_input_tokens ?? undefined,
+            }
+          : undefined,
+      );
 
       // Anthropic assembles tool calls into `tool_use` content blocks on the
       // final message, so unlike the OpenAI path there is nothing to

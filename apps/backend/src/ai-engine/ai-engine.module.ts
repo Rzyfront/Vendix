@@ -5,6 +5,7 @@ import { ApiCatalogService } from './tools/bridge/api-catalog.service';
 import { createApiBridgeTools } from './tools/bridge/api-bridge.tools';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
+import { AgentTraceService } from './observability/agent-trace.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
@@ -56,6 +57,7 @@ import { S3Service } from '../common/services/s3.service';
   providers: [
     AIEngineService,
     AILoggingService,
+    AgentTraceService,
     AIAgentService,
     AIToolRegistry,
     // Provided here rather than in VexiModule even though the class lives in
@@ -86,6 +88,7 @@ import { S3Service } from '../common/services/s3.service';
   exports: [
     AIEngineService,
     AILoggingService,
+    AgentTraceService,
     AIAgentService,
     AIToolRegistry,
     VexiConfirmationService,
