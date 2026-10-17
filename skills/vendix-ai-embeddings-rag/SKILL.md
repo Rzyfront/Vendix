@@ -1,13 +1,13 @@
 ---
 name: vendix-ai-embeddings-rag
 description: >
-  Embeddings and RAG pipeline: pgvector setup, OpenAI embedding generation, raw SQL
-  vector storage/search, product event pipeline, RAG context building, and batch sync.
-  Trigger: When working with embeddings, semantic search, pgvector, RAG, or the embedding pipeline.
+  Govern store business embeddings, pgvector/RAG, five entity pipelines and the
+  separate platform knowledge namespace, application routing and metering.
+  Trigger: Working with embeddings, semantic search, pgvector, RAG or the embedding pipeline.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "3.0"
   scope: [root]
   auto_invoke:
     - "Working with AI embeddings or RAG"
@@ -18,78 +18,93 @@ metadata:
     - "Debugging embedding generation"
 ---
 
-## Source of Truth
+# Embeddings and RAG
 
-- Embeddings: `apps/backend/src/ai-engine/embeddings/embedding.service.ts`
-- RAG: `apps/backend/src/ai-engine/embeddings/rag.service.ts`
-- Events: `apps/backend/src/ai-engine/embeddings/embedding-events.listener.ts`
-- Processor: `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts`
-- Batch sync: `apps/backend/src/jobs/embedding-sync.job.ts`
-- Migration: `apps/backend/prisma/migrations/20260326030000_add_ai_embeddings/migration.sql`
-- Agent tool: `apps/backend/src/ai-engine/tools/domains/search.tools.ts` (`semantic_search`, wired to `searchByText`)
+## Critical boundaries
 
-## pgvector Facts
+- `ai_embeddings.embedding` is vector(1536), unique `[store_id,entity_type,entity_id]`,
+  existing HNSW cosine index preserved. Parameterize raw SQL; it bypasses Prisma scopes.
+- Business entity types are **product, customer, order, supplier, expense**. Positive
+  store AND organization IDs are mandatory. `searchByText` requires matching authenticated
+  ALS, never static fallback/tenant0. B namespace SQL additionally requires
+  `knowledge_scope='store' AND store_id=current AND organization_id=current`.
+- Never `store_id=current OR store_id=0` in semantic_search. Tool/skill/process/recipe
+  global knowledge has a DIFFERENT API, not a widened StoreEmbeddingParams.
+- With both B flags OFF, valid business calls keep the legacy SQL path (plus tenant/type
+  safety predicates), usable before the additive B migration. Enable either B flag only
+  after SQL is applied. Existing global rows still cannot be reached by positive business IDs.
 
-- Migration enables `CREATE EXTENSION IF NOT EXISTS vector`.
-- `ai_embeddings.embedding` is `vector(1536)` / Prisma `Unsupported("vector(1536)")`.
-- HNSW cosine index exists with `vector_cosine_ops`.
-- Unique key is `[store_id, entity_type, entity_id]`.
-- Use raw SQL for vector operations; Prisma ORM does not support pgvector operations directly.
+## Sources
 
-## EmbeddingService
+- `ai-engine/embeddings/embedding.service.ts`, `rag.service.ts`.
+- `embedding-events.listener.ts` (canonical `EMBEDDABLE_ENTITY_TYPES`).
+- `embedding-backfill.service.ts`, `jobs/embedding-sync.job.ts`.
+- `queue/processors/ai-embedding.processor.ts` (EmbeddingModule registration).
+- `tools/domains/search.tools.ts` (`semantic_search`).
+- `embeddings/knowledge-{search,embedding}.service.ts`,
+  `tools/tool-catalog-indexer.service.ts`; migration `20261018100000_ai_tool_knowledge_catalog`.
 
-- Uses OpenAI SDK directly with `OPENAI_API_KEY`.
-- Model is `text-embedding-3-small`.
-- Text is truncated to 8000 chars.
-- Store/upsert uses `$queryRawUnsafe` and `$6::vector` with `ON CONFLICT`.
-- Search uses `1 - (embedding <=> query::vector)` as cosine similarity.
-- Search always filters by `store_id` and optionally by `entity_type`.
-- Defaults: `limit=5`, `min_similarity=0.3`.
+## Store generation and retrieval
 
-## Event Pipeline
+`generateEmbedding` first calls **AIEngine.runEmbedding(appKey,undefined,text)**,
+using `EMBEDDING_APP_KEY` or default `product_embeddings`. This honors configured app/
+provider, logging, rates and merchant subscription gating/usage. Only app/config resolution
+errors fall back to the existing direct OpenAI SDK when explicitly configured; provider
+failures are not silently rerouted. Text input is capped8000 characters.
 
-Current event listener only handles products:
+`isAvailable()` counts an EXPLICIT EMBEDDING_APP_KEY or SDK key; the silent default
+app name alone is not proof the app exists. Semantic search is registered only when
+available; empty/unavailable results provide a concrete find_product/find_customer fallback.
 
-- `product.created` -> enqueue `ai-embedding` job `embed`.
-- `product.updated` -> enqueue `embed`.
-- `product.deleted` -> enqueue `delete-embedding`.
+Store worker `embed` restores tenant ALS from trusted event payload IDs before generation.
+`delete-embedding` never accepts sentinel0/global entity types. Raw queries explicitly
+filter both tenant dimensions; background writes must validate positive payload IDs.
 
-Product content is built from name, description, and category.
+## Entity/event pipeline
 
-To add an entity type, add event listeners, content-building logic, and ensure store/org/entity ids are present in the job payload.
+The listener covers five entity families, not only products. It re-reads relevant records
+when events omit organization IDs, and scopes by the entity's store. Orders include line
+items/customer context; expenses are indexed at approval/payment, not draft creation.
+Read the current listener event names rather than inventing a new emitter contract.
+Products also enqueue deletion. Backfill/job paths cover incremental indexing; existing
+job joins/filters should be audited before changes (a store-only legacy join is not proof
+of organization isolation). Do not block an HTTP request for mass indexing.
 
 ## RAGService
 
-- Reads `store_id` from `RequestContextService`.
-- If no store context exists, falls back to plain `aiEngine.chat()`.
-- Uses `EmbeddingService.searchByText()` for context.
-- Calls direct `aiEngine.chat(messages)`, not `run()`.
-- `app_key` exists in params but is currently unused.
+`queryWithContext` reads ALS store, searches business context when present, and calls
+**AIEngine.run(params.app_key ?? 'chat_assistant',undefined,messages)**. The app key IS
+used. Even without store, the answer uses run(appKey); do not regress to unmetered chat().
+Retrieved business text is data, not new instructions/authority. A similarity score is not
+a permission grant, freshness guarantee or independent business verifier.
 
-## Batch Sync
+## Platform knowledge (B)
 
-`embedding-sync.job.ts` runs daily at `0 2 * * *`, finds up to 500 active products without embeddings, and enqueues embeddings.
+See `vendix-ai-tool-routing` for the full lifecycle:
 
-Current caveat: batch sync uses global raw SQL and joins embeddings by `store_id`, `entity_type`, and `entity_id`; it does not include `organization_id` in the join. Verify before changing multi-tenant embedding logic.
+- Documents: `ai_knowledge_documents`, global/tenant-null, release-owned keys/hash/version,
+  no tenant write API. Embeddings: `knowledge_scope='global' AND store_id=0 AND organization_id=0`,
+  only tool/skill/process/recipe, internal `storeGlobalKnowledgeEmbedding`, validated document ID.
+- CHECKs/preflight guard namespace without historical DML, FK removal or weakening NOT NULL/
+  unique/HNSW. Unexpected FKs or invalid old IDs abort; never invent a store0 or relax StorePrisma.
+- Index AFTER domain registration; job `index-knowledge`, ≤50 code-reconstructed docs,
+  bounded retries, active-ready/CAS, logical retirement. Selector uses ONLY authorized IDs.
+- Separate app `agent_knowledge_embeddings`, explicit matching config/model1536, category `rag_embeddings` (NOT NULL schema), no merchant
+  store in isolated platform ALS and no SDK/product-quota fallback. Budget defaults0; platform isolated ALS
+  and normal Engine logging/rate limits. Input-byte spend reservations count failures
+  conservatively, distinct from post-success merchant quota.
+- Fingerprint model/config/dimension; wrong vector or drift rejects before INSERT.
+  Global retrieval uses exact/lexical/vector RRF and degrades locally, never into business SQL.
 
-## `semantic_search` Tool (wired)
+## Verification
 
-The agent tool `semantic_search` (`apps/backend/src/ai-engine/tools/domains/search.tools.ts`, domain `search`, `readOnly`) is live on embeddings — not a placeholder. It takes `{ query, entity_types?, limit? }` (default limit 5, entity filter from `EMBEDDABLE_ENTITY_TYPES`) and calls `EmbeddingService.searchByText(context.store_id, query, entityTypes, limit)`.
+Only exact created/modified specs, sequential/bounded heap. B isolatedModules config tests
+contracts, not whole-app typecheck or real provider/DB. QA double-apply migration, live
+recall/latency/cost and deployment bootstrap remain explicit gates pending owner approval.
+No claims of measured improvements from empty replays or synthetic mocks.
 
-Two honest fallbacks, both returned as RESULTS (never thrown, so the loop stays alive and retries by name with `find_product`/`find_customer`):
+## Related skills
 
-- No store in context → `{ error }` (semantic search is store-scoped).
-- Embeddings unavailable in the environment, or zero matches → `{ query, results: [], note }` with the concrete retry instruction (zero matches also warns that indexing is incremental).
-
-## Anti-Patterns
-
-- Do not omit explicit `store_id` filter in raw vector searches.
-- Do not block HTTP requests with synchronous embedding generation; enqueue jobs.
-- Do not assume RAG uses AI Applications/app keys; current RAG calls direct chat.
-
-## Related Skills
-
-- `vendix-ai-queue`
-- `vendix-ai-chat`
-- `vendix-ai-agent-tools`
-- `vendix-prisma-migrations`
+- `vendix-ai-tool-routing` — release-owned discovery and platform namespace.
+- `vendix-ai-queue`, `vendix-ai-platform-core` — jobs, app routes and logging.
+- `vendix-agent-evals-observability`, `vendix-prisma-migrations`, `vendix-multi-tenant-context`.

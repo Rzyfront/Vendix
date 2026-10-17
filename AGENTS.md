@@ -30,6 +30,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-ai-queue` |
 | -- | `vendix-ai-streaming` |
 | -- | `vendix-ai-style` |
+| -- | `vendix-ai-tool-routing` |
 | -- | `vendix-analytics-metrics` |
 | -- | `vendix-angular-forms` |
 | -- | `vendix-app-architecture` |
@@ -154,6 +155,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
+| Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |
 | Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
@@ -334,6 +336,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa) | `vendix-restaurant-table-qr` |
 | Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file | `vendix-bulk-operations` |
+| Indexing platform tool knowledge or changing its global namespace | `vendix-ai-tool-routing` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
 | Instrumenting Vex/Vexi traces or provider attempts | `vendix-agent-evals-observability` |

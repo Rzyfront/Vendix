@@ -5970,6 +5970,7 @@ model ai_agent_tasks {
 }
 
 model ai_embeddings {
+  knowledge_scope String                       @default("store") @db.Text
   id              Int                          @id @default(autoincrement())
   store_id        Int
   organization_id Int
@@ -5981,8 +5982,36 @@ model ai_embeddings {
   created_at      DateTime                     @default(now()) @db.Timestamp(6)
   updated_at      DateTime                     @default(now()) @db.Timestamp(6)
 
+  @@index([knowledge_scope, store_id, organization_id, entity_type], map: "ai_embeddings_knowledge_scope_idx")
   @@unique([store_id, entity_type, entity_id])
   @@index([store_id, entity_type])
+}
+
+// Platform documents are release-owned, not tenant-editable agent memory.
+model ai_knowledge_documents {
+  id                    Int       @id @default(autoincrement())
+  document_key          String    @unique @db.VarChar(250)
+  entity_type           String    @db.VarChar(50)
+  knowledge_scope       String    @default("global") @db.Text
+  store_id              Int?
+  organization_id       Int?
+  canonical_name        String    @db.VarChar(150)
+  version               String    @db.VarChar(50)
+  content               String    @db.Text
+  lexical_text          String    @db.Text
+  search_vector         Unsupported("tsvector")? @default(dbgenerated())
+  metadata              Json
+  content_hash          String    @db.VarChar(64)
+  indexed_hash          String?   @db.VarChar(64)
+  embedding_fingerprint String?   @db.VarChar(64)
+  release_hash          String    @db.VarChar(64)
+  status                String    @default("pending") @db.VarChar(20)
+  active                Boolean   @default(false)
+  error_code            String?   @db.VarChar(80)
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([knowledge_scope, entity_type, active, status], map: "ai_knowledge_documents_scope_status_idx")
 }
 
 // ── Help Center ──────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import { toolRoutingEnabled } from '../tool-catalog';
+import { bridgeDataPage, discoveryPage, discoveryError, pageParameters } from '../discovery-pagination';
 import { Logger } from '@nestjs/common';
 import { RegisteredTool, toolExecutionContractEnabled } from '../interfaces/tool.interface';
 import {
@@ -415,6 +417,11 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
+          ...(toolRoutingEnabled() ? { ...pageParameters,
+            path: { type: 'string', description: 'Ruta patrón exacta para consultar solo su contrato.' },
+            field_cursor: { type: 'string', description: 'Cursor de campos de una ruta; úsalo junto con path.' },
+            field_limit: { type: 'integer', description: 'Campos de contrato por página, de 1 a 20.' },
+          } : {}),
           domain: {
             type: 'string',
             description:
@@ -431,6 +438,31 @@ export function createApiBridgeTools({
       handler: async (args) => {
         const scopes = callerScopes();
         const methods = args.writable_only ? WRITE_METHODS : undefined;
+
+        if (toolRoutingEnabled()) {
+          try {
+            if (!args.domain) {
+              const page = discoveryPage(catalog.domainsFor(scopes, methods), args, { methods });
+              return JSON.stringify({ domains: page.data, total: page.total, has_more: page.has_more, cursor: page.cursor,
+                next_step: 'Consulta domain para rutas; continúa con cursor para más dominios.' });
+            }
+            const page = catalog.pageFor(scopes, { domain: String(args.domain), methods, path: args.path ? String(args.path) : undefined }, args);
+            const endpoints = page.data.map((entry) => {
+              const fields = [...(entry.bodySchema ?? []).map((f) => ({ ...f, location: 'body' })),
+                ...(entry.querySchema ?? []).map((f) => ({ ...f, location: 'query' }))];
+              const fieldPage = discoveryPage(fields, { cursor: args.field_cursor, limit: args.field_limit }, [entry.path, entry.method], 8);
+              return { path: entry.path, method: entry.method, requires: entry.requiredPermissions,
+                hace: entry.summary, campos: fieldPage.data.filter((f) => f.location === 'body'),
+                filtros: fieldPage.data.filter((f) => f.location === 'query'),
+                fields_total: fieldPage.total, fields_has_more: fieldPage.has_more, field_cursor: fieldPage.cursor,
+                ...(entry.multipart ? { necesita_documento: true, campo_archivo: entry.fileField } : {}),
+                ...(documentFieldOf(entry.bodySchema) ? { acepta_documento: true } : {}),
+                contract_complete: !fieldPage.has_more && !fields.some((f) => ['object', 'array', 'unknown'].includes(f.type)),
+                next_step: 'Si faltan campos continúa field_cursor con path exacto. Un object/array no describe su DTO anidado: obtiene contrato/preflight del dominio antes de proponer.' };
+            });
+            return JSON.stringify({ domain: args.domain, endpoints, total: page.total, has_more: page.has_more, cursor: page.cursor });
+          } catch (error) { return discoveryError(error); }
+        }
 
         if (!args.domain) {
           return JSON.stringify({
@@ -487,6 +519,10 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
+          ...(toolRoutingEnabled() ? {
+            result_cursor: { type: 'string', description: 'Cursor local de filas devuelto por esta misma consulta; no sustituye el cursor upstream.' },
+            result_limit: { type: 'integer', description: 'Filas por página local, 1 a 20 (por defecto 3).' },
+          } : {}),
           path: {
             type: 'string',
             description:
@@ -564,6 +600,11 @@ export function createApiBridgeTools({
               // lista de aceptados convierte ese bucle en una corrección.
               ...acceptedQueryNote(entry, args.query, response.status),
             });
+          }
+
+          if (toolRoutingEnabled()) {
+            try { return bridgeDataPage(body, args, entry.path); }
+            catch (error) { return discoveryError(error); }
           }
 
           if (body.length > MAX_RESPONSE_CHARS) {

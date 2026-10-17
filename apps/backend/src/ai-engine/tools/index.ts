@@ -59,3 +59,6 @@ export type {
 export { uiTools } from './domains/ui.tools';
 
 export * from './interfaces/tool.interface';
+
+export { createDiscoveryTools } from './domains/discovery.tools';
+export { ToolRouterService } from './tool-router.service';

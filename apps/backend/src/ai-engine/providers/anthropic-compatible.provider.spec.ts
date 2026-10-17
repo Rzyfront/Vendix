@@ -358,3 +358,25 @@ describe('Anthropic D0 discriminated tool results', () => {
     expect((provider as any).isToolError(JSON.stringify({ schema_version: '1', status }))).toBe(expected);
   });
 });
+
+describe('Anthropic B generic routing compatibility (native search intentionally OFF)', () => {
+  it('accepts expanded catalogs across rounds without native/deferred fields or history loss', async () => {
+    const provider = new AnthropicCompatibleProvider({ provider: 'Custom', sdkType: 'anthropic_compatible', apiKey: 'test-key', modelId: 'test-model', baseUrl: 'https://example.invalid' });
+    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }], model: 'test-model', stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } });
+    (provider as any).client.messages.create = create;
+    const definitions = Array.from({ length: 25 }, (_, i) => ({ type: 'function' as const,
+      function: { name: `operation_${i}`, description: 'sintética', parameters: { type: 'object' } } }));
+    const messages: import('../interfaces/ai-provider.interface').AIMessage[] = [
+      { role: 'user', content: 'Busca' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'discovery1', type: 'function', function: { name: 'search_tools', arguments: '{"query":"operation_24"}' } }] },
+      { role: 'tool', tool_call_id: 'discovery1', content: '{"enabled_next_inference":true}' },
+    ];
+    const before = JSON.stringify(messages);
+    await provider.chat(messages, { tools: definitions.slice(0, 13) }); await provider.chat(messages, { tools: definitions });
+    expect(create.mock.calls[1][0].tools).toHaveLength(25);
+    expect(create.mock.calls[0][0].messages).toEqual(create.mock.calls[1][0].messages);
+    expect(JSON.stringify(messages)).toBe(before);
+    const payload = JSON.stringify(create.mock.calls[1][0]);
+    for (const native of ['defer_loading', 'tool_search_tool', 'server_tool_use', 'tool_reference', 'pause_turn']) expect(payload).not.toContain(native);
+  });
+});

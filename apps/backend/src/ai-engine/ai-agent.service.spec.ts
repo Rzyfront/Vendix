@@ -1616,3 +1616,90 @@ describe('AIAgentService.runAgentStream', () => {
   });
 
 });
+
+describe('AIAgentService B routed catalog boundary', () => {
+  const saved = [process.env.AI_TOOL_ROUTING_ENABLED, process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED];
+  let registry: AIToolRegistry; let router: import('./tools/tool-router.service').ToolRouterService;
+  let chat: jest.Mock; let handler: jest.Mock; let ui: jest.Mock; let service: AIAgentService; let access: any;
+  beforeEach(async () => {
+    process.env.AI_TOOL_ROUTING_ENABLED = 'true'; process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, organization_id: 2, user_id: 3, roles: [], permissions: [], is_owner: true, is_super_admin: false });
+    registry = new AIToolRegistry({ issue: jest.fn().mockResolvedValue('single-use-token') } as any);
+    const { createDiscoveryTools } = await import('./tools/domains/discovery.tools');
+    const { ToolRouterService } = await import('./tools/tool-router.service');
+    const { localToolRanking } = await import('./tools/tool-catalog');
+    registry.registerMany(createDiscoveryTools()); handler = jest.fn().mockResolvedValue('{"id":1}');
+    for (let i = 0; i < 50; i++) registry.register({ name: `operation_${String(i).padStart(2, '0')}`, domain: 'inventory', description: `operation_${i}`,
+      parameters: { type: 'object', properties: {} }, handler, readOnly: true });
+    router = new ToolRouterService(registry, { rank: async (q, docs, _s, d) => ({ names: localToolRanking(q, docs, d), degraded: [] }) } as any);
+    chat = jest.fn().mockResolvedValue(ok({ content: 'Revisión' })); ui = jest.fn();
+    access = { canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }), getAIFeatureConfig: jest.fn().mockResolvedValue({ tools_allowed: ['*'] }), consumeAIQuota: jest.fn(),
+      checkExtraQuota: jest.fn().mockResolvedValue({ exceeded: false }), consumeExtraQuota: jest.fn() };
+    service = new AIAgentService({ chat } as any, {} as any, registry, { emit: jest.fn() } as any, { awaitResult: ui } as any, access, undefined, router);
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    ['AI_TOOL_ROUTING_ENABLED', 'AI_TOOL_EXECUTION_CONTRACT_ENABLED'].forEach((key, i) => { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; });
+  });
+  async function drain(params: Record<string, unknown> = {}) {
+    const gen = service.runAgentStream({ goal: 'operation_00', max_iterations: 6, ...params }); const chunks: AIStreamChunk[] = [];
+    let next = await gen.next(); while (!next.done) { chunks.push(next.value); next = await gen.next(); }
+    return { result: next.value, chunks };
+  }
+  const names = (index: number) => chat.mock.calls[index][1].tools.map((d: any) => d.function.name);
+  it('enables discovered definitions ONLY on the next inference and same args then execute despite D0 recovery', async () => {
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('s1', 'search_tools', { query: 'operation_49' }), call('bad-batch', 'operation_49', { id: 1 })] }))
+      .mockResolvedValueOnce(ok({ tool_calls: [call('next', 'operation_49', { id: 1 })] })).mockResolvedValueOnce(ok({ content: 'Leído' }));
+    const { result, chunks } = await drain();
+    expect(names(0)).toHaveLength(13); expect(names(0)).not.toContain('operation_49'); expect(names(1)).toHaveLength(25); expect(names(1)).toContain('operation_49');
+    expect(handler).toHaveBeenCalledTimes(1); expect(chunks.some((c) => c.type === 'tool_call' && c.tool?.id === 'bad-batch')).toBe(false);
+    expect(result.tools_used.map((t) => t.name)).toContain('operation_49'); expect(result.execution?.outcome).not.toBe('blocked');
+    expect(access.consumeAIQuota).toHaveBeenCalledTimes(1); // Discovery itself is not a business-success unit.
+  });
+  it('never emits an unoffered UI tool_call nor dispatches to the browser', async () => {
+    registry.register({ name: 'zz_ui', domain: 'ui', description: 'UI', parameters: {}, clientSide: true });
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('forged', 'zz_ui')] })).mockResolvedValueOnce(ok({ content: 'No se ejecutó' }));
+    const { chunks } = await drain({ stream_id: 's' }); expect(ui).not.toHaveBeenCalled(); expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+    expect(access.consumeAIQuota).not.toHaveBeenCalled();
+  });
+  it('excludes denied descriptions and revalidates the plan/caller/agent intersection', async () => {
+    registry.register({ name: 'secret_tool', domain: 'admin', description: 'RESTRICTED BODY', parameters: {}, requiredPermissions: ['admin'], handler });
+    await drain({ agent_allowed_tools: ['inventory', 'discovery'], agent_denied_tools: ['operation_00'], tools: ['inventory', 'discovery'] });
+    expect(JSON.stringify(chat.mock.calls[0][1])).not.toContain('RESTRICTED BODY'); expect(names(0)).not.toContain('operation_00');
+    expect(names(0)).toContain('search_tools'); expect(handler).not.toHaveBeenCalled();
+  });
+  it('revokes a tool between provider response and execution, including cached working sets', async () => {
+    chat.mockImplementationOnce(async () => {
+      access.getAIFeatureConfig.mockResolvedValue({ tools_allowed: ['search_tools'] });
+      return ok({ tool_calls: [call('revoked', 'operation_00')] });
+    });
+    const { result, chunks } = await drain(); expect(handler).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('blocked');
+    expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+  });
+  it('fails authorization closed on plan lookup outage with routing ON', async () => {
+    access.getAIFeatureConfig.mockRejectedValue(new Error('redis down')); await drain(); expect(chat.mock.calls[0][1].tools).toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('does not smuggle a denied planning tool through the plan-hook shortcut', async () => {
+    registry.register({ name: 'ask_user', domain: 'planning', description: 'Pregunta', parameters: {}, readOnly: true });
+    const plan = { execute: jest.fn(), snapshot: jest.fn().mockResolvedValue(null) };
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('p1', 'ask_user')] }));
+    await drain({ plan, agent_denied_tools: ['ask_user'] }); expect(plan.execute).not.toHaveBeenCalled();
+  });
+  it('keeps write approvals and never runs the write handler after discovery', async () => {
+    registry.register({ name: 'write_rare', domain: 'orders', description: 'Cambio raro', parameters: {}, requiresConfirmation: true,
+      preview: async () => ({ status: 'ok', target: 'Sintético', changes: [] }), handler });
+    chat.mockResolvedValueOnce(ok({ tool_calls: [call('s', 'search_tools', { query: 'write_rare' })] }))
+      .mockResolvedValueOnce(ok({ tool_calls: [call('w', 'write_rare')] }));
+    const { result } = await drain(); expect(handler).not.toHaveBeenCalled(); expect(result.pending_confirmation?.confirmation_token).toBe('single-use-token');
+    expect(result.execution?.outcome).toBe('pending_confirmation'); expect(access.consumeAIQuota).not.toHaveBeenCalled();
+  });
+  it('does not start inference if routing exhausted the clock', async () => {
+    let now = 1; jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const original = router.select.bind(router); jest.spyOn(router, 'select').mockImplementation(async (...args) => { const result = await original(...args); now = 5000; return result; });
+    const { result } = await drain({ timeout_ms: 1000 }); expect(chat).not.toHaveBeenCalled(); expect(result.execution?.outcome).toBe('partial');
+  });
+  it('retains full-catalog legacy behavior with flag OFF and does not invoke routing', async () => {
+    delete process.env.AI_TOOL_ROUTING_ENABLED; const select = jest.spyOn(router, 'select'); await drain(); expect(names(0)).toHaveLength(51); expect(select).not.toHaveBeenCalled();
+  });
+});

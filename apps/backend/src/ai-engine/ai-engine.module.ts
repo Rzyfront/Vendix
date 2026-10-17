@@ -9,6 +9,10 @@ import { AgentTraceService } from './observability/agent-trace.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
+import { ToolRouterService } from './tools/tool-router.service';
+import { ToolCatalogIndexerService } from './tools/tool-catalog-indexer.service';
+import { createDiscoveryTools } from './tools/domains/discovery.tools';
+import { toolRoutingEnabled } from './tools/tool-catalog';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { createSearchTools } from './tools/domains/search.tools';
 import { uiTools } from './tools/domains/ui.tools';
@@ -60,6 +64,8 @@ import { S3Service } from '../common/services/s3.service';
     AgentTraceService,
     AIAgentService,
     AIToolRegistry,
+    ToolRouterService,
+    ToolCatalogIndexerService,
     // Provided here rather than in VexiModule even though the class lives in
     // that folder: AIToolRegistry depends on it, and importing VexiModule into
     // this @Global() module would close a cycle (VexiModule imports this one).
@@ -91,6 +97,8 @@ import { S3Service } from '../common/services/s3.service';
     AgentTraceService,
     AIAgentService,
     AIToolRegistry,
+    ToolRouterService,
+    ToolCatalogIndexerService,
     VexiConfirmationService,
     VexiAttachmentsService,
     VexiUiChannelService,
@@ -113,6 +121,7 @@ export class AIEngineModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    if (toolRoutingEnabled()) this.toolRegistry.registerMany(createDiscoveryTools());
     this.toolRegistry.registerMany(
       createSearchTools({ embeddingService: this.embeddingService }),
     );

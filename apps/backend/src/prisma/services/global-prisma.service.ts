@@ -408,6 +408,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_messages;
   }
 
+  get ai_knowledge_documents() {
+    return this.baseClient.ai_knowledge_documents;
+  }
+
   get ai_embeddings() {
     return this.baseClient.ai_embeddings;
   }

@@ -124,6 +124,14 @@ export class AIToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  /** Aliases resolve to canonical definitions; they never create extra documents. */
+  getAliases(): Record<string, string> {
+    return Object.fromEntries([...this.aliases.keys()].sort().flatMap((alias) => {
+      const canonical = this.resolveToolName(alias);
+      return canonical ? [[alias, canonical]] : [];
+    }));
+  }
+
   getToolsForDomain(domain: string): AIToolDefinition[] {
     return Array.from(this.tools.values())
       .filter((t) => t.domain === domain)

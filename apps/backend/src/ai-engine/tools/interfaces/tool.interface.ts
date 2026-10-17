@@ -63,6 +63,14 @@ export interface RegisteredTool {
    * envelope la porten sin depender del default.
    */
   version?: string;
+  /** Release-owned discovery data only. Never fill this from customer prompts. */
+  discovery?: {
+    synonyms?: string[];
+    examples?: Array<{ intent: string; arguments: Record<string, unknown> }>;
+    dependencies?: string[];
+    /** Pure validation for synthetic examples: no DB, credentials or side effects. */
+    preflight?: (args: Record<string, unknown>) => boolean;
+  };
   /**
    * Marca el tool como deprecado. T2 solo declara el campo; el warning en el
    * stream, el marcado en el catálogo MCP y el alias post-remoción los

@@ -67,3 +67,9 @@ export interface AIJobResult {
   error?: string;
   progress?: number;
 }
+
+/** Platform job: deliberately no tenant=0/context or raw document content. */
+export interface AIKnowledgeIndexJob {
+  release_hash: string;
+  documents: Array<{ key: string; hash: string }>;
+}
