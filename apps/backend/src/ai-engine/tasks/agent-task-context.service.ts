@@ -61,9 +61,23 @@ export class AgentTaskContextService {
       artifact_ref: `agent-result:${result.id}`,
       artifact_path: `/store/${objective.agent_id === 'vex' ? 'vex' : 'vexi'}/objectives/${objective.id}/results/${result.id}`,
       // Release text is never a durable business fact, even during rollback.
-      data: result.tool_name === 'load_playbook' ? null : result.data,
+      data: ['load_playbook', 'load_recipe'].includes(result.tool_name)
+        ? null
+        : result.data,
+      ...(result.tool_name === 'load_recipe' &&
+      result.data &&
+      typeof result.data === 'object'
+        ? {
+            recipe_pin: ((data: Record<string, unknown>) => ({
+              id: data.recipe_id,
+              version: data.version,
+              hash: data.hash,
+            }))(result.data as Record<string, unknown>),
+          }
+        : {}),
       data_omitted:
-        result.tool_name === 'load_playbook' || (result.data_omitted ?? false),
+        ['load_playbook', 'load_recipe'].includes(result.tool_name) ||
+        (result.data_omitted ?? false),
       stale_executor: result.stale_lease,
     }));
     const effectRows = effects.map((effect) => ({

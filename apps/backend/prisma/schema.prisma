@@ -12975,3 +12975,51 @@ model fiscal_tax_payments {
   @@index([accounting_entry_id], map: "fiscal_tax_payments_entry_idx")
   @@index([reversal_of_id], map: "fiscal_tax_payments_reversal_idx")
 }
+
+/// F runtime procedural guidance. Global rows have NO tenant provenance.
+model ai_agent_recipes {
+  id Int @id @default(autoincrement())
+  identity_key String @unique @db.VarChar(64)
+  knowledge_scope String @db.VarChar(10)
+  store_id Int?
+  organization_id Int?
+  user_id Int?
+  recipe_key String @db.VarChar(160)
+  version String @db.VarChar(80)
+  template Json
+  content_hash String @db.VarChar(64)
+  status String @default("candidate") @db.VarChar(20)
+  source_trace_ids Json @default("[]")
+  source_objective_ids Json @default("[]")
+  source_evidence_refs Json @default("[]")
+  source_script_refs Json @default("[]")
+  review Json?
+  review_history Json @default("[]")
+  approved_at DateTime? @db.Timestamptz(6)
+  expires_at DateTime? @db.Timestamptz(6)
+  usage_count Int @default(0)
+  success_count Int @default(0)
+  failure_count Int @default(0)
+  invalidation_count Int @default(0)
+  last_failure_code String? @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  @@index([store_id,organization_id,user_id,status,expires_at], map: "ai_agent_recipes_owner_idx")
+  @@index([knowledge_scope,status,expires_at], map: "ai_agent_recipes_global_idx")
+}
+
+/// Private feedback even when recipe_id refers to a curated global recipe.
+model ai_agent_recipe_events {
+  id Int @id @default(autoincrement())
+  recipe_id Int
+  store_id Int
+  organization_id Int
+  user_id Int
+  objective_id String @db.Uuid
+  event_key String @unique @db.VarChar(64)
+  kind String @db.VarChar(16)
+  code String? @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  @@index([store_id,organization_id,user_id,objective_id],map:"ai_agent_recipe_events_owner_idx")
+  @@index([recipe_id,created_at],map:"ai_agent_recipe_events_recipe_idx")
+}

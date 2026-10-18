@@ -1,3 +1,11 @@
+import { RecipeRepository } from '../memory/recipe.repository';
+import { RecipeQualityService } from '../memory/recipe-quality.service';
+import {
+  AgentRecipe,
+  proceduralMemoryEnabled,
+} from '../memory/recipe.interface';
+import { requireObjectiveScope } from '../tasks/agent-objective.repository';
+import { assertKnowledgeVector } from '../embeddings/knowledge-embedding.service';
 import {
   Injectable,
   Logger,
@@ -33,6 +41,8 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     @InjectQueue('ai-embedding') private readonly queue: Queue,
     @Optional() private readonly playbooks?: PlaybookService,
     @Optional() private readonly playbookLoader?: PlaybookLoaderService,
+    @Optional() private readonly recipes?: RecipeRepository,
+    @Optional() private readonly recipeQuality?: RecipeQualityService,
   ) {}
 
   getReleaseManifest(): ToolCatalogManifest {
@@ -111,6 +121,130 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         },
       );
     }
+  }
+
+  /** F publications have a separate approved-row manifest. Static B snapshots must NOT retire runtime recipes. */
+  async indexRecipe(recipe: AgentRecipe): Promise<boolean> {
+    if (
+      !proceduralMemoryEnabled() ||
+      !knowledgeIndexEnabled() ||
+      !this.recipes ||
+      !this.recipeQuality
+    )
+      return false;
+    const current = async () =>
+      recipe.knowledge_scope === 'global'
+        ? this.recipes!.approvedGlobal(recipe.id)
+        : this.recipes!.live(recipe.id, recipe.content_hash);
+    const live = await current();
+    if (
+      !live ||
+      live.content_hash !== recipe.content_hash ||
+      !this.recipeQuality.compatible(live) ||
+      !this.recipeQuality.publicationValid(live)
+    )
+      return false;
+    const configuration = await this.knowledgeEmbeddings.configuration();
+    const content = JSON.stringify(live.template),
+      hash = live.content_hash;
+    if (live.knowledge_scope === 'global') {
+      const key = `recipe:${live.recipe_key}:${live.version}`;
+      const data = {
+        entity_type: 'recipe',
+        knowledge_scope: 'global',
+        store_id: null,
+        organization_id: null,
+        canonical_name: `recipe:${live.id}`,
+        version: live.version,
+        content,
+        lexical_text: live.template.workflow,
+        metadata: { entity_type: 'recipe', recipe_id: live.id },
+        content_hash: hash,
+        release_hash: hash,
+        status: 'pending',
+        active: false,
+        indexed_hash: null,
+        embedding_fingerprint: null,
+        updated_at: new Date(),
+      };
+      const saved = await this.prisma.ai_knowledge_documents.upsert({
+        where: { document_key: key },
+        create: { document_key: key, ...data },
+        update: data,
+      });
+      await this.embeddings.storeGlobalKnowledgeEmbedding({
+        documentId: saved.id,
+        type: 'recipe',
+        content,
+        hash,
+        fingerprint: configuration.fingerprint,
+      });
+      if (
+        !proceduralMemoryEnabled() ||
+        !(await current()) ||
+        !this.recipeQuality.compatible(live) ||
+        !this.recipeQuality.publicationValid(live)
+      )
+        return false;
+      await this.prisma.ai_knowledge_documents.updateMany({
+        where: {
+          id: saved.id,
+          knowledge_scope: 'global',
+          entity_type: 'recipe',
+          content_hash: hash,
+          status: 'pending',
+        },
+        data: {
+          status: 'ready',
+          active: true,
+          indexed_hash: hash,
+          embedding_fingerprint: configuration.fingerprint,
+          updated_at: new Date(),
+        },
+      });
+      return true;
+    }
+    const scope = requireObjectiveScope();
+    if (
+      live.store_id !== scope.store_id ||
+      live.organization_id !== scope.organization_id ||
+      live.user_id !== scope.user_id
+    )
+      return false;
+    const generated = await this.knowledgeEmbeddings.generate(
+      content,
+      configuration.fingerprint,
+    );
+    assertKnowledgeVector(generated.vector);
+    if (
+      !proceduralMemoryEnabled() ||
+      !(await current()) ||
+      !this.recipeQuality.compatible(live) ||
+      !this.recipeQuality.publicationValid(live)
+    )
+      return false;
+    // Only sanitized declarative guidance is embedded. Never widen business StoreEmbeddingParams.
+    const inserted = await this.prisma.$executeRawUnsafe(
+      `INSERT INTO ai_embeddings(knowledge_scope,store_id,organization_id,entity_type,entity_id,content,embedding,metadata,updated_at)
+      SELECT 'store',store_id,organization_id,'recipe',id,$1,$2::vector,$3::jsonb,NOW() FROM ai_agent_recipes
+      WHERE id=$4 AND knowledge_scope='store' AND store_id=$5 AND organization_id=$6 AND user_id=$7 AND content_hash=$8
+        AND status='approved' AND expires_at>NOW()
+      ON CONFLICT(store_id,entity_type,entity_id) DO UPDATE SET content=EXCLUDED.content,embedding=EXCLUDED.embedding,metadata=EXCLUDED.metadata,updated_at=NOW()
+      WHERE ai_embeddings.knowledge_scope='store' AND ai_embeddings.organization_id=$6`,
+      content,
+      `[${generated.vector.join(',')}]`,
+      JSON.stringify({
+        content_hash: hash,
+        fingerprint: generated.fingerprint,
+        owner_user_id: scope.user_id,
+      }),
+      live.id,
+      scope.store_id,
+      scope.organization_id,
+      scope.user_id,
+      hash,
+    );
+    return inserted === 1;
   }
 
   async indexBatch(job: AIKnowledgeIndexJob): Promise<void> {

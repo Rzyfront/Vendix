@@ -228,10 +228,12 @@ function harness(workflow = 'reponer-inventario') {
     '',
     repo as unknown as AgentObjectiveRepository,
   );
+  const recipeMemory = { verifierFailed: jest.fn() };
   const service = new AgentVerifierService(
     registry,
     repo as unknown as AgentObjectiveRepository,
     loader as unknown as PlaybookLoaderService,
+    recipeMemory as never,
   );
   function addEffect(
     stepId: string,
@@ -303,6 +305,7 @@ function harness(workflow = 'reponer-inventario') {
     inputs,
     allowed,
     dispatched,
+    recipeMemory,
     loader,
     addEffect,
     request,
@@ -441,6 +444,7 @@ describe('AgentVerifierService server-only D2 evidence', () => {
     );
     expect(response.verified).toBe(false);
     expect(h.dispatched).toHaveLength(0);
+    expect(h.recipeMemory.verifierFailed).not.toHaveBeenCalled();
   });
 
   it('requires explicit owner ALS; a static fallback never supplies verifier authority', async () => {
@@ -1055,6 +1059,9 @@ describe('AgentVerifierService server-only D2 evidence', () => {
         reasons: ['customer_document_identity_mismatch'],
       }),
     );
+    expect(h.recipeMemory.verifierFailed).toHaveBeenCalledWith(ID, [
+      'crear-cliente',
+    ]);
   });
 
   it('purchase lines are reread with exact product/variant quantities, not any nonempty array', async () => {

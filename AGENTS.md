@@ -24,6 +24,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-agent-evals-observability` |
 | -- | `vendix-agent-execution-contract` |
 | -- | `vendix-agent-playbooks` |
+| -- | `vendix-agent-procedural-memory` |
 | -- | `vendix-agent-sandbox-security` |
 | -- | `vendix-agent-voice-consent` |
 | -- | `vendix-ai-agent-tools` |
@@ -164,7 +165,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Changing playbook loading, contracts, packaging or verifiers | `vendix-agent-playbooks` |
+| Changing recipe quality review, publication or quarantine | `vendix-agent-procedural-memory` |
 | Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
+| Changing runtime procedural recipes or recipe mining | `vendix-agent-procedural-memory` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |

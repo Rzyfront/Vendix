@@ -1,3 +1,9 @@
+import { ProceduralMemoryService } from './memory/procedural-memory.service';
+import { RecipeQualityService } from './memory/recipe-quality.service';
+import { RecipeRepository } from './memory/recipe.repository';
+import { RecipeMinerProcessor } from './memory/recipe-miner.processor';
+import { proceduralMemoryEnabled } from './memory/recipe.interface';
+import { createProceduralRecipeTools } from './tools/domains/recipe.tools';
 import { AgentVerifierService } from './tasks/agent-verifier.service';
 import { SandboxBrokerService } from './sandbox/sandbox-broker.service';
 import { SandboxClientService } from './sandbox/sandbox-client.service';
@@ -85,6 +91,10 @@ import { S3Service } from '../common/services/s3.service';
     AgentEvidenceService,
     AgentDurableSessionService,
     AgentVerifierService,
+    ProceduralMemoryService,
+    RecipeQualityService,
+    RecipeRepository,
+    RecipeMinerProcessor,
     SandboxBrokerService,
     SandboxClientService,
     SandboxPolicyService,
@@ -157,6 +167,8 @@ export class AIEngineModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    if (proceduralMemoryEnabled())
+      this.toolRegistry.registerMany(createProceduralRecipeTools());
     if (sandboxEnabled())
       this.toolRegistry.registerMany(createCodeExecutionTools(this.sandbox));
     if (playbooksEnabled())

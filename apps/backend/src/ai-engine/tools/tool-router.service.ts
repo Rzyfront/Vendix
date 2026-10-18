@@ -16,6 +16,8 @@ const DISCOVERY = new Set([
   'search_tools',
   'search_playbooks',
   'load_playbook',
+  'search_recipes',
+  'load_recipe',
   'list_capabilities',
   'list_endpoints',
 ]);

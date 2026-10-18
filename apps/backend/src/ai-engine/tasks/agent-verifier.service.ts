@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ProceduralMemoryService } from '../memory/procedural-memory.service';
+import { Optional, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { canonicalJson } from '../../domains/store/vexi/vexi-confirmation.service';
@@ -122,6 +123,11 @@ export type AgentVerificationResult =
     };
 
 class VerificationRefusal extends Error {}
+/** A domain predicate actually ran on fresh observations; malformed requests/permission errors are NOT recipe failures. */
+class RecipePostconditionFailure extends VerificationRefusal {}
+function refusePostcondition(reason: string): never {
+  throw new RecipePostconditionFailure(reason);
+}
 function refuse(reason: string): never {
   throw new VerificationRefusal(reason);
 }
@@ -348,6 +354,7 @@ export class AgentVerifierService {
     private readonly registry: AIToolRegistry,
     private readonly repository: AgentObjectiveRepository,
     private readonly playbooks: PlaybookLoaderService,
+    @Optional() private readonly proceduralMemory?: ProceduralMemoryService,
   ) {}
 
   /** Metadata only. Coverage is NOT permission, execution, or proof of a completed workflow. */
@@ -414,6 +421,7 @@ export class AgentVerifierService {
   ): Promise<AgentVerificationResult> {
     const refs: string[] = [];
     const liveReads: number[] = [];
+    let activeWorkflow: string | undefined;
     if (!robustExecutionEnabled() || !durableObjectivesEnabled())
       return {
         verified: false,
@@ -462,6 +470,7 @@ export class AgentVerifierService {
         for (const input of document.contract.inputs)
           if (input.required && request.inputs[input.key] == null)
             refuse(`missing_input:${input.key}`);
+        activeWorkflow = request.workflow_key;
         await this.verifyWorkflow(
           session,
           request,
@@ -502,6 +511,14 @@ export class AgentVerifierService {
     } catch (error) {
       // Authorization/ownership remains indistinguishable 404; never leak foreign IDs.
       if (error instanceof NotFoundException) throw error;
+      if (error instanceof RecipePostconditionFailure && activeWorkflow)
+        try {
+          await this.proceduralMemory?.verifierFailed(session.objective_id, [
+            activeWorkflow,
+          ]);
+        } catch {
+          /* Preserve verifier failure; F is optional. */
+        }
       return {
         verified: false,
         reasons: [
@@ -813,7 +830,7 @@ export class AgentVerifierService {
       [...observations.values()],
     );
     if (!result.verified || result.scope !== 'domain')
-      refuse(
+      refusePostcondition(
         result.reasons.join(',') || 'preparation_is_not_business_completion',
       );
     // C's predicates are intentionally narrow. Close known projection gaps
@@ -855,7 +872,7 @@ export class AgentVerifierService {
         canonicalJson(expected.map((line) => key(line, true)).sort()) !==
         canonicalJson(actual.map((line) => key(line, false)).sort())
       )
-        refuse('purchase_order_lines_mismatch');
+        refusePostcondition('purchase_order_lines_mismatch');
     }
     if (request.workflow_key === 'reponer-inventario') {
       if (request.inputs.product_variant_id != null)
@@ -895,7 +912,7 @@ export class AgentVerifierService {
             ? 'transfer'
             : 'purchase';
       if (final.sugerencia !== expected)
-        refuse('sourcing_quantity_postcondition_mismatch');
+        refusePostcondition('sourcing_quantity_postcondition_mismatch');
     }
     if (request.workflow_key === 'crear-cliente') {
       const customer = record(
@@ -908,7 +925,7 @@ export class AgentVerifierService {
         .filter((v) => v != null && v !== '')
         .join(' ');
       if (String(customer.document ?? '').trim() !== expectedDocument.trim())
-        refuse('customer_document_identity_mismatch');
+        refusePostcondition('customer_document_identity_mismatch');
     }
     if (
       request.workflow_key === 'cambio-precios' &&
@@ -924,12 +941,12 @@ export class AgentVerifierService {
           !Array.isArray(po.lineas) ||
           po.lineas.some((line) => Number(record(line).pending) !== 0))
       )
-        refuse('purchase_partially_received');
+        refusePostcondition('purchase_partially_received');
       if (
         request.inputs.expected_status === 'partial' &&
         po.status !== 'partial'
       )
-        refuse('purchase_expected_status_mismatch');
+        refusePostcondition('purchase_expected_status_mismatch');
     }
     if (WORKFLOW_GAPS[request.workflow_key])
       refuse(`unsupported_capability:${WORKFLOW_GAPS[request.workflow_key]}`);

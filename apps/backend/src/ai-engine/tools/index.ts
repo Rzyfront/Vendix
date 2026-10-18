@@ -65,3 +65,5 @@ export { ToolRouterService } from './tool-router.service';
 
 export { createPlaybookTools } from './domains/playbook.tools';
 export { createCodeExecutionTools } from './domains/code-execution.tools';
+
+export { createProceduralRecipeTools } from './domains/recipe.tools';

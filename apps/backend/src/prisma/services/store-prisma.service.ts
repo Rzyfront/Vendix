@@ -96,6 +96,8 @@ export class StorePrismaService extends BasePrismaService {
     'ai_attachments',
     'ai_agent_tasks',
     'ai_agent_objectives',
+    'ai_agent_recipes',
+    'ai_agent_recipe_events',
     'ai_agent_tool_results',
     'ai_agent_effects',
     // Explicit store ownership excludes system-only (NULL tenant) trace spans.
@@ -1561,6 +1563,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_agent_trace_spans() {
     return this.scoped_client.ai_agent_trace_spans;
+  }
+
+  // F global recipes are never reached through StorePrisma. Repository ALSO filters owner.
+  get ai_agent_recipes() {
+    return this.scoped_client.ai_agent_recipes;
+  }
+  get ai_agent_recipe_events() {
+    return this.scoped_client.ai_agent_recipe_events;
   }
 
   get ai_agent_objectives() {

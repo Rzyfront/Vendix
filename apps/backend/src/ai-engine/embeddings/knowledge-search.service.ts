@@ -1,3 +1,5 @@
+import { proceduralMemoryEnabled } from '../memory/recipe.interface';
+import { requireObjectiveScope } from '../tasks/agent-objective.repository';
 import { playbooksEnabled } from '../playbooks/playbook-flags';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -47,10 +49,12 @@ export class KnowledgeSearchService {
     documents: ToolDocument[],
     scopeSignature: string,
     domain?: string,
-    type: 'tool' | 'process' = 'tool',
+    type: 'tool' | 'process' | 'recipe' = 'tool',
   ): Promise<KnowledgeRanking> {
-    if (type !== 'tool' && type !== 'process')
+    if (type !== 'tool' && type !== 'process' && type !== 'recipe')
       throw new Error('INVALID_KNOWLEDGE_TYPE');
+    if (type === 'recipe' && !proceduralMemoryEnabled())
+      return { names: [], degraded: ['recipes_disabled'], cacheHit: false };
     if (type === 'process' && !playbooksEnabled())
       return { names: [], degraded: ['playbooks_disabled'], cacheHit: false };
     documents = documents.filter(
@@ -174,9 +178,57 @@ export class KnowledgeSearchService {
     return { names, degraded, cacheHit: false };
   }
 
+  /** Private procedural namespace: explicit owner/org/store; never semantic_search or global sentinel. */
+  async rankPrivateRecipes(query: string, ids: number[]): Promise<number[]> {
+    if (!proceduralMemoryEnabled() || !knowledgeIndexEnabled() || !ids.length)
+      return [];
+    const scope = requireObjectiveScope();
+    if (
+      ids.length > 100 ||
+      ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
+    )
+      throw new Error('RECIPE_SEARCH_IDS');
+    const base = `r.knowledge_scope='store' AND r.store_id=$1 AND r.organization_id=$2 AND r.user_id=$3
+      AND r.id=ANY($4::int[]) AND r.status='approved' AND r.expires_at>NOW()
+      AND e.knowledge_scope='store' AND e.store_id=$1 AND e.organization_id=$2 AND e.entity_type='recipe'
+      AND e.metadata->>'owner_user_id'=$3::text AND e.metadata->>'content_hash'=r.content_hash`;
+    const lexical = await this.queryIds(
+      `SELECT r.id FROM ai_agent_recipes r JOIN ai_embeddings e ON e.entity_id=r.id
+      WHERE ${base} AND to_tsvector('spanish',e.content) @@ plainto_tsquery('spanish',$5)
+      ORDER BY ts_rank_cd(to_tsvector('spanish',e.content),plainto_tsquery('spanish',$5)) DESC,r.id LIMIT 100`,
+      scope.store_id,
+      scope.organization_id,
+      scope.user_id,
+      ids,
+      query.slice(0, 500),
+    );
+    try {
+      const config = await this.embeddings.configuration(),
+        generated = await this.embeddings.generate(
+          query.slice(0, 500),
+          config.fingerprint,
+        );
+      assertKnowledgeVector(generated.vector);
+      if (!proceduralMemoryEnabled()) return [];
+      const vector = await this.queryIds(
+        `SELECT r.id FROM ai_agent_recipes r JOIN ai_embeddings e ON e.entity_id=r.id
+        WHERE ${base} AND e.metadata->>'fingerprint'=$6 AND e.embedding IS NOT NULL ORDER BY e.embedding <=> $5::vector,r.id LIMIT 100`,
+        scope.store_id,
+        scope.organization_id,
+        scope.user_id,
+        ids,
+        `[${generated.vector.join(',')}]`,
+        config.fingerprint,
+      );
+      return [...new Set([...lexical, ...vector])];
+    } catch {
+      return lexical;
+    }
+  }
+
   private readyDocuments(
     documents: ToolDocument[],
-    type: 'tool' | 'process',
+    type: 'tool' | 'process' | 'recipe',
   ): Promise<ReadyDocument[]> {
     return this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
