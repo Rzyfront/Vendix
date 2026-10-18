@@ -19,8 +19,6 @@ import {
   SandboxError,
   SandboxReply,
   SandboxStart,
-  sandboxEnabled,
-  sandboxStoreEnabled,
 } from './interfaces/sandbox-protocol.interface';
 
 const NEXT =
@@ -41,13 +39,12 @@ export class SandboxBrokerService {
     const config = this.client.configuration();
     // No local executable fallback. Jobs without this host capability cannot use it.
     if (
-      !sandboxEnabled() ||
       !invocation ||
       !ctx?.user_id ||
       !ctx.store_id ||
       !ctx.organization_id ||
-      !sandboxStoreEnabled(ctx.store_id) ||
-      !config
+      !config ||
+      !this.audit.sourceAvailable()
     )
       return this.failure('SANDBOX_UNAVAILABLE');
     const snapshot = Object.freeze({
@@ -91,8 +88,7 @@ export class SandboxBrokerService {
     });
     const assertLive = () => {
       if (closed) throw new SandboxError('SANDBOX_EXPIRED');
-      if (!sandboxEnabled() || !sandboxStoreEnabled(snapshot.store_id))
-        throw new SandboxError('SANDBOX_DENIED');
+
       deadline.assertCanStart();
     };
     try {
@@ -410,7 +406,7 @@ export class SandboxBrokerService {
   private failure(code: string, refs: string[] = [], runId?: string): string {
     return JSON.stringify({
       schema_version: '1',
-      status: 'blocked',
+      status: code === 'SANDBOX_UNAVAILABLE' ? 'recoverable_error' : 'blocked',
       error_code: code,
       retryable: false,
       next_action: NEXT,

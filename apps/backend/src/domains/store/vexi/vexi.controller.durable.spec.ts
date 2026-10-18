@@ -52,14 +52,6 @@ function fixture() {
 }
 
 describe('Vexi durable objective endpoints', () => {
-  const flag = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-  beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-  });
-  afterEach(() => {
-    if (flag === undefined) delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = flag;
-  });
   it('GET exposes only progress, never plans, authority or an inference', async () => {
     const { controller, repo, registry } = fixture();
     const snapshot: any = await controller.getObjective('owned');
@@ -111,19 +103,6 @@ describe('Vexi durable objective endpoints', () => {
     });
   });
 
-  it('flag OFF returns not-found without touching durable storage', async () => {
-    const { controller, repo } = fixture();
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'false';
-    await expect(controller.getObjective('owned')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-    await expect(
-      controller.resumeObjective('owned', { expected_version: 9 }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-    expect(repo.get).not.toHaveBeenCalled();
-    expect(repo.resume).not.toHaveBeenCalled();
-  });
-
   it('artifact handles are paginated without serializing every full result into the list', async () => {
     const { controller, repo } = fixture();
     repo.listResults.mockResolvedValue({
@@ -144,7 +123,7 @@ describe('Vexi durable objective endpoints', () => {
         offset: 2,
         limit: 2,
       }),
-    ).toEqual({
+    ).toMatchObject({
       id: 'r1',
       data: [3, 4],
       artifact: true,

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { accessSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { SandboxClientService } from './sandbox-client.service';
 import {
@@ -7,6 +8,10 @@ import {
   SandboxStart,
 } from './interfaces/sandbox-protocol.interface';
 
+jest.mock('node:fs', () => ({
+  ...jest.requireActual('node:fs'),
+  accessSync: jest.fn(),
+}));
 jest.mock('node:child_process', () => ({ spawn: jest.fn() }));
 const originalPlatform = process.platform;
 const keys = [
@@ -14,7 +19,6 @@ const keys = [
   'AI_SANDBOX_SUPERVISOR_CONFIG',
   'AI_SANDBOX_RUNTIME_DIGEST',
   'AI_SANDBOX_POLICY_DIGEST',
-  'AI_SANDBOX_SECURITY_REVIEWED',
 ];
 const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
 
@@ -49,10 +53,10 @@ describe('SandboxClientService: fixed supervisor-only transport', () => {
     Object.assign(process.env, {
       AI_SANDBOX_SUPERVISOR: '/opt/agent-sandbox/supervisor.py',
       AI_SANDBOX_SUPERVISOR_CONFIG: '/etc/agent-sandbox.json',
-      AI_SANDBOX_SECURITY_REVIEWED: 'true',
       AI_SANDBOX_RUNTIME_DIGEST: `sha256:${'b'.repeat(64)}`,
       AI_SANDBOX_POLICY_DIGEST: `sha256:${'a'.repeat(64)}`,
     });
+    jest.mocked(accessSync).mockImplementation(() => undefined);
     child = new EventEmitter();
     Object.assign(child, {
       stdin: new PassThrough(),
@@ -84,6 +88,13 @@ describe('SandboxClientService: fixed supervisor-only transport', () => {
         : (process.env[key] = saved[key]);
   });
 
+  it('detects missing supervisor/runtime files without spawning or throwing', () => {
+    jest.mocked(accessSync).mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+    expect(service.configuration()).toBeNull();
+    expect(spawn).not.toHaveBeenCalled();
+  });
   it('never spawns Deno directly, a shell, or with backend secrets', async () => {
     const pending = service.run(start, jest.fn(), new AbortController().signal);
     ready();
@@ -141,7 +152,9 @@ describe('SandboxClientService: fixed supervisor-only transport', () => {
         ...service.configuration(),
         ...patch,
       });
-      await expect(pending).rejects.toMatchObject({ code: 'SANDBOX_PROTOCOL' });
+      await expect(pending).rejects.toMatchObject({
+        code: 'nonce' in patch ? 'SANDBOX_PROTOCOL' : 'SANDBOX_UNAVAILABLE',
+      });
     },
   );
   it('parses multi-byte UTF8 frames split across transport chunks', async () => {

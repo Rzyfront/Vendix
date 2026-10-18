@@ -73,25 +73,24 @@ describe('AILoggingService phase A correlation/privacy', () => {
     error_message:
       'failed body secret-token confirmation_token=secret-confirmation',
   };
-  const build = (enabled: boolean) => {
+  const build = () => {
     const create = jest.fn().mockResolvedValue({});
     const service = new AILoggingService(
       { ai_engine_logs: { create } } as any,
       {} as any,
       undefined,
-      { get: jest.fn().mockReturnValue(enabled) } as any,
     );
     return { service, create };
   };
 
   it('persists a valid supplied request UUID instead of the database default', async () => {
-    const { service, create } = build(false);
+    const { service, create } = build();
     await service.logRequest({ ...entry, request_id: UUID });
     expect(create.mock.calls[0][0].data.request_id).toBe(UUID);
   });
 
   it('normalizes arbitrary IDs deterministically and stores only a bounded hash', async () => {
-    const { service, create } = build(true);
+    const { service, create } = build();
     const external = 'external:request:Bearer secret-token';
     await service.logRequest({ ...entry, request_id: external });
     await service.logRequest({ ...entry, request_id: external });
@@ -105,7 +104,7 @@ describe('AILoggingService phase A correlation/privacy', () => {
   });
 
   it('tracing removes previews/errors and rejects arbitrary metadata/correlations', async () => {
-    const { service, create } = build(true);
+    const { service, create } = build();
     await service.logRequest({
       ...entry,
       trace_id: 'Bearer secret-token',
@@ -145,19 +144,8 @@ describe('AILoggingService phase A correlation/privacy', () => {
     );
   });
 
-  it('flag OFF preserves the legacy preview and numeric cache defaults', async () => {
-    const { service, create } = build(false);
-    await service.logRequest(entry);
-    const data = create.mock.calls[0][0].data;
-    expect(data.input_preview).toBe(entry.input_preview);
-    expect(data.error_message).toBe(entry.error_message);
-    expect(data.cache_read_tokens).toBe(0);
-    expect(data.usage_observed).toBeUndefined();
-    expect(data.cost_source).toBeUndefined();
-  });
-
   it('swallows telemetry sink failure without returning or logging the payload', async () => {
-    const { service, create } = build(true);
+    const { service, create } = build();
     create.mockRejectedValue(new Error('rejected body secret-token'));
     const error = jest.spyOn((service as any).logger, 'error');
     await expect(service.logRequest(entry)).resolves.toBeUndefined();
@@ -166,14 +154,12 @@ describe('AILoggingService phase A correlation/privacy', () => {
 });
 
 describe('H accounting is explicit without enabling tracing', () => {
-  it('persists unknown usage + redacts data on H cancellation, but OFF keeps legacy', async () => {
-    const before = process.env.AI_AGENT_STREAMING_ENABLED;
+  it('persists unknown usage and redacts data on cancellation', async () => {
     const create = jest.fn().mockResolvedValue({});
     const service = new AILoggingService(
       { ai_engine_logs: { create } } as never,
       {} as never,
       undefined,
-      { get: () => false } as never,
     );
     const entry = {
       prompt_tokens: 0,
@@ -204,7 +190,6 @@ describe('H accounting is explicit without enabling tracing', () => {
       },
     };
     try {
-      process.env.AI_AGENT_STREAMING_ENABLED = 'true';
       await service.logRequest(entry);
       expect(create.mock.calls[0][0].data).toMatchObject({
         usage_observed: entry.usage_observed,
@@ -212,15 +197,7 @@ describe('H accounting is explicit without enabling tracing', () => {
         error_message: '[redacted]',
       });
       expect(create.mock.calls[0][0].data.input_preview).toBeUndefined();
-      process.env.AI_AGENT_STREAMING_ENABLED = 'false';
-      await service.logRequest(entry);
-      expect(create.mock.calls[1][0].data.usage_observed).toBeUndefined();
-      expect(create.mock.calls[1][0].data.input_preview).toBe(
-        'private-message',
-      );
     } finally {
-      if (before === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
-      else process.env.AI_AGENT_STREAMING_ENABLED = before;
     }
   });
 });

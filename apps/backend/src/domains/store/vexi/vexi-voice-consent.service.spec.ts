@@ -50,8 +50,6 @@ describe('VexiVoiceConsentService authenticated server-STT consent', () => {
     RequestContextService.runIsolated(owner, fn);
 
   beforeEach(() => {
-    previousFlag = process.env.AI_VOICE_CONFIRM_ENABLED;
-    process.env.AI_VOICE_CONFIRM_ENABLED = 'true';
     now = 1_000_000;
     jest.spyOn(Date, 'now').mockImplementation(() => now);
     redis = new MemoryRedis();
@@ -64,8 +62,6 @@ describe('VexiVoiceConsentService authenticated server-STT consent', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    if (previousFlag === undefined) delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    else process.env.AI_VOICE_CONFIRM_ENABLED = previousFlag;
   });
 
   async function ready(
@@ -303,25 +299,6 @@ describe('VexiVoiceConsentService authenticated server-STT consent', () => {
     ).rejects.toThrow();
     expect(redis.values.size).toBe(0);
   });
-
-  it.each([undefined, 'false', 'TRUE', '1'])(
-    'does nothing with flag absent/not literal true: %s',
-    (value) =>
-      asOwner(async () => {
-        if (value === undefined) delete process.env.AI_VOICE_CONFIRM_ENABLED;
-        else process.env.AI_VOICE_CONFIRM_ENABLED = value;
-        await expect(
-          service.createSession({
-            conversationId: 8,
-            agentKey: 'vexi',
-            objectiveId: null,
-            stepId: null,
-            tools,
-          }),
-        ).rejects.toThrow();
-        expect(redis.values.size).toBe(0);
-      }),
-  );
 
   it('expires proposal/challenge<=60s while session stays fixed at300s', () =>
     asOwner(async () => {

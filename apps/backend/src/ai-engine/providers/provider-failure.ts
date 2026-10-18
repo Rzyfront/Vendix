@@ -1,11 +1,8 @@
-import { toolExecutionContractEnabled } from '../tools/interfaces/tool.interface';
-
 /** Preserve SDK transport facts, without matching arbitrary provider prose. */
 export function providerFailureMetadata(error: unknown): {
   error_code?: string;
   retryable?: boolean;
 } {
-  if (!toolExecutionContractEnabled()) return {};
   const err = error as { status?: number; code?: string; name?: string };
   const transient =
     err?.status === 429 ||

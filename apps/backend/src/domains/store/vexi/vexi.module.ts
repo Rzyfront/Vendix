@@ -8,10 +8,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { WeeklyReportModule } from '../weekly-report/weekly-report.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import {
-  ConditionalRealtimeEnabledGuard,
-  VexiRealtimeController,
-} from './vexi-realtime.controller';
+import { VexiRealtimeController } from './vexi-realtime.controller';
 import { VexiRealtimeService } from './vexi-realtime.service';
 import { VexiVoiceController } from './vexi-voice.controller';
 import { VexiVoiceService } from './vexi-voice.service';
@@ -55,7 +52,6 @@ import { VexiVoiceConfirmationService } from './vexi-voice-confirmation.service'
   controllers: [VexiRealtimeController, VexiVoiceController, VexiController],
   providers: [
     VexiRealtimeService,
-    ConditionalRealtimeEnabledGuard,
     VexiSurfaceEnabledGuard,
     VexiVoiceConsentService,
     VexiVoiceAuthorityService,

@@ -176,13 +176,8 @@ async function prepared() {
   }))!;
   return { ...w, session, hook: w.plans.createHook(7, session) };
 }
-beforeEach(() => {
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-  process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED = 'true';
-});
+
 afterEach(() => {
-  delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-  delete process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED;
   jest.restoreAllMocks();
 });
 
@@ -208,22 +203,20 @@ it('real repository/session/hook/verifier commits completion only after fresh ca
 it('one shared loop publishes completed_verified only from committed opaque server proof', () =>
   RequestContextService.runIsolated(context, async () => {
     const w = await prepared();
-    const chat = jest
-      .fn()
-      .mockResolvedValue({
-        success: true,
-        content: '',
-        tool_calls: [
-          {
-            id: 'verifycall',
-            type: 'function',
-            function: {
-              name: 'verify_deliverables',
-              arguments: JSON.stringify({ deliverables: [{ id: 'd1' }] }),
-            },
+    const chat = jest.fn().mockResolvedValue({
+      success: true,
+      content: '',
+      tool_calls: [
+        {
+          id: 'verifycall',
+          type: 'function',
+          function: {
+            name: 'verify_deliverables',
+            arguments: JSON.stringify({ deliverables: [{ id: 'd1' }] }),
           },
-        ],
-      });
+        },
+      ],
+    });
     const service = new AIAgentService(
       { chat } as never,
       {} as never,
@@ -462,12 +455,10 @@ it('technical insertion remaps dependency identity, and incomplete additions or 
 it('an unverified internal plan cannot narrate business completion from model prose', () =>
   RequestContextService.runIsolated(context, async () => {
     const w = await prepared();
-    const chat = jest
-      .fn()
-      .mockResolvedValue({
-        success: true,
-        content: 'Todo quedó cerrado y verificado.',
-      });
+    const chat = jest.fn().mockResolvedValue({
+      success: true,
+      content: 'Todo quedó cerrado y verificado.',
+    });
     const service = new AIAgentService(
       { chat } as never,
       {} as never,
@@ -519,15 +510,3 @@ it('approved-effect deadline fits live lease and counts active execution before 
     jest.useRealTimers();
   }
 });
-it('D2 OFF keeps legacy twelve-step plan semantics without requiring new contracts', () =>
-  RequestContextService.runIsolated(context, async () => {
-    delete process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED;
-    const w = harness();
-    const session = (await w.sessions.open(7, 'vexi', 'Cerrar caja'))!;
-    const result = await w.plans
-      .createHook(7, session)
-      .execute('propose_plan', planArgs(12));
-    expect(JSON.parse(result.result).ok).toBe(true);
-    expect(session.objective.plan?.steps).toHaveLength(12);
-    await session.close();
-  }));

@@ -28,8 +28,6 @@ const pin = (name = 'reponer-inventario', section = 'steps') => ({
 });
 
 describe('C release pins over real D1 repository/context (in-memory SQL transport)', () => {
-  const savedC = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-  const savedD1 = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
   let db: ObjectiveMemoryDatabase;
   let repo: AgentObjectiveRepository;
   function add(
@@ -57,8 +55,6 @@ describe('C release pins over real D1 repository/context (in-memory SQL transpor
     db.results.set(result.id, result);
   }
   beforeEach(() => {
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
     db = new ObjectiveMemoryDatabase();
     repo = new AgentObjectiveRepository(db.prisma);
     db.objectives.set(id, {
@@ -80,12 +76,7 @@ describe('C release pins over real D1 repository/context (in-memory SQL transpor
       updated_at: new Date(),
     } as unknown as AgentObjective);
   });
-  afterAll(() => {
-    if (savedC === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    else process.env.AI_AGENT_PLAYBOOKS_ENABLED = savedC;
-    if (savedD1 === undefined) delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = savedD1;
-  });
+  afterAll(() => {});
   it('restores newest two distinct release identities after >25 unrelated messages/results, never bodies', async () =>
     run(async () => {
       add(1, pin());
@@ -120,7 +111,6 @@ describe('C release pins over real D1 repository/context (in-memory SQL transpor
     run(async () => {
       add(1, pin());
       for (const enabled of ['true', 'false']) {
-        process.env.AI_AGENT_PLAYBOOKS_ENABLED = enabled;
         const context = await new AgentTaskContextService(repo).build(id);
         const result = JSON.parse(context.context).results[0];
         expect(result.data).toBeNull();
@@ -164,15 +154,4 @@ describe('C release pins over real D1 repository/context (in-memory SQL transpor
     RequestContextService.run(scope, () => undefined);
     await expect(repo.listPlaybookPins(id)).rejects.toThrow('explicit tenant');
   });
-  it('C OFF does not query playbook history or alter original D1 prompt shape', async () =>
-    run(async () => {
-      delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      add(1, pin());
-      const context = await new AgentTaskContextService(repo).build(id);
-      expect(context.playbook_pins).toBeUndefined();
-      expect(JSON.parse(context.context)).not.toHaveProperty('playbook_pins');
-      expect(db.statements.some((q) => q.sql.includes('DISTINCT ON'))).toBe(
-        false,
-      );
-    }));
 });

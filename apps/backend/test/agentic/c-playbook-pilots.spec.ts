@@ -109,7 +109,14 @@ function fixture(directory: string) {
         _keys: number,
         key: string,
         fingerprint: string,
+        boundFingerprint?: string,
+        metadata?: string,
       ) => {
+        if (_keys === 2 && _script.includes("redis.call('SET'")) {
+          redisValues.set(key, boundFingerprint!);
+          redisValues.set(fingerprint, metadata!);
+          return 1;
+        }
         const stored = redisValues.get(key);
         if (stored === undefined) return 0;
         if (stored !== fingerprint) return -1;
@@ -557,14 +564,6 @@ function fixture(directory: string) {
 }
 
 describe('C three playbook pilots: offline real-factory integration', () => {
-  const flags = [
-    'AI_AGENT_PLAYBOOKS_ENABLED',
-    'AI_TOOL_ROUTING_ENABLED',
-    'AI_TOOL_EXECUTION_CONTRACT_ENABLED',
-  ] as const;
-  const originalFlags = Object.fromEntries(
-    flags.map((key) => [key, process.env[key]]),
-  );
   let directory: string;
   let h: ReturnType<typeof fixture>;
   beforeAll(() => {
@@ -576,19 +575,12 @@ describe('C three playbook pilots: offline real-factory integration', () => {
       );
   });
   beforeEach(async () => {
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
-    process.env.AI_TOOL_ROUTING_ENABLED = 'false';
-    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'false';
     h = fixture(directory);
     await h.loader.initializeRelease();
   });
   afterEach(() => jest.restoreAllMocks());
   afterAll(() => {
     rmSync(directory, { recursive: true, force: true });
-    for (const key of flags) {
-      if (originalFlags[key] === undefined) delete process.env[key];
-      else process.env[key] = originalFlags[key];
-    }
   });
 
   it.each(PILOTS)(
@@ -768,7 +760,11 @@ describe('C three playbook pilots: offline real-factory integration', () => {
           ).rejects.toMatchObject({ errorCode: 'AI_AGENT_004' }),
         { permissions: ['store:cash_registers:read'] },
       );
-      expect(h.redis.eval).not.toHaveBeenCalled();
+      expect(
+        h.redis.eval.mock.calls.filter(([script]) =>
+          script.includes("redis.call('DEL'"),
+        ),
+      ).toHaveLength(0);
       expect(h.cash.sessionsService.closeSession).not.toHaveBeenCalled();
     }));
 
@@ -947,7 +943,11 @@ describe('C three playbook pilots: offline real-factory integration', () => {
         verified: true,
         evidence_step_ids: ['create', 'validate', 'emit', 'verify'],
       });
-      expect(h.redis.set).toHaveBeenCalledTimes(3);
+      expect(
+        h.redis.eval.mock.calls.filter(([script]) =>
+          script.includes("redis.call('SET'"),
+        ),
+      ).toHaveLength(3);
       expect(
         new Set([
           createProposal.confirmation_token,
@@ -1029,55 +1029,6 @@ describe('C three playbook pilots: offline real-factory integration', () => {
       expect(result.status).not.toBe('ok');
       expect(result.effect_status).not.toBe('applied');
       expect(h.invoicing.invoiceFlowService.send).not.toHaveBeenCalled();
-    }));
-
-  it.each([undefined, 'false', 'TRUE', '1'])(
-    'OFF=%s preserves legacy cash string result and never manufactures a positive D0 receipt',
-    (flag) =>
-      scoped(async () => {
-        if (flag === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-        else process.env.AI_AGENT_PLAYBOOKS_ENABLED = flag;
-        const args = { session_id: 900020, actual_closing_amount: 105 };
-        const proposal = await h.propose('close_cash_session', args);
-        const output = await h.registry.executeTool(
-          'close_cash_session',
-          args,
-          { confirmationToken: String(proposal.confirmation_token) },
-        );
-        expect(output).toBe(
-          JSON.stringify({
-            resumen: 'sesión #900020 — Caja sintética cerrada con arqueo $105.',
-            session_id: 900020,
-            resultado: h.state.cash,
-          }),
-        );
-        expect(output).not.toContain('"applied"');
-        expect(output).not.toContain('resource_ids');
-      }),
-  );
-
-  it('OFF keeps the exact original invoice-create result even when the domain returned full evidence', () =>
-    scoped(async () => {
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
-      const args = { order_id: 900010 };
-      const proposal = await h.propose('create_invoice_from_order', args);
-      const output = await h.registry.executeTool(
-        'create_invoice_from_order',
-        args,
-        { confirmationToken: String(proposal.confirmation_token) },
-      );
-      expect(output).toBe(
-        JSON.stringify({
-          invoice_id: 900011,
-          invoice_number: 'SYNTHETIC-FV',
-          status: 'draft',
-          order_id: 900010,
-          subtotal: 100,
-          tax_amount: 19,
-          total_amount: 119,
-          next_step: 'Evalúa el borrador con get_emit_readiness (F-32).',
-        }),
-      );
     }));
 
   it('does not upgrade ambiguous legacy invoice results to applied based on fallback status/id', () =>
@@ -1198,58 +1149,6 @@ describe('C three playbook pilots: offline real-factory integration', () => {
     }),
   );
 
-  it('OFF keeps exact original validation and emission field sets, not opt-in receipts', () =>
-    scoped(async () => {
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
-      h.state.invoice = {
-        id: 900011,
-        status: 'draft',
-        invoice_number: 'SYNTHETIC-FV',
-        total_amount: 119,
-      };
-      const args = { invoice_id: 900011 };
-      const validation = await h.propose('validate_invoice', args);
-      expect(
-        await h.registry.executeTool('validate_invoice', args, {
-          confirmationToken: String(validation.confirmation_token),
-        }),
-      ).toBe(
-        JSON.stringify({
-          invoice_id: 900011,
-          invoice_number: 'SYNTHETIC-FV',
-          status: 'validated',
-          total_amount: 119,
-          enables: 'send_invoice_dian (F-30)',
-        }),
-      );
-      const emission = await h.propose('send_invoice_dian', args);
-      const output = JSON.parse(
-        await h.registry.executeTool('send_invoice_dian', args, {
-          confirmationToken: String(emission.confirmation_token),
-        }),
-      );
-      expect(Object.keys(output)).toEqual([
-        'invoice_id',
-        'invoice_number',
-        'status',
-        'send_status',
-        'transmission_status',
-        'cufe',
-        'is_resend',
-        'issuer_dian',
-        'resolution_used',
-        'emission_chain',
-      ]);
-      expect(output).toMatchObject({
-        invoice_id: 900011,
-        status: 'sent',
-        cufe: null,
-        is_resend: false,
-      });
-      expect(output.applied).toBeUndefined();
-      expect(output.resource_ids).toBeUndefined();
-    }));
-
   it.each(PILOTS)(
     '%s exploration-operation reduction is a deterministic fixture proxy, NOT a measured baseline',
     (id) =>
@@ -1314,33 +1213,6 @@ describe('C three playbook pilots: offline real-factory integration', () => {
         expect(h.redis.set).not.toHaveBeenCalled();
       }),
   );
-
-  it('C flag OFF rollback disables loading a previously active exact pin without granting a write', () =>
-    scoped(() => {
-      const session = h.session();
-      const first = h.service.load(session, {
-        id: 'reponer-inventario',
-        version: '1.0.0',
-        section: 'verification',
-      }) as LoadedPlaybook;
-      expect(first.hash).toMatch(/^[a-f0-9]{64}$/);
-      expect(
-        h.service.load(h.session(), {
-          id: first.id,
-          version: first.version,
-          hash: 'different-release',
-        }),
-      ).toMatchObject({ error_code: 'PLAYBOOK_HASH_MISMATCH' });
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
-      expect(
-        h.service.load(session, {
-          id: first.id,
-          version: first.version,
-          hash: first.hash,
-        }),
-      ).toMatchObject({ error_code: 'PLAYBOOKS_DISABLED' });
-      expect(h.redis.set).not.toHaveBeenCalled();
-    }));
 
   it('loading actual release content prunes revoked fiscal writes instead of restoring permissions', () =>
     scoped(() => {

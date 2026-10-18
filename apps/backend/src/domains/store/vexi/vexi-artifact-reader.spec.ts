@@ -23,21 +23,9 @@ const scope = {
 type Query = Parameters<VexiPlanStateService['getObjectiveArtifact']>[2];
 
 describe('D1 real repository → H bounded Vexi artifact reader', () => {
-  const flags = {
-    AI_DURABLE_OBJECTIVES_ENABLED: process.env.AI_DURABLE_OBJECTIVES_ENABLED,
-    AI_TOOL_RESULT_COMPACTION_ENABLED:
-      process.env.AI_TOOL_RESULT_COMPACTION_ENABLED,
-  };
-  beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-    process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
-  });
-  afterEach(() => {
-    for (const [key, value] of Object.entries(flags)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
+  const flags = {};
+
+  afterEach(() => {});
 
   function fixture() {
     const db = new ObjectiveMemoryDatabase();
@@ -204,27 +192,6 @@ describe('D1 real repository → H bounded Vexi artifact reader', () => {
       service.getObjectiveArtifact(ID, saved.id, {}),
     ).rejects.toMatchObject({ status: 401 });
   });
-
-  it('retains the exact legacy page contract with H OFF', async () =>
-    RequestContextService.runIsolated(scope, async () => {
-      const { service, save } = fixture();
-      const saved = await save({ rows: [{ id: 1 }, { id: 2 }, { id: 3 }] });
-      process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'false';
-      const page = await service.getObjectiveArtifact(ID, saved.id, {
-        offset: 1,
-        limit: 1,
-      });
-      expect(page.data).toEqual({ rows: [{ id: 2 }] });
-      expect(page.artifact_pagination).toEqual({
-        offset: 1,
-        limit: 1,
-        total: 3,
-        complete: false,
-        has_more: true,
-        next_offset: 2,
-      });
-      expect(page).not.toHaveProperty('bounded');
-    }));
 
   it('binds projection cursors and rejects malformed reader query DTOs without changing UUID list cursor', async () => {
     const valid = plainToInstance(AgentObjectiveResultsQueryDto, {

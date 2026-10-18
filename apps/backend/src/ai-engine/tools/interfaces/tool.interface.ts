@@ -1,5 +1,3 @@
-import { AIToolDefinition } from '../../interfaces/ai-provider.interface';
-
 /**
  * Versión de contrato que el registry asigna a todo tool que no declare una.
  * T2: las 70 tools existentes nacen en `'1'` sin cambio de comportamiento; todo
@@ -8,8 +6,6 @@ import { AIToolDefinition } from '../../interfaces/ai-provider.interface';
 export const DEFAULT_TOOL_VERSION = '1';
 
 /** D0 is opt-in; executeTool/string handlers and MCP keep their legacy ABI. */
-export const toolExecutionContractEnabled = (): boolean =>
-  process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED === 'true';
 
 export type ToolExecutionStatus =
   | 'ok'

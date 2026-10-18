@@ -24,12 +24,10 @@ const tool = (
 });
 
 describe('ToolRouterService B: relevance is not authority', () => {
-  const env = process.env.AI_TOOL_ROUTING_ENABLED;
   let registry: AIToolRegistry;
   let router: ToolRouterService;
   let rank: jest.Mock;
   beforeEach(() => {
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
     registry = new AIToolRegistry({} as any);
     registry.registerMany(createDiscoveryTools());
     for (let i = 0; i < 60; i++)
@@ -49,10 +47,7 @@ describe('ToolRouterService B: relevance is not authority', () => {
     }));
     router = new ToolRouterService(registry, { rank } as any);
   });
-  afterAll(() => {
-    if (env === undefined) delete process.env.AI_TOOL_ROUTING_ENABLED;
-    else process.env.AI_TOOL_ROUTING_ENABLED = env;
-  });
+  afterAll(() => {});
   it.each(['find_coffee', 'buscar_cafe', 'CAFÉ', 'reposición'])(
     'finds ES/snake_case/exact alias %s at K12',
     async (query) => {
@@ -230,15 +225,7 @@ describe('ToolRouterService B: relevance is not authority', () => {
       'find_coffee',
     );
   });
-  it('leaves the complete legacy catalog intact with flag OFF', async () => {
-    delete process.env.AI_TOOL_ROUTING_ENABLED;
-    const auth = registry.getAllDefinitions();
-    expect(
-      (await router.select(router.createSession('x', 's'), auth, false, false))
-        .definitions,
-    ).toEqual(auth);
-    expect(rank).not.toHaveBeenCalled();
-  });
+
   it.each([
     {},
     { query: '' },

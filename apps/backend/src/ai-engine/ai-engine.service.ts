@@ -650,9 +650,7 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = this.trace?.isEnabled()
-        ? RequestContextService.asyncLocalStorage.getStore()
-        : RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -739,7 +737,7 @@ export class AIEngineService implements OnModuleInit {
         extraMessages,
         optionsOverride,
       );
-    if (!this.providerObserver || !this.trace?.isEnabled()) {
+    if (!this.providerObserver || !this.trace) {
       yield* factory();
       return;
     }
@@ -1074,10 +1072,7 @@ export class AIEngineService implements OnModuleInit {
       } finally {
         // Log after stream completes — always runs regardless of early returns
         const latencyMs = Date.now() - startTime;
-        const context =
-          agentic || this.trace?.isEnabled()
-            ? RequestContextService.asyncLocalStorage.getStore()
-            : RequestContextService.getContext();
+        const context = RequestContextService.asyncLocalStorage.getStore();
         const configSettings = resolvedConfigId
           ? this.configSettings.get(resolvedConfigId)
           : undefined;
@@ -1254,9 +1249,7 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = this.trace?.isEnabled()
-        ? RequestContextService.asyncLocalStorage.getStore()
-        : RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -1422,9 +1415,7 @@ export class AIEngineService implements OnModuleInit {
       yield lastChunk;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = this.trace?.isEnabled()
-        ? RequestContextService.asyncLocalStorage.getStore()
-        : RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -1965,14 +1956,14 @@ export class AIEngineService implements OnModuleInit {
   }
 
   private safeProviderError(error: string | undefined): string | undefined {
-    return this.trace?.isEnabled() ? 'PROVIDER_ERROR' : error;
+    return 'PROVIDER_ERROR';
   }
 
   private async observeProviderCall(
     appKey: string | undefined,
     callback: () => Promise<AIResponse>,
   ): Promise<AIResponse> {
-    if (!this.providerObserver || !this.trace?.isEnabled()) return callback();
+    if (!this.providerObserver || !this.trace) return callback();
     if (this.trace.currentSpan()) {
       return this.providerObserver.call(
         { call_reason: appKey ? 'application' : 'direct' },
@@ -2142,7 +2133,6 @@ export class AIEngineService implements OnModuleInit {
   }
 
   private observedLogFields(usage: AIResponse['usage']) {
-    if (!this.trace?.isEnabled()) return {};
     const observed = this.providerObserver?.observedUsage(usage);
     return {
       cost_source: 'logical_summary' as const,
@@ -2337,9 +2327,7 @@ export class AIEngineService implements OnModuleInit {
     featureCategory?: string | null;
   }): void {
     const latencyMs = Date.now() - params.startTime;
-    const context = this.trace?.isEnabled()
-      ? RequestContextService.asyncLocalStorage.getStore()
-      : RequestContextService.getContext();
+    const context = RequestContextService.asyncLocalStorage.getStore();
     const configSettings = params.configId
       ? this.configSettings.get(params.configId)
       : undefined;

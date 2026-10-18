@@ -11,7 +11,6 @@ const tool = (name: string, version = '1') => ({
   readOnly: true,
 });
 describe('ToolCatalogIndexerService B', () => {
-  const env = process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
   let registry: AIToolRegistry;
   let prisma: any;
   let queue: any;
@@ -20,7 +19,6 @@ describe('ToolCatalogIndexerService B', () => {
   let service: ToolCatalogIndexerService;
   let rows: Map<string, any>;
   beforeEach(() => {
-    process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = 'true';
     rows = new Map();
     registry = new AIToolRegistry({} as any);
     prisma = {
@@ -59,10 +57,7 @@ describe('ToolCatalogIndexerService B', () => {
       queue,
     );
   });
-  afterAll(() => {
-    if (env === undefined) delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    else process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = env;
-  });
+  afterAll(() => {});
   it('waits until all module-init factories registered, snapshots complete catalog in batches ≤50', async () => {
     registry.register(tool('early'));
     await service.enqueueSnapshot();
@@ -120,8 +115,9 @@ describe('ToolCatalogIndexerService B', () => {
     await service.onApplicationBootstrap();
     registry.removeTool('retired');
     await service.enqueueSnapshot();
-    const where =
-      prisma.ai_knowledge_documents.updateMany.mock.calls.at(-1)[0].where;
+    const where = prisma.ai_knowledge_documents.updateMany.mock.calls
+      .filter(([a]) => a.where.entity_type === 'tool')
+      .at(-1)[0].where;
     expect(where.canonical_name.notIn).toEqual(['list_orders']);
     expect(where).not.toHaveProperty('document_key');
   });
@@ -131,8 +127,8 @@ describe('ToolCatalogIndexerService B', () => {
     const job = queue.add.mock.calls[0][1];
     embeddings.storeGlobalKnowledgeEmbedding.mockImplementation(async () => {
       expect([...rows.values()][0]).toMatchObject({
-        active: false,
-        status: 'pending',
+        active: true,
+        status: 'ready',
       });
     });
     await service.indexBatch(job);
@@ -144,7 +140,22 @@ describe('ToolCatalogIndexerService B', () => {
       data: { active: false, status: 'retired' },
     });
   });
-  it('records error without publishing a candidate and lets BullMQ retry', async () => {
+  it('does not retire newer versions when the embedding publication loses its CAS', async () => {
+    registry.register(tool('list_orders', '2'));
+    await service.onApplicationBootstrap();
+    prisma.ai_knowledge_documents.updateMany.mockImplementation(
+      async ({ where }) => ({
+        count: where.id && where.status === 'ready' ? 0 : 1,
+      }),
+    );
+    await service.indexBatch(queue.add.mock.calls[0][1]);
+    expect(
+      prisma.ai_knowledge_documents.updateMany.mock.calls.some(
+        ([arg]) => arg.where.version,
+      ),
+    ).toBe(false);
+  });
+  it('keeps lexical catalog active on embedding failure without leaking errors', async () => {
     registry.register(tool('list_orders'));
     await service.onApplicationBootstrap();
     embeddings.storeGlobalKnowledgeEmbedding.mockRejectedValue(
@@ -152,25 +163,27 @@ describe('ToolCatalogIndexerService B', () => {
     );
     await expect(
       service.indexBatch(queue.add.mock.calls[0][1]),
-    ).rejects.toThrow('KNOWLEDGE_INDEX_FAILED');
+    ).resolves.toBeUndefined();
     expect([...rows.values()][0]).toMatchObject({
-      status: 'error',
-      active: false,
+      status: 'ready',
+      active: true,
+      embedding_fingerprint: null,
       error_code: 'KNOWLEDGE_INDEX_FAILED',
     });
     expect(JSON.stringify([...rows.values()])).not.toContain('private secret');
   });
-  it('does not index/enqueue with the flag OFF or before the bootstrap barrier', async () => {
+  it('automatically enqueues at bootstrap and rejects stale jobs', async () => {
     registry.register(tool('list_orders'));
     const manifest = service.getReleaseManifest();
     await expect(
       service.indexBatch({ release_hash: manifest.hash, documents: [] }),
     ).rejects.toThrow('BOOT_BARRIER');
-    delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    await service.onApplicationBootstrap();
-    await service.indexBatch({ release_hash: 'x', documents: [] });
-    expect(prisma.ai_knowledge_documents.updateMany).not.toHaveBeenCalled();
     expect(queue.add).not.toHaveBeenCalled();
+    await service.onApplicationBootstrap();
+    expect(queue.add).toHaveBeenCalled();
+    await expect(
+      service.indexBatch({ release_hash: 'x', documents: [] }),
+    ).rejects.toThrow('STALE_KNOWLEDGE_RELEASE');
   });
   it('safe bootstrap failures leave the local catalog available', async () => {
     registry.register(tool('list_orders'));
@@ -265,9 +278,10 @@ describe('ToolCatalogIndexerService B', () => {
     expect(commands).toContain(
       "knowledge_scope = 'global' AND store_id = 0 AND organization_id = 0",
     );
-    expect(commands).toContain('unexpected FK');
+    expect(commands).toContain('NOT VALID');
+    expect(commands).not.toMatch(/RAISE EXCEPTION/);
   });
-  it('C indexes section documents as global process on the same queue and preserves B-only rollback', async () => {
+  it('C indexes section documents as global process on the same queue and retires removed process sections', async () => {
     registry.register(tool('list_orders'));
     const doc = {
       key: 'process:cerrar-caja:1:steps',
@@ -326,9 +340,47 @@ describe('ToolCatalogIndexerService B', () => {
       prisma.ai_knowledge_documents.updateMany.mock.calls.some(
         ([arg]) => arg.where.entity_type === 'process',
       ),
-    ).toBe(false);
+    ).toBe(true);
     await expect(service.indexBatch(job)).rejects.toThrow(
       'STALE_KNOWLEDGE_RELEASE',
     );
   });
+});
+
+it('indexes lexical documents automatically when the embedding app is unavailable', async () => {
+  const registry = new AIToolRegistry({} as any);
+  registry.register(tool('list_orders'));
+  const upsert = jest.fn(async ({ create }) => ({ id: 1, ...create }));
+  const service = new ToolCatalogIndexerService(
+    registry,
+    {
+      ai_knowledge_documents: {
+        updateMany: jest.fn(),
+        findUnique: jest.fn(),
+        upsert,
+      },
+    } as any,
+    { storeGlobalKnowledgeEmbedding: jest.fn() } as any,
+    {
+      configuration: jest.fn().mockRejectedValue(new Error('absent app')),
+    } as any,
+    { add: jest.fn() } as any,
+  );
+  await service.onApplicationBootstrap();
+  const manifest = service.getReleaseManifest();
+  await expect(
+    service.indexBatch({
+      release_hash: manifest.hash,
+      documents: manifest.documents.map((d) => ({ key: d.key, hash: d.hash })),
+    }),
+  ).resolves.toBeUndefined();
+  expect(upsert).toHaveBeenCalledWith(
+    expect.objectContaining({
+      create: expect.objectContaining({
+        active: true,
+        status: 'ready',
+        embedding_fingerprint: null,
+      }),
+    }),
+  );
 });

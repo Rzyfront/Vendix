@@ -2,14 +2,12 @@ import { KnowledgeEmbeddingService } from './knowledge-embedding.service';
 import { RequestContextService } from '../../common/context/request-context.service';
 const vector = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
 describe('KnowledgeEmbeddingService: metered platform-only embeddings', () => {
-  const env = process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
   let engine: any;
   let redis: any;
   let settings: Record<string, string>;
   let service: KnowledgeEmbeddingService;
   let app: any;
   beforeEach(() => {
-    process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = 'true';
     settings = { AI_KNOWLEDGE_DAILY_TOKEN_BUDGET: '100000' };
     app = {
       is_active: true,
@@ -32,10 +30,7 @@ describe('KnowledgeEmbeddingService: metered platform-only embeddings', () => {
       redis,
     );
   });
-  afterAll(() => {
-    if (env === undefined) delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    else process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = env;
-  });
+  afterAll(() => {});
   it('runs the separate app with platform ALS, no tenant0 and no tenant quota, preserving the outer context', async () => {
     engine.runEmbedding.mockImplementation(async () => {
       const context = RequestContextService.asyncLocalStorage.getStore();
@@ -131,11 +126,7 @@ describe('KnowledgeEmbeddingService: metered platform-only embeddings', () => {
     });
     await expect(service.generate('x')).rejects.toThrow('FINGERPRINT_CHANGED');
   });
-  it('makes no engine call with index disabled', async () => {
-    delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    await expect(service.generate('x')).rejects.toThrow('INDEX_DISABLED');
-    expect(engine.getApplication).not.toHaveBeenCalled();
-  });
+
   it('separates platform tracing from a caller tenant trace without fabricating a successful business outcome', async () => {
     const root = { kind: 'root' };
     const trace = {

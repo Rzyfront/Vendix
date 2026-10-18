@@ -594,7 +594,6 @@ describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
 });
 
 describe('AIEngineService phase A provider attempts and quota isolation', () => {
-  const previousFlag = process.env.AI_AGENT_TRACING_ENABLED;
   const settings = { pricing: { input_per_1k: 1, output_per_1k: 2 } };
   const app = {
     key: 'phase_a_text',
@@ -618,12 +617,9 @@ describe('AIEngineService phase A provider attempts and quota isolation', () => 
 
   afterEach(() => {
     jest.restoreAllMocks();
-    if (previousFlag === undefined) delete process.env.AI_AGENT_TRACING_ENABLED;
-    else process.env.AI_AGENT_TRACING_ENABLED = previousFlag;
   });
 
   const build = (enabled = true) => {
-    process.env.AI_AGENT_TRACING_ENABLED = String(enabled);
     const rows = new Map<string, any>();
     const prisma = {
       ai_engine_applications: { findUnique: jest.fn().mockResolvedValue(app) },
@@ -780,26 +776,6 @@ describe('AIEngineService phase A provider attempts and quota isolation', () => 
       cache_read_tokens: null,
       cache_creation_tokens: null,
     });
-  });
-
-  it('flag OFF keeps provider payload, response and quota units/dedup semantics unchanged', async () => {
-    const off = build(false);
-    const chatOff = jest.fn().mockResolvedValue({ ...success });
-    (off.service as any).providers.set(5, { chat: chatOff });
-    const resultOff = await off.execute();
-    expect(off.rows.size).toBe(0);
-    const on = build(true);
-    const chatOn = jest.fn().mockResolvedValue({ ...success });
-    (on.service as any).providers.set(5, { chat: chatOn });
-    const resultOn = await on.execute();
-    expect(chatOn.mock.calls).toEqual(chatOff.mock.calls);
-    expect(resultOn).toEqual(resultOff);
-    const offQuota = off.subscriptionAccess.consumeAIQuota.mock.calls[0];
-    const onQuota = on.subscriptionAccess.consumeAIQuota.mock.calls[0];
-    expect(onQuota.slice(0, 3)).toEqual(offQuota.slice(0, 3));
-    expect(offQuota[3]).toMatch(/^legacy-request-dedup:/);
-    expect(onQuota[3]).toMatch(/^legacy-request-dedup:/);
-    expect(onQuota[3]).not.toBe([...on.rows.values()][0].trace_id);
   });
 
   it.each([

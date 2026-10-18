@@ -2,14 +2,14 @@ import { ProceduralMemoryService } from './memory/procedural-memory.service';
 import { RecipeQualityService } from './memory/recipe-quality.service';
 import { RecipeRepository } from './memory/recipe.repository';
 import { RecipeMinerProcessor } from './memory/recipe-miner.processor';
-import { proceduralMemoryEnabled } from './memory/recipe.interface';
+
 import { createProceduralRecipeTools } from './tools/domains/recipe.tools';
 import { AgentVerifierService } from './tasks/agent-verifier.service';
 import { SandboxBrokerService } from './sandbox/sandbox-broker.service';
 import { SandboxClientService } from './sandbox/sandbox-client.service';
 import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
 import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
-import { sandboxEnabled } from './sandbox/interfaces/sandbox-protocol.interface';
+
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
@@ -25,13 +25,10 @@ import { AIAgentService } from './ai-agent.service';
 import { ToolRouterService } from './tools/tool-router.service';
 import { ToolCatalogIndexerService } from './tools/tool-catalog-indexer.service';
 import { createDiscoveryTools } from './tools/domains/discovery.tools';
-import {
-  PlaybookLoaderService,
-  playbooksEnabled,
-} from './playbooks/playbook-loader.service';
+import { PlaybookLoaderService } from './playbooks/playbook-loader.service';
 import { PlaybookService } from './playbooks/playbook.service';
 import { createPlaybookTools } from './tools/domains/playbook.tools';
-import { toolRoutingEnabled } from './tools/tool-catalog';
+
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { createSearchTools } from './tools/domains/search.tools';
 import { uiTools } from './tools/domains/ui.tools';
@@ -167,14 +164,10 @@ export class AIEngineModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    if (proceduralMemoryEnabled())
-      this.toolRegistry.registerMany(createProceduralRecipeTools());
-    if (sandboxEnabled())
-      this.toolRegistry.registerMany(createCodeExecutionTools(this.sandbox));
-    if (playbooksEnabled())
-      this.toolRegistry.registerMany(createPlaybookTools());
-    if (toolRoutingEnabled())
-      this.toolRegistry.registerMany(createDiscoveryTools());
+    this.toolRegistry.registerMany(createProceduralRecipeTools());
+    this.toolRegistry.registerMany(createCodeExecutionTools(this.sandbox));
+    this.toolRegistry.registerMany(createPlaybookTools());
+    this.toolRegistry.registerMany(createDiscoveryTools());
     this.toolRegistry.registerMany(
       createSearchTools({ embeddingService: this.embeddingService }),
     );

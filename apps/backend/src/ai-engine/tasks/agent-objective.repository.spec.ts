@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
-  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { RequestContextService } from '../../common/context/request-context.service';
@@ -104,27 +103,16 @@ const statement = (call: unknown[]): string => (call[0] as { sql: string }).sql;
 describe('AgentObjectiveRepository D1', () => {
   let tx: { $queryRaw: jest.Mock; $executeRaw: jest.Mock };
   let repository: AgentObjectiveRepository;
-  const before = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
+
   beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
     tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn().mockResolvedValue(1) };
     repository = new AgentObjectiveRepository({
       $transaction: async (fn: (client: typeof tx) => Promise<unknown>) =>
         fn(tx),
     } as unknown as StorePrismaService);
   });
-  afterAll(() => {
-    if (before === undefined) delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = before;
-  });
+  afterAll(() => {});
 
-  it('requires literal true and performs no query while off', async () => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'TRUE';
-    await expect(scoped(() => repository.get(ID))).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-  });
   it('rejects missing ALS even when the historical static context exists', async () => {
     RequestContextService.run(ctx, () => undefined);
     expect(RequestContextService.getContext()).toEqual(ctx);

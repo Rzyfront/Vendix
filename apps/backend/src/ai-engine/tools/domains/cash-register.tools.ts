@@ -6,7 +6,6 @@ import {
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../domains/store/cash-registers/movements/movements.service';
 import { CloseSessionDto } from '../../../domains/store/cash-registers/dto/close-session.dto';
-import { playbooksEnabled } from '../../playbooks/playbook-flags';
 
 /**
  * Familia cash-register de Vex (paso 8 del plan vex-agent).
@@ -87,9 +86,7 @@ function toPositiveInt(value: unknown): number | null {
 }
 
 function isDateOnly(value: unknown): value is string {
-  return (
-    typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
-  );
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
 function sessionLabel(s: Record<string, any>): string {
@@ -206,12 +203,15 @@ export function createCashRegisterTools(
               next_step: 'Pasa el ID numérico del usuario u omítelo.',
             };
           }
-          const session =
-            await deps.sessionsService.getActiveSession(user_id);
-          return { session: (session ?? null) as unknown as Record<string, any> | null };
+          const session = await deps.sessionsService.getActiveSession(user_id);
+          return {
+            session: (session ?? null) as unknown as Record<string, any> | null,
+          };
         }
         const session = await deps.sessionsService.getActiveSession();
-        return { session: (session ?? null) as unknown as Record<string, any> | null };
+        return {
+          session: (session ?? null) as unknown as Record<string, any> | null,
+        };
       }),
     },
 
@@ -539,9 +539,7 @@ export function createCashRegisterTools(
               pending_orders: pending.data,
               count: pending.count,
               fingerprint: pending.fingerprint,
-              ...(pending.pagination
-                ? { pagination: pending.pagination }
-                : {}),
+              ...(pending.pagination ? { pagination: pending.pagination } : {}),
             };
           }
         }
@@ -559,17 +557,13 @@ export function createCashRegisterTools(
         if (args.override_reason !== undefined) {
           dto.override_reason = args.override_reason.trim();
         }
-        const closed = await deps.sessionsService.closeSession(
-          id,
-          dto,
-        );
+        const closed = await deps.sessionsService.closeSession(id, dto);
         const row = closed as unknown as Record<string, any>;
         return {
           resumen: `${sessionLabel({ ...session, ...row })} cerrada con arqueo $${actual}.`,
           session_id: row.id ?? id,
           resultado: row,
-          ...(playbooksEnabled() &&
-          row.success !== false &&
+          ...(row.success !== false &&
           !row.error &&
           toPositiveInt(row.id) === id &&
           row.status === 'closed' &&
@@ -713,19 +707,16 @@ export function createCashRegisterTools(
             next_step: 'Lee la sesión activa con get_active_cash_session.',
           };
         }
-        const movement = await deps.movementsService.createManualMovement(
-          id,
-          {
-            type: args.type as 'cash_in' | 'cash_out',
-            amount,
-            ...(typeof args?.reference === 'string' && args.reference.trim()
-              ? { reference: args.reference.trim() }
-              : {}),
-            ...(typeof args?.notes === 'string' && args.notes.trim()
-              ? { notes: args.notes.trim() }
-              : {}),
-          },
-        );
+        const movement = await deps.movementsService.createManualMovement(id, {
+          type: args.type as 'cash_in' | 'cash_out',
+          amount,
+          ...(typeof args?.reference === 'string' && args.reference.trim()
+            ? { reference: args.reference.trim() }
+            : {}),
+          ...(typeof args?.notes === 'string' && args.notes.trim()
+            ? { notes: args.notes.trim() }
+            : {}),
+        });
         const row = movement as unknown as Record<string, any>;
         const kind = args.type === 'cash_in' ? 'Ingreso' : 'Egreso';
         return {

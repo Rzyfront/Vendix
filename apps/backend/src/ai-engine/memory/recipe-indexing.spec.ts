@@ -62,13 +62,9 @@ function setup() {
 }
 describe('F separate publication/index/retrieval namespaces', () => {
   beforeEach(() => {
-    process.env.AI_PROCEDURAL_MEMORY_ENABLED = 'true';
-    process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = 'true';
     process.env.AI_RECIPE_REVIEW_KEY = 'ab'.repeat(32);
   });
   afterEach(() => {
-    delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-    delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
     delete process.env.AI_RECIPE_REVIEW_KEY;
   });
   it('private embedding uses real positive scope, owner metadata and sanitized content; no B global docs', () =>
@@ -83,13 +79,10 @@ describe('F separate publication/index/retrieval namespaces', () => {
       expect(args[2]).toContain('"owner_user_id":11');
       expect(f.prisma.ai_knowledge_documents.upsert).not.toHaveBeenCalled();
     }));
-  it('candidate/unapproved and flagOFF never embeds or writes schema', () =>
+  it('candidate/unapproved never embeds or writes schema', () =>
     scoped(async () => {
       const f = setup();
       f.repo.live.mockResolvedValue(null);
-      expect(await f.indexer.indexRecipe(f.recipe)).toBe(false);
-      f.repo.live.mockResolvedValue(f.recipe);
-      delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
       expect(await f.indexer.indexRecipe(f.recipe)).toBe(false);
       expect(f.knowledge.generate).not.toHaveBeenCalled();
       expect(f.prisma.$executeRawUnsafe).not.toHaveBeenCalled();
@@ -149,14 +142,14 @@ describe('F separate publication/index/retrieval namespaces', () => {
       await expect(f.search.rankPrivateRecipes('cliente', [0])).rejects.toThrow(
         'RECIPE_SEARCH_IDS',
       );
-      delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-      expect(await f.search.rankPrivateRecipes('cliente', [41])).toEqual([]);
+
+      expect(await f.search.rankPrivateRecipes('cliente', [41])).toEqual([41]);
     });
   });
   it('global rank accepts only recipe docs passed by authorized service and F flag; no candidate by generic search', () =>
     scoped(async () => {
       const f = setup();
-      delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
+
       const doc = {
         key: 'recipe:workflow:1',
         name: 'recipe:41',
@@ -172,9 +165,9 @@ describe('F separate publication/index/retrieval namespaces', () => {
       expect(
         await f.search.rank('cliente', [doc], 'owner-sig', undefined, 'recipe'),
       ).toHaveProperty('names', ['recipe:41']);
-      delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
+
       expect(
         await f.search.rank('cliente', [doc], 'owner-sig', undefined, 'recipe'),
-      ).toHaveProperty('names', []);
+      ).toHaveProperty('names', ['recipe:41']);
     }));
 });

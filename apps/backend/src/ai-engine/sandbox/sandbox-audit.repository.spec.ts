@@ -122,6 +122,15 @@ describe('SandboxAuditRepository phase E', () => {
     );
   });
 
+  it('detects missing or invalid encryption keys without accessing storage', () => {
+    delete process.env.AI_SANDBOX_SOURCE_KEY;
+    expect(repository.sourceAvailable()).toBe(false);
+    process.env.AI_SANDBOX_SOURCE_KEY = 'not-a-key';
+    expect(repository.sourceAvailable()).toBe(false);
+    process.env.AI_SANDBOX_SOURCE_KEY = Buffer.alloc(32, 7).toString('base64');
+    expect(repository.sourceAvailable()).toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
   afterAll(() => {
     if (priorKey === undefined) delete process.env.AI_SANDBOX_SOURCE_KEY;
     else process.env.AI_SANDBOX_SOURCE_KEY = priorKey;

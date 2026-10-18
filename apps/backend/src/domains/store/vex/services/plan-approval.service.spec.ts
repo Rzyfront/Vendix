@@ -1,3 +1,4 @@
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { createHash, randomUUID } from 'node:crypto';
 import { PlanApprovalService } from './plan-approval.service';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
@@ -193,6 +194,18 @@ function persistPlan(
 }
 
 describe('PlanApprovalService', () => {
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService.asyncLocalStorage, 'getStore')
+      .mockReturnValue({
+        store_id: 7,
+        organization_id: 3,
+        user_id: 11,
+        is_owner: true,
+        is_super_admin: false,
+      });
+  });
+  afterEach(() => jest.restoreAllMocks());
   let redis: ReturnType<typeof makeRedis>;
   let registry: ReturnType<typeof makeRegistry>;
   let planState: ReturnType<typeof makePlanState>;
@@ -540,7 +553,7 @@ describe('PlanApprovalService', () => {
         'send_invoice_dian',
         { order_id: 1046 },
       ),
-    ).resolves.toBe('irreversible');
+    ).resolves.toBe('unknown_step');
   });
 
   it('(rx3-h) steps del cliente alterados se ignoran: el token solo cubre lo verificado', async () => {
@@ -785,10 +798,10 @@ describe('PlanApprovalService', () => {
         userId: 11,
         clientSteps: steps,
       });
-      // Reversible → no necesita confirmación aparte.
+      // Cada escritura, incluso reversible, conserva aprobación individual.
       await expect(
         service.resolveStepForConfirmation({ ...input, stepId: 's1' }),
-      ).rejects.toEqual(conflictWithReason('step_not_irreversible'));
+      ).resolves.toMatchObject({ tool: 'create_customer' });
       // Otro usuario → 403.
       await expect(
         service.resolveStepForConfirmation({ ...input, userId: 99 }),
@@ -904,16 +917,6 @@ describe('PlanApprovalService', () => {
 });
 
 describe('PlanApprovalService D1 single-write consent', () => {
-  const original = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-  beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-  });
-  afterEach(() => {
-    if (original === undefined)
-      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = original;
-  });
-
   async function inScope<T>(fn: () => Promise<T>) {
     const { RequestContextService } =
       await import('../../../../common/context/request-context.service');

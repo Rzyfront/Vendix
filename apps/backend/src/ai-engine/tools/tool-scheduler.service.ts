@@ -5,8 +5,6 @@ import {
 } from '../../common/context/request-context.service';
 import type { RegisteredTool } from './interfaces/tool.interface';
 
-export const parallelReadsEnabled = (): boolean =>
-  process.env.AI_PARALLEL_READS_ENABLED === 'true';
 export interface ScheduledToolCall {
   call_id: string;
   tool_name: string;
@@ -195,9 +193,7 @@ export class ToolSchedulerService {
       else {
         let release: (() => void) | undefined;
         try {
-          const safe =
-            parallelReadsEnabled() &&
-            this.parallelSafe(tool, deps, call.arguments);
+          const safe = this.parallelSafe(tool, deps, call.arguments);
           release = await this.acquire(
             {
               objective,
@@ -292,7 +288,6 @@ export class ToolSchedulerService {
     for (const call of calls) {
       const tool = tools.get(call.tool_name)!;
       if (
-        parallelReadsEnabled() &&
         this.parallelSafe(tool, dependencies.get(call.call_id)!, call.arguments)
       )
         parallel.push(call);

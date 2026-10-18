@@ -100,13 +100,10 @@ chat/stream parity, system overrides, multimodal content and grouped IDs. No liv
 provider call is needed for the contract; actual latency/cache hits need runtime
 measurements. See `docs/vex-agent-improvement-process.md` for the rollout gate.
 
-## H agentic transport and context budget (default OFF)
+## H agentic transport and context budget
 
-- `AI_AGENT_STREAMING_ENABLED === 'true'` selects `runAgentStream` inside the SAME
-  `AIAgentService` loop. It reuses run/runStream application messages/options,
-  subscription/rate gates and provider configuration; never call unmetered SDK
-  streaming from the loop. `runAgent` drains the same generator. No transport
-  fallback/retry after streamed content: that could pay/execute twice.
+- Autonomy capabilities are standard, without environment switches.
+
 - Before dispatch, `supportsAgentStreaming(appKey)` selects H only when the concrete
   provider declares metered streaming. Anthropic declares native support; OpenAI
   requires the explicit config acknowledgement below. Otherwise select buffered
@@ -141,8 +138,7 @@ measurements. See `docs/vex-agent-improvement-process.md` for the rollout gate.
   cost_measurement and billable. Cancellation estimates (configured prices + reserved
   input/output, integer microUSD) are explicitly ESTIMATED metadata, never billing or quota consumption.
   Missing pricing remains unknown. Cache tokens are not charged twice as fresh input.
-- Keep all H flags OFF until A/D0/B/D1/D2 deploy/bootstrap/QA gates pass; flags never
-  auto-enable prerequisites. No business-data cache, permission snapshot or approval
+- Preserve CI/bootstrap and authorized QA evidence as verification gates, not runtime switches. No business-data cache, permission snapshot or approval
   cache is introduced by prompt caching. Real warm/cold TTFT/context/cost comparisons
   require authorized provider runs, not synthetic fixtures or heartbeats.
 
@@ -192,3 +188,13 @@ Required steps:
 - `vendix-ai-streaming`
 - `vendix-subscription-gate`
 - `vendix-ai-chat`
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

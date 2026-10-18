@@ -14,7 +14,7 @@ import {
   AgentDurableSessionService,
   ObjectiveProgress,
 } from '../../../ai-engine/tasks/agent-durable-session.service';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
 import type {
   AgentResult,
@@ -628,10 +628,6 @@ export class AIChatService {
     signal?: AbortSignal,
     replay: ChatReplayRequest = {},
   ): AsyncGenerator<ChatStreamFrame> {
-    if (process.env.AI_AGENT_STREAMING_ENABLED !== 'true') {
-      yield* this.executeMessageStream(conversationId, streamId, signal);
-      return;
-    }
     // Revalidate owner, tenant, archive and Vex gates on EVERY attach, before
     // looking up transport frames. A cached frame never retains authorization.
     const context = RequestContextService.asyncLocalStorage.getStore();
@@ -723,12 +719,11 @@ export class AIChatService {
     // cotización recién creada). Esos turnos sí corren el loop.
     let continuationPlan: AgentPlan | null = null;
     if (intent.continuation) {
-      if (durableObjectivesEnabled() && intent.continuation === 'rejected')
+      if (intent.continuation === 'rejected')
         await this.planState.rejectPendingObjective(conversationId);
       continuationPlan = await this.planState.getActive(conversationId);
       const durableContinuation =
-        durableObjectivesEnabled() &&
-        (await this.durableSessions?.canContinue(conversationId));
+        await this.durableSessions?.canContinue(conversationId);
       if (
         !continuationPlan &&
         !durableContinuation &&
@@ -935,12 +930,9 @@ export class AIChatService {
         stream_id: streamId,
         plan: this.planState.createHook(conversation.id),
         shouldAbort: async () =>
-          (process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
-            signal?.aborted === true) ||
+          signal?.aborted === true ||
           !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
-        ...(process.env.AI_AGENT_STREAMING_ENABLED === 'true'
-          ? { signal }
-          : {}),
+        ...{ signal },
         ...durableArgs,
       });
 
@@ -984,7 +976,7 @@ export class AIChatService {
       toolsUsed = result.tools_used;
       execution = result.execution;
       objective = result.objective;
-      if (process.env.AI_AGENT_STREAMING_ENABLED === 'true' && !doneChunk) {
+      if (!doneChunk) {
         // H can be enabled independently of D0/D1. The legacy loop sometimes
         // returns on cancellation without yielding done; do not leave clients
         // reconnecting forever after persistence. No invented usage/success.
@@ -994,11 +986,7 @@ export class AIChatService {
           ...(objective ? { objective } : {}),
         };
       }
-      if (
-        process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
-        result.aborted &&
-        !fullContent
-      ) {
+      if (result.aborted && !fullContent) {
         // Cancelling transport is not rollback. Persist an honest terminal turn
         // even when the durable wrapper suppressed all buffered model prose.
         fullContent =
@@ -1066,12 +1054,14 @@ export class AIChatService {
         intent.speak,
       );
 
-      const completionStream =
-        process.env.AI_AGENT_STREAMING_ENABLED === 'true'
-          ? this.aiEngine.runStream(appKey, undefined, contextMessages, {
-              signal,
-            })
-          : this.aiEngine.runStream(appKey, undefined, contextMessages);
+      const completionStream = this.aiEngine.runStream(
+        appKey,
+        undefined,
+        contextMessages,
+        {
+          signal,
+        },
+      );
       for await (const chunk of completionStream) {
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
@@ -1122,8 +1112,9 @@ export class AIChatService {
     if (
       fullContent ||
       vexMetadata ||
-      (process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
-        (execution || objective || toolsUsed.length > 0))
+      execution ||
+      objective ||
+      toolsUsed.length > 0
     ) {
       // La propuesta no entra en `tool_calls`: la rama de confirmación del
       // bucle sale por `continue` sin registrarla como herramienta usada.
@@ -1132,9 +1123,7 @@ export class AIChatService {
       // propuesta idéntica en vez de señalar la que ya está en pantalla.
       // Convive con los bloques/plan de Vex en el mismo objeto.
       const metadata = {
-        ...(process.env.AI_AGENT_STREAMING_ENABLED === 'true'
-          ? { stream_id: streamId }
-          : {}),
+        ...{ stream_id: streamId },
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
         ...(execution ? { execution } : {}),
@@ -1165,11 +1154,7 @@ export class AIChatService {
                 // the loop. A string prefix here would corrupt JSON and discard
                 // artifact refs when the conversation is reopened. No sink means
                 // keeping full data, not inventing a complete truncated result.
-                result:
-                  process.env.AI_AGENT_STREAMING_ENABLED === 'true' ||
-                  process.env.AI_TOOL_RESULT_COMPACTION_ENABLED === 'true'
-                    ? tool.result
-                    : tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
+                result: tool.result,
                 ...(tool.execution ? { execution: tool.execution } : {}),
               })) as unknown as Prisma.InputJsonValue)
             : undefined,
@@ -1575,7 +1560,6 @@ export class AIChatService {
     base: { plan_approval?: AgentPlanApprovalHook },
     options: { speak?: boolean; continuation?: boolean } = {},
   ) {
-    if (!durableObjectivesEnabled()) return {};
     if (!this.durableSessions)
       throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
     if (agentKey === VEX_AGENT_KEY && !base.plan_approval)

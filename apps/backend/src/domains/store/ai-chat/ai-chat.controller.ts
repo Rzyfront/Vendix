@@ -96,9 +96,7 @@ export class AIChatController {
     return this.responseService.success(
       {
         stream_id: streamId,
-        ...(process.env.AI_AGENT_STREAMING_ENABLED === 'true'
-          ? { replay_enabled: true }
-          : {}),
+        ...{ replay_enabled: true },
       },
       'Stream ready',
     );

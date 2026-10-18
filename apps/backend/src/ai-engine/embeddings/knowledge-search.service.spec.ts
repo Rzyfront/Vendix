@@ -11,7 +11,6 @@ const doc = (name: string, description: string) =>
   });
 const vector = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
 describe('KnowledgeSearchService B', () => {
-  const env = process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
   let raw: jest.Mock;
   let transaction: jest.Mock;
   let embeddings: any;
@@ -28,7 +27,6 @@ describe('KnowledgeSearchService B', () => {
     embedding_fingerprint: 'model-v1',
   }));
   beforeEach(() => {
-    process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = 'true';
     raw = jest.fn(async (sql: string) =>
       sql.includes('document_key') ? ready : [{ id: 1 }, { id: 2 }],
     );
@@ -46,10 +44,7 @@ describe('KnowledgeSearchService B', () => {
       embeddings,
     );
   });
-  afterAll(() => {
-    if (env === undefined) delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    else process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED = env;
-  });
+  afterAll(() => {});
   it('uses authorized global IDs only, explicit namespaces and parameterized PostgreSQL lexical/vector branches', async () => {
     const query = `café'); SELECT secreto --`;
     const result = await service.rank(query, docs.slice(0, 1), 'tenant1');
@@ -146,24 +141,15 @@ describe('KnowledgeSearchService B', () => {
       time.mockRestore();
     }
   });
-  it('does not read DB or providers with flags OFF', async () => {
-    delete process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED;
-    expect((await service.rank('café', docs, 's')).names[0]).toBe(
-      'find_coffee',
-    );
-    expect(transaction).not.toHaveBeenCalled();
-    expect(embeddings.configuration).not.toHaveBeenCalled();
-  });
+
   it('uses exact canonical/alias fast path with zero DB or embedding calls', async () => {
     const result = await service.rank('find_coffee', docs, 's');
     expect(result.names[0]).toBe('find_coffee');
     expect(transaction).not.toHaveBeenCalled();
     expect(embeddings.configuration).not.toHaveBeenCalled();
   });
-  it('C process retrieval binds its type separately and cannot read persisted docs after OFF', async () => {
-    const savedC = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+  it('process retrieval binds its type separately', async () => {
     try {
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
       const processDoc = {
         ...docs[0],
         key: 'process:reponer:1:steps',
@@ -187,21 +173,7 @@ describe('KnowledgeSearchService B', () => {
       expect(raw.mock.calls[1][3]).toBe('process');
       expect(raw.mock.calls[2][4]).toBe('process');
       expect(raw.mock.calls[2][0]).toContain('e.entity_type = d.entity_type');
-      raw.mockClear();
-      delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      expect(
-        await service.rank(
-          'necesito abastecer café',
-          [processDoc],
-          'scope',
-          undefined,
-          'process',
-        ),
-      ).toMatchObject({ names: [], degraded: ['playbooks_disabled'] });
-      expect(raw).not.toHaveBeenCalled();
     } finally {
-      if (savedC === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      else process.env.AI_AGENT_PLAYBOOKS_ENABLED = savedC;
     }
   });
 });

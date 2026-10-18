@@ -22,11 +22,7 @@ const context = {
 };
 const run = <T>(work: () => T) =>
   RequestContextService.runIsolated(context, work);
-const flags = [
-  'AI_VOICE_CONFIRM_ENABLED',
-  'AI_DURABLE_OBJECTIVES_ENABLED',
-  'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-];
+
 const capture = {
   dedicated: true,
   foreground: true,
@@ -219,15 +215,6 @@ async function fixture(agentKey: 'vex' | 'vexi' = 'vexi') {
   };
 }
 describe('G REAL consent -> existing apply -> D1 receipt offline', () => {
-  const saved = flags.map((k) => process.env[k]);
-  beforeEach(() => flags.forEach((k) => (process.env[k] = 'true')));
-  afterEach(() =>
-    flags.forEach((k, i) =>
-      saved[i] === undefined
-        ? delete process.env[k]
-        : (process.env[k] = saved[i]),
-    ),
-  );
   it('exact server phrase applies once and TTS failure preserves applied text', () =>
     run(async () => {
       const f = await fixture();
@@ -469,15 +456,5 @@ describe('G REAL consent -> existing apply -> D1 receipt offline', () => {
       expect(result).toEqual({ text: 'sí' });
       expect(f.mutation).not.toHaveBeenCalled();
       expect(f.authority.prepareAuthority).toHaveBeenCalledWith(5, 'vex');
-    }));
-  it('all G controls OFF retain no new capability or implicit dependencies', () =>
-    run(async () => {
-      const f = await fixture();
-      delete process.env.AI_VOICE_CONFIRM_ENABLED;
-      expect(f.host.capability().enabled).toBe(false);
-      await expect(
-        f.host.session({ conversation_id: 5, agent_key: 'vexi' }),
-      ).rejects.toBeDefined();
-      expect(f.mutation).not.toHaveBeenCalled();
     }));
 });

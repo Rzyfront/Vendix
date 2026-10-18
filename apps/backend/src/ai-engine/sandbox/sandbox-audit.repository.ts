@@ -203,6 +203,15 @@ function redactUsage(usage: Record<string, unknown>): Record<string, unknown> {
  */
 @Injectable()
 export class SandboxAuditRepository {
+  sourceAvailable(): boolean {
+    try {
+      sourceKey().fill(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   private validId(id: string): void {

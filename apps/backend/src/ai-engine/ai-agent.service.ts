@@ -1,31 +1,17 @@
 import { ProceduralMemoryService } from './memory/procedural-memory.service';
-import {
-  RecipeSession,
-  proceduralMemoryEnabled,
-} from './memory/recipe.interface';
-import {
-  compactRecoverableToolResult,
-  toolResultCompactionEnabled,
-} from './context/tool-result-compaction';
-import {
-  sandboxEnabled,
-  sandboxStoreEnabled,
-} from './sandbox/interfaces/sandbox-protocol.interface';
+import { RecipeSession } from './memory/recipe.interface';
+import { compactRecoverableToolResult } from './context/tool-result-compaction';
+
 import {
   publicSandboxArgs,
   sandboxInvocation,
 } from './sandbox/sandbox-invocation.context';
-import {
-  agentStreamingEnabled,
-  streamAgentInference,
-} from './context/agent-stream-inference';
+import { streamAgentInference } from './context/agent-stream-inference';
 import { historicalAssistantProse } from './context/agent-context-budget';
 import {
-  robustExecutionEnabled,
-  parallelReadsEnabled,
   maximumRecoveryReplans,
   maximumCatalogExpansions,
-} from './tasks/agent-execution-flags';
+} from './tasks/agent-recovery-limits';
 import {
   AgentDeadline,
   agentDeadlineContext,
@@ -56,14 +42,12 @@ import {
   ToolRoutingSession,
 } from './tools/tool-router.service';
 import { PlaybookService, PlaybookSession } from './playbooks/playbook.service';
-import { playbooksEnabled } from './playbooks/playbook-loader.service';
-import { toolRoutingEnabled } from './tools/tool-catalog';
+
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import {
   AgentExecutionSummary,
   ToolExecutionReceipt,
   ToolExecutionResult,
-  toolExecutionContractEnabled,
 } from './tools/interfaces/tool.interface';
 import {
   countsAsToolSuccess,
@@ -94,7 +78,6 @@ import {
 import {
   AIToolDefinition,
   AIMessage,
-  AIResponse,
   AIStreamChunk,
 } from './interfaces/ai-provider.interface';
 
@@ -161,16 +144,6 @@ const AGENT_TIMEOUT_CEILING_MS = 600_000;
  * is respected instead of forced up to a fixed constant.
  */
 const SUPERADMIN_MAX_ITERATIONS = 60;
-
-/**
- * Tool results longer than this never travel to the model in full: they are
- * compacted to `{summary, block_id, rows}` and the complete payload is kept
- * server-side as a block when a sink is present (step 5 of the Vex plan).
- */
-const TOOL_RESULT_COMPACT_CHARS = 6000;
-
-/** Head of a compacted result shown to the model as its summary. */
-const COMPACT_SUMMARY_CHARS = 600;
 
 export interface AgentRunParams {
   goal: string;
@@ -518,7 +491,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `VEX_TOKENS_CONSUMED failed for store=${storeId}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
+        `VEX_TOKENS_CONSUMED failed for store=${storeId}: REDACTED_ERROR`,
       );
     }
   }
@@ -589,7 +562,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `AI_TOOLS_GATE lookup failed for store=${storeId}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
+        `AI_TOOLS_GATE lookup failed for store=${storeId}: REDACTED_ERROR`,
       );
       return failClosed ? new Set() : null;
     }
@@ -638,7 +611,7 @@ export class AIAgentService {
       );
     } catch (err) {
       this.logger.warn(
-        `AI_TOOL_CONSUMED failed for store=${storeId} tool=${toolName}: ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
+        `AI_TOOL_CONSUMED failed for store=${storeId} tool=${toolName}: REDACTED_ERROR`,
       );
     }
   }
@@ -930,7 +903,7 @@ export class AIAgentService {
     artifactId?: string,
     toolArgs?: Record<string, unknown>,
   ): Promise<string> {
-    if (toolResultCompactionEnabled()) {
+    {
       const originalReceipt = normalizeToolResult(result, {
         write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
       });
@@ -979,7 +952,7 @@ export class AIAgentService {
         },
       });
       if (compacted === result) return result;
-      if (toolExecutionContractEnabled() || params.durable) {
+      {
         const normalized = normalizeToolResult(result, {
           write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
         });
@@ -990,86 +963,7 @@ export class AIAgentService {
           next_action: JSON.parse(compacted).next_step,
         });
       }
-      return compacted;
     }
-    // Vex-only: its 40-iteration turns over the full catalog are the ones that
-    // drown in 100KB query results. Vexi keeps full results — its trace,
-    // transcript and model all predate compaction and behave unchanged.
-    if (params.agent_key !== 'vex' && !params.durable) return result;
-    if (result.length <= TOOL_RESULT_COMPACT_CHARS) return result;
-    let rows: number | null = null;
-    try {
-      const parsed: unknown = JSON.parse(result);
-      const rowsOf = (v: unknown): unknown[] | null => {
-        if (Array.isArray(v)) return v;
-        if (v && typeof v === 'object') {
-          const o = v as Record<string, unknown>;
-          for (const key of ['rows', 'data', 'items', 'results']) {
-            if (Array.isArray(o[key])) return o[key] as unknown[];
-          }
-          const data = o.data;
-          if (data && typeof data === 'object' && !Array.isArray(data)) {
-            for (const key of ['rows', 'items', 'results']) {
-              const nested = (data as Record<string, unknown>)[key];
-              if (Array.isArray(nested)) return nested;
-            }
-          }
-        }
-        return null;
-      };
-      const found = rowsOf(parsed);
-      if (found) rows = found.length;
-    } catch {
-      // Not JSON: no row count, still compacted.
-    }
-    let blockId: string | null = null;
-    if (params.block_sink && params.conversation_id) {
-      try {
-        blockId = await params.block_sink.save({
-          conversation_id: params.conversation_id,
-          kind: 'markdown',
-          spec: { title: `Resultado de ${toolName}`, source_tool: toolName },
-          data: { text: result },
-        });
-      } catch (err) {
-        this.logger.warn(
-          `Compaction sink failed for tool "${toolName}": ${this.trace?.isEnabled() ? 'REDACTED_ERROR' : (err as Error).message}`,
-        );
-      }
-    }
-    const compacted = {
-      summary: result.slice(0, COMPACT_SUMMARY_CHARS),
-      block_id: blockId,
-      ...(artifactId && params.durable
-        ? {
-            artifact_ref: {
-              objective_id: params.durable.objective_id,
-              result_id: artifactId,
-              path: `/store/${params.agent_key === 'vex' ? 'vex' : 'vexi'}/objectives/${params.durable.objective_id}/results/${artifactId}`,
-            },
-          }
-        : {}),
-      rows,
-      truncated: true,
-      next_step: blockId
-        ? 'El resultado completo quedó guardado en el bloque block_id: léelo por partes con vex_block_read en vez de repetir la consulta.'
-        : artifactId
-          ? 'El resultado completo está en artifact_ref: consulta su path con call_endpoint y sigue el cursor. No repitas la resolución de IDs.'
-          : 'El resultado venía truncado: refina la consulta si necesitas el resto.',
-    };
-    if (toolExecutionContractEnabled() || params.durable) {
-      const normalized = normalizeToolResult(result, {
-        write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
-        evidenceRef: blockId ? `block:${blockId}` : undefined,
-      });
-      return JSON.stringify({
-        ...toolReceipt(normalized),
-        data: compacted,
-        freshness: 'truncated',
-        next_action: compacted.next_step,
-      });
-    }
-    return JSON.stringify(compacted);
   }
 
   /**
@@ -1197,8 +1091,8 @@ export class AIAgentService {
         : undefined;
     const runLoop = (observe?: (outcome: AgentOutcome) => void) => {
       const loop = this.runAgentLoop(params, observe);
-      const semantic = toolExecutionContractEnabled() || !!params.durable;
-      const source = semantic ? withExecutionContract(loop) : loop;
+
+      const source = withExecutionContract(loop);
       return params.durable
         ? this.withDurableSession(source, params.durable)
         : source;
@@ -1282,12 +1176,12 @@ export class AIAgentService {
     session: AgentDurableSession,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     let done: AIStreamChunk | undefined;
-    const robust = robustExecutionEnabled();
+
     let textBuffered = false;
     try {
       let step = await source.next();
       while (!step.done) {
-        if (robust && step.value.type === 'text') {
+        if (step.value.type === 'text') {
           textBuffered = true;
           step = await source.next();
         } else if (step.value.type === 'done') {
@@ -1325,7 +1219,6 @@ export class AIAgentService {
         };
       }
       if (
-        robust &&
         result.objective.semantic_status !== 'completed_verified' &&
         (session.objective.plan || session.objective.requires_revalidation) &&
         !result.pending_confirmation &&
@@ -1337,12 +1230,7 @@ export class AIAgentService {
       ) {
         result.content = `Conservo el avance, pero faltan postcondiciones de servidor para dar este trabajo por terminado. ${session.objective.next_step ?? result.execution?.next_action ?? 'Consultaré el estado del registro antes de repetir cualquier cambio.'}`;
       }
-      if (
-        robust &&
-        (textBuffered || result.content) &&
-        result.content &&
-        !result.aborted
-      )
+      if ((textBuffered || result.content) && result.content && !result.aborted)
         yield { type: 'text', content: result.content };
       yield {
         ...(done ?? { type: 'done' as const }),
@@ -1408,15 +1296,7 @@ export class AIAgentService {
           allowed.push(d);
       }
     return allowed.filter(
-      (d) =>
-        (!['search_recipes', 'load_recipe'].includes(d.function.name) ||
-          (proceduralMemoryEnabled() && !!params.durable)) &&
-        (playbooksEnabled() ||
-          !['search_playbooks', 'load_playbook'].includes(d.function.name)) &&
-        (d.function.name !== 'run_readonly_script' ||
-          (sandboxEnabled() &&
-            sandboxStoreEnabled(context?.store_id) &&
-            !!params.durable)),
+      (d) => d.function.name !== 'run_readonly_script' || !!params.durable,
     );
   }
 
@@ -1425,10 +1305,10 @@ export class AIAgentService {
     observeOutcome: (outcome: AgentOutcome) => void = () => undefined,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     const activeTrace = this.trace?.currentSpan() ? this.trace : undefined;
-    const semantic = toolExecutionContractEnabled() || !!params.durable;
+
     const recovery = new ToolRecovery();
-    const robust = robustExecutionEnabled() && !!params.durable;
-    const hTransport = agentStreamingEnabled() && !!params.app_key;
+    const robust = !!params.durable;
+    const hTransport = !!params.app_key;
     // Decide before any provider dispatch. A compatible URL is not proof that
     // streaming usage is supported; unknown counters must not bypass token caps.
     const streaming =
@@ -1512,7 +1392,7 @@ export class AIAgentService {
           );
 
     const context = RequestContextService.getContext();
-    const routing = toolRoutingEnabled() && !!this.toolRouter;
+    const routing = !!this.toolRouter;
     let routingAuthority: AIToolDefinition[] = [];
     let routingSession: ToolRoutingSession | undefined;
     let playbookSession: PlaybookSession | undefined;
@@ -1601,15 +1481,7 @@ export class AIAgentService {
     }
 
     filteredTools = filteredTools.filter(
-      (d) =>
-        (!['search_recipes', 'load_recipe'].includes(d.function.name) ||
-          (proceduralMemoryEnabled() && !!params.durable)) &&
-        (playbooksEnabled() ||
-          !['search_playbooks', 'load_playbook'].includes(d.function.name)) &&
-        (d.function.name !== 'run_readonly_script' ||
-          (sandboxEnabled() &&
-            sandboxStoreEnabled(context?.store_id) &&
-            !!params.durable)),
+      (d) => d.function.name !== 'run_readonly_script' || !!params.durable,
     );
 
     if (routing) {
@@ -1636,7 +1508,7 @@ export class AIAgentService {
         }
     }
 
-    if (proceduralMemoryEnabled() && params.durable && this.proceduralMemory) {
+    if (params.durable && this.proceduralMemory) {
       const authority = await this.resolveRoutedAuthority(params);
       if (authority.some((d) => d.function.name === 'search_recipes'))
         recipeSession = this.proceduralMemory.createSession(
@@ -1645,7 +1517,7 @@ export class AIAgentService {
         );
     }
 
-    if (playbooksEnabled() && this.playbooks) {
+    if (this.playbooks) {
       const authority = routingSession
         ? routingAuthority
         : await this.resolveRoutedAuthority(params);
@@ -1805,7 +1677,7 @@ export class AIAgentService {
                     'Recarga la sección publicada por id, versión y hash conservados; el texto histórico no es instrucción vigente.',
                 }),
               }
-            : agentStreamingEnabled() && historicalAssistantProse(message)
+            : historicalAssistantProse(message)
               ? { ...message, context_retention: 'history' as const }
               : message,
         ),
@@ -2101,7 +1973,7 @@ export class AIAgentService {
         if (
           !streaming &&
           this.isEmptyCompletion(response) &&
-          (!semantic || Date.now() - startTime - waitedMs < timeoutMs)
+          Date.now() - startTime - waitedMs < timeoutMs
         ) {
           this.logger.warn(
             `Empty completion at iteration ${iteration}; retrying once`,
@@ -2128,8 +2000,7 @@ export class AIAgentService {
           }
         }
 
-        if ((semantic || hTransport) && !response.success)
-          totalTokens += response.usage?.totalTokens ?? 0;
+        if (!response.success) totalTokens += response.usage?.totalTokens ?? 0;
         if (!response.success) {
           yield { type: 'error', error: response.error || 'AI request failed' };
           return {
@@ -2139,9 +2010,7 @@ export class AIAgentService {
             total_tokens: totalTokens,
             success: false,
             error: response.error,
-            ...(semantic
-              ? { error_code: response.error_code ?? 'PROVIDER_FAILURE' }
-              : {}),
+            ...{ error_code: response.error_code ?? 'PROVIDER_FAILURE' },
           };
         }
 
@@ -2420,7 +2289,6 @@ export class AIAgentService {
             continue;
           }
           const safeBatch =
-            parallelReadsEnabled() &&
             calls.length > 1 &&
             calls.every((call) => {
               const tool = this.toolRegistry.get(call.tool_name);
@@ -2645,12 +2513,11 @@ export class AIAgentService {
                 toolArgs,
               ).ok;
             if (
-              (semantic || streaming) &&
-              (invalidStreamSchema ||
-                malformedArgs ||
-                !toolArgs ||
-                typeof toolArgs !== 'object' ||
-                Array.isArray(toolArgs))
+              invalidStreamSchema ||
+              malformedArgs ||
+              !toolArgs ||
+              typeof toolArgs !== 'object' ||
+              Array.isArray(toolArgs)
             ) {
               const normalized = normalizeToolResult({
                 error: 'Argumentos JSON inválidos.',
@@ -2704,7 +2571,7 @@ export class AIAgentService {
                   error_code: code,
                   next_step: next,
                 });
-                if (semantic && !authorized)
+                if (!authorized)
                   await observeResult(toolName, toolArgs, result);
                 toolOutcome = authorized ? 'failed' : 'blocked_permission';
                 toolErrorCode = code;
@@ -2720,7 +2587,7 @@ export class AIAgentService {
                     name: toolName,
                     summary: next,
                     failed: true,
-                    ...(semantic ? { execution: toolReceipt(result) } : {}),
+                    ...{ execution: toolReceipt(result) },
                   },
                 };
                 continue;
@@ -2922,7 +2789,7 @@ export class AIAgentService {
                     tools_used: toolsUsed,
                     total_tokens: totalTokens,
                     success: true,
-                    ...(semantic && toolName === 'ask_user'
+                    ...(toolName === 'ask_user'
                       ? { awaiting_input: true }
                       : {}),
                     ...(pendingPlan ? { pending_plan: pendingPlan } : {}),
@@ -2960,14 +2827,12 @@ export class AIAgentService {
               toolOutcome = 'blocked_permission';
               toolErrorCode = 'AI_AGENT_TOOL_NOT_ALLOWED';
               observeOutcome('blocked_permission');
-              const denied = semantic
-                ? normalizeToolResult({
-                    error: 'Catálogo no autorizado.',
-                    error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
-                    next_step:
-                      'Puedo preparar una consulta permitida o solicitar revisión al administrador.',
-                  })
-                : undefined;
+              const denied = normalizeToolResult({
+                error: 'Catálogo no autorizado.',
+                error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+                next_step:
+                  'Puedo preparar una consulta permitida o solicitar revisión al administrador.',
+              });
               if (denied) await observeResult(toolName, toolArgs, denied);
               const notAllowed =
                 `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
@@ -2994,7 +2859,7 @@ export class AIAgentService {
               continue;
             }
 
-            if (semantic && !parallelResults.has(toolCall.id)) {
+            if (!parallelResults.has(toolCall.id)) {
               const previousAttempts = recovery.attempts;
               let suppressed: ToolExecutionResult | null = null;
               if (robust) {
@@ -3098,7 +2963,7 @@ export class AIAgentService {
                 id: toolCall.id,
                 name: toolName,
                 arguments: publicSandboxArgs(toolName, toolArgs),
-                ...(semantic && this.toolRegistry.isClientSide(toolName)
+                ...(this.toolRegistry.isClientSide(toolName)
                   ? {
                       execution: toolReceipt(
                         normalizeToolResult(
@@ -3182,12 +3047,10 @@ export class AIAgentService {
                   note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos y NO llegó respuesta, así que no sabes si funcionó. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"), y ofrécele verificarlo. Si tu objetivo necesita más pasos, pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo cuyo resultado no viste.`,
                 });
 
-              const uiExecution = semantic
-                ? normalizeToolResult(resultPayload, {
-                    clientSide: true,
-                    evidenceRef: `tool_call:${toolCall.id}`,
-                  })
-                : undefined;
+              const uiExecution = normalizeToolResult(resultPayload, {
+                clientSide: true,
+                evidenceRef: `tool_call:${toolCall.id}`,
+              });
               if (uiExecution) {
                 durableResult = uiExecution;
                 toolOutcome = await observeResult(
@@ -3253,11 +3116,7 @@ export class AIAgentService {
               }
               const execute = async () => {
                 if (['search_recipes', 'load_recipe'].includes(toolName)) {
-                  if (
-                    !proceduralMemoryEnabled() ||
-                    !recipeSession ||
-                    !this.proceduralMemory
-                  )
+                  if (!recipeSession || !this.proceduralMemory)
                     return JSON.stringify({
                       error_code: 'RECIPE_SESSION_REQUIRED',
                       error: 'Receta no disponible; usa playbooks actuales.',
@@ -3290,14 +3149,9 @@ export class AIAgentService {
                   );
                 }
                 if (['search_playbooks', 'load_playbook'].includes(toolName)) {
-                  if (
-                    !playbooksEnabled() ||
-                    !playbookSession ||
-                    !this.playbooks
-                  )
+                  if (!playbookSession || !this.playbooks)
                     return JSON.stringify({
-                      error:
-                        'El proceso requiere una sesión vigente y flag activo.',
+                      error: 'El proceso requiere una sesión vigente.',
                       error_code: 'PLAYBOOK_SESSION_REQUIRED',
                       next_step: 'Usa las capacidades autorizadas actuales.',
                     });
@@ -3332,31 +3186,19 @@ export class AIAgentService {
                   return JSON.stringify(value);
                 }
                 const registryExecute = async () =>
-                  semantic
-                    ? JSON.stringify(
-                        await this.toolRegistry.executeToolResult(
-                          toolName,
-                          toolArgs,
-                          {
-                            evidenceRef: `tool_call:${toolCall.id}`,
-                            ...(process.env.AI_VOICE_CONFIRM_ENABLED ===
-                              'true' && params.conversation_id
-                              ? { conversationId: params.conversation_id }
-                              : {}),
-                          },
-                        ),
-                      )
-                    : process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
-                        params.conversation_id
-                      ? this.toolRegistry.executeTool(toolName, toolArgs, {
-                          conversationId: params.conversation_id,
-                        })
-                      : this.toolRegistry.executeTool(toolName, toolArgs);
-                if (
-                  toolName === 'run_readonly_script' &&
-                  sandboxEnabled() &&
-                  params.durable
-                ) {
+                  JSON.stringify(
+                    await this.toolRegistry.executeToolResult(
+                      toolName,
+                      toolArgs,
+                      {
+                        evidenceRef: `tool_call:${toolCall.id}`,
+                        ...(params.conversation_id
+                          ? { conversationId: params.conversation_id }
+                          : {}),
+                      },
+                    ),
+                  );
+                if (toolName === 'run_readonly_script' && params.durable) {
                   const durable = params.durable;
                   return sandboxInvocation.run(
                     {
@@ -3402,14 +3244,12 @@ export class AIAgentService {
                       ? activeTrace.run(toolSpan, meteredExecute)
                       : meteredExecute(),
                   );
-              const normalized = semantic
-                ? normalizeToolResult(raw, {
-                    write:
-                      this.toolRegistry.get(toolName)?.requiresConfirmation ===
-                      true,
-                    evidenceRef: `tool_call:${toolCall.id}`,
-                  })
-                : undefined;
+              const normalized = normalizeToolResult(raw, {
+                write:
+                  this.toolRegistry.get(toolName)?.requiresConfirmation ===
+                  true,
+                evidenceRef: `tool_call:${toolCall.id}`,
+              });
               durableResult = normalized ? { ...normalized } : undefined;
               let artifactId: string | undefined = parallelArtifacts.get(
                 toolCall.id,
@@ -3530,14 +3370,12 @@ export class AIAgentService {
                 // proposal: it is a refusal the model can still fix and retry.
                 if (!details?.confirmation_token) {
                   toolOutcome = 'failed';
-                  const rejected = semantic
-                    ? normalizeToolResult({
-                        error: payload.message,
-                        error_code: 'TOOL_PREVIEW_REJECTED',
-                        next_step:
-                          'Comprueba los datos o indica el requisito que falta. No hay un cambio pendiente de aprobación.',
-                      })
-                    : undefined;
+                  const rejected = normalizeToolResult({
+                    error: payload.message,
+                    error_code: 'TOOL_PREVIEW_REJECTED',
+                    next_step:
+                      'Comprueba los datos o indica el requisito que falta. No hay un cambio pendiente de aprobación.',
+                  });
                   if (rejected)
                     await observeResult(toolName, toolArgs, rejected);
                   messages.push({
@@ -3609,29 +3447,23 @@ export class AIAgentService {
                       toolArgs,
                     );
                     const apply = async () =>
-                      semantic
-                        ? JSON.stringify(
-                            await this.toolRegistry.executeToolResult(
-                              toolName,
-                              toolArgs,
-                              {
-                                confirmationToken: singleUse,
-                                evidenceRef: `tool_call:${toolCall.id}`,
-                              },
-                            ),
-                          )
-                        : this.toolRegistry.executeTool(toolName, toolArgs, {
+                      JSON.stringify(
+                        await this.toolRegistry.executeToolResult(
+                          toolName,
+                          toolArgs,
+                          {
                             confirmationToken: singleUse,
-                          });
+                            evidenceRef: `tool_call:${toolCall.id}`,
+                          },
+                        ),
+                      );
                     const appliedRaw = activeTrace
                       ? await activeTrace.run(toolSpan, apply)
                       : await apply();
-                    const normalizedApply = semantic
-                      ? normalizeToolResult(appliedRaw, {
-                          write: true,
-                          evidenceRef: `tool_call:${toolCall.id}`,
-                        })
-                      : undefined;
+                    const normalizedApply = normalizeToolResult(appliedRaw, {
+                      write: true,
+                      evidenceRef: `tool_call:${toolCall.id}`,
+                    });
                     durableResult = normalizedApply
                       ? { ...normalizedApply }
                       : undefined;
@@ -3762,16 +3594,14 @@ export class AIAgentService {
                       id: toolCall.id,
                       name: toolName,
                       summary: `Paso ${order} registrado en el plan.`,
-                      ...(semantic
-                        ? {
-                            execution: toolReceipt(
-                              normalizeToolResult(
-                                { requires_confirmation: true },
-                                { write: true },
-                              ),
-                            ),
-                          }
-                        : {}),
+                      ...{
+                        execution: toolReceipt(
+                          normalizeToolResult(
+                            { requires_confirmation: true },
+                            { write: true },
+                          ),
+                        ),
+                      },
                     },
                   };
                   continue;
@@ -3800,16 +3630,14 @@ export class AIAgentService {
                     id: toolCall.id,
                     name: toolName,
                     summary: 'Esperando confirmación del usuario.',
-                    ...(semantic
-                      ? {
-                          execution: toolReceipt(
-                            normalizeToolResult(
-                              { requires_confirmation: true },
-                              { write: true },
-                            ),
-                          ),
-                        }
-                      : {}),
+                    ...{
+                      execution: toolReceipt(
+                        normalizeToolResult(
+                          { requires_confirmation: true },
+                          { write: true },
+                        ),
+                      ),
+                    },
                   },
                 };
                 yield {
@@ -3827,9 +3655,7 @@ export class AIAgentService {
                 continue;
               }
 
-              const normalizedError = semantic
-                ? normalizeToolException(error)
-                : undefined;
+              const normalizedError = normalizeToolException(error);
               toolOutcome = normalizedError
                 ? await observeResult(toolName, toolArgs, normalizedError)
                 : 'failed';
@@ -4028,53 +3854,6 @@ export class AIAgentService {
       // exactly the pessimistic-but-human close the situation calls for.
       // Failing THAT, the fallback below is still a sentence, never an error.
       let closing = '';
-      if (!timedOut && !semantic && !streaming) {
-        messages.push({
-          role: 'user',
-          content:
-            'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo; si no, dile con naturalidad que no diste con lo que buscaba y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
-        });
-
-        try {
-          const closingSpan = activeTrace?.startSpan('closing_inference', {
-            round: iteration,
-          });
-          const close = async () =>
-            params.app_key
-              ? await this.aiEngine.run(
-                  params.app_key,
-                  params.variables,
-                  messages,
-                  {},
-                )
-              : params.config_id
-                ? await this.aiEngine.chatWith(params.config_id, messages, {})
-                : await this.aiEngine.chat(messages, {});
-
-          let lastCall: AIResponse | undefined;
-          try {
-            lastCall = activeTrace
-              ? await activeTrace.run(closingSpan, close)
-              : await close();
-          } catch (error) {
-            activeTrace?.endSpan(closingSpan, {
-              status: 'error',
-              error_code: 'AI_CLOSING_FAILED',
-            });
-            throw error;
-          } finally {
-            activeTrace?.endSpan(closingSpan, {
-              status: lastCall?.success ? 'ok' : 'error',
-            });
-          }
-          totalTokens += lastCall?.usage?.totalTokens ?? 0;
-          closing = (lastCall?.content ?? '').trim();
-        } catch (closingError: any) {
-          this.logger.warn(
-            `Agent closing turn failed: ${activeTrace ? 'CLOSING_ERROR' : (closingError?.message ?? 'unknown')}`,
-          );
-        }
-      }
 
       const content =
         closing ||
@@ -4091,7 +3870,7 @@ export class AIAgentService {
         total_tokens: totalTokens,
         success: true,
         pending_confirmation: pendingConfirmation,
-        ...(semantic ? { exhausted: true } : {}),
+        ...{ exhausted: true },
       };
     } catch (error: any) {
       if ((robust || hTransport) && isAgentAbort(error)) {

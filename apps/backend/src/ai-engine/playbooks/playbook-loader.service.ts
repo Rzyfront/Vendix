@@ -10,9 +10,6 @@ import {
   validatePlaybookCatalog,
 } from './playbook-validator';
 
-import { playbooksEnabled } from './playbook-flags';
-export { playbooksEnabled } from './playbook-flags';
-
 @Injectable()
 export class PlaybookLoaderService implements OnApplicationBootstrap {
   private documents: PlaybookDocument[] = [];
@@ -34,7 +31,6 @@ export class PlaybookLoaderService implements OnApplicationBootstrap {
    * depending on provider declaration order among parallel bootstrap hooks.
    */
   async initializeRelease(): Promise<void> {
-    if (!playbooksEnabled()) return;
     if (!this.initialization)
       this.initialization = Promise.resolve().then(() => this.readRelease());
     await this.initialization;
@@ -46,7 +42,6 @@ export class PlaybookLoaderService implements OnApplicationBootstrap {
   }
 
   getPlaybooks(): readonly PlaybookDocument[] {
-    if (!playbooksEnabled()) return [];
     if (!this.initialized) throw new Error('PLAYBOOK_BOOT_BARRIER');
     // Callers never receive mutable references into the release snapshot.
     return structuredClone(this.documents);

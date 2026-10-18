@@ -1,12 +1,27 @@
 # F — memoria procedimental revisada (OFF por defecto)
 
-## Alcance y frontera
+## Operación estándar de autonomía
 
-Implementación offline: no significa promoción, medición de ahorro ni QA real.
-`AI_PROCEDURAL_MEMORY_ENABLED=true` permite búsqueda/carga sólo en el loop textual
-Vex/Vexi con sesión D1; el servicio exige además C y D2. No activa dependencias.
-Voz STT que entra al mismo chat hereda el contrato textual; realtime/MCP sueltos
-reciben `RECIPE_SESSION_REQUIRED`. No nueva escritura ni permiso desde recetas.
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
+
+## Alcance y frontera
 
 Engram del equipo no participa en runtime. El factory `createProceduralRecipeTools`
 NO es `createRecipeTools` de recetas gastronómicas. No cambios mobile, proveedor,
@@ -88,7 +103,7 @@ Nunca reconstruir autoridad a partir de valores del JSON del modelo o del job.
   dos tiendas sintéticas y ambas familias soportadas (openai-compatible/anthropic-compatible,
   cuatro combinaciones). Nunca promover referencias o ejemplos privados por cambiar scope.
 - Retirar por `RecipeRepository.retire` (reason deprecated) desde mantenimiento autorizado
-  con scope visible, o flag OFF como freno inmediato. Sin eliminación histórica.
+  con scope visible. Ante incidentes usar el apagado general de Vex/Vexi. Sin eliminación histórica.
 
 TTL máximo inicial30d; `AI_RECIPE_REVIEW_TTL_DAYS` permite reducirlo (1–30). Expiración
 se excluye/quarantines al consultar. Renovar por evidencia humana NUEVA reviewed+approved

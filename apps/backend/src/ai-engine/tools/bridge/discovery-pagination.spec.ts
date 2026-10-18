@@ -5,11 +5,9 @@ import { CapabilityRegistryService } from './capability-registry.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 
 describe('B bridge/capability authorized pages', () => {
-  const saved = process.env.AI_TOOL_ROUTING_ENABLED;
   let catalog: ApiCatalogService;
   let tools: ReturnType<typeof createApiBridgeTools>;
   beforeEach(() => {
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       permissions: ['read'],
       access_token: 'synthetic-test-only',
@@ -43,8 +41,6 @@ describe('B bridge/capability authorized pages', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    if (saved === undefined) delete process.env.AI_TOOL_ROUTING_ENABLED;
-    else process.env.AI_TOOL_ROUTING_ENABLED = saved;
   });
   async function run(name: string, args: Record<string, unknown>) {
     return JSON.parse(
@@ -118,7 +114,7 @@ describe('B bridge/capability authorized pages', () => {
     expect(next.operaciones).toHaveLength(5);
     expect(next.operaciones[0].path).not.toBe(first.operaciones[0].path);
   });
-  it('pages real mocked GET results without issuing another verb or character-slicing data', async () => {
+  it('preserves complete GET payload before shared durable compaction without issuing another verb', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       text: async () =>
@@ -131,10 +127,9 @@ describe('B bridge/capability authorized pages', () => {
         }),
     } as any);
     const first = await run('call_endpoint', { path: 'store/things/00' });
-    expect(first.data).toHaveLength(3);
-    expect(first.source_total).toBe(99);
-    expect(first.has_more).toBe(true);
-    expect(first.complete).toBe(false);
+    expect(first.data).toHaveLength(20);
+    expect(first.meta.total).toBe(99);
+    expect(first).not.toHaveProperty('truncated');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
   });
   it('preserves HTTP200 business failure semantics instead of hiding them behind a data page', async () => {
@@ -144,22 +139,12 @@ describe('B bridge/capability authorized pages', () => {
       message: 'Consulta rechazada',
       data: [],
     };
-    jest
-      .spyOn(global, 'fetch')
-      .mockResolvedValue({
-        ok: true,
-        text: async () => JSON.stringify(body),
-      } as any);
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify(body),
+    } as any);
     expect(await run('call_endpoint', { path: 'store/things/00' })).toEqual(
       body,
     );
-  });
-  it('preserves legacy shapes and schemas with flag OFF', async () => {
-    delete process.env.AI_TOOL_ROUTING_ENABLED;
-    tools = createApiBridgeTools({ catalog, attachments: {} as any });
-    const result = await run('list_endpoints', { domain: 'things' });
-    expect(result.endpoints).toHaveLength(22);
-    expect(result).not.toHaveProperty('cursor');
-    expect(tools[0].parameters.properties).not.toHaveProperty('limit');
   });
 });

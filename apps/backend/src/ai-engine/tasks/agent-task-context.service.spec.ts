@@ -62,6 +62,7 @@ describe('AgentTaskContextService', () => {
       get,
       listResults,
       listEffects,
+      listPlaybookPins: jest.fn().mockResolvedValue([]),
     } as unknown as AgentObjectiveRepository);
   });
 
@@ -72,6 +73,7 @@ describe('AgentTaskContextService', () => {
         get,
         listResults,
         listEffects,
+        listPlaybookPins: jest.fn().mockResolvedValue([]),
       } as unknown as AgentObjectiveRepository);
       const restored = await reloaded.build(ID);
       const facts = JSON.parse(restored.context);

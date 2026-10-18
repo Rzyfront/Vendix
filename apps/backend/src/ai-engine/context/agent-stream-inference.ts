@@ -3,10 +3,6 @@ import type {
   AIStreamChunk,
 } from '../interfaces/ai-provider.interface';
 
-export function agentStreamingEnabled(): boolean {
-  return process.env.AI_AGENT_STREAMING_ENABLED === 'true';
-}
-
 /** Run one inference under the SAME durable meter as buffered calls. Provider
  * text is genuinely consumed incrementally, but is not a business fact: do not
  * expose an unverified "already changed" sentence before its tool result. */

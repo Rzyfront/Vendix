@@ -36,8 +36,6 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
   const asOwner = <T>(fn: () => T): T =>
     RequestContextService.runIsolated(owner, fn);
   beforeEach(() => {
-    previousFlag = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
     objective = {
       id: '11111111-1111-4111-8111-111111111111',
       conversation_id: 8,
@@ -51,31 +49,25 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
     };
     prisma = {
       ai_conversations: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 8,
-            metadata: { agent_key: 'vexi' },
-            status: 'active',
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 8,
+          metadata: { agent_key: 'vexi' },
+          status: 'active',
+        }),
       },
     };
     globalPrisma = {
       ai_agents: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({
-            is_active: true,
-            allowed_tools: ['*'],
-            denied_tools: [],
-          }),
+        findUnique: jest.fn().mockResolvedValue({
+          is_active: true,
+          allowed_tools: ['*'],
+          denied_tools: [],
+        }),
       },
       store_settings: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({
-            settings: { vexi: { enabled: true }, vex: { enabled: true } },
-          }),
+        findUnique: jest.fn().mockResolvedValue({
+          settings: { vexi: { enabled: true }, vex: { enabled: true } },
+        }),
       },
     };
     agent = {
@@ -104,9 +96,6 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    if (previousFlag === undefined)
-      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = previousFlag;
   });
 
   it('retains current intersect snapshot throughout awaited callback and restores original ALS', () =>
@@ -336,7 +325,7 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
       const consumeAIQuota = jest.fn();
       Object.assign(access, { consumeAIQuota });
       const current = await service.resolveAuthority(8, 'vexi');
-      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
+
       await service.recordResult(
         { ...current, objective_id: null },
         'get_product',

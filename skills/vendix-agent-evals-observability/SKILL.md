@@ -18,8 +18,8 @@ metadata:
 
 ## Safety contract
 
-- `AI_AGENT_TRACING_ENABLED` defaults OFF. Telemetry must not change prompts,
-  provider retry policies, authorization, confirmations or quota deduplication IDs.
+- Autonomy capabilities are standard, without environment switches.
+
 - Use explicit authenticated ALS scope, never the legacy static request-context
   fallback. System traces require a separate declared system purpose. No tenant
   API may expose system traces or another user's/store's evidence.
@@ -66,7 +66,7 @@ Missing usage/pricing is `null`/unknown, not free work. Preserve cache dimension
 
 Spans: proposed retention 14 days; aggregates 90 days. Cleanup requires a later
 bounded authorized job, never destructive SQL in a schema migration. Rollback:
-turn the flag OFF, preserve evidence/schema and pending approvals.
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 
 ## Related Skills
 
@@ -74,3 +74,13 @@ turn the flag OFF, preserve evidence/schema and pending approvals.
 - `vendix-ai-agent-tools` — execution and confirmation invariants.
 - `vendix-prisma-scopes` — tenant isolation and singleton registration.
 - `how-to-test`, `buildcheck-dev` — authorized verification and machine limits.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

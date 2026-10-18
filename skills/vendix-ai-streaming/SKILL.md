@@ -121,34 +121,6 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
 
 ## H safety, replay and recoverable results
 
-- Source transport: `AIEngineService.runAgentStream`, provider terminal contract
-  `providers/agent-stream-contract.ts`. `AI_AGENT_STREAMING_ENABLED` defaults OFF.
-  Engine yields actual text deltas, but agent-facing prose is NOT evidence: the loop
-  retains it until pending-write/durable verification guards run. Visible `progress`
-  is neutral server narration, separate from final answer and never persisted as
-  a completed business effect. Do NOT count the initial transport frame/heartbeat
-  as useful-business TTFT. A verified read/tool result or final answer is useful.
-- `ChatStreamReplay` is an ephemeral, bounded owner/store/org/conversation transport
-  buffer, NOT another durable task authority. Intent remains Redis single-use.
-  Intent response adds replay_enabled only H; frames add stream_id/sequence and
-  optional objective_id/checkpoint from D1. Reattach to SAME stream after_sequence;
-  never POST prompt again on H socket failure. Reject unknown/ahead/gapped cursors,
-  changed principal and expired/restarted worker; reconcile objective/transcript.
-- Every attach rechecks conversation/archive/Vex access; cached frames grant no
-  permissions. Replay suppresses cached approval/token frames and asks for canonical
-  reconciliation, since another tab may have consumed them. It never recreates
-  approval authority. Lost Vexi single-step cards may require explicit rejection/
-  reproposal; do not promise refresh restores a token that is not persisted.
-- Browser replay closes EventSource before retry, validates monotonic cursor,
-  fences callbacks from closed sockets, caps reconnects and never re-dispatches a
-  duplicate UI call. Teardown closes source/aborts cooperative H work; backend drains
-  to persist receipts/unknown effects. Aborting a write is NOT rollback. Status must
-  remain waiting/unknown where the receipt says so, never green/applied by inference.
-- `AI_TOOL_RESULT_COMPACTION_ENABLED` is a separate default-OFF switch. Shared helper
-  `context/tool-result-compaction.ts` persists full owner-scoped data FIRST (D1 result
-  or real Vex block); without persistence, returns raw. Bridge H preserves complete
-  body before loop compaction and does not repaginate a bounded artifact. It never
-  represents a JSON prefix as complete data or compacts reader output recursively.
 - Compact envelope has structural deterministic summary, IDs, source pagination,
   units/evidence refs and complete:false. Guards/proposals/errors remain intact.
   Readers return bounded pages with snapshot/query-bound cursor, total, has_more,
@@ -170,3 +142,13 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
 - `vendix-ai-chat`
 - `vendix-ai-agent-tools`
 - `vendix-notifications-system`
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

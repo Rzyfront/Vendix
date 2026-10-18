@@ -1,4 +1,3 @@
-import { playbooksEnabled } from '../playbooks/playbook-loader.service';
 import type { ActivePlaybookPin } from '../playbooks/playbook.service';
 import { Injectable } from '@nestjs/common';
 import { AgentObjectiveRepository } from './agent-objective.repository';
@@ -31,9 +30,7 @@ export class AgentTaskContextService {
       limit: options.max_results ?? 20,
     });
     const effects = await this.objectives.listEffects(id, 50);
-    const playbookPins = playbooksEnabled()
-      ? await this.objectives.listPlaybookPins(id)
-      : undefined;
+    const playbookPins = await this.objectives.listPlaybookPins(id);
     const maxChars = Math.max(512, Math.min(24000, options.max_chars ?? 8000));
     const now = Date.now();
     const entities = [...objective.entities]

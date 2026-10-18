@@ -1,15 +1,27 @@
 # D0 — resultados reales y cierre útil
 
+## Operación estándar de autonomía
+
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
+
 ## Alcance y activación
-
-Implementación opt-in sobre el loop compartido de Vex/Vexi. Único flag nuevo:
-`AI_TOOL_EXECUTION_CONTRACT_ENABLED=true`; ausente, `false`, `1` o cualquier otro
-valor lo dejan **OFF**. No se modificaron proveedor/modelo, configuración persistida,
-prompts de DB, cuotas comerciales, dependencias ni schema. No hay migración.
-
-`AI_AGENT_TRACING_ENABLED` de A es independiente y sigue OFF por defecto. Rollback:
-apagar D0; conservar propuestas, tokens y JSON histórico. Los lectores aceptan la
-metadata opcional sin exigir encender un flag en el navegador.
 
 Excepción mínima de copy: los dos fallbacks sin evidencia ya no piden reformular
 la solicitud, incluso en el camino legacy. No cambian su control de flujo, cuotas,
@@ -94,5 +106,5 @@ Reporte local: `/tmp/vendix-agentic-D0-offline-20261017.json`.
 ## Siguiente fase
 
 D0 deja las costuras listas para B, no lo implementa. Antes de promoción: revisión
-independiente, CI, pruebas runtime con flags ON/OFF, permisos/plan revocados,
+independiente, CI, pruebas runtime del comportamiento estándar, permisos/plan revocados,
 aprobación rechazada/replay, timeout de write, reload y aislamiento tenant.

@@ -8,10 +8,7 @@ import { AIToolRegistry } from '../tools/ai-tool-registry';
 import type { RegisteredTool } from '../tools/interfaces/tool.interface';
 import { createPlaybookTools } from '../tools/domains/playbook.tools';
 import { catalogHash } from '../tools/tool-catalog';
-import {
-  PlaybookLoaderService,
-  playbooksEnabled,
-} from './playbook-loader.service';
+import { PlaybookLoaderService } from './playbook-loader.service';
 import {
   PlaybookService,
   type PlaybookSession,
@@ -132,14 +129,12 @@ function document(id = 'reponer-inventario'): PlaybookDocument {
 }
 
 describe('PlaybookService C: knowledge is not authority', () => {
-  const oldFlag = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
   let registry: AIToolRegistry;
   let documents: PlaybookDocument[];
   let service: PlaybookService;
   let loader: { getPlaybooks: jest.Mock };
   let api: { find: jest.Mock };
   beforeEach(() => {
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
     registry = new AIToolRegistry({} as any);
     registry.registerMany([read(), write(), ...createPlaybookTools()]);
     documents = [
@@ -154,10 +149,7 @@ describe('PlaybookService C: knowledge is not authority', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
-  afterAll(() => {
-    if (oldFlag === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    else process.env.AI_AGENT_PLAYBOOKS_ENABLED = oldFlag;
-  });
+  afterAll(() => {});
   const session = (
     service: PlaybookService,
     registry: AIToolRegistry,
@@ -172,19 +164,6 @@ describe('PlaybookService C: knowledge is not authority', () => {
         ),
     });
 
-  it.each([undefined, 'false', 'TRUE', '1', ''])(
-    'defaults OFF for %s',
-    (value) => {
-      if (value === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      else process.env.AI_AGENT_PLAYBOOKS_ENABLED = value;
-      expect(playbooksEnabled()).toBe(false);
-      expect(
-        scoped(() =>
-          service.search(session(service, registry), { query: 'reponer' }),
-        ),
-      ).toMatchObject({ error_code: 'PLAYBOOKS_DISABLED' });
-    },
-  );
   it('search returns only matching titles/inputs/cost/availability, never bodies or steps', () =>
     scoped(() => {
       documents[1].name = 'Factura de venta';
@@ -344,7 +323,7 @@ describe('PlaybookService C: knowledge is not authority', () => {
         ],
       });
       expect(service.getActiveToolDependencies(handle)).toEqual([]);
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
+
       expect(service.getActiveToolDependencies(handle)).toEqual([]);
     }));
   it('prunes unauthorized structured steps plus transitive dependents and matching prose', () =>
@@ -477,18 +456,7 @@ describe('PlaybookService C: knowledge is not authority', () => {
       expect(result.section.steps.map((step) => step.id)).toEqual(['read']);
       expect(result.hash).toBe(pins[0].hash);
     }));
-  it('rollback OFF prevents a previously valid session from loading or searching', () =>
-    scoped(() => {
-      const handle = session(service, registry);
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
-      expect(
-        service.load(handle, { id: documents[0].id, version: '1' }),
-      ).toMatchObject({ error_code: 'PLAYBOOKS_DISABLED' });
-      expect(service.search(handle, { query: 'reponer' })).toMatchObject({
-        error_code: 'PLAYBOOKS_DISABLED',
-      });
-      expect(service.getKnowledgeManifest().documents).toEqual([]);
-    }));
+
   it('charges complete UTF8 JSON conservatively and never exceeds 2000 cumulative tokens per workflow', () =>
     scoped(() => {
       documents[0].sections[0].body = Array(700).fill('áéíóú 🚚').join('\n');
@@ -649,7 +617,7 @@ describe('PlaybookService C: knowledge is not authority', () => {
         degraded: ['knowledge_unavailable'],
       });
     }));
-  it('does not call hybrid retrieval when flag OFF or query invalid', async () =>
+  it('invalid query never calls hybrid retrieval', () =>
     scoped(async () => {
       const rank = jest.fn();
       service = new PlaybookService(
@@ -658,14 +626,9 @@ describe('PlaybookService C: knowledge is not authority', () => {
         api as any,
         { rank } as any,
       );
-      const handle = session(service, registry);
-      expect(await service.searchHybrid(handle, { query: '' })).toMatchObject({
-        error_code: 'PLAYBOOK_SEARCH_INVALID',
-      });
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
       expect(
-        await service.searchHybrid(handle, { query: 'café' }),
-      ).toMatchObject({ error_code: 'PLAYBOOKS_DISABLED' });
+        await service.searchHybrid(session(service, registry), { query: '' }),
+      ).toMatchObject({ error_code: 'PLAYBOOK_SEARCH_INVALID' });
       expect(rank).not.toHaveBeenCalled();
     }));
   it('never resurrects access changed while hybrid retrieval waits', async () =>
@@ -699,36 +662,7 @@ describe('PlaybookService C: knowledge is not authority', () => {
       });
       expect(await pending).toMatchObject({ results: [] });
     }));
-  it('discards a hybrid answer when C is disabled during its wait', async () =>
-    scoped(async () => {
-      let finish!: (value: {
-        names: string[];
-        degraded: string[];
-        cacheHit: boolean;
-      }) => void;
-      const rank = jest.fn(
-        () =>
-          new Promise((resolve) => {
-            finish = resolve;
-          }),
-      );
-      service = new PlaybookService(
-        loader as any,
-        registry,
-        api as any,
-        { rank } as any,
-      );
-      const pending = service.searchHybrid(session(service, registry), {
-        query: 'comprobante electrónico',
-      });
-      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'false';
-      finish({
-        names: ['facturar-venta:steps'],
-        degraded: [],
-        cacheHit: false,
-      });
-      expect(await pending).toMatchObject({ error_code: 'PLAYBOOKS_DISABLED' });
-    }));
+
   it('standalone MCP/voice handlers fail closed despite readOnly declarations', async () => {
     for (const tool of createPlaybookTools()) {
       expect(tool.readOnly).toBe(true);
@@ -743,12 +677,10 @@ describe('PlaybookService C: knowledge is not authority', () => {
 });
 
 describe('PlaybookLoaderService C: packaged release bootstrap', () => {
-  const flag = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
   let loader: PlaybookLoaderService;
   let registry: { getAll: jest.Mock };
   let api: { coveredPermissions: jest.Mock; listFor: jest.Mock };
   beforeEach(() => {
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
     registry = { getAll: jest.fn(() => [read(), write()]) };
     api = {
       coveredPermissions: jest.fn(() => new Set(['inventory:read'])),
@@ -759,10 +691,7 @@ describe('PlaybookLoaderService C: packaged release bootstrap', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
-  afterAll(() => {
-    if (flag === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    else process.env.AI_AGENT_PLAYBOOKS_ENABLED = flag;
-  });
+  afterAll(() => {});
   function assets() {
     jest.spyOn(fs, 'lstatSync').mockImplementation(
       (path) =>
@@ -826,15 +755,7 @@ describe('PlaybookLoaderService C: packaged release bootstrap', () => {
     ]);
     expect(validator.validatePlaybookCatalog).toHaveBeenCalledTimes(1);
   });
-  it('keeps OFF behavior free from filesystem, registry and API access', async () => {
-    delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    const spy = jest.spyOn(fs, 'readdirSync');
-    await loader.initializeRelease();
-    expect(loader.getPlaybooks()).toEqual([]);
-    expect(registry.getAll).not.toHaveBeenCalled();
-    expect(api.listFor).not.toHaveBeenCalled();
-    expect(spy).not.toHaveBeenCalled();
-  });
+
   it('fails explicitly for missing assets rather than resolving source checkout', async () => {
     jest.spyOn(fs, 'lstatSync').mockImplementation(() => {
       throw new Error('ENOENT');
@@ -846,12 +767,10 @@ describe('PlaybookLoaderService C: packaged release bootstrap', () => {
   });
   it('rejects symlinked assets', async () => {
     assets();
-    jest
-      .spyOn(fs, 'lstatSync')
-      .mockReturnValue({
-        isDirectory: () => true,
-        isSymbolicLink: () => true,
-      } as fs.Stats);
+    jest.spyOn(fs, 'lstatSync').mockReturnValue({
+      isDirectory: () => true,
+      isSymbolicLink: () => true,
+    } as fs.Stats);
     await expect(loader.initializeRelease()).rejects.toThrow(
       'PLAYBOOK_ASSETS_UNAVAILABLE',
     );

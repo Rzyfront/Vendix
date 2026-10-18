@@ -367,11 +367,7 @@ function invoice() {
 
 describe('AgentVerifierService server-only D2 evidence', () => {
   const env = { ...process.env };
-  beforeEach(() => {
-    process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED = 'true';
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
-  });
+
   afterEach(() => {
     process.env = { ...env };
   });
@@ -406,26 +402,6 @@ describe('AgentVerifierService server-only D2 evidence', () => {
         h.binding(),
       ),
     ).toBeNull();
-  });
-
-  it.each([
-    'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-    'AI_DURABLE_OBJECTIVES_ENABLED',
-  ])('default OFF kill switch %s dispatches nothing', async (flag) => {
-    delete process.env[flag];
-    const h = harness();
-    expect(
-      await run(() =>
-        h.service.verify(h.session, h.request(), {
-          assertToolAllowed: h.allowed,
-        }),
-      ),
-    ).toEqual({
-      verified: false,
-      reasons: ['robust_verification_disabled'],
-      evidence_refs: [],
-    });
-    expect(h.dispatched).toEqual([]);
   });
 
   it('unknown workflows/model-supplied observations cannot choose a verifier or close an objective', async () => {

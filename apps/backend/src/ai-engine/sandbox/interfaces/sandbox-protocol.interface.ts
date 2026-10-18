@@ -1,23 +1,6 @@
 import type { ToolExecutionResult } from '../../tools/interfaces/tool.interface';
 
-export const sandboxEnabled = (): boolean =>
-  process.env.AI_SANDBOX_ENABLED === 'true';
-
 /** Operator canary opt-in, empty by default. Never a tenant id supplied by guest. */
-export function sandboxStoreEnabled(storeId: number | undefined): boolean {
-  const raw = process.env.AI_SANDBOX_STORE_IDS ?? '';
-  const ids = raw.split(',').map((id) => id.trim());
-  if (
-    !storeId ||
-    !raw ||
-    ids.length > 100 ||
-    ids.some(
-      (id) => !/^[1-9][0-9]*$/.test(id) || !Number.isSafeInteger(Number(id)),
-    )
-  )
-    return false;
-  return ids.includes(String(storeId));
-}
 
 export interface SandboxLimits {
   wall_ms: number;

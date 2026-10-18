@@ -4,8 +4,6 @@ import type {
 } from '../playbooks/playbook.interface';
 import type { ObjectiveScope } from '../tasks/interfaces/agent-objective.interface';
 
-export const proceduralMemoryEnabled = (): boolean =>
-  process.env.AI_PROCEDURAL_MEMORY_ENABLED === 'true';
 export const RECIPE_POLICY_VERSION =
   'declarative-f1-fresh-inputs-individual-approval';
 export type RecipeStatus =

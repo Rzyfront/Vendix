@@ -3,15 +3,6 @@ import { OpenAICompatibleProvider } from './openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './anthropic-compatible.provider';
 
 describe('D0 provider failure metadata without another retry layer', () => {
-  const original = process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
-  beforeEach(() => {
-    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
-  });
-  afterEach(() => {
-    if (original === undefined)
-      delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
-    else process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = original;
-  });
   it.each([
     { status: 429 },
     { status: 503 },
@@ -28,10 +19,7 @@ describe('D0 provider failure metadata without another retry layer', () => {
       providerFailureMetadata({ status: 401, message: '503 timeout' }),
     ).toEqual({ error_code: 'PROVIDER_FAILURE', retryable: false });
   });
-  it('OFF keeps provider failure responses byte-compatible', () => {
-    delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
-    expect(providerFailureMetadata({ status: 429 })).toEqual({});
-  });
+
   it.each(['openai', 'anthropic'])(
     '%s chat preserves actual transport classification and makes only one SDK dispatch here',
     async (family) => {

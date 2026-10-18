@@ -7,7 +7,6 @@ import {
   ToolSchedulerService,
   type ToolBatchInput,
   type ScheduledToolCall,
-  parallelReadsEnabled,
 } from './tool-scheduler.service';
 
 const context = (store_id = 1): RequestContext => ({
@@ -72,20 +71,18 @@ const run = <T>(
 
 describe('ToolSchedulerService bounded opt-in reads', () => {
   let scheduler: ToolSchedulerService;
-  const oldFlag = process.env.AI_PARALLEL_READS_ENABLED;
+
   const oldCap = process.env.AI_PARALLEL_READS_GLOBAL_CAP;
   const oldPool = process.env.DATABASE_POOL_MAX;
   const oldObjectiveCap = process.env.AI_PARALLEL_READS_OBJECTIVE_CAP;
   beforeEach(() => {
     scheduler = new ToolSchedulerService();
-    process.env.AI_PARALLEL_READS_ENABLED = 'true';
+
     delete process.env.AI_PARALLEL_READS_GLOBAL_CAP;
     delete process.env.DATABASE_POOL_MAX;
     delete process.env.AI_PARALLEL_READS_OBJECTIVE_CAP;
   });
   afterEach(() => {
-    if (oldFlag === undefined) delete process.env.AI_PARALLEL_READS_ENABLED;
-    else process.env.AI_PARALLEL_READS_ENABLED = oldFlag;
     if (oldCap === undefined) delete process.env.AI_PARALLEL_READS_GLOBAL_CAP;
     else process.env.AI_PARALLEL_READS_GLOBAL_CAP = oldCap;
     if (oldPool === undefined) delete process.env.DATABASE_POOL_MAX;
@@ -471,26 +468,7 @@ describe('ToolSchedulerService bounded opt-in reads', () => {
       expect(max).toBe(1);
     },
   );
-  it('defaults OFF and only literal true enables concurrency', async () => {
-    delete process.env.AI_PARALLEL_READS_ENABLED;
-    expect(parallelReadsEnabled()).toBe(false);
-    process.env.AI_PARALLEL_READS_ENABLED = 'TRUE';
-    expect(parallelReadsEnabled()).toBe(false);
-    const gate = deferred();
-    let active = 0;
-    const promise = run(scheduler, {
-      execute: async () => {
-        active++;
-        await gate.promise;
-        active--;
-        return 'ok';
-      },
-    });
-    await tick();
-    expect(active).toBe(1);
-    gate.resolve();
-    await promise;
-  });
+
   it('settles cancellation without waiting for non-cooperative handlers, retaining permits until their actual completion', async () => {
     const gate = deferred(),
       abort = new AbortController();
@@ -599,8 +577,8 @@ describe('ToolSchedulerService bounded opt-in reads', () => {
   });
   it('offline fake-clock fan-out fixture reduces eight independent reads from 800ms to 300ms (not provider/runtime benchmark)', async () => {
     jest.useFakeTimers();
-    const measure = async (enabled: boolean) => {
-      process.env.AI_PARALLEL_READS_ENABLED = String(enabled);
+    const measure = async (cap: string) => {
+      process.env.AI_PARALLEL_READS_OBJECTIVE_CAP = cap;
       const start = Date.now();
       const promise = run(new ToolSchedulerService(), {
         execute: async (call) => {
@@ -613,8 +591,8 @@ describe('ToolSchedulerService bounded opt-in reads', () => {
       await promise;
       return Date.now() - start;
     };
-    const serial = await measure(false),
-      parallel = await measure(true);
+    const serial = await measure('1'),
+      parallel = await measure('3');
     expect(serial).toBe(800);
     expect(parallel).toBe(300);
     expect(parallel).toBeLessThanOrEqual(serial * 0.7);

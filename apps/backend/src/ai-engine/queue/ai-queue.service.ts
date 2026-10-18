@@ -1,7 +1,4 @@
-import {
-  proceduralMemoryEnabled,
-  RecipeMiningJob,
-} from '../memory/recipe.interface';
+import { RecipeMiningJob } from '../memory/recipe.interface';
 import { catalogHash } from '../tools/tool-catalog';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -91,7 +88,7 @@ export class AIQueueService {
   }
 
   async enqueueRecipeMining(params: RecipeMiningJob): Promise<void> {
-    if (!proceduralMemoryEnabled() || !this.recipeQueue) return;
+    if (!this.recipeQueue) return;
     // Identity only. No goal, args, trace text, results or bearer in Redis.
     await this.recipeQueue.add(
       'mine-recipe',
@@ -117,7 +114,7 @@ export class AIQueueService {
     organization_id?: number;
     user_id?: number;
   }): Promise<void> {
-    if (!proceduralMemoryEnabled() || !this.recipeQueue) return;
+    if (!this.recipeQueue) return;
     await this.recipeQueue.add('index-recipe', params, {
       jobId: `recipe-index-${catalogHash(params)}`,
       attempts: 2,

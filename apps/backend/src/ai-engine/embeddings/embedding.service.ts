@@ -1,12 +1,25 @@
-import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 import { AIEngineService } from '../ai-engine.service';
 import { RequestContextService } from '../../common/context/request-context.service';
-import { BUSINESS_TYPES, KNOWLEDGE_TYPES, KnowledgeType, knowledgeIndexEnabled, toolRoutingEnabled } from '../tools/tool-catalog';
-import { KnowledgeEmbeddingService, assertKnowledgeVector } from './knowledge-embedding.service';
+import {
+  BUSINESS_TYPES,
+  KNOWLEDGE_TYPES,
+  KnowledgeType,
+} from '../tools/tool-catalog';
+import {
+  KnowledgeEmbeddingService,
+  assertKnowledgeVector,
+} from './knowledge-embedding.service';
 
 export interface StoreEmbeddingParams {
   store_id: number;
@@ -48,7 +61,8 @@ export class EmbeddingService {
     // AIEngineService. Plain injection would not resolve at boot.
     @Inject(forwardRef(() => AIEngineService))
     private readonly aiEngine: AIEngineService,
-    @Optional() private readonly knowledgeEmbeddings?: KnowledgeEmbeddingService,
+    @Optional()
+    private readonly knowledgeEmbeddings?: KnowledgeEmbeddingService,
   ) {
     this.initializeOpenAI();
   }
@@ -81,9 +95,7 @@ export class EmbeddingService {
       this.configService.get<string>('EMBEDDING_APP_KEY') ||
       process.env.EMBEDDING_APP_KEY;
     const appKey = raw?.trim();
-    return (
-      appKey || EmbeddingService.DEFAULT_EMBEDDING_APP_KEY
-    );
+    return appKey || EmbeddingService.DEFAULT_EMBEDDING_APP_KEY;
   }
 
   /**
@@ -193,16 +205,18 @@ export class EmbeddingService {
       this.logger.error(
         `Embedding generation via app failed: ${error?.message}`,
       );
-      throw new VendixHttpException(
-        ErrorCodes.AI_EMBED_001,
-        error?.message,
-      );
+      throw new VendixHttpException(ErrorCodes.AI_EMBED_001, error?.message);
     }
   }
 
   async storeEmbedding(params: StoreEmbeddingParams): Promise<void> {
     this.assertStoreIds(params.store_id, params.organization_id);
-    if (!BUSINESS_TYPES.includes(params.entity_type as typeof BUSINESS_TYPES[number])) throw new Error('INVALID_BUSINESS_ENTITY');
+    if (
+      !BUSINESS_TYPES.includes(
+        params.entity_type as (typeof BUSINESS_TYPES)[number],
+      )
+    )
+      throw new Error('INVALID_BUSINESS_ENTITY');
     try {
       const embedding = await this.generateEmbedding(params.content);
       const embeddingStr = `[${embedding.join(',')}]`;
@@ -236,79 +250,98 @@ export class EmbeddingService {
   async searchSimilar(
     params: SimilaritySearchParams,
   ): Promise<SimilarityResult[]> {
-    const organizationId = params.organization_id ?? RequestContextService.asyncLocalStorage.getStore()?.organization_id;
+    const organizationId =
+      params.organization_id ??
+      RequestContextService.asyncLocalStorage.getStore()?.organization_id;
     this.assertStoreIds(params.store_id, organizationId);
-    const entityTypes = params.entity_types?.length ? params.entity_types : [...BUSINESS_TYPES];
-    if (entityTypes.some((type) => !BUSINESS_TYPES.includes(type as typeof BUSINESS_TYPES[number]))) throw new Error('INVALID_BUSINESS_ENTITY');
-    if (toolRoutingEnabled() || knowledgeIndexEnabled()) {
+    const entityTypes = params.entity_types?.length
+      ? params.entity_types
+      : [...BUSINESS_TYPES];
+    if (
+      entityTypes.some(
+        (type) =>
+          !BUSINESS_TYPES.includes(type as (typeof BUSINESS_TYPES)[number]),
+      )
+    )
+      throw new Error('INVALID_BUSINESS_ENTITY');
+    {
       return this.searchStoreNamespace(params, organizationId!, entityTypes);
-    }
-    try {
-      const embeddingStr = `[${params.query_embedding.join(',')}]`;
-      const limit = params.limit || 5;
-      const minSimilarity = params.min_similarity || 0.3;
-
-      const results = await this.prisma.$queryRawUnsafe<SimilarityResult[]>(
-        `
-        SELECT
-          id,
-          entity_type,
-          entity_id,
-          content,
-          metadata,
-          1 - (embedding <=> $1::vector) as similarity
-        FROM ai_embeddings
-        WHERE store_id = $2 AND organization_id = $6
-          AND entity_type = ANY($3::text[])
-          AND embedding IS NOT NULL
-          AND 1 - (embedding <=> $1::vector) > $4
-        ORDER BY embedding <=> $1::vector
-        LIMIT $5
-      `,
-        embeddingStr,
-        params.store_id,
-        entityTypes,
-        minSimilarity,
-        limit,
-        organizationId,
-      );
-      return results;
-    } catch (error: any) {
-      this.logger.error(`Similarity search failed: ${error.message}`);
-      throw new VendixHttpException(ErrorCodes.AI_EMBED_003, error.message);
     }
   }
 
   private assertStoreIds(storeId: number, organizationId?: number): void {
-    if (!Number.isSafeInteger(storeId) || storeId <= 0 || !Number.isSafeInteger(organizationId) || organizationId! <= 0) {
+    if (
+      !Number.isSafeInteger(storeId) ||
+      storeId <= 0 ||
+      !Number.isSafeInteger(organizationId) ||
+      organizationId! <= 0
+    ) {
       throw new Error('POSITIVE_TENANT_CONTEXT_REQUIRED');
     }
   }
 
-  private async searchStoreNamespace(params: SimilaritySearchParams, organizationId: number, entityTypes: string[]): Promise<SimilarityResult[]> {
+  private async searchStoreNamespace(
+    params: SimilaritySearchParams,
+    organizationId: number,
+    entityTypes: string[],
+  ): Promise<SimilarityResult[]> {
     const context = RequestContextService.asyncLocalStorage.getStore();
-    if (context?.store_id !== params.store_id || context.organization_id !== organizationId) throw new Error('TENANT_CONTEXT_MISMATCH');
-    return this.prisma.$queryRawUnsafe<SimilarityResult[]>(`
+    if (
+      context?.store_id !== params.store_id ||
+      context.organization_id !== organizationId
+    )
+      throw new Error('TENANT_CONTEXT_MISMATCH');
+    return this.prisma.$queryRawUnsafe<SimilarityResult[]>(
+      `
       SELECT id, entity_type, entity_id, content, metadata, 1 - (embedding <=> $1::vector) AS similarity
       FROM ai_embeddings WHERE knowledge_scope = 'store' AND store_id = $2 AND organization_id = $3
         AND entity_type = ANY($4::text[]) AND embedding IS NOT NULL
         AND 1 - (embedding <=> $1::vector) > $5
       ORDER BY embedding <=> $1::vector, id LIMIT $6`,
-      `[${params.query_embedding.join(',')}]`, params.store_id, organizationId, entityTypes,
-      params.min_similarity ?? 0.3, Math.max(1, Math.min(50, Math.floor(params.limit ?? 5))));
+      `[${params.query_embedding.join(',')}]`,
+      params.store_id,
+      organizationId,
+      entityTypes,
+      params.min_similarity ?? 0.3,
+      Math.max(1, Math.min(50, Math.floor(params.limit ?? 5))),
+    );
   }
 
   /** Internal platform-only write path. Never extend StoreEmbeddingParams with sentinel IDs. */
-  async storeGlobalKnowledgeEmbedding(params: { documentId: number; type: KnowledgeType; content: string; hash: string; fingerprint: string }): Promise<void> {
-    if (!knowledgeIndexEnabled() || !this.knowledgeEmbeddings) throw new Error('KNOWLEDGE_INDEX_DISABLED');
-    if (!Number.isSafeInteger(params.documentId) || params.documentId <= 0 || !KNOWLEDGE_TYPES.includes(params.type)) throw new Error('INVALID_KNOWLEDGE_DOCUMENT');
+  async storeGlobalKnowledgeEmbedding(params: {
+    documentId: number;
+    type: KnowledgeType;
+    content: string;
+    hash: string;
+    fingerprint: string;
+  }): Promise<void> {
+    if (!this.knowledgeEmbeddings) throw new Error('KNOWLEDGE_INDEX_DISABLED');
+    if (
+      !Number.isSafeInteger(params.documentId) ||
+      params.documentId <= 0 ||
+      !KNOWLEDGE_TYPES.includes(params.type)
+    )
+      throw new Error('INVALID_KNOWLEDGE_DOCUMENT');
     // Verify ownership/readiness candidate from the DB, not from a user-supplied store=0 payload.
-    const document = await this.prisma.ai_knowledge_documents.findFirst({ where: { id: params.documentId,
-      knowledge_scope: 'global', entity_type: params.type, store_id: null, organization_id: null, content_hash: params.hash } });
-    if (!document || document.content !== params.content) throw new Error('KNOWLEDGE_DOCUMENT_CHANGED');
-    const generated = await this.knowledgeEmbeddings.generate(params.content, params.fingerprint);
+    const document = await this.prisma.ai_knowledge_documents.findFirst({
+      where: {
+        id: params.documentId,
+        knowledge_scope: 'global',
+        entity_type: params.type,
+        store_id: null,
+        organization_id: null,
+        content_hash: params.hash,
+      },
+    });
+    if (!document || document.content !== params.content)
+      throw new Error('KNOWLEDGE_DOCUMENT_CHANGED');
+    const generated = await this.knowledgeEmbeddings.generate(
+      params.content,
+      params.fingerprint,
+    );
     assertKnowledgeVector(generated.vector);
-    const inserted = await this.prisma.$executeRawUnsafe(`
+    const inserted = await this.prisma.$executeRawUnsafe(
+      `
       INSERT INTO ai_embeddings (knowledge_scope, store_id, organization_id, entity_type, entity_id, content, embedding, metadata, updated_at)
       SELECT 'global', 0, 0, $1, id, content, $2::vector, $3::jsonb, NOW()
       FROM ai_knowledge_documents WHERE id = $4 AND knowledge_scope = 'global' AND store_id IS NULL
@@ -316,7 +349,15 @@ export class EmbeddingService {
       ON CONFLICT (store_id, entity_type, entity_id) DO UPDATE SET content = EXCLUDED.content,
         embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, updated_at = NOW()
       WHERE ai_embeddings.knowledge_scope = 'global' AND ai_embeddings.organization_id = 0`,
-      params.type, `[${generated.vector.join(',')}]`, JSON.stringify({ content_hash: params.hash, fingerprint: generated.fingerprint }), params.documentId, params.hash);
+      params.type,
+      `[${generated.vector.join(',')}]`,
+      JSON.stringify({
+        content_hash: params.hash,
+        fingerprint: generated.fingerprint,
+      }),
+      params.documentId,
+      params.hash,
+    );
     if (inserted !== 1) throw new Error('KNOWLEDGE_DOCUMENT_CHANGED');
   }
 
@@ -325,7 +366,12 @@ export class EmbeddingService {
     entityType: string,
     entityId: number,
   ): Promise<void> {
-    if (!Number.isSafeInteger(storeId) || storeId <= 0 || !BUSINESS_TYPES.includes(entityType as typeof BUSINESS_TYPES[number])) throw new Error('INVALID_BUSINESS_ENTITY');
+    if (
+      !Number.isSafeInteger(storeId) ||
+      storeId <= 0 ||
+      !BUSINESS_TYPES.includes(entityType as (typeof BUSINESS_TYPES)[number])
+    )
+      throw new Error('INVALID_BUSINESS_ENTITY');
     await this.prisma.ai_embeddings.deleteMany({
       where: {
         store_id: storeId,
@@ -343,7 +389,8 @@ export class EmbeddingService {
   ): Promise<SimilarityResult[]> {
     const context = RequestContextService.asyncLocalStorage.getStore();
     this.assertStoreIds(storeId, context?.organization_id);
-    if (context?.store_id !== storeId) throw new Error('TENANT_CONTEXT_MISMATCH');
+    if (context?.store_id !== storeId)
+      throw new Error('TENANT_CONTEXT_MISMATCH');
     const queryEmbedding = await this.generateEmbedding(query);
     return this.searchSimilar({
       store_id: storeId,

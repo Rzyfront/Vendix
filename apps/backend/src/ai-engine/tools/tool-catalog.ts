@@ -7,10 +7,6 @@ import {
 import { RegisteredTool } from './interfaces/tool.interface';
 import { validateToolArgs } from './tool-args.validator';
 
-export const toolRoutingEnabled = (): boolean =>
-  process.env.AI_TOOL_ROUTING_ENABLED === 'true';
-export const knowledgeIndexEnabled = (): boolean =>
-  process.env.AI_TOOL_KNOWLEDGE_INDEX_ENABLED === 'true';
 export const KNOWLEDGE_DIMENSION = 1536;
 export const KNOWLEDGE_TYPES = ['tool', 'skill', 'process', 'recipe'] as const;
 export const BUSINESS_TYPES = [

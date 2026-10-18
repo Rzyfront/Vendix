@@ -21,7 +21,7 @@ import {
   AgentDurableSession,
   objectiveArgsHash,
 } from './agent-durable-session.service';
-import { robustExecutionEnabled } from './agent-execution-flags';
+
 import {
   AgentObjectiveRepository,
   requireObjectiveScope,
@@ -36,7 +36,6 @@ import type {
   AgentToolResult,
   ObjectiveScope,
 } from './interfaces/agent-objective.interface';
-import { durableObjectivesEnabled } from './interfaces/agent-objective.interface';
 
 type Data = Record<string, unknown>;
 const record = (v: unknown): Data =>
@@ -422,12 +421,7 @@ export class AgentVerifierService {
     const refs: string[] = [];
     const liveReads: number[] = [];
     let activeWorkflow: string | undefined;
-    if (!robustExecutionEnabled() || !durableObjectivesEnabled())
-      return {
-        verified: false,
-        reasons: ['robust_verification_disabled'],
-        evidence_refs: [],
-      };
+
     try {
       if (
         !requests.length ||

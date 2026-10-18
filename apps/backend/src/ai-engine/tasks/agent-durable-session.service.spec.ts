@@ -97,19 +97,12 @@ function setup() {
     session: new AgentDurableSession(state, 'facts', repo),
   };
 }
-afterEach(() => delete process.env.AI_DURABLE_OBJECTIVES_ENABLED);
-it('OFF never touches storage', async () => {
-  const s = setup();
-  expect(await s.service.open(7, 'vexi', 'x')).toBeNull();
-  expect(s.repo.get).not.toHaveBeenCalled();
-});
+
 it('ON refuses static tenant fallback', async () => {
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
   RequestContextService.run(ctx, () => undefined);
   await expect(setup().service.open(7, 'vexi', 'x')).rejects.toThrow();
 });
 it('ON shares fenced lease and bounded facts', async () => {
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
   const s = setup();
   const session = await RequestContextService.runIsolated(ctx, () =>
     s.service.open(7, 'vexi', 'x'),
@@ -126,7 +119,6 @@ it.each([
   'cancelled',
   'superseded',
 ])('does not silently resume %s', async (status) => {
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
   const s = setup();
   s.state = { ...s.state, semantic_status: status };
   await expect(

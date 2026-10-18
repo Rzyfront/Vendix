@@ -3,17 +3,26 @@
 Implementación offline, **no habilitada ni certificada en producción**. Fase G del
 plan aprobado; A/D0/B/D1/C/D2/H preexistentes. No se implementan E ni F.
 
-## Activación y límites
+## Operación estándar de autonomía
 
-- `AI_VOICE_CONFIRM_ENABLED` sólo habilita con literal `true`; default OFF.
-  Spoken apply requiere además D1 `AI_DURABLE_OBJECTIVES_ENABLED` y D2
-  `AI_AGENT_ROBUST_EXECUTION_ENABLED`. No se habilitan automáticamente.
-- No se cambiaron proveedor/modelo/configuración, DB, prompts de aplicaciones ni
-  variables de entorno. Ninguna migración G. Rollback por flags, sin borrar datos.
-- Voz no es biometría ni resistencia garantizada a replay acústico. No hay acceso
-  más amplio por hablar. Clic sigue disponible y ninguna escritura se autoaprueba.
-- Realtime nativo sigue usando su transporte existente y duración reportada;
-  no se presenta como inferencia medida por AIEngine ni baseline de costo real.
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
 
 ## Circuito y autoridad
 
@@ -127,5 +136,5 @@ latencia/costo/completion comparables NULL. Ceros sin runs no prueban seguridad.
 
 Rafael debe autorizar entorno/CI de esta rama, QA acústico con>=95% aceptación
 explícita limpia y100% negativos sin writes, fixtures, presupuesto para proveedor
-y canary. Mantener flagsOFF. La migración B20261018100000 valida CHECK sobre filas
+y canary.Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 existentes y exige ventana de mantenimiento; G no la cambia ni la aplica.

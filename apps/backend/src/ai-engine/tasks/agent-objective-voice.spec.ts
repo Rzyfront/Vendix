@@ -13,12 +13,6 @@ const ctx = {
 const scope = <T>(work: () => T) =>
   RequestContextService.runIsolated(ctx, work);
 describe('G first voice attachment never supersedes objective', () => {
-  const flag = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-  beforeEach(() => (process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true'));
-  afterEach(() => {
-    if (flag === undefined) delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = flag;
-  });
   function fixture() {
     const db = new ObjectiveMemoryDatabase();
     db.seedConversation(5, ctx, { agent_key: 'vex' });

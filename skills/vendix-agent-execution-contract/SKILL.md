@@ -18,10 +18,10 @@ metadata:
 
 ## Critical rules
 
-- `AI_TOOL_EXECUTION_CONTRACT_ENABLED` defaults OFF; only literal `true` opts the
-  shared sync/SSE loop into D0. Do not change model/provider configuration.
+- Autonomy capabilities are standard, without environment switches.
+
 - `AIToolRegistry.executeTool()` keeps its string ABI, aliases and existing
-  confirmation exceptions for MCP/voice/apply consumers. The opt-in
+  confirmation exceptions for MCP/voice/apply consumers. The standard
   `executeToolResult()` uses the SAME permission, validation, preview and token
   checks; it is not an execution bypass. Do not rewrite hundreds of handlers or
   the global HTTP envelope.
@@ -83,7 +83,7 @@ QA/Playwright for runtime. Missing live receipts remain `not_run`.
 ## Boundaries
 
 No durable objective repository, business verifier, new tool router, autonomous
-writes, new voice consent or sandbox in D0. Disable the flag for rollback without
+writes, new voice consent or sandbox in D0.Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 removing JSON metadata, pending proposals or A's evidence.
 
 ## Related skills
@@ -93,14 +93,13 @@ removing JSON metadata, pending proposals or A's evidence.
 - `vendix-agent-evals-observability` — truthful outcomes and cost evidence.
 - `vendix-ai-chat`, `vendix-vex-agent`, `vendix-vexi-agent` — surfaces and ownership.
 
-## D2 opt-in extension
+## D2 robust execution
+## Standard autonomy operation
 
-`AI_AGENT_ROBUST_EXECUTION_ENABLED` plus D1 adds objective-scoped recovery and
-server verification; the D0 flag alone does not enable it. `completed_verified`
-is emitted only after repository commitment of an opaque server proof, never
-from `ToolExecutionReceipt.status=ok` or an applied receipt. The durable wrapper
-preserves that status and suppresses optimistic completion prose for an
-unverified multistep plan. Pending approval/input retains its exact user action.
-Verifier reads retain successful-tool metering and actual guards; late reads
-are audit-only, not successful quota units. See `vendix-agent-durable-tasks`
-for bounded recovery, inner cancellation fences, pool limits and explicit gaps.
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

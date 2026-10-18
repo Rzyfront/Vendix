@@ -14,23 +14,13 @@ const file = {
   originalname: 'fixture.webm',
 } as Express.Multer.File;
 describe('G dedicated server transcription', () => {
-  const before = process.env.AI_VOICE_CONFIRM_ENABLED;
-  beforeEach(() => {
-    process.env.AI_VOICE_CONFIRM_ENABLED = 'true';
-  });
-  afterEach(() => {
-    if (before === undefined) delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    else process.env.AI_VOICE_CONFIRM_ENABLED = before;
-  });
   it('requests reliable server observation without dictation chunks', () =>
     RequestContextService.runIsolated(context, async () => {
-      const runTranscription = jest
-        .fn()
-        .mockResolvedValue({
-          success: true,
-          text: 'confirmo cambiar registro codigo 123456',
-          confidence: 0.99,
-        });
+      const runTranscription = jest.fn().mockResolvedValue({
+        success: true,
+        text: 'confirmo cambiar registro codigo 123456',
+        confidence: 0.99,
+      });
       const service = new VexiVoiceService({ runTranscription } as any);
       service.appendChunk('normal-turn', file);
       await expect(service.transcribeConsent(file)).resolves.toMatchObject({
@@ -56,14 +46,11 @@ describe('G dedicated server transcription', () => {
         confidence: null,
       });
     }));
-  it('flag OFF and missing ALS never dispatch STT', async () => {
+  it('missing ALS never dispatches STT', async () => {
     const runTranscription = jest.fn();
     const service = new VexiVoiceService({ runTranscription } as any);
     await expect(service.transcribeConsent(file)).rejects.toBeDefined();
-    delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    await RequestContextService.runIsolated(context, () =>
-      expect(service.transcribeConsent(file)).rejects.toBeDefined(),
-    );
+
     expect(runTranscription).not.toHaveBeenCalled();
   });
   it('invalid and oversized audio fail before provider', () =>

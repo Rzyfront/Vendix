@@ -15,7 +15,7 @@ import {
   AgentPlanToolName,
 } from '../../../ai-engine/interfaces/agent-plan.interface';
 import { AgentObjectiveRepository } from '../../../ai-engine/tasks/agent-objective.repository';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import { objectiveArgsHash } from '../../../ai-engine/tasks/agent-durable-session.service';
 import {
   countsAsToolSuccess,
@@ -64,7 +64,7 @@ export class VexiVoiceAuthorityService {
       conversationId,
       expectedAgentKey,
     );
-    if (!current.objective_id && durableObjectivesEnabled()) {
+    if (!current.objective_id) {
       await this.objectives.ensureForConversation(
         conversationId,
         current.agent_key,
@@ -143,9 +143,7 @@ export class VexiVoiceAuthorityService {
         'La voz o las herramientas de este agente no están disponibles en el plan actual. Puedes revisar el cambio con clic.',
       );
     const plan = await this.plans.get(conversationId); // Also rejects a durable-pointer rollback.
-    const objective = durableObjectivesEnabled()
-      ? await this.objectives.getForConversation(conversationId)
-      : null;
+    const objective = await this.objectives.getForConversation(conversationId);
     if (
       objective &&
       (objective.expires_at.getTime() <= Date.now() ||
@@ -343,7 +341,7 @@ export class VexiVoiceAuthorityService {
         /* Like the shared text path: do not hide an observed receipt on metering outage. */
       }
     }
-    if (!authority.objective_id || !durableObjectivesEnabled()) return;
+    if (!authority.objective_id) return;
     const objective = await this.objectives.get(authority.objective_id);
     const leased = await this.objectives.acquireLease(
       objective.id,

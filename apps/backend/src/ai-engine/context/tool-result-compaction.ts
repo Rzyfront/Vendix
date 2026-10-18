@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 
 /** Independent H kill switch: never enables durable objectives or provider features. */
-export const toolResultCompactionEnabled = (): boolean =>
-  process.env.AI_TOOL_RESULT_COMPACTION_ENABLED === 'true';
 
 export const ARTIFACT_PAGE_JSON_CHARS = 4400;
 const MAX_TEXT_CHARS = 3000;

@@ -1,4 +1,3 @@
-import { robustExecutionEnabled } from './agent-execution-flags';
 import {
   consumeAgentVerification,
   agentVerificationContractsHash,
@@ -8,7 +7,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -27,7 +25,6 @@ import {
   AgentObjective,
   AgentToolResult,
   AppendToolResultInput,
-  durableObjectivesEnabled,
   emptyObjectiveBudget,
   ObjectiveBudget,
   ObjectiveCheckpoint,
@@ -110,13 +107,12 @@ export class AgentObjectiveRepository {
   constructor(private readonly prisma: StorePrismaService) {}
 
   isEnabled(): boolean {
-    return durableObjectivesEnabled();
+    return true;
   }
 
   private scope(): ObjectiveScope {
     const scope = requireObjectiveScope();
-    if (!this.isEnabled())
-      throw new ServiceUnavailableException('Durable objectives are disabled');
+
     return scope;
   }
   private validId(id: string): void {
@@ -492,8 +488,6 @@ export class AgentObjectiveRepository {
     lease: ObjectiveLease,
     capability: unknown,
   ): Promise<AgentObjective> {
-    if (!robustExecutionEnabled())
-      throw new BadRequestException('Independent verification is disabled');
     const scope = this.scope();
     return this.transaction(async (tx) => {
       const row = await this.find(tx, scope, id, true);

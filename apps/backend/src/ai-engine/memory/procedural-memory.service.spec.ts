@@ -12,12 +12,6 @@ import {
 import { createProceduralRecipeTools } from '../tools/domains/recipe.tools';
 import { AgentTaskContextService } from '../tasks/agent-task-context.service';
 
-const flags = [
-  'AI_PROCEDURAL_MEMORY_ENABLED',
-  'AI_DURABLE_OBJECTIVES_ENABLED',
-  'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-  'AI_AGENT_PLAYBOOKS_ENABLED',
-];
 const scoped = <T>(cb: () => T, overrides = {}) =>
   RequestContextService.runIsolated({ ...context, ...overrides }, cb);
 function setup() {
@@ -119,11 +113,9 @@ function setup() {
 }
 describe('F private procedural memory', () => {
   beforeEach(() => {
-    flags.forEach((f) => (process.env[f] = 'true'));
     process.env.AI_RECIPE_REVIEW_KEY = 'ab'.repeat(32);
   });
   afterEach(() => {
-    flags.forEach((f) => delete process.env[f]);
     delete process.env.AI_RECIPE_REVIEW_KEY;
   });
   it('verified D2 postconditions + pinned C release create ONLY a candidate from symbolic release fields', () =>
@@ -152,19 +144,7 @@ describe('F private procedural memory', () => {
       expect(s.recipes.candidate).not.toHaveBeenCalled();
     }),
   );
-  it.each([
-    'AI_PROCEDURAL_MEMORY_ENABLED',
-    'AI_DURABLE_OBJECTIVES_ENABLED',
-    'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-    'AI_AGENT_PLAYBOOKS_ENABLED',
-  ])('%s off is inert, no new DB/capture', (flag) =>
-    scoped(async () => {
-      const s = setup();
-      delete process.env[flag];
-      expect(await s.memory.capture(objectiveId)).toEqual([]);
-      expect(s.objectives.get).not.toHaveBeenCalled();
-    }),
-  );
+
   it.each(['unknown_effect', 'pending_confirmation', 'blocked'])(
     'non-observed receipt %s never creates candidate',
     (status) =>
@@ -449,7 +429,6 @@ describe('F private procedural memory', () => {
 
 it('F can explicitly renew expired review only with NEW signed quality evidence, preserving failures', () =>
   scoped(async () => {
-    flags.forEach((f) => (process.env[f] = 'true'));
     process.env.AI_RECIPE_REVIEW_KEY = 'ab'.repeat(32);
     try {
       const s = setup();
@@ -468,7 +447,23 @@ it('F can explicitly renew expired review only with NEW signed quality evidence,
         s.memory.applyReview(41, signReview(s.recipe)),
       ).rejects.toThrow('RECIPE_REVIEW_SEQUENCE');
     } finally {
-      flags.forEach((f) => delete process.env[f]);
       delete process.env.AI_RECIPE_REVIEW_KEY;
+    }
+  }));
+
+it('mines a candidate without signing authority but publication is a safe no-op', () =>
+  scoped(async () => {
+    const key = process.env.AI_RECIPE_REVIEW_KEY;
+    delete process.env.AI_RECIPE_REVIEW_KEY;
+    try {
+      const s = setup();
+      await expect(s.memory.capture(objectiveId)).resolves.toEqual([41]);
+      await expect(
+        s.memory.applyReview(41, {} as any),
+      ).resolves.toBeUndefined();
+      expect(s.recipes.transition).not.toHaveBeenCalled();
+    } finally {
+      if (key === undefined) delete process.env.AI_RECIPE_REVIEW_KEY;
+      else process.env.AI_RECIPE_REVIEW_KEY = key;
     }
   }));

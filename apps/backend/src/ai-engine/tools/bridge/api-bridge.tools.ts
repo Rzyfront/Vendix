@@ -1,19 +1,12 @@
-import { toolRoutingEnabled } from '../tool-catalog';
-import { toolResultCompactionEnabled } from '../../context/tool-result-compaction';
 import {
-  bridgeDataPage,
   discoveryPage,
   discoveryError,
   pageParameters,
 } from '../discovery-pagination';
 import { Logger } from '@nestjs/common';
-import {
-  RegisteredTool,
-  toolExecutionContractEnabled,
-} from '../interfaces/tool.interface';
+import { RegisteredTool } from '../interfaces/tool.interface';
 import {
   ApiCatalogService,
-  type CatalogEntry,
   type CatalogMethod,
   type CatalogField,
 } from './api-catalog.service';
@@ -434,25 +427,23 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
-          ...(toolRoutingEnabled()
-            ? {
-                ...pageParameters,
-                path: {
-                  type: 'string',
-                  description:
-                    'Ruta patrón exacta para consultar solo su contrato.',
-                },
-                field_cursor: {
-                  type: 'string',
-                  description:
-                    'Cursor de campos de una ruta; úsalo junto con path.',
-                },
-                field_limit: {
-                  type: 'integer',
-                  description: 'Campos de contrato por página, de 1 a 20.',
-                },
-              }
-            : {}),
+          ...{
+            ...pageParameters,
+            path: {
+              type: 'string',
+              description:
+                'Ruta patrón exacta para consultar solo su contrato.',
+            },
+            field_cursor: {
+              type: 'string',
+              description:
+                'Cursor de campos de una ruta; úsalo junto con path.',
+            },
+            field_limit: {
+              type: 'integer',
+              description: 'Campos de contrato por página, de 1 a 20.',
+            },
+          },
           domain: {
             type: 'string',
             description:
@@ -470,7 +461,7 @@ export function createApiBridgeTools({
         const scopes = callerScopes();
         const methods = args.writable_only ? WRITE_METHODS : undefined;
 
-        if (toolRoutingEnabled()) {
+        {
           try {
             if (!args.domain) {
               const page = discoveryPage(
@@ -605,20 +596,17 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
-          ...(toolRoutingEnabled()
-            ? {
-                result_cursor: {
-                  type: 'string',
-                  description:
-                    'Cursor local de filas devuelto por esta misma consulta; no sustituye el cursor upstream.',
-                },
-                result_limit: {
-                  type: 'integer',
-                  description:
-                    'Filas por página local, 1 a 20 (por defecto 3).',
-                },
-              }
-            : {}),
+          ...{
+            result_cursor: {
+              type: 'string',
+              description:
+                'Cursor local de filas devuelto por esta misma consulta; no sustituye el cursor upstream.',
+            },
+            result_limit: {
+              type: 'integer',
+              description: 'Filas por página local, 1 a 20 (por defecto 3).',
+            },
+          },
           path: {
             type: 'string',
             description:
@@ -685,9 +673,7 @@ export function createApiBridgeTools({
           if (!response.ok) {
             return JSON.stringify({
               error: `La consulta a "${entry.path}" devolvió ${response.status}.`,
-              ...(toolExecutionContractEnabled()
-                ? { statusCode: response.status }
-                : {}),
+              ...{ statusCode: response.status },
               detail: body.slice(0, 500),
               // El 400 de `forbidNonWhitelisted` nombra el parámetro sobrante y
               // ninguno de los válidos, así que el modelo entraba a adivinar:
@@ -701,24 +687,6 @@ export function createApiBridgeTools({
           // H persists the complete owner-scoped result in the agent loop BEFORE
           // producing its recoverable envelope. Never slice JSON first, nor
           // re-page an already bounded artifact and discard its cursor/units.
-          if (toolResultCompactionEnabled()) return body;
-          if (toolRoutingEnabled()) {
-            try {
-              return bridgeDataPage(body, args, entry.path);
-            } catch (error) {
-              return discoveryError(error);
-            }
-          }
-
-          if (body.length > MAX_RESPONSE_CHARS) {
-            return JSON.stringify({
-              path: entry.path,
-              truncated: true,
-              note: `La respuesta es de ${body.length} caracteres y se truncó. Acota la consulta con parámetros (limit, fechas) para obtener el detalle.`,
-              data: body.slice(0, MAX_RESPONSE_CHARS),
-            });
-          }
-
           return body;
         } catch (error: any) {
           if (isAgentAbort(error)) throw error;
@@ -1010,9 +978,7 @@ export function createApiBridgeTools({
             return JSON.stringify({
               applied: false,
               status: response.status,
-              ...(toolExecutionContractEnabled()
-                ? { statusCode: response.status }
-                : {}),
+              ...{ statusCode: response.status },
               detail: responseBody.slice(0, 800),
               note: 'El cambio NO se aplicó. Dile a la persona qué faltó, en sus términos, y ofrécele reintentarlo con el dato corregido.',
             });

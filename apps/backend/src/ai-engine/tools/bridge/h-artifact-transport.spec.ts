@@ -5,22 +5,10 @@ import { createApiBridgeTools } from './api-bridge.tools';
 
 describe('H bridge preserves full data before persistence and bounded artifact readers', () => {
   const originalFetch = global.fetch;
-  const flags = [
-    'AI_TOOL_ROUTING_ENABLED',
-    'AI_TOOL_RESULT_COMPACTION_ENABLED',
-  ];
-  let saved: Array<[string, string | undefined]>;
-  beforeEach(() => {
-    saved = flags.map((key) => [key, process.env[key]]);
-    process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
-  });
+
+  beforeEach(() => {});
   afterEach(() => {
     global.fetch = originalFetch;
-    saved.forEach(([key, value]) =>
-      value === undefined
-        ? delete process.env[key]
-        : (process.env[key] = value),
-    );
   });
   async function bridge(body: string, readAllowed = true) {
     const catalog = new ApiCatalogService(
@@ -67,7 +55,6 @@ describe('H bridge preserves full data before persistence and bounded artifact r
   it.each(['true', 'false'])(
     'preserves full escaped JSON over6000 chars with routing=%s',
     async (routing) => {
-      process.env.AI_TOOL_ROUTING_ENABLED = routing;
       const body = JSON.stringify({
         data: Array.from({ length: 300 }, (_, id) => ({
           id,
@@ -81,7 +68,6 @@ describe('H bridge preserves full data before persistence and bounded artifact r
     },
   );
   it('does not paginate the D1 reader again and lose its artifact_cursor/units', async () => {
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
     const page = readArtifactPage(
       Array.from({ length: 90 }, (_, id) => ({ id })),
       { limit: 20 },

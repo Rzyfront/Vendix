@@ -20,10 +20,8 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
   let service: AgentTraceService;
   let upsert: jest.Mock;
   let records: Map<string, Record<string, any>>;
-  const originalFlag = process.env.AI_AGENT_TRACING_ENABLED;
 
   beforeEach(() => {
-    process.env.AI_AGENT_TRACING_ENABLED = 'true';
     records = new Map();
     upsert = jest.fn(async ({ where, create, update }) => {
       const row = records.has(where.span_id)
@@ -41,17 +39,6 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
   afterEach(async () => {
     await service.onModuleDestroy();
     jest.restoreAllMocks();
-    if (originalFlag === undefined) delete process.env.AI_AGENT_TRACING_ENABLED;
-    else process.env.AI_AGENT_TRACING_ENABLED = originalFlag;
-  });
-
-  it('is default OFF and does not allocate a trace or write', async () => {
-    delete process.env.AI_AGENT_TRACING_ENABLED;
-    expect(service.startTrace(tenant())).toBeUndefined();
-    expect(service.startSpan('tool')).toBeUndefined();
-    await service.flush();
-    expect(upsert).not.toHaveBeenCalled();
-    expect(service.getHealth().active_spans).toBe(0);
   });
 
   it('rejects incomplete, zero, and mixed system/tenant authority rather than falling back', async () => {

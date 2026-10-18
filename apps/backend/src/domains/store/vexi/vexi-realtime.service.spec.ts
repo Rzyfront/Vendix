@@ -338,20 +338,14 @@ describe('VexiRealtimeService G session authority', () => {
     RequestContextService.runIsolated(context, fn);
 
   beforeEach(() => {
-    savedFlag = process.env.AI_VOICE_CONFIRM_ENABLED;
-    savedRouting = process.env.AI_TOOL_ROUTING_ENABLED;
-    process.env.AI_VOICE_CONFIRM_ENABLED = 'true';
-    process.env.AI_TOOL_ROUTING_ENABLED = 'false';
     handler = jest.fn().mockResolvedValue('{"applied":true}');
-    preview = jest
-      .fn()
-      .mockResolvedValue({
-        status: 'ok',
-        target: 'Producto QA',
-        changes: [
-          { field: 'name', label: 'Nombre', before: 'Antes', after: 'Después' },
-        ],
-      });
+    preview = jest.fn().mockResolvedValue({
+      status: 'ok',
+      target: 'Producto QA',
+      changes: [
+        { field: 'name', label: 'Nombre', before: 'Antes', after: 'Después' },
+      ],
+    });
     read = jest.fn().mockResolvedValue('{"id":7,"name":"Producto QA"}');
     registry = new AIToolRegistry({
       issue: jest.fn().mockResolvedValue(confirmationToken),
@@ -473,7 +467,10 @@ describe('VexiRealtimeService G session authority', () => {
       ),
     };
     router = new ToolRouterService(registry, {
-      rank: jest.fn().mockResolvedValue({ names: [], degraded: [] }),
+      rank: jest.fn(async (_query, docs) => ({
+        names: docs.map((d) => d.name),
+        degraded: [],
+      })),
     } as any);
     session = {
       sessionId,
@@ -494,12 +491,10 @@ describe('VexiRealtimeService G session authority', () => {
       routing: router.createSession(authority.goal, 'initial'),
     };
     consent = {
-      createSession: jest
-        .fn()
-        .mockResolvedValue({
-          session_id: sessionId,
-          expires_at: new Date(session.expiresAt).toISOString(),
-        }),
+      createSession: jest.fn().mockResolvedValue({
+        session_id: sessionId,
+        expires_at: new Date(session.expiresAt).toISOString(),
+      }),
       validateSession: jest.fn().mockImplementation(async (id: string) => {
         const current = RequestContextService.asyncLocalStorage.getStore();
         if (
@@ -528,14 +523,12 @@ describe('VexiRealtimeService G session authority', () => {
             return session;
           },
         ),
-      registerProposal: jest
-        .fn()
-        .mockResolvedValue({
-          session_id: sessionId,
-          proposal_id: 'public-proposal',
-          preview_hash: 'hash',
-          expires_at: new Date(Date.now() + 60000).toISOString(),
-        }),
+      registerProposal: jest.fn().mockResolvedValue({
+        session_id: sessionId,
+        proposal_id: 'public-proposal',
+        preview_hash: 'hash',
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      }),
       closeSession: jest.fn().mockResolvedValue(undefined),
       closeSessionForBilling: jest
         .fn()
@@ -574,36 +567,7 @@ describe('VexiRealtimeService G session authority', () => {
   });
 
   afterEach(() => {
-    if (savedFlag === undefined) delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    else process.env.AI_VOICE_CONFIRM_ENABLED = savedFlag;
-    if (savedRouting === undefined) delete process.env.AI_TOOL_ROUTING_ENABLED;
-    else process.env.AI_TOOL_ROUTING_ENABLED = savedRouting;
     jest.restoreAllMocks();
-  });
-
-  it('OFF preserves legacy read and vetoes write without consulting G services', async () => {
-    delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    await expect(
-      run(() => service.executeToolCall('read_product', { id: 7 })),
-    ).resolves.toContain('Producto QA');
-    await expect(
-      run(() =>
-        service.executeToolCall('change_product', { id: 7, name: 'Otro' }),
-      ),
-    ).rejects.toThrow('not available in voice');
-    expect(consent.validateSession).not.toHaveBeenCalled();
-    expect(authorityService.resolveAuthority).not.toHaveBeenCalled();
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it('default OFF refuses the new session-only method', async () => {
-    delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    await expect(
-      run(() =>
-        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
-      ),
-    ).rejects.toThrow('no está disponible');
-    expect(read).not.toHaveBeenCalled();
   });
 
   it('rejects arbitrary legacy calls ON before any registry dispatch', async () => {
@@ -625,23 +589,19 @@ describe('VexiRealtimeService G session authority', () => {
   });
 
   it('creates a versioned server catalog and keeps provider expiry separate from session expiry', async () => {
-    jest
-      .spyOn(service as any, 'resolveVoiceSetup')
-      .mockResolvedValue({
-        config: {
-          sdk_type: 'openai_compatible',
-          api_key_ref: 'sk-test',
-          settings: {},
-          model_id: 'current-model',
-        },
-        instructions: 'Persona actual',
-      });
-    jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ value: 'ephemeral-test', expires_at: 123456 }),
-      } as Response);
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+        model_id: 'current-model',
+      },
+      instructions: 'Persona actual',
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test', expires_at: 123456 }),
+    } as Response);
     const result = await run(() =>
       service.createSession({ conversation_id: 9, agent_key: 'vexi' }),
     );
@@ -682,57 +642,22 @@ describe('VexiRealtimeService G session authority', () => {
 
   it('keeps Vex UI out of a new grant independently of a misconfigured agent row', async () => {
     authority.agent_key = 'vex';
-    jest
-      .spyOn(service as any, 'resolveVoiceSetup')
-      .mockResolvedValue({
-        config: {
-          sdk_type: 'openai_compatible',
-          api_key_ref: 'sk-test',
-          settings: {},
-        },
-        instructions: null,
-      });
-    jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ value: 'ephemeral-test' }),
-      } as Response);
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+      },
+      instructions: null,
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test' }),
+    } as Response);
     const result = await run(() =>
       service.createSession({ conversation_id: 9, agent_key: 'vex' }),
     );
     expect(result.tools.map((tool) => tool.name)).not.toContain('ui_navigate');
-  });
-
-  it('OFF grants preserve the read/UI catalog without asking for a conversation or storing G state', async () => {
-    delete process.env.AI_VOICE_CONFIRM_ENABLED;
-    jest
-      .spyOn(service as any, 'resolveVoiceSetup')
-      .mockResolvedValue({
-        config: {
-          sdk_type: 'openai_compatible',
-          api_key_ref: 'sk-test',
-          settings: {},
-        },
-        instructions: null,
-      });
-    jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ value: 'ephemeral-test' }),
-      } as Response);
-    const result = await run(() => service.createSession({}));
-    expect(result.session_id).toBeUndefined();
-    expect(result.tools.map((tool) => tool.name)).toContain('read_product');
-    expect(result.tools.map((tool) => tool.name)).toContain('ui_navigate');
-    expect(result.tools.map((tool) => tool.name)).not.toContain(
-      'change_product',
-    );
-    expect(result.instructions).toBeNull();
-    expect(consent.createSession).not.toHaveBeenCalled();
-    expect(authorityService.resolveAuthority).not.toHaveBeenCalled();
-    expect(authorityService.prepareAuthority).not.toHaveBeenCalled();
   });
 
   it.each(['read_product', 'change_product', 'ui_navigate'])(
@@ -1064,16 +989,14 @@ describe('VexiRealtimeService G session authority', () => {
 
   it('uses the existing router and CAS-swaps only currently authorized definitions', async () => {
     jest.spyOn(router, 'search').mockResolvedValue('{"expanded":true}');
-    jest
-      .spyOn(router, 'select')
-      .mockResolvedValue({
-        definitions: authority.authorizedDefinitions.filter(
-          (d: any) => d.function.name === 'read_product',
-        ),
-        operationalCount: 1,
-        degraded: [],
-        catalogHash: 'hash',
-      });
+    jest.spyOn(router, 'select').mockResolvedValue({
+      definitions: authority.authorizedDefinitions.filter(
+        (d: any) => d.function.name === 'read_product',
+      ),
+      operationalCount: 1,
+      degraded: [],
+      catalogHash: 'hash',
+    });
     const result = await run(() =>
       service.executeSessionToolCall(sessionId, 'search_tools', {
         query: 'read_product',

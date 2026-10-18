@@ -11,12 +11,6 @@ import { createProceduralRecipeTools } from '../../src/ai-engine/tools/domains/r
 import { fixture, context } from './f-recipe.fixtures';
 import { AgentVerifierService } from '../../src/ai-engine/tasks/agent-verifier.service';
 
-const flags = [
-  'AI_PROCEDURAL_MEMORY_ENABLED',
-  'AI_DURABLE_OBJECTIVES_ENABLED',
-  'AI_AGENT_PLAYBOOKS_ENABLED',
-  'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-];
 const scoped = <T>(cb: () => T) =>
   RequestContextService.runIsolated(context, cb);
 async function integration(
@@ -153,11 +147,9 @@ async function integration(
 }
 describe('F miner/recipe integration and fresh-input consent regression', () => {
   beforeEach(() => {
-    flags.forEach((f) => (process.env[f] = 'true'));
     process.env.AI_RECIPE_REVIEW_KEY = 'ab'.repeat(32);
   });
   afterEach(() => {
-    flags.forEach((f) => delete process.env[f]);
     delete process.env.AI_RECIPE_REVIEW_KEY;
   });
   it.each(['vex', 'vexi'] as const)(
@@ -214,18 +206,7 @@ describe('F miner/recipe integration and fresh-input consent regression', () => 
       });
       expect(next.write).not.toHaveBeenCalled();
     }));
-  it('flagOFF hides recipe tools and does not consult recipe DB even after registration', () =>
-    scoped(async () => {
-      const f = await integration('vexi');
-      delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-      const spy = jest.spyOn(f.memory, 'search');
-      await f.run();
-      expect(spy).not.toHaveBeenCalled();
-      const tools = f.chat.mock.calls[0][1].tools ?? [];
-      expect(
-        tools.map((d: { function: { name: string } }) => d.function.name),
-      ).not.toContain('search_recipes');
-    }));
+
   it('D2 server failure observer quarantines through F, while model booleans cannot verify anything', () =>
     scoped(async () => {
       const f = await integration('vexi');

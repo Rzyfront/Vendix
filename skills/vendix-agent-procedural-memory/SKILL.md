@@ -18,9 +18,8 @@ metadata:
 
 ## Critical boundaries
 
-- `AI_PROCEDURAL_MEMORY_ENABLED` defaults OFF, literal `true` only. Usable recipes
-  additionally require D1 + C + D2. No provider/model/settings changes, auto-enabling,
-  automatic publication, business data reuse, or authority from a recipe.
+- Autonomy capabilities are standard, without environment switches.
+
 - Engram is TEAM DEVELOPMENT memory, NOT runtime tenant recipes. Restaurant recipes
   belong to `menus.tools.ts`; F's factory is `createProceduralRecipeTools` to avoid
   colliding with the existing `createRecipeTools` export.
@@ -87,13 +86,13 @@ metadata:
   Feedback event+aggregate updates
   are transactionally deduplicated per owner/objective/version/kind. Global usage
   traces remain PRIVATE events. Report reuse@success, invalidations and failures,
-  not just counts. Publication withdrawal and flag revocation fence late results.
+  not just counts. Publication withdrawal and current authority fence late results.
 
 ## Verification and operation
 
 Exact specs only, sequential, heap1536, `test/agentic/jest.d1.config.json` (transpile-only,
 NOT global TypeScript/DI/build). See `docs/agentic-procedural-memory-F.md` for runbook.
-Keep flags OFF until CI/full bootstrap, PostgreSQL double-apply/ACL/CAS/concurrency,
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 independent human holdout, model baseline/canary and privacy review pass. Empty replay
 metrics are NULL/not_run, never measured savings or proof of completion.
 
@@ -102,3 +101,13 @@ metrics are NULL/not_run, never measured savings or proof of completion.
 `vendix-agent-durable-tasks`, `vendix-agent-playbooks`, `vendix-agent-execution-contract`,
 `vendix-ai-embeddings-rag`, `vendix-ai-tool-routing`, `vendix-prisma-migrations`,
 `vendix-agent-sandbox-security`, `vendix-agent-evals-observability`, `vendix-engram`.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

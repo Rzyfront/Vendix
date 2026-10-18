@@ -8,7 +8,6 @@ import { isS3Key, isSafeS3Key } from '../../../../common/helpers/s3-url.helper';
 import {
   ArtifactAggregate,
   readArtifactPage,
-  toolResultCompactionEnabled,
 } from '../../../../ai-engine/context/tool-result-compaction';
 
 export type VexBlockKind =
@@ -136,14 +135,9 @@ export class VexBlockService {
   }
 
   private storeIdOrThrow(): number {
-    const storeId = toolResultCompactionEnabled()
-      ? RequestContextService.asyncLocalStorage.getStore()?.store_id
-      : RequestContextService.getStoreId();
-    if (
-      !storeId ||
-      (toolResultCompactionEnabled() &&
-        (!Number.isSafeInteger(storeId) || storeId <= 0))
-    ) {
+    const storeId =
+      RequestContextService.asyncLocalStorage.getStore()?.store_id;
+    if (!storeId || !Number.isSafeInteger(storeId) || storeId <= 0) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     return storeId;
@@ -153,11 +147,7 @@ export class VexBlockService {
     const storeId = this.storeIdOrThrow();
     // Fail-closed: `where: { user_id: undefined }` hace que Prisma ignore el
     // predicado y la búsqueda degrada a "cualquier conversación de la tienda".
-    const userId = (
-      toolResultCompactionEnabled()
-        ? RequestContextService.asyncLocalStorage.getStore()
-        : RequestContextService.getContext()
-    )?.user_id;
+    const userId = RequestContextService.asyncLocalStorage.getStore()?.user_id;
     if (userId === undefined || userId === null) {
       throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
@@ -184,7 +174,7 @@ export class VexBlockService {
       where: {
         id: input.conversation_id,
         user_id: userId,
-        ...(toolResultCompactionEnabled() ? { store_id: storeId } : {}),
+        ...{ store_id: storeId },
       },
     });
     if (!conversation) {
@@ -226,11 +216,7 @@ export class VexBlockService {
    */
   private async findOwnedBlock(id: string): Promise<VexBlockRow> {
     const storeId = this.storeIdOrThrow();
-    const userId = (
-      toolResultCompactionEnabled()
-        ? RequestContextService.asyncLocalStorage.getStore()
-        : RequestContextService.getContext()
-    )?.user_id;
+    const userId = RequestContextService.asyncLocalStorage.getStore()?.user_id;
     const notFound = () =>
       new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
@@ -245,7 +231,7 @@ export class VexBlockService {
       where: {
         id: row.conversation_id,
         user_id: userId,
-        ...(toolResultCompactionEnabled() ? { store_id: storeId } : {}),
+        ...{ store_id: storeId },
       },
       select: { id: true },
     });
@@ -479,7 +465,7 @@ export class VexBlockService {
       rows: rows.slice(start, start + size),
       selection,
     };
-    if (toolResultCompactionEnabled()) {
+    {
       // Selections are context, not an excuse to exceed the reader's budget.
       const selected = selection.slice(0, MAX_SELECTION_ROWS_IN_CONTEXT);
       while (JSON.stringify(selected).length > 512 && selected.length)
@@ -532,42 +518,6 @@ export class VexBlockService {
         }),
       );
     }
-    if (row.kind !== 'markdown') return result;
-
-    const fullText = typeof row.data?.text === 'string' ? row.data.text : '';
-    const offset = Number.isFinite(textOptions.offset)
-      ? Math.max(0, Math.trunc(textOptions.offset!))
-      : 0;
-    const limit = Number.isFinite(textOptions.limit)
-      ? Math.min(
-          DEFAULT_TEXT_LIMIT,
-          Math.max(1, Math.trunc(textOptions.limit!)),
-        )
-      : DEFAULT_TEXT_LIMIT;
-    let text = fullText.slice(offset, offset + limit);
-    // Use a cursor, not fixed page arithmetic: escaped fragments can consume
-    // fewer characters than requested, and next_offset must never skip data.
-    if (JSON.stringify(text).length > MAX_TEXT_JSON_CHARS) {
-      let low = 0;
-      let high = text.length;
-      while (low < high) {
-        const mid = Math.ceil((low + high) / 2);
-        if (JSON.stringify(text.slice(0, mid)).length <= MAX_TEXT_JSON_CHARS)
-          low = mid;
-        else high = mid - 1;
-      }
-      text = text.slice(0, low);
-    }
-    const nextOffset = offset + text.length;
-    const hasMore = nextOffset < fullText.length;
-    return {
-      ...result,
-      text,
-      text_offset: offset,
-      total_chars: fullText.length,
-      has_more: hasMore,
-      next_offset: hasMore ? nextOffset : null,
-    };
   }
 
   /**

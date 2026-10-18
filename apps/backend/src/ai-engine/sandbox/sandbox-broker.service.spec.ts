@@ -74,6 +74,7 @@ function fixture() {
     filterResult: jest.fn((_name, value) => value),
   };
   const audit = {
+    sourceAvailable: jest.fn(() => true),
     start: jest.fn<any, any[]>(async () => {}),
     appendCall: jest.fn<any, any[]>(async () => {}),
     finish: jest.fn<any, any[]>(async () => {}),
@@ -137,13 +138,8 @@ function frame(start: any, over: Record<string, unknown> = {}) {
 }
 
 describe('E sandbox broker (synthetic transport, real registry)', () => {
-  beforeEach(() => {
-    process.env.AI_SANDBOX_ENABLED = 'true';
-    process.env.AI_SANDBOX_STORE_IDS = '1';
-  });
+  beforeEach(() => {});
   afterEach(() => {
-    delete process.env.AI_SANDBOX_ENABLED;
-    delete process.env.AI_SANDBOX_STORE_IDS;
     jest.restoreAllMocks();
   });
   it('dispatches through registry in strict isolated scope and persists before any guest bytes', async () => {
@@ -170,15 +166,17 @@ describe('E sandbox broker (synthetic transport, real registry)', () => {
     );
     expect(f.policy.authorize).toHaveBeenCalledTimes(4);
   });
-  it.each(['false', 'TRUE', '1', ''])(
-    'is unavailable when flag is %s',
-    async (value) => {
-      process.env.AI_SANDBOX_ENABLED = value;
-      const f = fixture();
-      expect((await f.run()).error_code).toBe('SANDBOX_UNAVAILABLE');
-      expect(f.client.run).not.toHaveBeenCalled();
-    },
-  );
+
+  it('missing source encryption key is unavailable without audit writes or blocking other tools', async () => {
+    const f = fixture();
+    f.audit.sourceAvailable.mockReturnValue(false);
+    expect(await f.run()).toMatchObject({
+      status: 'recoverable_error',
+      error_code: 'SANDBOX_UNAVAILABLE',
+    });
+    expect(f.audit.start).not.toHaveBeenCalled();
+    expect(f.client.run).not.toHaveBeenCalled();
+  });
   it('rejects fallback context and calls without a host invocation', async () => {
     const f = fixture();
     expect(JSON.parse(await f.broker.run(input)).error_code).toBe(
@@ -194,15 +192,7 @@ describe('E sandbox broker (synthetic transport, real registry)', () => {
     expect((await f.run()).error_code).toBe('SANDBOX_UNAVAILABLE');
     expect(f.audit.start).not.toHaveBeenCalled();
   });
-  it.each(['', '2', '*', '1,NaN', '-1', '1,'])(
-    'requires explicit valid store opt-in: %s',
-    async (ids) => {
-      process.env.AI_SANDBOX_STORE_IDS = ids;
-      const f = fixture();
-      expect((await f.run()).error_code).toBe('SANDBOX_UNAVAILABLE');
-      expect(f.client.run).not.toHaveBeenCalled();
-    },
-  );
+
   it.each([
     { nonce: 'spoof' },
     { execution_id: 'foreign' },
@@ -359,15 +349,7 @@ describe('E sandbox broker (synthetic transport, real registry)', () => {
     expect((await f.run()).status).toBe('blocked');
     expect(f.handler).not.toHaveBeenCalled();
   });
-  it('honors the per-store runtime kill switch after the last RPC', async () => {
-    const f = fixture();
-    f.client.run.mockImplementation(async (s, cb) => {
-      await cb(frame(s));
-      process.env.AI_SANDBOX_STORE_IDS = '2';
-      return { revoked: true };
-    });
-    expect((await f.run()).status).toBe('blocked');
-  });
+
   it('fences a non-cooperative late read after parent cancellation', async () => {
     const f = fixture();
     let entered!: () => void;

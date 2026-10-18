@@ -108,6 +108,7 @@ function build(opts: {
     getActive: jest.fn().mockResolvedValue(opts.plan ?? null),
     get: jest.fn().mockResolvedValue(opts.paused ?? opts.plan ?? null),
     markCurrentChangeStep: jest.fn().mockResolvedValue(null),
+    rejectPendingObjective: jest.fn().mockResolvedValue(null),
     createHook: jest.fn().mockReturnValue({ hook: true }),
     setStepHashes: jest.fn().mockResolvedValue([]),
   };
@@ -144,6 +145,7 @@ function build(opts: {
       store_settings: { findUnique: findVexSettings },
     } as any,
     {
+      supportsAgentStreaming: jest.fn().mockResolvedValue(false),
       getApplication: jest
         .fn()
         .mockResolvedValue({ metadata: { agent_enabled: true } }),
@@ -163,6 +165,25 @@ function build(opts: {
     planApproval,
     confirmations,
   );
+  jest
+    .spyOn(service as any, 'durableTurnArgs')
+    .mockImplementation(
+      async (conv: any, key, goal, base: any, options: any = {}) => ({
+        ...base,
+        conversation_id: conv.id,
+        plan: planState.createHook(conv.id),
+        messages: (service as any).buildContextWindow(
+          conv,
+          undefined,
+          options.speak,
+          {
+            active: await planState.getActive(),
+            paused: await planState.get(),
+            isContinuation: !!options.continuation,
+          },
+        ),
+      }),
+    );
   return {
     service,
     prisma,
@@ -183,7 +204,19 @@ function build(opts: {
 
 async function collect(service: AIChatService, intent: any) {
   const frames: any[] = [];
-  for await (const f of service.sendMessageStream(7, 's1')) frames.push(f);
+  await RequestContextService.runIsolated(
+    {
+      user_id: 9,
+      store_id: 1,
+      organization_id: 1,
+      is_owner: true,
+      is_super_admin: false,
+    },
+    async () => {
+      for await (const { replay, ...f } of service.sendMessageStream(7, 's1'))
+        if (f.type !== 'progress') frames.push(f);
+    },
+  );
   return frames;
 }
 
@@ -191,7 +224,7 @@ describe('AIChatService — plan interno de Vexi', () => {
   beforeEach(() => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -216,10 +249,7 @@ describe('AIChatService — plan interno de Vexi', () => {
     const b = build({ plan: PLAN });
     withIntent(b, { continuation: 'rejected' });
     await collect(b.service, null);
-    expect(b.planState.markCurrentChangeStep).toHaveBeenCalledWith(
-      7,
-      'rejected',
-    );
+    expect(b.planState.rejectPendingObjective).toHaveBeenCalledWith(7);
     const params = b.run.mock.calls[0][0];
     expect(params.goal).toContain(
       '(interno) La persona rechazó el cambio propuesto; no se aplicó.',
@@ -374,16 +404,16 @@ describe('AIChatService — plan interno de Vexi', () => {
     expect(roles).toEqual(['user']);
   });
 
-  it('aborted: sin fallback ni asistente persistido', async () => {
+  it('aborted: conserva un terminal honesto sin afirmar rollback', async () => {
     const run = agentGen([], { tools_used: [], content: '', aborted: true });
     const b = build({ plan: null, run });
     withIntent(b, { content: 'hola' });
     const frames = await collect(b.service, null);
-    expect(frames.some((f) => f.type === 'text')).toBe(false);
+    expect(frames.find((f) => f.type === 'text')?.content).toContain('detuvo');
     const roles = b.prisma.ai_messages.create.mock.calls.map(
       (c: any) => c[0].data.role,
     );
-    expect(roles).toEqual(['user']);
+    expect(roles).toEqual(['user', 'assistant']);
   });
 
   it('shouldAbort consulta isCurrentTurn y niega su resultado', async () => {
@@ -412,7 +442,7 @@ describe('AIChatService — agente configurable del chat por defecto', () => {
   beforeEach(() => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -690,7 +720,7 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
   it('hilo legacy sin roles sigue contestando: el gate es no-op fuera de vex', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({});
     await b.service.sendMessage(7, { content: 'hola' });
     expect(b.runSync).toHaveBeenCalled();
@@ -736,7 +766,7 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
   it('turno SSE de Vexi conserva ui_context en el snapshot', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({});
     b.streamIntents.consume.mockResolvedValue({
       conversation_id: 7,
@@ -778,7 +808,7 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
   it('listado agent_key=vex filtra por path y conserva el scope', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({});
     await b.service.listConversations({ agent_key: 'vex' } as any);
     const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
@@ -792,7 +822,7 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
   it('listado agent_key=vexi incluye hilos legacy sin agent_key', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({});
     await b.service.listConversations({ agent_key: 'vexi' } as any);
     const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
@@ -805,7 +835,7 @@ describe('AIChatService — gate y listado de Vex (pasos 3 y 4)', () => {
   it('listado sin filtro excluye vex pero conserva legacy y otras keys', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({});
     await b.service.listConversations({} as any);
     const where = b.prisma.ai_conversations.findMany.mock.calls[0][0].where;
@@ -917,7 +947,7 @@ describe('AIChatService — cableado de plan Vex (rx3)', () => {
   it('turno vexi no recibe ni hook ni sink (sync y SSE)', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const b = build({ wireVex: true, agentRow: vexiRow });
     await b.service.sendMessage(7, { content: 'hola' });
     expect(b.runSync.mock.calls[0][0].agent_key).toBe('vexi');
@@ -1063,7 +1093,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     await collect(b.service, null);
 
     const data = assistantCreate(b);
-    expect(data.metadata).toEqual({
+    expect(data.metadata).toMatchObject({
       blocks: [
         { block_id: 'b-table', kind: 'table', version: 2 },
         { block_id: 'b-chart', kind: 'chart', version: 1 },
@@ -1109,7 +1139,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     await collect(b.service, null);
 
     const data = assistantCreate(b);
-    expect(data.metadata).toEqual({
+    expect(data.metadata).toMatchObject({
       blocks: [{ block_id: 'b-sink', kind: 'markdown', version: 1 }],
     });
     expect(b.vexBlocks.attachToMessage).toHaveBeenCalledWith(['b-sink'], 1);
@@ -1146,7 +1176,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     await b.service.sendMessage(7, { content: 'hola' });
 
     const data = assistantCreate(b);
-    expect(data.metadata).toEqual({
+    expect(data.metadata).toMatchObject({
       blocks: [{ block_id: 'b-sync', kind: 'table', version: 1 }],
       plan: { plan_id: 'p9', steps: PENDING_STEPS, status: 'proposed' },
     });
@@ -1158,7 +1188,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
   it('turno vexi no escribe blocks ni plan', async () => {
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ user_id: 9 } as any);
+      .mockReturnValue({ user_id: 9, store_id: 1, organization_id: 1 } as any);
     const run = agentGen(
       [{ type: 'text', content: 'hola' }, { type: 'done' }],
       {
@@ -1174,7 +1204,7 @@ describe('AIChatService — persistencia vex (rx6)', () => {
     });
     await collect(b.service, null);
     const data = assistantCreate(b);
-    expect(data).not.toHaveProperty('metadata');
+    expect(data.metadata).toEqual({ stream_id: 's1' });
     expect(b.vexBlocks.attachToMessage).not.toHaveBeenCalled();
   });
 
@@ -1387,7 +1417,7 @@ describe('AIChat D0 receipt persistence', () => {
       .find((r: any) => r.role === 'assistant');
     expect(row.metadata.execution).toEqual(execution);
     expect(row.tool_calls[0].execution).toEqual(toolExecution);
-    expect(row.tool_calls[0].result.length).toBeLessThan(20000);
+    expect(row.tool_calls[0].result.length).toBe(20000);
     expect(frames.at(-1)).toMatchObject({
       type: 'done',
       execution,
@@ -1416,11 +1446,8 @@ describe('D1 chat durable real wiring', () => {
     is_owner: true,
     is_super_admin: false,
   };
-  beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-  });
+
   afterEach(() => {
-    delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
     jest.restoreAllMocks();
   });
   function wiring(agentKey = 'vexi') {
@@ -1459,6 +1486,7 @@ describe('D1 chat durable real wiring', () => {
     };
     const loop = new AIAgentService(
       {
+        supportsAgentStreaming: jest.fn().mockResolvedValue(false),
         chat,
         run: (_key: any, _vars: any, m: any, o: any) => chat(m, o),
       } as any,
@@ -1478,6 +1506,7 @@ describe('D1 chat durable real wiring', () => {
     (b.service as any).planState = plans;
     (b.service as any).durableSessions = sessions;
     (b.service as any).aiAgent = loop;
+    jest.mocked((b.service as any).durableTurnArgs).mockRestore();
     return { b, db, repo, plans, chat, read, sessions };
   }
   const response = (extra: any) => ({

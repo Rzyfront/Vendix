@@ -18,9 +18,8 @@ const reports: Array<{
   estimated_definition_reduction: number;
 }> = [];
 let registry: AIToolRegistry;
-const saved = process.env.AI_TOOL_ROUTING_ENABLED;
+
 beforeAll(() => {
-  process.env.AI_TOOL_ROUTING_ENABLED = 'true';
   registry = new AIToolRegistry({} as any);
   // Factory declarations ONLY, with inert dependencies, not a deployed bootstrap snapshot.
   for (const [name, factory] of Object.entries(factories)) {
@@ -41,8 +40,6 @@ beforeAll(() => {
   });
 });
 afterAll(() => {
-  if (saved === undefined) delete process.env.AI_TOOL_ROUTING_ENABLED;
-  else process.env.AI_TOOL_ROUTING_ENABLED = saved;
   if (process.env.AGENTIC_B_REPORT)
     writeFileSync(
       process.env.AGENTIC_B_REPORT,

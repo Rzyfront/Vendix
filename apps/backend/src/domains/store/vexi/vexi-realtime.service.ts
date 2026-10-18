@@ -160,12 +160,11 @@ export class VexiRealtimeService {
   async createSession(
     dto: CreateRealtimeSessionDto,
   ): Promise<RealtimeSessionGrant> {
-    const enabled = this.confirmationEnabled();
     let authority: VoiceAuthority | undefined;
     let routing: ToolRoutingSession | undefined;
     let authorized: AIToolDefinition[] | undefined;
     let offered: AIToolDefinition[] | undefined;
-    if (enabled) {
+    {
       this.requireVoiceServices();
       if (
         !Number.isSafeInteger(dto.conversation_id) ||
@@ -211,9 +210,7 @@ export class VexiRealtimeService {
     const model = config?.model_id || DEFAULT_REALTIME_MODEL;
     const voice = dto.voice || settings.voice || DEFAULT_VOICE;
     const baseUrl = (config?.base_url || DEFAULT_BASE_URL).replace(/\/+$/, '');
-    const tools = enabled
-      ? this.realtimeDefinitions(offered!)
-      : this.buildToolCatalog();
+    const tools = this.realtimeDefinitions(offered!);
     const ttlSeconds = this.resolveTtlSeconds(settings);
     const sessionPatch = this.buildSessionPatch(settings);
 
@@ -264,17 +261,15 @@ export class VexiRealtimeService {
       );
     }
 
-    const session = enabled
-      ? await this.consent!.createSession({
-          conversationId: authority!.conversation_id,
-          agentKey: authority!.agent_key,
-          objectiveId: authority!.objective_id,
-          stepId: authority!.step_id,
-          tools: this.versionedTools(offered!),
-          channel: 'realtime',
-          routing,
-        })
-      : undefined;
+    const session = await this.consent!.createSession({
+      conversationId: authority!.conversation_id,
+      agentKey: authority!.agent_key,
+      objectiveId: authority!.objective_id,
+      stepId: authority!.step_id,
+      tools: this.versionedTools(offered!),
+      channel: 'realtime',
+      routing,
+    });
 
     return {
       ...(session
@@ -293,9 +288,7 @@ export class VexiRealtimeService {
       voice,
       base_url: baseUrl,
       tools,
-      instructions: enabled
-        ? this.voiceInstructions(instructions, authority!)
-        : instructions,
+      instructions: this.voiceInstructions(instructions, authority!),
       session_patch: sessionPatch,
     };
   }
@@ -314,27 +307,11 @@ export class VexiRealtimeService {
     args: Record<string, unknown>,
     sessionId?: string,
   ): Promise<string> {
-    if (this.confirmationEnabled())
-      return (await this.executeSessionToolCall(sessionId, name, args)).output;
+    return (await this.executeSessionToolCall(sessionId, name, args)).output;
     // A client-side command reaching this bridge means the browser failed to
     // dispatch it locally. Let it fall through so `executeTool()` answers with
     // the specific "this runs in the browser" error instead of the generic
     // voice veto — the two failures need different fixes.
-    if (
-      !this.toolRegistry.isReadOnly(name) &&
-      !this.toolRegistry.isClientSide(name)
-    ) {
-      this.logger.warn(
-        `Realtime voice attempted a non-read-only tool: ${name} ` +
-          `(store=${RequestContextService.getContext()?.store_id})`,
-      );
-      throw new VendixHttpException(
-        ErrorCodes.AI_AGENT_004,
-        `Tool "${name}" is not available in voice mode`,
-      );
-    }
-
-    return this.toolRegistry.executeTool(name, args as Record<string, any>);
   }
 
   /**
@@ -693,17 +670,8 @@ export class VexiRealtimeService {
   // Internals
   // ------------------------------------------------------------------
 
-  private confirmationEnabled(): boolean {
-    return process.env.AI_VOICE_CONFIRM_ENABLED === 'true';
-  }
-
   private requireVoiceServices(): void {
-    if (
-      !this.confirmationEnabled() ||
-      !this.consent ||
-      !this.authority ||
-      !this.router
-    )
+    if (!this.consent || !this.authority || !this.router)
       throw new ServiceUnavailableException(
         'La sesión de confirmación por voz no está disponible. Puedes usar texto o clic.',
       );
@@ -999,32 +967,6 @@ export class VexiRealtimeService {
       process.env.AI_OPENAI_API_KEY ||
       ''
     );
-  }
-
-  /**
-   * Read-only catalog, already filtered by the caller's permissions. Realtime
-   * wants a flat `{type, name, description, parameters}`; the registry emits
-   * the chat-completions shape with the payload nested under `function`.
-   */
-  private buildToolCatalog(): RealtimeToolDefinition[] {
-    const context = RequestContextService.getContext();
-    // `[]` is truthy — check length so an empty permission list falls back to
-    // roles instead of pinning the catalog to zero tools.
-    const granted = context?.permissions;
-    const scope = granted?.length ? granted : context?.roles;
-    // Read-only data tools plus client-side UI commands. The latter belong in
-    // voice more than anywhere else — "llévame a inventario" is the whole
-    // reason to talk instead of click — and they carry no write risk: the
-    // browser dispatches them and `executeTool()` refuses them outright.
-    return [
-      ...this.toolRegistry.getReadOnlyDefinitions(scope),
-      ...this.toolRegistry.getClientSideDefinitions(scope),
-    ].map((d) => ({
-      type: 'function' as const,
-      name: d.function.name,
-      description: d.function.description,
-      parameters: d.function.parameters,
-    }));
   }
 
   private safetyIdentifier(): string {

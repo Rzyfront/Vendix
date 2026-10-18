@@ -12,7 +12,7 @@ export function createCodeExecutionTools(
       domain: 'sandbox',
       readOnly: true,
       description:
-        'Opcional: fan-out, paginación o join complejo del catálogo con JS limitado (TypeScript sólo sintaxis JS/JSDoc). Preferir list_products, vex_block_transform o reporte para consultas simples. Sólo tools.list_products(args) auditada en el working set; sin imports/red/fs/env/SQL/escrituras/UI. return JSON compacto; dinero con enteros/escalas decimales, nunca sumas floats. Disponibilidad Linux aislado requerida; no reintentar automáticamente. Código no verifica objetivos.',
+        'Cálculo read-only: fan-out, paginación o join complejo del catálogo con JS limitado (TypeScript sólo sintaxis JS/JSDoc). Preferir list_products, vex_block_transform o reporte para consultas simples. Sólo tools.list_products(args) auditada en el working set; sin imports/red/fs/env/SQL/escrituras/UI. return JSON compacto; dinero con enteros/escalas decimales, nunca sumas floats. Disponibilidad Linux aislado requerida; no reintentar automáticamente. Código no verifica objetivos.',
       parameters: {
         type: 'object',
         additionalProperties: false,

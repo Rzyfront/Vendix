@@ -1,4 +1,3 @@
-import { robustExecutionEnabled } from '../../tasks/agent-execution-flags';
 import { RegisteredTool } from '../interfaces/tool.interface';
 import { AGENT_PLAN_TOOLS } from '../../interfaces/agent-plan.interface';
 
@@ -22,7 +21,6 @@ const NO_CONVERSATION = JSON.stringify({
  * persisten nada.
  */
 export function createPlanningTools(): RegisteredTool[] {
-  const robust = robustExecutionEnabled();
   const verification = {
     type: 'object',
     properties: {
@@ -32,16 +30,14 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     required: ['workflow_key', 'step_id', 'inputs'],
   };
-  const dag = robust
-    ? {
-        depends_on: { type: 'array', items: { type: 'integer' } },
-        expected_input: { type: 'string' },
-        expected_output: { type: 'string' },
-        candidate_tools: { type: 'array', items: { type: 'string' } },
-        approval: { type: 'string', enum: ['none', 'individual'] },
-        verifier: { type: 'string' },
-      }
-    : {};
+  const dag = {
+    depends_on: { type: 'array', items: { type: 'integer' } },
+    expected_input: { type: 'string' },
+    expected_output: { type: 'string' },
+    candidate_tools: { type: 'array', items: { type: 'string' } },
+    approval: { type: 'string', enum: ['none', 'individual'] },
+    verifier: { type: 'string' },
+  };
   const stepItem = {
     type: 'object',
     properties: {
@@ -88,16 +84,15 @@ export function createPlanningTools(): RegisteredTool[] {
               type: 'object',
               properties: {
                 description: { type: 'string' },
-                ...(robust ? { verification } : {}),
+                ...{ verification },
               },
               required: ['description'],
             },
           },
           steps: {
             type: 'array',
-            description: robust
-              ? 'Bloque de 3 a 7 pasos con DAG, entrada/salida y verificador; una consulta simple no necesita plan.'
-              : 'Los movimientos en orden, máximo 12.',
+            description:
+              'Bloque de 3 a 7 pasos con DAG, entrada/salida y verificador; una consulta simple no necesita plan.',
             items: {
               ...stepItem,
               properties: {
@@ -167,9 +162,8 @@ export function createPlanningTools(): RegisteredTool[] {
       version: '1',
       domain: 'planning',
       readOnly: true,
-      description: robust
-        ? 'Solicita verificación de servidor de TODOS los entregables del contrato fijo. evidence_refs mapea IDs de paso del playbook a agent-result:UUID reales; verified:true o texto no prueban éxito. Las postcondiciones, permisos y relecturas se comprueban en el servidor.'
-        : 'Registra qué entregables ya verificaste leyendo el sistema. verified=true exige evidence con datos reales. Cuando todo está verificado, redacta la respuesta final. Nunca lo menciones a la persona.',
+      description:
+        'Solicita verificación de servidor de TODOS los entregables del contrato fijo. evidence_refs mapea IDs de paso del playbook a agent-result:UUID reales; verified:true o texto no prueban éxito. Las postcondiciones, permisos y relecturas se comprueban en el servidor.',
       parameters: {
         type: 'object',
         properties: {
@@ -181,9 +175,9 @@ export function createPlanningTools(): RegisteredTool[] {
                 id: { type: 'string', description: 'd1, d2, ...' },
                 verified: { type: 'boolean' },
                 evidence: { type: 'string' },
-                ...(robust ? { evidence_refs: { type: 'object' } } : {}),
+                ...{ evidence_refs: { type: 'object' } },
               },
-              required: robust ? ['id'] : ['id', 'verified'],
+              required: ['id'],
             },
           },
         },

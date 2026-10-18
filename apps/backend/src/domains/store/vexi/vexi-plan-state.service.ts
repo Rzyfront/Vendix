@@ -1,7 +1,4 @@
-import {
-  robustExecutionEnabled,
-  maximumRecoveryReplans,
-} from '../../../ai-engine/tasks/agent-execution-flags';
+import { maximumRecoveryReplans } from '../../../ai-engine/tasks/agent-recovery-limits';
 import {
   AgentVerifierService,
   AgentVerificationOptions,
@@ -27,7 +24,7 @@ import type {
   AgentObjective,
   ObjectiveLease,
 } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import { createHash, randomUUID } from 'crypto';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -53,7 +50,6 @@ import {
   ArtifactAggregate,
   ArtifactPage,
   readArtifactPage,
-  toolResultCompactionEnabled,
 } from '../../../ai-engine/context/tool-result-compaction';
 
 /** Un plan sin movimiento en este lapso se da por abandonado. */
@@ -164,9 +160,8 @@ export function renderPlanForModel(plan: AgentPlan): string {
 }
 
 /**
- * Estado persistido del task list interno de Vexi:
- * `ai_conversations.metadata.agent_plan`. Read-modify-write que preserva las
- * llaves ajenas de `metadata` (p. ej. `agent_key`).
+ * Estado del task list interno en el repositorio de objetivos durables.
+ * La metadata histórica se importa una sola vez y nunca vuelve a ser autoridad.
  */
 @Injectable()
 export class VexiPlanStateService {
@@ -190,8 +185,7 @@ export class VexiPlanStateService {
   }
 
   private objectiveApiRepository(): AgentObjectiveRepository {
-    if (!durableObjectivesEnabled() || !this.objectives)
-      throw new NotFoundException('Objective not found');
+    if (!this.objectives) throw new NotFoundException('Objective not found');
     return this.objectives;
   }
 
@@ -233,7 +227,6 @@ export class VexiPlanStateService {
 
   /** Explicit rejection intent from an already authenticated conversation turn. */
   async rejectPendingObjective(conversationId: number) {
-    if (!durableObjectivesEnabled()) return null;
     const repository = this.durableRepository();
     const objective = await repository.importLegacy(conversationId);
     if (!objective || objective.semantic_status !== 'awaiting_approval')
@@ -269,7 +262,7 @@ export class VexiPlanStateService {
     },
   ) {
     const result = await this.objectiveApiRepository().getResult(id, resultId);
-    if (toolResultCompactionEnabled()) {
+    {
       // getResult enforces explicit ALS store/org/user+objective ownership BEFORE paging.
       // Historical snapshots never become fresh write evidence through this reader.
       const { data: value, ...metadata } = result;
@@ -524,9 +517,7 @@ export class VexiPlanStateService {
     // y sus hashes deben leerse igual. Hallazgo live E2E-1 (2026-10-01).
     const { metadata } = await this.load(conversationId);
     const state = this.durableStates.get(metadata);
-    const raw = state
-      ? state.objective.step_hashes
-      : (metadata as Record<string, any>).agent_plan_step_hashes;
+    const raw = state?.objective.step_hashes ?? null;
     const list: unknown = Array.isArray(raw) ? raw : raw?.steps;
     const steps = Array.isArray(list)
       ? list.filter(
@@ -571,7 +562,7 @@ export class VexiPlanStateService {
       steps: hashes,
     };
     let state = this.durableStates.get(metadata);
-    if (!state && durableObjectivesEnabled()) {
+    if (!state) {
       const objective = await this.durableRepository().createOrReplace(
         conversationId,
         null,
@@ -594,13 +585,6 @@ export class VexiPlanStateService {
           lease_generation: saved.lease_generation,
         });
       }
-    } else {
-      await this.prisma.ai_conversations.updateMany({
-        where: { id: conversationId },
-        data: {
-          metadata: { ...metadata, agent_plan_step_hashes: record } as any,
-        },
-      });
     }
     return hashes;
   }
@@ -617,12 +601,6 @@ export class VexiPlanStateService {
       );
       return;
     }
-    if (!('agent_plan_step_hashes' in metadata)) return;
-    const { agent_plan_step_hashes: _dropped, ...rest } = metadata;
-    await this.prisma.ai_conversations.updateMany({
-      where: { id: conversationId },
-      data: { metadata: rest as any },
-    });
   }
 
   /** Intent is durable BEFORE dispatch. A consumed confirmation is not an exactly-once guarantee. */
@@ -640,10 +618,6 @@ export class VexiPlanStateService {
     },
     dispatch: () => Promise<string>,
   ): Promise<{ output: string; result?: ToolExecutionResult }> {
-    if (!durableObjectivesEnabled()) {
-      if (input.conversationId) await this.load(input.conversationId); // Reject durable-pointer rollback before any dispatch.
-      return { output: await dispatch() };
-    }
     if (!input.conversationId)
       throw new ConflictException(
         'Selecciona la conversación del objetivo antes de aplicar el cambio.',
@@ -677,20 +651,15 @@ export class VexiPlanStateService {
           }
         : {};
     const effectStarted = Date.now();
-    const effectDeadline = robustExecutionEnabled()
-      ? new AgentDeadline({
-          wallDeadlineMs: Math.min(
-            Date.now() + 180_000,
-            new Date(leased.expires_at).getTime(),
-            new Date(leased.lease_until!).getTime(),
-          ),
-          activeBudgetMs: Math.max(
-            0,
-            1_800_000 - leased.budget.active_runtime_ms,
-          ),
-          reserveMs: 2000,
-        })
-      : undefined;
+    const effectDeadline = new AgentDeadline({
+      wallDeadlineMs: Math.min(
+        Date.now() + 180_000,
+        new Date(leased.expires_at).getTime(),
+        new Date(leased.lease_until!).getTime(),
+      ),
+      activeBudgetMs: Math.max(0, 1_800_000 - leased.budget.active_runtime_ms),
+      reserveMs: 2000,
+    });
     const proposalHash = canonicalStepHash(input.tool, input.args);
     const currentStep = leased.plan?.steps.find(
       (step) =>
@@ -870,7 +839,7 @@ export class VexiPlanStateService {
     let released = false;
     const prepare = async () => {
       if (released) throw new ConflictException('Este ejecutor ya terminó.');
-      if (!durableObjectivesEnabled() || session) return;
+      if (session) return;
       const objective =
         await this.durableRepository().importLegacy(conversationId);
       if (objective) {
@@ -944,7 +913,7 @@ export class VexiPlanStateService {
       return reject('no hay plan activo');
     }
     const plan = current;
-    const robust = robustExecutionEnabled() && !!session;
+    const robust = !!session;
     if (robust && name === 'verify_deliverables') {
       if (
         !this.verifier ||
@@ -1106,17 +1075,16 @@ export class VexiPlanStateService {
     if (rawSteps.length === 0) {
       return reject('define al menos un paso');
     }
-    const robust = robustExecutionEnabled() && durableObjectivesEnabled();
-    if (robust && (rawSteps.length < 3 || rawSteps.length > 7))
+
+    if (rawSteps.length < 3 || rawSteps.length > 7)
       return reject(
         'El bloque multietapa debe tener de 3 a 7 pasos. Una consulta simple no necesita plan.',
       );
-    if (robust && previous && str(args.goal) !== previous.goal)
+    if (previous && str(args.goal) !== previous.goal)
       return reject(
         'La recuperación no puede cambiar el objetivo económico. Inicia otra conversación para otro trabajo.',
       );
     if (
-      robust &&
       rawDel.some(
         (d) =>
           !str(d?.description) ||
@@ -1142,33 +1110,30 @@ export class VexiPlanStateService {
         );
       }
       if (
-        robust &&
-        (!str(raw.expected_input) ||
-          !str(raw.expected_output) ||
-          !Array.isArray(raw.candidate_tools) ||
-          !raw.candidate_tools.length ||
-          raw.candidate_tools.some((name) => typeof name !== 'string') ||
-          !str(raw.verifier) ||
-          !Array.isArray(raw.depends_on) ||
-          raw.depends_on.some(
-            (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
-          ) ||
-          raw.approval !== (kind === 'cambio' ? 'individual' : 'none'))
+        !str(raw.expected_input) ||
+        !str(raw.expected_output) ||
+        !Array.isArray(raw.candidate_tools) ||
+        !raw.candidate_tools.length ||
+        raw.candidate_tools.some((name) => typeof name !== 'string') ||
+        !str(raw.verifier) ||
+        !Array.isArray(raw.depends_on) ||
+        raw.depends_on.some(
+          (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
+        ) ||
+        raw.approval !== (kind === 'cambio' ? 'individual' : 'none')
       )
         return reject(
           `El paso ${i + 1} requiere entrada/salida, tools candidatas, aprobación individual, verifier y dependencias previas.`,
         );
       steps.push({
-        ...(robust
-          ? {
-              depends_on: [...raw.depends_on],
-              expected_input: str(raw.expected_input),
-              expected_output: str(raw.expected_output),
-              candidate_tools: [...raw.candidate_tools],
-              approval: raw.approval,
-              verifier: str(raw.verifier),
-            }
-          : {}),
+        ...{
+          depends_on: [...raw.depends_on],
+          expected_input: str(raw.expected_input),
+          expected_output: str(raw.expected_output),
+          candidate_tools: [...raw.candidate_tools],
+          approval: raw.approval,
+          verifier: str(raw.verifier),
+        },
         order: i + 1,
         title: str(raw?.title) || `Paso ${i + 1}`,
         kind,
@@ -1179,25 +1144,18 @@ export class VexiPlanStateService {
     }
     const now = new Date().toISOString();
     const plan: AgentPlan = {
-      id:
-        durableObjectivesEnabled() && previous?.goal.trim() === str(args.goal)
-          ? previous.id
-          : randomUUID(),
+      id: previous?.goal.trim() === str(args.goal) ? previous.id : randomUUID(),
       status: 'active',
       goal: str(args.goal),
       deliverables: descriptions.map((description: string, i: number) => ({
         id: `d${i + 1}`,
         description,
         verified: false,
-        ...(robust
-          ? { verification: structuredClone(rawDel[i].verification) }
-          : {}),
+        ...{ verification: structuredClone(rawDel[i].verification) },
       })),
       steps,
       created_at:
-        durableObjectivesEnabled() && previous?.goal.trim() === str(args.goal)
-          ? previous.created_at
-          : now,
+        previous?.goal.trim() === str(args.goal) ? previous.created_at : now,
       updated_at: now,
     };
     // Solo se guarda el último plan; el previo queda superseded solo en el
@@ -1241,12 +1199,6 @@ export class VexiPlanStateService {
     let extra: Record<string, unknown> = {};
     if (status === 'failed') {
       step.attempts += 1;
-      if (step.attempts >= 2 && !robustExecutionEnabled()) {
-        extra = {
-          instruccion:
-            'explícale a la persona qué pasó y pregúntale cómo seguir con ask_user',
-        };
-      }
     }
     plan.updated_at = new Date().toISOString();
     return { result: ok(plan, extra) };
@@ -1332,19 +1284,18 @@ export class VexiPlanStateService {
         );
       }
     }
-    const robust = robustExecutionEnabled() && durableObjectivesEnabled();
+
     const dependencies = new Map<AgentPlanStep, AgentPlanStep[]>();
-    if (robust)
-      for (const step of plan.steps) {
-        const refs = (step.depends_on ?? []).map((order) =>
-          plan.steps.find((s) => s.order === order),
+    for (const step of plan.steps) {
+      const refs = (step.depends_on ?? []).map((order) =>
+        plan.steps.find((s) => s.order === order),
+      );
+      if (refs.some((ref) => !ref || removeOrders.includes(ref.order)))
+        return reject(
+          'No elimines una dependencia requerida; revisa el DAG completo.',
         );
-        if (refs.some((ref) => !ref || removeOrders.includes(ref.order)))
-          return reject(
-            'No elimines una dependencia requerida; revisa el DAG completo.',
-          );
-        dependencies.set(step, refs as AgentPlanStep[]);
-      }
+      dependencies.set(step, refs as AgentPlanStep[]);
+    }
     const newSteps: Array<{ raw: any; step: AgentPlanStep }> = [];
     for (const raw of adds) {
       const kind = raw?.kind === 'cambio' ? 'cambio' : 'verificacion';
@@ -1355,20 +1306,18 @@ export class VexiPlanStateService {
       newSteps.push({
         raw,
         step: {
-          ...(robust
-            ? {
-                depends_on: Array.isArray(raw.depends_on)
-                  ? [...raw.depends_on]
-                  : undefined,
-                expected_input: str(raw.expected_input),
-                expected_output: str(raw.expected_output),
-                candidate_tools: Array.isArray(raw.candidate_tools)
-                  ? [...raw.candidate_tools]
-                  : undefined,
-                approval: raw.approval,
-                verifier: str(raw.verifier),
-              }
-            : {}),
+          ...{
+            depends_on: Array.isArray(raw.depends_on)
+              ? [...raw.depends_on]
+              : undefined,
+            expected_input: str(raw.expected_input),
+            expected_output: str(raw.expected_output),
+            candidate_tools: Array.isArray(raw.candidate_tools)
+              ? [...raw.candidate_tools]
+              : undefined,
+            approval: raw.approval,
+            verifier: str(raw.verifier),
+          },
           order: 0,
           title: str(raw?.title) || 'Paso',
           kind,
@@ -1389,7 +1338,7 @@ export class VexiPlanStateService {
       if (str(u.done_when)) s.done_when = str(u.done_when);
     }
     for (const { raw, step } of newSteps) {
-      if (robust) {
+      {
         if (
           !Array.isArray(raw.depends_on) ||
           raw.depends_on.some((order) => !byOriginal.has(order))
@@ -1413,7 +1362,7 @@ export class VexiPlanStateService {
         `el plan quedaría con ${steps.length} pasos y el máximo es ${MAX_PLAN_STEPS}`,
       );
     }
-    if (robust) {
+    {
       if (
         steps.some(
           (step) =>
@@ -1467,9 +1416,7 @@ export class VexiPlanStateService {
     conversationId: number,
     session?: DurablePlanSession,
   ): Promise<{ metadata: Record<string, any>; plan: AgentPlan | null }> {
-    const scope = durableObjectivesEnabled()
-      ? requireObjectiveScope()
-      : undefined;
+    const scope = requireObjectiveScope();
     const row = await this.prisma.ai_conversations.findFirst({
       where: { id: conversationId, ...(scope ?? {}) },
       select: { metadata: true },
@@ -1479,7 +1426,7 @@ export class VexiPlanStateService {
       raw && typeof raw === 'object' && !Array.isArray(raw)
         ? { ...(raw as any) }
         : {};
-    if (durableObjectivesEnabled()) {
+    {
       const objective =
         await this.durableRepository().importLegacy(conversationId);
       if (!objective) return { metadata, plan: null };
@@ -1504,23 +1451,6 @@ export class VexiPlanStateService {
         plan.status = 'abandoned';
       return { metadata, plan };
     }
-    // Rollback must never revive the historical copy after conversion.
-    if (metadata.agent_objective_id || metadata.agent_objective_authority) {
-      throw new ConflictException(
-        'Este objetivo usa almacenamiento durable. Está pausado hasta restablecerlo.',
-      );
-    }
-    const plan = (metadata.agent_plan as AgentPlan | undefined) ?? null;
-    if (!plan) return { metadata, plan: null };
-    const age = Date.now() - new Date(plan.updated_at).getTime();
-    if (
-      (plan.status === 'active' || plan.status === 'paused') &&
-      age > PLAN_TTL_MS
-    ) {
-      plan.status = 'abandoned';
-      await this.save(conversationId, metadata, plan, false);
-    }
-    return { metadata, plan };
   }
 
   private async save(
@@ -1530,7 +1460,7 @@ export class VexiPlanStateService {
     touch = true,
   ): Promise<void> {
     if (touch) plan.updated_at = new Date().toISOString();
-    if (durableObjectivesEnabled()) {
+    {
       const repository = this.durableRepository();
       const state = this.durableStates.get(metadata);
       const sameObjective =
@@ -1577,13 +1507,5 @@ export class VexiPlanStateService {
       }
       return;
     }
-    if (metadata.agent_objective_id || metadata.agent_objective_authority)
-      throw new ConflictException(
-        'El plan durable no puede modificarse en metadata.',
-      );
-    await this.prisma.ai_conversations.updateMany({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, agent_plan: plan } as any },
-    });
   }
 }

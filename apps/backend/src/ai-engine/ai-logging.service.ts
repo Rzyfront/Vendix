@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { RequestContextService } from '../common/context/request-context.service';
 import {
   AgentTraceService,
@@ -36,19 +35,11 @@ export class AILoggingService {
     private readonly prisma: GlobalPrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     @Optional() private readonly trace?: AgentTraceService,
-    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async logRequest(entry: AILogEntry & AICacheLogFields): Promise<void> {
     try {
       const correlation = this.trace?.currentTraceContext();
-      // H may be enabled independently of trace collection. Persist explicit
-      // unknown counters instead of disguising a cancelled stream as free.
-      const hStreaming =
-        process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
-        entry.telemetry_metadata?.streaming === true;
-      const tracing =
-        this.tracingEnabled() || correlation !== undefined || hStreaming;
       const externalId =
         entry.request_id ??
         RequestContextService.asyncLocalStorage.getStore()?.request_id;
@@ -60,11 +51,10 @@ export class AILoggingService {
           ? hashTraceValue(externalId)
           : undefined;
       await this.prisma.ai_engine_logs.create({
-        // OFF remains usable before the additive tracing migration is applied.
         select: { id: true },
         data: {
           request_id: requestId,
-          ...(tracing && {
+          ...{
             trace_id: correlation?.trace_id ?? this.safeUuid(entry.trace_id),
             span_id: correlation?.span_id ?? this.safeUuid(entry.span_id),
             objective_id:
@@ -98,7 +88,7 @@ export class AILoggingService {
             },
             cost_source: 'logical_summary',
             telemetry_metadata: redactTraceAttributes(entry.telemetry_metadata),
-          }),
+          },
           app_key: entry.app_key,
           config_id: entry.config_id,
           organization_id: entry.organization_id,
@@ -113,24 +103,16 @@ export class AILoggingService {
           latency_ms: entry.latency_ms,
           status: entry.status,
           // Provider error messages may echo prompts, URLs and credentials.
-          error_message:
-            tracing && entry.error_message ? '[redacted]' : entry.error_message,
-          input_preview: tracing
-            ? undefined
-            : entry.input_preview?.substring(0, 500),
+          error_message: entry.error_message
+            ? '[redacted]'
+            : entry.error_message,
+          input_preview: undefined,
         },
       });
     } catch (error: any) {
       // Prisma errors may contain the rejected data, including legacy previews.
       this.logger.error('Failed to log AI request');
     }
-  }
-
-  private tracingEnabled(): boolean {
-    const value =
-      this.config?.get('AI_AGENT_TRACING_ENABLED') ??
-      process.env.AI_AGENT_TRACING_ENABLED;
-    return value === true || value === 'true';
   }
 
   private safeUuid(value?: string): string | undefined {

@@ -9,10 +9,7 @@ import {
   type ToolCatalogManifest,
   type ToolDocument,
 } from '../tools/tool-catalog';
-import {
-  PlaybookLoaderService,
-  playbooksEnabled,
-} from './playbook-loader.service';
+import { PlaybookLoaderService } from './playbook-loader.service';
 import type { PlaybookDocument, PlaybookStep } from './playbook.interface';
 
 export interface PlaybookScope {
@@ -168,7 +165,6 @@ export class PlaybookService {
 
   /** Routing hints only: every returned tool already belongs to the current authorized intersection. */
   getActiveToolDependencies(session: PlaybookSession): string[] {
-    if (!playbooksEnabled()) return [];
     const state = this.state(session);
     const documents = this.loader.getPlaybooks();
     const names = new Set<string>();
@@ -198,11 +194,6 @@ export class PlaybookService {
   }
 
   search(session: PlaybookSession, args: { query: string; limit?: number }) {
-    if (!playbooksEnabled())
-      return error(
-        'PLAYBOOKS_DISABLED',
-        'Los procesos progresivos están desactivados.',
-      );
     const state = this.state(session);
     if (
       typeof args.query !== 'string' ||
@@ -281,12 +272,8 @@ export class PlaybookService {
         undefined,
         'process',
       );
-      // Provider/index waits cannot revive a disabled flag or stale session authority.
-      if (!playbooksEnabled())
-        return error(
-          'PLAYBOOKS_DISABLED',
-          'Los procesos progresivos están desactivados.',
-        );
+      // Provider/index waits cannot revive stale session authority.
+
       const current = this.state(session);
       const currentPermissions =
         RequestContextService.asyncLocalStorage.getStore()?.permissions ?? [];
@@ -343,11 +330,6 @@ export class PlaybookService {
       hash?: string;
     },
   ): LoadedPlaybook | PlaybookError {
-    if (!playbooksEnabled())
-      return error(
-        'PLAYBOOKS_DISABLED',
-        'Los procesos progresivos están desactivados.',
-      );
     const state = this.state(session);
     if (
       typeof args.id !== 'string' ||
@@ -506,7 +488,6 @@ export class PlaybookService {
 
   /** Release-only B manifest: descriptions + sections, no customer data or executable authority. */
   getKnowledgeManifest(): ToolCatalogManifest {
-    if (!playbooksEnabled()) return { hash: catalogHash([]), documents: [] };
     const documents: ToolDocument[] = this.loader
       .getPlaybooks()
       .flatMap((document) =>

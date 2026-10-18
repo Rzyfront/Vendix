@@ -1,5 +1,5 @@
 import type { AgentRecoveryState } from './agent-recovery.service';
-import { robustExecutionEnabled } from './agent-execution-flags';
+
 import {
   ConflictException,
   Injectable,
@@ -22,7 +22,6 @@ import {
   ObjectiveBudget,
   ObjectiveProgress,
   ObjectiveLease,
-  durableObjectivesEnabled,
 } from './interfaces/agent-objective.interface';
 
 export type { ObjectiveProgress } from './interfaces/agent-objective.interface';
@@ -370,10 +369,7 @@ export class AgentDurableSession {
     if (result.aborted) return objectiveProgress(this.objective);
     // Only the opaque server verifier can enter completed_verified. Never
     // downgrade that state to a conversational partial during normal closure.
-    if (
-      robustExecutionEnabled() &&
-      this.objective.semantic_status === 'completed_verified'
-    ) {
+    if (this.objective.semantic_status === 'completed_verified') {
       await this.close();
       this.objective = await this.repo.get(this.objective_id);
       return objectiveProgress(this.objective);
@@ -428,7 +424,6 @@ export class AgentDurableSessionService {
     private readonly contexts: AgentTaskContextService,
   ) {}
   async canContinue(conversationId: number): Promise<boolean> {
-    if (!durableObjectivesEnabled()) return false;
     let row = await this.repo.getForConversation(conversationId);
     if (row?.semantic_status === 'awaiting_approval')
       row = await this.repo.recoverAppliedReceipt(row.id, row.version);
@@ -444,7 +439,6 @@ export class AgentDurableSessionService {
     goal: string,
     options: { continuation?: boolean; objectiveId?: string } = {},
   ): Promise<AgentDurableSession | null> {
-    if (!durableObjectivesEnabled()) return null;
     // Do not borrow another request's historical static tenant context.
     const ctx = RequestContextService.asyncLocalStorage.getStore();
     if (!ctx?.store_id || !ctx.organization_id || !ctx.user_id)

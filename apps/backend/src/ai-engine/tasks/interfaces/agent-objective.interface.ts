@@ -1,9 +1,6 @@
 import type { AgentPlan } from '../../interfaces/agent-plan.interface';
 import type { ToolExecutionReceipt } from '../../tools/interfaces/tool.interface';
 
-export const durableObjectivesEnabled = (): boolean =>
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED === 'true';
-
 export interface ObjectiveScope {
   store_id: number;
   organization_id: number;

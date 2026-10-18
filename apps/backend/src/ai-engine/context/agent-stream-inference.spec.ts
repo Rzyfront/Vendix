@@ -1,7 +1,4 @@
-import {
-  agentStreamingEnabled,
-  streamAgentInference,
-} from './agent-stream-inference';
+import { streamAgentInference } from './agent-stream-inference';
 import type {
   AIResponse,
   AIStreamChunk,
@@ -9,21 +6,7 @@ import type {
 
 describe('H inference transport and semantic fence', () => {
   const direct = (consume: () => Promise<AIResponse>) => consume();
-  it('default OFF requires literal true', () => {
-    const before = process.env.AI_AGENT_STREAMING_ENABLED;
-    try {
-      for (const value of [undefined, 'false', 'TRUE', '1']) {
-        if (value === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
-        else process.env.AI_AGENT_STREAMING_ENABLED = value;
-        expect(agentStreamingEnabled()).toBe(false);
-      }
-      process.env.AI_AGENT_STREAMING_ENABLED = 'true';
-      expect(agentStreamingEnabled()).toBe(true);
-    } finally {
-      if (before === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
-      else process.env.AI_AGENT_STREAMING_ENABLED = before;
-    }
-  });
+
   it('consumes tokens before provider done without painting unverified effect claims', async () => {
     let release!: () => void;
     const hold = new Promise<void>((resolve) => {

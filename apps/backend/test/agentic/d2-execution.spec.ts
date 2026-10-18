@@ -151,30 +151,9 @@ async function drain(
   return { chunks, result: next.value as AgentResult };
 }
 const scope = <T>(fn: () => T) => RequestContextService.runIsolated(ctx, fn);
-const flags = [
-  'AI_DURABLE_OBJECTIVES_ENABLED',
-  'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-  'AI_PARALLEL_READS_ENABLED',
-  'AI_TOOL_EXECUTION_CONTRACT_ENABLED',
-  'AI_TOOL_ROUTING_ENABLED',
-  'AI_AGENT_PLAYBOOKS_ENABLED',
-  'AI_PARALLEL_READS_GLOBAL_CAP',
-  'AI_PARALLEL_READS_OBJECTIVE_CAP',
-  'DATABASE_POOL_MAX',
-] as const;
-let saved: Array<[string, string | undefined]>;
-beforeEach(() => {
-  saved = flags.map((key) => [key, process.env[key]]);
-  for (const key of flags) delete process.env[key];
-  process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
-  process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED = 'true';
-  process.env.AI_PARALLEL_READS_ENABLED = 'true';
-  process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
-});
+
+beforeEach(() => {});
 afterEach(() => {
-  saved.forEach(([key, value]) =>
-    value === undefined ? delete process.env[key] : (process.env[key] = value),
-  );
   jest.restoreAllMocks();
 });
 
@@ -489,36 +468,5 @@ describe('D2 real execution seams, synthetic provider/domain', () => {
       expect(late.freshness).not.toBe('observed');
       expect(result.objective?.semantic_status).not.toBe('completed_verified');
       expect(handler).toHaveBeenCalledTimes(2);
-    }));
-
-  it('with all D2 flags OFF preserves the legacy serial loop and never writes a recovery checkpoint', async () =>
-    scope(async () => {
-      delete process.env.AI_AGENT_ROBUST_EXECUTION_ENABLED;
-      delete process.env.AI_PARALLEL_READS_ENABLED;
-      delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
-      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-      const gate = defer();
-      let active = 0,
-        max = 0;
-      const handler = jest.fn(async (args: Record<string, unknown>) => {
-        active++;
-        max = Math.max(max, active);
-        await gate.promise;
-        active--;
-        return JSON.stringify({ id: args.id });
-      });
-      const w = wiring(readTool(handler));
-      w.queue.push(
-        answer(Array.from({ length: 8 }, (_, i) => call(i))),
-        answer(),
-      );
-      const pending = drain(w.agent);
-      await tickUntil(() => active === 1);
-      gate.resolve();
-      await pending;
-      expect(max).toBe(1);
-      expect(handler).toHaveBeenCalledTimes(8);
-      expect(w.db.results.size).toBe(0);
-      expect(w.db.objectives.size).toBe(0);
     }));
 });

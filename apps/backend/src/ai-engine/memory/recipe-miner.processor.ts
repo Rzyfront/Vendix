@@ -3,7 +3,7 @@ import type { Job } from 'bullmq';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { ProceduralMemoryService } from './procedural-memory.service';
 import { RecipeRepository } from './recipe.repository';
-import { RecipeMiningJob, proceduralMemoryEnabled } from './recipe.interface';
+import { RecipeMiningJob } from './recipe.interface';
 import { ToolCatalogIndexerService } from '../tools/tool-catalog-indexer.service';
 
 @Processor('ai-recipe-miner', { concurrency: 1 })
@@ -27,7 +27,6 @@ export class RecipeMinerProcessor extends WorkerHost {
         }
     >,
   ): Promise<{ candidate_ids?: number[]; indexed?: boolean }> {
-    if (!proceduralMemoryEnabled()) return {};
     const data = job.data;
     if (
       job.name === 'index-recipe' &&

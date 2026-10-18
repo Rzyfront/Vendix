@@ -235,14 +235,13 @@ Rules for the pattern:
 - `vendix-mcp-server`
 - `vendix-inventory-stock`
 
-## G opt-in voice proposal/consent
+## G voice proposal/consent
+## Standard autonomy operation
 
-The voice read-only table above describes the legacy/default-OFF surface.
-`AI_VOICE_CONFIRM_ENABLED=true` adds authenticated session-bound offered catalogs:
-reads remain reads, writes run ONLY registry `proposalOnly` (never a handler even
-with a token), and UI calls require server authority before browser dispatch.
-Dedicated consent uses the original exact preview hash and server-STT reliability,
-not realtime transcription or model interpretation. Actual apply remains in the
-same confirmation/D1/D2 choke with current permissions ∩ objective snapshot over
-the entire bridge callback. See `vendix-agent-voice-consent` for TTLs, nonce,
-Vex effect identity, click fallback, billing retention and live acoustic gates.
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

@@ -15,11 +15,6 @@ async function collect(generator: AsyncGenerator<unknown>): Promise<unknown[]> {
   return result;
 }
 describe('H chat reattachment revalidates current access before transport lookup', () => {
-  const previous = process.env.AI_AGENT_STREAMING_ENABLED;
-  afterEach(() => {
-    if (previous === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
-    else process.env.AI_AGENT_STREAMING_ENABLED = previous;
-  });
   function fixture() {
     const execute = jest.fn(async function* () {
       yield { type: 'text', content: 'registro leído' };
@@ -40,22 +35,8 @@ describe('H chat reattachment revalidates current access before transport lookup
     );
     return { service, execute, getConversation, gate };
   }
-  it.each([undefined, 'false', 'TRUE'])(
-    'keeps the legacy direct generator and shape with flag %s',
-    async (flag) => {
-      if (flag === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
-      else process.env.AI_AGENT_STREAMING_ENABLED = flag;
-      const { service, execute, gate } = fixture();
-      expect(await collect(service.sendMessageStream(7, 'opaque'))).toEqual([
-        { type: 'text', content: 'registro leído' },
-        { type: 'done' },
-      ]);
-      expect(execute).toHaveBeenCalledTimes(1);
-      expect(gate).not.toHaveBeenCalled();
-    },
-  );
+
   it('replays only after fresh scoped conversation and current gate checks, with no second execute', async () => {
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
     const { service, execute, getConversation, gate } = fixture();
     await RequestContextService.run(context, async () => {
       await collect(service.sendMessageStream(7, 'opaque'));
@@ -89,7 +70,6 @@ describe('H chat reattachment revalidates current access before transport lookup
     });
   });
   it('fails closed without explicit AsyncLocalStorage scope', async () => {
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
     const { service, execute } = fixture();
     await expect(
       collect(service.sendMessageStream(7, 'opaque')),
@@ -97,7 +77,6 @@ describe('H chat reattachment revalidates current access before transport lookup
     expect(execute).not.toHaveBeenCalled();
   });
   it('never resurrects cached single-step or plan consent from another tab; keeps evidence and sequence', async () => {
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
     const { service } = fixture();
     const execute = jest.fn(async function* () {
       yield {
@@ -151,7 +130,6 @@ describe('H chat reattachment revalidates current access before transport lookup
     });
   });
   it('wires disconnect through the real chat generator, drains and persists cancellation without re-consuming intent', async () => {
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
     const conversation = {
       id: 7,
       store_id: 1,
@@ -242,6 +220,9 @@ describe('H chat reattachment revalidates current access before transport lookup
         createHook: jest.fn(),
       } as never,
     );
+    jest
+      .spyOn(service as any, 'durableTurnArgs')
+      .mockResolvedValue({ messages: [], plan: {} });
     const client = new AbortController();
     await RequestContextService.run(context, async () => {
       const draining = collect(

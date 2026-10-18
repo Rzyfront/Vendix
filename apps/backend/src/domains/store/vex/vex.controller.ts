@@ -3,7 +3,7 @@ import {
   ResumeAgentObjectiveDto,
   RejectAgentObjectiveProposalDto,
 } from '../vexi/dto/resume-agent-objective.dto';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import {
   Body,
   Controller,
@@ -346,22 +346,7 @@ export class VexController {
       const isConfirmationRejection =
         err instanceof VendixHttpException &&
         err.errorCode === ErrorCodes.AI_AGENT_005.code;
-      if (
-        !durableObjectivesEnabled() &&
-        !isConfirmationRejection &&
-        planId &&
-        conversationId !== undefined
-      ) {
-        await this.persistStepResult({
-          planId,
-          conversationId,
-          stepId: dto.step_id,
-          tool,
-          args,
-          outcome: 'failed',
-          error: (err as Error)?.message,
-        });
-      }
+
       throw err;
     }
 

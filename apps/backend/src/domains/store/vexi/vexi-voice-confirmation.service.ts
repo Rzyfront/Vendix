@@ -5,14 +5,12 @@ import {
   toolPreviewHash,
 } from '../../../ai-engine/tools/ai-tool-registry';
 import { describeVoiceAction } from './voice-action';
-import { robustExecutionEnabled } from '../../../ai-engine/tasks/agent-execution-flags';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import {
   VexiVoiceConsentService,
   VoiceConsentProposal,
   VoiceConsentCapture,
   VoiceConsentAudit,
-  voiceConfirmationEnabled,
 } from './vexi-voice-consent.service';
 import {
   VexiVoiceAuthorityService,
@@ -74,26 +72,16 @@ export class VexiVoiceConfirmationService {
 
   capability() {
     return {
-      enabled:
-        voiceConfirmationEnabled() &&
-        durableObjectivesEnabled() &&
-        robustExecutionEnabled(),
+      enabled: true,
       requires_reliable_stt: true,
       fallback: 'click',
     };
-  }
-  private requireEnabled() {
-    if (!this.capability().enabled)
-      throw new ConflictException(
-        'La confirmación hablada no está disponible. Usa la aprobación con clic.',
-      );
   }
   async session(input: {
     conversation_id: number;
     agent_key: 'vex' | 'vexi';
     channel?: 'pipeline' | 'realtime';
   }) {
-    this.requireEnabled();
     const current = await this.authority.prepareAuthority(
       input.conversation_id,
       input.agent_key,
@@ -120,7 +108,6 @@ export class VexiVoiceConfirmationService {
     input: { conversation_id: number; agent_key: 'vex' | 'vexi' },
     file: Express.Multer.File,
   ) {
-    this.requireEnabled();
     await this.authority.prepareAuthority(
       input.conversation_id,
       input.agent_key,
@@ -128,7 +115,6 @@ export class VexiVoiceConfirmationService {
     return this.voice.transcribe(undefined, file); // Dictation is NEVER consent.
   }
   async challenge(input: VoiceChallengeRequest) {
-    this.requireEnabled();
     const session = await this.consent.validateSession(input.session_id);
     const current = await this.authority.resolveAuthority(
       session.conversationId,
@@ -299,7 +285,6 @@ export class VexiVoiceConfirmationService {
     await this.authority.assertWritable(current);
   }
   async validate(proposal: Readonly<VoiceConsentProposal>) {
-    this.requireEnabled();
     const current = await this.authority.resolveAuthority(
       proposal.conversationId,
       proposal.agentKey,
@@ -368,7 +353,6 @@ export class VexiVoiceConfirmationService {
     file: Express.Multer.File,
     apply: VoiceApply,
   ) {
-    this.requireEnabled();
     const proposal = await this.consent.getProposal(
       input.session_id,
       input.proposal_id,

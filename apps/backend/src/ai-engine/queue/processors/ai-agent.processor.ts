@@ -10,7 +10,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { buildActiveUserRolesWhere } from '../../../common/utils/role-scope.util';
 import { SubscriptionAccessService } from '../../../domains/store/subscriptions/services/subscription-access.service';
 import { AgentObjectiveRepository } from '../../tasks/agent-objective.repository';
-import { durableObjectivesEnabled } from '../../tasks/interfaces/agent-objective.interface';
+
 import { AgentDurableSessionService } from '../../tasks/agent-durable-session.service';
 import type { RequestContext } from '../../../common/context/request-context.service';
 
@@ -75,17 +75,14 @@ export class AIAgentProcessor extends WorkerHost {
           // Never spread a job/context: no credential survives the queue boundary.
         },
         async () => {
-          const enabled = durableObjectivesEnabled();
-          const context = enabled
-            ? await this.currentAuthority(job.data, requestId)
-            : RequestContextService.asyncLocalStorage.getStore()!;
+          const context = await this.currentAuthority(job.data, requestId);
           return RequestContextService.runIsolated(context, async () => {
             let durable: Awaited<
               ReturnType<AgentDurableSessionService['open']>
             > = null;
             let agentKey = 'vexi';
             let objectiveConversation: number | undefined;
-            if (enabled && job.data.objective_id) {
+            if (job.data.objective_id) {
               if (!this.objectives || !this.durableSessions)
                 throw new ForbiddenException('Durable worker unavailable');
               const objective = await this.objectives.get(
@@ -103,10 +100,12 @@ export class AIAgentProcessor extends WorkerHost {
               agentKey = objective.agent_id ?? 'vexi';
               objectiveConversation = objective.conversation_id;
             }
-            const policy = enabled
-              ? await this.currentAgentPolicy(context, agentKey, job.data)
-              : {};
-            if (enabled && job.data.objective_id) {
+            const policy = await this.currentAgentPolicy(
+              context,
+              agentKey,
+              job.data,
+            );
+            if (job.data.objective_id) {
               durable = await this.durableSessions!.open(
                 objectiveConversation!,
                 agentKey,

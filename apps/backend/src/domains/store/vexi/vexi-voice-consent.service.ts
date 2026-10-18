@@ -10,9 +10,6 @@ import {
   VexiConfirmationService,
 } from './vexi-confirmation.service';
 
-export const voiceConfirmationEnabled = (): boolean =>
-  process.env.AI_VOICE_CONFIRM_ENABLED === 'true';
-
 const SESSION_TTL_SECONDS = 300;
 /** Billing retention is NOT authority duration. All executable reads use expiresAt. */
 const SESSION_RETENTION_SECONDS = 3_600;
@@ -840,7 +837,6 @@ export class VexiVoiceConsentService {
     organizationId: number;
     storeId: number;
   } {
-    if (!voiceConfirmationEnabled()) this.reject('voice_disabled');
     // Never getContext(): its legacy static fallback could adopt another tenant.
     const context = RequestContextService.asyncLocalStorage.getStore();
     if (

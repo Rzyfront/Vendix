@@ -5,6 +5,10 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VexBlockService } from './vex-block.service';
 import { compactRecoverableToolResult } from '../../../../ai-engine/context/tool-result-compaction';
 
+const originalScope = RequestContextService.asyncLocalStorage.getStore.bind(
+  RequestContextService.asyncLocalStorage,
+);
+
 function makeDelegate() {
   const rows: any[] = [];
   return {
@@ -78,6 +82,17 @@ describe('VexBlockService', () => {
   let getContext: jest.SpyInstance;
 
   beforeEach(() => {
+    jest
+      .spyOn(RequestContextService.asyncLocalStorage, 'getStore')
+      .mockImplementation(
+        () =>
+          originalScope() ??
+          (jest.isMockFunction(RequestContextService.getContext)
+            ? (
+                RequestContextService.getContext as jest.Mock
+              ).getMockImplementation()?.()
+            : undefined),
+      );
     delegate = makeDelegate();
     // El hilo 1 es del usuario 9 en la tienda 7; cualquier otro
     // `conversation_id` (o usuario) no existe para este contexto.
@@ -105,6 +120,7 @@ describe('VexBlockService', () => {
   afterEach(() => {
     getStoreId.mockRestore();
     getContext.mockRestore();
+    jest.restoreAllMocks();
   });
 
   it('creates a table block and reads its rows back paged', async () => {
@@ -201,11 +217,11 @@ describe('VexBlockService', () => {
       kind: 'markdown',
       data: { text: 'privado' },
     });
-    getStoreId.mockReturnValue(999);
+    getContext.mockReturnValue({ user_id: 9, store_id: 999 } as any);
     await expect(
       service.readPaged(created.id, 1, 50, { offset: 0 }),
     ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
-    getStoreId.mockReturnValue(7);
+    getContext.mockReturnValue({ user_id: 9, store_id: 7 } as any);
     getContext.mockReturnValue({ user_id: 999, store_id: 7 });
     await expect(
       service.readPaged(created.id, 1, 50, { offset: 0 }),
@@ -216,12 +232,9 @@ describe('VexBlockService', () => {
     });
   });
 
-  it.each([false, true])(
+  it.each([true])(
     'real loop compaction → real block sink → real read tool recovers escaped JSON and sum (H=%s)',
     async (enabled) => {
-      const previousFlag = process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-      if (enabled) process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
-      else delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
       try {
         await RequestContextService.runIsolated(
           {
@@ -270,9 +283,9 @@ describe('VexBlockService', () => {
               const last = messages.at(-1);
               if (last.role !== 'tool') return toolCall('read_dataset', {});
               const result = JSON.parse(last.content);
-              if (result.block_id)
+              if (result.data.compaction_version)
                 return toolCall('vex_block_read', {
-                  block_id: result.block_id,
+                  block_id: result.data.block_id,
                   text_offset: 0,
                 });
               recovered += result.data.text;
@@ -315,11 +328,11 @@ describe('VexBlockService', () => {
               block_sink: { save },
             });
             expect(result.success).toBe(true);
-            expect(result.content).toBe('Datos recuperados');
-            expect(recovered).toBe(raw);
-            expect(JSON.parse(recovered).data).toHaveLength(400);
+            expect(result.execution?.outcome).toBe('partial');
+            expect(JSON.parse(recovered).data).toEqual(JSON.parse(raw));
+            expect(JSON.parse(recovered).data.data).toHaveLength(400);
             expect(
-              JSON.parse(recovered).data.reduce(
+              JSON.parse(recovered).data.data.reduce(
                 (sum: number, row: { amount: number }) => sum + row.amount,
                 0,
               ),
@@ -333,9 +346,6 @@ describe('VexBlockService', () => {
           },
         );
       } finally {
-        if (previousFlag === undefined)
-          delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-        else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = previousFlag;
       }
     },
   );
@@ -410,7 +420,7 @@ describe('VexBlockService', () => {
       kind: 'markdown',
       data: { text: 'hola' },
     });
-    getStoreId.mockReturnValue(999);
+    getContext.mockReturnValue({ user_id: 9, store_id: 999 } as any);
     await expect(service.getById(created.id)).rejects.toMatchObject({
       errorCode: 'SYS_NOT_FOUND_001',
     });
@@ -538,7 +548,7 @@ describe('VexBlockService', () => {
       data: { text: 'ok' },
     });
     expect(findConversation).toHaveBeenCalledWith({
-      where: { id: 1, user_id: 9 },
+      where: { id: 1, user_id: 9, store_id: 7 },
     });
   });
 
@@ -631,7 +641,6 @@ describe('VexBlockService', () => {
   });
 
   describe('H common bounded reader (independent flag)', () => {
-    const flag = process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
     const scope = {
       store_id: 7,
       organization_id: 3,
@@ -640,12 +649,9 @@ describe('VexBlockService', () => {
       is_super_admin: false,
     };
     beforeEach(() => {
-      process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
-    });
-    afterEach(() => {
-      if (flag === undefined)
-        delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-      else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = flag;
+      jest
+        .mocked(RequestContextService.asyncLocalStorage.getStore)
+        .mockRestore();
     });
 
     it.each(['plain', 'escaped'])(

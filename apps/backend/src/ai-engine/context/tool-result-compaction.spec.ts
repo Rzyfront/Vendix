@@ -4,28 +4,9 @@ import {
   describeToolResult,
   isBoundedArtifactPage,
   readArtifactPage,
-  toolResultCompactionEnabled,
 } from './tool-result-compaction';
 
 describe('recoverable tool-result compaction', () => {
-  const originalFlag = process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-  afterEach(() => {
-    if (originalFlag === undefined)
-      delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-    else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = originalFlag;
-  });
-
-  it('defaults OFF and enables only literal true', () => {
-    for (const flag of [undefined, '', '1', 'TRUE', 'false']) {
-      if (flag === undefined)
-        delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
-      else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = flag;
-      expect(toolResultCompactionEnabled()).toBe(false);
-    }
-    process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
-    expect(toolResultCompactionEnabled()).toBe(true);
-  });
-
   it('does not compact before full persistence succeeds and uses structural summaries, not JSON prefixes', async () => {
     const raw = JSON.stringify({
       data: Array.from({ length: 400 }, (_, id) => ({

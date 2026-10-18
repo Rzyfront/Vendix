@@ -30,11 +30,6 @@ const request = {
 };
 const run = <T>(work: () => T) =>
   RequestContextService.runIsolated(context, work);
-const flags = [
-  'AI_SANDBOX_ENABLED',
-  'AI_DURABLE_OBJECTIVES_ENABLED',
-  'AI_TOOL_EXECUTION_CONTRACT_ENABLED',
-];
 
 async function fixture(key: 'vex' | 'vexi' = 'vexi') {
   const registry = new AIToolRegistry({} as never);
@@ -134,6 +129,7 @@ async function fixture(key: 'vex' | 'vexi' = 'vexi') {
     registry,
   );
   const audit = {
+    sourceAvailable: jest.fn(() => true),
     start: jest.fn(async () => {}),
     appendCall: jest.fn(async () => {}),
     finish: jest.fn(async () => {}),
@@ -219,14 +215,8 @@ async function fixture(key: 'vex' | 'vexi' = 'vexi') {
 }
 
 describe('E offline integration: same agent+registry+D1 for both text surfaces', () => {
-  beforeEach(() => {
-    for (const flag of flags) process.env[flag] = 'true';
-    process.env.AI_SANDBOX_STORE_IDS = '5';
-  });
-  afterEach(() => {
-    for (const flag of flags) delete process.env[flag];
-    delete process.env.AI_SANDBOX_STORE_IDS;
-  });
+  beforeEach(() => {});
+  afterEach(() => {});
   it.each(['vex', 'vexi'] as const)(
     '%s persists read evidence before guest and omits source from public calls/transcript',
     async (key) =>

@@ -18,8 +18,8 @@ metadata:
 
 ## Critical rules
 
-- `AI_AGENT_PLAYBOOKS_ENABLED` defaults OFF; only literal `true` enables C. No
-  provider/model/prompt DB edits. B index additionally needs its own flag/migration.
+- Autonomy capabilities are standard, without environment switches.
+
 - Runtime business guidance lives in `apps/backend/src/ai-engine/playbooks/content/`,
   **not** developer `skills/`. These MD files adapt progressive disclosure, not
   exact Agent Skills schema: JSON YAML-subset frontmatter, structured metadata
@@ -96,7 +96,7 @@ compiled loader. Existing CI `scripts/assert-build-assets.js` checks every sourc
 asset is bundled. Tests can exercise the gate in a temporary fixture, but this is
 not a real build. Never assume a local source directory proves deployed assets.
 
-Keep flags OFF until CI/bootstrap, domain-owner review and authorized QA pass.
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 Synthetic factories/Redis/HTTP fixtures prove contracts, not live DIAN, DB SQL
 concurrency, model completion, latency, cost or the ≥30% exploration gate. Preserve
 A's corpus and report absent baseline/provider runs as `not_run`/unknown.
@@ -106,3 +106,13 @@ A's corpus and report absent baseline/provider runs as `not_run`/unknown.
 `vendix-ai-agent-tools`, `vendix-agent-execution-contract`, `vendix-ai-tool-routing`,
 `vendix-ai-embeddings-rag`, `vendix-agent-durable-tasks`, `vendix-vex-agent`,
 `vendix-vexi-agent` and each process's business-domain skills.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

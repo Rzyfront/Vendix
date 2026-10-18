@@ -17,7 +17,6 @@ import {
   RecipeTemplate,
   RecipeReview,
   RecipeStatus,
-  proceduralMemoryEnabled,
 } from './recipe.interface';
 
 const json = (value: unknown) => Prisma.sql`${JSON.stringify(value)}::jsonb`;
@@ -128,7 +127,6 @@ export class RecipeRepository {
     return rows[0];
   }
   async available(): Promise<AgentRecipe[]> {
-    if (!proceduralMemoryEnabled()) return [];
     const scope = requireObjectiveScope();
     const local = await this.store.$queryRaw<AgentRecipe[]>(
       Prisma.sql`SELECT * FROM ai_agent_recipes WHERE ${owner(scope)} AND status='approved' AND approved_at IS NOT NULL AND review IS NOT NULL ORDER BY id DESC LIMIT 100`,

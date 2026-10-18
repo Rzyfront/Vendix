@@ -1,9 +1,6 @@
 import { RecipeRepository } from '../memory/recipe.repository';
 import { RecipeQualityService } from '../memory/recipe-quality.service';
-import {
-  AgentRecipe,
-  proceduralMemoryEnabled,
-} from '../memory/recipe.interface';
+import { AgentRecipe } from '../memory/recipe.interface';
 import { requireObjectiveScope } from '../tasks/agent-objective.repository';
 import { assertKnowledgeVector } from '../embeddings/knowledge-embedding.service';
 import {
@@ -25,7 +22,6 @@ import { AIToolRegistry } from './ai-tool-registry';
 import {
   buildToolManifest,
   catalogHash,
-  knowledgeIndexEnabled,
   ToolCatalogManifest,
 } from './tool-catalog';
 
@@ -48,7 +44,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
   getReleaseManifest(): ToolCatalogManifest {
     const tools = buildToolManifest(this.registry);
     const processes = this.playbooks?.getKnowledgeManifest().documents ?? [];
-    if (!processes.length) return tools; // OFF manifest remains byte-for-byte B.
+    if (!processes.length) return tools;
     const documents = [...tools.documents, ...processes].sort((a, b) =>
       a.key.localeCompare(b.key),
     );
@@ -65,7 +61,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     // All decentralized onModuleInit factories have registered BEFORE this hook.
     await this.playbookLoader?.initializeRelease();
     this.bootstrapped = true;
-    if (!knowledgeIndexEnabled()) return;
+
     try {
       await this.enqueueSnapshot();
     } catch {
@@ -76,16 +72,10 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
   }
 
   async enqueueSnapshot(): Promise<void> {
-    if (!knowledgeIndexEnabled() || !this.bootstrapped) return;
+    if (!this.bootstrapped) return;
     const manifest = this.getReleaseManifest();
     // Complete snapshot, including aliases/versions. Never infer retirement from a batch.
     for (const type of ['tool', 'process'] as const) {
-      // When C is OFF do not retire its historical process docs on B rollback.
-      if (
-        type === 'process' &&
-        !manifest.documents.some((d) => d.metadata.entity_type === type)
-      )
-        continue;
       await this.prisma.ai_knowledge_documents.updateMany({
         where: {
           knowledge_scope: 'global',
@@ -125,13 +115,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
 
   /** F publications have a separate approved-row manifest. Static B snapshots must NOT retire runtime recipes. */
   async indexRecipe(recipe: AgentRecipe): Promise<boolean> {
-    if (
-      !proceduralMemoryEnabled() ||
-      !knowledgeIndexEnabled() ||
-      !this.recipes ||
-      !this.recipeQuality
-    )
-      return false;
+    if (!this.recipes || !this.recipeQuality) return false;
     const current = async () =>
       recipe.knowledge_scope === 'global'
         ? this.recipes!.approvedGlobal(recipe.id)
@@ -180,7 +164,6 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         fingerprint: configuration.fingerprint,
       });
       if (
-        !proceduralMemoryEnabled() ||
         !(await current()) ||
         !this.recipeQuality.compatible(live) ||
         !this.recipeQuality.publicationValid(live)
@@ -217,7 +200,6 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     );
     assertKnowledgeVector(generated.vector);
     if (
-      !proceduralMemoryEnabled() ||
       !(await current()) ||
       !this.recipeQuality.compatible(live) ||
       !this.recipeQuality.publicationValid(live)
@@ -248,7 +230,6 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
   }
 
   async indexBatch(job: AIKnowledgeIndexJob): Promise<void> {
-    if (!knowledgeIndexEnabled()) return;
     // Reject payload drift/old workers. Job content is reconstructed from release code,
     // not trusted Redis strings or a fabricated store-0 request context.
     if (!this.bootstrapped) throw new Error('KNOWLEDGE_BOOT_BARRIER');
@@ -266,7 +247,9 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       if (!document) throw new Error('INVALID_KNOWLEDGE_JOB');
       return document;
     });
-    const configuration = await this.knowledgeEmbeddings.configuration();
+    const configuration = await this.knowledgeEmbeddings
+      .configuration()
+      .catch(() => null);
     for (const doc of selected) {
       const type = doc.metadata.entity_type === 'process' ? 'process' : 'tool';
       const old = await this.prisma.ai_knowledge_documents.findUnique({
@@ -277,7 +260,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         old.status === 'ready' &&
         old.content_hash === doc.hash &&
         old.indexed_hash === doc.hash &&
-        old.embedding_fingerprint === configuration.fingerprint
+        old.embedding_fingerprint === (configuration?.fingerprint ?? null)
       )
         continue;
       const data = {
@@ -292,8 +275,10 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         metadata: doc.metadata as Prisma.InputJsonObject,
         content_hash: doc.hash,
         release_hash: manifest.hash,
-        status: 'pending',
-        active: false,
+        status: 'ready',
+        active: true,
+        indexed_hash: doc.hash,
+        embedding_fingerprint: null,
         error_code: null,
         updated_at: new Date(),
       };
@@ -302,6 +287,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         create: { document_key: doc.key, ...data },
         update: data,
       });
+      if (!configuration) continue; // Lexical index is usable with no embedding app/budget.
       try {
         await this.embeddings.storeGlobalKnowledgeEmbedding({
           documentId: saved.id,
@@ -311,13 +297,13 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
           fingerprint: configuration.fingerprint,
         });
         // CAS: never mark a newer candidate ready with an older embedding.
-        await this.prisma.ai_knowledge_documents.updateMany({
+        const activated = await this.prisma.ai_knowledge_documents.updateMany({
           where: {
             id: saved.id,
             content_hash: doc.hash,
             release_hash: manifest.hash,
             knowledge_scope: 'global',
-            status: 'pending',
+            status: 'ready',
           },
           data: {
             status: 'ready',
@@ -327,6 +313,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
             updated_at: new Date(),
           },
         });
+        if (activated.count !== 1) continue; // A newer release won the CAS; never retire its versions.
         // Retire older versions only AFTER this version is ready; no deletion.
         await this.prisma.ai_knowledge_documents.updateMany({
           where: {
@@ -346,13 +333,15 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
             release_hash: manifest.hash,
           },
           data: {
-            status: 'error',
-            active: false,
+            status: 'ready',
+            active: true,
+            indexed_hash: doc.hash,
+            embedding_fingerprint: null,
             error_code: 'KNOWLEDGE_INDEX_FAILED',
             updated_at: new Date(),
           },
         });
-        throw new Error('KNOWLEDGE_INDEX_FAILED');
+        // Preserve the authorized lexical catalog if a provider/budget is unavailable.
       }
     }
   }

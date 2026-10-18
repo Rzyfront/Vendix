@@ -16,7 +16,6 @@ import { buildDianCertificateS3Key } from '../../../domains/store/invoicing/dian
 import { S3Service } from '../../../common/services/s3.service';
 import { resolveDianPartyTaxScheme } from '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes';
 import { toDianTaxLevelCode } from '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes';
-import { playbooksEnabled } from '../../playbooks/playbook-flags';
 
 export interface InvoicingToolDeps {
   invoicingService: InvoicingService;
@@ -246,9 +245,7 @@ export function createInvoicingTools(
    * (F-35) → resolución con saldo (F-34). La comparten `preview` y `handler`
    * para que la re-verificación sea la misma comprobación, no una parecida.
    */
-  async function resolveEmissionGate(
-    invoiceId: number,
-  ): Promise<
+  async function resolveEmissionGate(invoiceId: number): Promise<
     | {
         ok: true;
         invoice: any;
@@ -460,7 +457,8 @@ export function createInvoicingTools(
                 invoice.customer.legal_name ??
                 ([invoice.customer.first_name, invoice.customer.last_name]
                   .filter(Boolean)
-                  .join(' ') || null),
+                  .join(' ') ||
+                  null),
               person_type: invoice.customer.person_type ?? null,
               email: invoice.customer.email ?? null,
             }
@@ -476,9 +474,7 @@ export function createInvoicingTools(
           issue_date: toIsoDate(invoice.issue_date),
           due_date: toIsoDate(invoice.due_date),
           currency: invoice.currency_code ?? invoice.currency ?? null,
-          subtotal: toNumberOrNull(
-            invoice.subtotal_amount ?? invoice.subtotal,
-          ),
+          subtotal: toNumberOrNull(invoice.subtotal_amount ?? invoice.subtotal),
           tax_amount: toNumberOrNull(invoice.tax_amount),
           total_amount: toNumberOrNull(invoice.total_amount),
           cufe: invoice.cufe ?? null,
@@ -487,8 +483,7 @@ export function createInvoicingTools(
           resolution: invoice.resolution
             ? {
                 id: invoice.resolution.id ?? null,
-                resolution_number:
-                  invoice.resolution.resolution_number ?? null,
+                resolution_number: invoice.resolution.resolution_number ?? null,
                 prefix: invoice.resolution.prefix ?? null,
               }
             : null,
@@ -502,9 +497,7 @@ export function createInvoicingTools(
             event_name: event.event_name ?? event.name ?? null,
             status: event.status ?? null,
             description: event.description ?? null,
-            registered_at: toIsoDate(
-              event.registered_at ?? event.created_at,
-            ),
+            registered_at: toIsoDate(event.registered_at ?? event.created_at),
           })),
         });
       },
@@ -558,8 +551,7 @@ export function createInvoicingTools(
           warnings: report.warnings ?? [],
           findings: report.findings ?? [],
           identity_emittable: report.identity?.emittable ?? null,
-          fiscal_document_emittable:
-            report.fiscal_document?.emittable ?? null,
+          fiscal_document_emittable: report.fiscal_document?.emittable ?? null,
           valid_transitions: report.valid_transitions ?? [],
           discard_route: report.discard_route ?? null,
           emission_chain: EMISSION_CHAIN,
@@ -683,9 +675,7 @@ export function createInvoicingTools(
             stats: dashboard?.stats ?? null,
             certificate_status: dashboard?.certificate_status ?? null,
             configs_summary: dashboard?.configs_summary ?? [],
-            recent_submissions: Array.isArray(
-              dashboard?.recent_submissions,
-            )
+            recent_submissions: Array.isArray(dashboard?.recent_submissions)
               ? dashboard.recent_submissions.slice(0, 5)
               : [],
           },
@@ -768,7 +758,12 @@ export function createInvoicingTools(
           status: warnings.length ? 'warning' : 'ok',
           target: `Validar ${invoiceSubject(invoice)}`,
           changes: [
-            { field: 'estado', label: 'Estado', from: 'draft', to: 'validated' },
+            {
+              field: 'estado',
+              label: 'Estado',
+              from: 'draft',
+              to: 'validated',
+            },
             {
               field: 'efecto',
               label: 'Efecto',
@@ -837,8 +832,7 @@ export function createInvoicingTools(
           enables: 'send_invoice_dian (F-30)',
           // C opt-in: only the explicit domain result is an effect receipt.
           // Fallback IDs/status above preserve the legacy display ABI, not proof.
-          ...(playbooksEnabled() &&
-          validated?.success !== false &&
+          ...(validated?.success !== false &&
           !validated?.error &&
           toPositiveInt(validated?.id) === invoiceId &&
           validated?.status === 'validated'
@@ -959,8 +953,7 @@ export function createInvoicingTools(
             remaining_before: gate.remaining,
           },
           emission_chain: EMISSION_CHAIN,
-          ...(playbooksEnabled() &&
-          sent?.success !== false &&
+          ...(sent?.success !== false &&
           !sent?.error &&
           toPositiveInt(sent?.id) === invoiceId &&
           ['sent', 'accepted'].includes(sent?.status)
@@ -1260,8 +1253,7 @@ export function createInvoicingTools(
           tax_amount: toNumberOrNull(created?.tax_amount),
           total_amount: toNumberOrNull(created?.total_amount),
           next_step: 'Evalúa el borrador con get_emit_readiness (F-32).',
-          ...(playbooksEnabled() &&
-          created?.success !== false &&
+          ...(created?.success !== false &&
           !created?.error &&
           toPositiveInt(created?.id) !== null &&
           created?.status === 'draft' &&
@@ -1469,7 +1461,8 @@ export function createInvoicingTools(
         properties: {
           config_id: {
             type: 'number',
-            description: 'ID de la configuración DIAN que firmará con este certificado.',
+            description:
+              'ID de la configuración DIAN que firmará con este certificado.',
           },
           p12_base64: {
             type: 'string',
@@ -1497,10 +1490,7 @@ export function createInvoicingTools(
               'config_id inválido: debe ser un entero positivo. Revisa las configuraciones en el módulo de facturación electrónica.',
           };
         }
-        if (
-          typeof args.password !== 'string' ||
-          !args.password.trim()
-        ) {
+        if (typeof args.password !== 'string' || !args.password.trim()) {
           return {
             status: 'error',
             target: 'Subir certificado DIAN',

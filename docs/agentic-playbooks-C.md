@@ -4,21 +4,26 @@ Implementación offline, **no promoción/canary ni baseline medido**. Fuente de 
 brief-C y plan aprobado, sección C. Prerrequisitos existentes: A, D0, B y D1.
 No scheduler/verificador de objetivos D2, nueva voz, sandbox o recetas de tienda.
 
-## Activación y rollback
+## Operación estándar de autonomía
 
-- `AI_AGENT_PLAYBOOKS_ENABLED`: solo `true`, **default OFF**. No se activó aquí.
-- Registro search/load y validación de assets ocurren opt-in. Las declaraciones
-  standalone MCP/voz devuelven `PLAYBOOK_SESSION_REQUIRED`: no nueva vía de ejecución.
-- Indexación/retrieval híbrido usa además `AI_TOOL_KNOWLEDGE_INDEX_ENABLED` de B y
-  su migración existente; no hay migración C. Sin índice/app/DB: fallback lexical
-  local explícito. No cambios de modelo, proveedor, configuración o prompt DB.
-- B routing mantiene discovery autorizado como scaffold, K12/24/40 intacto. Las
-  dependencias del playbook son hints intersectados con autoridad actual, no grants.
-- D1 ON conserva pins por objetivo; sin D1 la sesión es solo del turno. Rollout
-  requiere revisar/activar prerrequisitos explícitamente, no auto-habilitar flags.
-- Rollback excluye tools C de un registry ya inicializado, bloquea carga y queries
-  process, rechaza jobs de manifiesto viejo. No borra documentos/pins/results ni
-  reanima bodies históricos. Solo una referencia al body se rehidrata, incluso OFF.
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
 
 ## Contrato y confianza
 
@@ -33,7 +38,7 @@ Cada archivo publica owner, industria, workflow key, tools/versiones, permisos,
 verifiers y contrato de entradas simbólicas/DAG/ejemplos happy-sad. El validador
 comprueba nombres reales, versiones, required args/tipos/enums, referencias,
 permisos suficientes, rutas del ApiCatalog, ciclos, aprobación y verificadores.
-No invoca previews ni handlers para indexar. Assets inválidos opt-in fallan bootstrap.
+No invoca previews ni handlers para indexar. Assets de release inválidos fallan bootstrap.
 
 La sesión opaca vive en WeakMap, no por ID elegido por el modelo. Exige ALS real
 con owner/store/org positivos exactos. Autorización inicial∩actual, denies y scopes

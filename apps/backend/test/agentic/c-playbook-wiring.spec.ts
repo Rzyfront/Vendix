@@ -90,11 +90,6 @@ const document = (): PlaybookDocument => {
 };
 
 describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
-  const saved = [
-    'AI_AGENT_PLAYBOOKS_ENABLED',
-    'AI_TOOL_ROUTING_ENABLED',
-    'AI_TOOL_EXECUTION_CONTRACT_ENABLED',
-  ].map((key) => [key, process.env[key]]);
   let registry: AIToolRegistry;
   let service: AIAgentService;
   let playbooks: PlaybookService;
@@ -102,9 +97,6 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
   let read: jest.Mock;
   const run = <T>(fn: () => T) => RequestContextService.runIsolated(ctx, fn);
   beforeEach(() => {
-    process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
-    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
     registry = new AIToolRegistry({} as any);
     registry.registerMany([
       ...createPlaybookTools(),
@@ -176,12 +168,6 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
     );
   });
   afterEach(() => jest.restoreAllMocks());
-  afterAll(() =>
-    saved.forEach(([key, value]) => {
-      if (value === undefined) delete process.env[key!];
-      else process.env[key!] = value;
-    }),
-  );
   it.each(['vexi', 'vex'])(
     'runs search→load→authorized read on %s, no twenty-body system prompt',
     async (agent) =>
@@ -224,23 +210,7 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
         expect(result.execution?.outcome).not.toBe('completed_verified');
       }),
   );
-  it('C OFF removes previously boot-registered playbooks from definitions and never loads history', async () =>
-    run(async () => {
-      delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      const create = jest.spyOn(playbooks, 'createSession');
-      await service.runAgent({ goal: 'reponer inventario', max_iterations: 1 });
-      const names = chat.mock.calls[0][1].tools.map(
-        (d: any) => d.function.name,
-      );
-      expect(names).not.toContain('load_playbook');
-      expect(names).not.toContain('search_playbooks');
-      expect(create).not.toHaveBeenCalled();
-      expect(
-        chat.mock.calls[0][0]
-          .filter((m: any) => m.role === 'system')
-          .some((m: any) => m.content.includes('Pines históricos')),
-      ).toBe(false);
-    }));
+
   it('agent deny and strict caller scope cannot receive re-added playbook discovery', async () =>
     run(async () => {
       chat.mockResolvedValueOnce(
@@ -278,7 +248,6 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
     'never rehydrates historical tool bodies when C=%s',
     async (flag) =>
       run(async () => {
-        process.env.AI_AGENT_PLAYBOOKS_ENABLED = flag;
         const oldCall = call('load_playbook', {
           id: 'reponer-inventario',
           version: '0.9.0',
@@ -313,27 +282,6 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
       expect(JSON.stringify(chat.mock.calls[0][0])).toContain(
         'No tienes herramientas operativas',
       );
-    }));
-  it('C remains usable with B routing OFF without changing the normal guarded business dispatch', async () =>
-    run(async () => {
-      delete process.env.AI_TOOL_ROUTING_ENABLED;
-      chat
-        .mockResolvedValueOnce(
-          answer([
-            call('load_playbook', {
-              id: 'reponer-inventario',
-              version: '1.0.0',
-              section: 'steps',
-            }),
-          ]),
-        )
-        .mockResolvedValueOnce(answer([call('read_stock')]));
-      const result = await service.runAgent({
-        goal: 'reponer',
-        max_iterations: 3,
-      });
-      expect(read).toHaveBeenCalledTimes(1);
-      expect(result.tools_used[0].name).toBe('load_playbook');
     }));
 });
 

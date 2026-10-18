@@ -6,11 +6,7 @@ import { REDIS_CLIENT } from '../../common/redis/redis.module';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { AgentTraceService } from '../observability/agent-trace.service';
 import { AIEngineService } from '../ai-engine.service';
-import {
-  catalogHash,
-  KNOWLEDGE_DIMENSION,
-  knowledgeIndexEnabled,
-} from '../tools/tool-catalog';
+import { catalogHash, KNOWLEDGE_DIMENSION } from '../tools/tool-catalog';
 
 export function assertKnowledgeVector(vector: number[]): void {
   if (
@@ -46,7 +42,6 @@ export class KnowledgeEmbeddingService {
     model: string;
     fingerprint: string;
   }> {
-    if (!knowledgeIndexEnabled()) throw new Error('KNOWLEDGE_INDEX_DISABLED');
     const appKey =
       this.setting('AI_KNOWLEDGE_EMBEDDING_APP_KEY')?.trim() ||
       'agent_knowledge_embeddings';

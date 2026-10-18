@@ -8,7 +8,6 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { AgentObjectiveRepository } from '../../../ai-engine/tasks/agent-objective.repository';
-import { durableObjectivesEnabled } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
 
 /** Past this, the "goal" is a document, not an instruction. */
 const MAX_GOAL_CHARS = 2000;
@@ -79,10 +78,7 @@ export class VexiTaskService {
     /** Reference only. An objective does not occupy another background-job slot. */
     objectiveId?: string;
   }): Promise<TaskSnapshot> {
-    const durableEnabled = durableObjectivesEnabled();
-    const context = durableEnabled
-      ? RequestContextService.asyncLocalStorage.getStore()
-      : RequestContextService.getContext();
+    const context = RequestContextService.asyncLocalStorage.getStore();
     const storeId = context?.store_id;
     const organizationId = context?.organization_id;
     const userId = context?.user_id;
@@ -103,7 +99,7 @@ export class VexiTaskService {
     }
 
     let objectiveId: string | undefined;
-    if (durableEnabled && (params.objectiveId || params.conversationId)) {
+    if (params.objectiveId || params.conversationId) {
       if (!this.objectives)
         throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
       const objective = params.objectiveId
@@ -191,14 +187,11 @@ export class VexiTaskService {
    * panel from showing "en curso" on a task that already finished.
    */
   async get(id: number): Promise<TaskSnapshot & { live_status?: string }> {
-    const strictContext = durableObjectivesEnabled()
-      ? RequestContextService.asyncLocalStorage.getStore()
-      : undefined;
+    const strictContext = RequestContextService.asyncLocalStorage.getStore();
     if (
-      durableObjectivesEnabled() &&
-      (!strictContext?.store_id ||
-        !strictContext.organization_id ||
-        !strictContext.user_id)
+      !strictContext?.store_id ||
+      !strictContext.organization_id ||
+      !strictContext.user_id
     ) {
       throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
     }
@@ -247,12 +240,9 @@ export class VexiTaskService {
 
   /** The person's recent tasks, newest first, for the panel's task strip. */
   async listRecent(limit = 5): Promise<TaskSnapshot[]> {
-    const context = durableObjectivesEnabled()
-      ? RequestContextService.asyncLocalStorage.getStore()
-      : RequestContextService.getContext();
+    const context = RequestContextService.asyncLocalStorage.getStore();
     const userId =
-      !durableObjectivesEnabled() ||
-      (context?.store_id && context?.organization_id)
+      context?.store_id && context?.organization_id
         ? context?.user_id
         : undefined;
     if (!userId) return [];

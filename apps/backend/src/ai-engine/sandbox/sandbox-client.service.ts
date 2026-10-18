@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { accessSync, constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import {
@@ -21,10 +22,17 @@ export class SandboxClientService {
       !isAbsolute(executable) ||
       !isAbsolute(config) ||
       !/^sha256:[a-f0-9]{64}$/.test(policy) ||
-      !/^sha256:[a-f0-9]{64}$/.test(runtime) ||
-      process.env.AI_SANDBOX_SECURITY_REVIEWED !== 'true'
+      !/^sha256:[a-f0-9]{64}$/.test(runtime)
     )
       return null;
+    try {
+      accessSync(executable, constants.X_OK);
+      accessSync(config, constants.R_OK);
+    } catch {
+      return null;
+    }
+    // The supervisor verifies the pinned Deno capsule/isolation before ready.
+    // A missing runtime never falls back to executing code in this process.
     return { policy_digest: policy, runtime_digest: runtime };
   }
 
@@ -96,7 +104,12 @@ export class SandboxClientService {
         finish(new SandboxError('SANDBOX_PROTOCOL')),
       );
       child.on('close', () => {
-        if (!stopped) finish(new SandboxError('SANDBOX_PROTOCOL'));
+        if (!stopped)
+          finish(
+            new SandboxError(
+              ready ? 'SANDBOX_PROTOCOL' : 'SANDBOX_UNAVAILABLE',
+            ),
+          );
       });
       child.stderr.on('data', (chunk: Buffer) => {
         stderrBytes += chunk.length; // Never log guest/supervisor stderr, even on failure.
@@ -134,7 +147,7 @@ export class SandboxClientService {
               frame.runtime_digest !== start.runtime_digest ||
               frame.policy_digest !== start.policy_digest
             )
-              return finish(new SandboxError('SANDBOX_PROTOCOL'));
+              return finish(new SandboxError('SANDBOX_UNAVAILABLE'));
             ready = true;
           } else if (frame.type === 'call') {
             void onCall(frame as unknown as SandboxCall).then(

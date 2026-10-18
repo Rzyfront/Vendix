@@ -7,16 +7,13 @@ import {
   AgentObjectiveRepository,
   requireObjectiveScope,
 } from '../tasks/agent-objective.repository';
-import { durableObjectivesEnabled } from '../tasks/interfaces/agent-objective.interface';
-import { robustExecutionEnabled } from '../tasks/agent-execution-flags';
-import { playbooksEnabled } from '../playbooks/playbook-flags';
+
 import { RecipeQualityService } from './recipe-quality.service';
 import { RecipeRepository } from './recipe.repository';
 import {
   AgentRecipe,
   RecipeSession,
   RecipeReview,
-  proceduralMemoryEnabled,
   recipeFallback,
 } from './recipe.interface';
 import { KnowledgeSearchService } from '../embeddings/knowledge-search.service';
@@ -44,7 +41,6 @@ export class ProceduralMemoryService {
   ) {}
 
   async capture(objectiveId: string): Promise<number[]> {
-    if (!this.enabled()) return [];
     const objective = await this.objectives.get(objectiveId);
     if (
       objective.semantic_status !== 'completed_verified' ||
@@ -67,10 +63,7 @@ export class ProceduralMemoryService {
     );
     const pins = await this.objectives.listPlaybookPins(objectiveId);
     const traceIds = await this.recipes.traceIds(objectiveId);
-    const scriptRefs =
-      process.env.AI_SANDBOX_ENABLED === 'true'
-        ? await this.recipes.scriptRefs(objectiveId)
-        : [];
+    const scriptRefs = await this.recipes.scriptRefs(objectiveId);
     const ids: number[] = [];
     for (const deliverable of objective.plan.deliverables) {
       const template = this.quality.template(
@@ -102,7 +95,7 @@ export class ProceduralMemoryService {
           return [];
       }
       this.quality.assertClean(template);
-      if (!this.enabled()) return [];
+
       const currentAuthority = await this.recipes.currentOwnerPermissions(
         objective.authority_snapshot,
       );
@@ -164,7 +157,6 @@ export class ProceduralMemoryService {
     if (Object.keys(args).some((k) => !['query', 'limit'].includes(k)))
       return recipeFallback();
     if (
-      !this.enabled() ||
       typeof args.query !== 'string' ||
       !args.query.trim() ||
       args.query.length > 500 ||
@@ -216,7 +208,7 @@ export class ProceduralMemoryService {
         /* Local authorized matching never widens into semantic_search business SQL. */
       }
     }
-    // Provider/index waits cannot revive old approval, scope, schema, permissions or flags.
+    // Provider/index waits cannot revive old approval, scope, schema, permissions.
     const fresh = new Map(
       (await this.compatible(state)).map((r) => [String(r.id), r]),
     );
@@ -244,7 +236,6 @@ export class ProceduralMemoryService {
     )
       return recipeFallback();
     if (
-      !this.enabled() ||
       !Number.isSafeInteger(args.id) ||
       args.id <= 0 ||
       typeof args.version !== 'string' ||
@@ -291,7 +282,6 @@ export class ProceduralMemoryService {
       'used',
     );
     if (
-      !this.enabled() ||
       !(await this.compatible(state)).some(
         (r) => r.id === recipe.id && r.content_hash === recipe.content_hash,
       )
@@ -308,7 +298,6 @@ export class ProceduralMemoryService {
     objectiveId: string,
     workflows: string[],
   ): Promise<void> {
-    if (!this.enabled()) return;
     await this.objectives.get(objectiveId); // owner404 before any pin/global access
     for (const pin of await this.recipes.loadedPins(objectiveId)) {
       const recipe = await this.recipes.live(pin.id, pin.hash);
@@ -329,7 +318,6 @@ export class ProceduralMemoryService {
     }
   }
   async completed(objectiveId: string): Promise<void> {
-    if (!this.enabled()) return;
     const objective = await this.objectives.get(objectiveId);
     if (objective.semantic_status !== 'completed_verified') return;
     for (const pin of await this.recipes.loadedPins(objectiveId))
@@ -341,7 +329,9 @@ export class ProceduralMemoryService {
   }
   /** Operator service methods: NEVER registered as tools or exposed through bridge endpoints. */
   async applyReview(id: number, review: RecipeReview): Promise<void> {
-    if (!this.enabled()) throw new Error('RECIPE_DISABLED');
+    // Mining works without a signing authority; publication never does.
+    if (!/^[a-f0-9]{64}$/i.test(process.env.AI_RECIPE_REVIEW_KEY ?? '')) return;
+
     const system =
       RequestContextService.asyncLocalStorage.getStore()?.is_super_admin ===
       true;
@@ -404,7 +394,6 @@ export class ProceduralMemoryService {
       });
   }
   async prepareGlobal(id: number): Promise<number> {
-    if (!this.enabled()) throw new Error('RECIPE_DISABLED');
     const source = await this.recipes.systemGet(id);
     this.quality.assertClean(source.template);
     if (!this.quality.publicationValid(source))
@@ -458,16 +447,8 @@ export class ProceduralMemoryService {
       throw new NotFoundException('Recipe not found');
     return state;
   }
-  private enabled(): boolean {
-    return (
-      proceduralMemoryEnabled() &&
-      durableObjectivesEnabled() &&
-      robustExecutionEnabled() &&
-      playbooksEnabled()
-    );
-  }
+
   private async compatible(state: State): Promise<AgentRecipe[]> {
-    if (!this.enabled()) return [];
     const current = RequestContextService.asyncLocalStorage.getStore();
     const authority = await this.recipes.currentOwnerPermissions(
       state.permissions.filter((p) => current?.permissions?.includes(p)),
@@ -505,6 +486,6 @@ export class ProceduralMemoryService {
         continue;
       valid.push(r);
     }
-    return this.enabled() ? valid : [];
+    return valid;
   }
 }

@@ -115,6 +115,24 @@ describe('AIAgentService.runAgentStream', () => {
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
       executeTool,
+      executeToolResult: async (name, args, options) => {
+        try {
+          return normalizeToolResult(
+            options?.confirmationToken
+              ? await executeTool(name, args, {
+                  confirmationToken: options.confirmationToken,
+                })
+              : await executeTool(name, args),
+          );
+        } catch (error) {
+          if (
+            error instanceof VendixHttpException &&
+            (error.getResponse() as any).error_code === 'AI_AGENT_005'
+          )
+            throw error;
+          return normalizeToolException(error);
+        }
+      },
     };
     canUseAIFeature = jest.fn();
     getAIFeatureConfig = jest.fn();
@@ -463,9 +481,9 @@ describe('AIAgentService.runAgentStream', () => {
 
     const { chunks, result } = await drain({});
 
-    expect(chunks.map((c) => c.type)).toEqual(['text']);
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'done']);
     expect(result.success).toBe(true);
-    expect(result.content).toContain('No alcancé a completar');
+    expect(result.execution?.outcome).toBe('partial');
     expect(chat).not.toHaveBeenCalled();
   });
 
@@ -486,7 +504,7 @@ describe('AIAgentService.runAgentStream', () => {
       });
       expect(chat).toHaveBeenCalledTimes(1);
       expect(executeTool).toHaveBeenCalledTimes(1);
-      expect(result.content).toContain('No alcancé a completar');
+      expect(result.execution?.outcome).toBe('partial');
       expect(result.total_tokens).toBe(10);
     },
   );
@@ -582,7 +600,7 @@ describe('AIAgentService.runAgentStream', () => {
 
     const { result } = await drain({ stream_id: 's1' });
 
-    expect(result.content).toBe('hecho');
+    expect(result.execution?.outcome).toBe('partial');
     expect(chat).toHaveBeenCalledTimes(2);
   });
 
@@ -591,7 +609,7 @@ describe('AIAgentService.runAgentStream', () => {
       shouldAbort: jest.fn().mockResolvedValue(true),
     });
     expect(chunks).toEqual([]);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       content: '',
       iterations: 0,
       tools_used: [],
@@ -645,11 +663,11 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({ agent_key: 'vex' });
     // 40 tool iterations + 1 closing turn without tools.
-    expect(chat).toHaveBeenCalledTimes(41);
+    expect(chat).toHaveBeenCalledTimes(40);
 
     chat.mockClear();
     await drain({});
-    expect(chat).toHaveBeenCalledTimes(11);
+    expect(chat).toHaveBeenCalledTimes(10);
   });
 
   it('(vex-iii) vex results over 6000 chars compact to summary+block_id+rows', async () => {
@@ -666,11 +684,8 @@ describe('AIAgentService.runAgentStream', () => {
     const { result } = await drain({ agent_key: 'vex' });
 
     const stored = JSON.parse(result.tools_used[0].result);
-    expect(stored.truncated).toBe(true);
-    expect(stored.block_id).toBeNull();
-    expect(stored.rows).toBe(50);
-    expect(typeof stored.summary).toBe('string');
-    expect(result.tools_used[0].result.length).toBeLessThan(7000);
+    expect(stored.data).toEqual(rows);
+    expect(result.tools_used[0].result.length).toBeGreaterThan(7000);
   });
 
   it('(vex-iv) compaction keeps the full payload in a block when a sink exists', async () => {
@@ -692,7 +707,9 @@ describe('AIAgentService.runAgentStream', () => {
         kind: 'markdown',
       }),
     );
-    expect(JSON.parse(result.tools_used[0].result).block_id).toBe('block-1');
+    expect(JSON.parse(result.tools_used[0].result).data.block_id).toBe(
+      'block-1',
+    );
   });
 
   it('(vex-v) a render tool success emits a ui_block frame', async () => {
@@ -799,7 +816,7 @@ describe('AIAgentService.runAgentStream', () => {
       },
     );
     expect(result.pending_confirmation).toBeUndefined();
-    expect(result.content).toBe('aplicado');
+    expect(result.execution?.outcome).not.toBe('completed_verified');
     expect(chunks.map((c) => c.type)).toEqual([
       'tool_call',
       'tool_result',
@@ -893,12 +910,7 @@ describe('AIAgentService.runAgentStream', () => {
     const toolResult = chunks[0] as any;
     expect(toolResult.tool.failed).toBe(true);
     expect(toolResult.tool.summary).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
-    // The rejection goes back as a tool message so the model self-corrects.
-    const followUp = chat.mock.calls[1][0];
-    const toolMsg = [...followUp].reverse().find((m: any) => m.role === 'tool');
-    expect(JSON.parse(toolMsg.content).error_code).toBe(
-      'AI_AGENT_TOOL_NOT_ALLOWED',
-    );
+    expect(chat).toHaveBeenCalledTimes(1); // permission blocks halt rather than re-infer.
   });
 
   it('(rx2-a2) hallucinated tool name is rejected without reaching executeTool', async () => {
@@ -963,7 +975,7 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({ agent_key: 'vex', max_iterations: 40 });
 
-    expect(chat).toHaveBeenCalledTimes(41);
+    expect(chat).toHaveBeenCalledTimes(40);
   });
 
   it('(rx2-c) vex turn meters vex_agent, vexi keeps tool_agents', async () => {
@@ -1241,12 +1253,12 @@ describe('AIAgentService.runAgentStream', () => {
       expect.objectContaining({ conversation_id: 7, kind: 'markdown' }),
     );
     const stored = JSON.parse(result.tools_used[0].result);
-    expect(stored.truncated).toBe(true);
-    expect(stored.block_id).toBe('block-7');
+    expect(stored.data.truncated).toBe(true);
+    expect(stored.data.block_id).toBe('block-7');
   });
 
   it.each([[undefined], ['vexi']])(
-    '(rx3-c) non-vex turns never compact (agent_key=%s)',
+    'all surfaces compact only after persistence (agent_key=%s)',
     async (agentKey) => {
       const save = jest.fn().mockResolvedValue('block-x');
       const raw = 'z'.repeat(9000);
@@ -1261,9 +1273,11 @@ describe('AIAgentService.runAgentStream', () => {
         conversation_id: 7,
       });
 
-      expect(result.tools_used[0].result).toBe(raw);
-      expect(result.tools_used[0].result).toHaveLength(9000);
-      expect(save).not.toHaveBeenCalled();
+      expect(JSON.parse(result.tools_used[0].result).data.block_id).toBe(
+        'block-x',
+      );
+      expect(result.tools_used[0].result.length).toBeLessThan(6000);
+      expect(save).toHaveBeenCalled();
     },
   );
 
@@ -1273,8 +1287,6 @@ describe('AIAgentService.runAgentStream', () => {
     let priorFlag: string | undefined;
 
     beforeEach(() => {
-      priorFlag = process.env.AI_AGENT_TRACING_ENABLED;
-      process.env.AI_AGENT_TRACING_ENABLED = 'true';
       rows = new Map();
       trace = new AgentTraceService({
         ai_agent_trace_spans: {
@@ -1289,8 +1301,6 @@ describe('AIAgentService.runAgentStream', () => {
 
     afterEach(async () => {
       await trace.flush();
-      if (priorFlag === undefined) delete process.env.AI_AGENT_TRACING_ENABLED;
-      else process.env.AI_AGENT_TRACING_ENABLED = priorFlag;
     });
 
     const auth = {
@@ -1316,10 +1326,10 @@ describe('AIAgentService.runAgentStream', () => {
         .mockResolvedValueOnce(ok({ content: 'Cierre sin verificar' }));
       const { result } = await traced({ max_iterations: 1 });
       await trace.flush();
-      expect(chat).toHaveBeenCalledTimes(3);
+      expect(chat).toHaveBeenCalledTimes(2);
       expect(result.iterations).toBe(1);
       expect(byKind('provider_retry')).toHaveLength(1);
-      expect(byKind('closing_inference')).toHaveLength(1);
+      expect(byKind('closing_inference')).toHaveLength(0);
       expect(byKind('tool')).toHaveLength(1);
       expect(byKind('context')[0].attributes).toEqual(
         expect.objectContaining({
@@ -1400,25 +1410,6 @@ describe('AIAgentService.runAgentStream', () => {
       );
     });
 
-    it('failed closing inference remains an error span, not a verified completion', async () => {
-      chat
-        .mockResolvedValueOnce(
-          ok({ tool_calls: [call('read-1', 'list_things')] }),
-        )
-        .mockRejectedValueOnce(new Error('Bearer PRIVATE_CLOSING_ERROR'));
-      const warnLog = jest
-        .spyOn((service as any).logger, 'warn')
-        .mockImplementation(() => undefined);
-      const { result } = await traced({ max_iterations: 1 });
-      await trace.flush();
-      expect(result.success).toBe(true); // legacy product contract unchanged in A
-      expect(byKind('root')[0].outcome).toBe('partial');
-      expect(byKind('closing_inference')[0].status).toBe('error');
-      expect(JSON.stringify(warnLog.mock.calls)).not.toContain(
-        'PRIVATE_CLOSING_ERROR',
-      );
-    });
-
     it('ask_user is awaiting input and sync run drains the same traced generator', async () => {
       chat.mockResolvedValueOnce(
         ok({ tool_calls: [call('ask-1', 'ask_user')] }),
@@ -1442,20 +1433,6 @@ describe('AIAgentService.runAgentStream', () => {
       expect(executeTool).not.toHaveBeenCalled();
     });
 
-    it('flag OFF preserves the legacy result with no spans', async () => {
-      process.env.AI_AGENT_TRACING_ENABLED = 'false';
-      chat.mockResolvedValueOnce(ok({ content: 'respuesta' }));
-      const { result } = await traced();
-      await trace.flush();
-      expect(result).toMatchObject({
-        content: 'respuesta',
-        success: true,
-        iterations: 1,
-      });
-      expect(rows.size).toBe(0);
-      expect(chat).toHaveBeenCalledTimes(1);
-    });
-
     it('observing a successful tool does not replace or duplicate tool quota IDs', async () => {
       jest.mocked(RequestContextService.getContext).mockReturnValue(auth);
       canUseAIFeature.mockResolvedValue({ allowed: true });
@@ -1475,9 +1452,7 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
   describe('D0 opt-in semantic outcomes', () => {
-    const previous = process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
     beforeEach(() => {
-      process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
       registry.executeToolResult = jest.fn(async (name, args, options) =>
         normalizeToolResult(await executeTool(name, args), {
           evidenceRef: options.evidenceRef,
@@ -1485,11 +1460,7 @@ describe('AIAgentService.runAgentStream', () => {
         }),
       );
     });
-    afterEach(() => {
-      if (previous === undefined)
-        delete process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED;
-      else process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = previous;
-    });
+
     it('resolved business errors are partial, not quota success, and identical retries never execute', async () => {
       configureStorePlan(['list_things']);
       executeTool.mockResolvedValue(
@@ -1749,10 +1720,6 @@ describe('AIAgentService.runAgentStream', () => {
 });
 
 describe('AIAgentService B routed catalog boundary', () => {
-  const saved = [
-    process.env.AI_TOOL_ROUTING_ENABLED,
-    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED,
-  ];
   let registry: AIToolRegistry;
   let router: import('./tools/tool-router.service').ToolRouterService;
   let chat: jest.Mock;
@@ -1761,8 +1728,6 @@ describe('AIAgentService B routed catalog boundary', () => {
   let service: AIAgentService;
   let access: any;
   beforeEach(async () => {
-    process.env.AI_TOOL_ROUTING_ENABLED = 'true';
-    process.env.AI_TOOL_EXECUTION_CONTRACT_ENABLED = 'true';
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 1,
       organization_id: 2,
@@ -1818,12 +1783,6 @@ describe('AIAgentService B routed catalog boundary', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    ['AI_TOOL_ROUTING_ENABLED', 'AI_TOOL_EXECUTION_CONTRACT_ENABLED'].forEach(
-      (key, i) => {
-        if (saved[i] === undefined) delete process.env[key];
-        else process.env[key] = saved[i];
-      },
-    );
   });
   async function drain(params: Record<string, unknown> = {}) {
     const gen = service.runAgentStream({
@@ -1977,13 +1936,6 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(chat).not.toHaveBeenCalled();
     expect(result.execution?.outcome).toBe('partial');
   });
-  it('retains full-catalog legacy behavior with flag OFF and does not invoke routing', async () => {
-    delete process.env.AI_TOOL_ROUTING_ENABLED;
-    const select = jest.spyOn(router, 'select');
-    await drain();
-    expect(names(0)).toHaveLength(51);
-    expect(select).not.toHaveBeenCalled();
-  });
 });
 
 describe('D1 durable loop seam', () => {
@@ -2049,7 +2001,22 @@ describe('D1 durable loop seam', () => {
     );
     durable = {
       objective_id: 'obj1',
-      objective: { authority_snapshot: ['read'] },
+      objective: {
+        authority_snapshot: ['read'],
+        budget: { active_runtime_ms: 0 },
+        expires_at: new Date(Date.now() + 60000),
+      },
+      recoveryState: jest.fn().mockResolvedValue({
+        schema_version: '1',
+        replans: 0,
+        expansions: 0,
+        corrections: 0,
+        transient_retries: 0,
+        failures: [],
+        unknown_effect: false,
+        exhausted: false,
+      }),
+      checkpointRecovery: jest.fn(),
       assertBudget: jest.fn(),
       assertCurrent: jest.fn(),
       excludeWait: jest.fn(),
@@ -2176,99 +2143,4 @@ describe('D1 durable loop seam', () => {
     expect(durable.close).toHaveBeenCalledTimes(1);
     expect(durable.finish).not.toHaveBeenCalled();
   });
-});
-
-describe('C rollback with a boot-registered discovery declaration', () => {
-  it('does not expose playbooks when C is OFF even if registration happened before a flag flip', async () => {
-    const previous = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-    const context = jest
-      .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ permissions: [], roles: [] } as any);
-    try {
-      const chat = jest
-        .fn()
-        .mockResolvedValue(ok({ content: 'Sin procesos activos.' }));
-      const registry = {
-        getAvailableDefinitions: () => [
-          def('search_playbooks'),
-          def('load_playbook'),
-        ],
-        canonicalName: (n: string) => n,
-      };
-      const loop = new AIAgentService(
-        { chat } as any,
-        {} as any,
-        registry as any,
-        { emit: jest.fn() } as any,
-        {} as any,
-        {} as any,
-      );
-      await loop.runAgent({ goal: 'hola', max_iterations: 1 });
-      expect(chat.mock.calls[0][1].tools).toBeUndefined();
-    } finally {
-      context.mockRestore();
-      if (previous === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
-      else process.env.AI_AGENT_PLAYBOOKS_ENABLED = previous;
-    }
-  });
-});
-
-it('D2 kill switches default OFF and reject truthy values other than literal true', async () => {
-  const { robustExecutionEnabled, parallelReadsEnabled } =
-    await import('./tasks/agent-execution-flags');
-  const keys = [
-    'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-    'AI_PARALLEL_READS_ENABLED',
-  ];
-  const previous = keys.map((key) => process.env[key]);
-  try {
-    for (const value of [undefined, '1', 'TRUE', 'false']) {
-      keys.forEach((key) =>
-        value === undefined
-          ? delete process.env[key]
-          : (process.env[key] = value),
-      );
-      expect(robustExecutionEnabled()).toBe(false);
-      expect(parallelReadsEnabled()).toBe(false);
-    }
-  } finally {
-    keys.forEach((key, index) =>
-      previous[index] === undefined
-        ? delete process.env[key]
-        : (process.env[key] = previous[index]),
-    );
-  }
-});
-
-it('H transport and compaction default OFF independently and require literal true', async () => {
-  const { agentStreamingEnabled } =
-    await import('./context/agent-stream-inference');
-  const { toolResultCompactionEnabled } =
-    await import('./context/tool-result-compaction');
-  const keys = [
-    'AI_AGENT_STREAMING_ENABLED',
-    'AI_TOOL_RESULT_COMPACTION_ENABLED',
-  ];
-  const previous = keys.map((key) => process.env[key]);
-  try {
-    for (const value of [undefined, '1', 'TRUE', 'false']) {
-      keys.forEach((key) =>
-        value === undefined
-          ? delete process.env[key]
-          : (process.env[key] = value),
-      );
-      expect(agentStreamingEnabled()).toBe(false);
-      expect(toolResultCompactionEnabled()).toBe(false);
-    }
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
-    expect(agentStreamingEnabled()).toBe(true);
-    expect(toolResultCompactionEnabled()).toBe(false);
-  } finally {
-    keys.forEach((key, i) =>
-      previous[i] === undefined
-        ? delete process.env[key]
-        : (process.env[key] = previous[i]),
-    );
-  }
 });

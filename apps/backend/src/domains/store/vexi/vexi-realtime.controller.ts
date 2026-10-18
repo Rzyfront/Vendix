@@ -1,13 +1,5 @@
-import {
-  Body,
-  CanActivate,
-  Controller,
-  ExecutionContext,
-  Injectable,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+
 import { VexiRealtimeService } from './vexi-realtime.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
@@ -18,25 +10,12 @@ import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscript
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
-import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
-import { RequestContextService } from '@common/context/request-context.service';
+
 import {
   CloseRealtimeSessionDto,
   CreateRealtimeSessionDto,
   RealtimeToolCallDto,
 } from './dto';
-
-/** G selects the owned conversation's toggle in the shared authority adapter. */
-@Injectable()
-export class ConditionalRealtimeEnabledGuard implements CanActivate {
-  constructor(private readonly legacy: VexiEnabledGuard) {}
-
-  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
-    return process.env.AI_VOICE_CONFIRM_ENABLED === 'true'
-      ? true
-      : this.legacy.canActivate(context);
-  }
-}
 
 /**
  * Vexi realtime voice.
@@ -50,7 +29,7 @@ export class ConditionalRealtimeEnabledGuard implements CanActivate {
  * segments and stock levels.
  */
 @Controller('store/vexi/realtime')
-@UseGuards(RolesGuard, ConditionalRealtimeEnabledGuard)
+@UseGuards(RolesGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class VexiRealtimeController {
   constructor(
@@ -75,7 +54,7 @@ export class VexiRealtimeController {
   @Post('tool-call')
   @SkipSubscriptionGate()
   async callTool(@Body() dto: RealtimeToolCallDto) {
-    if (process.env.AI_VOICE_CONFIRM_ENABLED === 'true') {
+    {
       const result = await this.realtime.executeSessionToolCall(
         dto.session_id,
         dto.name,
@@ -89,11 +68,6 @@ export class VexiRealtimeController {
         'Tool processed',
       );
     }
-    const output = await this.realtime.executeToolCall(dto.name, dto.arguments);
-    return this.responseService.success(
-      { call_id: dto.call_id, output },
-      'Tool executed',
-    );
   }
 
   /**
@@ -103,21 +77,12 @@ export class VexiRealtimeController {
   @Post('session/close')
   @SkipSubscriptionGate()
   async closeSession(@Body() dto: CloseRealtimeSessionDto) {
-    if (process.env.AI_VOICE_CONFIRM_ENABLED === 'true') {
+    {
       await this.realtime.closeSession(dto.session_id, dto.duration_seconds);
       return this.responseService.success(
         { duration_seconds: dto.duration_seconds },
         'Session closed',
       );
     }
-    const requestId =
-      RequestContextService.getContext()?.request_id ??
-      `vexi-voice-${randomUUID()}`;
-
-    await this.realtime.consumeSessionQuota(dto.duration_seconds, requestId);
-    return this.responseService.success(
-      { duration_seconds: dto.duration_seconds },
-      'Session closed',
-    );
   }
 }

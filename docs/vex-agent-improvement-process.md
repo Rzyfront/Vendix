@@ -154,12 +154,7 @@ sesiones ni contra un tenant real de producción.
 
 ## Fase A: instrumentación y baseline reproducible
 
-`AI_AGENT_TRACING_ENABLED=true` habilita observabilidad; por omisión está apagado.
-No modifica modelo/configuración, prompts, catálogos ofrecidos, políticas, límites,
-deduplicación de cuotas ni el contrato de respuesta legacy. Revertir el flag es
-el rollback; no borrar datos ni esquema. Aplicar primero la migración aditiva
-`20261018090000_ai_agent_trace_spans` mediante el proceso de release autorizado.
-Nunca aplicar migraciones a una base remota desde una sesión de implementación.
+La observabilidad está siempre activa con scope explícito, redacción de datos y sinks best-effort. No cambia autorizaciones, cuotas ni políticas de retry.
 
 ### Qué mide y qué no prueba
 

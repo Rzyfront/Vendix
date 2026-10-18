@@ -1,21 +1,28 @@
 # Fase D1 — objetivos y checkpoints durables
 
-Implementación opt-in del plan aprobado de autonomía Vex/Vexi. No implementa
+Implementación estándar del plan aprobado de autonomía Vex/Vexi. No implementa
 playbooks C, verificador/scheduler D2, streaming H, voz G, sandbox E ni recetas F.
 
-## Activación y rollback
+## Operación estándar de autonomía
 
-- `AI_DURABLE_OBJECTIVES_ENABLED=true`, solo literal, **default OFF**. No se
-  activó en la app ni se modificó proveedor/modelo/DB/prompt de aplicaciones.
-- D1 utiliza el contrato semántico D0 para sesiones durables aunque su flag
-  independiente siga OFF. Todos los flags OFF conservan conversaciones legacy.
-- Requiere migración `20261018110000_ai_agent_objectives`, exclusivamente aditiva.
-  No fue aplicada contra ninguna DB; `prisma generate` sí validó/generó cliente.
-- Rollback: apagar D1, conservar tablas/receipts/propuestas. Conversaciones con
-  `agent_objective_id`/`durable-v1` se pausan en esta versión en vez de revivir el
-  JSON histórico. `agent_plan` mutable se tombstonea al importar; una versión más
-  antigua no podrá continuar desde ese campo nulo. No borrar ni restaurar JSON
-  antiguo manualmente.
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
 
 ## Autoridad y estado
 

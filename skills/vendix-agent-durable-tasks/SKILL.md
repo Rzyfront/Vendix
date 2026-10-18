@@ -19,11 +19,8 @@ metadata:
 
 ## Critical rules
 
-- `AI_DURABLE_OBJECTIVES_ENABLED` defaults OFF; only literal `true` enables it.
-  Do not change model, provider or subscription configuration. D1 sessions use
-  the D0 semantic contract even if its separate flag is OFF. All flags OFF keep
-  legacy conversations; a migrated pointer intentionally blocks stale legacy
-  execution on rollback.
+- Autonomy capabilities are standard, without environment switches.
+
 - Objectives are NOT BullMQ jobs. One row per business goal, many turns/results.
   `ai_agent_tasks.objective_id` is optional; do not change the one-active-job slot,
   task strip or interpret a finished job as verified business completion.
@@ -126,10 +123,8 @@ those limits. Never run whole suites/builds on the dev Mac.
 
 ## D2 robust execution, verification and scheduling
 
-- `AI_AGENT_ROBUST_EXECUTION_ENABLED` is OFF by default and requires a D1 session.
-  It never enables D1/C/B automatically. Postconditions additionally need C's
-  packaged, initialized release. `AI_PARALLEL_READS_ENABLED` is an independent
-  OFF-by-default kill switch; OFF keeps the original serial flow.
+- Autonomy capabilities are standard, without environment switches.
+
 - Persist 3–7-step blocks with explicit input/output, candidate tools, individual
   approval, verifier and DAG edges. A single read keeps its fast path. Technical
   insertion remaps dependency identities, never silently rebinds numeric orders.
@@ -173,5 +168,15 @@ those limits. Never run whole suites/builds on the dev Mac.
   `onLateResult` is stale audit only, never an advanced session or successful quota.
 - Run D2 specs individually with the same bounded D1 Jest config. Fixtures prove
   contracts/transport, not real DB locks, DI/bootstrap, model latency or canary.
-  Keep flags OFF pending CI and authorized live gates; rollback never deletes
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
   objectives/evidence or revives legacy authority.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

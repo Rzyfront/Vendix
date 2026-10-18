@@ -8,12 +8,6 @@ import { RequestContextService } from '../../common/context/request-context.serv
 import { AIQueueService } from '../queue/ai-queue.service';
 
 describe('F miner queue boundary', () => {
-  beforeEach(() => {
-    process.env.AI_PROCEDURAL_MEMORY_ENABLED = 'true';
-  });
-  afterEach(() => {
-    delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-  });
   it('queue serializes identity only, never source/goal/args/bearer; retry/job IDs are stable', async () => {
     const queue = { add: jest.fn() };
     const service = new AIQueueService(
@@ -117,14 +111,5 @@ describe('F miner queue boundary', () => {
         data: { id: 41, hash: recipe.content_hash },
       } as never),
     ).toEqual({ indexed: false });
-  });
-  it('OFF is no-op even with queued historical jobs', async () => {
-    delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-    const miner = new RecipeMinerProcessor(
-      {} as never,
-      {} as never,
-      {} as never,
-    );
-    expect(await miner.process({} as never)).toEqual({});
   });
 });

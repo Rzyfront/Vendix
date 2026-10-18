@@ -621,10 +621,7 @@ export class AIToolRegistry {
 
       const strictContext = RequestContextService.asyncLocalStorage.getStore();
       const token =
-        process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
-        preview &&
-        strictContext?.store_id &&
-        strictContext.organization_id
+        preview && strictContext?.store_id && strictContext.organization_id
           ? await this.confirmations.issue(name, args, context.user_id, {
               previewHash: toolPreviewHash(preview),
               organizationId: strictContext.organization_id,

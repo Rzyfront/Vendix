@@ -18,11 +18,9 @@ metadata:
 
 ## Non-negotiable boundary
 
-- `AI_SANDBOX_ENABLED` defaults OFF. Registration is startup-scoped; runtime
-  kill switch also fails closed. Missing Linux supervisor, pinned digests,
-  encryption key or reviewed isolation means unavailable, not local execution.
-- `AI_SANDBOX_STORE_IDS` is an explicit comma-separated canary list, empty by
-  default. No wildcard/implicit store opt-in. Revoke globally or per-store.
+- Autonomy capabilities are standard, without environment switches.
+
+- Availability is detected from real isolated-runtime dependencies, never a store canary allowlist.
 - NEVER run generated code in Nest, Node `vm`, local Deno, or on the dev Mac.
   Runtime is one ephemeral Linux gVisor capsule per execution. No network,
   host/tenant mounts, Docker socket, secrets, FS, env, subprocesses, FFI, imports
@@ -85,7 +83,7 @@ egress/imports/fs/env/FFI/workers, memory/CPU/stdout/PIDs, cancellation/late RPC
 Review report must match final runtime/policy/seccomp/runsc/supervisor digests.
 An env boolean or synthetic negative test is not security certification.
 
-Keep flags OFF until security review + real QA and capacity approval. Baseline,
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 canary, rounds/cost/latency benefits require authorized real measurements. No
 infrastructure provisioning or paid service choice is implicit in this skill.
 
@@ -97,3 +95,13 @@ infrastructure provisioning or paid service choice is implicit in this skill.
 - `docs/agentic-sandbox-E.md` — phase boundaries and verification status.
 - Related: `vendix-agent-durable-tasks`, `vendix-ai-agent-tools`,
   `vendix-multi-tenant-context`, `vendix-prisma-migrations`, `buildcheck-dev`.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

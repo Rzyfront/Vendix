@@ -1,3 +1,4 @@
+import { RequestContextService } from '../../../common/context/request-context.service';
 import {
   VexiPlanStateService,
   canonicalStepHash,
@@ -11,12 +12,19 @@ const preview = {
 };
 const args = { quantity: 2 };
 describe('G canonical Vex displayed proposal identity', () => {
-  const flag = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-  beforeEach(() => delete process.env.AI_DURABLE_OBJECTIVES_ENABLED);
-  afterEach(() => {
-    if (flag === undefined) delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = flag;
-  });
+  beforeEach(() =>
+    jest
+      .spyOn(RequestContextService.asyncLocalStorage, 'getStore')
+      .mockReturnValue({
+        store_id: 7,
+        organization_id: 3,
+        user_id: 11,
+        is_owner: true,
+        is_super_admin: false,
+      }),
+  );
+  afterEach(() => jest.restoreAllMocks());
+
   function fixture() {
     const row = { metadata: { agent_key: 'vex' } };
     const plan = {
@@ -45,7 +53,26 @@ describe('G canonical Vex displayed proposal identity', () => {
         create: jest.fn(),
       },
     };
-    return { service: new VexiPlanStateService(prisma), prisma, plan, row };
+    const objective: any = {
+      id: 'obj',
+      step_hashes: null,
+      version: 1,
+      plan: null,
+    };
+    const repo = {
+      importLegacy: jest.fn(async () => objective),
+      updateHashes: jest.fn(async (_id, _version, hashes) => {
+        objective.step_hashes = hashes;
+        return objective;
+      }),
+    };
+    return {
+      service: new VexiPlanStateService(prisma, repo as any),
+      prisma,
+      plan,
+      row,
+      objective,
+    };
   }
   it('exact original diff returns the persisted step id, not tool/current-plan id', async () => {
     const f = fixture();
@@ -124,7 +151,7 @@ describe('G canonical Vex displayed proposal identity', () => {
       preview,
     );
     expect(identity.stepId).toBe('s1');
-    expect((f.row.metadata as any).agent_plan_step_hashes).toMatchObject({
+    expect(f.objective.step_hashes).toMatchObject({
       plan_id: identity.planId,
       steps: [
         {

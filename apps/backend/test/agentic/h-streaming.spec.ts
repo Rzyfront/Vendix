@@ -132,25 +132,8 @@ async function drain(
   return { chunks, result: step.value };
 }
 describe('H agentic streaming end-to-end seam offline', () => {
-  const flags = [
-    'AI_AGENT_STREAMING_ENABLED',
-    'AI_TOOL_ROUTING_ENABLED',
-    'AI_TOOL_EXECUTION_CONTRACT_ENABLED',
-    'AI_AGENT_ROBUST_EXECUTION_ENABLED',
-  ];
-  let saved: Array<[string, string | undefined]>;
-  beforeEach(() => {
-    saved = flags.map((key) => [key, process.env[key]]);
-    flags.forEach((key) => delete process.env[key]);
-    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
-  });
-  afterEach(() => {
-    saved.forEach(([key, value]) =>
-      value === undefined
-        ? delete process.env[key]
-        : (process.env[key] = value),
-    );
-  });
+  beforeEach(() => {});
+  afterEach(() => {});
   it('streamed and buffered entry points share registry execution and terminal output', async () =>
     scope(async () => {
       const streamed = fixture([
@@ -216,17 +199,7 @@ describe('H agentic streaming end-to-end seam offline', () => {
       ).not.toContain('Ya cambié');
       expect(f.runAgentStream).toHaveBeenCalledTimes(1);
     }));
-  it('OFF preserves buffered ABI and emits no H progress or stream SDK call', async () =>
-    scope(async () => {
-      delete process.env.AI_AGENT_STREAMING_ENABLED;
-      const f = fixture([answer([call()]), answer(undefined, 'Respuesta.')]);
-      const result = await drain(f.agent);
-      expect(f.runAgentStream).not.toHaveBeenCalled();
-      expect(f.run).toHaveBeenCalledTimes(2);
-      expect(result.chunks.some((chunk) => chunk.type === 'progress')).toBe(
-        false,
-      );
-    }));
+
   it('chooses buffered BEFORE dispatch when concrete provider usage capability is unproved', async () =>
     scope(async () => {
       const f = fixture([

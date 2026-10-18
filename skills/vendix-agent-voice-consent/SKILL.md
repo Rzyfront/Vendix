@@ -18,9 +18,8 @@ metadata:
 
 ## Critical rules
 
-- `AI_VOICE_CONFIRM_ENABLED` defaults OFF (literal `true` only). Spoken apply also
-  requires the existing D1/D2 flags; never enable dependencies automatically.
-  No model, provider, credential, app or DB setting is changed by this flag.
+- Autonomy capabilities are standard, without environment switches.
+
 - Audio is NOT authentication/biometrics. Use the authenticated user, org, store,
   owned conversation, server agent identity, objective and current step. Derive
   all authority server-side, never from client objective IDs/catalogs/transcripts.
@@ -102,11 +101,11 @@ original proposal expiry. Never automatically fall back to click after failure. 
   gates. Negative echo/noise/negation/replay/cross-scope must yield zero writes;
   >=95% explicit clean acceptance requires an agreed acoustic corpus, not unit tests.
 - Measure STT/proposal/consent/ack separately from human reading. No provider spend
-  or QA remote without approval. Preserve flagsOFF until authorized canary.
+  or QA remote without approval. Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 - Billing close is post-success/deterministic-dedup but close→quota crash recovery
   is not exactly-once charging. Do not change economic policy to hide this gap.
-- Roll back flags only; retain objectives/effects/evidence. Do not replay a write
-  because audio or transport was lost. No mandatory G migration.
+Use the existing general Vex/Vexi control to stop operation; preserve evidence.
+  Never replay a write because audio or transport was lost. No mandatory G migration.
 
 ## Related skills
 
@@ -114,3 +113,13 @@ original proposal expiry. Never automatically fall back to click after failure. 
 `vendix-agent-durable-tasks`, `vendix-agent-execution-contract`, `vendix-vex-agent`,
 `vendix-permissions`, `vendix-subscription-gate`, `vendix-multi-tenant-context`,
 `vendix-zoneless-signals`, `vendix-agent-evals-observability`.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

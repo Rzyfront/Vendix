@@ -18,9 +18,8 @@ metadata:
 
 ## Critical rules
 
-- `AI_TOOL_ROUTING_ENABLED` and `AI_TOOL_KNOWLEDGE_INDEX_ENABLED` default OFF,
-  literal `true` only. No model/provider/merchant quota change. SQL must be deployed
-  before enabling either flag. Index OFF + routing ON uses authorized local lexical ranking.
+- Autonomy capabilities are standard, without environment switches.
+
 - **Authorization first:** permissions ∩ agent ∩ subscription ∩ caller, denies last.
   Revalidate per inference AND execution; B subscription lookup errors fail closed.
   Relevance NEVER adds authority. Plan-hook exceptions remain planning-only.
@@ -49,10 +48,10 @@ metadata:
 - Snapshot AFTER decentralized `onModuleInit`, using `onApplicationBootstrap` plus
   worker barrier. Job `index-knowledge` reconstructs code-owned docs from key/hash;
   batches ≤50, 2 attempts/backoff. Reject stale releases, CAS readiness, logically retire
-  removed names; no deletion. New versions activate only after vector readiness.
+  removed names; no deletion. Lexical documents activate independently of embeddings; vector ranking still requires a matching ready fingerprint.
 - Platform docs are global/tenant-null. Embeddings use explicit global scope/IDs0 ONLY
   in the internal `storeGlobalKnowledgeEmbedding` path. Store params/scoped services
-  NEVER accept sentinel0. Migration preflight aborts on bad IDs/scope/FKs, no repair DML.
+  NEVER accept sentinel0. Migration CHECK is NOT VALID; no historical scans, preflight exceptions or repair DML. Optional validation is separate maintenance.
 
 ## Retrieval and spend
 
@@ -102,3 +101,13 @@ See `docs/agentic-tool-routing-B.md` for rollout/rollback and deferred gates.
 - `vendix-ai-agent-tools`, `vendix-agent-execution-contract` — authority, approvals, recovery.
 - `vendix-ai-embeddings-rag`, `vendix-prisma-migrations` — namespace and SQL constraints.
 - `vendix-agent-evals-observability`, `buildcheck-dev` — evidence and memory limits.
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

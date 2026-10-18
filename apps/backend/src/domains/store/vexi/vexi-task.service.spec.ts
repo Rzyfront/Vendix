@@ -1,3 +1,4 @@
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { VexiTaskService } from './vexi-task.service';
 
 describe('VexiTaskService D0 business outcome vs worker completion', () => {
@@ -96,7 +97,18 @@ describe('D0 task listener lag', () => {
       } as any,
       {} as any,
     );
-    expect(await service.get(1)).toMatchObject({
+    expect(
+      await RequestContextService.runIsolated(
+        {
+          store_id: 11,
+          organization_id: 7,
+          user_id: 3,
+          is_owner: true,
+          is_super_admin: false,
+        },
+        () => service.get(1),
+      ),
+    ).toMatchObject({
       live_status: 'completed',
       result: { execution },
     });
@@ -104,7 +116,6 @@ describe('D0 task listener lag', () => {
 });
 
 describe('D1 task reference is separate from durable objective state', () => {
-  const originalFlag = process.env.AI_DURABLE_OBJECTIVES_ENABLED;
   const context = {
     store_id: 11,
     organization_id: 7,
@@ -119,7 +130,6 @@ describe('D1 task reference is separate from durable objective state', () => {
   let objectives: any;
   let service: VexiTaskService;
   beforeEach(() => {
-    process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true';
     prisma = {
       ai_agent_tasks: {
         count: jest.fn().mockResolvedValue(0),
@@ -151,11 +161,7 @@ describe('D1 task reference is separate from durable objective state', () => {
       objectives,
     );
   });
-  afterAll(() => {
-    if (originalFlag === undefined)
-      delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    else process.env.AI_DURABLE_OBJECTIVES_ENABLED = originalFlag;
-  });
+  afterAll(() => {});
   it('keeps exactly the current one-job limit and list while carrying an optional reference', async () => {
     const { RequestContextService } =
       await import('../../../common/context/request-context.service');
@@ -234,21 +240,6 @@ describe('D1 task reference is separate from durable objective state', () => {
       store_id: 11,
       organization_id: 7,
     });
-    expect(objectives.get).not.toHaveBeenCalled();
-  });
-  it('flag OFF ignores optional objective reference without touching new columns', async () => {
-    const { RequestContextService } =
-      await import('../../../common/context/request-context.service');
-    delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
-    await RequestContextService.runIsolated(context, () =>
-      service.enqueue({ goal: 'consulta', objectiveId: 'objective' }),
-    );
-    expect(
-      prisma.ai_agent_tasks.create.mock.calls[0][0].data.objective_id,
-    ).toBeUndefined();
-    expect(
-      queue.enqueueAgentTask.mock.calls[0][0].objective_id,
-    ).toBeUndefined();
     expect(objectives.get).not.toHaveBeenCalled();
   });
 });

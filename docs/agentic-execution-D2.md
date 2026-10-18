@@ -3,17 +3,26 @@
 Implementación offline del paso D2 aprobado. No es certificación de runtime,
 completion del modelo, PostgreSQL concurrente, proveedor, gasto ni promoción.
 
-## Activación y rollback
+## Operación estándar de autonomía
 
-| Flag | Predeterminado | Uso |
-|---|---|---|
-| `AI_AGENT_ROBUST_EXECUTION_ENABLED` | OFF | Recovery, verificación servidor, deadline y contrato DAG; necesita sesión D1 |
-| `AI_PARALLEL_READS_ENABLED` | OFF | Lecturas explícitamente auditadas; también requiere D2+D1 en el loop |
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
 
-Ninguna activa dependencias automáticamente. Verificación necesita el release C
-inicializado/empaquetado (`AI_AGENT_PLAYBOOKS_ENABLED`); router B mantiene su flag
-independiente. Rollback conserva tablas/evidencias/propuestas y nunca reactiva
-metadata legacy de un objetivo ya migrado. No cambian modelo/proveedor/suscripción.
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
 
 ## Implementación
 

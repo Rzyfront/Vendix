@@ -30,9 +30,9 @@ metadata:
   `knowledge_scope='store' AND store_id=current AND organization_id=current`.
 - Never `store_id=current OR store_id=0` in semantic_search. Tool/skill/process/recipe
   global knowledge has a DIFFERENT API, not a widened StoreEmbeddingParams.
-- With both B flags OFF, valid business calls keep the legacy SQL path (plus tenant/type
-  safety predicates), usable before the additive B migration. Enable either B flag only
-  after SQL is applied. Existing global rows still cannot be reached by positive business IDs.
+- Namespace-safe SQL is always active after the additive B migration deploy.
+  Existing global rows cannot be reached by positive business IDs; no disabled
+  compatibility path can bypass these predicates.
 
 ## Sources
 
@@ -85,8 +85,9 @@ See `vendix-ai-tool-routing` for the full lifecycle:
 - Documents: `ai_knowledge_documents`, global/tenant-null, release-owned keys/hash/version,
   no tenant write API. Embeddings: `knowledge_scope='global' AND store_id=0 AND organization_id=0`,
   only tool/skill/process/recipe, internal `storeGlobalKnowledgeEmbedding`, validated document ID.
-- CHECKs/preflight guard namespace without historical DML, FK removal or weakening NOT NULL/
-  unique/HNSW. Unexpected FKs or invalid old IDs abort; never invent a store0 or relax StorePrisma.
+- CHECK NOT VALID protects new rows without scanning or rejecting historical data
+  at deploy. No historical DML, preflight RAISE, FK removal or weakening NOT NULL/
+  unique/HNSW. Optional validation is separate maintenance; never relax StorePrisma.
 - Index AFTER domain registration; job `index-knowledge`, ≤50 code-reconstructed docs,
   bounded retries, active-ready/CAS, logical retirement. Selector uses ONLY authorized IDs.
 - Separate app `agent_knowledge_embeddings`, explicit matching config/model1536, category `rag_embeddings` (NOT NULL schema), no merchant

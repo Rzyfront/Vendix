@@ -33,9 +33,7 @@ const partial = {
   total_tokens: 0,
   tools_used: [],
 };
-beforeEach(() => (process.env.AI_DURABLE_OBJECTIVES_ENABLED = 'true'));
 afterEach(() => {
-  delete process.env.AI_DURABLE_OBJECTIVES_ENABLED;
   jest.restoreAllMocks();
 });
 

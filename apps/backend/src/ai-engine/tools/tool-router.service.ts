@@ -9,7 +9,6 @@ import {
   catalogHash,
   localToolRanking,
   ToolDocument,
-  toolRoutingEnabled,
 } from './tool-catalog';
 
 const DISCOVERY = new Set([
@@ -31,7 +30,6 @@ export interface ToolRoutingSession {
   used: string[];
   dependencies: string[];
   pending?: { query: string; domain?: string };
-  enabled: boolean;
   lastSearch?: { query: string; names: string[] };
 }
 export interface ToolRouterSelection {
@@ -61,7 +59,6 @@ export class ToolRouterService {
       names: [],
       used: [],
       dependencies,
-      enabled: toolRoutingEnabled(),
     };
   }
 
@@ -94,13 +91,13 @@ export class ToolRouterService {
     );
     // A strict agent/plan/caller scope that excludes discovery retains the FULL authorized
     // catalog, rather than getting stranded at K12 or receiving an unauthorized scaffold.
-    if (!session.enabled || !allowed.has('search_tools'))
+    if (!allowed.has('search_tools'))
       return {
         definitions: authorizedDefinitions,
         operationalCount: authorizedDefinitions.filter(
           (d) => !isAgentPlanTool(d.function.name),
         ).length,
-        degraded: session.enabled ? ['discovery_not_authorized'] : [],
+        degraded: ['discovery_not_authorized'],
         catalogHash: hash,
       };
     const scaffold = docs.filter(

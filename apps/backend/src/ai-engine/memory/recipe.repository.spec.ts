@@ -53,12 +53,6 @@ function setup() {
   };
 }
 describe('F repository SQL contracts (mocks, NOT PostgreSQL)', () => {
-  beforeEach(() => {
-    process.env.AI_PROCEDURAL_MEMORY_ENABLED = 'true';
-  });
-  afterEach(() => {
-    delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-  });
   it('private lookup explicitly binds all dimensions; foreign and unknown identical404', () =>
     scoped(async () => {
       const f = setup();
@@ -84,13 +78,7 @@ describe('F repository SQL contracts (mocks, NOT PostgreSQL)', () => {
       expect(globalSql).toContain('store_id IS NULL');
       expect(globalSql).not.toMatch(/store_id=0| OR /);
     }));
-  it('OFF never reads new schema', () =>
-    scoped(async () => {
-      const f = setup();
-      delete process.env.AI_PROCEDURAL_MEMORY_ENABLED;
-      expect(await f.repository.available()).toEqual([]);
-      expect(f.store.$queryRaw).not.toHaveBeenCalled();
-    }));
+
   it('candidate INSERT idempotent and never resets status, metrics or provenance on replay', () =>
     scoped(async () => {
       const f = setup();

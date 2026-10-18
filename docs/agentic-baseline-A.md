@@ -1,5 +1,26 @@
 # Baseline agentic A — inventario reproducible, medición live pendiente
 
+## Operación estándar de autonomía
+
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
+
 Fecha: 2026-10-17. Corpus `agentic-es-A-v1`: **50 casos sintéticos**, 40 desarrollo / 10 holdout congelado. Sin solicitudes reales, PII, audio de usuarios, cambios de proveedor/modelo/prompt ni acceso a DB/app/proveedores. Ningún gasto autorizado o realizado por el harness offline.
 
 ## Estado y límites
@@ -80,4 +101,4 @@ Dependencia explícita: **D0 y posteriores requieren este baseline observado ant
 
 Pruebas exactas secuenciales: agent55, engine33, logging8, trace17 y harness43: **156 PASS**. No se corrió ninguna suite global ni build/typecheck del monorepo. `prisma generate`, auditoría de singletons y `git diff --check` pasan. La generación utilizó el cliente compartido del checkout principal por el symlink autorizado; no se instalaron dependencias.
 
-Runtime de esta rama **no verificado**: `vendix_backend` monta el checkout principal, no este worktree. No se repuntó/reinició el entorno compartido. Migración redactada/revisada, no aplicada ni probada dos veces contra una base. No hay baseline live, canary, medición de costo real ni overhead medido. Por ello el cierre medido de A permanece **bloqueado**, con código estable disponible y flag OFF; no habilitar ni avanzar gates de promoción por este informe.
+Runtime de esta rama **no verificado**: `vendix_backend` monta el checkout principal, no este worktree. No se repuntó/reinició el entorno compartido. Migración redactada/revisada, no aplicada ni probada dos veces contra una base. No hay baseline live, canary, medición de costo real ni overhead medido. Por ello el cierre medido de A permanece **bloqueado**, con código disponible; sus capacidades son estándar, pero este informe no certifica los gates live pendientes.

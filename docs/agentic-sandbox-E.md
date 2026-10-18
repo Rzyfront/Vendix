@@ -1,17 +1,31 @@
 # Fase E — sandbox opcional de lectura
 
+## Operación estándar de autonomía
+
+A, D0, B, D1, C, D2, H, G, E y F son comportamiento estándar de Vex/Vexi,
+sin interruptores de entorno ni rutas OFF. Para detenerlos se usa el apagado
+general existente de Vex/Vexi, conservando objetivos, evidencias y propuestas.
+No cambian autorización, consentimiento individual, proveedor ni cuotas.
+
+El sandbox sólo está disponible con runtime Deno aislado/supervisor/configuración
+reales y `AI_SANDBOX_SOURCE_KEY` válida; si faltan, informa disponibilidad ausente
+y el agente continúa con herramientas normales. Nunca ejecuta código en el host API.
+La minería de recetas está activa; publicar requiere revisión firmada con
+`AI_RECIPE_REVIEW_KEY`; sin llave no publica y no interrumpe el chat.
+El catálogo se sincroniza automáticamente al bootstrap mediante el job idempotente
+existente. Sin app de embeddings, presupuesto o vectores, conserva búsqueda léxica
+autorizada; no exige mapear configuración adicional en Secrets Manager.
+
+La verificación offline histórica de este documento no certifica despliegue,
+PostgreSQL real, proveedor ni QA acústica. Estos gates se reportan pendientes,
+no se convierten en controles de activación por entorno.
+
+
 Implementación offline, **OFF / no desplegada / no certificada para ejecutar
 código adversarial**. No se ha provisionado infraestructura, instalado Deno,
 construido imagen ni contratado servicio. Fase F no forma parte del entregable.
 
 ## Circuito compartido
-
-`run_readonly_script` se registra al bootstrap sólo con `AI_SANDBOX_ENABLED=true`.
-El mismo flag se comprueba en cada ejecución. El loop textual Vex/Vexi entrega
-una capability ALS host-only de su sesión D1; MCP, realtime y llamadas sueltas
-sin esa capability fallan cerrado. No hay otro motor ni objetivo paralelo.
-`AI_SANDBOX_STORE_IDS` exige IDs canary explícitos separados por coma, vacío
-por defecto; sin opt-in la tool no se ofrece al loop ni ejecuta. No se configuró.
 
 El broker fija principal/objetivo/nonce/manifiesto/working set. Por llamada:
 
@@ -59,9 +73,9 @@ FFI/sys/imports/secretos/mounts; código cargado como dato. Deno no limita recur
 por sí solo ni valida autoridad Vendix. [Modelo Deno](https://docs.deno.com/runtime/fundamentals/security/),
 [modelo gVisor](https://gvisor.dev/docs/architecture_guide/security/).
 
-Requiere **todos**: flags D1 y sesión vigente; switch E; supervisor/config con
+Requiere sesión durable vigente y supervisor/config con
 rutas absolutas; `AI_SANDBOX_POLICY_DIGEST`, `AI_SANDBOX_RUNTIME_DIGEST` por SHA256;
-`AI_SANDBOX_SECURITY_REVIEWED=true`; `AI_SANDBOX_SOURCE_KEY` base64 canónico32bytes.
+verificación real de aislamiento por el supervisor; `AI_SANDBOX_SOURCE_KEY` base64 canónico32bytes.
 El config root-owned exige reporte independiente ligado a imagen final, política,
 seccomp, runsc y supervisor reales. Ninguno se configuró aquí. Base de imagen sí
 fijada por manifest oficial; no se inventó digest de imagen final ni perfil QA.

@@ -43,10 +43,7 @@ export class VexiVoiceService {
     file?: Express.Multer.File,
   ): Promise<import('./vexi-voice-consent.service').VoiceConsentObservation> {
     this.requireFile(file, MAX_CHUNK_BYTES);
-    if (
-      process.env.AI_VOICE_CONFIRM_ENABLED !== 'true' ||
-      !RequestContextService.asyncLocalStorage.getStore()?.user_id
-    )
+    if (!RequestContextService.asyncLocalStorage.getStore()?.user_id)
       throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
     const response = await this.aiEngine.runTranscription(VOICE_STT_APP_KEY, {
       inputAudio: {

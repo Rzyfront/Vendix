@@ -338,10 +338,6 @@ export class AgentTraceService implements OnModuleDestroy {
 
   constructor(private readonly prisma: GlobalPrismaService) {}
 
-  isEnabled(): boolean {
-    return process.env.AI_AGENT_TRACING_ENABLED === 'true';
-  }
-
   hash(value: unknown): string {
     return hashTraceValue(value);
   }
@@ -353,7 +349,6 @@ export class AgentTraceService implements OnModuleDestroy {
     scope: AgentTraceScope,
     attributes?: Record<string, unknown>,
   ): AgentTraceHandle | undefined {
-    if (!this.isEnabled()) return undefined;
     if (!this.validScope(scope)) {
       this.alarm('invalid_scope');
       return undefined;
@@ -394,8 +389,7 @@ export class AgentTraceService implements OnModuleDestroy {
     attributes?: Record<string, unknown>,
     parent = this.currentSpan(),
   ): AgentTraceHandle | undefined {
-    if (!this.isEnabled() || !parent || !KINDS.has(kind) || kind === 'root')
-      return undefined;
+    if (!parent || !KINDS.has(kind) || kind === 'root') return undefined;
     const parentState = this.states.get(parent);
     if (
       !parentState ||

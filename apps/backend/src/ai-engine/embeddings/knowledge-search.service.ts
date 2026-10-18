@@ -1,13 +1,11 @@
-import { proceduralMemoryEnabled } from '../memory/recipe.interface';
 import { requireObjectiveScope } from '../tasks/agent-objective.repository';
-import { playbooksEnabled } from '../playbooks/playbook-flags';
+
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { normalizeSearchText } from '../../common/utils/search-text.util';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import {
   catalogHash,
-  knowledgeIndexEnabled,
   localToolRanking,
   reciprocalRankFusion,
   ToolDocument,
@@ -53,16 +51,13 @@ export class KnowledgeSearchService {
   ): Promise<KnowledgeRanking> {
     if (type !== 'tool' && type !== 'process' && type !== 'recipe')
       throw new Error('INVALID_KNOWLEDGE_TYPE');
-    if (type === 'recipe' && !proceduralMemoryEnabled())
-      return { names: [], degraded: ['recipes_disabled'], cacheHit: false };
-    if (type === 'process' && !playbooksEnabled())
-      return { names: [], degraded: ['playbooks_disabled'], cacheHit: false };
+
     documents = documents.filter(
       (d) => (d.metadata.entity_type ?? 'tool') === type,
     );
     const boundedQuery = query.slice(0, 500);
     const local = localToolRanking(boundedQuery, documents, domain);
-    if (!documents.length || !knowledgeIndexEnabled())
+    if (!documents.length)
       return { names: local, degraded: ['index_disabled'], cacheHit: false };
     const normalizedQuery = normalizeSearchText(boundedQuery);
     if (
@@ -180,8 +175,7 @@ export class KnowledgeSearchService {
 
   /** Private procedural namespace: explicit owner/org/store; never semantic_search or global sentinel. */
   async rankPrivateRecipes(query: string, ids: number[]): Promise<number[]> {
-    if (!proceduralMemoryEnabled() || !knowledgeIndexEnabled() || !ids.length)
-      return [];
+    if (!ids.length) return [];
     const scope = requireObjectiveScope();
     if (
       ids.length > 100 ||
@@ -209,7 +203,7 @@ export class KnowledgeSearchService {
           config.fingerprint,
         );
       assertKnowledgeVector(generated.vector);
-      if (!proceduralMemoryEnabled()) return [];
+
       const vector = await this.queryIds(
         `SELECT r.id FROM ai_agent_recipes r JOIN ai_embeddings e ON e.entity_id=r.id
         WHERE ${base} AND e.metadata->>'fingerprint'=$6 AND e.embedding IS NOT NULL ORDER BY e.embedding <=> $5::vector,r.id LIMIT 100`,
