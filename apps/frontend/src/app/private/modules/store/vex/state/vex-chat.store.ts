@@ -1,3 +1,4 @@
+import { vexApplyState } from './vex-plan-state';
 import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
 import {
@@ -74,6 +75,7 @@ interface VexBlockRef {
 }
 
 const FRONTEND_PLAN_STATUSES: readonly VexPlanStatus[] = [
+  'unknown_effect',
   'proposed',
   'approved',
   'rejected',
@@ -124,6 +126,7 @@ function adaptStepStatus(raw: unknown): VexPlanStepStatus | null {
   switch (raw) {
     case 'applied':
       return 'done';
+    case 'unknown':
     case 'pending':
     case 'failed':
     case 'cancelled':
@@ -351,7 +354,7 @@ export class VexChatStore {
   private readonly loaded_ids = new Set<string>();
   /**
    * Plan tokens minted by approve, keyed by `plan_id`. In-memory only (TTL
-   * 15 min server-side): a reload drops them; irreversible steps then mint
+   * 15 min server-side): a reload drops them; pending steps then mint
    * their own single-use token on demand.
    * Plain map — never template-observed, so no signal needed.
    */
@@ -767,8 +770,9 @@ export class VexChatStore {
   }
 
   /**
-   * One click approves the bundle and drives every reversible step, in order,
-   * through the plan token. The approve request EXCLUDES irreversible steps:
+   * One click covers only the first selected change. Later changes remain
+   * pending and need a fresh individual confirmation. The approve request
+   * EXCLUDES irreversible steps:
    * the plan token never covers them, they stay `pending` and render their own
    * card, which asks the server for a single-use confirmation when the person
    * confirms that step. Reversible steps the token does not cover (drifted
@@ -818,12 +822,25 @@ export class VexChatStore {
       this.patchPlan(conversation_id, message_id, { status: 'executing' });
       const covered = new Set(approved.covered_steps ?? []);
       const ignored = new Set(approved.ignored_steps ?? []);
+      const reconfirm = new Set(approved.reconfirm_steps ?? []);
       let last_plan_status: VexPlanStatus = 'approved';
       for (let i = 0; i < plan.steps.length; i++) {
         const step = plan.steps[i];
         const order = i + 1;
         // Irreversible: pending, own card, own confirmation. Never run here.
-        if (step.irreversible) continue;
+        if (step.irreversible || reconfirm.has(order)) {
+          this.patchPlanStep(
+            conversation_id,
+            message_id,
+            plan.plan_id,
+            step.step_id,
+            {
+              status: 'pending',
+              confirmation_token: undefined,
+            },
+          );
+          continue;
+        }
         if (ignored.has(order) || !covered.has(order)) {
           this.patchPlanStep(
             conversation_id,
@@ -862,6 +879,11 @@ export class VexChatStore {
             result,
             true,
           );
+          if (
+            last_plan_status === 'unknown_effect' ||
+            last_plan_status === 'failed'
+          )
+            return;
         } catch (error) {
           const token = readSingleUseToken(error);
           if (token) {
@@ -929,11 +951,19 @@ export class VexChatStore {
     result: VexApplyStepResult,
     in_loop: boolean,
   ): VexPlanStatus {
-    const plan_status = adaptPlanStatus(result.plan_status);
+    const state = vexApplyState(result);
+    const plan_status = state.plan_status;
     this.patchPlanStep(conversation_id, message_id, plan_id, step_id, {
-      status: adaptStepStatus(result.step_status) ?? 'done',
+      status: state.step_status,
+      error: state.error,
+      confirmation_token: undefined,
     });
-    if (!in_loop || isTerminalPlanStatus(plan_status)) {
+    if (
+      !in_loop ||
+      isTerminalPlanStatus(plan_status) ||
+      plan_status === 'unknown_effect' ||
+      plan_status === 'failed'
+    ) {
       this.patchPlan(conversation_id, message_id, { status: plan_status });
     }
     return plan_status;
@@ -1076,7 +1106,11 @@ export class VexChatStore {
     const current = this.findPlan(conversation_id, message_id, plan.plan_id);
     const step = current?.steps.find((s) => s.step_id === step_id);
     if (!current || !step) return;
-    if (step.status === 'done' || step.status === 'running') return;
+    if (
+      step.status !== 'pending' ||
+      !['proposed', 'approved', 'executing'].includes(current.status)
+    )
+      return;
     const token = confirmation_token || step.confirmation_token;
     if (token) {
       void this.runSingleUseApply(
@@ -1089,15 +1123,12 @@ export class VexChatStore {
       );
       return;
     }
-    if (
-      step.irreversible &&
-      !current.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)
-    ) {
+    if (!current.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
       // After a reload (or once the in-memory token is gone) the single-use
       // token is minted on demand from the persisted step: request, then apply
       // through `confirmations/apply`. The person already clicked this step's
       // own approve button.
-      void this.runIrreversibleApply(
+      void this.runStepConfirmationApply(
         conversation_id,
         message_id,
         numeric,
@@ -1106,21 +1137,9 @@ export class VexChatStore {
       );
       return;
     }
-    const plan_token = this.plan_tokens.get(current.plan_id);
-    if (!plan_token) {
-      this.toast.error(
-        'Aprueba primero el plan para habilitar este paso.',
-        'Falta la aprobación',
-      );
-      return;
-    }
-    void this.runPlanStepRedeem(
-      conversation_id,
-      message_id,
-      numeric,
-      current.plan_id,
-      step,
-      plan_token,
+    this.toast.error(
+      'Esta propuesta venció. Solicita una propuesta nueva.',
+      'Falta la aprobación',
     );
   }
 
@@ -1141,7 +1160,7 @@ export class VexChatStore {
     this._busy_plan_id.set(plan_id);
     try {
       if (plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
-        await firstValueFrom(
+        const result = await firstValueFrom(
           this.api.applyStepConfirmation(
             step.tool,
             step.arguments ?? {},
@@ -1149,11 +1168,25 @@ export class VexChatStore {
             numeric,
           ),
         );
-        this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
-          status: 'done',
-        });
-        this.patchPlan(conversation_id, message_id, { status: 'done' });
-        this.reopenNarration(numeric, conversation_id, message_id);
+        const applied =
+          result.execution?.status === 'ok' &&
+          result.execution.effect_status === 'applied';
+        this.finishStepApply(
+          conversation_id,
+          message_id,
+          numeric,
+          plan_id,
+          step.step_id,
+          {
+            ...result,
+            ...(applied
+              ? {
+                  step_status: 'applied' as const,
+                  plan_status: 'applied' as const,
+                }
+              : {}),
+          },
+        );
         return;
       }
       const result = await firstValueFrom(
@@ -1186,11 +1219,11 @@ export class VexChatStore {
   }
 
   /**
-   * Irreversible step with no live token: `steps/:step_id/confirmation`
+   * Any pending server step without a live token: `steps/:step_id/confirmation`
    * mints one over the persisted tool+arguments (only for an `approved` plan
    * and a `pending` step), then `confirmations/apply` consumes it.
    */
-  private async runIrreversibleApply(
+  private async runStepConfirmationApply(
     conversation_id: string,
     message_id: string,
     numeric: number,
@@ -1219,63 +1252,6 @@ export class VexChatStore {
         result,
       );
     } catch (error) {
-      await this.handleStepError(
-        error,
-        conversation_id,
-        numeric,
-        plan_id,
-        step,
-      );
-    } finally {
-      this._busy_plan_id.set(null);
-    }
-  }
-
-  /**
-   * Own-card approve of a reversible step without a token (the person routed
-   * it there, the plan token is still in memory): applies it under the plan
-   * token. A non-`ok` outcome answers a fresh single-use token and holds so
-   * the person reviews the server message and clicks again.
-   */
-  private async runPlanStepRedeem(
-    conversation_id: string,
-    message_id: string,
-    numeric: number,
-    plan_id: string,
-    step: VexPlanStep,
-    plan_token: string,
-  ): Promise<void> {
-    this._busy_plan_id.set(plan_id);
-    try {
-      const result = await firstValueFrom(
-        this.api.applyConfirmation({
-          conversationId: numeric,
-          planId: plan_id,
-          stepId: step.step_id,
-          planToken: plan_token,
-        }),
-      );
-      this.finishStepApply(
-        conversation_id,
-        message_id,
-        numeric,
-        plan_id,
-        step.step_id,
-        result,
-      );
-    } catch (error) {
-      const token = readSingleUseToken(error);
-      if (token) {
-        this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
-          status: 'pending',
-          confirmation_token: token,
-        });
-        this.toast.error(
-          `${extractApiErrorMessage(error)} Revísalo y pulsa de nuevo para aplicarlo.`,
-          'Necesita confirmación propia',
-        );
-        return;
-      }
       await this.handleStepError(
         error,
         conversation_id,

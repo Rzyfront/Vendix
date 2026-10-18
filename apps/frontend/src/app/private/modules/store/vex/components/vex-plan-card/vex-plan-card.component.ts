@@ -16,20 +16,12 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 
 /**
- * Approval card for a whole Vex plan.
+ * One-write approval card, also compatible with persisted multi-step plans.
+ * The initial click covers only the first eligible change. Every remaining
+ * pending write renders its own confirmation and requires a new human click.
+ * Cancelling is not rollback; already applied steps keep their receipts.
  *
- * Every step renders its diff through the shared
- * `app-vexi-confirmation-card` (same `from → to` rows the owner already
- * knows), footer hidden: steps are information, not buttons. One plan
- * approval executes the reversible steps only; each pending irreversible
- * step (once the plan is approved) renders its OWN card with its own
- * approve/reject footer, emitted via `stepApprove` / `cancel`. Rejecting
- * any step rejects the whole plan explicitly — there is no per-step undo.
- *
- * Token-clean: the card never sees the plan token and passes a step's own
- * token through untouched. There is no default action and no timeout:
- * neither button is autofocused, so an Enter pressed out of habit in the
- * composer can never approve a write.
+ * Tokens are opaque to this card. No action is selected or triggered by default.
  */
 @Component({
   selector: 'vendix-vex-plan-card',
@@ -84,7 +76,9 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
           agentLabel="Vex"
         ></app-vexi-confirmation-card>
 
-        @if (step.status === 'failed' && step.error) {
+        @if (
+          (step.status === 'failed' || step.status === 'unknown') && step.error
+        ) {
           <p class="text-xs text-[var(--color-error)] m-0" role="alert">
             {{ step.error }}
           </p>
@@ -186,7 +180,10 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                   {{ step_status_label(step.status) }}
                 </span>
               </div>
-              @if (step.status === 'failed' && step.error) {
+              @if (
+                (step.status === 'failed' || step.status === 'unknown') &&
+                step.error
+              ) {
                 <p class="text-xs text-[var(--color-error)] m-0" role="alert">
                   {{ step.error }}
                 </p>
@@ -227,8 +224,8 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
               class="text-xs text-[var(--color-text-secondary)] m-0"
               role="note"
             >
-              Aprobar el plan ejecuta los pasos reversibles. Los irreversibles
-              quedan fuera y piden su propia confirmación.
+              Esta aprobación cubre una acción. Cada cambio restante pedirá su
+              propia confirmación.
             </p>
           }
           <footer class="flex gap-2">
@@ -296,6 +293,8 @@ export class VexPlanCardComponent {
 
   readonly status_label = computed(() => {
     switch (this.plan().status) {
+      case 'unknown_effect':
+        return 'pendiente de verificación';
       case 'proposed':
         return 'esperando tu aprobación';
       case 'approved':
@@ -335,6 +334,8 @@ export class VexPlanCardComponent {
   readonly closed_note = computed(() => {
     const applied = this.done_count();
     switch (this.plan().status) {
+      case 'unknown_effect':
+        return 'El efecto no está confirmado. Verifica el resultado antes de otra acción; no repitas este cambio.';
       case 'executing':
         return 'Plan aprobado. Vex está ejecutando los pasos.';
       case 'approved': {
@@ -368,6 +369,8 @@ export class VexPlanCardComponent {
   });
 
   single_status_label(step: VexPlanStep): string {
+    if (step.status === 'unknown' || this.plan().status === 'unknown_effect')
+      return 'Pendiente de verificación';
     if (step.status === 'done') return 'Hecho';
     if (step.status === 'failed') return 'Falló';
     if (step.status === 'cancelled' || this.plan().status === 'rejected') {
@@ -384,6 +387,8 @@ export class VexPlanCardComponent {
 
   step_status_label(status: VexPlanStep['status']): string {
     switch (status) {
+      case 'unknown':
+        return 'por verificar';
       case 'pending':
         return 'pendiente';
       case 'approved':
@@ -451,23 +456,17 @@ export class VexPlanCardComponent {
     };
   }
 
-  /**
-   * Whether the step renders its OWN confirmation card (with approve/reject
-   * footer) instead of a diff-only one. Only after the plan approval minted
-   * the plan token, only while the step is still pending, and only for
-   * steps outside the plan click: irreversibles, or reversibles the token
-   * routed to their own card (drifted args, replay) carrying a live token.
-   */
+  /** Every pending write in an approved plan has an individual confirmation. */
   show_own_card(step: VexPlanStep): boolean {
     const status = this.plan().status;
     if (status !== 'approved' && status !== 'executing') return false;
     if (step.status !== 'pending') return false;
-    return step.irreversible || !!step.confirmation_token;
+    return true; // Every remaining pending write requires a new individual click/token.
   }
 
   onStepApprove(step: VexPlanStep): void {
     // The step's own token travels through untouched; the store resolves
-    // the step fresh by `step_id` and falls back to a plan-token redeem
+    // the step fresh by `step_id` and requests a new individual confirmation
     // when no token is attached yet.
     this.stepApprove.emit({
       step_id: step.step_id,

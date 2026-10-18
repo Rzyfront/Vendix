@@ -59,7 +59,7 @@ describe('G dedicated voice consent UI guards (not STT or acoustic proof)', () =
   it('allows only the active focused silent foreground challenge', () => {
     expect(voiceCaptureAllowed(allowed)).toBe(true);
   });
-  it.each([
+  [
     { focused: false },
     { visible: false },
     { assistantSilent: false },
@@ -68,8 +68,16 @@ describe('G dedicated voice consent UI guards (not STT or acoustic proof)', () =
     { now: 2001 },
     { expiresAt: NaN },
     { expiresAt: Infinity },
-  ])('fails closed when a challenge boundary changes: %j', (patch) => {
-    expect(voiceCaptureAllowed({ ...allowed, ...patch })).toBe(false);
+  ].forEach((patch, index) => {
+    it(
+      'fails closed when a challenge boundary changes: %j' +
+        ' (caso ' +
+        index +
+        ')',
+      () => {
+        expect(voiceCaptureAllowed({ ...allowed, ...patch })).toBe(false);
+      },
+    );
   });
   it('recognizes ISO and Unix expiry without extending it', () => {
     expect(voiceChallengeExpiry('2026-10-17T12:00:00.000Z')).toBe(

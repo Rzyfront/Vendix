@@ -25,7 +25,7 @@ describe('H progress is transient, not a false assistant claim or applied effect
   it('does not duplicate an already known tool step', () => {
     const start = actions.toolCallStarted({ id: 'same', name: 'get_product' });
     const state = vexiReducer(vexiReducer(initialVexiState, start), start);
-    expect(state.toolSteps).toHaveLength(1);
+    expect(state.toolSteps).toHaveSize(1);
   });
   it('cancellation preserves pending proposals and marks running work unknown, never done/applied', () => {
     let state: VexiState = vexiReducer(
@@ -47,15 +47,23 @@ describe('H progress is transient, not a false assistant claim or applied effect
     expect(state.messages).toEqual([]);
     expect(state.error).toContain('Verifica');
   });
-  it.each([
+  [
     actions.streamError({ error: 'interrupted' }),
     actions.streamReconciled(),
     actions.streamStarted({ conversationId: 7 }),
-  ])('clears stale progress on terminal/reconcile/new turn %s', (action) => {
-    const progress = vexiReducer(
-      initialVexiState,
-      actions.receiveStreamProgress({ content: 'Consultando.' }),
+  ].forEach((action, index) => {
+    it(
+      'clears stale progress on terminal/reconcile/new turn %s' +
+        ' (caso ' +
+        index +
+        ')',
+      () => {
+        const progress = vexiReducer(
+          initialVexiState,
+          actions.receiveStreamProgress({ content: 'Consultando.' }),
+        );
+        expect(vexiReducer(progress, action).streamingProgress).toBe('');
+      },
     );
-    expect(vexiReducer(progress, action).streamingProgress).toBe('');
   });
 });

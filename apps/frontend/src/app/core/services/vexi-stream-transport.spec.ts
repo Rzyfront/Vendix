@@ -8,7 +8,7 @@ import {
 
 class Source {
   onerror: (() => void) | null = null;
-  close = jest.fn();
+  close = jasmine.createSpy('close');
   private listener?: (event: MessageEvent) => void;
   addEventListener(_type: string, listener: (event: MessageEvent) => void) {
     this.listener = listener;
@@ -25,8 +25,8 @@ const replay = (sequence: number): VexiReplayCursor => ({
   checkpoint: 4,
 });
 describe('H frontend SSE replay/cancellation', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
+  beforeEach(() => jasmine.clock().install());
+  afterEach(() => jasmine.clock().uninstall());
   function fixture(supported = false) {
     const sources: Source[] = [];
     const urls: string[] = [];
@@ -50,7 +50,7 @@ describe('H frontend SSE replay/cancellation', () => {
   }
   it('G invalidates a spoken challenge on drop and before transport reattach', () => {
     const sources: Source[] = [];
-    const discontinuity = jest.fn();
+    const discontinuity = jasmine.createSpy('discontinuity');
     const subscription = replayEventSource<Frame>(
       'opaque',
       () => '/stream',
@@ -64,9 +64,9 @@ describe('H frontend SSE replay/cancellation', () => {
     ).subscribe();
     sources[0].onerror?.();
     expect(discontinuity).toHaveBeenCalledTimes(1);
-    jest.advanceTimersByTime(150);
+    jasmine.clock().tick(150);
     expect(discontinuity).toHaveBeenCalledTimes(2);
-    expect(sources).toHaveLength(2);
+    expect(sources).toHaveSize(2);
     subscription.unsubscribe();
   });
   it('reconnects only the same opaque stream with objective/checkpoint/sequence and drops duplicate frames', () => {
@@ -75,7 +75,7 @@ describe('H frontend SSE replay/cancellation', () => {
     test.sources[0].frame({ type: 'tool_call', replay: replay(2) });
     test.sources[0].onerror?.();
     expect(test.sources[0].close).toHaveBeenCalled();
-    jest.advanceTimersByTime(150);
+    jasmine.clock().tick(150);
     expect(test.urls[1]).toContain(
       'stream_id=opaque&after_sequence=2&objective_id=objective&checkpoint=4',
     );
@@ -99,9 +99,9 @@ describe('H frontend SSE replay/cancellation', () => {
     const test = fixture(true);
     for (let attempt = 0; attempt < 3; attempt++) {
       test.sources[attempt].onerror?.();
-      jest.advanceTimersByTime(150);
+      jasmine.clock().tick(150);
     }
-    expect(test.sources).toHaveLength(3);
+    expect(test.sources).toHaveSize(3);
     expect(test.urls.slice(1)).toEqual([
       '/stream?stream_id=opaque&after_sequence=0',
       '/stream?stream_id=opaque&after_sequence=0',
@@ -114,8 +114,8 @@ describe('H frontend SSE replay/cancellation', () => {
   it('leaves OFF legacy drops to reconciliation, never implicit EventSource retries', () => {
     const test = fixture();
     test.sources[0].onerror?.();
-    jest.runAllTimers();
-    expect(test.sources).toHaveLength(1);
+    jasmine.clock().tick(10000);
+    expect(test.sources).toHaveSize(1);
     expect((test.errors[0] as VexiStreamTransportError).replaySupported).toBe(
       false,
     );
@@ -125,26 +125,31 @@ describe('H frontend SSE replay/cancellation', () => {
     const test = fixture(true);
     test.sources[0].onerror?.();
     test.subscription.unsubscribe();
-    jest.runAllTimers();
+    jasmine.clock().tick(10000);
     test.sources[0].frame({ type: 'tool_call', replay: replay(1) });
-    expect(test.sources).toHaveLength(1);
+    expect(test.sources).toHaveSize(1);
     expect(test.frames).toEqual([]);
     expect(test.sources[0].close).toHaveBeenCalled();
   });
-  it.each([
+  [
     { ...replay(1), stream_id: 'other' },
     replay(3),
     { ...replay(1), sequence: 0.5 },
-  ])(
-    'rejects alien/gapped/invalid cursor without rendering or dispatching',
-    (cursor) => {
-      const test = fixture(true);
-      test.sources[0].frame({ type: 'tool_call', replay: cursor });
-      expect(test.frames).toEqual([]);
-      expect(test.errors).toHaveLength(1);
-      expect(test.sources[0].close).toHaveBeenCalled();
-    },
-  );
+  ].forEach((cursor, index) => {
+    it(
+      'rejects alien/gapped/invalid cursor without rendering or dispatching' +
+        ' (caso ' +
+        index +
+        ')',
+      () => {
+        const test = fixture(true);
+        test.sources[0].frame({ type: 'tool_call', replay: cursor });
+        expect(test.frames).toEqual([]);
+        expect(test.errors).toHaveSize(1);
+        expect(test.sources[0].close).toHaveBeenCalled();
+      },
+    );
+  });
   it('tolerates a scoped replay reconciliation error without retrying inference', () => {
     const test = fixture(true);
     test.sources[0].frame({
@@ -153,8 +158,8 @@ describe('H frontend SSE replay/cancellation', () => {
     });
     expect(test.subscription.closed).toBe(true);
     expect(test.errors).toEqual([]);
-    expect(test.frames).toHaveLength(1);
-    expect(test.sources).toHaveLength(1);
+    expect(test.frames).toHaveSize(1);
+    expect(test.sources).toHaveSize(1);
   });
   it('never adds prompts, tool args or tokens from cursor metadata to stream URLs', () => {
     expect(

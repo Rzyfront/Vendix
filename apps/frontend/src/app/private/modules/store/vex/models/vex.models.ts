@@ -117,6 +117,7 @@ export interface VexBlockInteraction {
 }
 
 export type VexPlanStepStatus =
+  | 'unknown'
   | 'pending'
   | 'approved'
   | 'running'
@@ -156,6 +157,7 @@ export interface VexPlanStep {
 }
 
 export type VexPlanStatus =
+  | 'unknown_effect'
   | 'proposed'
   | 'approved'
   | 'rejected'

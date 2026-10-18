@@ -265,6 +265,7 @@ export interface VexStepConfirmation {
 
 /** Persisted step state as the server reports it (`metadata.plan.steps[].status`). */
 export type VexServerStepStatus =
+  | 'unknown'
   | 'pending'
   | 'applied'
   | 'failed'
@@ -272,6 +273,7 @@ export type VexServerStepStatus =
 
 /** Persisted plan state as the server reports it (`metadata.plan.status`). */
 export type VexServerPlanStatus =
+  | 'unknown_effect'
   | 'proposed'
   | 'approved'
   | 'rejected'
@@ -283,8 +285,9 @@ export interface VexApplyStepResult {
   tool: string;
   output: string;
   summary?: string | null;
-  step_status: VexServerStepStatus;
-  plan_status: VexServerPlanStatus;
+  step_status?: VexServerStepStatus;
+  plan_status?: VexServerPlanStatus;
+  execution?: VexiToolExecution;
 }
 
 export interface VexConversationsPage {
@@ -579,10 +582,20 @@ export class VexApiService {
     args: Record<string, unknown>,
     confirmationToken: string,
     conversationId: number,
-  ): Observable<{ tool: string; output: string; summary?: string | null }> {
+  ): Observable<{
+    tool: string;
+    output: string;
+    summary?: string | null;
+    execution?: VexiToolExecution;
+  }> {
     return this.http
       .post<{
-        data: { tool: string; output: string; summary?: string | null };
+        data: {
+          tool: string;
+          output: string;
+          summary?: string | null;
+          execution?: VexiToolExecution;
+        };
       }>(`${this.vexiBase}/confirmations/apply`, {
         tool,
         arguments: args,
