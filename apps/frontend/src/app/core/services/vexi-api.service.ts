@@ -1,6 +1,12 @@
+import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
+import type {
+  VoiceConsentContext,
+  VoiceConsentReceipt,
+} from './vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, throwError } from 'rxjs';
+import { voiceClickRequest } from './vexi-voice-consent.model';
 import {
   VexiReplayCursor,
   replayEventSource,
@@ -238,6 +244,7 @@ export interface PaginatedConversations {
 @Injectable({ providedIn: 'root' })
 export class VexiApiService {
   private http = inject(HttpClient);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
   private readonly replayStreams = new Set<string>();
 
   canReplayStream(streamId: string): boolean {
@@ -253,6 +260,8 @@ export class VexiApiService {
       (cursor) =>
         replayStreamUrl(this.getStreamUrl(conversationId, streamId), cursor),
       this.canReplayStream(streamId),
+      undefined,
+      () => this.voiceSafety.invalidate(),
     );
   }
   private baseUrl = `${environment.apiUrl}/store/ai-chat`;
@@ -511,6 +520,7 @@ export class VexiApiService {
     output: string;
     /** The tool's own sentence about what it changed. Null when it wrote none. */
     summary?: string | null;
+    execution?: VexiToolExecution;
     /** Present only when `speak` was asked for and the synthesis succeeded. */
     audio_base64?: string;
     content_type?: string;
@@ -521,6 +531,7 @@ export class VexiApiService {
           tool: string;
           output: string;
           summary?: string | null;
+          execution?: VexiToolExecution;
           audio_base64?: string;
           content_type?: string;
         };
@@ -539,6 +550,35 @@ export class VexiApiService {
         ...(speak ? { speak: true } : {}),
       })
       .pipe(map((res) => res.data));
+  }
+
+  /** Explicit human click only. Original opaque identity survives voice cancellation; server owns the token. */
+  applyDisplayedVoiceProposal(
+    context: VoiceConsentContext,
+    speak?: boolean,
+  ): Observable<VoiceConsentReceipt> {
+    const request = voiceClickRequest(context);
+    if (!request)
+      return throwError(
+        () => new Error('La propuesta venció. Solicita una nueva.'),
+      );
+    return this.applyVoiceProposal(
+      request.session_id,
+      request.proposal_id,
+      speak,
+    );
+  }
+
+  applyVoiceProposal(
+    session_id: string,
+    proposal_id: string,
+    speak?: boolean,
+  ): Observable<VoiceConsentReceipt> {
+    return this.http
+      .post<{
+        data: VoiceConsentReceipt;
+      }>(`${environment.apiUrl}/store/vexi/voice/confirmations/apply`, { session_id, proposal_id, ...(speak ? { speak: true } : {}) })
+      .pipe(map((response) => response.data));
   }
 
   /**

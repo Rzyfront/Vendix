@@ -9,7 +9,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.2"
+  version: "3.3"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -234,3 +234,15 @@ Rules for the pattern:
 - `vendix-ai-embeddings-rag`
 - `vendix-mcp-server`
 - `vendix-inventory-stock`
+
+## G opt-in voice proposal/consent
+
+The voice read-only table above describes the legacy/default-OFF surface.
+`AI_VOICE_CONFIRM_ENABLED=true` adds authenticated session-bound offered catalogs:
+reads remain reads, writes run ONLY registry `proposalOnly` (never a handler even
+with a token), and UI calls require server authority before browser dispatch.
+Dedicated consent uses the original exact preview hash and server-STT reliability,
+not realtime transcription or model interpretation. Actual apply remains in the
+same confirmation/D1/D2 choke with current permissions ∩ objective snapshot over
+the entire bridge callback. See `vendix-agent-voice-consent` for TTLs, nonce,
+Vex effect identity, click fallback, billing retention and live acoustic gates.

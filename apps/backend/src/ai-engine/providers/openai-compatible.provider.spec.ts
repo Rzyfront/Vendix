@@ -1440,3 +1440,95 @@ describe('OpenAI-compatible H metering capability', () => {
     expect(chunks.map((c) => c.type)).toEqual(['error']);
   });
 });
+
+describe('G consent STT observed logprob capability', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+  function provider(enabled: boolean, baseUrl = 'https://api.example.test/v1') {
+    return new OpenAICompatibleProvider({
+      provider: 'custom',
+      sdkType: 'openai_compatible',
+      apiKey: 'offline',
+      modelId: 'unchanged-current-model',
+      baseUrl,
+      settings: { transcription_logprobs_supported: enabled },
+    });
+  }
+  const options = {
+    inputAudio: {
+      data: Buffer.from('fixture').toString('base64'),
+      format: 'webm',
+    },
+    requireConfidence: true,
+  };
+  it('opt-in request includes logprobs and uses lowest observed token probability', async () => {
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        text: 'confirmo cambio',
+        logprobs: [
+          { token: 'confirmo', logprob: Math.log(0.99) },
+          { token: ' cambio', logprob: Math.log(0.97) },
+        ],
+      }),
+    });
+    global.fetch = fetch;
+    const result = await provider(true).transcribeAudio(options);
+    expect(result.confidence).toBeCloseTo(0.97);
+    const body = fetch.mock.calls[0][1].body as FormData;
+    expect(body.get('include[]')).toBe('logprobs');
+    expect(body.get('response_format')).toBe('json');
+    expect(body.get('model')).toBe('unchanged-current-model');
+  });
+  it('no capability preserves request options and refuses score even if injected', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          text: 'yes',
+          logprobs: [{ token: 'yes', logprob: 0 }],
+        }),
+      });
+    global.fetch = fetch;
+    expect(
+      (await provider(false).transcribeAudio(options)).confidence,
+    ).toBeNull();
+    expect(
+      (fetch.mock.calls[0][1].body as FormData).get('include[]'),
+    ).toBeNull();
+  });
+  it.each([
+    undefined,
+    [],
+    [{ token: 'yes', logprob: 1 }],
+    [{ token: 'no', logprob: 0 }],
+    [{ token: 'yes', logprob: NaN }],
+    [{ token: 'yes', logprob: '0' }],
+  ])('partial/malformed logprobs remain unknown %j', async (logprobs) => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ text: 'yes', logprobs }),
+      });
+    expect(
+      (await provider(true).transcribeAudio(options)).confidence,
+    ).toBeNull();
+  });
+  it('legacy transcription requests no extra fields and returns no confidence property', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ text: 'hello' }) });
+    global.fetch = fetch;
+    const result = await provider(true).transcribeAudio({
+      inputAudio: options.inputAudio,
+    });
+    expect(Object.hasOwn(result, 'confidence')).toBe(false);
+    expect(
+      (fetch.mock.calls[0][1].body as FormData).get('include[]'),
+    ).toBeNull();
+  });
+});

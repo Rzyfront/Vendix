@@ -1,3 +1,4 @@
+import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
@@ -206,7 +207,13 @@ export interface VexStreamChunk {
     | 'ui_block'
     | 'plan_approval'
     | 'done'
-    | 'error';
+    | 'error'
+    | 'audio'
+    | 'timing';
+  audio_base64?: string;
+  content_type?: string;
+  index?: number;
+  filler?: boolean;
   content?: string;
   /** Id of the persisted assistant row, when the backend reports it (`done`/first frame). */
   message_id?: string | number;
@@ -288,6 +295,7 @@ export interface VexConversationsPage {
 @Injectable({ providedIn: 'root' })
 export class VexApiService {
   private readonly http = inject(HttpClient);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
   private readonly replayStreams = new Set<string>();
   private readonly chatBase = `${environment.apiUrl}/store/ai-chat`;
   private readonly vexBase = `${environment.apiUrl}/store/vex`;
@@ -365,6 +373,7 @@ export class VexApiService {
       attachmentIds?: string[];
       continuation?: 'approved' | 'rejected' | 'resume';
       skipUserMessage?: boolean;
+      speak?: boolean;
     },
   ): Observable<string> {
     return this.http
@@ -377,6 +386,7 @@ export class VexApiService {
             ? options.attachmentIds
             : undefined,
           skip_user_message: options?.skipUserMessage ? true : undefined,
+          ...(options?.speak ? { speak: true } : {}),
         },
       )
       .pipe(
@@ -410,6 +420,8 @@ export class VexApiService {
       (cursor) =>
         replayStreamUrl(this.getStreamUrl(conversationId, streamId), cursor),
       this.replayStreams.has(streamId),
+      undefined,
+      () => this.voiceSafety.invalidate(),
     ).pipe(
       map((raw) => {
         const chunk = { ...raw };

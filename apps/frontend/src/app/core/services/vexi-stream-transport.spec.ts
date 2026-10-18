@@ -48,6 +48,27 @@ describe('H frontend SSE replay/cancellation', () => {
     });
     return { sources, urls, frames, errors, subscription };
   }
+  it('G invalidates a spoken challenge on drop and before transport reattach', () => {
+    const sources: Source[] = [];
+    const discontinuity = jest.fn();
+    const subscription = replayEventSource<Frame>(
+      'opaque',
+      () => '/stream',
+      true,
+      () => {
+        const source = new Source();
+        sources.push(source);
+        return source as unknown as EventSource;
+      },
+      discontinuity,
+    ).subscribe();
+    sources[0].onerror?.();
+    expect(discontinuity).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(150);
+    expect(discontinuity).toHaveBeenCalledTimes(2);
+    expect(sources).toHaveLength(2);
+    subscription.unsubscribe();
+  });
   it('reconnects only the same opaque stream with objective/checkpoint/sequence and drops duplicate frames', () => {
     const test = fixture();
     test.sources[0].frame({ type: 'progress', replay: replay(1) });

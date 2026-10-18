@@ -369,7 +369,14 @@ export const vexiReducer = createReducer(
     VexiActions.proposalReceived,
     (
       state,
-      { tool, arguments: args, confirmationToken, preview, planActive },
+      {
+        tool,
+        arguments: args,
+        confirmationToken,
+        preview,
+        planActive,
+        voiceContext,
+      },
     ) => ({
       ...state,
       pendingProposal: {
@@ -379,6 +386,7 @@ export const vexiReducer = createReducer(
         preview,
         applying: false,
         planActive: planActive === true,
+        voiceContext,
       },
     }),
   ),
@@ -399,40 +407,74 @@ export const vexiReducer = createReducer(
   // So the acknowledgement is appended here as a visible assistant turn. Local
   // and not refetched, because the server's copy is that unrenderable `tool` row:
   // the sentence exists on the wire, not in a shape the thread can show.
-  on(VexiActions.confirmProposalSuccess, (state, { summary }) => {
-    const text = summary?.trim() || 'Listo, apliqué el cambio.';
+  on(
+    VexiActions.confirmProposalSuccess,
+    (
+      state,
+      {
+        summary,
+        conversationId,
+        confirmationToken,
+        proposalId,
+        receiptApplied,
+      },
+    ) => {
+      if (
+        conversationId !== undefined &&
+        (state.activeConversationId !== conversationId ||
+          state.pendingProposal?.confirmationToken !== confirmationToken ||
+          (proposalId !== undefined &&
+            state.pendingProposal?.voiceContext?.proposal_id !== proposalId))
+      )
+        return state;
+      const text =
+        summary?.trim() ||
+        (receiptApplied === false
+          ? 'El resultado no está confirmado. Verifica el estado antes de continuar.'
+          : 'Listo, apliqué el cambio.');
 
-    return {
-      ...state,
-      pendingProposal: null,
-      rejectedPlanActive: state.pendingProposal?.planActive === true,
-      messages: state.activeConversationId
-        ? [
-            ...state.messages,
-            {
-              id: -Date.now(),
-              conversation_id: state.activeConversationId,
-              role: 'assistant' as const,
-              content: text,
-              tool_calls: null,
-              tokens_used: 0,
-              cost_usd: 0,
-              metadata: null,
-              created_at: new Date().toISOString(),
-            },
-          ]
-        : state.messages,
-    };
-  }),
+      return {
+        ...state,
+        pendingProposal: null,
+        rejectedPlanActive: state.pendingProposal?.planActive === true,
+        messages: state.activeConversationId
+          ? [
+              ...state.messages,
+              {
+                id: -Date.now(),
+                conversation_id: state.activeConversationId,
+                role: 'assistant' as const,
+                content: text,
+                tool_calls: null,
+                tokens_used: 0,
+                cost_usd: 0,
+                metadata: null,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : state.messages,
+      };
+    },
+  ),
 
   // The proposal is dropped, not left pending: the token is single-use and
   // consumed on the failed attempt, so retrying it would fail again. Vexi has
   // to re-propose.
-  on(VexiActions.confirmProposalFailure, (state, { error }) => ({
-    ...state,
-    pendingProposal: null,
-    error,
-  })),
+  on(
+    VexiActions.confirmProposalFailure,
+    (state, { error, conversationId, confirmationToken, proposalId }) =>
+      conversationId !== undefined &&
+      (state.activeConversationId !== conversationId ||
+        state.pendingProposal?.confirmationToken !== confirmationToken ||
+        (proposalId !== undefined &&
+          state.pendingProposal?.voiceContext?.proposal_id !== proposalId))
+        ? state
+        : {
+            ...state,
+            pendingProposal: null,
+            error,
+          },
+  ),
 
   // Rejecting needs an answer for the same reason approving does — a card that
   // just disappears is indistinguishable from a button that failed. The sentence

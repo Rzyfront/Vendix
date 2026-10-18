@@ -494,11 +494,15 @@ export class OpenAICompatibleProvider implements AIProvider {
       const parsed = (await response.json()) as {
         text?: string;
         usage?: any;
+        logprobs?: Array<{ token?: unknown; logprob?: unknown }>;
       } | null;
 
       return {
         success: typeof parsed?.text === 'string',
         text: parsed?.text,
+        ...(options.requireConfidence && {
+          confidence: this.transcriptionConfidence(parsed),
+        }),
         model,
         usage: this.mapTokenUsage(parsed?.usage),
         error:
@@ -566,6 +570,14 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     const form = new FormData();
     form.append('model', model);
+    // Explicit endpoint capability, never guessed from model name/base URL.
+    if (
+      options.requireConfidence &&
+      this.config.settings?.transcription_logprobs_supported === true
+    ) {
+      form.append('response_format', 'json');
+      form.append('include[]', 'logprobs');
+    }
     // The extension matters as much as the MIME type: the API sniffs the
     // filename to pick a decoder, and a container it cannot name is refused
     // even when the bytes are valid.
@@ -581,6 +593,35 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     return { headers: this.buildProviderHeaders(false), body: form };
+  }
+
+  private transcriptionConfidence(
+    parsed: {
+      text?: string;
+      logprobs?: Array<{ token?: unknown; logprob?: unknown }>;
+    } | null,
+  ): number | null {
+    if (
+      this.isOpenRouterConfig() ||
+      this.config.settings?.transcription_logprobs_supported !== true ||
+      !parsed?.text ||
+      !Array.isArray(parsed.logprobs) ||
+      parsed.logprobs.length === 0 ||
+      parsed.logprobs.length > 1000 ||
+      parsed.logprobs.some(
+        (entry) =>
+          !entry ||
+          typeof entry.token !== 'string' ||
+          typeof entry.logprob !== 'number' ||
+          !Number.isFinite(entry.logprob) ||
+          entry.logprob > 0,
+      ) ||
+      parsed.logprobs.map((entry) => entry.token).join('') !== parsed.text
+    )
+      return null;
+    return Math.min(
+      ...parsed.logprobs.map((entry) => Math.exp(entry.logprob as number)),
+    );
   }
 
   /**

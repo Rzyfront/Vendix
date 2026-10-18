@@ -13,6 +13,10 @@ import { VexBlockService } from './services/vex-block.service';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
+import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.service';
+import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Vex: whole-plan approval, UI blocks and the business log.
@@ -51,9 +55,37 @@ export class VexModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
     private readonly blocks: VexBlockService,
+    private readonly voiceConfirmations: VexiVoiceConfirmationService,
+    private readonly planApproval: PlanApprovalService,
+    private readonly access: SubscriptionAccessService,
   ) {}
 
   onModuleInit(): void {
-    this.toolRegistry.registerMany(createVexBlockTools({ blocks: this.blocks }));
+    this.voiceConfirmations.registerVexReceiptSink(async (proposal) => {
+      const context = RequestContextService.asyncLocalStorage.getStore()!;
+      // Same post-success unit/dedupe convention as VexController.applyPlanStep.
+      try {
+        await this.access.consumeAIQuota(
+          context.store_id!,
+          'vex_agent',
+          1,
+          `${context.request_id ?? `internal-${randomUUID()}`}:tool:${proposal.planId ?? 'plan'}:${proposal.tool}`,
+        );
+      } catch {
+        /* A metering outage must not hide an already-applied receipt. */
+      }
+      return proposal.planId
+        ? this.planApproval.recordStepResult({
+            planId: proposal.planId,
+            conversationId: proposal.conversationId,
+            tool: proposal.tool,
+            args: proposal.arguments,
+            outcome: 'applied',
+          })
+        : null;
+    });
+    this.toolRegistry.registerMany(
+      createVexBlockTools({ blocks: this.blocks }),
+    );
   }
 }

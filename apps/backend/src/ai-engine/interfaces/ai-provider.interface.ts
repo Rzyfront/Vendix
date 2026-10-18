@@ -346,11 +346,15 @@ export interface AITranscriptionRequestOptions {
   language?: string;
   temperature?: number;
   provider?: Record<string, any>;
+  /** G dedicated capture only; unsupported capability must return unknown. */
+  requireConfidence?: boolean;
 }
 
 export interface AITranscriptionResponse {
   success: boolean;
   text?: string;
+  /** Conservative observed minimum token probability, NOT biometric reliability. */
+  confidence?: number | null;
   model?: string;
   usage?: {
     promptTokens: number;

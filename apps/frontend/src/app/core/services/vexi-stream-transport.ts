@@ -23,6 +23,7 @@ export function replayEventSource<
   getUrl: (cursor?: VexiReplayCursor) => string,
   replaySupported = false,
   createSource: (url: string) => EventSource = (url) => new EventSource(url),
+  onDiscontinuity: () => void = () => undefined,
 ): Observable<T> {
   return new Observable<T>((subscriber) => {
     let source: EventSource | undefined;
@@ -36,6 +37,7 @@ export function replayEventSource<
     };
     const connect = () => {
       if (closed) return;
+      if (reconnects) onDiscontinuity();
       const url = getUrl(
         cursor ??
           (reconnects ? { stream_id: streamId, sequence: 0 } : undefined),
@@ -87,6 +89,7 @@ export function replayEventSource<
       });
       connection.onerror = () => {
         if (closed || subscriber.closed || source !== connection) return;
+        onDiscontinuity();
         connection.close(); // Never allow EventSource's implicit single-use-intent retry.
         source = undefined;
         if (replaySupported && reconnects++ < 2)

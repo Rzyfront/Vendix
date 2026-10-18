@@ -210,6 +210,35 @@ export class AgentObjectiveRepository {
     });
   }
 
+  /** G first voice attachment is create-if-absent, NEVER replace/supersede. */
+  async ensureForConversation(
+    conversationId: number,
+    agentId: string,
+    goal: string,
+  ): Promise<AgentObjective> {
+    const scope = this.scope();
+    return this.transaction(async (tx) => {
+      const conversation = await this.conversation(
+        tx,
+        scope,
+        conversationId,
+        true,
+      );
+      const metadata = objectMetadata(conversation.metadata);
+      if (typeof metadata.agent_objective_id === 'string')
+        return this.find(tx, scope, metadata.agent_objective_id, true);
+      if (metadata.agent_objective_authority)
+        throw new ConflictException('Durable authority pointer is missing');
+      return this.insert(tx, scope, conversationId, null, agentId, metadata, {
+        goal: goal.slice(0, 2000),
+        authority_snapshot: [
+          ...(RequestContextService.asyncLocalStorage.getStore()?.permissions ??
+            []),
+        ],
+      });
+    });
+  }
+
   private async insert(
     tx: Tx,
     scope: ObjectiveScope,

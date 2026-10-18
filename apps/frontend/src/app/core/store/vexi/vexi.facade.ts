@@ -1,3 +1,8 @@
+import { voiceReceiptWasApplied } from '../../services/vexi-voice-consent.model';
+import type {
+  VoiceConsentApplied,
+  VoiceConsentContext,
+} from '../../services/vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
@@ -160,6 +165,43 @@ export class VexiFacade {
    */
   confirmProposal(speak = false): void {
     this.store.dispatch(VexiActions.confirmProposal({ speak }));
+  }
+
+  receiveRealtimeProposal(
+    proposal: VexiProposal,
+    voiceContext: VoiceConsentContext,
+  ): void {
+    if (this.activeConversationId() !== voiceContext.conversation_id) return;
+    this.store.dispatch(
+      VexiActions.proposalReceived({ ...proposal, voiceContext }),
+    );
+  }
+
+  acceptVoiceReceipt(result: VoiceConsentApplied): void {
+    const proposal = this.pendingProposal();
+    if (
+      this.activeConversationId() !== result.context.conversation_id ||
+      proposal?.confirmationToken !== result.confirmationToken ||
+      proposal?.voiceContext?.proposal_id !== result.context.proposal_id
+    )
+      return;
+    const applied = voiceReceiptWasApplied(result.receipt);
+    this.store.dispatch(
+      VexiActions.confirmProposalSuccess({
+        receiptApplied: applied,
+        proposalId: result.context.proposal_id,
+        tool: result.receipt.tool,
+        output: result.receipt.output,
+        summary: result.receipt.summary,
+        audioBase64: applied ? result.receipt.audio_base64 : undefined,
+        contentType: result.receipt.content_type,
+        conversationId: result.context.conversation_id,
+        confirmationToken: result.confirmationToken,
+        domain: proposal.preview?.domain,
+        planActive: applied && proposal.planActive,
+        speak: true,
+      }),
+    );
   }
 
   rejectProposal(): void {

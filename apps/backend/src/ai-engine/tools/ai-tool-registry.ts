@@ -16,6 +16,21 @@ import { VendixHttpException, ErrorCodes } from '../../common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmation.service';
 import { validateToolArgs } from './tool-args.validator';
+import { createHash } from 'node:crypto';
+import { canonicalJson } from '../../domains/store/vexi/vexi-confirmation.service';
+
+export interface ToolExecutionOptions {
+  confirmationToken?: string;
+  /** Server turn binding for newly issued G proposals, never from tool args. */
+  conversationId?: number;
+  /** G preview transport: a token supplied here can NEVER invoke a handler. */
+  proposalOnly?: boolean;
+  /** Checked against a fresh preview immediately before redeeming the token. */
+  expectedPreviewHash?: string;
+}
+
+export const toolPreviewHash = (preview: unknown): string =>
+  createHash('sha256').update(canonicalJson(preview)).digest('hex');
 
 /**
  * Política de remoción de tools (T5).
@@ -349,16 +364,58 @@ export class AIToolRegistry {
   async executeTool(
     name: string,
     args: Record<string, any>,
-    options?: { confirmationToken?: string },
+    options?: ToolExecutionOptions,
   ): Promise<string> {
     return this.executeToolRaw(name, args, options);
+  }
+
+  /** G re-reads the SAME domain preview; it cannot execute or mint approval. */
+  async previewForConsent(name: string, args: Record<string, unknown>) {
+    const canonicalName = this.canonicalName(name);
+    const tool = this.get(canonicalName);
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    if (
+      !context?.user_id ||
+      !context.store_id ||
+      !context.organization_id ||
+      !tool?.requiresConfirmation ||
+      tool.clientSide ||
+      !tool.preview
+    )
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_004,
+        'Esta acción requiere revisión con clic.',
+      );
+    const granted = context.permissions?.length
+      ? context.permissions
+      : (context.roles ?? []);
+    if (
+      tool.requiredPermissions?.some(
+        (permission) => !granted.includes(permission),
+      )
+    )
+      throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
+    const validation = validateToolArgs(canonicalName, tool.parameters, args);
+    if (!validation.ok)
+      throw new VendixHttpException(ErrorCodes.AI_AGENT_004, validation.error);
+    const preview = await tool.preview(args, context);
+    if (!preview || preview.status === 'error')
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_005,
+        preview?.message ?? 'No hay una propuesta válida para consentir.',
+      );
+    return {
+      arguments: args,
+      preview,
+      toolVersion: tool.version ?? DEFAULT_TOOL_VERSION,
+    };
   }
 
   /** Opt-in consumer API. Legacy handlers, aliases and MCP strings stay intact. */
   async executeToolResult(
     name: string,
     args: Record<string, unknown>,
-    options?: { confirmationToken?: string; evidenceRef?: string },
+    options?: ToolExecutionOptions & { evidenceRef?: string },
   ): Promise<ToolExecutionResult> {
     const tool = this.get(this.canonicalName(name));
     let handlerStarted = false;
@@ -385,7 +442,7 @@ export class AIToolRegistry {
   private async executeToolRaw(
     name: string,
     args: Record<string, any>,
-    options?: { confirmationToken?: string },
+    options?: ToolExecutionOptions,
     onHandlerStart?: () => void,
   ): Promise<string> {
     const resolvedName = this.resolveToolName(name);
@@ -484,7 +541,16 @@ export class AIToolRegistry {
         name,
         args,
         context,
-        options?.confirmationToken,
+        options?.proposalOnly ? undefined : options?.confirmationToken,
+        options?.expectedPreviewHash,
+        options?.conversationId,
+      );
+    }
+
+    if (options?.proposalOnly) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_004,
+        'Esta superficie sólo prepara propuestas de escritura.',
       );
     }
 
@@ -535,6 +601,8 @@ export class AIToolRegistry {
     args: Record<string, any>,
     context: ToolExecutionContext,
     confirmationToken?: string,
+    expectedPreviewHash?: string,
+    conversationId?: number,
   ): Promise<void> {
     if (!confirmationToken) {
       const preview = tool.preview
@@ -551,7 +619,20 @@ export class AIToolRegistry {
         );
       }
 
-      const token = await this.confirmations.issue(name, args, context.user_id);
+      const strictContext = RequestContextService.asyncLocalStorage.getStore();
+      const token =
+        process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
+        preview &&
+        strictContext?.store_id &&
+        strictContext.organization_id
+          ? await this.confirmations.issue(name, args, context.user_id, {
+              previewHash: toolPreviewHash(preview),
+              organizationId: strictContext.organization_id,
+              storeId: strictContext.store_id,
+              toolVersion: tool.version ?? DEFAULT_TOOL_VERSION,
+              ...(conversationId && { conversationId }),
+            })
+          : await this.confirmations.issue(name, args, context.user_id);
 
       throw new VendixHttpException(
         ErrorCodes.AI_AGENT_005,
@@ -563,6 +644,21 @@ export class AIToolRegistry {
           confirmation_token: token,
         } as any,
       );
+    }
+
+    if (expectedPreviewHash !== undefined) {
+      const preview = tool.preview
+        ? await tool.preview(args, context)
+        : undefined;
+      if (
+        !preview ||
+        preview.status === 'error' ||
+        toolPreviewHash(preview) !== expectedPreviewHash
+      )
+        throw new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'Los valores cambiaron. Revisa y aprueba una propuesta nueva.',
+        );
     }
 
     const outcome = await this.confirmations.redeem(

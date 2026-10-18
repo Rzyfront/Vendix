@@ -305,6 +305,8 @@ const SUGGESTIONS: readonly string[] = [
           @if (pendingProposal(); as proposal) {
             <app-vexi-confirmation-card
               [proposal]="proposal"
+              [voiceContext]="proposal.voiceContext || consentContext()"
+              (voiceApplied)="facade.acceptVoiceReceipt($event)"
               (approve)="confirmProposal()"
               (reject)="rejectProposal()"
             />
@@ -1390,6 +1392,19 @@ export class VexiPanelComponent {
   protected readonly toolSteps = this.facade.toolSteps;
   protected readonly pendingProposal = this.facade.pendingProposal;
   protected readonly activeTask = this.facade.activeTask;
+  protected readonly consentContext = computed(() => {
+    const conversation_id = this.activeConversationId();
+    return conversation_id
+      ? {
+          conversation_id,
+          agent_key: 'vexi' as const,
+          channel: 'pipeline' as const,
+          ...(this.facade.objective()?.id
+            ? { objective_id: this.facade.objective()!.id }
+            : {}),
+        }
+      : null;
+  });
 
   protected readonly sidebarOpen = signal(false);
 

@@ -419,6 +419,98 @@ export class VexiPlanStateService {
     return (await this.getStepHashRecord(conversationId)).steps;
   }
 
+  /** G voice can approve only the one diff actually shown in this owned thread. */
+  async assertVoiceProposalPreview(
+    conversationId: number,
+    planId: string,
+    tool: string,
+    args: Record<string, unknown>,
+    previewHash: string,
+  ): Promise<{ stepId: string }> {
+    await this.load(conversationId);
+    const message = await this.prisma.ai_messages.findFirst({
+      where: {
+        conversation_id: conversationId,
+        role: 'assistant',
+        metadata: { path: ['plan', 'plan_id'], equals: planId },
+      },
+      orderBy: { created_at: 'desc' },
+      select: { metadata: true },
+    });
+    const plan = (
+      message?.metadata as {
+        plan?: {
+          status?: string;
+          steps?: Array<{
+            step_id?: string;
+            status?: string;
+            tool: string;
+            arguments: Record<string, unknown>;
+            preview?: unknown;
+          }>;
+        };
+      } | null
+    )?.plan;
+    const step = plan?.steps?.length === 1 ? plan.steps[0] : undefined;
+    if (
+      !step ||
+      !step.step_id ||
+      step.status !== 'pending' ||
+      !['proposed', 'approved'].includes(plan?.status ?? '') ||
+      step.tool !== tool ||
+      canonicalStepHash(tool, step.arguments) !==
+        canonicalStepHash(tool, args) ||
+      createHash('sha256').update(canonicalJson(step.preview)).digest('hex') !==
+        previewHash
+    )
+      throw new ConflictException(
+        'La propuesta visible cambió o no está pendiente. Revisa una nueva propuesta.',
+      );
+    return { stepId: step.step_id };
+  }
+
+  /** Realtime creates the same single-step Vex proposal identity as text. */
+  async persistVoiceWriteProposal(
+    conversationId: number,
+    tool: string,
+    args: Record<string, unknown>,
+    preview: unknown,
+  ): Promise<{ planId: string; stepId: string }> {
+    await this.load(conversationId);
+    const planId = randomUUID();
+    const stepId = 's1';
+    await this.setStepHashes(
+      conversationId,
+      [{ order: 1, tool, args }],
+      planId,
+    );
+    await this.prisma.ai_messages.create({
+      data: {
+        conversation_id: conversationId,
+        role: 'assistant',
+        content:
+          'Cambio propuesto por voz. Espera tu aprobación; todavía no se aplicó.',
+        metadata: {
+          plan: {
+            plan_id: planId,
+            status: 'proposed',
+            steps: [
+              {
+                step_id: stepId,
+                order: 1,
+                tool,
+                arguments: args,
+                preview,
+                status: 'pending',
+              },
+            ],
+          },
+        } as any,
+      },
+    });
+    return { planId, stepId };
+  }
+
   /**
    * Registro completo de hashes: `{plan_id, created_at, steps}`. Lee también
    * la forma antigua (arreglo plano sin identidad): `plan_id`/`created_at`
@@ -540,6 +632,11 @@ export class VexiPlanStateService {
       stepId?: string;
       tool: string;
       args: Record<string, any>;
+      consent?: {
+        channel: 'voice';
+        challenge_hash: string;
+        proposal_hash: string;
+      };
     },
     dispatch: () => Promise<string>,
   ): Promise<{ output: string; result?: ToolExecutionResult }> {
@@ -568,6 +665,17 @@ export class VexiPlanStateService {
       version: leased.version,
       lease_generation: leased.lease_generation,
     };
+    const consentAudit =
+      input.consent &&
+      /^[a-f0-9]{64}$/.test(input.consent.challenge_hash) &&
+      /^[a-f0-9]{64}$/.test(input.consent.proposal_hash)
+        ? {
+            consent: {
+              ...input.consent,
+              observed_at: new Date().toISOString(),
+            },
+          }
+        : {};
     const effectStarted = Date.now();
     const effectDeadline = robustExecutionEnabled()
       ? new AgentDeadline({
@@ -659,7 +767,7 @@ export class VexiPlanStateService {
           operationId,
           'proposed',
           'approved',
-          {},
+          { domain_receipt: consentAudit },
           lease,
         );
       await repository.transitionEffect(
@@ -667,7 +775,7 @@ export class VexiPlanStateService {
         operationId,
         'approved',
         'applying',
-        {},
+        { domain_receipt: consentAudit },
         lease,
       );
       applying = true;
@@ -695,6 +803,7 @@ export class VexiPlanStateService {
           result.status === 'unknown_effect' ? 'unknown' : 'failed',
           {
             domain_receipt: {
+              ...consentAudit,
               status: result.status,
               error_code: result.error_code,
             },
@@ -719,6 +828,7 @@ export class VexiPlanStateService {
         status,
         {
           domain_receipt: {
+            ...consentAudit,
             status: result.status,
             error_code: result.error_code,
             resource_ids: result.resource_ids,

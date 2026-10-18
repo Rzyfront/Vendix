@@ -1341,6 +1341,12 @@ export class AIAgentService {
   }
 
   /** B authority is rebuilt per inference AND execution; relevance never grants it. */
+  async resolveToolAuthority(
+    params: AgentRunParams,
+  ): Promise<AIToolDefinition[]> {
+    return this.resolveRoutedAuthority(params);
+  }
+
   private async resolveRoutedAuthority(
     params: AgentRunParams,
   ): Promise<AIToolDefinition[]> {
@@ -3245,10 +3251,19 @@ export class AIAgentService {
                         toolArgs,
                         {
                           evidenceRef: `tool_call:${toolCall.id}`,
+                          ...(process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
+                          params.conversation_id
+                            ? { conversationId: params.conversation_id }
+                            : {}),
                         },
                       ),
                     )
-                  : this.toolRegistry.executeTool(toolName, toolArgs);
+                  : process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
+                      params.conversation_id
+                    ? this.toolRegistry.executeTool(toolName, toolArgs, {
+                        conversationId: params.conversation_id,
+                      })
+                    : this.toolRegistry.executeTool(toolName, toolArgs);
               };
               const meteredExecute = () =>
                 params.durable ? params.durable.runTool(execute) : execute();

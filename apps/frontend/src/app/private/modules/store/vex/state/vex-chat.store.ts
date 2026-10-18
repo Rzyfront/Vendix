@@ -1,3 +1,9 @@
+import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
+import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
+import {
+  VoiceConsentApplied,
+  voiceReceiptWasApplied,
+} from '../../../../../core/services/vexi-voice-consent.model';
 import {
   DestroyRef,
   Injectable,
@@ -333,6 +339,8 @@ function adaptConversation(
 export class VexChatStore {
   private readonly destroyRef = inject(DestroyRef);
   private readonly api = inject(VexApiService);
+  private readonly voice = inject(VexiVoicePipelineService);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
   private readonly objectiveApi = inject(VexiApiService);
   private readonly toast = inject(ToastService);
 
@@ -371,6 +379,9 @@ export class VexChatStore {
     ),
   );
   readonly active_id = this._active_id.asReadonly();
+  readonly activeNumericId = computed(() =>
+    this._active_id() ? Number(this._active_id()) : null,
+  );
   readonly active_conversation = computed<VexConversation | null>(() => {
     const id = this._active_id();
     if (!id) return null;
@@ -399,12 +410,16 @@ export class VexChatStore {
   }
 
   newConversation(): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     this.closeStream();
     this._error.set(null);
     this._active_id.set(null);
   }
 
   selectConversation(id: string): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     if (!this._conversations().some((c) => c.id === id)) return;
     this.closeStream();
     this._error.set(null);
@@ -466,6 +481,129 @@ export class VexChatStore {
     this._search_term.set(term);
   }
 
+  async ensureVoiceConversation(): Promise<number | null> {
+    const id = await this.ensureConversation('Conversación por voz');
+    return id ? Number(id) : null;
+  }
+
+  sendVoiceMessage(content: string): void {
+    if (!content.trim() || this._is_agent_typing()) return;
+    void this.runTurn(content.trim(), [], true);
+  }
+
+  /** Adopts only the receipt from the already consumed voice request; never reapplies. */
+  acceptVoiceReceipt(
+    message_id: string,
+    plan_id: string,
+    result: VoiceConsentApplied,
+  ): void {
+    const conversation_id = String(result.context.conversation_id);
+    const plan = this.findPlan(conversation_id, message_id, plan_id);
+    const step = plan?.steps.find((item) =>
+      result.confirmationToken
+        ? item.confirmation_token === result.confirmationToken
+        : item.step_id === result.context.step_id &&
+          item.tool === result.receipt.tool &&
+          result.proposalArguments !== undefined &&
+          argsEqual(item.arguments ?? {}, result.proposalArguments),
+    );
+    if (!plan || !step) return;
+    const applied = voiceReceiptWasApplied(result.receipt);
+    this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
+      status: applied ? 'done' : 'pending',
+      confirmation_token: undefined,
+      error: applied
+        ? undefined
+        : 'Resultado sin verificar. Consulta el objetivo antes de volver a proponer.',
+    });
+    if (applied && result.receipt.step_status && result.receipt.plan_status) {
+      this.applyServerResult(
+        conversation_id,
+        message_id,
+        plan_id,
+        step.step_id,
+        result.receipt as VexApplyStepResult,
+        false,
+      );
+    } else if (plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
+      this.patchPlan(conversation_id, message_id, {
+        status: applied ? 'done' : 'partially_applied',
+      });
+    }
+    const text =
+      result.receipt.summary?.trim() ||
+      (applied ? 'Cambio aplicado.' : 'Resultado pendiente de verificación.');
+    this._conversations.update((list) =>
+      list.map((conversation) =>
+        conversation.id === conversation_id
+          ? {
+              ...conversation,
+              messages: [
+                ...conversation.messages,
+                buildMessage('agent', text, new Date()),
+              ],
+            }
+          : conversation,
+      ),
+    );
+    if (
+      applied &&
+      this._active_id() === conversation_id &&
+      result.receipt.audio_base64
+    ) {
+      const id = `voice-receipt-${Date.now()}`;
+      this.voice.startTurn(id);
+      this.voice.enqueue(id, {
+        index: 0,
+        audio_base64: result.receipt.audio_base64,
+        content_type: result.receipt.content_type || 'audio/mpeg',
+      });
+      this.voice.finishTurn(id);
+    }
+    if (this.active_objective()?.id && this._active_id() === conversation_id)
+      this.refreshObjective(this.active_objective()!.id);
+  }
+
+  acceptRealtimeVoiceReceipt(result: VoiceConsentApplied): void {
+    const conversation_id = String(result.context.conversation_id);
+    const applied = voiceReceiptWasApplied(result.receipt);
+    const text =
+      result.receipt.summary?.trim() ||
+      (applied
+        ? 'Cambio aplicado.'
+        : 'Resultado sin verificar. Consulta el estado.');
+    this._conversations.update((list) =>
+      list.map((conversation) =>
+        conversation.id === conversation_id
+          ? {
+              ...conversation,
+              messages: [
+                ...conversation.messages,
+                buildMessage('agent', text, new Date()),
+              ],
+            }
+          : conversation,
+      ),
+    );
+    if (
+      applied &&
+      this._active_id() === conversation_id &&
+      result.receipt.audio_base64
+    ) {
+      const id = `voice-receipt-${Date.now()}`;
+      this.voice.startTurn(id);
+      this.voice.enqueue(id, {
+        index: 0,
+        audio_base64: result.receipt.audio_base64,
+        content_type: result.receipt.content_type || 'audio/mpeg',
+      });
+      this.voice.finishTurn(id);
+    }
+    const objective = this.active_objective();
+    if (objective && this._active_id() === conversation_id)
+      this.refreshObjective(objective.id);
+  }
+
   sendMessage(content: string, attachment_ids: string[] = []): void {
     const text = content.trim();
     if (!text || this._is_agent_typing()) return;
@@ -491,6 +629,8 @@ export class VexChatStore {
 
   /** Stops the live stream; the turn already persisted stays as-is. */
   stopStream(): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     const active = this._active_id();
     this.closeStream();
     this._is_agent_typing.set(false);
@@ -517,6 +657,7 @@ export class VexChatStore {
   }
 
   approvePlan(message_id: string, plan_id: string): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -871,6 +1012,7 @@ export class VexChatStore {
    * fallback proposal has no server plan: cancelling it is local.
    */
   cancelPlan(message_id: string, plan_id: string): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -925,6 +1067,7 @@ export class VexChatStore {
     step_id: string,
     confirmation_token?: string,
   ): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -1361,7 +1504,12 @@ export class VexChatStore {
     });
   }
 
-  private runTurn(text: string, attachment_ids: string[]): Promise<void> {
+  private runTurn(
+    text: string,
+    attachment_ids: string[],
+    speak = false,
+  ): Promise<void> {
+    this.voiceSafety.invalidate();
     this.closeStream();
     const generation = this.stream_generation;
     this._error.set(null);
@@ -1405,10 +1553,12 @@ export class VexChatStore {
         firstValueFrom(
           this.api.createStreamIntent(numeric, text, {
             attachmentIds: attachment_ids.length ? attachment_ids : undefined,
+            ...(speak ? { speak: true } : {}),
           }),
         )
           .then((stream_id) => {
             if (generation !== this.stream_generation) return;
+            if (speak) this.voice.startTurn(stream_id);
             this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
@@ -1536,6 +1686,15 @@ export class VexChatStore {
               target = server_id;
             }
           }
+          if (chunk.type === 'audio' && chunk.audio_base64)
+            this.voice.enqueue(stream_id, {
+              index: chunk.index ?? 0,
+              audio_base64: chunk.audio_base64,
+              content_type: chunk.content_type || 'audio/mpeg',
+              filler: chunk.filler,
+            });
+          if (chunk.type === 'done' || chunk.type === 'error')
+            this.voice.finishTurn(stream_id);
           this.applyChunk(conversation_id, target, chunk);
           if (
             reconcileRequired &&

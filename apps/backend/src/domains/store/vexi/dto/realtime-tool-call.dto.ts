@@ -4,6 +4,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -11,6 +12,11 @@ import {
 } from 'class-validator';
 
 export class RealtimeToolCallDto {
+  /** Required by the service only when G is enabled; legacy OFF stays compatible. */
+  @IsOptional()
+  @IsUUID()
+  session_id?: string;
+
   /**
    * Registry tool name. Constrained to the registry's own naming shape so a
    * malformed name is rejected by validation before it reaches the lookup.
@@ -32,6 +38,10 @@ export class RealtimeToolCallDto {
 }
 
 export class CloseRealtimeSessionDto {
+  @IsOptional()
+  @IsUUID()
+  session_id?: string;
+
   /**
    * Billed seconds of open session, reported by the client when the peer
    * connection closes. Capped server-side so a bad client cannot inflate a

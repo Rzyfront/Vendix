@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
 import { environment } from '../../../environments/environment';
 
 /**
@@ -96,6 +97,7 @@ interface QueuedAudio {
 @Injectable({ providedIn: 'root' })
 export class VexiVoicePipelineService {
   private readonly http = inject(HttpClient);
+  private readonly safety = inject(VexiVoiceSafetyService);
   private readonly baseUrl = `${environment.apiUrl}/store/vexi/voice`;
 
   readonly state = signal<VexiPipelineState>('idle');
@@ -124,6 +126,8 @@ export class VexiVoicePipelineService {
   // --- capture -------------------------------------------------------------
 
   private recorder: MediaRecorder | null = null;
+  private captureContext: { conversation_id: number; agent_key: 'vex' } | null =
+    null;
   private micStream: MediaStream | null = null;
   private turnId: string | null = null;
   private mimeType = '';
@@ -177,8 +181,13 @@ export class VexiVoicePipelineService {
    * the caller can ask for a second hold instead of leaving the person holding a
    * button that is not recording.
    */
-  async startRecording(): Promise<boolean> {
+  async startRecording(context?: {
+    conversation_id: number;
+    agent_key: 'vex';
+  }): Promise<boolean> {
+    this.safety.invalidate();
     if (this.recorder) return true;
+    this.captureContext = context ?? null;
 
     this.errorMessage.set(null);
     // Barge-in: whatever Vexi was saying stops the moment the person starts
@@ -374,6 +383,12 @@ export class VexiVoicePipelineService {
 
     recorder.ondataavailable = (event) => {
       if (!event.data?.size) return;
+      // G Vex has an independent toggle. Keep one bounded audio upload and use
+      // the authenticated conversation-bound STT adapter, not Vexi-only chunks.
+      if (this.captureContext) {
+        this.tailParts.push(event.data);
+        return;
+      }
 
       // Everything after `stop()` was requested belongs to the tail, which
       // travels with the transcribe call rather than as one more chunk.
@@ -396,15 +411,15 @@ export class VexiVoicePipelineService {
     form.append('turn_id', turnId);
     form.append('file', blob, `chunk.${this.extension()}`);
 
-    return firstValueFrom(
-      this.http.post(`${this.baseUrl}/chunk`, form),
-    ).catch(() => {
-      // A dropped slice is a hole in the middle of the recording, which the
-      // decoder cannot bridge. Not fatal here: the transcript comes back short
-      // or empty and the person is asked to repeat, which beats failing a turn
-      // they already finished speaking.
-      return null;
-    });
+    return firstValueFrom(this.http.post(`${this.baseUrl}/chunk`, form)).catch(
+      () => {
+        // A dropped slice is a hole in the middle of the recording, which the
+        // decoder cannot bridge. Not fatal here: the transcript comes back short
+        // or empty and the person is asked to repeat, which beats failing a turn
+        // they already finished speaking.
+        return null;
+      },
+    );
   }
 
   private async transcribe(
@@ -413,14 +428,20 @@ export class VexiVoicePipelineService {
     format: string,
   ): Promise<string> {
     const form = new FormData();
-    form.append('turn_id', turnId);
+    const context = this.captureContext;
+    if (context) {
+      form.append('conversation_id', String(context.conversation_id));
+      form.append('agent_key', context.agent_key);
+    } else form.append('turn_id', turnId);
     if (tail) {
       form.append('file', tail, `tail.${this.extension(format)}`);
     }
 
     return firstValueFrom(
       this.http
-        .post<{ data: { text: string } }>(`${this.baseUrl}/transcribe`, form)
+        .post<{
+          data: { text: string };
+        }>(context ? `${this.baseUrl}/confirmations/transcribe` : `${this.baseUrl}/transcribe`, form)
         .pipe(map((res) => (res.data?.text ?? '').trim())),
     );
   }

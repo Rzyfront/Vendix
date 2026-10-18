@@ -98,6 +98,15 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                 @if (message.plan) {
                   <vendix-vex-plan-card
                     [plan]="message.plan"
+                    [conversationId]="store.activeNumericId()"
+                    [objectiveId]="store.active_objective()?.id"
+                    (voiceApplied)="
+                      store.acceptVoiceReceipt(
+                        message.id,
+                        message.plan.plan_id,
+                        $event
+                      )
+                    "
                     [busy]="store.busy_plan_id() === message.plan.plan_id"
                     (approve)="
                       store.approvePlan(message.id, message.plan.plan_id)

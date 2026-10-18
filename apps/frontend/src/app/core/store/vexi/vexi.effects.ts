@@ -1,3 +1,6 @@
+import { VexiRealtimeService } from '../../services/vexi-realtime.service';
+import { VexiVoiceSafetyService } from '../../services/vexi-voice-safety.service';
+import { voiceReceiptWasApplied } from '../../services/vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
@@ -77,6 +80,8 @@ export class VexiEffects {
   private uiContext = inject(VexiUiContextService);
   private uiCommands = inject(VexiUiCommandService);
   private voice = inject(VexiVoicePipelineService);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
+  private readonly realtime = inject(VexiRealtimeService);
 
   private readonly facadeProposal$ = this.store.select(
     VexiSelectors.selectPendingProposal,
@@ -323,6 +328,42 @@ export class VexiEffects {
     ),
   );
 
+  releaseRealtimeProposal$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          VexiActions.confirmProposalSuccess,
+          VexiActions.rejectProposalSuccess,
+        ),
+        map((action) => {
+          const pending = this.realtime.pendingProposal();
+          if (
+            pending?.context.agent_key === 'vexi' &&
+            pending.context.conversation_id === action.conversationId &&
+            pending.proposal.confirmationToken === action.confirmationToken
+          ) {
+            this.realtime.clearProposal();
+            void this.realtime.stop();
+          }
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  voiceBoundary$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          VexiActions.sendMessage,
+          VexiActions.selectConversation,
+          VexiActions.clearActiveConversation,
+          VexiActions.cancelStream,
+        ),
+        map(() => this.voiceSafety.invalidate()),
+      ),
+    { dispatch: false },
+  );
+
   cancelStream$ = createEffect(
     () =>
       this.actions$.pipe(
@@ -448,45 +489,61 @@ export class VexiEffects {
           );
         }
 
-        return this.chatApi
-          .applyConfirmation(
-            proposal.tool,
-            proposal.arguments,
-            proposal.confirmationToken,
-            conversationId ?? undefined,
-            speak,
-          )
-          .pipe(
-            map((result) =>
-              VexiActions.confirmProposalSuccess({
-                tool: proposal.tool,
-                output: result.output,
-                domain: proposal.preview?.domain,
-                // Solo el acuse que escribe la herramienta al aplicar. El
-                // `message` de la propuesta NO sirve de respaldo: es la frase
-                // que pide permiso ("Confírmalo y lo aplico."), así que usarla
-                // después de aplicar anunciaba el cambio ya hecho como si
-                // todavía lo estuviera pidiendo. Cuando no hay acuse, el
-                // reducer pone "Listo, apliqué el cambio." — honesto y en
-                // pasado.
-                summary: result.summary ?? null,
-                audioBase64: result.audio_base64,
-                contentType: result.content_type,
-                planActive: proposal.planActive === true,
+        const apply =
+          proposal.voiceContext?.session_id &&
+          proposal.voiceContext?.proposal_id
+            ? this.chatApi.applyDisplayedVoiceProposal(
+                proposal.voiceContext,
                 speak,
+              )
+            : this.chatApi.applyConfirmation(
+                proposal.tool,
+                proposal.arguments,
+                proposal.confirmationToken,
+                conversationId ?? undefined,
+                speak,
+              );
+        return apply.pipe(
+          map((result) =>
+            VexiActions.confirmProposalSuccess({
+              tool: proposal.tool,
+              conversationId: conversationId ?? undefined,
+              confirmationToken: proposal.confirmationToken,
+              proposalId: proposal.voiceContext?.proposal_id,
+              receiptApplied: voiceReceiptWasApplied(result),
+              output: result.output,
+              domain: proposal.preview?.domain,
+              // Solo el acuse que escribe la herramienta al aplicar. El
+              // `message` de la propuesta NO sirve de respaldo: es la frase
+              // que pide permiso ("Confírmalo y lo aplico."), así que usarla
+              // después de aplicar anunciaba el cambio ya hecho como si
+              // todavía lo estuviera pidiendo. Cuando no hay acuse, el
+              // reducer pone "Listo, apliqué el cambio." — honesto y en
+              // pasado.
+              summary: result.summary ?? null,
+              audioBase64: voiceReceiptWasApplied(result)
+                ? result.audio_base64
+                : undefined,
+              contentType: result.content_type,
+              planActive:
+                voiceReceiptWasApplied(result) && proposal.planActive === true,
+              speak,
+            }),
+          ),
+          catchError((error) =>
+            of(
+              VexiActions.confirmProposalFailure({
+                conversationId: conversationId ?? undefined,
+                confirmationToken: proposal.confirmationToken,
+                proposalId: proposal.voiceContext?.proposal_id,
+                error:
+                  error?.error?.message ||
+                  error?.message ||
+                  'No pude aplicar el cambio.',
               }),
             ),
-            catchError((error) =>
-              of(
-                VexiActions.confirmProposalFailure({
-                  error:
-                    error?.error?.message ||
-                    error?.message ||
-                    'No pude aplicar el cambio.',
-                }),
-              ),
-            ),
-          );
+          ),
+        );
       }),
     ),
   );
@@ -502,7 +559,12 @@ export class VexiEffects {
       withLatestFrom(
         this.store.select(VexiSelectors.selectActiveConversationId),
       ),
-      filter(([, conversationId]) => conversationId !== null),
+      filter(
+        ([action, conversationId]) =>
+          conversationId !== null &&
+          (action.conversationId === undefined ||
+            action.conversationId === conversationId),
+      ),
       map(([{ speak }, conversationId]) =>
         VexiActions.sendMessage({
           conversationId: conversationId as number,

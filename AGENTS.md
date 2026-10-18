@@ -24,6 +24,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-agent-evals-observability` |
 | -- | `vendix-agent-execution-contract` |
 | -- | `vendix-agent-playbooks` |
+| -- | `vendix-agent-voice-consent` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -155,6 +156,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing AgentPlan storage, objective leases or resume semantics | `vendix-agent-durable-tasks` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
+| Changing Vex/Vexi spoken consent or voice confirmation challenges | `vendix-agent-voice-consent` |
 | Changing agent verification, recovery or audited read scheduling | `vendix-agent-durable-tasks` |
 | Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
@@ -307,6 +309,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | El dev server cae en bucle o el dist queda inconsistente | `vendix-known-errors` |
 | Enabling or configuring Vex for a store (Agentes IA settings) | `vendix-vex-agent` |
+| Enabling realtime write proposals or dedicated approval audio capture | `vendix-agent-voice-consent` |
 | Escribir o revisar una migración de base de datos | `vendix-known-errors` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |

@@ -1,3 +1,4 @@
+import type { VoiceConsentContext } from '../../services/vexi-voice-consent.model';
 import { createAction, props } from '@ngrx/store';
 import {
   AIConversation,
@@ -40,6 +41,7 @@ export interface VexiProposal {
    * approving/rejecting reopens a continuation turn.
    */
   planActive?: boolean;
+  voiceContext?: VoiceConsentContext;
 }
 
 /**
@@ -232,6 +234,7 @@ export const proposalReceived = createAction(
     confirmationToken: string;
     preview?: VexiProposalPreview;
     planActive?: boolean;
+    voiceContext?: VoiceConsentContext;
   }>(),
 );
 
@@ -264,6 +267,10 @@ export const confirmProposalSuccess = createAction(
     tool: string;
     output: string;
     domain?: string;
+    conversationId?: number;
+    confirmationToken?: string;
+    proposalId?: string;
+    receiptApplied?: boolean;
     /**
      * What the tool said it changed. Becomes the visible turn that closes the
      * confirmation — without it, approving cleared the card and the conversation
@@ -282,7 +289,12 @@ export const confirmProposalSuccess = createAction(
 
 export const confirmProposalFailure = createAction(
   '[Vexi] Confirm Proposal Failure',
-  props<{ error: string }>(),
+  props<{
+    error: string;
+    conversationId?: number;
+    confirmationToken?: string;
+    proposalId?: string;
+  }>(),
 );
 
 export const rejectProposal = createAction('[Vexi] Reject Proposal');
