@@ -31,6 +31,8 @@ export interface AIMessageContentPart {
 }
 
 export interface AIMessage {
+  /** Server-only H retention hint; never forwarded to provider SDKs. */
+  context_retention?: 'required' | 'history';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | AIMessageContentPart[];
   tool_calls?: AIToolCall[];
@@ -38,6 +40,8 @@ export interface AIMessage {
 }
 
 export interface AIRequestOptions {
+  /** Internal H transport contract. Never serialize this into an SDK body. */
+  agenticStream?: boolean;
   /** Opt-in D2 cancellation; never serialized into the provider request body. */
   signal?: AbortSignal;
   /** Epoch-millisecond dispatch deadline, already excluding closure reserve. */
@@ -119,6 +123,7 @@ export interface AIStreamChunk {
    */
   type:
     | 'text'
+    | 'progress'
     | 'tool_call'
     | 'tool_result'
     | 'done'
@@ -127,6 +132,26 @@ export interface AIStreamChunk {
     | 'ui_block'
     | 'plan_approval';
   content?: string;
+  /** H provider terminal result; never contains partial tool arguments. */
+  tool_calls?: AIToolCall[];
+  finish_reason?: AIResponse['finish_reason'];
+  model?: string;
+  error_code?: string;
+  usage_state?: 'reported' | 'unknown';
+  context_budget?: {
+    estimated_input_tokens: number;
+    omitted_messages: number;
+    context_window_tokens: number;
+    provenance: 'configured' | 'fallback';
+    method: 'conservative_estimate';
+  };
+  /** Transport cursor is observational and grants no execution authority. */
+  replay?: {
+    stream_id: string;
+    sequence: number;
+    objective_id?: string;
+    checkpoint?: number;
+  };
   /**
    * Present on the chat `done` frame when the turn persisted an assistant row:
    * its `ai_messages.id`. For continuation turns the frontend links the new
@@ -417,6 +442,8 @@ export interface AIProviderConfig {
 }
 
 export interface AIProvider {
+  /** Config-specific capability. A stream without final usage cannot meter an agent. */
+  supportsMeteredAgentStream?(): boolean;
   chat(messages: AIMessage[], options?: AIRequestOptions): Promise<AIResponse>;
   complete(prompt: string, options?: AIRequestOptions): Promise<AIResponse>;
   testConnection(): Promise<{ success: boolean; message: string }>;

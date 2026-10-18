@@ -1,4 +1,5 @@
 import { toolRoutingEnabled } from '../tool-catalog';
+import { toolResultCompactionEnabled } from '../../context/tool-result-compaction';
 import {
   bridgeDataPage,
   discoveryPage,
@@ -697,6 +698,10 @@ export function createApiBridgeTools({
             });
           }
 
+          // H persists the complete owner-scoped result in the agent loop BEFORE
+          // producing its recoverable envelope. Never slice JSON first, nor
+          // re-page an already bounded artifact and discard its cursor/units.
+          if (toolResultCompactionEnabled()) return body;
           if (toolRoutingEnabled()) {
             try {
               return bridgeDataPage(body, args, entry.path);

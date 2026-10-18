@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "4.0"
   scope: [root]
   auto_invoke:
     - "Implementing AI streaming"
@@ -118,6 +118,51 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
 - Never put prompt text in an SSE query string. Use the intent handshake.
 - A new stream consumer must tolerate `tool_call` / `tool_result` frames it does not
   understand rather than treating an unknown `type` as an error.
+
+## H safety, replay and recoverable results
+
+- Source transport: `AIEngineService.runAgentStream`, provider terminal contract
+  `providers/agent-stream-contract.ts`. `AI_AGENT_STREAMING_ENABLED` defaults OFF.
+  Engine yields actual text deltas, but agent-facing prose is NOT evidence: the loop
+  retains it until pending-write/durable verification guards run. Visible `progress`
+  is neutral server narration, separate from final answer and never persisted as
+  a completed business effect. Do NOT count the initial transport frame/heartbeat
+  as useful-business TTFT. A verified read/tool result or final answer is useful.
+- `ChatStreamReplay` is an ephemeral, bounded owner/store/org/conversation transport
+  buffer, NOT another durable task authority. Intent remains Redis single-use.
+  Intent response adds replay_enabled only H; frames add stream_id/sequence and
+  optional objective_id/checkpoint from D1. Reattach to SAME stream after_sequence;
+  never POST prompt again on H socket failure. Reject unknown/ahead/gapped cursors,
+  changed principal and expired/restarted worker; reconcile objective/transcript.
+- Every attach rechecks conversation/archive/Vex access; cached frames grant no
+  permissions. Replay suppresses cached approval/token frames and asks for canonical
+  reconciliation, since another tab may have consumed them. It never recreates
+  approval authority. Lost Vexi single-step cards may require explicit rejection/
+  reproposal; do not promise refresh restores a token that is not persisted.
+- Browser replay closes EventSource before retry, validates monotonic cursor,
+  fences callbacks from closed sockets, caps reconnects and never re-dispatches a
+  duplicate UI call. Teardown closes source/aborts cooperative H work; backend drains
+  to persist receipts/unknown effects. Aborting a write is NOT rollback. Status must
+  remain waiting/unknown where the receipt says so, never green/applied by inference.
+- `AI_TOOL_RESULT_COMPACTION_ENABLED` is a separate default-OFF switch. Shared helper
+  `context/tool-result-compaction.ts` persists full owner-scoped data FIRST (D1 result
+  or real Vex block); without persistence, returns raw. Bridge H preserves complete
+  body before loop compaction and does not repaginate a bounded artifact. It never
+  represents a JSON prefix as complete data or compacts reader output recursively.
+- Compact envelope has structural deterministic summary, IDs, source pagination,
+  units/evidence refs and complete:false. Guards/proposals/errors remain intact.
+  Readers return bounded pages with snapshot/query-bound cursor, total, has_more,
+  complete and units. End-of-cursor is not whole-dataset evidence; artifact reads
+  remain historical/not reusable for writes. D1 uses artifact_cursor/next_query,
+  distinct from listResults UUID cursor. Vex markdown text reader remains compatible.
+- Projection/aggregation allow direct field names only, bounded field counts, no
+  expression execution. Numeric aggregate rejects strings/missing/nonfinite values
+  rather than silently summing a subset. Giant rows fall back to explicit escaped
+  text pages; reconstruct before parsing JSON. Same principal reads are idempotent;
+  foreign artifact/block IDs stay404. Verify loop→sink→reader, not just mocked sinks.
+- QA includes exact specs + real Playwright Vex/dock Happy/Sad/Brute when the branch
+  is actually deployed. Missing Angular/Jest/browser/runtime dependencies must be a
+  named gate, never hidden with mocked reducers or empty replay metrics.
 
 ## Related Skills
 

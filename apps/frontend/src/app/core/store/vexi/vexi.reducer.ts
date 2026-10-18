@@ -18,6 +18,7 @@ export interface VexiState {
   activeConversationId: number | null;
   messages: AIMessage[];
   streamingContent: string;
+  streamingProgress: string;
   isStreaming: boolean;
   isSending: boolean;
   loading: boolean;
@@ -70,6 +71,7 @@ export const initialVexiState: VexiState = {
   activeConversationId: null,
   messages: [],
   streamingContent: '',
+  streamingProgress: '',
   isStreaming: false,
   isSending: false,
   loading: false,
@@ -169,6 +171,7 @@ export const vexiReducer = createReducer(
     objectiveRequestId: null,
     messages: [],
     streamingContent: '',
+    streamingProgress: '',
   })),
 
   on(VexiActions.selectConversation, (state, { conversationId }) => ({
@@ -179,6 +182,7 @@ export const vexiReducer = createReducer(
     objectiveRequestId: null,
     messages: [],
     streamingContent: '',
+    streamingProgress: '',
     isStreaming: false,
   })),
 
@@ -220,6 +224,7 @@ export const vexiReducer = createReducer(
         ...state,
         isSending: true,
         streamingContent: '',
+        streamingProgress: '',
         isStreaming: true,
         planContinuePending: false,
         autoContinuations,
@@ -267,6 +272,7 @@ export const vexiReducer = createReducer(
     isSending: false,
     isStreaming: false,
     streamingContent: '',
+    streamingProgress: '',
     messages: [
       ...state.messages,
       {
@@ -296,9 +302,28 @@ export const vexiReducer = createReducer(
     ...state,
     toolSteps: [],
     streamingContent: '',
+    streamingProgress: '',
     isStreaming: true,
     isSending: true,
     error: null,
+  })),
+
+  on(VexiActions.receiveStreamProgress, (state, { content }) => ({
+    ...state,
+    streamingProgress: content,
+  })),
+  on(VexiActions.cancelStream, (state) => ({
+    ...state,
+    isStreaming: false,
+    isSending: false,
+    streamingProgress: '',
+    error:
+      'Respuesta detenida. Verifica el objetivo y los cambios en curso antes de reintentar.',
+    toolSteps: state.toolSteps.map((step) =>
+      step.status === 'running'
+        ? { ...step, status: 'unknown' as const }
+        : step,
+    ),
   })),
 
   on(VexiActions.receiveStreamChunk, (state, { content }) => ({
@@ -309,7 +334,7 @@ export const vexiReducer = createReducer(
   on(VexiActions.toolCallStarted, (state, { id, name, arguments: args }) => ({
     ...state,
     toolSteps: [
-      ...state.toolSteps,
+      ...state.toolSteps.filter((step) => step.id !== id),
       { id, name, arguments: args, status: 'running' as const },
     ],
   })),
@@ -508,6 +533,7 @@ export const vexiReducer = createReducer(
         isStreaming: false,
         isSending: false,
         streamingContent: '',
+        streamingProgress: '',
       };
     }
     if (!state.activeConversationId)
@@ -516,6 +542,7 @@ export const vexiReducer = createReducer(
         isStreaming: false,
         isSending: false,
         streamingContent: '',
+        streamingProgress: '',
       };
     return {
       ...state,
@@ -536,6 +563,7 @@ export const vexiReducer = createReducer(
         },
       ],
       streamingContent: '',
+      streamingProgress: '',
     };
   }),
 
@@ -553,11 +581,13 @@ export const vexiReducer = createReducer(
     // server already has in full, and `loadMessagesSuccess` arrives with the real
     // one in the same effect.
     streamingContent: '',
+    streamingProgress: '',
     error: null,
   })),
 
   on(VexiActions.streamError, (state, { error }) => ({
     ...state,
+    streamingProgress: '',
     isStreaming: false,
     isSending: false,
     error,
@@ -585,6 +615,7 @@ export const vexiReducer = createReducer(
     objectiveRequestId: null,
     messages: [],
     streamingContent: '',
+    streamingProgress: '',
     isStreaming: false,
   })),
 

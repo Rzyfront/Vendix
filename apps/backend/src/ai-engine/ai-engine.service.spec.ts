@@ -5,6 +5,7 @@ import { ProviderAttemptObserver } from './provider-attempt-observer';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import { RequestContextService } from '../common/context/request-context.service';
 import { AgentDeadline, agentDeadlineContext } from './tasks/agent-deadline';
+import { objectiveProviderMeter } from './tasks/agent-budget-context';
 
 /**
  * QUI-857 — Generación/mejora de imágenes de producto con IA.
@@ -1335,6 +1336,550 @@ describe('AIEngineService D2 opt-in deadlines', () => {
     expect(chunks).toEqual([
       { type: 'error', error: 'Agent deadline exceeded' },
     ]);
+    expect(consume).not.toHaveBeenCalled();
+  });
+});
+
+describe('AIEngineService H metered agentic stream', () => {
+  const usage = {
+    promptTokens: 30,
+    completionTokens: 5,
+    totalTokens: 105,
+    cacheReadTokens: 70,
+  };
+  const tool = {
+    type: 'function' as const,
+    function: {
+      name: 'read_product',
+      description: 'read',
+      parameters: { type: 'object' },
+    },
+  };
+  const app = {
+    key: 'h_agent',
+    is_active: true,
+    config_id: 5,
+    system_prompt: 'stable {{name}}',
+    prompt_template: 'request {{name}}',
+    temperature: 0.3,
+    max_tokens: 500,
+    output_format: 'text',
+    ai_feature_category: 'text_generation',
+    retry_config: { maxRetries: 8, delayMs: 0 },
+  };
+  const build = () => {
+    const prisma = {
+      ai_engine_applications: {
+        findUnique: jest.fn().mockResolvedValue({ ...app }),
+      },
+    };
+    const logging = {
+      logRequest: jest.fn(),
+      calculateCost: jest.fn(
+        (_s, p, c, r = 0, w = 0) => (p + c * 2 + r * 0.1 + w * 0.2) / 1000,
+      ),
+    };
+    const events = { emit: jest.fn() };
+    const service = new AIEngineService(
+      prisma as any,
+      { get: jest.fn() } as any,
+      {} as any,
+      logging as any,
+      events as any,
+      {} as any,
+      {} as any,
+    );
+    (service as any).configSettings.set(5, {
+      pricing: { input_per_1k: 1, output_per_1k: 2, cache_read_per_1k: 0.1 },
+    });
+    const gate = jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    const rate = jest
+      .spyOn(service as any, 'checkRateLimit')
+      .mockResolvedValue(undefined);
+    const consume = jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+    const provider = {
+      supportsMeteredAgentStream: jest.fn().mockReturnValue(true),
+      chat: jest.fn(),
+      chatStream: jest.fn().mockImplementation(async function* () {
+        yield { type: 'text', content: 'ok' };
+        yield {
+          type: 'done',
+          finish_reason: 'stop',
+          model: 'unchanged-model',
+          usage,
+        };
+      }),
+    };
+    (service as any).providers.set(5, provider);
+    const meter = {
+      attempts: 0,
+      observed: false,
+      dispatch: jest.fn().mockResolvedValue(undefined),
+      retry: jest.fn().mockResolvedValue(undefined),
+      usage: jest.fn().mockResolvedValue(undefined),
+    };
+    const run = async (options: any = {}, messages?: any[]) => {
+      const chunks: any[] = [];
+      await objectiveProviderMeter.run(meter, async () => {
+        for await (const chunk of service.runAgentStream(
+          app.key,
+          { name: 'value' },
+          messages,
+          options,
+        ))
+          chunks.push(chunk);
+      });
+      return chunks;
+    };
+    return {
+      service,
+      prisma,
+      logging,
+      events,
+      gate,
+      rate,
+      consume,
+      provider,
+      meter,
+      run,
+    };
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it('shares application prompts/options/gates/rate with run and charges exactly once', async () => {
+    const f = build();
+    const messages: any[] = [
+      { role: 'system', content: 'dynamic tenant and approval restriction' },
+      { role: 'user', content: 'actual intent' },
+    ];
+    const chunks = await f.run({ tools: [tool], temperature: 0.8 }, messages);
+    expect(f.gate).toHaveBeenCalledWith(app.key, app.ai_feature_category);
+    expect(f.rate).toHaveBeenCalledTimes(1);
+    const [sentMessages, options] = f.provider.chatStream.mock.calls[0];
+    expect(sentMessages).toEqual([
+      { role: 'system', content: 'stable value' },
+      { role: 'user', content: 'request value' },
+      ...messages,
+    ]);
+    expect(options).toMatchObject({
+      temperature: 0.8,
+      maxTokens: 500,
+      agenticStream: true,
+      tools: [tool],
+    });
+    expect(f.provider.chat).not.toHaveBeenCalled();
+    expect(f.meter.dispatch).toHaveBeenCalledTimes(1);
+    expect(f.meter.usage).toHaveBeenCalledTimes(1);
+    expect(f.meter.usage).toHaveBeenCalledWith(usage, 0.047);
+    expect(f.consume).toHaveBeenCalledTimes(1);
+    expect(f.consume.mock.calls[0][1]).toBe(105);
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'done',
+      content: 'ok',
+      model: 'unchanged-model',
+      usage_state: 'reported',
+      context_budget: {
+        provenance: 'fallback',
+        context_window_tokens: 32768,
+        method: 'conservative_estimate',
+      },
+    });
+    expect(f.logging.logRequest).toHaveBeenCalledTimes(1);
+    expect(f.logging.logRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'success',
+        model: 'unchanged-model',
+        prompt_tokens: 30,
+        cache_read_tokens: 70,
+        cost_usd: 0.047,
+      }),
+    );
+    expect(f.events.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes first text before done and charges before a consumer closes exactly at done', async () => {
+    const f = build();
+    const source = f.service.runAgentStream(app.key);
+    expect((await source.next()).value).toEqual({
+      type: 'text',
+      content: 'ok',
+    });
+    expect(f.consume).not.toHaveBeenCalled();
+    expect((await source.next()).value).toMatchObject({ type: 'done' });
+    expect(f.consume).toHaveBeenCalledTimes(1);
+    await source.return(undefined);
+    expect(f.logging.logRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success' }),
+    );
+  });
+
+  it.each(['missing', 'disabled', 'gate', 'rate', 'config', 'unsupported'])(
+    'rejects %s before provider dispatch and still logs the terminal error',
+    async (mode) => {
+      const f = build();
+      if (mode === 'missing')
+        f.prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      if (mode === 'disabled')
+        f.prisma.ai_engine_applications.findUnique.mockResolvedValue({
+          ...app,
+          is_active: false,
+        });
+      if (mode === 'gate') f.gate.mockRejectedValue(new Error('plan denied'));
+      if (mode === 'rate') f.rate.mockRejectedValue(new Error('rate limit'));
+      if (mode === 'config') (f.service as any).providers.delete(5);
+      if (mode === 'unsupported')
+        (f.service as any).providers.set(5, { chat: f.provider.chat });
+      expect((await f.run()).at(-1).type).toBe('error');
+      expect(f.provider.chatStream).not.toHaveBeenCalled();
+      expect(f.provider.chat).not.toHaveBeenCalled();
+      expect(f.meter.dispatch).not.toHaveBeenCalled();
+      expect(f.consume).not.toHaveBeenCalled();
+      expect(f.logging.logRequest).toHaveBeenCalledTimes(1);
+      expect(f.logging.logRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'error' }),
+      );
+    },
+  );
+
+  it('terminal tool-only result remains raw/correlated and is never emitted as a dispatched tool event', async () => {
+    const f = build();
+    const calls = [
+      {
+        id: 'a',
+        type: 'function',
+        function: { name: 'read_product', arguments: '{"id":3}' },
+      },
+    ];
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield {
+        type: 'done',
+        finish_reason: 'tool_calls',
+        tool_calls: calls,
+        usage,
+      };
+    });
+    const chunks = await f.run({ tools: [tool] });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      type: 'done',
+      tool_calls: calls,
+      content: '',
+    });
+    expect(f.consume).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'partial_json',
+    'foreign_tool',
+    'legacy_dispatch',
+    'missing_terminal',
+  ])('fails closed on %s without a fallback request or quota', async (mode) => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      if (mode === 'missing_terminal') {
+        yield { type: 'text', content: 'parcial' };
+        return;
+      }
+      if (mode === 'legacy_dispatch') {
+        yield {
+          type: 'tool_call',
+          tool: { id: 'a', name: 'read_product', arguments: {} },
+        };
+        return;
+      }
+      yield {
+        type: 'done',
+        finish_reason: 'tool_calls',
+        tool_calls: [
+          {
+            id: 'a',
+            type: 'function',
+            function: {
+              name: mode === 'foreign_tool' ? 'write_other' : 'read_product',
+              arguments: mode === 'partial_json' ? '{"id":' : '{}',
+            },
+          },
+        ],
+      };
+    });
+    const chunks = await f.run({ tools: [tool] });
+    expect(chunks.at(-1).type).toBe('error');
+    expect(
+      chunks.some((c) => c.type === 'done' || c.type === 'tool_call'),
+    ).toBe(false);
+    expect(f.provider.chatStream).toHaveBeenCalledTimes(1);
+    expect(f.provider.chat).not.toHaveBeenCalled();
+    expect(f.consume).not.toHaveBeenCalled();
+    expect(f.meter.usage).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnect closes cooperative provider, marks unknown usage, and never charges success', async () => {
+    const f = build();
+    let closed = false;
+    let signal: AbortSignal | undefined;
+    f.provider.chatStream.mockImplementation(async function* (_m, options) {
+      signal = options.signal;
+      try {
+        yield { type: 'text', content: 'partial' };
+        yield { type: 'done', usage };
+      } finally {
+        closed = true;
+      }
+    });
+    await objectiveProviderMeter.run(f.meter, async () => {
+      const source = f.service.runAgentStream(app.key);
+      await source.next();
+      await source.return(undefined);
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(closed).toBe(true);
+    expect(f.meter.usage).toHaveBeenCalledWith(undefined, null);
+    expect(f.consume).not.toHaveBeenCalled();
+    expect(f.logging.logRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        telemetry_metadata: expect.objectContaining({
+          usage_known: false,
+          billable: 'unknown',
+        }),
+      }),
+    );
+  });
+
+  it('provider failure after text never retries despite the application retry_config', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield { type: 'text', content: 'partial' };
+      throw new Error('transport failed');
+    });
+    const chunks = await f.run();
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'error']);
+    expect(f.provider.chatStream).toHaveBeenCalledTimes(1);
+    expect(f.provider.chat).not.toHaveBeenCalled();
+    expect(f.consume).not.toHaveBeenCalled();
+  });
+
+  it('unknown terminal usage fails closed without charging quota or exposing tools', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield { type: 'done', finish_reason: 'stop' };
+    });
+    const chunks = await f.run();
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'error',
+      error_code: 'AI_STREAM_USAGE_UNAVAILABLE',
+      usage_state: 'unknown',
+    });
+    expect(chunks.at(-1).usage).toBeUndefined();
+    expect(f.meter.usage).toHaveBeenCalledWith(undefined, null);
+    expect(f.consume).not.toHaveBeenCalled();
+    expect(f.events.emit.mock.calls[0][1]).toMatchObject({
+      cost_usd: null,
+      usage_state: 'unknown',
+      status: 'error',
+    });
+  });
+
+  it('uses configured context ceiling, rejects authority overflow before SDK and does not truncate tool pairs', async () => {
+    const f = build();
+    (f.service as any).configSettings.set(5, { context_window_tokens: 2048 });
+    const chunks = await f.run({}, [
+      { role: 'system', content: 'authority '.repeat(500) },
+    ]);
+    expect(chunks.at(-1).type).toBe('error');
+    expect(f.provider.chatStream).not.toHaveBeenCalled();
+    expect(f.meter.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes final content exactly once, without claiming text deltas are verified effects', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield { type: 'text', content: '<think>hidden</think> visible' };
+      yield { type: 'done', finish_reason: 'stop', usage };
+    });
+    expect((await f.run()).at(-1).content).toBe('visible');
+  });
+  it('preflights a declared metered capability and never dispatches an unsupported provider', async () => {
+    const f = build();
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(true);
+    f.provider.supportsMeteredAgentStream.mockReturnValue(false);
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+    const chunks = await f.run();
+    expect(chunks).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        error_code: 'AI_STREAM_UNAVAILABLE',
+      }),
+    ]);
+    expect(f.provider.chatStream).not.toHaveBeenCalled();
+    expect(f.meter.dispatch).not.toHaveBeenCalled();
+    expect(f.consume).not.toHaveBeenCalled();
+  });
+
+  it('preflight fails closed for missing capability, inactive app or unloaded config', async () => {
+    const f = build();
+    (f.service as any).providers.set(5, { chatStream: f.provider.chatStream });
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+    (f.service as any).providers.set(5, f.provider);
+    f.prisma.ai_engine_applications.findUnique.mockResolvedValue({
+      ...app,
+      is_active: false,
+    });
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+    f.prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+    f.prisma.ai_engine_applications.findUnique.mockResolvedValue({ ...app });
+    (f.service as any).providers.clear();
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+  });
+
+  it('degrades the concrete config on successful unknown usage, without fallback, and resets only on reload', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield {
+        type: 'done',
+        finish_reason: 'tool_calls',
+        tool_calls: [
+          {
+            id: 'a',
+            type: 'function',
+            function: { name: 'read_product', arguments: '{}' },
+          },
+        ],
+      };
+    });
+    const first = await f.run({ tools: [tool] });
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      type: 'error',
+      error_code: 'AI_STREAM_USAGE_UNAVAILABLE',
+    });
+    expect(first[0]).not.toHaveProperty('tool_calls');
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(false);
+    expect((await f.run()).at(-1).error_code).toBe('AI_STREAM_UNAVAILABLE');
+    expect(f.provider.chatStream).toHaveBeenCalledTimes(1);
+    expect(f.provider.chat).not.toHaveBeenCalled();
+    expect(f.consume).not.toHaveBeenCalled();
+    (f.prisma as any).ai_engine_configs = {
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+    await f.service.reloadConfigurations();
+    (f.service as any).providers.set(5, f.provider);
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(true);
+  });
+
+  it('cancelled and failed attempts with unknown usage do not consume quota or degrade metered capability', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        error: 'cancelled',
+        error_code: 'AGENT_CANCELLED',
+      };
+    });
+    expect((await f.run()).at(-1).type).toBe('error');
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(true);
+    expect(f.consume).not.toHaveBeenCalled();
+    expect(f.meter.usage).toHaveBeenCalledWith(undefined, null);
+  });
+
+  it('rejects a tool_calls terminal without any calls even when usage is reported', async () => {
+    const f = build();
+    f.provider.chatStream.mockImplementation(async function* () {
+      yield { type: 'done', finish_reason: 'tool_calls', usage };
+    });
+    expect((await f.run()).at(-1)).toMatchObject({
+      type: 'error',
+      error_code: 'AI_STREAM_INVALID',
+      usage_state: 'reported',
+    });
+    expect(f.consume).not.toHaveBeenCalled();
+    expect(await f.service.supportsAgentStreaming(app.key)).toBe(true);
+  });
+});
+
+describe('AIEngineService H full-batch schema boundary', () => {
+  it('rejects a valid-first/invalid-second batch atomically and retains reported usage for failed validation', async () => {
+    const usage = { promptTokens: 10, completionTokens: 2, totalTokens: 12 };
+    const definition = {
+      type: 'function' as const,
+      function: {
+        name: 'read',
+        description: 'read',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'integer' } },
+          required: ['id'],
+        },
+      },
+    };
+    const service = new AIEngineService(
+      {
+        ai_engine_applications: {
+          findUnique: async () => ({
+            key: 'h',
+            is_active: true,
+            config_id: 1,
+            temperature: null,
+            max_tokens: 100,
+          }),
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      { logRequest: jest.fn(), calculateCost: () => 0 } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+    );
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    const consume = jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+    (service as any).providers.set(1, {
+      supportsMeteredAgentStream: () => true,
+      chatStream: async function* () {
+        yield {
+          type: 'done',
+          finish_reason: 'tool_calls',
+          usage,
+          tool_calls: [
+            {
+              id: 'good',
+              type: 'function',
+              function: { name: 'read', arguments: '{"id":"1"}' },
+            },
+            {
+              id: 'bad',
+              type: 'function',
+              function: { name: 'read', arguments: '{"id":"not-a-number"}' },
+            },
+          ],
+        };
+      },
+    });
+    const chunks: any[] = [];
+    for await (const chunk of service.runAgentStream(
+      'h',
+      undefined,
+      undefined,
+      { tools: [definition] },
+    ))
+      chunks.push(chunk);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      type: 'error',
+      usage_state: 'reported',
+      usage,
+    });
+    expect(chunks[0]).not.toHaveProperty('tool_calls');
     expect(consume).not.toHaveBeenCalled();
   });
 });

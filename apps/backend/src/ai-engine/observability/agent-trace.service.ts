@@ -144,6 +144,10 @@ const COUNT_KEYS = new Set([
   'tool_count',
   'definition_tokens',
   'context_tokens',
+  'context_window_tokens',
+  'estimated_output_tokens',
+  'omitted_messages',
+  'estimated_cost_microusd',
   'round',
   'result_bytes',
   'requested_count',
@@ -219,6 +223,9 @@ const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
   internal_attempts: new Set(['unknown', 'observed']),
   usage_source: new Set(['provider', 'unknown']),
   billable: new Set(['reported_usage', 'unknown']),
+  cost_measurement: new Set(['reported', 'estimated', 'unknown']),
+  context_budget_source: new Set(['configured', 'fallback']),
+  estimation_method: new Set(['conservative_estimate']),
 };
 
 /** Only technical fingerprints/counts are retained; arbitrary metadata is discarded. */

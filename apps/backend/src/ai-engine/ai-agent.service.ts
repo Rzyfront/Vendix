@@ -1,4 +1,13 @@
 import {
+  compactRecoverableToolResult,
+  toolResultCompactionEnabled,
+} from './context/tool-result-compaction';
+import {
+  agentStreamingEnabled,
+  streamAgentInference,
+} from './context/agent-stream-inference';
+import { historicalAssistantProse } from './context/agent-context-budget';
+import {
   robustExecutionEnabled,
   parallelReadsEnabled,
   maximumRecoveryReplans,
@@ -905,7 +914,70 @@ export class AIAgentService {
     result: string,
     params: AgentRunParams,
     artifactId?: string,
+    toolArgs?: Record<string, unknown>,
   ): Promise<string> {
+    if (toolResultCompactionEnabled()) {
+      const originalReceipt = normalizeToolResult(result, {
+        write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
+      });
+      // Guard/proposal/error obligations are not expendable payload data. In
+      // particular never replace an uncertain effect or missing-field question.
+      if (originalReceipt.status !== 'ok') return result;
+      const requested =
+        toolArgs?.columns ?? toolArgs?.fields ?? toolArgs?.select;
+      const requestedFields = Array.isArray(requested)
+        ? requested.filter(
+            (field): field is string => typeof field === 'string',
+          )
+        : typeof requested === 'string'
+          ? requested.split(',').map((field) => field.trim())
+          : [];
+      const compacted = await compactRecoverableToolResult(toolName, result, {
+        requested_fields: requestedFields,
+        evidence_refs: originalReceipt.evidence_refs,
+        persist: async () => {
+          // D1 checkpoints save the entire owner-scoped result before this call.
+          if (artifactId && params.durable)
+            return {
+              artifact_ref: {
+                objective_id: params.durable.objective_id,
+                result_id: artifactId,
+                path: `/store/${params.agent_key === 'vex' ? 'vex' : 'vexi'}/objectives/${params.durable.objective_id}/results/${artifactId}`,
+              },
+              evidence_refs: [
+                `objective:${params.durable.objective_id}:result:${artifactId}`,
+              ],
+            };
+          if (params.block_sink && params.conversation_id) {
+            const blockId = await params.block_sink.save({
+              conversation_id: params.conversation_id,
+              kind: 'markdown',
+              spec: {
+                title: `Resultado de ${toolName}`,
+                source_tool: toolName,
+              },
+              data: { text: result },
+            });
+            return { block_id: blockId, evidence_refs: [`block:${blockId}`] };
+          }
+          // No durable/sink means no recoverable reference, so keep full data.
+          return null;
+        },
+      });
+      if (compacted === result) return result;
+      if (toolExecutionContractEnabled() || params.durable) {
+        const normalized = normalizeToolResult(result, {
+          write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
+        });
+        return JSON.stringify({
+          ...toolReceipt(normalized),
+          data: JSON.parse(compacted),
+          freshness: 'truncated',
+          next_action: JSON.parse(compacted).next_step,
+        });
+      }
+      return compacted;
+    }
     // Vex-only: its 40-iteration turns over the full catalog are the ones that
     // drown in 100KB query results. Vexi keeps full results — its trace,
     // transcript and model all predate compaction and behave unchanged.
@@ -1325,6 +1397,12 @@ export class AIAgentService {
     const semantic = toolExecutionContractEnabled() || !!params.durable;
     const recovery = new ToolRecovery();
     const robust = robustExecutionEnabled() && !!params.durable;
+    const hTransport = agentStreamingEnabled() && !!params.app_key;
+    // Decide before any provider dispatch. A compatible URL is not proof that
+    // streaming usage is supported; unknown counters must not bypass token caps.
+    const streaming =
+      hTransport &&
+      (await this.aiEngine.supportsAgentStreaming(params.app_key!));
     const recoveryPolicy = new AgentRecoveryService();
     const recoveryLimits = {
       max_replans: maximumRecoveryReplans(),
@@ -1567,7 +1645,7 @@ export class AIAgentService {
       timeoutMs = widenTimeout(timeoutMs);
     }
 
-    if (robust) {
+    if (robust || hTransport) {
       deadline = new AgentDeadline({
         wallDeadlineMs: wallLimit(timeoutMs),
         activeBudgetMs: Math.min(
@@ -1673,7 +1751,9 @@ export class AIAgentService {
                     'Recarga la sección publicada por id, versión y hash conservados; el texto histórico no es instrucción vigente.',
                 }),
               }
-            : message,
+            : agentStreamingEnabled() && historicalAssistantProse(message)
+              ? { ...message, context_retention: 'history' as const }
+              : message,
         ),
       );
     }
@@ -1799,6 +1879,7 @@ export class AIAgentService {
         }
 
         if (params.durable) await params.durable.assertBudget();
+        if (hTransport) deadline?.assertCanStart();
         if (deadline) {
           deadline.updateBudgets({
             wallDeadlineMs: wallLimit(timeoutMs),
@@ -1933,7 +2014,28 @@ export class AIAgentService {
               : dispatchProvider(),
           );
 
-        let response = await callProvider();
+        const callStreamingProvider = () =>
+          streamAgentInference(
+            () =>
+              this.aiEngine.runAgentStream(
+                params.app_key!,
+                params.variables,
+                messages,
+                toolOptions,
+              ),
+            (consume) =>
+              withinDeadline(() =>
+                params.durable
+                  ? params.durable.runProvider(consume)
+                  : consume(),
+              ),
+            () => deadline?.cancel(),
+          );
+        // One loop, one durable meter. No chatStream bypass and no buffered
+        // fallback after tokens: switching transports would spend twice.
+        let response = streaming
+          ? yield* callStreamingProvider()
+          : await callProvider();
         if (params.durable) await params.durable.assertCurrent();
 
         // Around one call in six comes back `success` with no content, no tool
@@ -1943,6 +2045,7 @@ export class AIAgentService {
         // second and turns most of those into real answers; the retry is not
         // repeated so a genuinely mute model still terminates the loop.
         if (
+          !streaming &&
           this.isEmptyCompletion(response) &&
           (!semantic || Date.now() - startTime - waitedMs < timeoutMs)
         ) {
@@ -1971,7 +2074,7 @@ export class AIAgentService {
           }
         }
 
-        if (semantic && !response.success)
+        if ((semantic || hTransport) && !response.success)
           totalTokens += response.usage?.totalTokens ?? 0;
         if (!response.success) {
           yield { type: 'error', error: response.error || 'AI request failed' };
@@ -2468,9 +2571,27 @@ export class AIAgentService {
               toolArgs = {};
               malformedArgs = true;
             }
+            const streamDefinition = streaming
+              ? filteredTools.find(
+                  (definition) =>
+                    this.toolRegistry.canonicalName(
+                      definition.function.name,
+                    ) === toolName,
+                )
+              : undefined;
+            const invalidStreamSchema =
+              streaming &&
+              streamDefinition &&
+              !malformedArgs &&
+              !validateToolArgs(
+                toolName,
+                streamDefinition.function.parameters,
+                toolArgs,
+              ).ok;
             if (
-              semantic &&
-              (malformedArgs ||
+              (semantic || streaming) &&
+              (invalidStreamSchema ||
+                malformedArgs ||
                 !toolArgs ||
                 typeof toolArgs !== 'object' ||
                 Array.isArray(toolArgs))
@@ -2906,6 +3027,15 @@ export class AIAgentService {
                   : '.')
               : undefined;
 
+            if (
+              streaming &&
+              this.toolRegistry.isReadOnly(toolName) &&
+              !isAgentPlanTool(toolName)
+            )
+              yield {
+                type: 'progress',
+                content: 'Voy a consultar los datos autorizados.',
+              };
             yield {
               type: 'tool_call',
               tool: {
@@ -3164,6 +3294,7 @@ export class AIAgentService {
                 raw,
                 params,
                 artifactId,
+                toolArgs,
               );
               if (normalized && result !== raw) {
                 normalized.freshness = 'truncated';
@@ -3377,6 +3508,7 @@ export class AIAgentService {
                       appliedRaw,
                       params,
                       appliedArtifactId,
+                      toolArgs,
                     );
                     if (normalizedApply && applied !== appliedRaw)
                       normalizedApply.freshness = 'truncated';
@@ -3750,7 +3882,7 @@ export class AIAgentService {
       // exactly the pessimistic-but-human close the situation calls for.
       // Failing THAT, the fallback below is still a sentence, never an error.
       let closing = '';
-      if (!timedOut && !semantic) {
+      if (!timedOut && !semantic && !streaming) {
         messages.push({
           role: 'user',
           content:
@@ -3816,7 +3948,7 @@ export class AIAgentService {
         ...(semantic ? { exhausted: true } : {}),
       };
     } catch (error: any) {
-      if (robust && isAgentAbort(error)) {
+      if ((robust || hTransport) && isAgentAbort(error)) {
         const content =
           'Se agotó el plazo activo o se canceló el turno. Conservo el avance; una escritura incierta se verifica antes de volver a intentarla.';
         yield { type: 'text', content };

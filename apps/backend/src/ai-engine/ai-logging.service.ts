@@ -42,7 +42,13 @@ export class AILoggingService {
   async logRequest(entry: AILogEntry & AICacheLogFields): Promise<void> {
     try {
       const correlation = this.trace?.currentTraceContext();
-      const tracing = this.tracingEnabled() || correlation !== undefined;
+      // H may be enabled independently of trace collection. Persist explicit
+      // unknown counters instead of disguising a cancelled stream as free.
+      const hStreaming =
+        process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
+        entry.telemetry_metadata?.streaming === true;
+      const tracing =
+        this.tracingEnabled() || correlation !== undefined || hStreaming;
       const externalId =
         entry.request_id ??
         RequestContextService.asyncLocalStorage.getStore()?.request_id;

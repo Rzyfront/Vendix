@@ -31,7 +31,9 @@ import { VexToolStep } from '../../models/vex.models';
         >
           <app-icon name="info" [size]="14"></app-icon>
           <span class="font-medium">
-            {{ running_count() > 0 ? 'Vex está trabajando' : 'Actividad de Vex' }}
+            {{
+              running_count() > 0 ? 'Vex está trabajando' : 'Actividad de Vex'
+            }}
             ({{ steps().length }})
           </span>
           <app-icon
@@ -47,17 +49,29 @@ import { VexToolStep } from '../../models/vex.models';
               <li class="flex items-start gap-2 py-1 text-xs">
                 <span
                   class="mt-0.5 shrink-0"
-                  [class.text-[var(--color-primary)]]="step.status === 'running'"
+                  [class.text-[var(--color-primary)]]="
+                    step.status === 'running'
+                  "
                   [class.text-[var(--color-success)]]="step.status === 'done'"
                   [class.text-[var(--color-error)]]="step.status === 'failed'"
                   aria-hidden="true"
                 >
                   @switch (step.status) {
                     @case ('running') {
-                      <app-icon name="loader-2" [size]="14" [spin]="true"></app-icon>
+                      <app-icon
+                        name="loader-2"
+                        [size]="14"
+                        [spin]="true"
+                      ></app-icon>
                     }
                     @case ('failed') {
                       <app-icon name="x-circle" [size]="14"></app-icon>
+                    }
+                    @case ('waiting') {
+                      <app-icon name="info" [size]="14"></app-icon>
+                    }
+                    @case ('unknown') {
+                      <app-icon name="info" [size]="14"></app-icon>
                     }
                     @default {
                       <app-icon name="check-circle" [size]="14"></app-icon>
@@ -69,7 +83,9 @@ import { VexToolStep } from '../../models/vex.models';
                     {{ humanize(step.name) }}
                   </p>
                   @if (step.summary) {
-                    <p class="text-[var(--color-text-secondary)] leading-relaxed">
+                    <p
+                      class="text-[var(--color-text-secondary)] leading-relaxed"
+                    >
                       {{ step.summary }}
                     </p>
                   }

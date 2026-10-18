@@ -1,6 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
+import {
+  replayEventSource,
+  replayStreamUrl,
+  VexiReplayCursor,
+} from '../../../../../core/services/vexi-stream-transport';
+import type { VexiToolExecution } from '../../../../../core/services/vexi-api.service';
 import { environment } from '../../../../../../environments/environment';
 import {
   VexBlockInteraction,
@@ -127,12 +133,15 @@ function adaptFallbackStep(payload: VexRawPlanApproval): VexPlanStep {
  * fallback frames become a one-step synthetic plan carrying their own token.
  * Returns `null` for a frame with neither — malformed, ignored by the stream.
  */
-function adaptPlanProposal(payload: VexRawPlanApproval): VexPlanProposal | null {
+function adaptPlanProposal(
+  payload: VexRawPlanApproval,
+): VexPlanProposal | null {
   if (Array.isArray(payload.steps) && payload.steps.length > 0) {
     const steps = payload.steps.map(adaptPlanStep);
-    const target = payload.steps.length === 1
-      ? payload.steps[0].preview?.target?.trim()
-      : undefined;
+    const target =
+      payload.steps.length === 1
+        ? payload.steps[0].preview?.target?.trim()
+        : undefined;
     return {
       plan_id: payload.plan_id ?? `${VEX_SINGLE_PLAN_PREFIX}plan`,
       title: target
@@ -187,8 +196,11 @@ export interface VexBackendMessage {
 
 /** One frame of a Vex turn, as it arrives over SSE (`ai-chunk` events). */
 export interface VexStreamChunk {
+  replay?: VexiReplayCursor;
+  reconcile_required?: boolean;
   type:
     | 'text'
+    | 'progress'
     | 'tool_call'
     | 'tool_result'
     | 'ui_block'
@@ -204,6 +216,7 @@ export interface VexStreamChunk {
     arguments?: Record<string, unknown>;
     summary?: string;
     failed?: boolean;
+    execution?: VexiToolExecution;
   };
   block?: VexUiBlock;
   plan?: VexPlanProposal;
@@ -275,6 +288,7 @@ export interface VexConversationsPage {
 @Injectable({ providedIn: 'root' })
 export class VexApiService {
   private readonly http = inject(HttpClient);
+  private readonly replayStreams = new Set<string>();
   private readonly chatBase = `${environment.apiUrl}/store/ai-chat`;
   private readonly vexBase = `${environment.apiUrl}/store/vex`;
   private readonly vexiBase = `${environment.apiUrl}/store/vexi`;
@@ -287,10 +301,15 @@ export class VexApiService {
     // Same flattened envelope as Vexi: the interceptor unwraps to
     // `{ data: VexBackendConversation[], meta }`.
     return this.http
-      .get<{ data: VexBackendConversation[]; meta: VexConversationsPage['meta'] }>(
-        `${this.chatBase}/conversations`,
-        { params: { agent_key: VEX_AGENT_KEY, ...(params as Record<string, unknown>) } as never },
-      )
+      .get<{
+        data: VexBackendConversation[];
+        meta: VexConversationsPage['meta'];
+      }>(`${this.chatBase}/conversations`, {
+        params: {
+          agent_key: VEX_AGENT_KEY,
+          ...(params as Record<string, unknown>),
+        } as never,
+      })
       .pipe(
         map((res) => ({
           data: res.data ?? [],
@@ -306,25 +325,29 @@ export class VexApiService {
 
   createConversation(title?: string): Observable<VexBackendConversation> {
     return this.http
-      .post<{ data: VexBackendConversation }>(`${this.chatBase}/conversations`, {
-        agent_key: VEX_AGENT_KEY,
-        ...(title ? { title } : {}),
-      })
+      .post<{ data: VexBackendConversation }>(
+        `${this.chatBase}/conversations`,
+        {
+          agent_key: VEX_AGENT_KEY,
+          ...(title ? { title } : {}),
+        },
+      )
       .pipe(map((res) => res.data));
   }
 
   getConversation(id: number): Observable<VexBackendConversation> {
     return this.http
-      .get<{ data: VexBackendConversation }>(`${this.chatBase}/conversations/${id}`)
+      .get<{
+        data: VexBackendConversation;
+      }>(`${this.chatBase}/conversations/${id}`)
       .pipe(map((res) => res.data));
   }
 
   archiveConversation(id: number): Observable<VexBackendConversation> {
     return this.http
-      .patch<{ data: VexBackendConversation }>(
-        `${this.chatBase}/conversations/${id}/archive`,
-        {},
-      )
+      .patch<{
+        data: VexBackendConversation;
+      }>(`${this.chatBase}/conversations/${id}/archive`, {})
       .pipe(map((res) => res.data));
   }
 
@@ -345,7 +368,7 @@ export class VexApiService {
     },
   ): Observable<string> {
     return this.http
-      .post<{ data: { stream_id: string } }>(
+      .post<{ data: { stream_id: string; replay_enabled?: boolean } }>(
         `${this.chatBase}/conversations/${conversationId}/stream-intent`,
         {
           content: options?.continuation ? undefined : content,
@@ -356,7 +379,18 @@ export class VexApiService {
           skip_user_message: options?.skipUserMessage ? true : undefined,
         },
       )
-      .pipe(map((res) => res.data.stream_id));
+      .pipe(
+        map((res) => {
+          if (res.data.replay_enabled === true) {
+            if (this.replayStreams.size >= 32)
+              this.replayStreams.delete(
+                this.replayStreams.values().next().value!,
+              );
+            this.replayStreams.add(res.data.stream_id);
+          }
+          return res.data.stream_id;
+        }),
+      );
   }
 
   /**
@@ -371,80 +405,28 @@ export class VexApiService {
     conversationId: number,
     streamId: string,
   ): Observable<VexStreamChunk> {
-    return new Observable<VexStreamChunk>((subscriber) => {
-      const url = this.getStreamUrl(conversationId, streamId);
-      if (!url) {
-        subscriber.next({
-          type: 'error',
-          error: 'Sesión no válida. Vuelve a iniciar sesión.',
-        });
-        subscriber.complete();
-        return undefined;
-      }
-
-      const source = new EventSource(url);
-      const close = (): void => {
-        source.close();
-      };
-
-      source.addEventListener('ai-chunk', (event) => {
-        let raw: Record<string, unknown>;
-        try {
-          raw = JSON.parse((event as MessageEvent).data);
-        } catch {
-          close();
-          subscriber.error(new Error('Respuesta del servidor no válida.'));
-          return;
-        }
-
-        // The backend names the payloads `plan_approval` / `ui_block`
-        // (`AIStreamChunk`); this client consumes them as `plan` / `block`.
-        // Adapt here so a frame the server added never dies silently.
-        const chunk = { ...(raw as unknown as VexStreamChunk) };
+    return replayEventSource<VexStreamChunk>(
+      streamId,
+      (cursor) =>
+        replayStreamUrl(this.getStreamUrl(conversationId, streamId), cursor),
+      this.replayStreams.has(streamId),
+    ).pipe(
+      map((raw) => {
+        const chunk = { ...raw };
         if (chunk.type === 'plan_approval') {
-          const payload = (raw as { plan_approval?: VexRawPlanApproval })
-            .plan_approval;
-          if (!payload) return;
-          const plan = adaptPlanProposal(payload);
-          if (!plan) return;
-          chunk.plan = plan;
+          const payload = (
+            raw as unknown as { plan_approval?: VexRawPlanApproval }
+          ).plan_approval;
+          if (payload) chunk.plan = adaptPlanProposal(payload) ?? undefined;
         } else if (chunk.type === 'ui_block') {
-          const payload = (raw as { ui_block?: VexRawUiBlock }).ui_block;
-          if (!payload || typeof payload.block_id !== 'string') return;
-          chunk.block = adaptUiBlock(payload);
+          const payload = (raw as unknown as { ui_block?: VexRawUiBlock })
+            .ui_block;
+          if (payload && typeof payload.block_id === 'string')
+            chunk.block = adaptUiBlock(payload);
         }
-
-        switch (chunk.type) {
-          case 'text':
-          case 'tool_call':
-          case 'tool_result':
-          case 'ui_block':
-          case 'plan_approval':
-            subscriber.next(chunk);
-            break;
-          case 'done':
-            subscriber.next(chunk);
-            close();
-            subscriber.complete();
-            break;
-          case 'error':
-            subscriber.next(chunk);
-            close();
-            subscriber.complete();
-            break;
-          default:
-            // Unknown frame: tolerate, do not break the turn.
-            break;
-        }
-      });
-
-      source.onerror = (): void => {
-        close();
-        subscriber.error(new Error('Se perdió la conexión con Vex.'));
-      };
-
-      return close;
-    });
+        return chunk;
+      }),
+    );
   }
 
   /**
@@ -487,10 +469,12 @@ export class VexApiService {
     }>,
   ): Observable<VexApprovePlanResult> {
     return this.http
-      .post<{ data: VexApprovePlanResult }>(
-        `${this.vexBase}/plans/${encodeURIComponent(planId)}/approve`,
-        { conversation_id: conversationId, steps },
-      )
+      .post<{
+        data: VexApprovePlanResult;
+      }>(`${this.vexBase}/plans/${encodeURIComponent(planId)}/approve`, {
+        conversation_id: conversationId,
+        steps,
+      })
       .pipe(map((res) => res.data));
   }
 
@@ -505,10 +489,11 @@ export class VexApiService {
     conversationId: number,
   ): Observable<{ plan_id: string; status: 'rejected' }> {
     return this.http
-      .post<{ data: { plan_id: string; status: 'rejected' } }>(
-        `${this.vexBase}/plans/${encodeURIComponent(planId)}/reject`,
-        { conversation_id: conversationId },
-      )
+      .post<{
+        data: { plan_id: string; status: 'rejected' };
+      }>(`${this.vexBase}/plans/${encodeURIComponent(planId)}/reject`, {
+        conversation_id: conversationId,
+      })
       .pipe(map((res) => res.data));
   }
 
@@ -525,7 +510,9 @@ export class VexApiService {
     conversationId: number,
   ): Observable<VexStepConfirmation> {
     return this.http
-      .post<{ data: VexStepConfirmation }>(
+      .post<{
+        data: VexStepConfirmation;
+      }>(
         `${this.vexBase}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/confirmation`,
         { conversation_id: conversationId },
       )
@@ -582,23 +569,22 @@ export class VexApiService {
     conversationId: number,
   ): Observable<{ tool: string; output: string; summary?: string | null }> {
     return this.http
-      .post<{ data: { tool: string; output: string; summary?: string | null } }>(
-        `${this.vexiBase}/confirmations/apply`,
-        {
-          tool,
-          arguments: args,
-          confirmation_token: confirmationToken,
-          conversation_id: conversationId,
-        },
-      )
+      .post<{
+        data: { tool: string; output: string; summary?: string | null };
+      }>(`${this.vexiBase}/confirmations/apply`, {
+        tool,
+        arguments: args,
+        confirmation_token: confirmationToken,
+        conversation_id: conversationId,
+      })
       .pipe(map((res) => res.data));
   }
 
   getBlock(blockId: string): Observable<VexUiBlock> {
     return this.http
-      .get<{ data: VexUiBlock }>(
-        `${this.vexBase}/blocks/${encodeURIComponent(blockId)}`,
-      )
+      .get<{
+        data: VexUiBlock;
+      }>(`${this.vexBase}/blocks/${encodeURIComponent(blockId)}`)
       .pipe(map((res) => res.data));
   }
 
@@ -611,10 +597,11 @@ export class VexApiService {
     interaction: VexBlockInteraction,
   ): Observable<void> {
     return this.http
-      .post<{ data: unknown }>(
-        `${this.vexBase}/blocks/${encodeURIComponent(blockId)}/interaction`,
-        { ...interaction },
-      )
+      .post<{
+        data: unknown;
+      }>(`${this.vexBase}/blocks/${encodeURIComponent(blockId)}/interaction`, {
+        ...interaction,
+      })
       .pipe(map(() => undefined));
   }
 

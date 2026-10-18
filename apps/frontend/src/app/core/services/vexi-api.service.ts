@@ -1,6 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
+import {
+  VexiReplayCursor,
+  replayEventSource,
+  replayStreamUrl,
+} from './vexi-stream-transport';
 import { environment } from '../../../environments/environment';
 
 /** Optional D0 metadata. Older servers/flags OFF keep the existing wire shape. */
@@ -124,6 +129,7 @@ export interface VexiUiContext {
 export interface VexiStreamChunk {
   type:
     | 'text'
+    | 'progress'
     | 'tool_call'
     | 'tool_result'
     | 'done'
@@ -136,6 +142,8 @@ export interface VexiStreamChunk {
     // The turn ran out of budget with work pending; open a continuation turn.
     | 'plan_continue';
   content?: string;
+  replay?: VexiReplayCursor;
+  reconcile_required?: boolean;
   tool?: {
     id: string;
     name: string;
@@ -230,6 +238,23 @@ export interface PaginatedConversations {
 @Injectable({ providedIn: 'root' })
 export class VexiApiService {
   private http = inject(HttpClient);
+  private readonly replayStreams = new Set<string>();
+
+  canReplayStream(streamId: string): boolean {
+    return this.replayStreams.has(streamId);
+  }
+
+  streamTurn(
+    conversationId: number,
+    streamId: string,
+  ): Observable<VexiStreamChunk> {
+    return replayEventSource<VexiStreamChunk>(
+      streamId,
+      (cursor) =>
+        replayStreamUrl(this.getStreamUrl(conversationId, streamId), cursor),
+      this.canReplayStream(streamId),
+    );
+  }
   private baseUrl = `${environment.apiUrl}/store/ai-chat`;
 
   createConversation(data: {
@@ -361,7 +386,7 @@ export class VexiApiService {
     continuation?: 'approved' | 'rejected' | 'resume',
   ): Observable<string> {
     return this.http
-      .post<{ data: { stream_id: string } }>(
+      .post<{ data: { stream_id: string; replay_enabled?: boolean } }>(
         `${this.baseUrl}/conversations/${conversationId}/stream-intent`,
         {
           // With a continuation the server composes the instruction and stores
@@ -384,7 +409,18 @@ export class VexiApiService {
           skip_user_message: skipUserMessage ? true : undefined,
         },
       )
-      .pipe(map((res) => res.data.stream_id));
+      .pipe(
+        map((res) => {
+          if (res.data.replay_enabled === true) {
+            if (this.replayStreams.size >= 32)
+              this.replayStreams.delete(
+                this.replayStreams.values().next().value!,
+              );
+            this.replayStreams.add(res.data.stream_id);
+          }
+          return res.data.stream_id;
+        }),
+      );
   }
 
   /**

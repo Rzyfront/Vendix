@@ -60,6 +60,11 @@ import {
   ConversationWithMessages,
   PaginatedConversations,
 } from './interfaces/ai-chat.interface';
+import {
+  ChatStreamReplay,
+  ChatReplayRequest,
+  ChatReplayCursor,
+} from './chat-stream-replay';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -126,7 +131,10 @@ const PLAN_MESSAGE_RULES_BLOCK =
  * would make every implementation carry a case it cannot reach. The SSE
  * controller only serializes what it is handed, so the transport needs no change.
  */
-export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
+export type ChatStreamFrame = (AIStreamChunk | VexiVoiceFrame) & {
+  replay?: ChatReplayCursor;
+  reconcile_required?: boolean;
+};
 
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
@@ -194,6 +202,7 @@ interface VexTurnCollection {
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
   private readonly MAX_CONTEXT_MESSAGES = 20;
+  private readonly streamReplay = new ChatStreamReplay<ChatStreamFrame>();
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -608,15 +617,76 @@ export class AIChatService {
    * Observable body runs after the handler returned and the interceptor's
    * AsyncLocalStorage scope has already been torn down.
    *
-   * `signal` is aborted when the client disconnects. It stops the synthesis queue
-   * from spending on a turn nobody is listening to; it deliberately does **not**
-   * interrupt the generator, because leaving the loop early would skip the writes
-   * that persist the assistant reply and its tool trace.
+   * OFF: disconnect stops speech only, preserving the legacy drain.
+   * H ON: disconnect also cancels provider/tools cooperatively. The single
+   * producer still drains to persist checkpoints, receipts and uncertain effects;
+   * reconnect only replays transport and never resumes inference.
    */
   async *sendMessageStream(
     conversationId: number,
     streamId: string,
     signal?: AbortSignal,
+    replay: ChatReplayRequest = {},
+  ): AsyncGenerator<ChatStreamFrame> {
+    if (process.env.AI_AGENT_STREAMING_ENABLED !== 'true') {
+      yield* this.executeMessageStream(conversationId, streamId, signal);
+      return;
+    }
+    // Revalidate owner, tenant, archive and Vex gates on EVERY attach, before
+    // looking up transport frames. A cached frame never retains authorization.
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    if (!context?.store_id || !context.organization_id || !context.user_id)
+      throw new BadRequestException('AI_STREAM_CONTEXT_REQUIRED');
+    const conversation = await this.getConversation(conversationId);
+    if (conversation.status === 'archived')
+      throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
+    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+    for await (const frame of this.streamReplay.open(
+      streamId,
+      {
+        store_id: context.store_id,
+        organization_id: context.organization_id,
+        user_id: context.user_id,
+        conversation_id: conversationId,
+      },
+      replay,
+      (runSignal, checkpoint) =>
+        this.executeMessageStream(
+          conversationId,
+          streamId,
+          runSignal,
+          checkpoint,
+        ),
+      signal,
+    )) {
+      // Another tab may already have consumed/rejected this approval. A cached
+      // consent card is NOT current authority. Keep sequence continuity but
+      // force a canonical transcript/objective read, without replaying a token.
+      let cachedApproval = frame.type === 'plan_approval';
+      if (
+        frame.type === 'tool_result' &&
+        frame.tool?.summary?.includes('confirmation_token')
+      )
+        cachedApproval = true;
+      yield replay.after_sequence !== undefined && cachedApproval
+        ? {
+            type: 'progress',
+            content:
+              'Reconecté la conversación. Consulta el estado actual de la propuesta antes de continuar.',
+            replay: frame.replay,
+            reconcile_required: true,
+          }
+        : frame;
+    }
+  }
+
+  private async *executeMessageStream(
+    conversationId: number,
+    streamId: string,
+    signal?: AbortSignal,
+    checkpoint?: (
+      read: () => { objective_id: string; checkpoint: number },
+    ) => void,
   ): AsyncGenerator<ChatStreamFrame> {
     // Every timing mark is relative to this. Taken before the first await so it
     // includes the intent lookup the browser is already waiting through.
@@ -829,6 +899,13 @@ export class AIChatService {
           continuation: !!intent.continuation,
         },
       );
+      if (durableArgs.durable) {
+        const session = durableArgs.durable;
+        checkpoint?.(() => ({
+          objective_id: session.objective_id,
+          checkpoint: session.lease.version,
+        }));
+      }
       const agentStream = this.aiAgent.runAgentStream({
         goal,
         ...base,
@@ -858,7 +935,12 @@ export class AIChatService {
         stream_id: streamId,
         plan: this.planState.createHook(conversation.id),
         shouldAbort: async () =>
+          (process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
+            signal?.aborted === true) ||
           !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
+        ...(process.env.AI_AGENT_STREAMING_ENABLED === 'true'
+          ? { signal }
+          : {}),
         ...durableArgs,
       });
 
@@ -902,6 +984,27 @@ export class AIChatService {
       toolsUsed = result.tools_used;
       execution = result.execution;
       objective = result.objective;
+      if (process.env.AI_AGENT_STREAMING_ENABLED === 'true' && !doneChunk) {
+        // H can be enabled independently of D0/D1. The legacy loop sometimes
+        // returns on cancellation without yielding done; do not leave clients
+        // reconnecting forever after persistence. No invented usage/success.
+        doneChunk = {
+          type: 'done',
+          ...(execution ? { execution } : {}),
+          ...(objective ? { objective } : {}),
+        };
+      }
+      if (
+        process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
+        result.aborted &&
+        !fullContent
+      ) {
+        // Cancelling transport is not rollback. Persist an honest terminal turn
+        // even when the durable wrapper suppressed all buffered model prose.
+        fullContent =
+          'La respuesta se detuvo. El avance se conserva; verifica los cambios en curso antes de volver a intentarlos.';
+        yield { type: 'text', content: fullContent };
+      }
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
       // sobre lo capturado por frames si ambos existen.
       vexPlan = result.pending_plan ?? null;
@@ -963,11 +1066,13 @@ export class AIChatService {
         intent.speak,
       );
 
-      for await (const chunk of this.aiEngine.runStream(
-        appKey,
-        undefined,
-        contextMessages,
-      )) {
+      const completionStream =
+        process.env.AI_AGENT_STREAMING_ENABLED === 'true'
+          ? this.aiEngine.runStream(appKey, undefined, contextMessages, {
+              signal,
+            })
+          : this.aiEngine.runStream(appKey, undefined, contextMessages);
+      for await (const chunk of completionStream) {
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
           voice?.push(chunk.content);
@@ -1014,7 +1119,12 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
     );
     let assistantMessage: { id: number } | null = null;
-    if (fullContent || vexMetadata) {
+    if (
+      fullContent ||
+      vexMetadata ||
+      (process.env.AI_AGENT_STREAMING_ENABLED === 'true' &&
+        (execution || objective || toolsUsed.length > 0))
+    ) {
       // La propuesta no entra en `tool_calls`: la rama de confirmación del
       // bucle sale por `continue` sin registrarla como herramienta usada.
       // Sin esta marca, el turno siguiente no tiene forma de saber que hay
@@ -1022,6 +1132,9 @@ export class AIChatService {
       // propuesta idéntica en vez de señalar la que ya está en pantalla.
       // Convive con los bloques/plan de Vex en el mismo objeto.
       const metadata = {
+        ...(process.env.AI_AGENT_STREAMING_ENABLED === 'true'
+          ? { stream_id: streamId }
+          : {}),
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
         ...(execution ? { execution } : {}),
@@ -1048,7 +1161,15 @@ export class AIChatService {
             ? (toolsUsed.map((tool) => ({
                 name: tool.name,
                 arguments: tool.args,
-                result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
+                // H has already persisted/compacted the recoverable payload in
+                // the loop. A string prefix here would corrupt JSON and discard
+                // artifact refs when the conversation is reopened. No sink means
+                // keeping full data, not inventing a complete truncated result.
+                result:
+                  process.env.AI_AGENT_STREAMING_ENABLED === 'true' ||
+                  process.env.AI_TOOL_RESULT_COMPACTION_ENABLED === 'true'
+                    ? tool.result
+                    : tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
                 ...(tool.execution ? { execution: tool.execution } : {}),
               })) as unknown as Prisma.InputJsonValue)
             : undefined,

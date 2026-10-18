@@ -3,6 +3,7 @@ import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createVexBlockTools } from '../../../../ai-engine/tools/domains/vex-blocks.tools';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VexBlockService } from './vex-block.service';
+import { compactRecoverableToolResult } from '../../../../ai-engine/context/tool-result-compaction';
 
 function makeDelegate() {
   const rows: any[] = [];
@@ -215,95 +216,129 @@ describe('VexBlockService', () => {
     });
   });
 
-  it('real loop compaction → real block sink → real read tool recovers the original JSON', async () => {
-    const raw = JSON.stringify({
-      data: Array.from({ length: 400 }, (_, id) => ({
-        id,
-        name: `café ${id}`,
-      })),
-    });
-    expect(raw.length).toBeGreaterThan(6000);
-    const registry = new AIToolRegistry({} as any);
-    const initialRead = jest.fn().mockResolvedValue(raw);
-    registry.register({
-      name: 'read_dataset',
-      domain: 'probe',
-      readOnly: true,
-      description: 'Leer',
-      parameters: { type: 'object' },
-      handler: initialRead,
-    });
-    registry.registerMany(createVexBlockTools({ blocks: service }));
-    let recovered = '';
-    let callId = 0;
-    const toolCall = (name: string, args: any) => ({
-      success: true,
-      content: '',
-      usage: { totalTokens: 1 },
-      tool_calls: [
-        {
-          id: `c${++callId}`,
-          type: 'function',
-          function: { name, arguments: JSON.stringify(args) },
-        },
-      ],
-    });
-    const chat = jest.fn(async (messages: any[]) => {
-      const last = messages.at(-1);
-      if (last.role !== 'tool') return toolCall('read_dataset', {});
-      const result = JSON.parse(last.content);
-      if (result.block_id)
-        return toolCall('vex_block_read', {
-          block_id: result.block_id,
-          text_offset: 0,
-        });
-      recovered += result.data.text;
-      if (result.data.has_more)
-        return toolCall('vex_block_read', {
-          block_id: result.data.block_id,
-          text_offset: result.data.next_offset,
-        });
-      return {
-        success: true,
-        content: 'Datos recuperados',
-        usage: { totalTokens: 1 },
-      };
-    });
-    const save = jest.fn(
-      async (input: any) => (await service.create(input)).id,
-    );
-    const loop = new AIAgentService(
-      { chat } as any,
-      {} as any,
-      registry,
-      { emit: jest.fn() } as any,
-      {} as any,
-      {
-        canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
-        getAIFeatureConfig: jest
-          .fn()
-          .mockResolvedValue({ tools_allowed: ['*'] }),
-        checkExtraQuota: jest.fn().mockResolvedValue({ exceeded: false }),
-        consumeExtraQuota: jest.fn(),
-        consumeAIQuota: jest.fn(),
-      } as any,
-    );
-    const result = await loop.runAgent({
-      goal: 'Leer todo',
-      agent_key: 'vex',
-      conversation_id: 1,
-      block_sink: { save },
-    });
-    expect(result.success).toBe(true);
-    expect(result.content).toBe('Datos recuperados');
-    expect(recovered).toBe(raw);
-    expect(JSON.parse(recovered).data).toHaveLength(400);
-    expect(initialRead).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(
-      result.tools_used.filter((t) => t.name === 'vex_block_read').length,
-    ).toBeGreaterThan(1);
-  });
+  it.each([false, true])(
+    'real loop compaction → real block sink → real read tool recovers escaped JSON and sum (H=%s)',
+    async (enabled) => {
+      const previousFlag = process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
+      if (enabled) process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
+      else delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
+      try {
+        await RequestContextService.runIsolated(
+          {
+            store_id: 7,
+            organization_id: 3,
+            user_id: 9,
+            is_owner: true,
+            is_super_admin: false,
+          },
+          async () => {
+            const raw = JSON.stringify({
+              data: Array.from({ length: 400 }, (_, id) => ({
+                id,
+                name: `café ${id}`,
+                amount: id + 1,
+                memo: '\0"\n',
+              })),
+            });
+            expect(raw.length).toBeGreaterThan(6000);
+            const registry = new AIToolRegistry({} as any);
+            const initialRead = jest.fn().mockResolvedValue(raw);
+            registry.register({
+              name: 'read_dataset',
+              domain: 'probe',
+              readOnly: true,
+              description: 'Leer',
+              parameters: { type: 'object' },
+              handler: initialRead,
+            });
+            registry.registerMany(createVexBlockTools({ blocks: service }));
+            let recovered = '';
+            let callId = 0;
+            const toolCall = (name: string, args: any) => ({
+              success: true,
+              content: '',
+              usage: { totalTokens: 1 },
+              tool_calls: [
+                {
+                  id: `c${++callId}`,
+                  type: 'function',
+                  function: { name, arguments: JSON.stringify(args) },
+                },
+              ],
+            });
+            const chat = jest.fn(async (messages: any[]) => {
+              const last = messages.at(-1);
+              if (last.role !== 'tool') return toolCall('read_dataset', {});
+              const result = JSON.parse(last.content);
+              if (result.block_id)
+                return toolCall('vex_block_read', {
+                  block_id: result.block_id,
+                  text_offset: 0,
+                });
+              recovered += result.data.text;
+              if (result.data.has_more)
+                return toolCall('vex_block_read', {
+                  block_id: result.data.block_id,
+                  text_offset: result.data.next_offset,
+                });
+              return {
+                success: true,
+                content: 'Datos recuperados',
+                usage: { totalTokens: 1 },
+              };
+            });
+            const save = jest.fn(
+              async (input: any) => (await service.create(input)).id,
+            );
+            const loop = new AIAgentService(
+              { chat } as any,
+              {} as any,
+              registry,
+              { emit: jest.fn() } as any,
+              {} as any,
+              {
+                canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }),
+                getAIFeatureConfig: jest
+                  .fn()
+                  .mockResolvedValue({ tools_allowed: ['*'] }),
+                checkExtraQuota: jest
+                  .fn()
+                  .mockResolvedValue({ exceeded: false }),
+                consumeExtraQuota: jest.fn(),
+                consumeAIQuota: jest.fn(),
+              } as any,
+            );
+            const result = await loop.runAgent({
+              goal: 'Leer todo',
+              agent_key: 'vex',
+              conversation_id: 1,
+              block_sink: { save },
+            });
+            expect(result.success).toBe(true);
+            expect(result.content).toBe('Datos recuperados');
+            expect(recovered).toBe(raw);
+            expect(JSON.parse(recovered).data).toHaveLength(400);
+            expect(
+              JSON.parse(recovered).data.reduce(
+                (sum: number, row: { amount: number }) => sum + row.amount,
+                0,
+              ),
+            ).toBe((400 * 401) / 2);
+            expect(initialRead).toHaveBeenCalledTimes(1);
+            expect(save).toHaveBeenCalledTimes(1);
+            expect(
+              result.tools_used.filter((t) => t.name === 'vex_block_read')
+                .length,
+            ).toBeGreaterThan(1);
+          },
+        );
+      } finally {
+        if (previousFlag === undefined)
+          delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
+        else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = previousFlag;
+      }
+    },
+  );
 
   it.each([
     { text_offset: 1.5 },
@@ -593,5 +628,187 @@ describe('VexBlockService', () => {
     ).rejects.toMatchObject({ errorCode: 'AUTH_PERM_001' });
     expect(delegate.rows).toHaveLength(0);
     expect(findConversation).not.toHaveBeenCalled();
+  });
+
+  describe('H common bounded reader (independent flag)', () => {
+    const flag = process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
+    const scope = {
+      store_id: 7,
+      organization_id: 3,
+      user_id: 9,
+      is_owner: true,
+      is_super_admin: false,
+    };
+    beforeEach(() => {
+      process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = 'true';
+    });
+    afterEach(() => {
+      if (flag === undefined)
+        delete process.env.AI_TOOL_RESULT_COMPACTION_ENABLED;
+      else process.env.AI_TOOL_RESULT_COMPACTION_ENABLED = flag;
+    });
+
+    it.each(['plain', 'escaped'])(
+      'compact persisted %s → Vex markdown reader round-trips without recursive storage',
+      async (kind) =>
+        RequestContextService.runIsolated(scope, async () => {
+          const raw =
+            kind === 'plain'
+              ? JSON.stringify({
+                  rows: Array.from({ length: 400 }, (_, id) => ({
+                    id,
+                    amount: id + 1,
+                  })),
+                })
+              : '\0\n"\\'.repeat(5000);
+          const saved = jest.fn(async () => ({
+            block_id: (
+              await service.create({
+                conversation_id: 1,
+                kind: 'markdown',
+                data: { text: raw },
+              })
+            ).id,
+          }));
+          const compacted = JSON.parse(
+            await compactRecoverableToolResult('read_sales', raw, {
+              persist: saved,
+            }),
+          );
+          const reader = createVexBlockTools({ blocks: service }).find(
+            (tool) => tool.name === 'vex_block_read',
+          )!;
+          let cursor: string | undefined;
+          let text = '';
+          do {
+            const serialized = await reader.handler!(
+              { block_id: compacted.block_id, ...(cursor ? { cursor } : {}) },
+              {} as any,
+            );
+            expect(serialized.length).toBeLessThan(6000);
+            const { data: page } = JSON.parse(serialized);
+            expect(page).toMatchObject({
+              artifact: true,
+              bounded: true,
+              reusable_for_write: false,
+              kind: 'markdown',
+            });
+            expect(page.text_offset).toBe(text.length);
+            text += page.text;
+            if (!page.has_more) {
+              expect(page.cursor).toBeNull();
+              break;
+            }
+            cursor = page.cursor;
+          } while (true);
+          expect(text).toBe(raw);
+          expect(saved).toHaveBeenCalledTimes(1);
+          expect(delegate.rows).toHaveLength(1);
+        }),
+    );
+
+    it('pages escaped rows under the REAL tool envelope, projects columns and aggregates the whole saved table', async () =>
+      RequestContextService.runIsolated(scope, async () => {
+        const rows = Array.from({ length: 400 }, (_, id) => ({
+          id,
+          amount: id + 1,
+          memo: '\0'.repeat(80),
+        }));
+        const block = await service.create({
+          conversation_id: 1,
+          kind: 'table',
+          data: { columns: [{ key: 'id', label: 'ID' }], rows },
+        });
+        const registry = new AIToolRegistry({} as any);
+        registry.registerMany(createVexBlockTools({ blocks: service }));
+        const collected: typeof rows = [];
+        let cursor: string | undefined;
+        do {
+          const serialized = await registry.executeTool('vex_block_read', {
+            block_id: block.id,
+            page_size: 500,
+            ...(cursor ? { cursor } : {}),
+          });
+          expect(serialized.length).toBeLessThan(6000);
+          const { data: page } = JSON.parse(serialized);
+          collected.push(...page.rows);
+          expect(page.complete).toBe(false);
+          if (!page.has_more) break;
+          cursor = page.cursor;
+        } while (true);
+        expect(collected).toEqual(rows);
+        const aggregate = JSON.parse(
+          await registry.executeTool('vex_block_read', {
+            block_id: block.id,
+            aggregate: { field: 'amount', function: 'sum' },
+          }),
+        ).data;
+        expect(aggregate.aggregate_data.value).toBe((400 * 401) / 2);
+        expect(aggregate.complete).toBe(true);
+        const projected = JSON.parse(
+          await registry.executeTool('vex_block_read', {
+            block_id: block.id,
+            page_size: 1,
+            columns: ['id'],
+          }),
+        ).data;
+        expect(projected.rows).toEqual([{ id: 0 }]);
+        expect(delegate.rows).toHaveLength(1);
+      }));
+
+    it('huge rows become labeled JSON text; huge selections never overflow the reader', async () =>
+      RequestContextService.runIsolated(scope, async () => {
+        const rows = [{ id: 1, memo: '\0'.repeat(12000) }];
+        const block = await service.create({
+          conversation_id: 1,
+          kind: 'table',
+          data: { columns: [{ key: 'id', label: 'ID' }], rows },
+        });
+        await service.recordInteraction(block.id, {
+          type: 'select',
+          payload: { selection: rows },
+        });
+        let cursor: string | undefined;
+        let text = '';
+        do {
+          const page = await service.readPaged(block.id, 1, 50, { cursor });
+          expect(JSON.stringify(page).length).toBeLessThan(6000);
+          expect(page).toMatchObject({
+            format: 'text',
+            encoding: 'json',
+            selection_omitted: 1,
+          });
+          text += page.text;
+          if (!page.has_more) break;
+          cursor = page.cursor!;
+        } while (true);
+        expect(JSON.parse(text)).toEqual(rows);
+      }));
+
+    it('rejects fallback/static context and foreign-owner/store cursors before returning data', async () => {
+      const block = await RequestContextService.runIsolated(scope, () =>
+        service.create({
+          conversation_id: 1,
+          kind: 'markdown',
+          data: { text: '\0'.repeat(9000) },
+        }),
+      );
+      const first = await RequestContextService.runIsolated(scope, () =>
+        service.readPaged(block.id),
+      );
+      for (const other of [
+        { ...scope, store_id: 999 },
+        { ...scope, user_id: 55 },
+      ])
+        await expect(
+          RequestContextService.runIsolated(other, () =>
+            service.readPaged(block.id, 1, 50, { cursor: first.cursor! }),
+          ),
+        ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
+      // Existing mocked fallback still has the legitimate principal, but no ALS is not authority.
+      await expect(service.readPaged(block.id)).rejects.toMatchObject({
+        errorCode: 'STORE_CONTEXT_001',
+      });
+    });
   });
 });

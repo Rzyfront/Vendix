@@ -2240,3 +2240,35 @@ it('D2 kill switches default OFF and reject truthy values other than literal tru
     );
   }
 });
+
+it('H transport and compaction default OFF independently and require literal true', async () => {
+  const { agentStreamingEnabled } =
+    await import('./context/agent-stream-inference');
+  const { toolResultCompactionEnabled } =
+    await import('./context/tool-result-compaction');
+  const keys = [
+    'AI_AGENT_STREAMING_ENABLED',
+    'AI_TOOL_RESULT_COMPACTION_ENABLED',
+  ];
+  const previous = keys.map((key) => process.env[key]);
+  try {
+    for (const value of [undefined, '1', 'TRUE', 'false']) {
+      keys.forEach((key) =>
+        value === undefined
+          ? delete process.env[key]
+          : (process.env[key] = value),
+      );
+      expect(agentStreamingEnabled()).toBe(false);
+      expect(toolResultCompactionEnabled()).toBe(false);
+    }
+    process.env.AI_AGENT_STREAMING_ENABLED = 'true';
+    expect(agentStreamingEnabled()).toBe(true);
+    expect(toolResultCompactionEnabled()).toBe(false);
+  } finally {
+    keys.forEach((key, i) =>
+      previous[i] === undefined
+        ? delete process.env[key]
+        : (process.env[key] = previous[i]),
+    );
+  }
+});

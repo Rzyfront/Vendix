@@ -12,6 +12,7 @@ import {
   agentDeadlineContext,
 } from '../../../ai-engine/tasks/agent-deadline';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -48,6 +49,12 @@ import {
 } from '../../../ai-engine/tools/tool-result.normalizer';
 import type { ToolExecutionResult } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { MAX_PLAN_STEPS } from '../../../ai-engine/tools/domains/planning.tools';
+import {
+  ArtifactAggregate,
+  ArtifactPage,
+  readArtifactPage,
+  toolResultCompactionEnabled,
+} from '../../../ai-engine/context/tool-result-compaction';
 
 /** Un plan sin movimiento en este lapso se da por abandonado. */
 export const PLAN_TTL_MS = 24 * 60 * 60 * 1000;
@@ -250,9 +257,68 @@ export class VexiPlanStateService {
   async getObjectiveArtifact(
     id: string,
     resultId: string,
-    query: { offset?: number; limit?: number },
+    query: {
+      offset?: number;
+      limit?: number;
+      artifact_cursor?: string;
+      text_offset?: number;
+      text_limit?: number;
+      columns?: string[];
+      aggregate_field?: string;
+      aggregate_function?: ArtifactAggregate['function'];
+    },
   ) {
     const result = await this.objectiveApiRepository().getResult(id, resultId);
+    if (toolResultCompactionEnabled()) {
+      // getResult enforces explicit ALS store/org/user+objective ownership BEFORE paging.
+      // Historical snapshots never become fresh write evidence through this reader.
+      const { data: value, ...metadata } = result;
+      const aggregate =
+        query.aggregate_field && query.aggregate_function
+          ? { field: query.aggregate_field, function: query.aggregate_function }
+          : undefined;
+      if (!!query.aggregate_field !== !!query.aggregate_function)
+        throw new BadRequestException(
+          'Both aggregate_field and aggregate_function are required',
+        );
+      const envelope = (page: ArtifactPage) => ({
+        ...metadata,
+        ...page,
+        data: page.data ?? null,
+        source_freshness: result.freshness,
+        freshness: page.complete ? result.freshness : 'truncated',
+        observed_at: result.created_at,
+        artifact_pagination: {
+          offset: page.offset,
+          limit: page.returned,
+          total: page.total,
+          has_more: page.has_more,
+          complete: page.complete,
+          next_offset: page.next_offset,
+          cursor: page.cursor,
+        },
+        next_query: page.cursor
+          ? {
+              artifact_cursor: page.cursor,
+              ...(query.columns ? { columns: query.columns } : {}),
+            }
+          : null,
+      });
+      try {
+        return envelope(
+          readArtifactPage(value, {
+            ...query,
+            cursor: query.artifact_cursor,
+            aggregate,
+            // Leave room for ResponseService's outer API envelope and bridge fields.
+            max_json_chars: 4200,
+            envelope,
+          }),
+        );
+      } catch (error) {
+        throw new BadRequestException((error as Error).message);
+      }
+    }
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 50;
     const value = result.data;

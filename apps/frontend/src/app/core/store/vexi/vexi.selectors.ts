@@ -88,3 +88,8 @@ export const selectObjectiveLoading = createSelector(
   selectVexiState,
   (state) => state.objectiveLoading,
 );
+
+export const selectStreamingProgress = createSelector(
+  selectVexiState,
+  (state) => state.streamingProgress,
+);

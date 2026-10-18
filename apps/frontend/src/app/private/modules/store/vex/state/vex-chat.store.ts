@@ -9,11 +9,13 @@ import { Subscription, firstValueFrom } from 'rxjs';
 import {
   VexiApiService,
   VexiObjective,
+  VexiToolExecution,
 } from '../../../../../core/services/vexi-api.service';
 import {
   canResumeObjective,
   objectivePointer,
 } from '../../../../../core/store/vexi/vexi-objective.utils';
+import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
@@ -335,6 +337,9 @@ export class VexChatStore {
   private readonly toast = inject(ToastService);
 
   private stream_sub?: Subscription;
+  private stream_generation = 0;
+  private readonly _stream_progress = signal('');
+  readonly stream_progress = this._stream_progress.asReadonly();
   private readonly loaded_ids = new Set<string>();
   /**
    * Plan tokens minted by approve, keyed by `plan_id`. In-memory only (TTL
@@ -496,7 +501,13 @@ export class VexChatStore {
             ? {
                 ...c,
                 messages: c.messages.map((m) =>
-                  m.streaming ? { ...m, streaming: false } : m,
+                  m.streaming
+                    ? {
+                        ...m,
+                        streaming: false,
+                        tool_steps: cancelVexToolSteps(m.tool_steps ?? []),
+                      }
+                    : m,
                 ),
               }
             : c,
@@ -1351,11 +1362,14 @@ export class VexChatStore {
   }
 
   private runTurn(text: string, attachment_ids: string[]): Promise<void> {
+    this.closeStream();
+    const generation = this.stream_generation;
     this._error.set(null);
     this._is_agent_typing.set(true);
 
     return this.ensureConversation(text)
       .then((conversation_id) => {
+        if (generation !== this.stream_generation) return;
         if (!conversation_id) {
           this._is_agent_typing.set(false);
           return;
@@ -1394,9 +1408,11 @@ export class VexChatStore {
           }),
         )
           .then((stream_id) => {
+            if (generation !== this.stream_generation) return;
             this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
+            if (generation !== this.stream_generation) return;
             this.failMessage(
               conversation_id,
               full.id,
@@ -1446,6 +1462,8 @@ export class VexChatStore {
       skipUserMessage?: boolean;
     },
   ): void {
+    this.closeStream();
+    const generation = this.stream_generation;
     this._is_agent_typing.set(true);
     const continuation_message: VexMessage = {
       ...buildMessage('agent', '', new Date()),
@@ -1471,6 +1489,7 @@ export class VexChatStore {
     );
     firstValueFrom(this.api.createStreamIntent(numeric, '', options))
       .then((stream_id) => {
+        if (generation !== this.stream_generation) return;
         this.subscribeStream(
           numeric,
           conversation_id,
@@ -1480,6 +1499,7 @@ export class VexChatStore {
         );
       })
       .catch((error) => {
+        if (generation !== this.stream_generation) return;
         this.failMessage(
           conversation_id,
           message_id,
@@ -1499,10 +1519,12 @@ export class VexChatStore {
     // Continuations adopt the server id of the new row (frame `message_id`)
     // when the backend reports it; otherwise the local id stays.
     let target = message_id;
+    let reconcileRequired = false;
     this.stream_sub = this.api
       .streamConversation(numeric, stream_id)
       .subscribe({
         next: (chunk) => {
+          reconcileRequired ||= chunk.reconcile_required === true;
           if (
             adopt_server_id &&
             chunk.message_id !== undefined &&
@@ -1515,6 +1537,12 @@ export class VexChatStore {
             }
           }
           this.applyChunk(conversation_id, target, chunk);
+          if (
+            reconcileRequired &&
+            (chunk.type === 'done' || chunk.type === 'error')
+          ) {
+            void this.loadThread(conversation_id);
+          }
         },
         error: (error: unknown) => {
           this.failMessage(
@@ -1556,7 +1584,13 @@ export class VexChatStore {
     chunk: {
       type: string;
       content?: string;
-      tool?: { id: string; name: string; summary?: string; failed?: boolean };
+      tool?: {
+        id: string;
+        name: string;
+        summary?: string;
+        failed?: boolean;
+        execution?: VexiToolExecution;
+      };
       block?: VexUiBlock;
       plan?: VexPlanProposal;
       error?: string;
@@ -1567,6 +1601,9 @@ export class VexChatStore {
       this.rememberObjective(chunk.objective);
     }
     switch (chunk.type) {
+      case 'progress':
+        this._stream_progress.set(chunk.content ?? '');
+        return;
       case 'text': {
         if (!chunk.content) return;
         const delta = chunk.content;
@@ -1600,7 +1637,15 @@ export class VexChatStore {
                   ...c,
                   messages: c.messages.map((m) =>
                     m.id === message_id
-                      ? { ...m, tool_steps: [...(m.tool_steps ?? []), step] }
+                      ? {
+                          ...m,
+                          tool_steps: [
+                            ...(m.tool_steps ?? []).filter(
+                              (existing) => existing.id !== step.id,
+                            ),
+                            step,
+                          ],
+                        }
                       : m,
                   ),
                 }
@@ -1611,32 +1656,25 @@ export class VexChatStore {
       }
       case 'tool_result': {
         if (!chunk.tool) return;
-        const { id, summary, failed } = chunk.tool;
+        const tool = chunk.tool;
         this._conversations.update((list) =>
-          list.map((c) =>
-            c.id === conversation_id
+          list.map((conversation) =>
+            conversation.id === conversation_id
               ? {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === message_id
+                  ...conversation,
+                  messages: conversation.messages.map((message) =>
+                    message.id === message_id
                       ? {
-                          ...m,
-                          tool_steps: (m.tool_steps ?? []).map((s) =>
-                            s.id === id
-                              ? {
-                                  ...s,
-                                  summary,
-                                  status: failed
-                                    ? ('failed' as const)
-                                    : ('done' as const),
-                                }
-                              : s,
+                          ...message,
+                          tool_steps: settleVexToolStep(
+                            message.tool_steps ?? [],
+                            tool,
                           ),
                         }
-                      : m,
+                      : message,
                   ),
                 }
-              : c,
+              : conversation,
           ),
         );
         return;
@@ -1678,6 +1716,7 @@ export class VexChatStore {
         return;
       }
       case 'done': {
+        this._stream_progress.set('');
         const now = new Date();
         this._conversations.update((list) =>
           list.map((c) =>
@@ -1713,6 +1752,7 @@ export class VexChatStore {
     message_id: string,
     error: string,
   ): void {
+    this._stream_progress.set('');
     this.patchMessage(conversation_id, message_id, { streaming: false, error });
     this._is_agent_typing.set(false);
   }
@@ -1863,6 +1903,8 @@ export class VexChatStore {
   }
 
   private closeStream(): void {
+    this.stream_generation++;
+    this._stream_progress.set('');
     this.stream_sub?.unsubscribe();
     this.stream_sub = undefined;
   }

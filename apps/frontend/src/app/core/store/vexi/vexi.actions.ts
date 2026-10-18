@@ -185,6 +185,13 @@ export const streamStarted = createAction(
   props<{ conversationId: number }>(),
 );
 
+/** Progress is transient status, never assistant answer/evidence of an applied effect. */
+export const receiveStreamProgress = createAction(
+  '[Vexi] Receive Stream Progress',
+  props<{ content: string }>(),
+);
+export const cancelStream = createAction('[Vexi] Cancel Stream');
+
 export const receiveStreamChunk = createAction(
   '[Vexi] Receive Stream Chunk',
   props<{ content: string }>(),
@@ -319,6 +326,8 @@ export const streamDropped = createAction(
   '[Vexi] Stream Dropped',
   props<{
     conversationId: number;
+    /** H binds reconciliation to this exact persisted turn, not an older reply. */
+    streamId?: string;
     /** A turn that already said something cannot be re-sent without duplicating it. */
     emittedText: boolean;
     /** A turn that already ran a tool cannot be re-sent without running it twice. */

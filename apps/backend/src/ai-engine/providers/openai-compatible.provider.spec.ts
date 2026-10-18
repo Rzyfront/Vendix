@@ -1043,3 +1043,400 @@ describe('OpenAI-compatible D2 opt-in cancellation', () => {
     expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 });
+
+describe('OpenAI-compatible H assembled agent stream', () => {
+  const tools = ['z_read', 'a_read'].map((name) => ({
+    type: 'function' as const,
+    function: { name, description: name, parameters: { type: 'object' } },
+  }));
+  const build = (events: any[], settings: Record<string, unknown> = {}) => {
+    const observeUsage = jest.fn();
+    const provider = new OpenAICompatibleProvider({
+      provider: 'test',
+      sdkType: 'openai_compatible',
+      apiKey: 'not-real',
+      modelId: 'configured',
+      settings,
+      observeUsage,
+    });
+    const create = jest.fn().mockImplementation(async () =>
+      (async function* () {
+        yield* events;
+      })(),
+    );
+    (provider as any).client.chat.completions.create = create;
+    return { provider, create, observeUsage };
+  };
+  const event = (delta: any = {}, finish_reason: string | null = null) => ({
+    model: 'configured',
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+  const collect = async (source: AsyncIterable<unknown>) => {
+    const chunks: any[] = [];
+    for await (const chunk of source) chunks.push(chunk);
+    return chunks;
+  };
+
+  it('streams useful text before completion but exposes grouped complete tools only on done', async () => {
+    const { provider, create } = build([
+      event({ content: 'Consulta' }),
+      event({
+        tool_calls: [
+          {
+            index: 1,
+            id: 'b',
+            function: { name: 'z_read', arguments: '{"quantity":' },
+          },
+          { index: 0, id: 'a', function: { name: 'a_read', arguments: '{}' } },
+        ],
+      }),
+      event(
+        { tool_calls: [{ index: 1, function: { arguments: '2}' } }] },
+        'tool_calls',
+      ),
+    ]);
+    const source = provider.chatStream(
+      [{ role: 'user', content: 'consulta' }],
+      { agenticStream: true, tools },
+    );
+    expect((await source.next()).value).toEqual({
+      type: 'text',
+      content: 'Consulta',
+    });
+    const next: any = (await source.next()).value;
+    expect(next.type).toBe('done');
+    expect(next.tool_calls.map((c: any) => c.id)).toEqual(['a', 'b']);
+    expect(next.tool_calls[1].function.arguments).toBe('{"quantity":2}');
+    expect(next).toMatchObject({
+      finish_reason: 'tool_calls',
+      model: 'configured',
+      usage_state: 'unknown',
+    });
+    expect(next.usage).toBeUndefined();
+    await source.return(undefined);
+    expect(
+      create.mock.calls[0][0].tools.map((t: any) => t.function.name),
+    ).toEqual(['a_read', 'z_read']);
+    expect(create.mock.calls[0][0]).not.toHaveProperty('stream_options');
+  });
+
+  it.each(['{"quantity":', 'null', '[]', '42', '"x"', ''])(
+    'rejects malformed completed arguments %s without an executable frame',
+    async (args) => {
+      const { provider } = build([
+        event(
+          {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'a',
+                function: { name: 'a_read', arguments: args },
+              },
+            ],
+          },
+          'tool_calls',
+        ),
+      ]);
+      const chunks = await collect(
+        provider.chatStream([], { agenticStream: true, tools }),
+      );
+      expect(chunks.map((c) => c.type)).toEqual(['error']);
+      expect(chunks[0]).not.toHaveProperty('tool_calls');
+    },
+  );
+
+  it.each(
+    [
+      [{ index: 0, id: '', function: { name: 'a_read', arguments: '{}' } }],
+      [{ index: 0, id: 'a', function: { name: 'unoffered', arguments: '{}' } }],
+      [
+        { index: 0, id: 'a', function: { name: 'a_read', arguments: '{}' } },
+        { index: 1, id: 'a', function: { name: 'z_read', arguments: '{}' } },
+      ],
+    ].map((calls) => [calls]),
+  )('rejects missing, foreign or duplicate identities', async (calls) => {
+    const { provider } = build([event({ tool_calls: calls }, 'tool_calls')]);
+    expect(
+      (
+        await collect(provider.chatStream([], { agenticStream: true, tools }))
+      )[0].type,
+    ).toBe('error');
+  });
+
+  it('rejects unfinished streams and truncated tool JSON instead of synthesizing stop', async () => {
+    for (const events of [
+      [event({ content: 'incompleto' })],
+      [
+        event(
+          {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'a',
+                function: { name: 'a_read', arguments: '{}' },
+              },
+            ],
+          },
+          'length',
+        ),
+      ],
+    ]) {
+      const { provider } = build(events);
+      const chunks = await collect(
+        provider.chatStream([], { agenticStream: true, tools }),
+      );
+      expect(chunks.at(-1).type).toBe('error');
+      expect(
+        chunks.some((c) => c.type === 'done' || c.type === 'tool_call'),
+      ).toBe(false);
+    }
+  });
+
+  it('requests stream usage only on a concrete opt-in and separates fresh/cache tokens', async () => {
+    const { provider, create, observeUsage } = build(
+      [
+        event({ content: 'ok' }, 'stop'),
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 5,
+            total_tokens: 105,
+            prompt_tokens_details: { cached_tokens: 70 },
+          },
+        },
+      ],
+      { stream_usage_supported: true },
+    );
+    const chunks = await collect(
+      provider.chatStream([], { agenticStream: true }),
+    );
+    expect(chunks.at(-1).usage).toEqual({
+      promptTokens: 30,
+      completionTokens: 5,
+      totalTokens: 105,
+      cacheReadTokens: 70,
+    });
+    expect(observeUsage).toHaveBeenCalledWith({
+      promptTokens: 30,
+      completionTokens: 5,
+      totalTokens: 105,
+      cacheReadTokens: 70,
+    });
+    expect(create.mock.calls[0][0].stream_options).toEqual({
+      include_usage: true,
+    });
+  });
+
+  it('preserves multi-round tool-only assistant history, grouped IDs and all systems', async () => {
+    const { provider, create } = build([
+      event(
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: 'a',
+              function: { name: 'a_read', arguments: '{}' },
+            },
+            {
+              index: 1,
+              id: 'b',
+              function: { name: 'z_read', arguments: '{"id":3}' },
+            },
+          ],
+        },
+        'tool_calls',
+      ),
+    ]);
+    const first = (
+      await collect(provider.chatStream([], { agenticStream: true, tools }))
+    )[0];
+    const messages: any[] = [
+      { role: 'system', content: 'base' },
+      { role: 'system', content: 'tenant restriction' },
+      { role: 'assistant', content: '', tool_calls: first.tool_calls },
+      { role: 'tool', tool_call_id: 'a', content: '{"ok":true}' },
+      { role: 'tool', tool_call_id: 'b', content: '{"ok":true}' },
+      { role: 'assistant', content: 'historia', context_retention: 'history' },
+    ];
+    create.mockImplementationOnce(async () =>
+      (async function* () {
+        yield event({ content: 'final' }, 'stop');
+      })(),
+    );
+    const second = await collect(
+      provider.chatStream(messages, { agenticStream: true, tools }),
+    );
+    expect(second.at(-1).finish_reason).toBe('stop');
+    expect(create.mock.calls[1][0].messages).toEqual(
+      messages.map(({ context_retention, ...m }) => m),
+    );
+    expect(create.mock.calls[1][0].tools).toEqual(
+      create.mock.calls[0][0].tools,
+    );
+    expect(messages.at(-1)).toHaveProperty('context_retention', 'history');
+  });
+
+  it('consumer disconnect aborts the SDK signal and never creates a retry/fallback request', async () => {
+    const { provider, create } = build([
+      event({ content: 'parcial' }),
+      event({}, 'stop'),
+    ]);
+    const source = provider.chatStream([], { agenticStream: true });
+    await source.next();
+    const signal = create.mock.calls[0][1].signal;
+    expect(signal.aborted).toBe(false);
+    await source.return(undefined);
+    expect(signal.aborted).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OpenAI-compatible H buffered/stream parity', () => {
+  it.each(['tool_calls', 'stop'])(
+    'preserves systems, canonical tools, schema and cache across transports with %s',
+    async (finishReason) => {
+      const provider = new OpenAICompatibleProvider({
+        provider: 'test',
+        sdkType: 'openai_compatible',
+        apiKey: 'not-real',
+        modelId: 'unchanged',
+      });
+      const tools = ['z', 'a'].map((name) => ({
+        type: 'function' as const,
+        function: {
+          name,
+          description: name,
+          parameters: {
+            type: 'object',
+            properties: { quantity: { type: 'integer' } },
+            required: ['quantity'],
+          },
+        },
+      }));
+      const calls = [
+        {
+          id: 'one',
+          type: 'function',
+          function: { name: 'a', arguments: '{"quantity":"2"}' },
+        },
+        {
+          id: 'two',
+          type: 'function',
+          function: { name: 'z', arguments: '{"quantity":3}' },
+        },
+      ];
+      const messages: any[] = [
+        { role: 'system', content: 'base old' },
+        { role: 'system', content: 'tenant restriction and pending approval' },
+        { role: 'assistant', content: '', tool_calls: calls },
+        { role: 'tool', tool_call_id: 'one', content: '{}' },
+        { role: 'tool', tool_call_id: 'two', content: '{}' },
+      ];
+      const rawUsage = {
+        prompt_tokens: 100,
+        completion_tokens: 5,
+        total_tokens: 105,
+        prompt_tokens_details: { cached_tokens: 70 },
+      };
+      const create = jest
+        .fn()
+        .mockResolvedValueOnce({
+          model: 'unchanged',
+          usage: rawUsage,
+          choices: [
+            {
+              message: { content: '', tool_calls: calls },
+              finish_reason: finishReason,
+            },
+          ],
+        })
+        .mockResolvedValueOnce(
+          (async function* () {
+            yield {
+              model: 'unchanged',
+              choices: [
+                {
+                  delta: {
+                    tool_calls: calls.map((call, index) => ({
+                      ...call,
+                      index,
+                    })),
+                  },
+                  finish_reason: finishReason,
+                },
+              ],
+              usage: rawUsage,
+            };
+          })(),
+        );
+      (provider as any).client.chat.completions.create = create;
+      const options = {
+        agenticStream: true,
+        tools,
+        systemPrompt: 'base new',
+        tool_choice: 'auto' as const,
+      };
+      const buffered = await provider.chat(messages, options);
+      const chunks: any[] = [];
+      for await (const chunk of provider.chatStream(messages, options))
+        chunks.push(chunk);
+      const { stream, ...streamPayload } = create.mock.calls[1][0];
+      expect(stream).toBe(true);
+      expect(streamPayload).toEqual(create.mock.calls[0][0]);
+      expect(
+        streamPayload.messages
+          .filter((m: any) => m.role === 'system')
+          .map((m: any) => m.content),
+      ).toEqual(['base new', 'tenant restriction and pending approval']);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].tool_calls).toEqual(buffered.tool_calls);
+      expect(chunks[0].usage).toEqual(buffered.usage);
+      expect(chunks[0].tool_calls[0].function.arguments).toBe('{"quantity":2}');
+      expect(messages[0].content).toBe('base old');
+    },
+  );
+});
+
+describe('OpenAI-compatible H metering capability', () => {
+  it.each([undefined, false, 'true', 1, true])(
+    'declares metered streams only for concrete boolean config opt-in %p',
+    (supported) => {
+      const provider = new OpenAICompatibleProvider({
+        provider: 'test',
+        sdkType: 'openai_compatible',
+        apiKey: 'not-real',
+        modelId: 'unchanged',
+        settings: { stream_usage_supported: supported },
+      });
+      expect(provider.supportsMeteredAgentStream()).toBe(supported === true);
+    },
+  );
+  it('rejects tool_calls stop with no calls in both H transports', async () => {
+    const provider = new OpenAICompatibleProvider({
+      provider: 'test',
+      sdkType: 'openai_compatible',
+      apiKey: 'not-real',
+      modelId: 'unchanged',
+    });
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce({
+        model: 'unchanged',
+        choices: [{ message: { content: '' }, finish_reason: 'tool_calls' }],
+      })
+      .mockResolvedValueOnce(
+        (async function* () {
+          yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }] };
+        })(),
+      );
+    (provider as any).client.chat.completions.create = create;
+    expect(await provider.chat([], { agenticStream: true })).toMatchObject({
+      success: false,
+    });
+    const chunks: any[] = [];
+    for await (const chunk of provider.chatStream([], { agenticStream: true }))
+      chunks.push(chunk);
+    expect(chunks.map((c) => c.type)).toEqual(['error']);
+  });
+});

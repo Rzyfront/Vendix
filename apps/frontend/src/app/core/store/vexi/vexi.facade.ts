@@ -25,6 +25,17 @@ export class VexiFacade {
   readonly streamingContent$ = this.store.select(
     VexiSelectors.selectStreamingContent,
   );
+  readonly streamingProgress$ = this.store.select(
+    VexiSelectors.selectStreamingProgress,
+  );
+  readonly streamingProgress = toSignal(this.streamingProgress$, {
+    initialValue: '',
+  });
+
+  cancelStream(): void {
+    this.store.dispatch(VexiActions.cancelStream());
+  }
+
   readonly isStreaming$ = this.store.select(VexiSelectors.selectIsStreaming);
   readonly isSending$ = this.store.select(VexiSelectors.selectIsSending);
   readonly loading$ = this.store.select(VexiSelectors.selectLoading);

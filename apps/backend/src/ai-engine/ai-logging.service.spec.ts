@@ -164,3 +164,63 @@ describe('AILoggingService phase A correlation/privacy', () => {
     expect(error).toHaveBeenCalledWith('Failed to log AI request');
   });
 });
+
+describe('H accounting is explicit without enabling tracing', () => {
+  it('persists unknown usage + redacts data on H cancellation, but OFF keeps legacy', async () => {
+    const before = process.env.AI_AGENT_STREAMING_ENABLED;
+    const create = jest.fn().mockResolvedValue({});
+    const service = new AILoggingService(
+      { ai_engine_logs: { create } } as never,
+      {} as never,
+      undefined,
+      { get: () => false } as never,
+    );
+    const entry = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cost_usd: 0,
+      latency_ms: 2,
+      status: 'error' as const,
+      input_preview: 'private-message',
+      error_message: 'private-error',
+      usage_observed: {
+        prompt_tokens: null,
+        completion_tokens: null,
+        cache_read_tokens: null,
+        cache_creation_tokens: null,
+      },
+      telemetry_metadata: {
+        streaming: true,
+        usage_known: false,
+        usage_source: 'unknown',
+        billable: 'unknown',
+        cost_measurement: 'estimated',
+        estimated_cost_microusd: 120,
+        context_window_tokens: 32768,
+        context_budget_source: 'fallback',
+        estimation_method: 'conservative_estimate',
+        estimated_output_tokens: 512,
+        omitted_messages: 2,
+      },
+    };
+    try {
+      process.env.AI_AGENT_STREAMING_ENABLED = 'true';
+      await service.logRequest(entry);
+      expect(create.mock.calls[0][0].data).toMatchObject({
+        usage_observed: entry.usage_observed,
+        telemetry_metadata: entry.telemetry_metadata,
+        error_message: '[redacted]',
+      });
+      expect(create.mock.calls[0][0].data.input_preview).toBeUndefined();
+      process.env.AI_AGENT_STREAMING_ENABLED = 'false';
+      await service.logRequest(entry);
+      expect(create.mock.calls[1][0].data.usage_observed).toBeUndefined();
+      expect(create.mock.calls[1][0].data.input_preview).toBe(
+        'private-message',
+      );
+    } finally {
+      if (before === undefined) delete process.env.AI_AGENT_STREAMING_ENABLED;
+      else process.env.AI_AGENT_STREAMING_ENABLED = before;
+    }
+  });
+});

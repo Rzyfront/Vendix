@@ -353,6 +353,13 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
         stop_reason: 'end_turn',
         result_bytes: Infinity,
         billable: 'unknown',
+        context_budget_source: 'fallback',
+        estimation_method: 'conservative_estimate',
+        cost_measurement: 'estimated',
+        estimated_cost_microusd: 120,
+        context_window_tokens: 32768,
+        estimated_output_tokens: 512,
+        omitted_messages: 2,
       }),
     ).toEqual({
       tool_count: 2,
@@ -360,6 +367,13 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
       catalog_hash: hashTraceValue('catalog'),
       stop_reason: 'end_turn',
       billable: 'unknown',
+      context_budget_source: 'fallback',
+      estimation_method: 'conservative_estimate',
+      cost_measurement: 'estimated',
+      estimated_cost_microusd: 120,
+      context_window_tokens: 32768,
+      estimated_output_tokens: 512,
+      omitted_messages: 2,
     });
   });
 
