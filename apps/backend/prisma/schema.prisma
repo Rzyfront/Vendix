@@ -6069,6 +6069,38 @@ model ai_agent_effects {
   @@index([evidence_result_id])
 }
 
+/// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.
+/// Source is authenticated ciphertext only; no plaintext accessor or business cascade.
+model ai_agent_script_runs {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id          Int
+  organization_id   Int
+  user_id           Int
+  objective_id      String    @db.Uuid
+  source_hash       String    @db.VarChar(64)
+  source_ciphertext Bytes
+  source_nonce      Bytes
+  source_auth_tag   Bytes
+  source_key_id     String    @db.VarChar(16)
+  policy_digest     String    @db.VarChar(71)
+  runtime_digest    String    @db.VarChar(71)
+  limits            Json
+  manifest          Json
+  calls             Json      @default("[]")
+  outcome           String    @default("running") @db.VarChar(20)
+  usage             Json      @default("{}")
+  lease_until       DateTime  @db.Timestamptz(6)
+  expires_at        DateTime  @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  finished_at       DateTime? @db.Timestamptz(6)
+
+  @@index([store_id, organization_id, user_id, created_at], map: "ai_agent_script_runs_owner_created_idx")
+  @@index([store_id, organization_id, user_id, objective_id], map: "ai_agent_script_runs_owner_objective_idx")
+  @@index([lease_until], map: "ai_agent_script_runs_admission_idx")
+  @@index([store_id, lease_until], map: "ai_agent_script_runs_store_admission_idx")
+  @@index([expires_at], map: "ai_agent_script_runs_retention_idx")
+}
+
 model ai_embeddings {
   knowledge_scope String                       @default("store") @db.Text
   id              Int                          @id @default(autoincrement())

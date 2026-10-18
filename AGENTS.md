@@ -24,6 +24,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-agent-evals-observability` |
 | -- | `vendix-agent-execution-contract` |
 | -- | `vendix-agent-playbooks` |
+| -- | `vendix-agent-sandbox-security` |
 | -- | `vendix-agent-voice-consent` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
@@ -157,11 +158,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
 | Changing Vex/Vexi spoken consent or voice confirmation challenges | `vendix-agent-voice-consent` |
+| Changing agent sandbox isolation, limits or deployment adapter | `vendix-agent-sandbox-security` |
 | Changing agent verification, recovery or audited read scheduling | `vendix-agent-durable-tasks` |
 | Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Changing playbook loading, contracts, packaging or verifiers | `vendix-agent-playbooks` |
+| Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |

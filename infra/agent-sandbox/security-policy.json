@@ -1,0 +1,63 @@
+{
+  "version": "vendix-readonly-sandbox-v1",
+  "default_enabled": false,
+  "transport": "ndjson-stdio-v1",
+  "isolation": "linux-gvisor-cgroup-v2-per-execution",
+  "guest_trust": "none-including-stdio-frames",
+  "source_normalization": "unicode-NFC-and-CRLF-or-CR-to-LF",
+  "languages": {
+    "javascript": "async-function-body-no-imports-or-dependencies",
+    "typescript": "JavaScript-valid-subset-and-JSDoc-only-no-type-erasure-or-transpilation"
+  },
+  "permissions": {
+    "network": false,
+    "read": false,
+    "write": false,
+    "environment": false,
+    "subprocess": false,
+    "ffi": false,
+    "system": false,
+    "imports": false,
+    "npm": false,
+    "remote_modules": false,
+    "permission_broker": false
+  },
+  "capsule": {
+    "runtime": "runsc",
+    "uid": "65532:65532",
+    "capabilities": "drop-all",
+    "network": "none",
+    "rootfs": "read-only",
+    "seccomp": "operator-reviewed-immutable-profile-required",
+    "no_new_privileges": true,
+    "host_mounts": false,
+    "secrets": false,
+    "reuse": false,
+    "logging": "none",
+    "cpu_quota_cores": 1,
+    "pids": 64
+  },
+  "maximum_limits": {
+    "wall_ms": 30000,
+    "cpu_ms": 2000,
+    "memory_mb": 256,
+    "calls": 20,
+    "concurrency": 3,
+    "pages": 10,
+    "rows": 5000,
+    "input_bytes": 2097152,
+    "output_bytes": 65536,
+    "source_bytes": 32768
+  },
+  "host_responsibilities": [
+    "current-authority-intersection-and-strict-tenant-context-per-call",
+    "semantic-readonly-allowlist-and-current-tool-schema",
+    "no-ui-write-plan-scratch-discovery-generic-endpoint-or-recursive-tools",
+    "monotonic-sequence-nonce-and-live-objective-lease",
+    "one-active-execution-per-store-and-global-capacity-admission",
+    "cumulative-calls-concurrency-pages-rows-and-reply-bytes",
+    "redacted-scoped-audit-with-source-reference-and-digests",
+    "cancel-and-fence-late-tool-effects-or-results"
+  ],
+  "promotion": "disabled-until-independent-Linux-isolation-report-and-human-review"
+}

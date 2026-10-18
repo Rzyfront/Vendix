@@ -428,6 +428,12 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_agent_trace_spans;
   }
 
+  // System sink only. Tenant access uses SandboxAuditRepository's org/store/user
+  // predicates, never a generic store/org delegate (which lacks owner ACL).
+  get ai_agent_script_runs() {
+    return this.baseClient.ai_agent_script_runs;
+  }
+
   get ai_agent_tasks() {
     return this.baseClient.ai_agent_tasks;
   }

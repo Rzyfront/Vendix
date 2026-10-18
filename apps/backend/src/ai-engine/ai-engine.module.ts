@@ -1,4 +1,10 @@
 import { AgentVerifierService } from './tasks/agent-verifier.service';
+import { SandboxBrokerService } from './sandbox/sandbox-broker.service';
+import { SandboxClientService } from './sandbox/sandbox-client.service';
+import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
+import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
+import { sandboxEnabled } from './sandbox/interfaces/sandbox-protocol.interface';
+import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -79,6 +85,10 @@ import { S3Service } from '../common/services/s3.service';
     AgentEvidenceService,
     AgentDurableSessionService,
     AgentVerifierService,
+    SandboxBrokerService,
+    SandboxClientService,
+    SandboxPolicyService,
+    SandboxAuditRepository,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -143,9 +153,12 @@ export class AIEngineModule implements OnModuleInit {
     private readonly toolbox: AiToolboxService,
     private readonly attachments: VexiAttachmentsService,
     private readonly s3: S3Service,
+    private readonly sandbox: SandboxBrokerService,
   ) {}
 
   onModuleInit() {
+    if (sandboxEnabled())
+      this.toolRegistry.registerMany(createCodeExecutionTools(this.sandbox));
     if (playbooksEnabled())
       this.toolRegistry.registerMany(createPlaybookTools());
     if (toolRoutingEnabled())

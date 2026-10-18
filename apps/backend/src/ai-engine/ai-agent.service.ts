@@ -3,6 +3,14 @@ import {
   toolResultCompactionEnabled,
 } from './context/tool-result-compaction';
 import {
+  sandboxEnabled,
+  sandboxStoreEnabled,
+} from './sandbox/interfaces/sandbox-protocol.interface';
+import {
+  publicSandboxArgs,
+  sandboxInvocation,
+} from './sandbox/sandbox-invocation.context';
+import {
   agentStreamingEnabled,
   streamAgentInference,
 } from './context/agent-stream-inference';
@@ -1390,8 +1398,12 @@ export class AIAgentService {
       }
     return allowed.filter(
       (d) =>
-        playbooksEnabled() ||
-        !['search_playbooks', 'load_playbook'].includes(d.function.name),
+        (playbooksEnabled() ||
+          !['search_playbooks', 'load_playbook'].includes(d.function.name)) &&
+        (d.function.name !== 'run_readonly_script' ||
+          (sandboxEnabled() &&
+            sandboxStoreEnabled(context?.store_id) &&
+            !!params.durable)),
     );
   }
 
@@ -1576,8 +1588,12 @@ export class AIAgentService {
 
     filteredTools = filteredTools.filter(
       (d) =>
-        playbooksEnabled() ||
-        !['search_playbooks', 'load_playbook'].includes(d.function.name),
+        (playbooksEnabled() ||
+          !['search_playbooks', 'load_playbook'].includes(d.function.name)) &&
+        (d.function.name !== 'run_readonly_script' ||
+          (sandboxEnabled() &&
+            sandboxStoreEnabled(context?.store_id) &&
+            !!params.durable)),
     );
 
     if (routing) {
@@ -3047,7 +3063,7 @@ export class AIAgentService {
               tool: {
                 id: toolCall.id,
                 name: toolName,
-                arguments: toolArgs,
+                arguments: publicSandboxArgs(toolName, toolArgs),
                 ...(semantic && this.toolRegistry.isClientSide(toolName)
                   ? {
                       execution: toolReceipt(
@@ -3149,7 +3165,7 @@ export class AIAgentService {
               }
               toolsUsed.push({
                 name: toolName,
-                args: toolArgs,
+                args: publicSandboxArgs(toolName, toolArgs),
                 ...(uiExecution ? { execution: toolReceipt(uiExecution) } : {}),
                 result: resultPayload,
               });
@@ -3244,26 +3260,67 @@ export class AIAgentService {
                       this.playbooks.getActiveToolDependencies(playbookSession);
                   return JSON.stringify(value);
                 }
-                return semantic
-                  ? JSON.stringify(
-                      await this.toolRegistry.executeToolResult(
-                        toolName,
-                        toolArgs,
-                        {
-                          evidenceRef: `tool_call:${toolCall.id}`,
-                          ...(process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
-                          params.conversation_id
-                            ? { conversationId: params.conversation_id }
-                            : {}),
-                        },
-                      ),
-                    )
-                  : process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
-                      params.conversation_id
-                    ? this.toolRegistry.executeTool(toolName, toolArgs, {
-                        conversationId: params.conversation_id,
-                      })
-                    : this.toolRegistry.executeTool(toolName, toolArgs);
+                const registryExecute = async () =>
+                  semantic
+                    ? JSON.stringify(
+                        await this.toolRegistry.executeToolResult(
+                          toolName,
+                          toolArgs,
+                          {
+                            evidenceRef: `tool_call:${toolCall.id}`,
+                            ...(process.env.AI_VOICE_CONFIRM_ENABLED ===
+                              'true' && params.conversation_id
+                              ? { conversationId: params.conversation_id }
+                              : {}),
+                          },
+                        ),
+                      )
+                    : process.env.AI_VOICE_CONFIRM_ENABLED === 'true' &&
+                        params.conversation_id
+                      ? this.toolRegistry.executeTool(toolName, toolArgs, {
+                          conversationId: params.conversation_id,
+                        })
+                      : this.toolRegistry.executeTool(toolName, toolArgs);
+                if (
+                  toolName === 'run_readonly_script' &&
+                  sandboxEnabled() &&
+                  params.durable
+                ) {
+                  const durable = params.durable;
+                  return sandboxInvocation.run(
+                    {
+                      agentKey: params.agent_key ?? 'vexi',
+                      initialNames: filteredTools.map((d) => d.function.name),
+                      durable,
+                      revalidate: async () => {
+                        await durable.assertCurrent();
+                        return (await this.resolveRoutedAuthority(params)).map(
+                          (d) => d.function.name,
+                        );
+                      },
+                      record: async (seq, name, args, result) => {
+                        const callId = `sandbox:${toolCall.id}:${seq}`;
+                        const artifact = await durable.checkpointTool(
+                          callId,
+                          name,
+                          args,
+                          result,
+                          this.toolRegistry.get(name)?.version ?? '1',
+                        );
+                        if (countsAsToolSuccess(result))
+                          await this.consumeToolCallQuota(
+                            context?.store_id,
+                            callId,
+                            name,
+                            params.agent_key,
+                          );
+                        return artifact;
+                      },
+                    },
+                    registryExecute,
+                  );
+                }
+                return registryExecute();
               };
               const meteredExecute = () =>
                 params.durable ? params.durable.runTool(execute) : execute();
@@ -3319,7 +3376,7 @@ export class AIAgentService {
 
               toolsUsed.push({
                 name: toolName,
-                args: toolArgs,
+                args: publicSandboxArgs(toolName, toolArgs),
                 result,
                 ...(normalized ? { execution: toolReceipt(normalized) } : {}),
               });
@@ -3327,7 +3384,10 @@ export class AIAgentService {
               // F3 — el `tool_result` exitoso suma 1 al contador mensual del
               // periodo, post-ejecución. Va después de `executeTool` a propósito:
               // propuestas, errores y despachos clientSide no consumen.
-              if (!normalized || countsAsToolSuccess(normalized))
+              if (
+                toolName !== 'run_readonly_script' &&
+                (!normalized || countsAsToolSuccess(normalized))
+              )
                 await this.consumeToolCallQuota(
                   context?.store_id,
                   toolCall.id,
@@ -3529,7 +3589,7 @@ export class AIAgentService {
                       normalizedApply.freshness = 'truncated';
                     toolsUsed.push({
                       name: toolName,
-                      args: toolArgs,
+                      args: publicSandboxArgs(toolName, toolArgs),
                       result: applied,
                       ...(normalizedApply
                         ? { execution: toolReceipt(normalizedApply) }
@@ -3610,7 +3670,7 @@ export class AIAgentService {
                     order,
                     step_id: `s${order}`,
                     tool: toolName,
-                    args: toolArgs,
+                    args: publicSandboxArgs(toolName, toolArgs),
                     preview: details.preview,
                   });
                   messages.push({
@@ -3649,7 +3709,7 @@ export class AIAgentService {
                 toolOutcome = 'awaiting_approval';
                 pendingConfirmation = {
                   tool: toolName,
-                  arguments: toolArgs,
+                  arguments: publicSandboxArgs(toolName, toolArgs),
                   confirmation_token: details.confirmation_token,
                   preview: details.preview,
                 };
@@ -3685,7 +3745,7 @@ export class AIAgentService {
                   type: 'plan_approval',
                   plan_approval: {
                     tool: toolName,
-                    arguments: toolArgs,
+                    arguments: publicSandboxArgs(toolName, toolArgs),
                     confirmation_token: details.confirmation_token,
                     preview: details?.preview,
                     ...(params.plan_approval?.plan_id
