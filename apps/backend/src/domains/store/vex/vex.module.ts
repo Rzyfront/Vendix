@@ -76,15 +76,20 @@ export class VexModule implements OnModuleInit {
           /* A metering outage must not hide an already-applied receipt. */
         }
       }
-      return proposal.planId
-        ? this.planApproval.recordStepResult({
-            planId: proposal.planId,
-            conversationId: proposal.conversationId,
-            tool: proposal.tool,
-            args: proposal.arguments,
-            outcome: result.outcome,
-            error: result.error,
-          })
+      if (proposal.planId)
+        return this.planApproval.recordStepResult({
+          planId: proposal.planId,
+          conversationId: proposal.conversationId,
+          tool: proposal.tool,
+          args: proposal.arguments,
+          outcome: result.outcome,
+          error: result.error,
+        });
+      // A `single-` card has no server plan to persist. Its applied receipt says
+      // so explicitly, as runSingleUseApply does for click; a non-applied one is
+      // already folded fail-closed by VexiController.applyConfirmation.
+      return result.outcome === 'applied'
+        ? { step_status: 'applied' as const, plan_status: 'applied' as const }
         : null;
     });
     this.toolRegistry.registerMany(

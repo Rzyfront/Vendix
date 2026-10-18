@@ -15,7 +15,11 @@ const args = { id: 7, name: 'Nuevo' };
 /** Real controller -> voice adapter -> Vex module sink -> plan persistence.
  * Prisma transport and the already-produced D1 receipt are synthetic, not DB/audio E2E.
  */
-function fixture(status: 'proposed' | 'approved', outcome = 'unknown_effect') {
+function fixture(
+  status: 'proposed' | 'approved',
+  outcome = 'unknown_effect',
+  withPlan = true,
+) {
   let metadata = {
     plan: {
       plan_id: planId,
@@ -88,13 +92,28 @@ function fixture(status: 'proposed' | 'approved', outcome = 'unknown_effect') {
     recordApplied: jest.fn(),
     recordAppliedNarration: jest.fn(),
   };
-  const proposal = {
-    agentKey: 'vex',
-    planId,
-    conversationId: 22,
+  const proposal: VoiceConsentProposal = {
+    sessionId: 'voice-session',
     tool: 'update_product',
+    toolVersion: '1',
     arguments: args,
-  } as VoiceConsentProposal;
+    preview: { summary: 'Renombrar producto' },
+    confirmationToken: 'consumed',
+    actionLabel: 'Producto · actualizar',
+    ...(withPlan && { planId }),
+    proposalId: 'proposal-1',
+    userId: 3,
+    organizationId: 7,
+    storeId: 11,
+    conversationId: 22,
+    agentKey: 'vex',
+    objectiveId: null,
+    stepId: null,
+    sessionRevision: 1,
+    argumentsHash: 'args-hash',
+    previewHash: 'preview-hash',
+    expiresAt: Date.now() + 60_000,
+  };
   const apply = () =>
     controller.applyConfirmation(
       {
@@ -186,6 +205,27 @@ describe('N1 Vex voice semantic receipt persistence', () => {
       expect(
         f.controller.activity.recordAppliedNarration,
       ).toHaveBeenCalledTimes(1);
+    }));
+  it('reports an applied single-use Vex voice receipt as applied, like the click path', async () =>
+    RequestContextService.runIsolated(context, async () => {
+      // `single-` cards send no plan_id: no server plan exists to persist.
+      const f = fixture('proposed', 'ok', false);
+      expect(f.proposal.planId).toBeUndefined();
+      expect(await f.apply()).toMatchObject({
+        step_status: 'applied',
+        plan_status: 'applied',
+      });
+      expect(f.quota).toHaveBeenCalledTimes(1);
+      expect(f.metadata().plan.steps[0].status).toBe('pending');
+    }));
+  it('keeps an uncertain single-use Vex voice receipt fail-closed', async () =>
+    RequestContextService.runIsolated(context, async () => {
+      const f = fixture('proposed', 'unknown_effect', false);
+      expect(await f.apply()).toMatchObject({
+        step_status: 'unknown',
+        plan_status: 'unknown_effect',
+      });
+      expect(f.quota).not.toHaveBeenCalled();
     }));
   it('does not send Vexi receipts to the Vex-only sink', async () => {
     const f = fixture('proposed');

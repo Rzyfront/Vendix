@@ -225,6 +225,45 @@ describe('B4/M3 Vex plan store and own cards', () => {
     expect(current(store).status).toBe('done');
     expect(current(store).steps[0].status).toBe('done');
   });
+  it('N3 marks an applied single-use voice receipt done, like the click path', () => {
+    // `single-` cards carry no server plan: the backend sink now synthesizes the
+    // applied step/plan state that runSingleUseApply adds for click.
+    plan.plan_id = 'single-voice';
+    plan.steps = [{ ...plan.steps[0], confirmation_token: 'single-use' }];
+    store.acceptVoiceReceipt('m1', plan.plan_id, {
+      context: {
+        conversation_id: 7,
+        agent_key: 'vex',
+        channel: 'pipeline',
+        step_id: 's1',
+      },
+      confirmationToken: 'single-use',
+      proposalArguments: plan.steps[0].arguments,
+      receipt: {
+        tool: 'create_customer',
+        output: '{}',
+        summary: 'Cliente creado.',
+        step_status: 'applied',
+        plan_status: 'applied',
+        execution: {
+          schema_version: '1',
+          status: 'ok',
+          effect_status: 'applied',
+          freshness: 'observed',
+          retryable: false,
+          error_code: null,
+          next_action: null,
+          resource_ids: {},
+          evidence_refs: [],
+        },
+      },
+    });
+    expect(current(store).status).toBe('done');
+    expect(current(store).steps[0].status).toBe('done');
+    expect(current(store).steps[0].error).toBeUndefined();
+    const messages = store.active_conversation()!.messages;
+    expect(messages[messages.length - 1].content).toBe('Cliente creado.');
+  });
   it('applies only covered first change and leaves second reachable after token loss/reload', async () => {
     await (store as any).runPlanApproval('7', 'm1', 7, plan);
     expect(api.applyConfirmation).toHaveBeenCalledTimes(1);
