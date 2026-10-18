@@ -38,6 +38,10 @@ export interface AIMessage {
 }
 
 export interface AIRequestOptions {
+  /** Opt-in D2 cancellation; never serialized into the provider request body. */
+  signal?: AbortSignal;
+  /** Epoch-millisecond dispatch deadline, already excluding closure reserve. */
+  deadlineMs?: number;
   model?: string;
   temperature?: number;
   maxTokens?: number;

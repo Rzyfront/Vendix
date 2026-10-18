@@ -1,3 +1,21 @@
+import {
+  robustExecutionEnabled,
+  parallelReadsEnabled,
+  maximumRecoveryReplans,
+  maximumCatalogExpansions,
+} from './tasks/agent-execution-flags';
+import {
+  AgentDeadline,
+  agentDeadlineContext,
+  isAgentAbort,
+} from './tasks/agent-deadline';
+import {
+  AgentRecoveryService,
+  AgentRecoveryState,
+  RecoveryDecision,
+} from './tasks/agent-recovery.service';
+import { ToolSchedulerService } from './tools/tool-scheduler.service';
+import { validateToolArgs } from './tools/tool-args.validator';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
@@ -186,6 +204,8 @@ export interface AgentRunParams {
    * this one, so it stops silently: no text, no error.
    */
   shouldAbort?: () => Promise<boolean>;
+  /** D2 cooperative cancellation; never an approval. */
+  signal?: AbortSignal;
   /**
    * Agent identity for this turn (`ai_agents.key`). Drives the budget table
    * (Vex gets 40/300s, 60/600s with an open plan) and travels to the audit
@@ -363,6 +383,7 @@ export interface AgentResult {
 @Injectable()
 export class AIAgentService {
   private readonly logger = new Logger(AIAgentService.name);
+  private readonly scheduler = new ToolSchedulerService();
   private readonly DEFAULT_MAX_ITERATIONS = 10;
   private readonly DEFAULT_TIMEOUT_MS = 60000;
 
@@ -1175,10 +1196,15 @@ export class AIAgentService {
     session: AgentDurableSession,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     let done: AIStreamChunk | undefined;
+    const robust = robustExecutionEnabled();
+    let textBuffered = false;
     try {
       let step = await source.next();
       while (!step.done) {
-        if (step.value.type === 'done') {
+        if (robust && step.value.type === 'text') {
+          textBuffered = true;
+          step = await source.next();
+        } else if (step.value.type === 'done') {
           done = step.value;
           step = await source.next();
         } else {
@@ -1194,9 +1220,43 @@ export class AIAgentService {
       }
       const result = step.value;
       result.objective = await session.finish(result);
+      if (result.objective.semantic_status === 'completed_verified') {
+        result.execution = {
+          schema_version: '1',
+          outcome: 'completed_verified',
+          next_action:
+            'El resultado fue verificado con postcondiciones de servidor.',
+          evidence_refs:
+            session.objective.plan?.deliverables.flatMap(
+              (d) => d.evidence_refs ?? [],
+            ) ?? [],
+          resource_ids: result.execution?.resource_ids ?? {},
+        };
+      }
+      if (
+        robust &&
+        result.objective.semantic_status !== 'completed_verified' &&
+        (session.objective.plan || session.objective.requires_revalidation) &&
+        !result.pending_confirmation &&
+        !result.pending_plan &&
+        !result.awaiting_input &&
+        !result.aborted &&
+        !result.plan_continue &&
+        result.success
+      ) {
+        result.content = `Conservo el avance, pero faltan postcondiciones de servidor para dar este trabajo por terminado. ${session.objective.next_step ?? result.execution?.next_action ?? 'Consultaré el estado del registro antes de repetir cualquier cambio.'}`;
+      }
+      if (
+        robust &&
+        (textBuffered || result.content) &&
+        result.content &&
+        !result.aborted
+      )
+        yield { type: 'text', content: result.content };
       yield {
         ...(done ?? { type: 'done' as const }),
         objective: result.objective,
+        ...(result.execution ? { execution: result.execution } : {}),
       };
       return result;
     } finally {
@@ -1264,6 +1324,35 @@ export class AIAgentService {
     const activeTrace = this.trace?.currentSpan() ? this.trace : undefined;
     const semantic = toolExecutionContractEnabled() || !!params.durable;
     const recovery = new ToolRecovery();
+    const robust = robustExecutionEnabled() && !!params.durable;
+    const recoveryPolicy = new AgentRecoveryService();
+    const recoveryLimits = {
+      max_replans: maximumRecoveryReplans(),
+      max_expansions: maximumCatalogExpansions(),
+    };
+    let recoveryState: AgentRecoveryState | undefined = robust
+      ? await params.durable!.recoveryState()
+      : undefined;
+    let recoveryDecision: RecoveryDecision | undefined;
+    const saveRecovery = async (state: AgentRecoveryState) => {
+      if (JSON.stringify(state) !== JSON.stringify(recoveryState))
+        await params.durable!.checkpointRecovery(state, recoveryState);
+      recoveryState = state;
+    };
+    let deadline: AgentDeadline | undefined;
+    const cumulativeActiveAtStart = robust
+      ? params.durable!.objective.budget.active_runtime_ms
+      : 0;
+    const wallLimit = (timeout: number) =>
+      Math.min(
+        startTime + timeout,
+        params.durable
+          ? new Date(params.durable.objective.expires_at).getTime()
+          : Infinity,
+        params.durable?.objective.lease_until
+          ? new Date(params.durable.objective.lease_until).getTime()
+          : Infinity,
+      );
     let semanticHalt = false;
     const startTime = Date.now();
     const isVex = params.agent_key === 'vex';
@@ -1478,6 +1567,22 @@ export class AIAgentService {
       timeoutMs = widenTimeout(timeoutMs);
     }
 
+    if (robust) {
+      deadline = new AgentDeadline({
+        wallDeadlineMs: wallLimit(timeoutMs),
+        activeBudgetMs: Math.min(
+          timeoutMs,
+          Math.max(0, 1_800_000 - cumulativeActiveAtStart),
+        ),
+        reserveMs: Math.min(2000, Math.floor(timeoutMs / 10)),
+        signal: params.signal,
+      });
+      if (params.shouldAbort) deadline.watchAbort(params.shouldAbort);
+    }
+    const withinDeadline = <T>(work: () => Promise<T>): Promise<T> =>
+      deadline
+        ? agentDeadlineContext.run(deadline, () => deadline!.run(work))
+        : work();
     const messages: AIMessage[] = [];
 
     // With an app key the system prompt lives in the database and `run()`
@@ -1577,12 +1682,59 @@ export class AIAgentService {
 
     const toolsUsed: AgentResult['tools_used'] = [];
     let pendingConfirmation: AgentResult['pending_confirmation'];
-    const observeResult = (
+    const observeResult = async (
       name: string,
       args: unknown,
       normalized: ToolExecutionResult,
     ) => {
-      recovery.record(name, args, normalized);
+      if (robust) {
+        const payload = normalized.data as Record<string, unknown> | null;
+        const next = recoveryPolicy.decide(
+          {
+            tool_name: name,
+            arguments: args,
+            receipt: normalized,
+            read_only: this.toolRegistry.isReadOnly(name),
+            missing_identifier:
+              args && typeof args === 'object'
+                ? Object.keys(args).find((key) =>
+                    /^(?:.*_id|sku|document|query)$/.test(key),
+                  )
+                : undefined,
+            deadline_at: deadline?.deadlineMs,
+            ...(normalized.status === 'recoverable_error' &&
+            payload &&
+            typeof payload === 'object'
+              ? {
+                  http_status:
+                    Number(payload.statusCode ?? payload.status) || undefined,
+                }
+              : {}),
+            ...(normalized.error_code === 'AI_AGENT_TOOL_NOT_OFFERED'
+              ? { failure_kind: 'missing_tool' as const }
+              : {}),
+          },
+          recoveryState,
+          recoveryLimits,
+        );
+        await saveRecovery(next.state);
+        recoveryDecision = next.decision;
+        if (next.decision.action !== 'continue')
+          normalized.next_action = next.decision.next_action;
+        if (
+          ['stop', 'ask_identifier', 'reconcile'].includes(next.decision.action)
+        )
+          semanticHalt = true;
+        this.eventEmitter.emit('ai.agent.recovery', {
+          objective_id: params.durable!.objective_id,
+          action: next.decision.action,
+          fingerprint: next.decision.fingerprint,
+          replans: next.state.replans,
+          expansions: next.state.expansions,
+          max_replans: recoveryLimits.max_replans,
+          max_expansions: recoveryLimits.max_expansions,
+        });
+      } else recovery.record(name, args, normalized);
       this.eventEmitter.emit('ai.agent.tool_result', {
         tool_name: name,
         status: normalized.status,
@@ -1647,6 +1799,29 @@ export class AIAgentService {
         }
 
         if (params.durable) await params.durable.assertBudget();
+        if (deadline) {
+          deadline.updateBudgets({
+            wallDeadlineMs: wallLimit(timeoutMs),
+            activeBudgetMs: Math.min(
+              timeoutMs,
+              Math.max(0, 1_800_000 - cumulativeActiveAtStart),
+            ),
+          });
+          if (deadline.remainingMs() <= 0) {
+            timedOut = true;
+            break;
+          }
+        }
+        if (
+          robust &&
+          recoveryDecision &&
+          recoveryDecision.action !== 'continue'
+        ) {
+          messages.push({
+            role: 'system',
+            content: `RECUPERACIÓN TÉCNICA ACOTADA: ${recoveryDecision.next_action}. El objetivo y el consentimiento individual no cambian.`,
+          });
+        }
 
         // Timeout check. It used to throw AI_AGENT_002, which escaped the
         // generator and cut the SSE mid-request; now it just leaves the loop
@@ -1726,6 +1901,9 @@ export class AIAgentService {
         }
 
         const toolOptions = {
+          ...(deadline
+            ? { signal: deadline.signal, deadlineMs: deadline.deadlineMs }
+            : {}),
           tools: filteredTools.length > 0 ? filteredTools : undefined,
           tool_choice: (filteredTools.length > 0 ? 'auto' : undefined) as
             | 'auto'
@@ -1749,9 +1927,11 @@ export class AIAgentService {
               ? this.aiEngine.chatWith(params.config_id, messages, toolOptions)
               : this.aiEngine.chat(messages, toolOptions);
         const callProvider = () =>
-          params.durable
-            ? params.durable.runProvider(dispatchProvider)
-            : dispatchProvider();
+          withinDeadline(() =>
+            params.durable
+              ? params.durable.runProvider(dispatchProvider)
+              : dispatchProvider(),
+          );
 
         let response = await callProvider();
         if (params.durable) await params.durable.assertCurrent();
@@ -1930,6 +2110,326 @@ export class AIAgentService {
           tool_calls: response.tool_calls,
         });
 
+        // D2 validates the COMPLETE batch before any registry, plan or UI dispatch.
+        // Only an entirely independent audited read batch is pre-executed; mixed
+        // UI/plan/write/dependent batches retain the existing serial circuit.
+        const parallelResults = new Map<string, string>();
+        const parallelArtifacts = new Map<string, string>();
+        const parallelAudited = new Set<string>();
+        if (robust) {
+          const authorized = await this.resolveRoutedAuthority(params);
+          const liveNames = new Set(
+            authorized.map((d) =>
+              this.toolRegistry.canonicalName(d.function.name),
+            ),
+          );
+          const calls = response.tool_calls.map((call) => ({
+            call_id: call.id,
+            tool_name: this.toolRegistry.canonicalName(call.function.name),
+            arguments: (() => {
+              try {
+                return JSON.parse(call.function.arguments);
+              } catch {
+                return null;
+              }
+            })(),
+          }));
+          let batchError:
+            | { code: string; next: string; culprit: number }
+            | undefined;
+          const batchIds = new Set<string>();
+          for (const [index, call] of calls.entries()) {
+            if (!call.call_id || batchIds.has(call.call_id)) {
+              batchError = {
+                code: 'INVALID_ARGS',
+                next: 'Los IDs de llamada deben ser únicos y no vacíos.',
+                culprit: index,
+              };
+              break;
+            }
+            batchIds.add(call.call_id);
+          }
+          for (const [index, call] of calls.entries()) {
+            if (batchError) break;
+            if (
+              !liveNames.has(call.tool_name) ||
+              !offeredNames.has(call.tool_name)
+            ) {
+              batchError = {
+                code: liveNames.has(call.tool_name)
+                  ? 'AI_AGENT_TOOL_NOT_OFFERED'
+                  : 'AI_AGENT_TOOL_NOT_ALLOWED',
+                next: liveNames.has(call.tool_name)
+                  ? 'Usa search_tools para cargar la capacidad autorizada en otra inferencia.'
+                  : 'Usa una alternativa permitida; este lote no se ejecutó.',
+                culprit: index,
+              };
+              break;
+            }
+            if (
+              !call.arguments ||
+              typeof call.arguments !== 'object' ||
+              Array.isArray(call.arguments)
+            ) {
+              batchError = {
+                code: 'INVALID_ARGS',
+                next: 'Corrige el JSON del lote según el schema ofrecido.',
+                culprit: index,
+              };
+              break;
+            }
+            const definition = filteredTools.find(
+              (d) =>
+                this.toolRegistry.canonicalName(d.function.name) ===
+                call.tool_name,
+            );
+            if (
+              call.tool_name.startsWith('vex_') &&
+              params.conversation_id != null &&
+              !Number.isInteger(call.arguments.conversation_id)
+            )
+              call.arguments.conversation_id = params.conversation_id;
+            const check =
+              definition &&
+              validateToolArgs(
+                call.tool_name,
+                definition.function.parameters,
+                call.arguments,
+              );
+            if (!check?.ok) {
+              batchError = {
+                code: 'INVALID_ARGS',
+                next:
+                  check?.next_step ??
+                  'Inspecciona el schema y corrige el campo inválido.',
+                culprit: index,
+              };
+              break;
+            }
+          }
+          if (batchError) {
+            for (const [index, call] of calls.entries()) {
+              const culprit = index === batchError.culprit;
+              const next = culprit
+                ? batchError.next
+                : 'Esta llamada válida no se despachó porque otra llamada invalidó el lote completo; puedes retomarla sin corregir sus argumentos.';
+              const result = normalizeToolResult(
+                {
+                  error: culprit
+                    ? 'Lote rechazado antes del dispatch.'
+                    : 'Llamada omitida, sin ejecución.',
+                  error_code: culprit
+                    ? batchError.code
+                    : 'BATCH_NOT_DISPATCHED',
+                  next_step: next,
+                },
+                {
+                  write:
+                    this.toolRegistry.get(call.tool_name)
+                      ?.requiresConfirmation === true,
+                },
+              );
+              // An omitted sibling is not a failed tool, schema correction or discovery expansion.
+              if (culprit)
+                await observeResult(call.tool_name, call.arguments, result);
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.call_id,
+                content: JSON.stringify(result),
+              });
+              const checkpointId =
+                call.call_id &&
+                calls.filter((c) => c.call_id === call.call_id).length === 1
+                  ? call.call_id
+                  : `${call.call_id || 'invalid-call'}:batch-rejected:${index}`;
+              await params.durable!.checkpointTool(
+                checkpointId,
+                call.tool_name,
+                call.arguments,
+                result,
+              );
+              yield {
+                type: 'tool_result',
+                tool: {
+                  id: call.call_id,
+                  name: call.tool_name,
+                  summary: next,
+                  failed: true,
+                  execution: toolReceipt(result),
+                },
+              };
+            }
+            if (semanticHalt) break;
+            continue;
+          }
+          const safeBatch =
+            parallelReadsEnabled() &&
+            calls.length > 1 &&
+            calls.every((call) => {
+              const tool = this.toolRegistry.get(call.tool_name);
+              return (
+                tool?.readOnly === true &&
+                !tool.clientSide &&
+                !tool.requiresConfirmation &&
+                tool.scheduling?.parallelSafe === true &&
+                tool.scheduling?.idempotent_read === true &&
+                !tool.scheduling.depends_on?.length &&
+                !isAgentPlanTool(tool.name) &&
+                !/^(ui_|vex_|search_|load_playbook)/.test(tool.name) &&
+                !(
+                  recoveryState?.failures.some((f) => !f.resolved) ||
+                  recoveryState?.unknown_effect ||
+                  recoveryState?.exhausted
+                )
+              );
+            });
+          if (safeBatch) {
+            let checkpoints = Promise.resolve();
+            let checkpointError: unknown;
+            const failedRead = (reason: unknown) =>
+              JSON.stringify({
+                error: 'La lectura del lote no pudo completarse.',
+                error_code:
+                  (reason as { code?: string })?.code ??
+                  'AI_TOOL_INFRASTRUCTURE_ERROR',
+                next_step:
+                  'Conserva las otras lecturas y consulta este registro de forma acotada.',
+              });
+            // Keep the deadline ALS and cooperative signal, but do NOT race away
+            // from allSettled: already completed siblings must reach durable storage.
+            const results = await agentDeadlineContext.run(deadline!, () =>
+              this.scheduler.executeBatch({
+                objective_id: params.durable!.objective_id,
+                context: RequestContextService.asyncLocalStorage.getStore()!,
+                calls,
+                offered_tools: calls.map(
+                  (c) => this.toolRegistry.get(c.tool_name)!,
+                ),
+                signal: deadline?.signal,
+                deadline_at: deadline?.deadlineMs,
+                validate: (call, tool) =>
+                  validateToolArgs(tool.name, tool.parameters, call.arguments),
+                execute: async (call) => {
+                  const current = await this.resolveRoutedAuthority(params);
+                  if (
+                    !current.some(
+                      (d) =>
+                        this.toolRegistry.canonicalName(d.function.name) ===
+                        call.tool_name,
+                    )
+                  )
+                    throw new Error('AI_AGENT_TOOL_NOT_ALLOWED');
+                  return JSON.stringify(
+                    await this.toolRegistry.executeToolResult(
+                      call.tool_name,
+                      call.arguments,
+                      { evidenceRef: `tool_call:${call.call_id}` },
+                    ),
+                  );
+                },
+                onLateResult: async (item) => {
+                  const call = calls.find((c) => c.call_id === item.call_id)!;
+                  const normalized = normalizeToolResult(item.value, {
+                    evidenceRef: `tool_call:${call.call_id}`,
+                  });
+                  normalized.freshness = 'unknown';
+                  normalized.evidence_refs = [];
+                  await params.durable!.auditTool(
+                    `late:${call.call_id}`,
+                    call.tool_name,
+                    call.arguments,
+                    normalized,
+                    this.toolRegistry.get(call.tool_name)?.version ?? '1',
+                    false,
+                  );
+                },
+                onSettled: (item) => {
+                  const call = calls.find((c) => c.call_id === item.call_id)!;
+                  const tool = this.toolRegistry.get(call.tool_name)!;
+                  checkpoints = checkpoints
+                    .then(async () => {
+                      const late =
+                        item.status === 'rejected'
+                          ? (item.reason as { late_result?: unknown })
+                              ?.late_result
+                          : undefined;
+                      const raw =
+                        item.status === 'fulfilled'
+                          ? item.value
+                          : late !== undefined
+                            ? late
+                            : failedRead(item.reason);
+                      const normalized = normalizeToolResult(raw, {
+                        evidenceRef: `tool_call:${call.call_id}`,
+                      });
+                      // Cancellation/lease loss can happen while an earlier checkpoint is
+                      // queued. Such data remains audit-only, never a fresh plan transition.
+                      const stale =
+                        late !== undefined ||
+                        deadline?.signal.aborted === true ||
+                        (deadline !== undefined &&
+                          Date.now() >= deadline.deadlineMs);
+                      if (stale) {
+                        normalized.freshness = 'unknown';
+                        parallelAudited.add(call.call_id);
+                        await params.durable!.auditTool(
+                          call.call_id,
+                          call.tool_name,
+                          call.arguments,
+                          normalized,
+                          tool.version ?? '1',
+                        );
+                        return;
+                      }
+                      try {
+                        const artifact = await params.durable!.checkpointTool(
+                          call.call_id,
+                          call.tool_name,
+                          call.arguments,
+                          normalized,
+                          tool.version ?? '1',
+                        );
+                        parallelArtifacts.set(call.call_id, artifact);
+                      } catch (error) {
+                        // appendToolResult may already have fenced/audited this call.
+                        // Continue the serial chain so one failure cannot erase siblings.
+                        checkpointError ??= error;
+                        normalized.freshness = 'unknown';
+                        parallelAudited.add(call.call_id);
+                        await params.durable!.auditTool(
+                          call.call_id,
+                          call.tool_name,
+                          call.arguments,
+                          normalized,
+                          tool.version ?? '1',
+                        );
+                      }
+                    })
+                    .catch((error) => {
+                      checkpointError ??= error;
+                    });
+                },
+              }),
+            );
+            await checkpoints;
+            // Every available result has been checkpointed/audited before surfacing
+            // the first persistence failure, preventing a partial Promise.all loss.
+            if (checkpointError) throw checkpointError;
+            for (const item of results)
+              parallelResults.set(
+                item.call_id,
+                item.status === 'fulfilled' &&
+                  !parallelAudited.has(item.call_id)
+                  ? item.value
+                  : failedRead(
+                      item.status === 'rejected'
+                        ? item.reason
+                        : { code: 'SCHEDULER_STALE_RESULT' },
+                    ),
+              );
+          }
+        }
+
         for (const toolCall of response.tool_calls) {
           // Normalized once, here, so the whole turn speaks one name: the
           // streamed frames, the trace, the clientSide check and the browser's
@@ -1939,7 +2439,7 @@ export class AIAgentService {
           const toolName = this.toolRegistry.canonicalName(
             toolCall.function.name,
           );
-          if (semanticHalt) break;
+          if (semanticHalt && !parallelResults.has(toolCall.id)) break;
           if (
             params.durable &&
             (pendingConfirmation || vexProposals.length > 0)
@@ -1954,10 +2454,14 @@ export class AIAgentService {
           let toolOutcome: AgentOutcome = 'cancelled';
           let toolErrorCode: string | undefined;
           let durableResult: ToolExecutionResult | undefined;
-          let durableCheckpointed = false;
+          let durableCheckpointed =
+            parallelArtifacts.has(toolCall.id) ||
+            parallelAudited.has(toolCall.id);
           let malformedArgs = false;
           try {
-            if (params.durable) await params.durable.assertBudget();
+            if (!parallelResults.has(toolCall.id)) deadline?.assertCanStart();
+            if (params.durable && !parallelResults.has(toolCall.id))
+              await params.durable.assertBudget();
             try {
               toolArgs = JSON.parse(toolCall.function.arguments);
             } catch {
@@ -1976,7 +2480,11 @@ export class AIAgentService {
                 error_code: 'INVALID_ARGS',
                 next_step: 'Corrige los argumentos usando el esquema ofrecido.',
               });
-              observeResult(toolName, toolCall.function.arguments, normalized);
+              await observeResult(
+                toolName,
+                toolCall.function.arguments,
+                normalized,
+              );
               toolOutcome = 'failed';
               toolErrorCode = 'INVALID_ARGS';
               messages.push({
@@ -2020,7 +2528,7 @@ export class AIAgentService {
                   next_step: next,
                 });
                 if (semantic && !authorized)
-                  observeResult(toolName, toolArgs, result);
+                  await observeResult(toolName, toolArgs, result);
                 toolOutcome = authorized ? 'failed' : 'blocked_permission';
                 toolErrorCode = code;
                 messages.push({
@@ -2041,6 +2549,35 @@ export class AIAgentService {
                 continue;
               }
               if (toolName === 'search_tools') {
+                if (
+                  robust &&
+                  params.durable!.objective.budget.expansions >=
+                    recoveryLimits.max_expansions
+                ) {
+                  const result = normalizeToolResult({
+                    error: 'Se agotaron las ampliaciones del objetivo.',
+                    error_code: 'AGENT_EXPANSION_LIMIT',
+                    next_step:
+                      'Usa el catálogo ya autorizado o informa la capacidad concreta que falta.',
+                  });
+                  await observeResult(toolName, toolArgs, result);
+                  semanticHalt = true;
+                  messages.push({
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(result),
+                  });
+                  yield {
+                    type: 'tool_result',
+                    tool: {
+                      id: toolCall.id,
+                      name: toolName,
+                      summary: result.next_action!,
+                      execution: toolReceipt(result),
+                    },
+                  };
+                  continue;
+                }
                 const result = await this.toolRouter!.search(
                   routingSession,
                   toolArgs,
@@ -2083,7 +2620,7 @@ export class AIAgentService {
                   next_step:
                     'Solicita el permiso vigente o elige una consulta permitida.',
                 });
-                observeResult(toolName, toolArgs, durableResult);
+                await observeResult(toolName, toolArgs, durableResult);
                 messages.push({
                   role: 'tool',
                   content: JSON.stringify(durableResult),
@@ -2110,7 +2647,38 @@ export class AIAgentService {
               let planContent: string;
               try {
                 const executePlan = () =>
-                  params.plan!.execute(toolName, toolArgs);
+                  withinDeadline(() =>
+                    robust
+                      ? params.plan!.execute(toolName, toolArgs, {
+                          assertToolAllowed: async (name) =>
+                            (await this.resolveRoutedAuthority(params)).some(
+                              (d) =>
+                                this.toolRegistry.canonicalName(
+                                  d.function.name,
+                                ) === name,
+                            ),
+                          onRead: async (result, meta) => {
+                            if (countsAsToolSuccess(result))
+                              await this.consumeToolCallQuota(
+                                context?.store_id,
+                                `${params.durable!.turn_id}:${meta.call_id}`,
+                                meta.tool_name,
+                                params.agent_key,
+                              );
+                            this.eventEmitter.emit('ai.agent.tool_result', {
+                              tool_name: meta.tool_name,
+                              status: result.status,
+                              error_code: result.error_code,
+                              effect_status: result.effect_status,
+                              store_id: context?.store_id,
+                              objective_id: params.durable!.objective_id,
+                              evidence_ref: `agent-result:${meta.artifact_id}`,
+                              source: 'server_verifier',
+                            });
+                          },
+                        })
+                      : params.plan!.execute(toolName, toolArgs),
+                  );
                 const outcome = activeTrace
                   ? await activeTrace.run(toolSpan, executePlan)
                   : await executePlan();
@@ -2120,6 +2688,13 @@ export class AIAgentService {
                 if (toolName === PROPOSE_PLAN_TOOL) {
                   maxIterations = Math.max(maxIterations, plannedBudget);
                   timeoutMs = widenTimeout(timeoutMs);
+                  deadline?.updateBudgets({
+                    wallDeadlineMs: wallLimit(timeoutMs),
+                    activeBudgetMs: Math.min(
+                      timeoutMs,
+                      Math.max(0, 1_800_000 - cumulativeActiveAtStart),
+                    ),
+                  });
                 }
 
                 if (outcome.endTurn) {
@@ -2216,7 +2791,7 @@ export class AIAgentService {
                       'Puedo preparar una consulta permitida o solicitar revisión al administrador.',
                   })
                 : undefined;
-              if (denied) observeResult(toolName, toolArgs, denied);
+              if (denied) await observeResult(toolName, toolArgs, denied);
               const notAllowed =
                 `AI_AGENT_TOOL_NOT_ALLOWED: la herramienta "${toolName}" no ` +
                 `está en el catálogo ofrecido en este turno. Usa solo las ` +
@@ -2242,15 +2817,51 @@ export class AIAgentService {
               continue;
             }
 
-            if (semantic) {
+            if (semantic && !parallelResults.has(toolCall.id)) {
               const previousAttempts = recovery.attempts;
-              const suppressed = recovery.beforeCall(toolName, toolArgs);
+              let suppressed: ToolExecutionResult | null = null;
+              if (robust) {
+                if (
+                  recoveryDecision?.action === 'retry_read' &&
+                  this.toolRegistry.isReadOnly(toolName)
+                ) {
+                  await withinDeadline(
+                    () =>
+                      new Promise<void>((resolve) =>
+                        setTimeout(resolve, recoveryDecision!.wait_ms ?? 0),
+                      ),
+                  );
+                }
+                const before = recoveryPolicy.beforeCall(
+                  {
+                    tool_name: toolName,
+                    arguments: toolArgs,
+                    read_only: this.toolRegistry.isReadOnly(toolName),
+                    deadline_at: deadline?.deadlineMs,
+                  },
+                  recoveryState,
+                  recoveryLimits,
+                );
+                await saveRecovery(before.state);
+                if (!before.allowed) {
+                  recoveryDecision = before.decision;
+                  suppressed = normalizeToolResult({
+                    error: 'No repetiré esta llamada sin progreso comprobable.',
+                    error_code: 'AGENT_RECOVERY_SUPPRESSED',
+                    next_step: before.decision?.next_action,
+                  });
+                  // A suppressed call is not another handler failure. Preserve its policy decision.
+                  if (before.decision?.action === 'stop') semanticHalt = true;
+                }
+              } else suppressed = recovery.beforeCall(toolName, toolArgs);
               if (params.durable && recovery.attempts > previousAttempts)
                 await params.durable.addBudget({
                   recovery: recovery.attempts - previousAttempts,
                 });
               if (suppressed) {
-                toolOutcome = observeResult(toolName, toolArgs, suppressed);
+                toolOutcome = robust
+                  ? 'failed'
+                  : await observeResult(toolName, toolArgs, suppressed);
                 messages.push({
                   role: 'tool',
                   content: JSON.stringify(suppressed),
@@ -2336,6 +2947,7 @@ export class AIAgentService {
               // with variants comes back `needs_user_input` and the same turn asks
               // which variant, because the answer arrived before the model spoke.
               const waitStart = Date.now();
+              deadline?.pauseActive();
               const uiWait = activeTrace?.startSpan(
                 'ui_wait',
                 undefined,
@@ -2344,9 +2956,11 @@ export class AIAgentService {
               let uiResult: string | null = null;
               try {
                 uiResult = params.stream_id
-                  ? await this.uiChannel.awaitResult(
-                      params.stream_id,
-                      toolCall.id,
+                  ? await withinDeadline(() =>
+                      this.uiChannel.awaitResult(
+                        params.stream_id!,
+                        toolCall.id,
+                      ),
                     )
                   : null;
               } catch (error) {
@@ -2356,6 +2970,7 @@ export class AIAgentService {
                 });
                 throw error;
               } finally {
+                deadline?.resumeActive();
                 activeTrace?.endSpan(uiWait, {
                   attributes: {
                     ui_result_known: uiResult !== null,
@@ -2389,7 +3004,11 @@ export class AIAgentService {
                 : undefined;
               if (uiExecution) {
                 durableResult = uiExecution;
-                toolOutcome = observeResult(toolName, toolArgs, uiExecution);
+                toolOutcome = await observeResult(
+                  toolName,
+                  toolArgs,
+                  uiExecution,
+                );
                 resultPayload = JSON.stringify(uiExecution);
               }
               toolsUsed.push({
@@ -2503,9 +3122,13 @@ export class AIAgentService {
               };
               const meteredExecute = () =>
                 params.durable ? params.durable.runTool(execute) : execute();
-              const raw = activeTrace
-                ? await activeTrace.run(toolSpan, meteredExecute)
-                : await meteredExecute();
+              const raw = parallelResults.has(toolCall.id)
+                ? await parallelResults.get(toolCall.id)!
+                : await withinDeadline(() =>
+                    activeTrace
+                      ? activeTrace.run(toolSpan, meteredExecute)
+                      : meteredExecute(),
+                  );
               const normalized = semantic
                 ? normalizeToolResult(raw, {
                     write:
@@ -2515,8 +3138,10 @@ export class AIAgentService {
                   })
                 : undefined;
               durableResult = normalized ? { ...normalized } : undefined;
-              let artifactId: string | undefined;
-              if (params.durable && durableResult) {
+              let artifactId: string | undefined = parallelArtifacts.get(
+                toolCall.id,
+              );
+              if (params.durable && durableResult && !durableCheckpointed) {
                 artifactId = await params.durable.checkpointTool(
                   toolCall.id,
                   toolName,
@@ -2526,9 +3151,10 @@ export class AIAgentService {
                 );
                 durableCheckpointed = true;
               }
-              toolOutcome = normalized
-                ? observeResult(toolName, toolArgs, normalized)
-                : 'partial';
+              toolOutcome =
+                normalized && !parallelAudited.has(toolCall.id)
+                  ? await observeResult(toolName, toolArgs, normalized)
+                  : 'partial';
               toolErrorCode = normalized?.error_code ?? undefined;
               // Oversized results travel compacted from here on: the trace, the
               // persisted transcript and the model all see `{summary, block_id,
@@ -2635,7 +3261,8 @@ export class AIAgentService {
                           'Comprueba los datos o indica el requisito que falta. No hay un cambio pendiente de aprobación.',
                       })
                     : undefined;
-                  if (rejected) observeResult(toolName, toolArgs, rejected);
+                  if (rejected)
+                    await observeResult(toolName, toolArgs, rejected);
                   messages.push({
                     role: 'tool',
                     content: JSON.stringify({
@@ -2743,7 +3370,7 @@ export class AIAgentService {
                       durableCheckpointed = true;
                     }
                     toolOutcome = normalizedApply
-                      ? observeResult(toolName, toolArgs, normalizedApply)
+                      ? await observeResult(toolName, toolArgs, normalizedApply)
                       : 'partial';
                     const applied = await this.compactToolResult(
                       toolName,
@@ -2926,7 +3553,7 @@ export class AIAgentService {
                 ? normalizeToolException(error)
                 : undefined;
               toolOutcome = normalizedError
-                ? observeResult(toolName, toolArgs, normalizedError)
+                ? await observeResult(toolName, toolArgs, normalizedError)
                 : 'failed';
               const errorMsg =
                 error instanceof VendixHttpException
@@ -3189,6 +3816,21 @@ export class AIAgentService {
         ...(semantic ? { exhausted: true } : {}),
       };
     } catch (error: any) {
+      if (robust && isAgentAbort(error)) {
+        const content =
+          'Se agotó el plazo activo o se canceló el turno. Conservo el avance; una escritura incierta se verifica antes de volver a intentarla.';
+        yield { type: 'text', content };
+        return {
+          content,
+          iterations: iteration,
+          tools_used: toolsUsed,
+          total_tokens: totalTokens,
+          success: false,
+          exhausted: true,
+          error_code: error.code ?? 'AGENT_CANCELLED',
+          ...(error.code === 'AGENT_CANCELLED' ? { aborted: true } : {}),
+        };
+      }
       if (error instanceof VendixHttpException) throw error;
 
       this.logger.error(
@@ -3204,6 +3846,7 @@ export class AIAgentService {
         error: error.message,
       };
     } finally {
+      deadline?.dispose();
       // R3-A: tokens (input + output) of the whole turn, whichever way it
       // ended, into the monthly counter. Never throws.
       if (isVex) {

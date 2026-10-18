@@ -1,6 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { providerFailureMetadata } from './provider-failure';
 import {
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from '../tasks/agent-deadline';
+import {
   AIProvider,
   AIProviderConfig,
   AIMessage,
@@ -158,31 +164,40 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
     try {
+      deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
       const transformedMessages = this.transformMessages(messages);
 
-      const response = await this.client.messages.create({
-        model: options?.model || this.config.modelId,
-        ...(system.length && { system }),
-        messages: transformedMessages,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t, i, arr) => ({
-            name: t.function.name,
-            description: t.function.description,
-            input_schema: t.function.parameters as any,
-            ...(i === arr.length - 1
-              ? { cache_control: { type: 'ephemeral' as const } }
-              : {}),
-          })),
-        }),
-      });
+      const request = () =>
+        this.client.messages.create(
+          {
+            model: options?.model || this.config.modelId,
+            ...(system.length && { system }),
+            messages: transformedMessages,
+            max_tokens:
+              options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            ...(options?.tools?.length && {
+              tools: options.tools.map((t, i, arr) => ({
+                name: t.function.name,
+                description: t.function.description,
+                input_schema: t.function.parameters as any,
+                ...(i === arr.length - 1
+                  ? { cache_control: { type: 'ephemeral' as const } }
+                  : {}),
+              })),
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const response = deadline ? await deadline.run(request) : await request();
 
       let textContent = '';
       const toolCalls: AIToolCall[] = [];
@@ -221,6 +236,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
             ? 'length'
             : 'stop';
 
+      deadline?.assertCanStart();
       return {
         success: true,
         content: textContent,
@@ -243,11 +259,15 @@ export class AnthropicCompatibleProvider implements AIProvider {
         finish_reason: finishReason,
       };
     } catch (error: any) {
+      if (deadline && isAgentAbort(error, deadline.signal))
+        return agentAbortFailure(error, deadline.signal);
       return {
         success: false,
         error: error.message || 'Anthropic-compatible request failed',
         ...providerFailureMetadata(error),
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 
@@ -279,32 +299,39 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
+    const deadline = createAgentOperation(options);
     try {
+      deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
 
-      const stream = this.client.messages.stream({
-        model: options?.model || this.config.modelId,
-        ...(system.length && { system }),
-        messages: this.transformMessages(messages),
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t, i, arr) => ({
-            name: t.function.name,
-            description: t.function.description,
-            input_schema: t.function.parameters as any,
-            ...(i === arr.length - 1
-              ? { cache_control: { type: 'ephemeral' as const } }
-              : {}),
-          })),
-        }),
-      });
+      const stream = this.client.messages.stream(
+        {
+          model: options?.model || this.config.modelId,
+          ...(system.length && { system }),
+          messages: this.transformMessages(messages),
+          max_tokens:
+            options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+          temperature:
+            options?.temperature ??
+            this.config.settings?.temperature ??
+            undefined,
+          ...(options?.tools?.length && {
+            tools: options.tools.map((t, i, arr) => ({
+              name: t.function.name,
+              description: t.function.description,
+              input_schema: t.function.parameters as any,
+              ...(i === arr.length - 1
+                ? { cache_control: { type: 'ephemeral' as const } }
+                : {}),
+            })),
+          }),
+        },
+        ...(deadline
+          ? ([{ signal: deadline.signal }] as const)
+          : ([] as const)),
+      );
 
-      for await (const event of stream) {
+      for await (const event of agentDeadlineStream(stream, deadline)) {
         if (
           event.type === 'content_block_delta' &&
           event.delta.type === 'text_delta'
@@ -313,7 +340,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
         }
       }
 
-      const finalMessage = await stream.finalMessage();
+      const finalMessage = deadline
+        ? await deadline.run(() => stream.finalMessage())
+        : await stream.finalMessage();
       this.config.observeUsage?.(
         finalMessage.usage
           ? {
@@ -332,6 +361,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
       // accumulate — the deltas would only give us partial JSON.
       for (const block of finalMessage.content ?? []) {
         if (block.type !== 'tool_use') continue;
+        deadline?.assertCanStart();
         yield {
           type: 'tool_call',
           tool: {
@@ -342,6 +372,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
         };
       }
 
+      deadline?.assertCanStart();
       yield {
         type: 'done',
         usage: {
@@ -360,8 +391,13 @@ export class AnthropicCompatibleProvider implements AIProvider {
     } catch (error: any) {
       yield {
         type: 'error',
-        error: error.message || 'Anthropic-compatible streaming failed',
+        error:
+          deadline && isAgentAbort(error, deadline.signal)
+            ? agentAbortFailure(error, deadline.signal).error
+            : error.message || 'Anthropic-compatible streaming failed',
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 }

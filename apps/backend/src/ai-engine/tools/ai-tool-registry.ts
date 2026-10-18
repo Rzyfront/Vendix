@@ -1,3 +1,4 @@
+import { agentDeadlineContext } from '../tasks/agent-deadline';
 import { Injectable, Logger } from '@nestjs/common';
 import { AIToolDefinition } from '../interfaces/ai-provider.interface';
 import {
@@ -7,7 +8,10 @@ import {
   ToolExecutionContext,
   ToolExecutionResult,
 } from './interfaces/tool.interface';
-import { normalizeToolException, normalizeToolResult } from './tool-result.normalizer';
+import {
+  normalizeToolException,
+  normalizeToolResult,
+} from './tool-result.normalizer';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmation.service';
@@ -126,10 +130,12 @@ export class AIToolRegistry {
 
   /** Aliases resolve to canonical definitions; they never create extra documents. */
   getAliases(): Record<string, string> {
-    return Object.fromEntries([...this.aliases.keys()].sort().flatMap((alias) => {
-      const canonical = this.resolveToolName(alias);
-      return canonical ? [[alias, canonical]] : [];
-    }));
+    return Object.fromEntries(
+      [...this.aliases.keys()].sort().flatMap((alias) => {
+        const canonical = this.resolveToolName(alias);
+        return canonical ? [[alias, canonical]] : [];
+      }),
+    );
   }
 
   getToolsForDomain(domain: string): AIToolDefinition[] {
@@ -356,14 +362,20 @@ export class AIToolRegistry {
   ): Promise<ToolExecutionResult> {
     const tool = this.get(this.canonicalName(name));
     let handlerStarted = false;
-    const context = { write: tool?.requiresConfirmation === true, evidenceRef: options?.evidenceRef };
+    const context = {
+      write: tool?.requiresConfirmation === true,
+      evidenceRef: options?.evidenceRef,
+    };
     try {
-      const raw = await this.executeToolRaw(name, args, options,
-        () => { handlerStarted = true; });
+      const raw = await this.executeToolRaw(name, args, options, () => {
+        handlerStarted = true;
+      });
       return normalizeToolResult(raw, context);
     } catch (error) {
-      const payload = error instanceof VendixHttpException
-        ? error.getResponse() as Record<string, unknown> : null;
+      const payload =
+        error instanceof VendixHttpException
+          ? (error.getResponse() as Record<string, unknown>)
+          : null;
       // Keep the existing proposal/token circuit, including preview refusals.
       if (payload?.error_code === 'AI_AGENT_005') throw error;
       return normalizeToolException(error, { ...context, handlerStarted });
@@ -423,6 +435,12 @@ export class AIToolRegistry {
       store_id: requestContext?.store_id,
       user_id: requestContext?.user_id,
       roles: requestContext?.roles,
+      ...(agentDeadlineContext.getStore()
+        ? {
+            signal: agentDeadlineContext.getStore()!.signal,
+            deadlineMs: agentDeadlineContext.getStore()!.deadlineMs,
+          }
+        : {}),
     };
 
     // Check permissions — use granular permissions if available, fall back to roles
@@ -484,6 +502,7 @@ export class AIToolRegistry {
       this.logger.log(
         `Executing tool: ${name} with args: ${JSON.stringify(args).substring(0, 200)}`,
       );
+      agentDeadlineContext.getStore()?.assertCanStart();
       onHandlerStart?.();
       const result = await tool.handler(args, context);
       return result;

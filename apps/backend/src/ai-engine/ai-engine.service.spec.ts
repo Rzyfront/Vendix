@@ -4,6 +4,7 @@ import { AgentTraceService } from './observability/agent-trace.service';
 import { ProviderAttemptObserver } from './provider-attempt-observer';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import { RequestContextService } from '../common/context/request-context.service';
+import { AgentDeadline, agentDeadlineContext } from './tasks/agent-deadline';
 
 /**
  * QUI-857 — Generación/mejora de imágenes de producto con IA.
@@ -1170,4 +1171,170 @@ describe('AIEngineService phase A provider attempts and quota isolation', () => 
       );
     },
   );
+});
+
+describe('AIEngineService D2 opt-in deadlines', () => {
+  const app = {
+    key: 'd2-read',
+    is_active: true,
+    config_id: 5,
+    temperature: null,
+    max_tokens: null,
+    ai_feature_category: null,
+    retry_config: { maxRetries: 3, delayMs: 1000 },
+  };
+  let service: AIEngineService;
+  let provider: { chat: jest.Mock; complete: jest.Mock; chatStream: jest.Mock };
+  let consume: jest.SpyInstance;
+  beforeEach(() => {
+    jest.useFakeTimers();
+    service = new AIEngineService(
+      {
+        ai_engine_applications: {
+          findUnique: jest.fn().mockResolvedValue(app),
+        },
+      } as any,
+      { get: jest.fn() } as any,
+      {} as any,
+      {
+        calculateCost: jest.fn().mockReturnValue(0),
+        logRequest: jest.fn(),
+      } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      { isEnforce: () => false } as any,
+    );
+    provider = { chat: jest.fn(), complete: jest.fn(), chatStream: jest.fn() };
+    (service as any).providers.set(5, provider);
+    (service as any).defaultConfigId = 5;
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    consume = jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  it('preserves the configured legacy retries when no deadline is supplied', async () => {
+    provider.chat
+      .mockResolvedValueOnce({ success: false, error: 'transient' })
+      .mockResolvedValueOnce({ success: true, content: 'ok' });
+    const result = service.run(app.key);
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(result).resolves.toMatchObject({ success: true });
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+    expect(provider.chat.mock.calls[0][1]).not.toHaveProperty('signal');
+  });
+
+  it('inherits request-local signal/deadline and never retries an aborted in-flight provider', async () => {
+    provider.chat.mockImplementation(() => new Promise(() => undefined));
+    const deadline = new AgentDeadline({
+      wallDeadlineMs: Date.now() + 100,
+      activeBudgetMs: 100,
+      reserveMs: 20,
+    });
+    const result = agentDeadlineContext.run(deadline, () =>
+      service.run(app.key),
+    );
+    await jest.advanceTimersByTimeAsync(80);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+      retryable: false,
+    });
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+    expect(provider.chat.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(consume).not.toHaveBeenCalled();
+    deadline.dispose();
+  });
+
+  it('stops before a backoff that cannot fit and makes no second provider dispatch', async () => {
+    provider.chat.mockResolvedValue({ success: false, error: 'temporary' });
+    const result = service.run(app.key, undefined, undefined, {
+      deadlineMs: Date.now() + 100,
+    });
+    await jest.advanceTimersByTimeAsync(0);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+    });
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels an existing backoff promptly without a new request', async () => {
+    provider.chat.mockResolvedValue({ success: false, error: 'temporary' });
+    const controller = new AbortController();
+    const result = service.run(app.key, undefined, undefined, {
+      signal: controller.signal,
+    });
+    await jest.advanceTimersByTimeAsync(20);
+    controller.abort();
+    await jest.advanceTimersByTimeAsync(0);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_CANCELLED',
+      retryable: false,
+    });
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(provider.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['chat', 'chatWith', 'complete'] as const)(
+    'fences late %s completions without publishing content',
+    async (method) => {
+      let finish!: (value: any) => void;
+      const mock = method === 'complete' ? provider.complete : provider.chat;
+      mock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const options = { deadlineMs: Date.now() + 10 };
+      const result =
+        method === 'chatWith'
+          ? service.chatWith(5, [], options)
+          : method === 'complete'
+            ? service.complete('read', options)
+            : service.chat([], options);
+      await jest.advanceTimersByTimeAsync(10);
+      await expect(result).resolves.toMatchObject({
+        success: false,
+        error_code: 'AGENT_DEADLINE_EXCEEDED',
+      });
+      finish({ success: true, content: 'late unauthorized generation' });
+      await jest.advanceTimersByTimeAsync(0);
+      await expect(result).resolves.not.toHaveProperty('content');
+    },
+  );
+
+  it('fences stream providers that ignore the signal, with no done or quota consumption', async () => {
+    provider.chatStream.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => undefined),
+      }),
+    });
+    const chunks: any[] = [];
+    const result = (async () => {
+      for await (const chunk of service.runStream(
+        app.key,
+        undefined,
+        undefined,
+        { deadlineMs: Date.now() + 10 },
+      ))
+        chunks.push(chunk);
+    })();
+    await jest.advanceTimersByTimeAsync(10);
+    await result;
+    expect(chunks).toEqual([
+      { type: 'error', error: 'Agent deadline exceeded' },
+    ]);
+    expect(consume).not.toHaveBeenCalled();
+  });
 });

@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Changing ToolExecutionResult or semantic tool outcomes"
@@ -92,3 +92,15 @@ removing JSON metadata, pending proposals or A's evidence.
 - `vendix-redis-quota`, `vendix-subscription-gate` — units, dedup and authorization.
 - `vendix-agent-evals-observability` — truthful outcomes and cost evidence.
 - `vendix-ai-chat`, `vendix-vex-agent`, `vendix-vexi-agent` — surfaces and ownership.
+
+## D2 opt-in extension
+
+`AI_AGENT_ROBUST_EXECUTION_ENABLED` plus D1 adds objective-scoped recovery and
+server verification; the D0 flag alone does not enable it. `completed_verified`
+is emitted only after repository commitment of an opaque server proof, never
+from `ToolExecutionReceipt.status=ok` or an applied receipt. The durable wrapper
+preserves that status and suppresses optimistic completion prose for an
+unverified multistep plan. Pending approval/input retains its exact user action.
+Verifier reads retain successful-tool metering and actual guards; late reads
+are audit-only, not successful quota units. See `vendix-agent-durable-tasks`
+for bounded recovery, inner cancellation fences, pool limits and explicit gaps.

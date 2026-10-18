@@ -1,6 +1,12 @@
 import OpenAI from 'openai';
 import { providerFailureMetadata } from './provider-failure';
 import {
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from '../tasks/agent-deadline';
+import {
   AIProvider,
   AIProviderConfig,
   AIMessage,
@@ -46,26 +52,40 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
     try {
-      const response = await this.client.chat.completions.create({
-        model: options?.model || this.config.modelId,
-        messages: this.buildMessages(messages, options?.systemPrompt) as any,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
-            type: t.type as any,
-            function: t.function,
-          })),
-        }),
-        ...(options?.tool_choice && {
-          tool_choice: options.tool_choice as any,
-        }),
-      });
+      deadline?.assertCanStart();
+      const request = () =>
+        this.client.chat.completions.create(
+          {
+            model: options?.model || this.config.modelId,
+            messages: this.buildMessages(
+              messages,
+              options?.systemPrompt,
+            ) as any,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            max_tokens:
+              options?.maxTokens ??
+              this.config.settings?.maxTokens ??
+              undefined,
+            ...(options?.tools?.length && {
+              tools: options.tools.map((t) => ({
+                type: t.type as any,
+                function: t.function,
+              })),
+            }),
+            ...(options?.tool_choice && {
+              tool_choice: options.tool_choice as any,
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const response = deadline ? await deadline.run(request) : await request();
 
       this.config.observeUsage?.(
         response.usage
@@ -93,6 +113,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         }),
       );
 
+      deadline?.assertCanStart();
       return {
         success: true,
         content: message?.content || '',
@@ -113,11 +134,15 @@ export class OpenAICompatibleProvider implements AIProvider {
               : 'stop',
       };
     } catch (error: any) {
+      if (deadline && isAgentAbort(error, deadline.signal))
+        return agentAbortFailure(error, deadline.signal);
       return {
         success: false,
         error: error.message || 'OpenAI-compatible request failed',
         ...providerFailureMetadata(error),
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 
@@ -896,27 +921,41 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
+    const deadline = createAgentOperation(options);
     try {
-      const stream = await this.client.chat.completions.create({
-        model: options?.model || this.config.modelId,
-        messages: this.buildMessages(messages, options?.systemPrompt) as any,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
-        stream: true,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
-            type: t.type as any,
-            function: t.function,
-          })),
-        }),
-        ...(options?.tool_choice && {
-          tool_choice: options.tool_choice as any,
-        }),
-      });
+      deadline?.assertCanStart();
+      const request = () =>
+        this.client.chat.completions.create(
+          {
+            model: options?.model || this.config.modelId,
+            messages: this.buildMessages(
+              messages,
+              options?.systemPrompt,
+            ) as any,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            max_tokens:
+              options?.maxTokens ??
+              this.config.settings?.maxTokens ??
+              undefined,
+            stream: true,
+            ...(options?.tools?.length && {
+              tools: options.tools.map((t) => ({
+                type: t.type as any,
+                function: t.function,
+              })),
+            }),
+            ...(options?.tool_choice && {
+              tool_choice: options.tool_choice as any,
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const stream = deadline ? await deadline.run(request) : await request();
 
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
@@ -932,7 +971,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         { id: string; name: string; args: string }
       >();
 
-      for await (const chunk of stream) {
+      for await (const chunk of agentDeadlineStream(stream, deadline)) {
         const delta = chunk.choices[0]?.delta;
 
         if (delta?.content) {
@@ -968,6 +1007,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.config.observeUsage?.(observedUsage);
       for (const slot of pending.values()) {
         if (!slot.name) continue;
+        deadline?.assertCanStart();
         yield {
           type: 'tool_call',
           tool: {
@@ -981,6 +1021,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         };
       }
 
+      deadline?.assertCanStart();
       yield {
         type: 'done',
         usage: {
@@ -992,8 +1033,13 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (error: any) {
       yield {
         type: 'error',
-        error: error.message || 'OpenAI-compatible streaming failed',
+        error:
+          deadline && isAgentAbort(error, deadline.signal)
+            ? agentAbortFailure(error, deadline.signal).error
+            : error.message || 'OpenAI-compatible streaming failed',
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 

@@ -215,6 +215,7 @@ export class ObjectiveMemoryDatabase {
       'conversation_id',
       'legacy_plan_id',
       'tool_call_id',
+      'tool_name',
       'operation_id',
       'step_id',
       'proposal_hash',
@@ -275,6 +276,25 @@ export class ObjectiveMemoryDatabase {
                 ? this.tasks
                 : (null as never);
     if (!map) throw new Error(`Unsupported test SQL table: ${q.sql}`);
+    if (
+      q.sql.includes(
+        "AND stale_lease=false ORDER BY (data->>'checkpoint_version')::bigint DESC",
+      )
+    ) {
+      return [...this.results.values()]
+        .filter(
+          (row) =>
+            this.matches(q, row as unknown as RecordRow) && !row.stale_lease,
+        )
+        .sort(
+          (a, b) =>
+            Number((b.data as RecordRow).checkpoint_version ?? 0) -
+              Number((a.data as RecordRow).checkpoint_version ?? 0) ||
+            Number(b.created_at) - Number(a.created_at) ||
+            b.id.localeCompare(a.id),
+        )
+        .slice(0, 1);
+    }
     if (q.sql.includes("DISTINCT ON (data->>'id')")) {
       const latest = [...this.results.values()]
         .filter(
@@ -395,6 +415,10 @@ export class ObjectiveMemoryDatabase {
         ? selected.length
         : selected.map((r) => clone(map.get(r.id as string | number)));
     }
+    if (q.sql.includes("tool_name <> 'agent_recovery_checkpoint'"))
+      selected = selected.filter(
+        (r) => r.tool_name !== 'agent_recovery_checkpoint',
+      );
     if (q.sql.includes('ORDER BY created_at,id')) {
       selected.sort(
         (a, b) =>

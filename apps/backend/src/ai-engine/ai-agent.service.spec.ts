@@ -2213,3 +2213,30 @@ describe('C rollback with a boot-registered discovery declaration', () => {
     }
   });
 });
+
+it('D2 kill switches default OFF and reject truthy values other than literal true', async () => {
+  const { robustExecutionEnabled, parallelReadsEnabled } =
+    await import('./tasks/agent-execution-flags');
+  const keys = [
+    'AI_AGENT_ROBUST_EXECUTION_ENABLED',
+    'AI_PARALLEL_READS_ENABLED',
+  ];
+  const previous = keys.map((key) => process.env[key]);
+  try {
+    for (const value of [undefined, '1', 'TRUE', 'false']) {
+      keys.forEach((key) =>
+        value === undefined
+          ? delete process.env[key]
+          : (process.env[key] = value),
+      );
+      expect(robustExecutionEnabled()).toBe(false);
+      expect(parallelReadsEnabled()).toBe(false);
+    }
+  } finally {
+    keys.forEach((key, index) =>
+      previous[index] === undefined
+        ? delete process.env[key]
+        : (process.env[key] = previous[index]),
+    );
+  }
+});

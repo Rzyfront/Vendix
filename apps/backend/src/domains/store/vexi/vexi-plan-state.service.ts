@@ -1,4 +1,17 @@
 import {
+  robustExecutionEnabled,
+  maximumRecoveryReplans,
+} from '../../../ai-engine/tasks/agent-execution-flags';
+import {
+  AgentVerifierService,
+  AgentVerificationOptions,
+} from '../../../ai-engine/tasks/agent-verifier.service';
+import { AgentDurableSession } from '../../../ai-engine/tasks/agent-durable-session.service';
+import {
+  AgentDeadline,
+  agentDeadlineContext,
+} from '../../../ai-engine/tasks/agent-deadline';
+import {
   ConflictException,
   Injectable,
   NotFoundException,
@@ -158,6 +171,7 @@ export class VexiPlanStateService {
   constructor(
     private readonly prisma: StorePrismaService,
     @Optional() private readonly objectives?: AgentObjectiveRepository,
+    @Optional() private readonly verifier?: AgentVerifierService,
   ) {}
 
   private durableRepository(): AgentObjectiveRepository {
@@ -488,6 +502,21 @@ export class VexiPlanStateService {
       version: leased.version,
       lease_generation: leased.lease_generation,
     };
+    const effectStarted = Date.now();
+    const effectDeadline = robustExecutionEnabled()
+      ? new AgentDeadline({
+          wallDeadlineMs: Math.min(
+            Date.now() + 180_000,
+            new Date(leased.expires_at).getTime(),
+            new Date(leased.lease_until!).getTime(),
+          ),
+          activeBudgetMs: Math.max(
+            0,
+            1_800_000 - leased.budget.active_runtime_ms,
+          ),
+          reserveMs: 2000,
+        })
+      : undefined;
     const proposalHash = canonicalStepHash(input.tool, input.args);
     const currentStep = leased.plan?.steps.find(
       (step) =>
@@ -511,7 +540,12 @@ export class VexiPlanStateService {
           args_hash: proposalHash,
           receipt: toolReceipt(result),
           data: result.data,
-          budget_delta: { tools: 1 },
+          budget_delta: {
+            tools: 1,
+            ...(effectDeadline
+              ? { active_runtime_ms: Math.max(0, Date.now() - effectStarted) }
+              : {}),
+          },
           checkpoint: {
             semantic_status:
               result.status === 'unknown_effect'
@@ -538,6 +572,7 @@ export class VexiPlanStateService {
       });
     };
     try {
+      effectDeadline?.assertCanStart();
       let effect = await repository.proposeEffect(
         leased.id,
         {
@@ -573,7 +608,11 @@ export class VexiPlanStateService {
       let output: string;
       let result: ToolExecutionResult;
       try {
-        output = await dispatch();
+        output = effectDeadline
+          ? await agentDeadlineContext.run(effectDeadline, () =>
+              effectDeadline.run(dispatch),
+            )
+          : await dispatch();
         result = normalizeToolResult(output, {
           write: true,
           handlerStarted: true,
@@ -642,6 +681,7 @@ export class VexiPlanStateService {
           /* durable applying also blocks replay */
         }
       }
+      effectDeadline?.dispose();
       await repository.releaseLease(leased.id, lease).catch(() => false);
     }
   }
@@ -675,9 +715,9 @@ export class VexiPlanStateService {
       get objectiveId() {
         return session?.objective.id;
       },
-      execute: async (name, args) => {
+      execute: async (name, args, options) => {
         await prepare();
-        return this.execute(conversationId, name, args ?? {}, session);
+        return this.execute(conversationId, name, args ?? {}, session, options);
       },
       snapshot: async () => {
         await prepare();
@@ -702,6 +742,7 @@ export class VexiPlanStateService {
     name: AgentPlanToolName,
     args: Record<string, any>,
     session?: DurablePlanSession,
+    options?: AgentVerificationOptions,
   ): Promise<AgentPlanToolOutcome> {
     const { plan: current, metadata } = await this.load(
       conversationId,
@@ -727,6 +768,100 @@ export class VexiPlanStateService {
       return reject('no hay plan activo');
     }
     const plan = current;
+    const robust = robustExecutionEnabled() && !!session;
+    if (robust && name === 'verify_deliverables') {
+      if (
+        !this.verifier ||
+        !options ||
+        !(session instanceof AgentDurableSession)
+      )
+        return reject(
+          'unsupported_capability: verificación de servidor no disponible en esta superficie',
+        );
+      if (
+        !plan.deliverables.every((d) => d.verification) ||
+        !plan.steps.every((step) => step.status === 'done')
+      )
+        return reject(
+          'Faltan postcondiciones de servidor o pasos pendientes. Un texto o verified:true no verifica el objetivo.',
+        );
+      const supplied = Array.isArray(args.deliverables)
+        ? args.deliverables
+        : [];
+      if (
+        supplied.length !== plan.deliverables.length ||
+        new Set(supplied.map((item) => item?.id)).size !== supplied.length ||
+        supplied.some(
+          (item) => !plan.deliverables.some((d) => d.id === item?.id),
+        )
+      )
+        return reject(
+          'Incluye referencias para todos los entregables del contrato fijo.',
+        );
+      const requests = plan.deliverables.map((d) => ({
+        ...d.verification!,
+        evidence_refs: supplied.find((item) => item?.id === d.id)
+          ?.evidence_refs,
+      }));
+      const result = await this.verifier.verifyMany(session, requests, options);
+      if (result.verified === false) {
+        const detail = `Postcondiciones no satisfechas: ${result.reasons.join('; ')}`;
+        if (
+          result.reasons.some((reason) =>
+            reason.startsWith('unsupported_capability:'),
+          )
+        ) {
+          const next = `La operación ${requests.map((r) => r.workflow_key).join(', ')} no dispone de verificación completa: ${result.reasons.join('; ')}. Conservé lo aplicado; revisa ese resultado en su módulo antes de repetir cambios.`;
+          session.objective =
+            (await this.durableRepository().checkpoint(
+              session.objective_id,
+              session.lease,
+              { semantic_status: 'partial', next_step: next },
+            )) ?? session.objective;
+          Object.assign(session.lease, {
+            version: session.objective.version,
+            lease_generation: session.objective.lease_generation,
+          });
+        }
+        return reject(detail);
+      }
+      await session.completeVerified(result.capability);
+      return {
+        result: ok(session.objective.plan!, {
+          evidence_refs: result.evidence_refs,
+          completion_verified: true,
+        }),
+        endTurn: {
+          text: `Verifiqué en el sistema los resultados solicitados. Referencias: ${result.evidence_refs.slice(-5).join(', ')}.`,
+        },
+      };
+    }
+    if (robust && name === 'revise_plan') {
+      if (str(args.goal) && str(args.goal) !== plan.goal)
+        return reject(
+          'No puedo cambiar el objetivo económico durante una recuperación técnica. Inicia otro objetivo para un trabajo distinto.',
+        );
+      if (Array.isArray(args.add_deliverables) && args.add_deliverables.length)
+        return reject(
+          'Una recuperación técnica no puede ampliar el objetivo económico.',
+        );
+      if ((session!.objective.budget.recovery ?? 0) >= maximumRecoveryReplans())
+        return reject(
+          'Se agotaron las dos revisiones técnicas del objetivo; conserva lo ya aplicado.',
+        );
+    }
+    if (robust && name === 'update_plan_step') {
+      const step = this.findStep(plan, args.order);
+      if (
+        step &&
+        ['in_progress', 'done'].includes(args.status) &&
+        (step.depends_on ?? []).some(
+          (order) =>
+            plan.steps.find((s) => s.order === order)?.status !== 'done',
+        )
+      )
+        return reject('Las dependencias del paso aún no tienen resultado.');
+    }
     let outcome: AgentPlanToolOutcome;
 
     switch (name) {
@@ -750,6 +885,25 @@ export class VexiPlanStateService {
         return reject(`herramienta desconocida: ${String(name)}`);
     }
 
+    if (
+      robust &&
+      name === 'revise_plan' &&
+      !outcome.result.startsWith('{"ok":false')
+    ) {
+      if (
+        plan.steps.length < 3 ||
+        plan.steps.length > 7 ||
+        plan.steps.some((step) =>
+          (step.depends_on ?? []).some(
+            (order) => order >= step.order || order < 1,
+          ),
+        )
+      )
+        return reject(
+          'El bloque ejecutable requiere entre 3 y 7 pasos con dependencias previas válidas.',
+        );
+      await (session as AgentDurableSession).addBudget({ recovery: 1 });
+    }
     // Un rechazo no cambia estado: no se persiste.
     if (!outcome.result.startsWith('{"ok":false')) {
       await this.save(conversationId, metadata, plan);
@@ -776,6 +930,32 @@ export class VexiPlanStateService {
     if (rawSteps.length === 0) {
       return reject('define al menos un paso');
     }
+    const robust = robustExecutionEnabled() && durableObjectivesEnabled();
+    if (robust && (rawSteps.length < 3 || rawSteps.length > 7))
+      return reject(
+        'El bloque multietapa debe tener de 3 a 7 pasos. Una consulta simple no necesita plan.',
+      );
+    if (robust && previous && str(args.goal) !== previous.goal)
+      return reject(
+        'La recuperación no puede cambiar el objetivo económico. Inicia otra conversación para otro trabajo.',
+      );
+    if (
+      robust &&
+      rawDel.some(
+        (d) =>
+          !str(d?.description) ||
+          !d?.verification ||
+          typeof d.verification.workflow_key !== 'string' ||
+          typeof d.verification.step_id !== 'string' ||
+          !d.verification.inputs ||
+          typeof d.verification.inputs !== 'object' ||
+          Array.isArray(d.verification.inputs) ||
+          Buffer.byteLength(JSON.stringify(d.verification.inputs)) > 64000,
+      )
+    )
+      return reject(
+        'unsupported_capability: cada entregable requiere un workflow de servidor, step_id e inputs explícitos.',
+      );
     const steps: AgentPlanStep[] = [];
     for (const [i, raw] of rawSteps.slice(0, MAX_PLAN_STEPS).entries()) {
       const kind = raw?.kind === 'cambio' ? 'cambio' : 'verificacion';
@@ -785,7 +965,34 @@ export class VexiPlanStateService {
           `el paso ${i + 1} es un cambio y necesita done_when (criterio verificable)`,
         );
       }
+      if (
+        robust &&
+        (!str(raw.expected_input) ||
+          !str(raw.expected_output) ||
+          !Array.isArray(raw.candidate_tools) ||
+          !raw.candidate_tools.length ||
+          raw.candidate_tools.some((name) => typeof name !== 'string') ||
+          !str(raw.verifier) ||
+          !Array.isArray(raw.depends_on) ||
+          raw.depends_on.some(
+            (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
+          ) ||
+          raw.approval !== (kind === 'cambio' ? 'individual' : 'none'))
+      )
+        return reject(
+          `El paso ${i + 1} requiere entrada/salida, tools candidatas, aprobación individual, verifier y dependencias previas.`,
+        );
       steps.push({
+        ...(robust
+          ? {
+              depends_on: [...raw.depends_on],
+              expected_input: str(raw.expected_input),
+              expected_output: str(raw.expected_output),
+              candidate_tools: [...raw.candidate_tools],
+              approval: raw.approval,
+              verifier: str(raw.verifier),
+            }
+          : {}),
         order: i + 1,
         title: str(raw?.title) || `Paso ${i + 1}`,
         kind,
@@ -806,6 +1013,9 @@ export class VexiPlanStateService {
         id: `d${i + 1}`,
         description,
         verified: false,
+        ...(robust
+          ? { verification: structuredClone(rawDel[i].verification) }
+          : {}),
       })),
       steps,
       created_at:
@@ -855,7 +1065,7 @@ export class VexiPlanStateService {
     let extra: Record<string, unknown> = {};
     if (status === 'failed') {
       step.attempts += 1;
-      if (step.attempts >= 2) {
+      if (step.attempts >= 2 && !robustExecutionEnabled()) {
         extra = {
           instruccion:
             'explícale a la persona qué pasó y pregúntale cómo seguir con ask_user',
@@ -946,6 +1156,19 @@ export class VexiPlanStateService {
         );
       }
     }
+    const robust = robustExecutionEnabled() && durableObjectivesEnabled();
+    const dependencies = new Map<AgentPlanStep, AgentPlanStep[]>();
+    if (robust)
+      for (const step of plan.steps) {
+        const refs = (step.depends_on ?? []).map((order) =>
+          plan.steps.find((s) => s.order === order),
+        );
+        if (refs.some((ref) => !ref || removeOrders.includes(ref.order)))
+          return reject(
+            'No elimines una dependencia requerida; revisa el DAG completo.',
+          );
+        dependencies.set(step, refs as AgentPlanStep[]);
+      }
     const newSteps: Array<{ raw: any; step: AgentPlanStep }> = [];
     for (const raw of adds) {
       const kind = raw?.kind === 'cambio' ? 'cambio' : 'verificacion';
@@ -956,6 +1179,20 @@ export class VexiPlanStateService {
       newSteps.push({
         raw,
         step: {
+          ...(robust
+            ? {
+                depends_on: Array.isArray(raw.depends_on)
+                  ? [...raw.depends_on]
+                  : undefined,
+                expected_input: str(raw.expected_input),
+                expected_output: str(raw.expected_output),
+                candidate_tools: Array.isArray(raw.candidate_tools)
+                  ? [...raw.candidate_tools]
+                  : undefined,
+                approval: raw.approval,
+                verifier: str(raw.verifier),
+              }
+            : {}),
           order: 0,
           title: str(raw?.title) || 'Paso',
           kind,
@@ -976,6 +1213,17 @@ export class VexiPlanStateService {
       if (str(u.done_when)) s.done_when = str(u.done_when);
     }
     for (const { raw, step } of newSteps) {
+      if (robust) {
+        if (
+          !Array.isArray(raw.depends_on) ||
+          raw.depends_on.some((order) => !byOriginal.has(order))
+        )
+          return reject('La dependencia nueva debe referir un paso existente.');
+        dependencies.set(
+          step,
+          raw.depends_on.map((order) => byOriginal.get(order)!),
+        );
+      }
       const ref =
         raw?.after_order != null
           ? byOriginal.get(Number(raw.after_order))
@@ -988,6 +1236,36 @@ export class VexiPlanStateService {
       return reject(
         `el plan quedaría con ${steps.length} pasos y el máximo es ${MAX_PLAN_STEPS}`,
       );
+    }
+    if (robust) {
+      if (
+        steps.some(
+          (step) =>
+            !step.expected_input ||
+            !step.expected_output ||
+            !step.candidate_tools?.length ||
+            step.candidate_tools.some((name) => typeof name !== 'string') ||
+            !step.verifier ||
+            step.approval !== (step.kind === 'cambio' ? 'individual' : 'none'),
+        )
+      )
+        return reject(
+          'Cada paso revisado requiere contrato completo de entrada/salida, tools, aprobación y verifier.',
+        );
+      for (const step of steps) {
+        const refs = dependencies.get(step) ?? [];
+        if (
+          refs.some(
+            (ref) =>
+              steps.indexOf(ref) < 0 ||
+              steps.indexOf(ref) >= steps.indexOf(step),
+          )
+        )
+          return reject(
+            'El DAG revisado requiere dependencias previas no eliminadas.',
+          );
+        step.depends_on = refs.map((ref) => steps.indexOf(ref) + 1);
+      }
     }
     steps = steps.map((s, i) => ({ ...s, order: i + 1 }));
     plan.steps = steps;

@@ -1,3 +1,4 @@
+import { AgentVerifierService } from './tasks/agent-verifier.service';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -77,6 +78,7 @@ import { S3Service } from '../common/services/s3.service';
     AgentTaskContextService,
     AgentEvidenceService,
     AgentDurableSessionService,
+    AgentVerifierService,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -112,6 +114,7 @@ import { S3Service } from '../common/services/s3.service';
     AgentTaskContextService,
     AgentEvidenceService,
     AgentDurableSessionService,
+    AgentVerifierService,
     AIEngineService,
     AILoggingService,
     AgentTraceService,

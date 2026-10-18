@@ -155,6 +155,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing AgentPlan storage, objective leases or resume semantics | `vendix-agent-durable-tasks` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
+| Changing agent verification, recovery or audited read scheduling | `vendix-agent-durable-tasks` |
 | Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |

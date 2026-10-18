@@ -486,7 +486,9 @@ describe('OpenAICompatibleProvider', () => {
 
     it('still infers image from settings when the column holds its default', () => {
       expect(
-        (withType('text', { image_model: 'gpt-image-1' }) as any).getModelType(),
+        (
+          withType('text', { image_model: 'gpt-image-1' }) as any
+        ).getModelType(),
       ).toBe('image');
     });
 
@@ -925,5 +927,119 @@ describe('OpenAICompatibleProvider', () => {
         `data:image/png;base64,${bytes.toString('base64')}`,
       );
     });
+  });
+});
+
+describe('OpenAI-compatible D2 opt-in cancellation', () => {
+  const provider = () =>
+    new OpenAICompatibleProvider({
+      provider: 'QA',
+      sdkType: 'openai_compatible',
+      apiKey: 'synthetic-test-only',
+      modelId: 'test-model',
+    });
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('passes AbortSignal as SDK request options, never as model input', async () => {
+    const instance = provider();
+    const create = jest.fn().mockResolvedValue({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      model: 'test-model',
+    });
+    (instance as any).client.chat.completions.create = create;
+    await expect(
+      instance.chat([{ role: 'user', content: 'read' }], {
+        deadlineMs: Date.now() + 1000,
+      }),
+    ).resolves.toMatchObject({ success: true });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('signal');
+    expect(create.mock.calls[0][0]).not.toHaveProperty('deadlineMs');
+    expect(create.mock.calls[0][1]).toEqual({
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('rejects pre-aborted dispatch and fences a late provider completion', async () => {
+    const instance = provider();
+    let finish!: (value: any) => void;
+    const create = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    (instance as any).client.chat.completions.create = create;
+    const caller = new AbortController();
+    caller.abort();
+    await expect(
+      instance.chat([], { signal: caller.signal }),
+    ).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_CANCELLED',
+      retryable: false,
+    });
+    expect(create).not.toHaveBeenCalled();
+    const result = instance.chat([], { deadlineMs: Date.now() + 50 });
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+      retryable: false,
+    });
+    finish({ choices: [{ message: { content: 'late success' } }] });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts a non-cooperative stream without emitting a done or late tool call', async () => {
+    const instance = provider();
+    const create = jest.fn().mockResolvedValue({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => undefined),
+      }),
+    });
+    (instance as any).client.chat.completions.create = create;
+    const chunks: any[] = [];
+    const result = (async () => {
+      for await (const chunk of instance.chatStream([], {
+        deadlineMs: Date.now() + 20,
+      }))
+        chunks.push(chunk);
+    })();
+    await jest.advanceTimersByTimeAsync(20);
+    await result;
+    expect(chunks).toEqual([
+      { type: 'error', error: 'Agent deadline exceeded' },
+    ]);
+    expect(create.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+
+  it('propagates abort into the installed SDK fetch without transport retry', async () => {
+    const fetcher = jest.fn(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          init?.signal?.addEventListener('abort', abort, { once: true });
+          if (init?.signal?.aborted) abort();
+        }),
+    );
+    const instance = new OpenAICompatibleProvider({
+      provider: 'QA',
+      sdkType: 'openai_compatible',
+      apiKey: 'synthetic-test-only',
+      modelId: 'test-model',
+      fetch: fetcher,
+    });
+    const result = instance.chat([], { deadlineMs: Date.now() + 30 });
+    await jest.advanceTimersByTimeAsync(30);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      retryable: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+    });
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 });

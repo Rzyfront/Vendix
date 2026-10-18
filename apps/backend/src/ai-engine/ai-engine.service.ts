@@ -16,6 +16,13 @@ import {
   objectiveMeteredFetch,
 } from './tasks/agent-budget-context';
 import { randomUUID } from 'crypto';
+import {
+  AgentDeadline,
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from './tasks/agent-deadline';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   AIProvider,
@@ -302,8 +309,13 @@ export class AIEngineService implements OnModuleInit {
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
     const response = await this.observeProviderCall(undefined, () =>
-      this.observeProviderAttempt(this.defaultConfigId, messages, options, () =>
-        provider.chat(messages, options),
+      this.withProviderDeadline(options, (scoped) =>
+        this.observeProviderAttempt(
+          this.defaultConfigId,
+          messages,
+          scoped,
+          () => provider.chat(messages, scoped),
+        ),
       ),
     );
     if (!response.success) {
@@ -322,11 +334,13 @@ export class AIEngineService implements OnModuleInit {
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
     const response = await this.observeProviderCall(undefined, () =>
-      this.observeProviderAttempt(
-        this.defaultConfigId,
-        [{ role: 'user', content: prompt }],
-        options,
-        () => provider.complete(prompt, options),
+      this.withProviderDeadline(options, (scoped) =>
+        this.observeProviderAttempt(
+          this.defaultConfigId,
+          [{ role: 'user', content: prompt }],
+          scoped,
+          () => provider.complete(prompt, scoped),
+        ),
       ),
     );
     if (!response.success) {
@@ -351,8 +365,10 @@ export class AIEngineService implements OnModuleInit {
     const thinking = options?.thinking ?? this.isThinkingEnabled(configId);
     return this.sanitizeResponse(
       await this.observeProviderCall(undefined, () =>
-        this.observeProviderAttempt(configId, messages, options, () =>
-          provider.chat(messages, options),
+        this.withProviderDeadline(options, (scoped) =>
+          this.observeProviderAttempt(configId, messages, scoped, () =>
+            provider.chat(messages, scoped),
+          ),
         ),
       ),
       thinking,
@@ -584,13 +600,25 @@ export class AIEngineService implements OnModuleInit {
       };
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        lastResponse = await this.observeProviderAttempt(
-          resolvedConfigId,
-          messages,
-          options,
-          () => provider.chat(messages, options),
-          attempt + 1,
+        lastResponse = await this.withProviderDeadline(options, (scoped) =>
+          this.observeProviderAttempt(
+            resolvedConfigId,
+            messages,
+            scoped,
+            () => provider.chat(messages, scoped),
+            attempt + 1,
+          ),
         );
+        // Cancellation is terminal even when the application's existing retry
+        // policy allows another request. Never spend a closing/retry inference.
+        if (
+          ['AGENT_CANCELLED', 'AGENT_DEADLINE_EXCEEDED'].includes(
+            lastResponse.error_code ?? '',
+          )
+        ) {
+          logResponse = lastResponse;
+          return lastResponse;
+        }
 
         if (lastResponse.success) {
           // Sanitize thinking blocks based on config setting
@@ -622,11 +650,16 @@ export class AIEngineService implements OnModuleInit {
           this.logger.warn(
             `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
           );
-          const wait = () =>
-            new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-          if (this.providerObserver)
-            await this.providerObserver.retry(delayMs, wait);
-          else await wait();
+          const wait = () => this.waitForProviderRetry(delayMs, options);
+          try {
+            if (this.providerObserver)
+              await this.providerObserver.retry(delayMs, wait);
+            else await wait();
+          } catch (error) {
+            if (!isAgentAbort(error, options.signal)) throw error;
+            logResponse = agentAbortFailure(error, options.signal);
+            return logResponse;
+          }
         }
       }
 
@@ -741,6 +774,7 @@ export class AIEngineService implements OnModuleInit {
     const callId = randomUUID();
     let lastChunk: AIStreamChunk | null = null;
     let resolvedConfigId: number | null = null;
+    let deadline: AgentDeadline | undefined;
 
     try {
       const app = await this.prisma.ai_engine_applications.findUnique({
@@ -826,8 +860,14 @@ export class AIEngineService implements OnModuleInit {
       if (optionsOverride) {
         Object.assign(options, optionsOverride);
       }
+      deadline = createAgentOperation(options);
+      if (deadline) {
+        options.signal = deadline.signal;
+        options.deadlineMs = deadline.deadlineMs;
+      }
 
       try {
+        deadline?.assertCanStart();
         const stream =
           this.providerObserver && this.trace?.currentSpan()
             ? this.providerObserver.attemptStream(
@@ -838,12 +878,18 @@ export class AIEngineService implements OnModuleInit {
                 () => provider.chatStream!(messages, options),
               )
             : provider.chatStream(messages, options);
-        for await (const chunk of stream) {
+        for await (const chunk of agentDeadlineStream(stream, deadline)) {
           lastChunk = chunk;
           yield chunk;
         }
       } catch (error: any) {
-        lastChunk = { type: 'error', error: error.message };
+        lastChunk = {
+          type: 'error',
+          error:
+            deadline && isAgentAbort(error, deadline.signal)
+              ? agentAbortFailure(error, deadline.signal).error
+              : error.message,
+        };
         yield lastChunk;
       }
 
@@ -859,6 +905,7 @@ export class AIEngineService implements OnModuleInit {
         });
       }
     } finally {
+      deadline?.dispose();
       // Log after stream completes — always runs regardless of early returns
       const latencyMs = Date.now() - startTime;
       const context = this.trace?.isEnabled()
@@ -1639,6 +1686,57 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
+  private async withProviderDeadline(
+    options: AIRequestOptions | undefined,
+    callback: (scoped: AIRequestOptions | undefined) => Promise<AIResponse>,
+  ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
+    if (!deadline) return callback(options);
+    try {
+      const scoped = {
+        ...options,
+        signal: deadline.signal,
+        deadlineMs: deadline.deadlineMs,
+      };
+      return await deadline.run(() => callback(scoped));
+    } catch (error) {
+      if (!isAgentAbort(error, deadline.signal)) throw error;
+      return agentAbortFailure(error, deadline.signal);
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  private async waitForProviderRetry(
+    delayMs: number,
+    options: AIRequestOptions,
+  ): Promise<void> {
+    const deadline = createAgentOperation(options);
+    if (!deadline)
+      return new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      // A backoff that fills the entire remaining budget cannot lead to work.
+      deadline.assertCanStart(delayMs + 1);
+      await deadline.run(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              clearTimeout(timer);
+              reject(deadline.signal.reason);
+            };
+            const timer = setTimeout(() => {
+              deadline.signal.removeEventListener('abort', abort);
+              resolve();
+            }, delayMs);
+            deadline.signal.addEventListener('abort', abort, { once: true });
+            if (deadline.signal.aborted) abort();
+          }),
+      );
+    } finally {
+      deadline.dispose();
+    }
+  }
+
   private async observeProviderAttempt(
     configId: number | null,
     messages: AIMessage[],
@@ -1657,9 +1755,15 @@ export class AIEngineService implements OnModuleInit {
             },
             callback,
           );
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
     const meter = objectiveProviderMeter.getStore();
     if (meter) await meter.dispatch();
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
     const response = await execute();
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
     if (meter) {
       meter.observed = true;
       const usage = response.usage;

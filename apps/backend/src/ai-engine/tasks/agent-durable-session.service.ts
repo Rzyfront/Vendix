@@ -1,3 +1,5 @@
+import type { AgentRecoveryState } from './agent-recovery.service';
+import { robustExecutionEnabled } from './agent-execution-flags';
 import {
   ConflictException,
   Injectable,
@@ -99,6 +101,65 @@ export class AgentDurableSession {
       version: row.version,
       lease_generation: row.lease_generation,
     });
+  }
+  async completeVerified(capability: unknown): Promise<void> {
+    this.accept(
+      await this.repo.commitVerified(this.objective_id, this.lease, capability),
+    );
+  }
+  async recoveryState(): Promise<AgentRecoveryState | undefined> {
+    const stored = await this.repo.latestInternalResult(
+      this.objective_id,
+      'agent_recovery_checkpoint',
+    );
+    if (!stored) return undefined;
+    const state = (stored.data as { recovery?: AgentRecoveryState } | null)
+      ?.recovery;
+    // A corrupt checkpoint is deliberately passed to the policy, which fails closed.
+    return state ?? ({} as AgentRecoveryState);
+  }
+  async checkpointRecovery(
+    state: AgentRecoveryState,
+    previous?: AgentRecoveryState,
+  ): Promise<void> {
+    const counter = (value?: AgentRecoveryState) =>
+      value ? value.replans + value.corrections + value.transient_retries : 0;
+    const saved = await this.repo.appendToolResult(
+      this.objective_id,
+      this.lease,
+      {
+        tool_call_id: `${this.turn_id}:recovery:${randomUUID()}`,
+        tool_name: 'agent_recovery_checkpoint',
+        args_hash: objectiveArgsHash({}),
+        receipt: toolReceipt({
+          schema_version: '1',
+          status: 'ok',
+          error_code: null,
+          retryable: false,
+          next_action: null,
+          evidence_refs: [],
+          resource_ids: {},
+          pagination: null,
+          freshness: 'observed',
+          effect_status: 'not_applicable',
+          data: null,
+        }),
+        data: {
+          schema_version: '1',
+          checkpoint_version: this.lease.version,
+          recovery: state,
+        },
+        // Catalog policy reservations live in state; the actual search dispatch
+        // alone charges budget.expansions, so one expansion is never billed twice.
+        budget_delta: {
+          recovery: Math.max(0, counter(state) - counter(previous)),
+        },
+        checkpoint: {},
+      },
+    );
+    if (!saved.advanced)
+      throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
+    this.accept(saved.objective);
   }
   async assertCurrent(): Promise<void> {
     const row = await this.repo.get(this.objective_id);
@@ -234,6 +295,30 @@ export class AgentDurableSession {
         'Este cambio fue rechazado, enviado o es incierto. Revisa la propuesta antes de continuar.',
       );
   }
+  /** Late/non-cooperative reads are auditable, never current-generation evidence. */
+  async auditTool(
+    callId: string,
+    name: string,
+    args: unknown,
+    result: ToolExecutionResult,
+    version = '1',
+    countTool = true,
+  ): Promise<string> {
+    const saved = await this.repo.appendToolResult(
+      this.objective_id,
+      { version: -1, lease_generation: this.lease.lease_generation },
+      {
+        tool_call_id: `${this.turn_id}:${callId}`,
+        tool_name: name,
+        tool_version: version,
+        args_hash: objectiveArgsHash(args),
+        receipt: toolReceipt(result),
+        data: result.data,
+        budget_delta: { tools: countTool ? 1 : 0 },
+      },
+    );
+    return saved.result.id;
+  }
   async checkpointTool(
     callId: string,
     name: string,
@@ -263,7 +348,18 @@ export class AgentDurableSession {
       receipt: toolReceipt(result),
       data: result.data,
       budget_delta: { tools: 1 },
-      checkpoint: { semantic_status: status, next_step: result.next_action },
+      checkpoint: {
+        semantic_status:
+          ['unknown_effect', 'blocked', 'awaiting_approval'].includes(
+            this.objective.semantic_status,
+          ) && status === 'active'
+            ? (this.objective.semantic_status as
+                | 'unknown_effect'
+                | 'blocked'
+                | 'awaiting_approval')
+            : status,
+        next_step: result.next_action,
+      },
     });
     if (!advanced) throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
     this.accept(objective);
@@ -272,6 +368,16 @@ export class AgentDurableSession {
   async finish(result: AgentResult): Promise<ObjectiveProgress> {
     // Old executors never overwrite a replacement's goal, plan or state.
     if (result.aborted) return objectiveProgress(this.objective);
+    // Only the opaque server verifier can enter completed_verified. Never
+    // downgrade that state to a conversational partial during normal closure.
+    if (
+      robustExecutionEnabled() &&
+      this.objective.semantic_status === 'completed_verified'
+    ) {
+      await this.close();
+      this.objective = await this.repo.get(this.objective_id);
+      return objectiveProgress(this.objective);
+    }
     await this.accountRuntime();
     const outcome = result.execution?.outcome;
     const semantic_status =

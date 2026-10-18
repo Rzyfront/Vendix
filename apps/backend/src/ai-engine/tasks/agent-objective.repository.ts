@@ -1,3 +1,8 @@
+import { robustExecutionEnabled } from './agent-execution-flags';
+import {
+  consumeAgentVerification,
+  agentVerificationContractsHash,
+} from './agent-verification-capability';
 import {
   BadRequestException,
   ConflictException,
@@ -452,6 +457,104 @@ export class AgentObjectiveRepository {
     return rows[0];
   }
 
+  /** The ONLY completed_verified transition. A JSON boolean/reference cannot authorize it. */
+  async commitVerified(
+    id: string,
+    lease: ObjectiveLease,
+    capability: unknown,
+  ): Promise<AgentObjective> {
+    if (!robustExecutionEnabled())
+      throw new BadRequestException('Independent verification is disabled');
+    const scope = this.scope();
+    return this.transaction(async (tx) => {
+      const row = await this.find(tx, scope, id, true);
+      this.assertLease(row, lease);
+      if (
+        !row.plan ||
+        !row.plan.deliverables.length ||
+        !row.plan.deliverables.every((d) => d.verification) ||
+        !row.plan.steps.every((s) => s.status === 'done') ||
+        [
+          'blocked',
+          'unknown_effect',
+          'awaiting_approval',
+          'cancelled',
+          'superseded',
+        ].includes(row.semantic_status)
+      )
+        throw new BadRequestException(
+          'All postconditions and steps must be satisfied',
+        );
+      const proof = consumeAgentVerification(capability, {
+        ...scope,
+        objective_id: id,
+        step_id: 'objective',
+        ...lease,
+      });
+      if (
+        !proof ||
+        !proof.evidence_refs.length ||
+        proof.contracts_hash !==
+          agentVerificationContractsHash(
+            row.plan.deliverables.map((d) => d.verification!),
+          ) ||
+        JSON.stringify([...proof.workflows].sort()) !==
+          JSON.stringify(
+            row.plan.deliverables
+              .map((d) => d.verification!.workflow_key)
+              .sort(),
+          )
+      )
+        throw new BadRequestException(
+          'Independent verification capability required',
+        );
+      // Recheck pending/uncertain effects inside the same owner-scoped transaction.
+      const effects = await tx.$queryRaw<AgentEffect[]>(
+        Prisma.sql`SELECT * FROM ai_agent_effects WHERE objective_id=${id}::uuid AND ${scopeSql(scope)}`,
+      );
+      if (
+        effects.some((effect) =>
+          ['proposed', 'approved', 'applying', 'unknown'].includes(
+            effect.status,
+          ),
+        )
+      )
+        throw new ConflictException(
+          'Effects still require approval or reconciliation',
+        );
+      for (const reference of proof.evidence_refs) {
+        const match = /^agent-result:([a-f0-9-]{36})$/i.exec(reference);
+        if (!match) throw new BadRequestException('Invalid evidence reference');
+        const found = await tx.$queryRaw<AgentToolResult[]>(
+          Prisma.sql`SELECT * FROM ai_agent_tool_results WHERE id=${match[1]}::uuid AND objective_id=${id}::uuid AND ${scopeSql(scope)}`,
+        );
+        if (
+          !found[0] ||
+          found[0].stale_lease ||
+          found[0].receipt.status !== 'ok' ||
+          found[0].freshness !== 'observed'
+        )
+          throw new BadRequestException('Evidence no longer current');
+      }
+      const plan: AgentPlan = {
+        ...row.plan,
+        status: 'done',
+        updated_at: new Date().toISOString(),
+        deliverables: row.plan.deliverables.map((d) => ({
+          ...d,
+          verified: true,
+          evidence_refs: proof.evidence_refs,
+          evidence: proof.evidence_refs.join(', '),
+        })),
+      };
+      const rows = await tx.$queryRaw<AgentObjective[]>(
+        Prisma.sql`UPDATE ai_agent_objectives SET plan=${json(plan)},semantic_status='completed_verified',requires_revalidation=false,next_step=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=${id}::uuid AND ${scopeSql(scope)} AND ${leaseSql(lease)} AND expires_at>CURRENT_TIMESTAMP RETURNING *`,
+      );
+      if (!rows[0]) throw new ConflictException('Objective changed');
+      return rows[0];
+    });
+  }
+
   async savePlan(
     id: string,
     expectedVersion: number,
@@ -817,6 +920,21 @@ export class AgentObjectiveRepository {
     });
   }
 
+  /** Server-owned runtime checkpoints, never supplied by a model/tool payload. */
+  async latestInternalResult(
+    id: string,
+    toolName: 'agent_recovery_checkpoint',
+  ): Promise<AgentToolResult | null> {
+    const scope = this.scope();
+    return this.transaction(async (tx) => {
+      await this.find(tx, scope, id);
+      const rows = await tx.$queryRaw<AgentToolResult[]>(
+        Prisma.sql`SELECT * FROM ai_agent_tool_results WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND tool_name=${toolName} AND stale_lease=false ORDER BY (data->>'checkpoint_version')::bigint DESC,created_at DESC,id DESC LIMIT 1`,
+      );
+      return rows[0] ?? null;
+    });
+  }
+
   async listResults(
     id: string,
     options: { cursor?: string; limit?: number } = {},
@@ -840,7 +958,7 @@ export class AgentObjectiveRepository {
         ? Prisma.sql`AND (created_at,id)>(${cursor[0].created_at},${cursor[0].id}::uuid)`
         : Prisma.empty;
       const rows = await tx.$queryRaw<AgentToolResult[]>(
-        Prisma.sql`SELECT id,store_id,organization_id,user_id,objective_id,task_id,tool_call_id,tool_name,tool_version,args_hash,receipt,CASE WHEN octet_length(data::text)<=1500 THEN data ELSE NULL END AS data,pagination,freshness,resource_ids,evidence_refs,lease_generation,stale_lease,created_at,(octet_length(data::text)>1500) AS data_omitted FROM ai_agent_tool_results WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} ${after} ORDER BY created_at,id LIMIT ${limit + 1}`,
+        Prisma.sql`SELECT id,store_id,organization_id,user_id,objective_id,task_id,tool_call_id,tool_name,tool_version,args_hash,receipt,CASE WHEN octet_length(data::text)<=1500 THEN data ELSE NULL END AS data,pagination,freshness,resource_ids,evidence_refs,lease_generation,stale_lease,created_at,(octet_length(data::text)>1500) AS data_omitted FROM ai_agent_tool_results WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND tool_name <> 'agent_recovery_checkpoint' ${after} ORDER BY created_at,id LIMIT ${limit + 1}`,
       );
       const items = rows.slice(0, limit);
       return {
