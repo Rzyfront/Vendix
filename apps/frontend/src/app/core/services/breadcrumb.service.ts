@@ -688,6 +688,18 @@ export class BreadcrumbService {
       parent: 'Reservas',
       icon: 'calendar-clock',
     },
+    {
+      path: '/admin/services/stations',
+      title: 'Estaciones de Servicio',
+      parent: 'Tienda',
+      icon: 'warehouse',
+    },
+    {
+      path: '/admin/reservations/stations',
+      title: 'Estaciones de Servicio',
+      parent: 'Reservas',
+      icon: 'warehouse',
+    },
 
     // Products
     {

@@ -10,9 +10,12 @@ export interface PaginatedApiResponse<T> {
   meta: { total: number; page: number; limit: number; totalPages: number; hasNextPage: boolean; hasPreviousPage: boolean };
 }
 
+export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+
 export interface ServiceStation {
   id: number;
   name: string;
+  station_type?: StationType;
   capacity: number;
   status: 'active' | 'inactive';
   public_id: string | null;
@@ -83,11 +86,11 @@ export class ServiceStationsService {
       .pipe(map((response) => this.unwrap(response)));
   }
 
-  create(body: { name: string; capacity: number }): Observable<ServiceStation> {
+  create(body: { name: string; capacity: number; station_type?: StationType }): Observable<ServiceStation> {
     return this.http.post<{ data?: ServiceStation } | ServiceStation>(this.base, body).pipe(map((r) => this.unwrap(r)));
   }
 
-  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status'>>): Observable<ServiceStation> {
+  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type'>>): Observable<ServiceStation> {
     return this.http.patch<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`, body).pipe(map((r) => this.unwrap(r)));
   }
 
@@ -133,6 +136,46 @@ export class ServiceStationsService {
         }
         return [];
       }),
+    );
+  }
+
+  getAllProducts(): Observable<any[]> {
+    return this.http.get<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/products?limit=150`).pipe(
+      map((r) => {
+        const unwrapped = this.unwrap<unknown>(r);
+        if (Array.isArray(unwrapped)) return unwrapped;
+        if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped && Array.isArray((unwrapped as { data: unknown }).data)) {
+          return (unwrapped as { data: any[] }).data;
+        }
+        return [];
+      }),
+    );
+  }
+
+  getSession(id: number): Observable<any> {
+    return this.http.get<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${id}`).pipe(
+      map((r) => this.unwrap(r)),
+    );
+  }
+
+  addItem(sessionId: number, body: { product_id: number; quantity?: number; unit_price?: number; description?: string }): Observable<any> {
+    return this.http.post<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${sessionId}/items`, body).pipe(
+      map((r) => this.unwrap(r)),
+    );
+  }
+
+  removeItem(sessionId: number, itemId: number): Observable<any> {
+    return this.http.delete<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${sessionId}/items/${itemId}`).pipe(
+      map((r) => this.unwrap(r)),
+    );
+  }
+
+  setBudget(sessionId: number, amount: number, currency: string = 'COP', expectedVersion: number = 0): Observable<any> {
+    return this.http.put<{ data?: any } | any>(
+      `${environment.apiUrl}/store/service-sessions/${sessionId}/budget`,
+      { amount, currency, expectedVersion },
+    ).pipe(
+      map((r) => this.unwrap(r)),
     );
   }
 }

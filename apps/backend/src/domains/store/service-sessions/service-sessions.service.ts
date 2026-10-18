@@ -11,7 +11,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { ServiceSessionAccessService } from '../../ecommerce/service-sessions/service-session-access.service';
 import { EmailService } from '../../../email/email.service';
 import { SettingsService } from '../settings/settings.service';
-import { OpenServiceSessionDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
+import { AddSessionItemDto, OpenServiceSessionDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 
 const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
@@ -72,83 +72,50 @@ export class ServiceSessionsService {
       select: { id: true },
     });
     const [stationService, product] = await Promise.all([
-      this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } }),
-      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
+      bookingAllocation
+        ? this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } })
+        : Promise.resolve(null),
+      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
     ]);
-    if (!station || !stationService || product?.product_type !== 'service') {
+    if (!station || (bookingAllocation && !stationService) || product?.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.STATION_001);
     }
     if (providerId) {
-      const [stationProvider, providerService, provider] = await Promise.all([
-        this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: stationId, provider_id: providerId } }),
-        this.prisma.provider_services.findFirst({ where: { provider_id: providerId, product_id: productId } }),
-        this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true } }),
-      ]);
-      if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
-    } else if (product.booking_mode === 'provider_required') {
+      if (bookingAllocation) {
+        const [stationProvider, providerService, provider] = await Promise.all([
+          this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: stationId, provider_id: providerId } }),
+          this.prisma.provider_services.findFirst({ where: { provider_id: providerId, product_id: productId } }),
+          this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true } }),
+        ]);
+        if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
+      } else {
+        const provider = await this.prisma.service_providers.findFirst({
+          where: { id: providerId, store_id: storeId, is_active: true },
+          select: { id: true },
+        });
+        if (!provider) throw new VendixHttpException(ErrorCodes.STATION_001);
+      }
+    } else if (bookingAllocation && product.booking_mode === 'provider_required') {
       throw new VendixHttpException(ErrorCodes.STATION_001, 'Selecciona un proveedor compatible.');
     }
 
     const startAt = now;
-    const minimumWalkInEnd = product.service_duration_minutes
-      ? new Date(now.getTime() + (product.service_duration_minutes + (product.buffer_minutes ?? 0)) * 60_000)
-      : null;
-    const plannedEnd = bookingAllocation?.end_at ?? (dto.planned_end_at ? new Date(dto.planned_end_at) : minimumWalkInEnd);
-    if (!plannedEnd || plannedEnd <= startAt || (!bookingAllocation && plannedEnd <= now)) {
-      throw new VendixHttpException(ErrorCodes.STATION_009);
-    }
-    if (!bookingAllocation && (!minimumWalkInEnd || plannedEnd < minimumWalkInEnd)) {
-      throw new VendixHttpException(ErrorCodes.STATION_009, 'El horizonte walk-in no puede ser menor a la duración del servicio.');
-    }
-
-    if (!bookingAllocation) {
-      const timezone = await resolveStoreTimezone(this.prisma, storeId);
-      const localParts = (date: Date) => {
-        const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
-        return Object.fromEntries(parts.map((part) => [part.type, part.value])) as Record<string, string>;
-      };
-      const localStart = localParts(startAt);
-      const localEnd = localParts(plannedEnd);
-      const localDate = `${localStart.year}-${localStart.month}-${localStart.day}`;
-      if (localEnd.year !== localStart.year || localEnd.month !== localStart.month || localEnd.day !== localStart.day) {
-        throw new VendixHttpException(ErrorCodes.STATION_009, 'El walk-in debe terminar el mismo día local.');
+    let plannedEnd: Date;
+    if (bookingAllocation) {
+      plannedEnd = bookingAllocation.end_at;
+      if (!plannedEnd || plannedEnd <= startAt) {
+        throw new VendixHttpException(ErrorCodes.STATION_009);
       }
-      const weekday = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
-      const startMinutes = Number(localStart.hour) * 60 + Number(localStart.minute);
-      const endMinutes = Number(localEnd.hour) * 60 + Number(localEnd.minute);
-      const inside = (windows: Array<{ start_time: string; end_time: string }>) => windows.some((window) => {
-        const [sh, sm] = window.start_time.split(':').map(Number);
-        const [eh, em] = window.end_time.split(':').map(Number);
-        return startMinutes >= sh * 60 + sm && endMinutes <= eh * 60 + em;
-      });
-      const [stationSchedules, stationException, storeWindows] = await Promise.all([
-        this.prisma.service_station_schedules.findMany({ where: { store_id: storeId, station_id: stationId, weekday, is_active: true }, select: { start_time: true, end_time: true } }),
-        this.prisma.service_station_exceptions.findFirst({ where: { store_id: storeId, station_id: stationId, start_at: { lt: plannedEnd }, end_at: { gt: startAt } }, select: { id: true } }),
-        this.businessHours.loadStoreWindows(storeId),
-      ]);
-      if (!inside(stationSchedules) || stationException) throw new VendixHttpException(ErrorCodes.STATION_002);
-      const storeHours = storeWindows.get(weekday) ?? [];
-      if (storeWindows.size > 0) {
-        if (!inside(storeHours)) throw new VendixHttpException(ErrorCodes.STATION_002);
+    } else {
+      const parsedEnd = dto.planned_end_at ? new Date(dto.planned_end_at) : null;
+      if (parsedEnd && !isNaN(parsedEnd.getTime()) && parsedEnd > now) {
+        plannedEnd = parsedEnd;
       } else {
-        const storeSettings = await this.prisma.store_settings.findUnique({ where: { store_id: storeId }, select: { settings: true } });
-        const workingDays = (storeSettings?.settings as any)?.availability?.working_days;
-        const openDays = Array.isArray(workingDays) && workingDays.length > 0 && workingDays.every((day: unknown) => Number.isInteger(day) && Number(day) >= 0 && Number(day) <= 6)
-          ? workingDays as number[]
-          : [1, 2, 3, 4, 5];
-        if (!openDays.includes(weekday) || startMinutes < 480 || endMinutes > 1080) {
-          throw new VendixHttpException(ErrorCodes.STATION_002);
-        }
+        const durationMinutes = product.service_duration_minutes ?? 60;
+        plannedEnd = new Date(now.getTime() + durationMinutes * 60_000);
       }
-      if (providerId) {
-        const [providerSchedule, providerException] = await Promise.all([
-          this.prisma.provider_schedules.findMany({ where: { provider_id: providerId, day_of_week: weekday, is_active: true }, select: { start_time: true, end_time: true } }),
-          this.prisma.provider_exceptions.findFirst({ where: { provider_id: providerId, date: new Date(`${localDate}T00:00:00.000Z`) }, select: { is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
-        ]);
-        const windows = providerException?.custom_start_time && providerException.custom_end_time
-          ? [{ start_time: providerException.custom_start_time, end_time: providerException.custom_end_time }]
-          : providerSchedule;
-        if (!windows.length || providerException?.is_unavailable || !inside(windows)) throw new VendixHttpException(ErrorCodes.STATION_003);
+      if (plannedEnd <= now) {
+        throw new VendixHttpException(ErrorCodes.STATION_009);
       }
     }
 
@@ -180,6 +147,7 @@ export class ServiceSessionsService {
 
       if (!orderId) {
         const orderNumber = `SVC-${session.id}`;
+        const basePrice = Number(product?.base_price ?? 0);
         const order = await tx.orders.create({
           data: {
             store_id: storeId,
@@ -190,13 +158,13 @@ export class ServiceSessionsService {
             channel: booking?.channel ?? 'pos',
             delivery_type: 'direct_delivery',
             currency: currency || 'COP',
-            subtotal_amount: 0,
+            subtotal_amount: basePrice,
             tax_amount: 0,
             shipping_cost: 0,
             discount_amount: 0,
-            grand_total: 0,
+            grand_total: basePrice,
             total_paid: 0,
-            remaining_balance: 0,
+            remaining_balance: basePrice,
             service_session_id: session.id,
             updated_at: now,
           },
@@ -205,6 +173,22 @@ export class ServiceSessionsService {
         orderId = order.id;
         await tx.service_sessions.updateMany({ where: { id: session.id, store_id: storeId }, data: { order_id: orderId } });
         if (booking) await tx.bookings.updateMany({ where: { id: booking.id, store_id: storeId }, data: { order_id: orderId } });
+
+        if (product) {
+          await tx.order_items.create({
+            data: {
+              order_id: orderId,
+              service_session_id: session.id,
+              product_id: product.id,
+              product_name: product.name,
+              quantity: 1,
+              unit_price: product.base_price,
+              total_price: product.base_price,
+              item_type: 'service',
+              updated_at: now,
+            },
+          });
+        }
       } else {
         const linked = await tx.orders.updateMany({
           where: { id: orderId, store_id: storeId, state: { in: ['draft', 'processing'] }, service_session_id: null },
@@ -528,7 +512,7 @@ export class ServiceSessionsService {
       where: { id, store_id: storeId },
     });
     if (!session) throw new VendixHttpException(ErrorCodes.STATION_006);
-    const [subjects, allocations, recentEvents] = await Promise.all([
+    const [subjects, allocations, recentEvents, order] = await Promise.all([
       this.prisma.service_subjects.findMany({ where: { store_id: storeId, session_id: id }, orderBy: { created_at: 'asc' } }),
       this.prisma.service_allocations.findMany({ where: { store_id: storeId, session_id: id }, orderBy: { created_at: 'asc' } }),
       this.prisma.service_progress_events.findMany({
@@ -536,10 +520,31 @@ export class ServiceSessionsService {
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         take: 101,
       }),
+      session.order_id
+        ? this.prisma.orders.findFirst({
+            where: { id: session.order_id, store_id: storeId },
+            include: {
+              order_items: {
+                orderBy: { id: 'asc' },
+              },
+              users: {
+                select: { id: true, first_name: true, last_name: true, email: true, phone: true, document_number: true },
+              },
+            },
+          })
+        : null,
     ]);
     const eventsHaveOlder = recentEvents.length > 100;
     const progressEvents = recentEvents.slice(0, 100).reverse();
-    return { ...session, subjects, allocations, progress_events: progressEvents, events_have_older: eventsHaveOlder };
+    const normalizedOrder = order
+      ? (({ users, ...orderData }) => ({
+          ...orderData,
+          customer: users
+            ? (({ document_number, ...customer }) => ({ ...customer, identification_number: document_number }))(users)
+            : null,
+        }))(order)
+      : null;
+    return { ...session, subjects, allocations, progress_events: progressEvents, events_have_older: eventsHaveOlder, order: normalizedOrder };
   }
 
   async listActive(cursor?: number) {
@@ -559,22 +564,218 @@ export class ServiceSessionsService {
     const ids = sessions.map((session) => session.id);
     const stationIds = [...new Set(sessions.map((session) => session.station_id))];
     const productIds = [...new Set(sessions.map((session) => session.product_id))];
-    const [stations, products, subjects, allocations] = await Promise.all([
+    const [stations, products, subjects, allocations, orders] = await Promise.all([
       this.prisma.service_stations.findMany({ where: { store_id: storeId, id: { in: stationIds } }, select: { id: true, name: true } }),
       this.prisma.products.findMany({ where: { store_id: storeId, id: { in: productIds } }, select: { id: true, name: true } }),
       this.prisma.service_subjects.findMany({ where: { store_id: storeId, session_id: { in: ids } }, orderBy: { created_at: 'asc' } }),
       this.prisma.service_allocations.findMany({ where: { store_id: storeId, session_id: { in: ids }, state: { in: ACTIVE_ALLOCATIONS } }, orderBy: { created_at: 'desc' } }),
+      this.prisma.orders.findMany({
+        where: { store_id: storeId, service_session_id: { in: ids } },
+        select: { id: true, service_session_id: true, order_number: true, grand_total: true, subtotal_amount: true, remaining_balance: true },
+      }),
     ]);
     const stationById = new Map(stations.map((row) => [row.id, row.name]));
     const productById = new Map(products.map((row) => [row.id, row.name]));
-    const items = sessions.map((session) => ({
-      ...session,
-      station_name: stationById.get(session.station_id) ?? 'Estación',
-      product_name: productById.get(session.product_id) ?? 'Servicio',
-      subject: subjects.find((row) => row.session_id === session.id) ?? null,
-      allocation: allocations.find((row) => row.session_id === session.id) ?? null,
-    }));
+    const orderBySessionId = new Map(orders.map((o) => [o.service_session_id, o]));
+    const items = sessions.map((session) => {
+      const ord = orderBySessionId.get(session.id);
+      return {
+        ...session,
+        station_name: stationById.get(session.station_id) ?? 'Estación',
+        product_name: productById.get(session.product_id) ?? 'Servicio',
+        subject: subjects.find((row) => row.session_id === session.id) ?? null,
+        allocation: allocations.find((row) => row.session_id === session.id) ?? null,
+        order: ord
+          ? {
+              id: ord.id,
+              order_number: ord.order_number,
+              grand_total: Number(ord.grand_total),
+              subtotal_amount: Number(ord.subtotal_amount),
+              remaining_balance: Number(ord.remaining_balance),
+            }
+          : null,
+      };
+    });
     return { items, next_cursor: hasMore ? sessions[sessions.length - 1].id : null };
+  }
+
+  async addItem(sessionId: number, dto: AddSessionItemDto) {
+    const { storeId, userId } = this.requireContext();
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+    });
+    if (!session || !['open', 'in_progress', 'paused'].includes(session.status)) {
+      throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
+    }
+    const product = await this.prisma.products.findFirst({
+      where: { id: dto.product_id, store_id: storeId },
+    });
+    if (!product) {
+      throw new VendixHttpException(ErrorCodes.PRODUCT_001, 'Producto no encontrado.');
+    }
+    const qty = Math.max(1, Number(dto.quantity || 1));
+    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : Number(product.base_price || 0);
+    const totalPrice = unitPrice * qty;
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      let orderId = session.order_id;
+      if (!orderId) {
+        const orderNumber = `SVC-${session.id}`;
+        const newOrder = await tx.orders.create({
+          data: {
+            store_id: storeId,
+            created_by_user_id: userId ?? null,
+            order_number: orderNumber,
+            state: 'draft',
+            channel: 'pos',
+            delivery_type: 'direct_delivery',
+            currency: 'COP',
+            subtotal_amount: 0,
+            tax_amount: 0,
+            shipping_cost: 0,
+            discount_amount: 0,
+            grand_total: 0,
+            total_paid: 0,
+            remaining_balance: 0,
+            service_session_id: session.id,
+            updated_at: now,
+          },
+          select: { id: true },
+        });
+        orderId = newOrder.id;
+        await tx.service_sessions.update({ where: { id: session.id }, data: { order_id: orderId } });
+      }
+
+      if (product.track_inventory && product.product_type === 'physical') {
+        const stockLevel = await tx.stock_levels.findFirst({
+          where: { product_id: product.id },
+          orderBy: { quantity_available: 'desc' },
+        });
+        if (stockLevel && stockLevel.quantity_available < qty) {
+          throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${product.name}`);
+        }
+        if (stockLevel) {
+          const store = await tx.stores.findUnique({ where: { id: storeId }, select: { organization_id: true } });
+          if (store?.organization_id) {
+            await tx.stock_reservations.create({
+              data: {
+                organization_id: store.organization_id,
+                product_id: product.id,
+                location_id: stockLevel.location_id,
+                quantity: qty,
+                reserved_for_type: 'order',
+                reserved_for_id: orderId,
+                status: 'active',
+              },
+            });
+            await tx.stock_levels.update({
+              where: { id: stockLevel.id },
+              data: {
+                quantity_reserved: { increment: qty },
+                quantity_available: { decrement: qty },
+                updated_at: now,
+              },
+            });
+          }
+        }
+      }
+
+      const item = await tx.order_items.create({
+        data: {
+          order_id: orderId,
+          service_session_id: session.id,
+          product_id: product.id,
+          product_name: product.name,
+          description: dto.description || null,
+          quantity: qty,
+          unit_price: unitPrice,
+          total_price: totalPrice,
+          item_type: product.product_type === 'physical' ? 'physical' : 'service',
+          updated_at: now,
+        },
+      });
+
+      const allItems = await tx.order_items.findMany({
+        where: { order_id: orderId },
+        select: { total_price: true },
+      });
+      const newSubtotal = allItems.reduce((acc, it) => acc + Number(it.total_price), 0);
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          subtotal_amount: newSubtotal,
+          grand_total: newSubtotal,
+          remaining_balance: newSubtotal,
+          updated_at: now,
+        },
+      });
+
+      await this.writeProgress(tx, storeId, session.id, 'item_added', userId ?? null, `Se agregó ${qty}x ${product.name} a la cuenta`);
+      return { item, order_id: orderId, grand_total: newSubtotal };
+    });
+
+    this.emit(storeId, sessionId, 'item_added', { order_id: result.order_id, grand_total: result.grand_total });
+    return result;
+  }
+
+  async removeItem(sessionId: number, itemId: number) {
+    const { storeId, userId } = this.requireContext();
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+    });
+    if (!session || !session.order_id) {
+      throw new VendixHttpException(ErrorCodes.STATION_006, 'Atención no encontrada.');
+    }
+    const item = await this.prisma.order_items.findFirst({
+      where: { id: itemId, order_id: session.order_id },
+    });
+    if (!item) {
+      throw new VendixHttpException(ErrorCodes.ORDER_004, 'Ítem no encontrado en la orden.');
+    }
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      if (item.product_id) {
+        const reservation = await tx.stock_reservations.findFirst({
+          where: { reserved_for_type: 'order', reserved_for_id: session.order_id!, product_id: item.product_id, status: 'active' },
+        });
+        if (reservation) {
+          await tx.stock_reservations.update({ where: { id: reservation.id }, data: { status: 'cancelled', updated_at: now } });
+          await tx.stock_levels.updateMany({
+            where: { product_id: item.product_id, location_id: reservation.location_id },
+            data: {
+              quantity_reserved: { decrement: reservation.quantity },
+              quantity_available: { increment: reservation.quantity },
+              updated_at: now,
+            },
+          });
+        }
+      }
+
+      await tx.order_items.delete({ where: { id: itemId } });
+
+      const remainingItems = await tx.order_items.findMany({
+        where: { order_id: session.order_id! },
+        select: { total_price: true },
+      });
+      const newSubtotal = remainingItems.reduce((acc, it) => acc + Number(it.total_price), 0);
+      await tx.orders.update({
+        where: { id: session.order_id! },
+        data: {
+          subtotal_amount: newSubtotal,
+          grand_total: newSubtotal,
+          remaining_balance: newSubtotal,
+          updated_at: now,
+        },
+      });
+
+      await this.writeProgress(tx, storeId, session.id, 'item_removed', userId ?? null, `Se eliminó ${item.product_name} de la cuenta`);
+      return { deleted: true, itemId, grand_total: newSubtotal };
+    });
+
+    this.emit(storeId, sessionId, 'item_removed', { item_id: itemId, grand_total: result.grand_total });
+    return result;
   }
 
   async publicProgress(id: number) {

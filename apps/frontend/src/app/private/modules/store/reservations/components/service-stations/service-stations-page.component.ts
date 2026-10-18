@@ -1,199 +1,1370 @@
-import { CommonModule } from '@angular/common';
-import { Component, computed, inject, OnInit, signal } from '@angular/core';
+import { CommonModule, DecimalPipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { ButtonComponent, CardComponent, IconComponent, ItemListCardConfig, PaginationComponent, ResponsiveDataViewComponent, TableColumn } from '../../../../../../shared/components';
+import {
+  BadgeComponent,
+  ButtonComponent,
+  CardComponent,
+  IconComponent,
+  InputComponent,
+  ModalComponent,
+  SelectorComponent,
+  SelectorOption,
+  SpinnerComponent,
+  StatsComponent,
+  StickyHeaderActionButton,
+  StickyHeaderComponent,
+  TextareaComponent,
+  ToastService,
+} from '../../../../../../shared/components';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
-import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
-import { storeWallTimeToIso } from './service-stations-time.util';
 import {
   ServiceStation,
   ServiceStationsService,
-  StationException,
   StationProviderOption,
-  StationSchedule,
   StationServiceOption,
+  StationType,
 } from './service-stations.service';
+import { environment } from '../../../../../../../environments/environment';
 
-const WEEKDAYS = [
-  { value: 1, label: 'Lunes' },
-  { value: 2, label: 'Martes' },
-  { value: 3, label: 'Miércoles' },
-  { value: 4, label: 'Jueves' },
-  { value: 5, label: 'Viernes' },
-  { value: 6, label: 'Sábado' },
-  { value: 0, label: 'Domingo' },
+export interface ServiceSessionRow {
+  id: number;
+  status: string;
+  opened_at: string;
+  planned_end_at?: string | null;
+  station_id: number;
+  station_name: string;
+  product_id?: number | null;
+  product_name: string;
+  subject?: { label: string; subject_type?: string; metadata?: Record<string, unknown> } | null;
+  allocation?: { provider_id?: number; provider_name?: string } | null;
+  budget_amount?: number | null;
+  access_url?: string | null;
+  order?: {
+    id: number;
+    order_number: string;
+    grand_total: number;
+    subtotal_amount: number;
+    remaining_balance: number;
+    order_items?: Array<{
+      id: number;
+      product_id: number;
+      product_name: string;
+      quantity: number;
+      unit_price: number;
+      total_price: number;
+      item_type?: string;
+    }>;
+  } | null;
+}
+
+export interface StationTypeMeta {
+  id: StationType;
+  label: string;
+  singularLabel: string;
+  icon: string;
+  description: string;
+  requiresVehicle: boolean;
+  vehicleNamePlaceholder: string;
+  platePlaceholder: string;
+}
+
+export const STATION_TYPES_META: Record<StationType, StationTypeMeta> = {
+  carro: {
+    id: 'carro',
+    label: 'Bahías para Carros / Autos',
+    singularLabel: 'Carro / Automóvil',
+    icon: 'warehouse',
+    description: 'Elevadores, fosas, lubricación, autolavado y mecánica automotriz',
+    requiresVehicle: true,
+    vehicleNamePlaceholder: 'Ej. Toyota Corolla, Chevrolet Onix, Kia Sportage',
+    platePlaceholder: 'Ej. ABC-123',
+  },
+  moto: {
+    id: 'moto',
+    label: 'Boxes para Motos',
+    singularLabel: 'Motocicleta / Moto',
+    icon: 'zap',
+    description: 'Rampas para motos, lubricación, frenos y lavado especializado',
+    requiresVehicle: true,
+    vehicleNamePlaceholder: 'Ej. Yamaha NMAX 155, Bajaj Pulsar NS 200, AKT NKD',
+    platePlaceholder: 'Ej. XYZ-45D',
+  },
+  celular: {
+    id: 'celular',
+    label: 'Reparación de Celulares / Electrónica',
+    singularLabel: 'Celular / Electrónica',
+    icon: 'smartphone',
+    description: 'Diagnóstico, cambio de pantalla, microelectrónica y reparación de dispositivos',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  peluqueria: {
+    id: 'peluqueria',
+    label: 'Peluquería',
+    singularLabel: 'Peluquería',
+    icon: 'scissors',
+    description: 'corte, tinte, peinado, tratamientos capilares (unisex)',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  barberia: {
+    id: 'barberia',
+    label: 'Barbería (Sillón Clásico)',
+    singularLabel: 'Barbería',
+    icon: 'user',
+    description: 'corte masculino, fade, arreglo de barba y afeitado con navaja',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  salon_belleza: {
+    id: 'salon_belleza',
+    label: 'Salón de Belleza / Spa',
+    singularLabel: 'Salón de Belleza / Spa',
+    icon: 'sparkles',
+    description: 'manicure, pedicure, masajes, faciales',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  general: {
+    id: 'general',
+    label: 'Servicios Generales',
+    singularLabel: 'Estación General',
+    icon: 'activity',
+    description: 'Puestos polivalentes de atención directa a clientes',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+};
+
+export const STATION_TYPE_SELECTOR_OPTIONS: SelectorOption[] = [
+  { value: 'carro', label: 'Bahía para Carros / Automóviles', icon: 'warehouse', description: 'Elevadores, fosas, autolavado y lubricación' },
+  { value: 'moto', label: 'Box para Motos / Motocicletas', icon: 'zap', description: 'Rampas neumáticas y lubricación de motos' },
+  { value: 'celular', label: 'Reparación de Celulares / Electrónica', icon: 'smartphone', description: 'Diagnóstico, cambio de pantalla y microelectrónica' },
+  { value: 'peluqueria', label: 'Peluquería', icon: 'scissors', description: 'corte, tinte, peinado, tratamientos capilares (unisex)' },
+  { value: 'barberia', label: 'Barbería (Sillón Clásico)', icon: 'user', description: 'corte masculino, fade, arreglo de barba y afeitado con navaja' },
+  { value: 'salon_belleza', label: 'Salón de Belleza / Spa', icon: 'sparkles', description: 'manicure, pedicure, masajes, faciales' },
+  { value: 'general', label: 'Servicio General', icon: 'activity', description: 'Atención personalizada y puestos polivalentes' },
 ];
+
+export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
 
 @Component({
   selector: 'app-service-stations-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonComponent, CardComponent, IconComponent, ResponsiveDataViewComponent, PaginationComponent],
+  imports: [
+    CommonModule,
+    DecimalPipe,
+    FormsModule,
+    StickyHeaderComponent,
+    StatsComponent,
+    CardComponent,
+    SpinnerComponent,
+    ButtonComponent,
+    IconComponent,
+    BadgeComponent,
+    ModalComponent,
+    InputComponent,
+    SelectorComponent,
+    TextareaComponent,
+  ],
   templateUrl: './service-stations-page.component.html',
   styleUrl: './service-stations-page.component.scss',
 })
-export class ServiceStationsPageComponent implements OnInit {
+export class ServiceStationsPageComponent implements OnInit, OnDestroy {
+  private readonly http = inject(HttpClient);
   private readonly stationsApi = inject(ServiceStationsService);
   private readonly reservationsApi = inject(ReservationsService);
   private readonly router = inject(Router);
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly toastService = inject(ToastService);
 
+  private timerInterval?: any;
+  readonly now = signal(Date.now());
+
+  // Base state
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly stations = signal<ServiceStation[]>([]);
-  readonly selectedId = signal<number | null>(null);
-  readonly filters = signal({ page: 1, limit: 10 });
-  readonly totalItems = signal(0);
-  readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.filters().limit) || 1);
-  readonly timezone = computed(() => this.storeSettings.timezone());
-  readonly selectedStation = computed(() => this.stations().find((station) => station.id === this.selectedId()) ?? null);
+  readonly activeSessions = signal<ServiceSessionRow[]>([]);
   readonly services = signal<StationServiceOption[]>([]);
   readonly providers = signal<StationProviderOption[]>([]);
-  readonly schedule = signal<StationSchedule[]>([]);
-  readonly exceptions = signal<StationException[]>([]);
-  readonly serviceIds = signal<number[]>([]);
-  readonly providerIds = signal<number[]>([]);
-  readonly errorMessage = signal<string | null>(null);
-  readonly successMessage = signal<string | null>(null);
-  readonly showCreateForm = signal(false);
-  readonly newName = signal('');
-  readonly editName = signal('');
-  readonly exceptionStart = signal('');
-  readonly exceptionEnd = signal('');
-  readonly exceptionReason = signal('');
-  readonly weekdays = WEEKDAYS;
-  readonly activeCount = computed(() => this.stations().filter((station) => station.status === 'active').length);
-  readonly stationColumns: TableColumn[] = [
-    { key: 'name', label: 'Estación', priority: 1 },
-    { key: 'status', label: 'Estado', priority: 1, transform: (value: string) => value === 'active' ? 'Activa' : 'Inactiva', badge: true, badgeConfig: { type: 'status' } },
-    { key: 'services', label: 'Servicios', priority: 2, transform: (value: ServiceStation['services']) => String(value?.length ?? 0) },
-    { key: 'providers', label: 'Proveedores', priority: 2, transform: (value: ServiceStation['providers']) => String(value?.length ?? 0) },
-  ];
-  readonly stationRowClass = (station: ServiceStation): string =>
-    station.id === this.selectedId() ? 'station-row--selected' : '';
-  readonly stationCardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'status',
-    subtitleTransform: (value: string) => value === 'active' ? 'Activa' : 'Inactiva',
-    avatarFallbackIcon: 'map-pin',
-    avatarShape: 'square',
-    detailKeys: [
-      { key: 'services', label: 'Servicios', icon: 'wrench', transform: (value: ServiceStation['services']) => String(value?.length ?? 0) },
-      { key: 'providers', label: 'Proveedores', icon: 'users', transform: (value: ServiceStation['providers']) => String(value?.length ?? 0) },
-    ],
-  };
+  readonly providerRecords = signal<ServiceProvider[]>([]);
 
-  ngOnInit(): void {
-    this.loadStations();
-    this.stationsApi.getServiceOptions().subscribe({ next: (items) => this.services.set(items), error: () => this.services.set([]) });
-    this.reservationsApi.getProviders().subscribe({
-      next: (items: ServiceProvider[]) => {
-        this.providerRecords.set(items);
-        this.providers.set(items.filter((item) => item.is_active).map((item) => ({
-        id: item.id,
-        display_name: item.display_name || `${item.employee?.first_name ?? ''} ${item.employee?.last_name ?? ''}`.trim() || `Proveedor ${item.id}`,
-        is_active: item.is_active,
-      })));
-      },
-      error: () => this.providers.set([]),
-    });
+  // Header Actions
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'refresh',
+      label: 'Actualizar',
+      variant: 'secondary',
+      icon: 'refresh-cw',
+      loading: this.loading(),
+    },
+    {
+      id: 'create-station',
+      label: 'Nueva Estación',
+      variant: 'outline',
+      icon: 'plus',
+    },
+    {
+      id: 'new-checkin',
+      label: 'Nuevo Ingreso',
+      variant: 'primary',
+      icon: 'plus',
+    },
+  ]);
+
+  onHeaderAction(id: string): void {
+    if (id === 'refresh') {
+      this.loadData();
+      this.toastService.info('Actualizando datos de estaciones...');
+    } else if (id === 'create-station') {
+      this.openCreateModal();
+    } else if (id === 'new-checkin') {
+      this.openCheckinModal();
+    }
   }
 
-  goBack(): void { void this.router.navigate(['/admin/reservations']); }
+  // Filters & selection
+  readonly selectedCategory = signal<string>('all');
+  readonly selectedStatusFilter = signal<StatusFilterId>('all');
+  readonly timezone = computed(() => this.storeSettings.timezone());
+
+  // Modals state
+  readonly showCreateModal = signal(false);
+  readonly showCheckinModal = signal(false);
+  readonly showSessionModal = signal(false);
+  readonly showConfigModal = signal(false);
+  readonly showQrModal = signal(false);
+
+  // QR Modal State
+  readonly qrStation = signal<ServiceStation | null>(null);
+  readonly qrDataUrl = signal<string | null>(null);
+  readonly qrLoading = signal(false);
+
+  // Create station form
+  readonly newName = signal('');
+  readonly newStationType = signal<StationType>('carro');
+  readonly newEquipment = signal('');
+
+  // Check-in form
+  readonly checkinStationId = signal<number | null>(null);
+  readonly checkinVehicleName = signal('');
+  readonly checkinPlate = signal('');
+  readonly checkinMileage = signal('');
+  readonly checkinDeviceModel = signal('');
+  readonly checkinImei = signal('');
+  readonly checkinReportedIssue = signal('');
+  readonly checkinUnlockCode = signal('');
+  readonly checkinAccessories = signal('');
+  readonly checkinStylePreference = signal('');
+  readonly checkinAllergies = signal('');
+  readonly checkinCustomerName = signal('');
+  readonly checkinCustomerDoc = signal('');
+  readonly checkinCustomerPhone = signal('');
+  readonly checkinCustomerEmail = signal('');
+  readonly checkinProductId = signal<number | null>(null);
+  readonly checkinProviderId = signal<number | null>(null);
+  readonly checkinDurationMinutes = signal<number>(45);
+  readonly checkinNotes = signal('');
+
+  // Presupuesto inicial e insumo inicial (Aplica como opcional a TODOS los tipos)
+  readonly checkinBudgetAmount = signal<number | null>(null);
+  readonly checkinInitialProductId = signal<number | null>(null);
+  readonly checkinInitialProductQty = signal<number>(1);
+  readonly checkinInitialProductPrice = signal<number | null>(null);
+
+  // Tracking de access_url por sesión (para compartir seguimiento con QR y WhatsApp)
+  readonly lastAccessUrlBySession = signal<Map<number, string>>(new Map());
+  readonly sessionAccessUrl = signal<string | null>(null);
+  readonly sessionAccessQrDataUrl = signal<string | null>(null);
+  readonly sessionAccessQrLoading = signal(false);
+
+  // Selector Options
+  readonly stationTypesMeta = STATION_TYPES_META;
+  readonly stationTypeOptions = STATION_TYPE_SELECTOR_OPTIONS;
+
+  readonly selectedCheckinStation = computed(() => {
+    const id = this.checkinStationId();
+    if (!id) return null;
+    return this.stations().find((s) => s.id === id) ?? null;
+  });
+
+  readonly checkinStationType = computed<StationType>(() => {
+    const st = this.selectedCheckinStation();
+    if (!st) return 'carro';
+    return this.getStationType(st);
+  });
+
+  readonly checkinRequiresVehicle = computed(() => {
+    const type = this.checkinStationType();
+    return type === 'carro' || type === 'moto';
+  });
+
+  readonly checkinIsMoto = computed(() => {
+    return this.checkinStationType() === 'moto';
+  });
+
+  readonly checkinIsCelular = computed(() => {
+    return this.checkinStationType() === 'celular';
+  });
+
+  readonly checkinIsBeauty = computed(() => {
+    const type = this.checkinStationType();
+    return type === 'peluqueria' || type === 'barberia' || type === 'salon_belleza';
+  });
+
+  readonly stationSelectorOptions = computed<SelectorOption[]>(() => {
+    return this.stations().map((st) => {
+      const sess = this.stationSession(st.id);
+      const isOccupied = !!sess;
+      const isInactive = st.status !== 'active';
+      const type = this.getStationType(st);
+      const meta = STATION_TYPES_META[type];
+      const statusLabel = isOccupied ? ' [Ocupada]' : isInactive ? ' [Inactiva]' : ' [Libre]';
+      return {
+        value: st.id,
+        label: `${st.name}${statusLabel}`,
+        icon: meta.icon,
+        disabled: isOccupied || isInactive,
+        description: isOccupied ? `Ocupada (${this.getCustomerName(sess!)})` : `Capacidad: 1 • ${meta.singularLabel}`,
+      };
+    });
+  });
+
+  readonly serviceSelectorOptions = computed<SelectorOption[]>(() => {
+    const opts: SelectorOption[] = [
+      { value: 0, label: 'Sin servicio predefinido', description: 'Abrir cuenta con ítems a demanda' },
+    ];
+    for (const s of this.services()) {
+      opts.push({
+        value: s.id,
+        label: s.name,
+        description: s.service_duration_minutes ? `${s.service_duration_minutes} min` : undefined,
+      });
+    }
+    return opts;
+  });
+
+  readonly providerSelectorOptions = computed<SelectorOption[]>(() => {
+    const opts: SelectorOption[] = [
+      { value: 0, label: 'Rotativo / Sin asignar' },
+    ];
+    for (const p of this.providers()) {
+      opts.push({
+        value: p.id,
+        label: p.display_name,
+        disabled: !p.is_active,
+      });
+    }
+    return opts;
+  });
+
+  readonly catalogProductSelectorOptions = computed<SelectorOption[]>(() => {
+    return this.allCatalogProducts().map((prod) => ({
+      value: prod.id,
+      label: `${prod.name} ($${Number(prod.base_price || 0).toLocaleString('es-CO')})`,
+      description: prod.product_type === 'physical' ? 'Insumo / Repuesto físico' : 'Servicio / Mano de obra',
+    }));
+  });
+
+  // Manage session / Cuenta state (estilo mesas / cuenta abierta)
+  readonly selectedSession = signal<ServiceSessionRow | null>(null);
+  readonly sessionOrder = signal<any | null>(null);
+  readonly sessionOrderLoading = signal(false);
+  readonly budget = signal<any>(null);
+  readonly proposals = signal<any[]>([]);
+  readonly sessionBudgetAmount = signal<number | null>(null);
+
+  // Agregar ítems / productos a la cuenta
+  readonly allCatalogProducts = signal<any[]>([]);
+  readonly selectedAddProductId = signal<number | null>(null);
+  readonly addQuantity = signal<number>(1);
+  readonly addUnitPrice = signal<number | null>(null);
+  readonly addDescription = signal('');
+  readonly addingItem = signal(false);
+
+  // Config station state
+  readonly selectedStation = signal<ServiceStation | null>(null);
+  readonly selectedConfigTab = signal<'details' | 'services' | 'providers'>('details');
+  readonly editName = signal('');
+  readonly editStationType = signal<StationType>('carro');
+  readonly editCapacity = signal(1);
+  readonly serviceIds = signal<number[]>([]);
+  readonly providerIds = signal<number[]>([]);
+
+  // Computed KPIs (estilo restaurante mesas)
+  readonly totalStations = computed(() => this.stations().length);
+
+  readonly occupiedCount = computed(() =>
+    this.activeSessions().filter((s) => s.status === 'open' || s.status === 'in_progress').length,
+  );
+
+  readonly pausedCount = computed(() =>
+    this.activeSessions().filter((s) => s.status === 'paused').length,
+  );
+
+  readonly freeCount = computed(() =>
+    Math.max(
+      0,
+      this.stations().filter((s) => s.status === 'active').length -
+        this.occupiedCount() -
+        this.pausedCount(),
+    ),
+  );
+
+  readonly occupancyRate = computed(() => {
+    const total = this.totalStations();
+    if (!total) return 0;
+    const busy = this.occupiedCount() + this.pausedCount();
+    return Math.min(100, Math.round((busy / total) * 100));
+  });
+
+  readonly avgDurationMinutes = computed(() => {
+    const sessions = this.activeSessions();
+    if (!sessions.length) return 38;
+    const totalMinutes = sessions.reduce((acc, s) => acc + this.sessionElapsedMinutes(s.opened_at), 0);
+    return Math.max(1, Math.round(totalMinutes / sessions.length));
+  });
+
+  readonly totalActiveBudget = computed(() => {
+    return this.activeSessions().reduce((acc, s) => {
+      const orderTotal = s.order?.grand_total;
+      if (orderTotal != null && !isNaN(Number(orderTotal))) return acc + Number(orderTotal);
+      return acc + (Number(s.budget_amount) || 0);
+    }, 0);
+  });
+
+  // Dynamic Categories based ONLY on stations that exist
+  readonly existingStationTypes = computed<StationType[]>(() => {
+    const set = new Set<StationType>();
+    for (const st of this.stations()) {
+      set.add(this.getStationType(st));
+    }
+    return Array.from(set);
+  });
+
+  readonly availableCategoryTabs = computed(() => {
+    const existing = this.existingStationTypes();
+    const tabs: Array<{ id: string; label: string; icon: string; count: number }> = [
+      { id: 'all', label: `Todos (${this.stations().length})`, icon: 'warehouse', count: this.stations().length },
+    ];
+    for (const type of existing) {
+      const meta = STATION_TYPES_META[type];
+      const count = this.stations().filter((s) => this.getStationType(s) === type).length;
+      tabs.push({
+        id: type,
+        label: `${meta.label} (${count})`,
+        icon: meta.icon,
+        count,
+      });
+    }
+    return tabs;
+  });
+
+  // Displayed groups
+  readonly displayedGroups = computed(() => {
+    const selCat = this.selectedCategory();
+    const statusFilter = this.selectedStatusFilter();
+    const all = this.stations();
+    const existing = this.existingStationTypes();
+    const typesToRender = selCat === 'all' ? existing : [selCat as StationType];
+
+    return typesToRender
+      .filter((t) => existing.includes(t))
+      .map((type) => {
+        const meta = STATION_TYPES_META[type];
+        let items = all.filter((st) => this.getStationType(st) === type);
+        if (statusFilter !== 'all') {
+          items = items.filter((st) => {
+            const sess = this.stationSession(st.id);
+            if (statusFilter === 'occupied') return sess && sess.status !== 'paused';
+            if (statusFilter === 'paused') return sess && sess.status === 'paused';
+            if (statusFilter === 'free') return st.status === 'active' && !sess;
+            return true;
+          });
+        }
+        const activeCount = items.filter((st) => {
+          const sess = this.stationSession(st.id);
+          return sess && sess.status !== 'paused';
+        }).length;
+        const freeCount = items.filter((st) => st.status === 'active' && !this.stationSession(st.id)).length;
+        const pausedCount = items.filter((st) => {
+          const sess = this.stationSession(st.id);
+          return sess && sess.status === 'paused';
+        }).length;
+
+        return {
+          ...meta,
+          stations: items,
+          activeCount,
+          freeCount,
+          pausedCount,
+        };
+      })
+      .filter((group) => group.stations.length > 0 || selCat === group.id);
+  });
+
+  ngOnInit(): void {
+    this.loadData();
+    this.timerInterval = setInterval(() => this.now.set(Date.now()), 15000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+  }
+
+  loadData(): void {
+    this.loadStations();
+    this.loadActiveSessions();
+    this.loadCatalogs();
+  }
 
   loadStations(selectId?: number): void {
     this.loading.set(true);
-    const { page, limit } = this.filters();
-    this.stationsApi.list(page, limit).subscribe({
+    this.stationsApi.list(1, 100).subscribe({
       next: (response) => {
         const items = response.data ?? [];
         this.stations.set(items);
-        this.totalItems.set(response.meta?.total ?? items.length);
         this.loading.set(false);
-        const target = selectId ?? this.selectedId() ?? items[0]?.id ?? null;
-        if (target && items.some((item) => item.id === target)) this.selectStation(target);
-        else if (items[0]) this.selectStation(items[0].id);
-        else this.selectedId.set(null);
+        if (selectId) {
+          const found = items.find((s) => s.id === selectId);
+          if (found) this.selectStationForConfig(found);
+        }
       },
       error: (error: unknown) => {
         this.loading.set(false);
-        this.errorMessage.set(this.errorText(error, 'No fue posible cargar las estaciones.'));
+        this.toastService.error(this.errorText(error, 'No fue posible cargar las estaciones.'));
       },
     });
   }
 
-  onPageChange(page: number): void {
-    this.filters.update((filters) => ({ ...filters, page }));
-    this.selectedId.set(null);
-    this.loadStations();
-  }
-
-  onStationRowClick(station: ServiceStation): void {
-    if (station?.id) this.selectStation(station.id);
-  }
-
-  selectStation(id: number): void {
-    this.selectedId.set(id);
-    this.errorMessage.set(null);
-    this.successMessage.set(null);
-    const station = this.stations().find((item) => item.id === id);
-    if (!station) return;
-    this.editName.set(station.name);
-    this.serviceIds.set(station.services.map((item) => item.product_id));
-    this.providerIds.set(station.providers.map((item) => item.provider_id));
-    this.stationsApi.getSchedules(id).subscribe({
-      next: (rows) => {
-        this.schedule.set(WEEKDAYS.flatMap((day) => {
-          const blocks = rows
-            .filter((row) => row.weekday === day.value)
-            .sort((a, b) => a.start_time.localeCompare(b.start_time))
-            .map((row, block_order) => ({ ...row, block_order }));
-          return blocks.length ? blocks : [{
-            weekday: day.value, block_order: 0, start_time: '09:00', end_time: '18:00', is_active: false,
-          }];
-        }));
+  loadActiveSessions(): void {
+    this.http.get<any>(`${environment.apiUrl}/store/service-sessions`).subscribe({
+      next: (r) => {
+        const items = r?.data?.items ?? r?.data ?? [];
+        this.activeSessions.set(Array.isArray(items) ? items : []);
       },
-      error: (error: unknown) => this.errorMessage.set(this.errorText(error, 'No fue posible cargar el horario.')),
+      error: () => {},
     });
-    this.loadExceptions(id);
   }
 
-  loadExceptions(id: number): void {
-    this.stationsApi.getExceptions(id).subscribe({
-      next: (rows) => this.exceptions.set(rows),
-      error: (error: unknown) => this.errorMessage.set(this.errorText(error, 'No fue posible cargar las excepciones.')),
+  loadCatalogs(): void {
+    this.stationsApi.getServiceOptions().subscribe({
+      next: (services) => this.services.set(services ?? []),
+      error: () => {},
     });
+    this.reservationsApi.getProviders().subscribe({
+      next: (data) => {
+        const list = data ?? [];
+        this.providerRecords.set(list);
+        this.providers.set(
+          list.map((p) => ({
+            id: p.id,
+            display_name: p.display_name ?? (p as any).name ?? `Especialista #${p.id}`,
+            is_active: Boolean(p.is_active),
+          })),
+        );
+      },
+      error: () => this.providerRecords.set([]),
+    });
+  }
+
+  // Station Category / Type Classification
+  getStationType(station: ServiceStation): StationType {
+    if (station.station_type && STATION_TYPES_META[station.station_type]) {
+      return station.station_type;
+    }
+    const combined = (
+      station.name +
+      ' ' +
+      (station.services || []).map((s) => s.product?.name || '').join(' ')
+    ).toLowerCase();
+    if (/celular|smartphone|telefono|móvil|movil|pantalla|display|tablet|electr[oó]nic/i.test(combined)) return 'celular';
+    if (/moto|box|rampa|dos ruedas/i.test(combined)) return 'moto';
+    if (/belleza|spa|uña|manic|pedic|facial|cabina|color|estilismo/i.test(combined)) return 'salon_belleza';
+    if (/barber|silla|barba|corte|fade|caballero/i.test(combined)) return 'barberia';
+    if (/peluquer/i.test(combined)) return 'peluqueria';
+    return 'carro';
+  }
+
+  getStationCategory(station: ServiceStation): string {
+    return this.getStationType(station);
+  }
+
+  categoryCount(cat: string): number {
+    if (cat === 'all') return this.stations().length;
+    return this.stations().filter((st) => this.getStationType(st) === cat).length;
+  }
+
+  // Session & Live Timers Helpers
+  stationSession(stationId: number): ServiceSessionRow | undefined {
+    return this.activeSessions().find(
+      (s) =>
+        s.station_id === stationId &&
+        (s.status === 'open' || s.status === 'in_progress' || s.status === 'paused'),
+    );
+  }
+
+  sessionElapsedMinutes(openedAt: string): number {
+    if (!openedAt) return 0;
+    const diff = Math.max(0, this.now() - new Date(openedAt).getTime());
+    return Math.floor(diff / 60000);
+  }
+
+  sessionPlannedMinutes(session: ServiceSessionRow): number {
+    if (session.planned_end_at && session.opened_at) {
+      const diff = Math.max(
+        1,
+        Math.round((new Date(session.planned_end_at).getTime() - new Date(session.opened_at).getTime()) / 60000),
+      );
+      return diff;
+    }
+    return 45;
+  }
+
+  sessionProgressPercent(session: ServiceSessionRow): number {
+    const elapsed = this.sessionElapsedMinutes(session.opened_at);
+    const target = this.sessionPlannedMinutes(session);
+    return Math.min(100, Math.round((elapsed / target) * 100));
+  }
+
+  // Modal QR: Visualización, descarga e impresión del QR físico
+  async openQrModal(station: ServiceStation): Promise<void> {
+    this.qrStation.set(station);
+    this.qrDataUrl.set(null);
+    this.qrLoading.set(true);
+    this.showQrModal.set(true);
+
+    try {
+      const QRCode = await import('qrcode');
+      const publicId = station.public_id || `station-${station.id}`;
+      const stationUrl = `${window.location.origin}/?estacion=${publicId}`;
+      const dataUrl = await QRCode.toDataURL(stationUrl, {
+        width: 480,
+        margin: 2,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+      });
+      this.qrDataUrl.set(dataUrl);
+    } catch {
+      this.toastService.error('Error al generar el código QR de la estación.');
+    } finally {
+      this.qrLoading.set(false);
+    }
+  }
+
+  copyQrLink(): void {
+    const st = this.qrStation();
+    if (!st) return;
+    const publicId = st.public_id || `station-${st.id}`;
+    const url = `${window.location.origin}/?estacion=${publicId}`;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        this.toastService.success('Enlace de la estación copiado al portapapeles.');
+      }).catch(() => {
+        this.toastService.info(`URL de estación: ${url}`);
+      });
+    } else {
+      this.toastService.info(`URL de estación: ${url}`);
+    }
+  }
+
+  downloadQrImage(): void {
+    const dataUrl = this.qrDataUrl();
+    const st = this.qrStation();
+    if (!dataUrl || !st) return;
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `QR-Estacion-${st.name.replace(/\s+/g, '_')}.png`;
+    link.click();
+    this.toastService.success('Imagen del código QR descargada.');
+  }
+
+  printQrCode(): void {
+    const dataUrl = this.qrDataUrl();
+    const st = this.qrStation();
+    if (!dataUrl || !st) return;
+    const meta = STATION_TYPES_META[this.getStationType(st)];
+    const publicId = st.public_id || `station-${st.id}`;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      this.toastService.error('Permite las ventanas emergentes para imprimir el código QR.');
+      return;
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>QR - ${st.name}</title>
+  <style>
+    @page { size: auto; margin: 15mm; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #0f172a;
+      background: #ffffff;
+    }
+    .card {
+      border: 3px solid #0f172a;
+      border-radius: 28px;
+      padding: 36px 44px;
+      text-align: center;
+      max-width: 440px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 18px;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #334155;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0 0 6px 0;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    p.subtitle {
+      margin: 0 0 24px 0;
+      color: #64748b;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    img.qr {
+      width: 270px;
+      height: 270px;
+      margin-bottom: 20px;
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      padding: 10px;
+      background: #ffffff;
+    }
+    .instruction {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }
+    .token {
+      font-family: monospace;
+      font-size: 11px;
+      color: #64748b;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${meta.singularLabel}</div>
+    <h1>${st.name}</h1>
+    <p class="subtitle">Estación de Servicio • Vendix</p>
+    <img src="${dataUrl}" class="qr" alt="QR ${st.name}" />
+    <div class="instruction">Escanea para consultar estado o autoservicio</div>
+    <div class="token">ID: ${publicId}</div>
+  </div>
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 250);
+    };
+  </script>
+</body>
+</html>`);
+    printWindow.document.close();
+  }
+
+  // Modal 1: Create Station con Tipo de Estación
+  openCreateModal(): void {
+    this.newName.set('');
+    this.newStationType.set('carro');
+    this.newEquipment.set('');
+    this.showCreateModal.set(true);
   }
 
   createStation(): void {
     const name = this.newName().trim();
-    if (!name) { this.errorMessage.set('Escribe el nombre de la estación.'); return; }
+    if (!name) {
+      this.toastService.error('El nombre de la estación es obligatorio.');
+      return;
+    }
     this.saving.set(true);
-    this.errorMessage.set(null);
-    this.filters.update((filters) => ({ ...filters, page: 1 }));
-    this.stationsApi.create({ name, capacity: 1 }).subscribe({
+    this.stationsApi.create({
+      name,
+      capacity: 1,
+      station_type: this.newStationType(),
+    }).subscribe({
       next: (station) => {
         this.saving.set(false);
-        this.showCreateForm.set(false);
-        this.newName.set('');
-        this.successMessage.set('Estación creada.');
+        this.showCreateModal.set(false);
+        this.toastService.success('Estación creada con éxito.');
         this.loadStations(station.id);
       },
-      error: (error: unknown) => { this.saving.set(false); this.errorMessage.set(this.errorText(error, 'No fue posible crear la estación.')); },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible crear la estación.'));
+      },
     });
   }
 
-  saveDetails(): void {
+  // Helper methods to read customer and vehicle metadata
+  getCustomerName(session: ServiceSessionRow): string {
+    const meta = session.subject?.metadata as Record<string, any> | undefined;
+    if (meta && meta['customer_name']) return String(meta['customer_name']);
+    return session.subject?.label || 'Cliente General';
+  }
+
+  getVehicleName(session: ServiceSessionRow): string | null {
+    const meta = session.subject?.metadata as Record<string, any> | undefined;
+    if (meta && meta['vehicle_name']) return String(meta['vehicle_name']);
+    if (session.subject?.label && session.subject.label.includes(' - ')) {
+      return session.subject.label.split(' - ')[0].trim();
+    }
+    return null;
+  }
+
+  getCustomerPlate(session: ServiceSessionRow): string | null {
+    const meta = session.subject?.metadata as Record<string, any> | undefined;
+    if (meta && meta['plate']) return String(meta['plate']);
+    if (session.subject?.label && session.subject.label.includes(' - ')) {
+      const parts = session.subject.label.split(' - ');
+      const candidate = parts[parts.length - 1].trim();
+      if (/^[A-Z0-9-]{4,8}$/i.test(candidate)) return candidate.toUpperCase();
+    }
+    return null;
+  }
+
+  getCustomerPhone(session: ServiceSessionRow): string | null {
+    const meta = session.subject?.metadata as Record<string, any> | undefined;
+    return meta && meta['customer_phone'] ? String(meta['customer_phone']) : null;
+  }
+
+  getCustomerDoc(session: ServiceSessionRow): string | null {
+    const meta = session.subject?.metadata as Record<string, any> | undefined;
+    return meta && meta['customer_document'] ? String(meta['customer_document']) : null;
+  }
+
+  // Modal 2: Check-in / Nuevo Ingreso
+  openCheckinModal(station?: ServiceStation): void {
+    if (station) {
+      this.checkinStationId.set(station.id);
+    } else {
+      const freeStation = this.stations().find((s) => s.status === 'active' && !this.stationSession(s.id));
+      const target = freeStation || this.stations()[0] || null;
+      this.checkinStationId.set(target ? target.id : null);
+    }
+    this.checkinVehicleName.set('');
+    this.checkinPlate.set('');
+    this.checkinMileage.set('');
+    this.checkinDeviceModel.set('');
+    this.checkinImei.set('');
+    this.checkinReportedIssue.set('');
+    this.checkinUnlockCode.set('');
+    this.checkinAccessories.set('');
+    this.checkinStylePreference.set('');
+    this.checkinAllergies.set('');
+    this.checkinCustomerName.set('');
+    this.checkinCustomerDoc.set('');
+    this.checkinCustomerPhone.set('');
+    this.checkinCustomerEmail.set('');
+    this.checkinProductId.set(this.services()[0]?.id ?? 0);
+    this.checkinProviderId.set(0);
+    this.checkinDurationMinutes.set(45);
+    this.checkinNotes.set('');
+
+    // Limpiar campos de presupuesto e insumos iniciales
+    this.checkinBudgetAmount.set(null);
+    this.checkinInitialProductId.set(null);
+    this.checkinInitialProductQty.set(1);
+    this.checkinInitialProductPrice.set(null);
+
+    // Asegurar carga de catálogo de productos para el selector de insumos
+    if (!this.allCatalogProducts().length) {
+      this.stationsApi.getAllProducts().subscribe({
+        next: (prods) => this.allCatalogProducts.set(prods || []),
+        error: () => {},
+      });
+    }
+
+    this.showCheckinModal.set(true);
+  }
+
+  onCheckinStationChange(stationId: number | string): void {
+    this.checkinStationId.set(Number(stationId));
+  }
+
+  onCheckinInitialProductSelect(productId: number | null): void {
+    const id = productId ? Number(productId) : null;
+    this.checkinInitialProductId.set(id);
+    if (!id) {
+      this.checkinInitialProductPrice.set(null);
+      return;
+    }
+    const found = this.allCatalogProducts().find((p) => p.id === id);
+    if (found) {
+      this.checkinInitialProductPrice.set(Number(found.base_price || 0));
+    }
+  }
+
+  submitCheckin(): void {
+    const stationId = this.checkinStationId();
+    const customerName = this.checkinCustomerName().trim();
+    if (!stationId) {
+      this.toastService.error('Debes seleccionar una estación libre.');
+      return;
+    }
+    if (!customerName) {
+      this.toastService.error('El nombre del cliente es obligatorio.');
+      return;
+    }
+
+    const station = this.stations().find((s) => s.id === stationId);
+    const stationType = station ? this.getStationType(station) : 'carro';
+    const requiresVehicle = stationType === 'carro' || stationType === 'moto';
+    const isCelular = stationType === 'celular';
+    const isBeauty = stationType === 'peluqueria' || stationType === 'barberia' || stationType === 'salon_belleza';
+
+    const vehicleName = this.checkinVehicleName().trim();
+    const plate = this.checkinPlate().trim().toUpperCase();
+    const mileage = this.checkinMileage().trim();
+
+    const deviceModel = this.checkinDeviceModel().trim();
+    const imei = this.checkinImei().trim();
+    const reportedIssue = this.checkinReportedIssue().trim();
+    const unlockCode = this.checkinUnlockCode().trim();
+    const accessories = this.checkinAccessories().trim();
+
+    const stylePreference = this.checkinStylePreference().trim();
+    const allergies = this.checkinAllergies().trim();
+
+    if (requiresVehicle) {
+      if (!vehicleName) {
+        this.toastService.error(
+          stationType === 'moto'
+            ? 'Debes ingresar el nombre o modelo de la moto (ej. Yamaha NMAX).'
+            : 'Debes ingresar el nombre o modelo del carro (ej. Toyota Hilux).',
+        );
+        return;
+      }
+      if (!plate) {
+        this.toastService.error('La placa del vehículo es obligatoria.');
+        return;
+      }
+    } else if (isCelular) {
+      if (!deviceModel) {
+        this.toastService.error('Debes ingresar la marca y modelo del equipo (ej. iPhone 13, Samsung S21).');
+        return;
+      }
+      if (!reportedIssue) {
+        this.toastService.error('Debes ingresar la falla reportada del equipo.');
+        return;
+      }
+    }
+
+    this.saving.set(true);
+    const duration = this.checkinDurationMinutes() || 45;
+    const plannedEnd = new Date(Date.now() + duration * 60000).toISOString();
+
+    const doc = this.checkinCustomerDoc().trim();
+    const phone = this.checkinCustomerPhone().trim();
+    const email = this.checkinCustomerEmail().trim();
+    const notes = this.checkinNotes().trim();
+
+    // Spec: Label del subject: vehículo "<modelo> - <placa>", celular "<modelo equipo>", persona: nombre del cliente
+    let label = customerName;
+    if (requiresVehicle) {
+      label = `${vehicleName} - ${plate}`;
+    } else if (isCelular) {
+      label = deviceModel;
+    }
+
+    // Spec: CORRIGE BUG: ServiceSubjectDto.subject_type solo acepta 'vehicle' | 'person' | 'other'
+    const subjectType: 'vehicle' | 'person' | 'other' = requiresVehicle
+      ? 'vehicle'
+      : isCelular
+        ? 'other'
+        : 'person';
+
+    const metadata: Record<string, unknown> = {
+      customer_name: customerName,
+      ...(doc ? { customer_document: doc } : {}),
+      ...(phone ? { customer_phone: phone } : {}),
+      ...(email ? { customer_email: email } : {}),
+      station_type: stationType,
+      ...(notes ? { notes } : {}),
+    };
+
+    if (requiresVehicle) {
+      metadata['vehicle_name'] = vehicleName;
+      metadata['plate'] = plate;
+      if (mileage) metadata['mileage'] = mileage;
+    } else if (isCelular) {
+      metadata['device_model'] = deviceModel;
+      metadata['reported_issue'] = reportedIssue;
+      if (imei) metadata['imei'] = imei;
+      if (unlockCode) metadata['unlock_code'] = unlockCode;
+      if (accessories) metadata['accessories'] = accessories;
+    } else if (isBeauty) {
+      if (stylePreference) metadata['style_preference'] = stylePreference;
+      if (allergies) metadata['allergies'] = allergies;
+    }
+
+    // Fallback de servicio para que nunca falle la apertura walk-in
+    let productId = this.checkinProductId() ? Number(this.checkinProductId()) : undefined;
+    if (!productId) {
+      productId = station?.services[0]?.product_id || this.services()[0]?.id || undefined;
+    }
+
+    const payload: any = {
+      station_id: Number(stationId),
+      ...(productId ? { product_id: productId } : {}),
+      provider_id: this.checkinProviderId() ? Number(this.checkinProviderId()) : undefined,
+      planned_end_at: plannedEnd,
+      contact_email: email || undefined,
+      subject: {
+        subject_type: subjectType,
+        label,
+        metadata,
+      },
+    };
+
+    const budgetVal = this.checkinBudgetAmount();
+    const initialProdId = this.checkinInitialProductId();
+    const initialQty = Math.max(1, Number(this.checkinInitialProductQty() || 1));
+    const initialPrice = this.checkinInitialProductPrice() != null ? Number(this.checkinInitialProductPrice()) : undefined;
+
+    this.http.post<any>(`${environment.apiUrl}/store/service-sessions`, payload).subscribe({
+      next: (res) => {
+        const newSessionId = res?.data?.id || res?.id;
+        const accessUrl = res?.data?.access_url ?? res?.access_url ?? null;
+        if (newSessionId && accessUrl) {
+          this.lastAccessUrlBySession.update((map) => new Map(map).set(newSessionId, accessUrl));
+        }
+
+        if (newSessionId) {
+          // 1. Guardar presupuesto inicial opcional para TODOS los tipos
+          if (budgetVal != null && Number(budgetVal) > 0) {
+            this.stationsApi.setBudget(newSessionId, Number(budgetVal)).subscribe({
+              error: () => {},
+            });
+          }
+          // 2. Agregar insumo inicial opcional para TODOS los tipos
+          if (initialProdId) {
+            this.stationsApi.addItem(newSessionId, {
+              product_id: Number(initialProdId),
+              quantity: initialQty,
+              unit_price: initialPrice,
+              description: 'Insumo / producto inicial de ingreso',
+            }).subscribe({
+              error: () => {},
+            });
+          }
+        }
+
+        this.saving.set(false);
+        this.showCheckinModal.set(false);
+        this.toastService.success(
+          requiresVehicle
+            ? `Ingreso de ${vehicleName} (${plate}) registrado con éxito.`
+            : isCelular
+              ? `Ingreso de ${deviceModel} (${customerName}) registrado con éxito.`
+              : `Atención de ${customerName} iniciada con éxito.`,
+        );
+        this.loadActiveSessions();
+      },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible registrar el ingreso.'));
+      },
+    });
+  }
+
+  // Modal 3: Manage Active Session / Cuenta de la Bahía
+  openManageSession(session: ServiceSessionRow): void {
+    this.selectedSession.set(session);
+    this.sessionOrder.set(session.order ?? null);
+    this.showSessionModal.set(true);
+    this.sessionOrderLoading.set(true);
+    this.selectedAddProductId.set(null);
+    this.addQuantity.set(1);
+    this.addUnitPrice.set(null);
+    this.addDescription.set('');
+
+    const knownUrl = this.lastAccessUrlBySession().get(session.id) || session.access_url || null;
+    this.sessionAccessUrl.set(knownUrl);
+    this.sessionAccessQrDataUrl.set(null);
+    if (knownUrl) {
+      this.sessionAccessQrLoading.set(true);
+      import('qrcode').then((QRCode) => {
+        QRCode.toDataURL(knownUrl, {
+          width: 320,
+          margin: 2,
+          color: { dark: '#0f172a', light: '#ffffff' },
+        }).then((dataUrl) => {
+          this.sessionAccessQrDataUrl.set(dataUrl);
+          this.sessionAccessQrLoading.set(false);
+        }).catch(() => {
+          this.sessionAccessQrLoading.set(false);
+        });
+      }).catch(() => {
+        this.sessionAccessQrLoading.set(false);
+      });
+    }
+
+    // Load full session with order_items
+    this.stationsApi.getSession(session.id).subscribe({
+      next: (full) => {
+        this.sessionOrderLoading.set(false);
+        if (full) {
+          this.selectedSession.set(full);
+          this.sessionOrder.set(full.order ?? null);
+          if (full.access_url && !this.sessionAccessUrl()) {
+            this.sessionAccessUrl.set(full.access_url);
+            this.lastAccessUrlBySession.update((map) => new Map(map).set(session.id, full.access_url));
+          }
+        }
+      },
+      error: () => this.sessionOrderLoading.set(false),
+    });
+
+    // Load product catalog for adding to the account
+    if (!this.allCatalogProducts().length) {
+      this.stationsApi.getAllProducts().subscribe({
+        next: (prods) => this.allCatalogProducts.set(prods || []),
+        error: () => {},
+      });
+    }
+
+    // Load budget
+    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`).subscribe({
+      next: (r) => {
+        const val = r?.data ?? null;
+        this.budget.set(val);
+        this.sessionBudgetAmount.set(val ? Number(val.amount) : null);
+      },
+      error: () => {},
+    });
+
+    // Load proposals
+    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/proposals`).subscribe({
+      next: (r) => this.proposals.set(r?.data ?? []),
+      error: () => this.proposals.set([]),
+    });
+  }
+
+  copySessionAccessUrl(): void {
+    const url = this.sessionAccessUrl();
+    if (!url) return;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        this.toastService.success('Enlace de seguimiento copiado al portapapeles.');
+      }).catch(() => {
+        this.toastService.info(`URL de seguimiento: ${url}`);
+      });
+    } else {
+      this.toastService.info(`URL de seguimiento: ${url}`);
+    }
+  }
+
+  shareSessionByWhatsApp(session: ServiceSessionRow): void {
+    const url = this.sessionAccessUrl();
+    if (!url) return;
+    const clientName = this.getCustomerName(session);
+    const stationName = session.station_name;
+    const rawPhone = this.getCustomerPhone(session) || '';
+    const digitsOnly = rawPhone.replace(/\D/g, '');
+    let formattedPhone = digitsOnly;
+    if (digitsOnly.length === 10) {
+      formattedPhone = `57${digitsOnly}`;
+    }
+    const message = `Hola ${clientName}, sigue en tiempo real el servicio en ${stationName}: ${url}`;
+    const waUrl = formattedPhone
+      ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`
+      : `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+  }
+
+  onAddProductSelect(productId: number | null): void {
+    this.selectedAddProductId.set(productId);
+    if (!productId) {
+      this.addUnitPrice.set(null);
+      return;
+    }
+    const found = this.allCatalogProducts().find((p) => p.id === productId);
+    if (found) {
+      this.addUnitPrice.set(Number(found.base_price || 0));
+    }
+  }
+
+  addItemToAccount(): void {
+    const session = this.selectedSession();
+    const productId = this.selectedAddProductId();
+    if (!session || !productId) return;
+    const qty = Math.max(1, Number(this.addQuantity() || 1));
+    const price = this.addUnitPrice() != null ? Number(this.addUnitPrice()) : undefined;
+
+    this.addingItem.set(true);
+    this.stationsApi.addItem(session.id, {
+      product_id: productId,
+      quantity: qty,
+      unit_price: price,
+      description: this.addDescription().trim() || undefined,
+    }).subscribe({
+      next: () => {
+        this.addingItem.set(false);
+        this.selectedAddProductId.set(null);
+        this.addQuantity.set(1);
+        this.addUnitPrice.set(null);
+        this.addDescription.set('');
+        this.toastService.success('Ítem agregado a la cuenta de la estación.');
+        // Refresh session & order
+        this.stationsApi.getSession(session.id).subscribe({
+          next: (full) => {
+            if (full) {
+              this.selectedSession.set(full);
+              this.sessionOrder.set(full.order ?? null);
+            }
+            this.loadActiveSessions();
+          },
+        });
+      },
+      error: (error: unknown) => {
+        this.addingItem.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible agregar el ítem a la cuenta.'));
+      },
+    });
+  }
+
+  removeItemFromAccount(itemId: number): void {
+    const session = this.selectedSession();
+    if (!session || !itemId) return;
+
+    this.stationsApi.removeItem(session.id, itemId).subscribe({
+      next: () => {
+        this.toastService.success('Ítem eliminado de la cuenta.');
+        // Refresh session & order
+        this.stationsApi.getSession(session.id).subscribe({
+          next: (full) => {
+            if (full) {
+              this.selectedSession.set(full);
+              this.sessionOrder.set(full.order ?? null);
+            }
+            this.loadActiveSessions();
+          },
+        });
+      },
+      error: (error: unknown) => {
+        this.toastService.error(this.errorText(error, 'No fue posible eliminar el ítem.'));
+      },
+    });
+  }
+
+  saveBudget(): void {
+    const session = this.selectedSession();
+    const amount = this.sessionBudgetAmount();
+    if (!session || amount == null || amount < 0) return;
+    this.saving.set(true);
+    this.http
+      .put<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`, {
+        amount,
+        currency: this.budget()?.currency || 'COP',
+        expectedVersion: this.budget()?.version ?? 0,
+      })
+      .subscribe({
+        next: (r) => {
+          this.budget.set(r?.data ?? r);
+          this.saving.set(false);
+          this.toastService.success('Techo de presupuesto actualizado.');
+          this.loadActiveSessions();
+        },
+        error: (error: unknown) => {
+          this.saving.set(false);
+          this.toastService.error(this.errorText(error, 'No fue posible guardar el presupuesto.'));
+        },
+      });
+  }
+
+  transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close'): void {
+    this.saving.set(true);
+    this.http.patch<any>(`${environment.apiUrl}/store/service-sessions/${session.id}`, { action }).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.showSessionModal.set(false);
+        this.selectedSession.set(null);
+        this.loadActiveSessions();
+        this.toastService.success(
+          action === 'close'
+            ? 'Atención finalizada con éxito.'
+            : action === 'pause'
+              ? 'Atención pausada.'
+              : 'Atención reanudada.',
+        );
+      },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible actualizar el estado de la atención.'));
+      },
+    });
+  }
+
+  // Modal 4: Configure Station (Compatibility, Providers, QR)
+  selectStationForConfig(station: ServiceStation): void {
+    this.selectedStation.set(station);
+    this.editName.set(station.name);
+    this.editStationType.set(this.getStationType(station));
+    this.editCapacity.set(1);
+    this.selectedConfigTab.set('details');
+    this.serviceIds.set(station.services?.map((s) => s.product_id) ?? []);
+    this.providerIds.set(station.providers?.map((p) => p.provider_id) ?? []);
+    this.showConfigModal.set(true);
+  }
+
+  saveStationDetails(): void {
     const station = this.selectedStation();
     if (!station) return;
     const name = this.editName().trim();
-    if (!name) { this.errorMessage.set('El nombre es obligatorio.'); return; }
-    this.runSave(this.stationsApi.update(station.id, { name, capacity: station.capacity }), 'Datos de estación guardados.', station.id);
+    if (!name) {
+      this.toastService.error('El nombre es obligatorio.');
+      return;
+    }
+    this.runSave(
+      this.stationsApi.update(station.id, {
+        name,
+        capacity: 1,
+        station_type: this.editStationType(),
+      }),
+      'Datos guardados.',
+      station.id,
+    );
   }
 
-  toggleStatus(): void {
+  toggleStationStatus(): void {
     const station = this.selectedStation();
     if (!station) return;
     if (station.status === 'active') {
@@ -204,127 +1375,47 @@ export class ServiceStationsPageComponent implements OnInit {
   }
 
   toggleService(id: number): void {
-    this.serviceIds.update((ids) => ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]);
+    this.serviceIds.update((ids) => (ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id]));
   }
 
   toggleProvider(id: number): void {
-    this.providerIds.update((ids) => ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]);
+    this.providerIds.update((ids) => (ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id]));
   }
 
   providerSupportsSelectedServices(provider: StationProviderOption): boolean {
     const item = this.reservationsApiProvider(provider.id);
     const selected = this.serviceIds();
-    return selected.length > 0 && (item?.services ?? []).some((service) => selected.includes(service.product_id));
+    return selected.length > 0 && (item?.services ?? []).some((s) => selected.includes(s.product_id));
   }
 
   private reservationsApiProvider(id: number): ServiceProvider | undefined {
-    return this.providerRecords().find((provider) => provider.id === id);
-  }
-
-  private readonly providerRecords = signal<ServiceProvider[]>([]);
-
-  updateSchedule(weekday: number, blockOrder: number, field: 'start_time' | 'end_time' | 'is_active', value: string | boolean): void {
-    this.schedule.update((rows) => rows.map((row) => row.weekday === weekday && row.block_order === blockOrder ? { ...row, [field]: value } : row));
-  }
-
-  schedulesFor(weekday: number): StationSchedule[] {
-    return this.schedule().filter((row) => row.weekday === weekday).sort((a, b) => a.start_time.localeCompare(b.start_time));
-  }
-
-  addScheduleBlock(weekday: number): void {
-    this.schedule.update((rows) => {
-      const dayRows = rows.filter((row) => row.weekday === weekday);
-      const block_order = Math.max(-1, ...dayRows.map((row) => row.block_order ?? 0)) + 1;
-      const next = rows.filter((row) => row.weekday !== weekday || row.is_active);
-      next.push({ weekday, block_order, start_time: '13:00', end_time: '18:00', is_active: true });
-      return next;
-    });
-  }
-
-  removeScheduleBlock(weekday: number, blockOrder: number): void {
-    this.schedule.update((rows) => {
-      const remaining = rows.filter((row) => row.weekday !== weekday || row.block_order !== blockOrder);
-      if (remaining.some((row) => row.weekday === weekday)) return remaining;
-      return [...remaining, { weekday, block_order: 0, start_time: '09:00', end_time: '18:00', is_active: false }];
-    });
-  }
-
-  saveSchedule(): void {
-    const station = this.selectedStation();
-    if (!station) return;
-    const active = this.schedule().filter((row) => row.is_active);
-    if (active.some((row) => row.start_time >= row.end_time)) {
-      this.errorMessage.set('En cada día, la hora final debe ser posterior a la inicial.');
-      return;
-    }
-    const overlaps = WEEKDAYS.some((day) => {
-      const blocks = active.filter((row) => row.weekday === day.value).sort((a, b) => a.start_time.localeCompare(b.start_time));
-      return blocks.some((row, index) => index > 0 && row.start_time < blocks[index - 1].end_time);
-    });
-    if (overlaps) {
-      this.errorMessage.set('Los bloques del mismo día no pueden superponerse.');
-      return;
-    }
-    this.runSave(this.stationsApi.setSchedules(station.id, active), 'Horario de estación guardado.', station.id);
-  }
-
-  addException(): void {
-    const station = this.selectedStation();
-    if (!station || !this.exceptionStart() || !this.exceptionEnd()) {
-      this.errorMessage.set('Completa el inicio y el fin de la excepción.');
-      return;
-    }
-    const startIso = storeWallTimeToIso(this.exceptionStart(), this.timezone());
-    const endIso = storeWallTimeToIso(this.exceptionEnd(), this.timezone());
-    if (!startIso || !endIso) {
-      this.errorMessage.set(`La hora indicada no existe en ${this.timezone()} por un cambio de horario. Elige otra hora.`);
-      return;
-    }
-    this.saving.set(true);
-    this.stationsApi.createException(station.id, {
-      start_at: startIso, end_at: endIso, reason: this.exceptionReason().trim() || undefined,
-    }).subscribe({
-      next: () => {
-        this.saving.set(false);
-        this.exceptionStart.set(''); this.exceptionEnd.set(''); this.exceptionReason.set('');
-        this.loadExceptions(station.id);
-        this.successMessage.set('Excepción agregada.');
-      },
-      error: (error: unknown) => { this.saving.set(false); this.errorMessage.set(this.errorText(error, 'No fue posible agregar la excepción.')); },
-    });
-  }
-
-  formatExceptionTime(value: string): string {
-    return formatStoreDateTime(value, this.timezone(), { dateStyle: 'medium', timeStyle: 'short' });
-  }
-
-  deleteException(exceptionId: number): void {
-    const station = this.selectedStation();
-    if (!station) return;
-    this.stationsApi.deleteException(station.id, exceptionId).subscribe({
-      next: () => { this.loadExceptions(station.id); this.successMessage.set('Excepción eliminada.'); },
-      error: (error: unknown) => this.errorMessage.set(this.errorText(error, 'No fue posible eliminar la excepción.')),
-    });
+    return this.providerRecords().find((p) => p.id === id);
   }
 
   saveServices(): void {
     const station = this.selectedStation();
     if (!station) return;
-    this.runSave(this.stationsApi.setServices(station.id, this.serviceIds()), 'Servicios compatibles guardados.', station.id);
+    this.runSave(this.stationsApi.setServices(station.id, this.serviceIds()), 'Servicios guardados.', station.id);
   }
 
   saveProviders(): void {
     const station = this.selectedStation();
     if (!station) return;
-    this.runSave(this.stationsApi.setProviders(station.id, this.providerIds()), 'Proveedores compatibles guardados.', station.id);
+    this.runSave(this.stationsApi.setProviders(station.id, this.providerIds()), 'Proveedores guardados.', station.id);
   }
 
   private runSave<T>(request: import('rxjs').Observable<T>, message: string, stationId: number): void {
     this.saving.set(true);
-    this.errorMessage.set(null);
     request.subscribe({
-      next: () => { this.saving.set(false); this.successMessage.set(message); this.loadStations(stationId); },
-      error: (error: unknown) => { this.saving.set(false); this.errorMessage.set(this.errorText(error, 'No fue posible guardar los cambios.')); },
+      next: () => {
+        this.saving.set(false);
+        this.toastService.success(message);
+        this.loadStations(stationId);
+      },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible guardar los cambios.'));
+      },
     });
   }
 

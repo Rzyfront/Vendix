@@ -54,7 +54,7 @@ export class OpenServiceSessionDto {
   @Min(1)
   product_id?: number;
 
-  /** Required for a walk-in; booking sessions use their confirmed allocation. */
+  /** Opcional para walk-in (si no se envía, calcula now + duración del servicio o 60 min); las reservas usan su asignación confirmada. */
   @IsOptional()
   @IsDateString()
   @Matches(/(?:Z|[+-]\d{2}:\d{2})$/i, { message: 'planned_end_at debe incluir zona horaria explícita' })
@@ -106,3 +106,27 @@ export class ListActiveServiceSessionsDto {
   @Min(1)
   cursor?: number;
 }
+
+export class AddSessionItemDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  product_id: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  unit_price?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  description?: string;
+}
+

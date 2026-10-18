@@ -35,6 +35,11 @@ import type {
 } from '../../../../../../shared/components';
 import { WeeklyScheduleEditorComponent } from './weekly-schedule-editor/weekly-schedule-editor.component';
 import { ExceptionsManagerComponent } from './exceptions-manager/exceptions-manager.component';
+import {
+  ServiceStationsService,
+  ServiceStation,
+} from '../service-stations/service-stations.service';
+import { STATION_TYPES_META } from '../service-stations/service-stations-page.component';
 
 interface AvailableEmployee {
   id: number;
@@ -76,6 +81,7 @@ interface BookableService {
 })
 export class ScheduleManagementComponent {
   private reservationsService = inject(ReservationsService);
+  private stationsService = inject(ServiceStationsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
@@ -181,6 +187,30 @@ export class ScheduleManagementComponent {
     return all.filter(s => (s.name || '').toLowerCase().includes(query));
   });
 
+  // Station management
+  allStations = signal<ServiceStation[]>([]);
+  stationSearchQuery = signal('');
+  assignedStationIds = signal<number[]>([]);
+  loadingStations = signal(false);
+  togglingStationId = signal<number | null>(null);
+
+  filteredStations = computed(() => {
+    const query = this.stationSearchQuery().toLowerCase().trim();
+    const all = this.allStations();
+    if (!query) return all;
+    return all.filter((st) => {
+      const nameMatch = (st.name || '').toLowerCase().includes(query);
+      const meta = st.station_type ? STATION_TYPES_META[st.station_type] : null;
+      const typeMatch = meta
+        ? meta.label.toLowerCase().includes(query) ||
+          meta.singularLabel.toLowerCase().includes(query)
+        : false;
+      return nameMatch || typeMatch;
+    });
+  });
+
+  assignedStationCount = computed(() => this.assignedStationIds().length);
+
   // Live schedule stats (updated in real-time from editor)
   liveWeeklyHours = signal<number | null>(null);
   liveActiveDays = signal<number | null>(null);
@@ -193,6 +223,7 @@ export class ScheduleManagementComponent {
   // Modal tabs
   readonly detailTabs = [
     { id: 'services', label: 'Servicios', icon: 'layers' },
+    { id: 'stations', label: 'Estaciones', icon: 'warehouse' },
     { id: 'schedule', label: 'Horario', icon: 'clock' },
     { id: 'exceptions', label: 'Excepciones', icon: 'calendar-x' },
   ];
@@ -309,10 +340,13 @@ export class ScheduleManagementComponent {
     this.activeTab.set('services');
     this.liveWeeklyHours.set(null);
     this.liveActiveDays.set(null);
+    this.assignedStationIds.set([]);
+    this.stationSearchQuery.set('');
   }
 
   loadProviders(): void {
     this.loading.set(true);
+    this.loadAllStations();
     forkJoin([
       this.reservationsService.getProviders(),
       this.reservationsService.getBookableServices(),
@@ -334,7 +368,12 @@ export class ScheduleManagementComponent {
     this.managingServices.set(false);
     this.editingBio.set(false);
     this.activeTab.set('services');
+    this.stationSearchQuery.set('');
     this.isDetailModalOpen.set(true);
+    this.loadProviderStations(provider.id);
+    if (this.allStations().length === 0) {
+      this.loadAllStations();
+    }
     this.reservationsService
       .getProvider(provider.id)
       .pipe(
@@ -650,4 +689,118 @@ export class ScheduleManagementComponent {
       `${provider.employee?.first_name ?? ''} ${provider.employee?.last_name ?? ''}`.trim()
     );
   }
+
+  // --- Stations Management ---
+
+  loadAllStations(): void {
+    this.stationsService
+      .list(1, 100)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.allStations.set(res.data || []);
+        },
+        error: () => {
+          // Non-blocking fallback
+        },
+      });
+  }
+
+  loadProviderStations(providerId: number): void {
+    this.loadingStations.set(true);
+    this.reservationsService
+      .getProviderStations(providerId)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingStations.set(false)),
+      )
+      .subscribe({
+        next: (ids) => {
+          this.assignedStationIds.set(ids || []);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar estaciones del personal');
+        },
+      });
+  }
+
+  isStationAssigned(stationId: number): boolean {
+    return this.assignedStationIds().includes(stationId);
+  }
+
+  toggleStationAssignment(stationId: number, assign: boolean): void {
+    const provider = this.selectedProvider();
+    if (!provider) return;
+
+    this.togglingStationId.set(stationId);
+    const current = this.assignedStationIds();
+    const next = assign
+      ? [...current, stationId]
+      : current.filter((id) => id !== stationId);
+    this.assignedStationIds.set(next);
+
+    const obs$ = assign
+      ? this.reservationsService.assignStationToProvider(provider.id, stationId)
+      : this.reservationsService.removeStationFromProvider(provider.id, stationId);
+
+    obs$
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.togglingStationId.set(null)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            assign ? 'Estación vinculada al personal' : 'Estación desvinculada',
+          );
+        },
+        error: () => {
+          this.assignedStationIds.set(current);
+          this.toastService.error('Error al actualizar asignación de estación');
+        },
+      });
+  }
+
+  toggleAllStations(assignAll: boolean): void {
+    const provider = this.selectedProvider();
+    if (!provider) return;
+
+    const targetIds = assignAll ? this.allStations().map((s) => s.id) : [];
+
+    this.loadingStations.set(true);
+    this.reservationsService
+      .setProviderStations(provider.id, targetIds)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingStations.set(false)),
+      )
+      .subscribe({
+        next: (ids) => {
+          this.assignedStationIds.set(ids);
+          this.toastService.success(
+            assignAll
+              ? 'Todas las estaciones asignadas'
+              : 'Todas las estaciones desvinculadas',
+          );
+        },
+        error: () => this.toastService.error('Error al actualizar estaciones'),
+      });
+  }
+
+  getStationIcon(type?: string): string {
+    if (!type) return 'warehouse';
+    return (
+      STATION_TYPES_META[type as keyof typeof STATION_TYPES_META]?.icon ||
+      'warehouse'
+    );
+  }
+
+  getStationTypeLabel(type?: string): string {
+    if (!type) return 'General';
+    return (
+      STATION_TYPES_META[type as keyof typeof STATION_TYPES_META]?.singularLabel ||
+      'General'
+    );
+  }
 }
+

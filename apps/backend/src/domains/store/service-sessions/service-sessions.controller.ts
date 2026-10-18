@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -18,7 +19,13 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
-import { ExtendServiceSessionDto, ListActiveServiceSessionsDto, OpenServiceSessionDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
+import {
+  AddSessionItemDto,
+  ExtendServiceSessionDto,
+  ListActiveServiceSessionsDto,
+  OpenServiceSessionDto,
+  ServiceSessionTransitionDto,
+} from './dto/service-session.dto';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 import { ServiceSessionsService } from './service-sessions.service';
 
@@ -73,6 +80,24 @@ export class ServiceSessionsController {
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return this.response.success(await this.sessions.findOne(id));
+  }
+
+  @Post(':id/items')
+  @Permissions('store:reservations:update')
+  async addItem(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddSessionItemDto,
+  ) {
+    return this.response.created(await this.sessions.addItem(id, dto), 'Producto o servicio agregado a la cuenta');
+  }
+
+  @Delete(':id/items/:itemId')
+  @Permissions('store:reservations:update')
+  async removeItem(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('itemId', ParseIntPipe) itemId: number,
+  ) {
+    return this.response.success(await this.sessions.removeItem(id, itemId), 'Item eliminado de la cuenta');
   }
 
   @Sse(':id/stream')

@@ -24,6 +24,10 @@ export class CreateServiceStationDto {
   name: string;
 
   @IsOptional()
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -41,6 +45,10 @@ export class UpdateServiceStationDto {
   @MinLength(1)
   @MaxLength(120)
   name?: string;
+
+  @IsOptional()
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
 
   @IsOptional()
   @Type(() => Number)

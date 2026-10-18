@@ -110,6 +110,7 @@ export class ServiceStationsService {
         data: {
           store_id: this.storeId,
           name: dto.name.trim(),
+          station_type: dto.station_type ?? 'carro',
           capacity: dto.capacity ?? 1,
           status: dto.status ?? 'active',
         },
@@ -130,6 +131,7 @@ export class ServiceStationsService {
         where: { id, store_id: this.storeId },
         data: {
           ...(dto.name !== undefined && { name: dto.name.trim() }),
+          ...(dto.station_type !== undefined && { station_type: dto.station_type }),
           ...(dto.capacity !== undefined && { capacity: dto.capacity }),
           ...(dto.status !== undefined && { status: dto.status }),
           updated_at: new Date(),
@@ -160,27 +162,6 @@ export class ServiceStationsService {
       throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
     }
 
-    // Keep configured providers compatible when the service set changes.
-    const assignedProviders = station.providers.map((item) => item.provider_id);
-    if (assignedProviders.length && ids.length) {
-      const compatible = await this.prisma.provider_services.findMany({
-        where: {
-          provider_id: { in: assignedProviders },
-          product_id: { in: ids },
-          provider: { store_id: this.storeId },
-          product: { store_id: this.storeId },
-        },
-        select: { provider_id: true },
-        distinct: ['provider_id'],
-      });
-      if (compatible.length !== assignedProviders.length) {
-        throw new ConflictException('La selección dejaría proveedores asignados sin un servicio compatible');
-      }
-    }
-    if (assignedProviders.length && ids.length === 0) {
-      throw new ConflictException('Retira primero los proveedores antes de dejar la estación sin servicios');
-    }
-
     await this.prisma.$transaction(async (tx: any) => {
       await tx.service_station_services.deleteMany({ where: { store_id: this.storeId, station_id: id } });
       if (ids.length) {
@@ -193,7 +174,7 @@ export class ServiceStationsService {
   }
 
   async setProviders(id: number, dto: SetStationProvidersDto) {
-    const station = await this.findOne(id);
+    await this.findOne(id);
     const ids = dto.provider_ids;
     const providers = ids.length
       ? await this.prisma.service_providers.findMany({
@@ -203,25 +184,6 @@ export class ServiceStationsService {
       : [];
     if (providers.length !== ids.length) {
       throw new NotFoundException('Uno o más proveedores activos no pertenecen a esta tienda');
-    }
-    const serviceIds = station.services.map((item) => item.product_id);
-    if (ids.length && serviceIds.length === 0) {
-      throw new BadRequestException('Configura primero al menos un servicio para esta estación');
-    }
-    if (ids.length && serviceIds.length) {
-      const compatible = await this.prisma.provider_services.findMany({
-        where: {
-          provider_id: { in: ids },
-          product_id: { in: serviceIds },
-          provider: { store_id: this.storeId },
-          product: { store_id: this.storeId },
-        },
-        select: { provider_id: true },
-        distinct: ['provider_id'],
-      });
-      if (compatible.length !== ids.length) {
-        throw new BadRequestException('Cada proveedor debe ofrecer al menos uno de los servicios de la estación');
-      }
     }
 
     await this.prisma.$transaction(async (tx: any) => {

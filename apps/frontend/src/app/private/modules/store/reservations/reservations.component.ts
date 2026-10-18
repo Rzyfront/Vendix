@@ -15,7 +15,6 @@ import { ReservationsService } from './services/reservations.service';
 import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
-import { ServiceSessionsPanelComponent } from './components/service-sessions-panel/service-sessions-panel.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import {
@@ -25,6 +24,7 @@ import {
   BookingStatus,
 } from './interfaces/reservation.interface';
 import {
+  ButtonComponent,
   ToastService,
   DialogService,
   IconComponent,
@@ -48,8 +48,8 @@ type ReservationView = 'calendar' | 'list';
     BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
-    ServiceSessionsPanelComponent,
     CardComponent,
+    ButtonComponent,
     IconComponent,
     TooltipComponent,
     InputButtonsComponent,

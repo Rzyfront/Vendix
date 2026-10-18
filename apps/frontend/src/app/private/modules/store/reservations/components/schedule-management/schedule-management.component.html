@@ -358,6 +358,13 @@
               <span class="stat-label">Servicios</span>
             </div>
           </div>
+          <div class="stat-card stat-warning">
+            <app-icon name="warehouse" [size]="18"/>
+            <div class="stat-content">
+              <span class="stat-number">{{ assignedStationCount() }}</span>
+              <span class="stat-label">Estaciones</span>
+            </div>
+          </div>
           <div class="stat-card stat-info">
             <app-icon name="clock" [size]="18"/>
             <div class="stat-content">
@@ -380,7 +387,7 @@
         [tabs]="detailTabs"
         [activeTab]="activeTab()"
         size="sm"
-        (tabChange)="activeTab.set($event); serviceSearchQuery.set('')"
+        (tabChange)="activeTab.set($event); serviceSearchQuery.set(''); stationSearchQuery.set('')"
       />
 
       <div class="tab-body">
@@ -448,6 +455,104 @@
           </div>
         }
 
+        <!-- ═══ Tab: Estaciones ═══ -->
+        @if (activeTab() === 'stations') {
+          <div class="services-section">
+            <div class="flex items-center gap-2">
+              <div class="flex-1">
+                <app-inputsearch
+                  size="sm"
+                  placeholder="Buscar estación por nombre o tipo..."
+                  (searchChange)="stationSearchQuery.set($event)"
+                />
+              </div>
+              @if (allStations().length > 0) {
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="toggleAllStations(true)"
+                    [disabled]="loadingStations() || assignedStationCount() === allStations().length"
+                    title="Asignar todas las estaciones a este personal"
+                  >
+                    Todas
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="toggleAllStations(false)"
+                    [disabled]="loadingStations() || assignedStationCount() === 0"
+                    title="Desvincular todas las estaciones"
+                  >
+                    Ninguna
+                  </app-button>
+                </div>
+              }
+            </div>
+
+            @if (loadingStations() && allStations().length === 0) {
+              <div class="flex items-center justify-center py-8 text-gray-400">
+                <app-icon name="loader" [size]="24" class="animate-spin" />
+              </div>
+            } @else if (filteredStations().length > 0) {
+              <div class="services-grid">
+                @for (station of filteredStations(); track station.id) {
+                  <div class="service-card" [class.assigned]="isStationAssigned(station.id)">
+                    <div class="service-card-left">
+                      <div class="service-icon" [class.active]="isStationAssigned(station.id)">
+                        <app-icon [name]="getStationIcon(station.station_type)" [size]="16"/>
+                      </div>
+                      <div class="service-info">
+                        <div class="flex items-center gap-2">
+                          <span class="service-name">{{ station.name }}</span>
+                          <app-badge [variant]="station.status === 'active' ? 'success' : 'neutral'" size="xs">
+                            {{ station.status === 'active' ? 'Activa' : 'Inactiva' }}
+                          </app-badge>
+                        </div>
+                        <div class="service-details">
+                          <span class="service-meta-item">
+                            <app-icon name="tag" [size]="12"/>
+                            {{ getStationTypeLabel(station.station_type) }}
+                          </span>
+                          <span class="service-meta-item">
+                            <app-icon name="users" [size]="12"/>
+                            Capacidad: {{ station.capacity || 1 }}
+                          </span>
+                          @if (station.services.length) {
+                            <span class="service-meta-item text-xs text-gray-500">
+                              • {{ station.services.length }} servicio(s) asociado(s)
+                            </span>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                    <app-toggle
+                      [checked]="isStationAssigned(station.id)"
+                      [ariaLabel]="'Asignar estación ' + station.name"
+                      [disabled]="togglingStationId() === station.id"
+                      (toggled)="toggleStationAssignment(station.id, !isStationAssigned(station.id))"
+                    />
+                  </div>
+                }
+              </div>
+            } @else if (allStations().length === 0) {
+              <app-empty-state
+                icon="warehouse"
+                title="Sin estaciones registradas"
+                description="No hay estaciones de servicio creadas en esta tienda. Puedes crearlas en el módulo de Estaciones."
+                [showActionButton]="false"
+              />
+            } @else {
+              <app-empty-state
+                icon="search"
+                title="Sin resultados"
+                description="No se encontraron estaciones con ese criterio de búsqueda"
+                [showActionButton]="false"
+              />
+            }
+          </div>
+        }
+
         <!-- ═══ Tab: Horario ═══ -->
         @if (activeTab() === 'schedule') {
           <app-weekly-schedule-editor [providerId]="p.id" (scheduleChanged)="onScheduleChanged($event)"/>
@@ -458,6 +563,7 @@
           <app-exceptions-manager [providerId]="p.id"/>
         }
       </div>
+
     }
 
     <!-- ▸ Footer -->
