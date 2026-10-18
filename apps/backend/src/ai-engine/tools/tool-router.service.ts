@@ -179,6 +179,7 @@ export class ToolRouterService {
     session: ToolRoutingSession,
     args: Record<string, unknown>,
     authorized: AIToolDefinition[],
+    allowExpansion = true,
   ): Promise<string> {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (
@@ -221,6 +222,15 @@ export class ToolRouterService {
         capacity: session.capacity,
         next_step:
           'Ya se alcanzó el máximo de 40 operativas. Usa list_capabilities/list_endpoints y el bridge autorizado; no inventes herramientas ni DTOs.',
+      });
+    // Validation, schema cursors and no-op results above do not expand the
+    // working set. Only the actual expansion needs an objective budget slot.
+    if (!allowExpansion)
+      return JSON.stringify({
+        error: 'Se agotaron las ampliaciones del objetivo.',
+        error_code: 'AGENT_EXPANSION_LIMIT',
+        next_step:
+          'Usa el catálogo ya autorizado o informa la capacidad concreta que falta.',
       });
     const searchQuery = [
       query,

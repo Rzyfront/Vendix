@@ -21,6 +21,7 @@ describe('B4/M3 Vex plan store and own cards', () => {
       'applyConfirmation',
       'requestStepConfirmation',
       'applyStepConfirmation',
+      'getConversation',
     ]);
     api.listConversations.and.returnValue(
       of({ data: [], meta: { total: 0, page: 1, limit: 50, totalPages: 0 } }),
@@ -95,6 +96,135 @@ describe('B4/M3 Vex plan store and own cards', () => {
   });
   const current = (s: VexChatStore) =>
     s.active_conversation()!.messages[0].plan!;
+  for (const initial of ['proposed', 'approved', 'single'] as const) {
+    it(`N1 folds voice unknown from ${initial} like click and remains blocked after thread reload`, async () => {
+      plan.plan_id =
+        initial === 'single'
+          ? 'single-voice'
+          : 'd973bb78-8c4a-4daa-a600-b9969d726447';
+      plan.status = initial === 'approved' ? 'approved' : 'proposed';
+      const token = initial === 'proposed' ? '' : 'old-token';
+      plan.steps = [
+        { ...plan.steps[0], confirmation_token: token || undefined },
+      ];
+      store.acceptVoiceReceipt('m1', plan.plan_id, {
+        context: {
+          conversation_id: 7,
+          agent_key: 'vex',
+          channel: 'pipeline',
+          step_id: 's1',
+        },
+        confirmationToken: token,
+        proposalArguments: plan.steps[0].arguments,
+        receipt: {
+          tool: 'create_customer',
+          output: '{}',
+          step_status: 'unknown',
+          plan_status: 'unknown_effect',
+          execution: {
+            schema_version: '1',
+            status: 'unknown_effect',
+            effect_status: 'unknown',
+            freshness: 'unknown',
+            retryable: false,
+            error_code: null,
+            next_action: 'Reconciliar antes de repetir.',
+            resource_ids: {},
+            evidence_refs: [],
+          },
+        },
+      });
+      const assertBlocked = () => {
+        const value = current(store);
+        expect(value.status).toBe('unknown_effect');
+        expect(value.steps[0].status).toBe('unknown');
+        expect(value.steps[0].confirmation_token).toBeUndefined();
+        expect(value.steps[0].error).toBe('Reconciliar antes de repetir.');
+        const card = TestBed.runInInjectionContext(
+          () => new VexPlanCardComponent(),
+        );
+        Object.assign(card, { plan: signal(value), conversationId: signal(7) });
+        expect(card.single_status_label(value.steps[0])).toBe(
+          'Pendiente de verificación',
+        );
+        expect(card.is_open()).toBe(false);
+        expect(card.show_own_card(value.steps[0])).toBe(false);
+        expect(card.voiceContext(value.steps[0])).toBeNull();
+        const message = store.active_conversation()!.messages[0];
+        store.approvePlan(message.id, value.plan_id);
+        store.approveStep(message.id, value, 's1', 'old-token');
+        expect(api.approvePlan).not.toHaveBeenCalled();
+        expect(api.requestStepConfirmation).not.toHaveBeenCalled();
+        expect(api.applyConfirmation).not.toHaveBeenCalled();
+        expect(api.applyStepConfirmation).not.toHaveBeenCalled();
+      };
+      assertBlocked();
+      const persisted = {
+        plan_id: plan.plan_id,
+        status: 'unknown_effect',
+        steps: [{ ...current(store).steps[0] }],
+      };
+      api.getConversation.and.returnValue(
+        of({
+          id: 7,
+          title: 'QA',
+          status: 'active',
+          metadata: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          messages: [
+            {
+              id: 1,
+              role: 'assistant',
+              content: '',
+              tool_calls: null,
+              metadata: { plan: persisted },
+              created_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+      await (store as any).loadThread('7');
+      assertBlocked();
+    });
+  }
+  it('N1 fails closed for voice receipts missing semantic statuses instead of returning to pending', () => {
+    plan.steps = [plan.steps[0]];
+    store.acceptVoiceReceipt('m1', plan.plan_id, {
+      context: {
+        conversation_id: 7,
+        agent_key: 'vex',
+        channel: 'pipeline',
+        step_id: 's1',
+      },
+      confirmationToken: '',
+      proposalArguments: plan.steps[0].arguments,
+      receipt: { tool: 'create_customer', output: '{}' },
+    });
+    expect(current(store).status).toBe('unknown_effect');
+    expect(current(store).steps[0].status).toBe('unknown');
+  });
+  it('N1 retains applied voice state when the server reports an applied receipt', () => {
+    plan.steps = [plan.steps[0]];
+    store.acceptVoiceReceipt('m1', plan.plan_id, {
+      context: {
+        conversation_id: 7,
+        agent_key: 'vex',
+        channel: 'pipeline',
+        step_id: 's1',
+      },
+      confirmationToken: '',
+      proposalArguments: plan.steps[0].arguments,
+      receipt: {
+        tool: 'create_customer',
+        output: '{}',
+        step_status: 'applied',
+        plan_status: 'applied',
+      },
+    });
+    expect(current(store).status).toBe('done');
+    expect(current(store).steps[0].status).toBe('done');
+  });
   it('applies only covered first change and leaves second reachable after token loss/reload', async () => {
     await (store as any).runPlanApproval('7', 'm1', 7, plan);
     expect(api.applyConfirmation).toHaveBeenCalledTimes(1);
@@ -106,7 +236,7 @@ describe('B4/M3 Vex plan store and own cards', () => {
     const card = TestBed.runInInjectionContext(
       () => new VexPlanCardComponent(),
     );
-    // Logic-only card test; the Angular template was compiled in the single ng test run.
+    // Logic-only card assertion; this does not certify the template or E2E.
     Object.assign(card, { plan: signal(current(store)) });
     expect(card.show_own_card(current(store).steps[1])).toBe(true);
     api.requestStepConfirmation.and.returnValue(
@@ -190,7 +320,7 @@ describe('B4/M3 Vex plan store and own cards', () => {
     const card = TestBed.runInInjectionContext(
       () => new VexPlanCardComponent(),
     );
-    // Logic-only card test; the Angular template was compiled in the single ng test run.
+    // Logic-only card assertion; this does not certify the template or E2E.
     Object.assign(card, { plan: signal(current(store)) });
     expect(card.single_status_label(current(store).steps[0])).toBe(
       'Pendiente de verificación',

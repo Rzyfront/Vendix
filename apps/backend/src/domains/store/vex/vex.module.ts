@@ -61,18 +61,20 @@ export class VexModule implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.voiceConfirmations.registerVexReceiptSink(async (proposal) => {
+    this.voiceConfirmations.registerVexReceiptSink(async (proposal, result) => {
       const context = RequestContextService.asyncLocalStorage.getStore()!;
       // Same post-success unit/dedupe convention as VexController.applyPlanStep.
-      try {
-        await this.access.consumeAIQuota(
-          context.store_id!,
-          'vex_agent',
-          1,
-          `${context.request_id ?? `internal-${randomUUID()}`}:tool:${proposal.planId ?? 'plan'}:${proposal.tool}`,
-        );
-      } catch {
-        /* A metering outage must not hide an already-applied receipt. */
+      if (result.outcome === 'applied') {
+        try {
+          await this.access.consumeAIQuota(
+            context.store_id!,
+            'vex_agent',
+            1,
+            `${context.request_id ?? `internal-${randomUUID()}`}:tool:${proposal.planId ?? 'plan'}:${proposal.tool}`,
+          );
+        } catch {
+          /* A metering outage must not hide an already-applied receipt. */
+        }
       }
       return proposal.planId
         ? this.planApproval.recordStepResult({
@@ -80,7 +82,8 @@ export class VexModule implements OnModuleInit {
             conversationId: proposal.conversationId,
             tool: proposal.tool,
             args: proposal.arguments,
-            outcome: 'applied',
+            outcome: result.outcome,
+            error: result.error,
           })
         : null;
     });

@@ -165,12 +165,30 @@ export class VexiController {
       result &&
       (result.status !== 'ok' || result.effect_status !== 'applied')
     ) {
+      const uncertain =
+        result.status === 'unknown_effect' ||
+        result.effect_status !== 'not_applied';
+      // Voice shares the click path's persisted semantic outcome, not just its
+      // successful receipt sink. No applied activity/quota/narration below.
+      const voicePlanState = voice
+        ? await this.voiceConfirmations!.recordResult(voice.proposal, {
+            outcome: uncertain ? 'unknown' : 'failed',
+            error: result.next_action ?? undefined,
+          })
+        : null;
       return this.responseService.success(
         {
           tool: dto.tool,
           output,
           summary: result.next_action,
           execution: result,
+          ...(voice?.proposal.agentKey === 'vex' && {
+            step_status: uncertain ? 'unknown' : 'failed',
+            plan_status: uncertain ? 'unknown_effect' : 'partially_applied',
+            ...(voicePlanState && typeof voicePlanState === 'object'
+              ? voicePlanState
+              : {}),
+          }),
         },
         'Resultado pendiente de verificación',
       );
@@ -218,7 +236,9 @@ export class VexiController {
       summary,
     });
     const voicePlanState = voice
-      ? await this.voiceConfirmations!.recordApplied(voice.proposal)
+      ? await this.voiceConfirmations!.recordResult(voice.proposal, {
+          outcome: 'applied',
+        })
       : null;
 
     // Voice mode only. A spoken approval that answers only in writing leaves the

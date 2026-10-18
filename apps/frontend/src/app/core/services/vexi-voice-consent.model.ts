@@ -31,13 +31,14 @@ export interface VoiceConsentReceipt {
   execution?: VexiToolExecution;
   audio_base64?: string;
   content_type?: string;
-  step_status?: 'pending' | 'applied' | 'failed' | 'cancelled';
+  step_status?: 'pending' | 'applied' | 'failed' | 'cancelled' | 'unknown';
   plan_status?:
     | 'proposed'
     | 'approved'
     | 'rejected'
     | 'applied'
-    | 'partially_applied';
+    | 'partially_applied'
+    | 'unknown_effect';
 }
 
 export interface VoiceConsentApplied {

@@ -511,28 +511,19 @@ export class VexChatStore {
           argsEqual(item.arguments ?? {}, result.proposalArguments),
     );
     if (!plan || !step) return;
-    const applied = voiceReceiptWasApplied(result.receipt);
-    this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
-      status: applied ? 'done' : 'pending',
-      confirmation_token: undefined,
-      error: applied
-        ? undefined
-        : 'Resultado sin verificar. Consulta el objetivo antes de volver a proponer.',
-    });
-    if (applied && result.receipt.step_status && result.receipt.plan_status) {
-      this.applyServerResult(
-        conversation_id,
-        message_id,
-        plan_id,
-        step.step_id,
-        result.receipt as VexApplyStepResult,
-        false,
-      );
-    } else if (plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
-      this.patchPlan(conversation_id, message_id, {
-        status: applied ? 'done' : 'partially_applied',
-      });
-    }
+    const applied =
+      voiceReceiptWasApplied(result.receipt) &&
+      vexApplyState(result.receipt as VexApplyStepResult).step_status === 'done';
+    // The same fail-closed fold as click, including non-applied/missing receipts.
+    // Unknown consumes the local token and closes every approval path.
+    this.applyServerResult(
+      conversation_id,
+      message_id,
+      plan_id,
+      step.step_id,
+      result.receipt as VexApplyStepResult,
+      false,
+    );
     const text =
       result.receipt.summary?.trim() ||
       (applied ? 'Cambio aplicado.' : 'Resultado pendiente de verificación.');

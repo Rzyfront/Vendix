@@ -36,12 +36,18 @@ export type VoiceApply = (
   audit?: VoiceConsentAudit,
 ) => Promise<unknown>;
 
+export interface VoiceApplyOutcome {
+  outcome: 'applied' | 'failed' | 'unknown';
+  error?: string;
+}
+
 /** Transport adapter only. Business effects remain behind the existing apply. */
 @Injectable()
 export class VexiVoiceConfirmationService {
   private readonly logger = new Logger(VexiVoiceConfirmationService.name);
   private vexReceiptSink?: (
     proposal: Readonly<VoiceConsentProposal>,
+    result: VoiceApplyOutcome,
   ) => Promise<unknown>;
   constructor(
     private readonly consent: VexiVoiceConsentService,
@@ -54,17 +60,23 @@ export class VexiVoiceConfirmationService {
 
   /** Registered by the owning Vex module; avoids reversing module dependencies. */
   registerVexReceiptSink(
-    sink: (proposal: Readonly<VoiceConsentProposal>) => Promise<unknown>,
+    sink: (
+      proposal: Readonly<VoiceConsentProposal>,
+      result: VoiceApplyOutcome,
+    ) => Promise<unknown>,
   ) {
     this.vexReceiptSink = sink;
   }
-  async recordApplied(proposal: Readonly<VoiceConsentProposal>) {
+  async recordResult(
+    proposal: Readonly<VoiceConsentProposal>,
+    result: VoiceApplyOutcome,
+  ) {
     if (proposal.agentKey !== 'vex') return null;
     try {
-      return await this.vexReceiptSink!(proposal);
+      return await this.vexReceiptSink!(proposal, result);
     } catch {
       this.logger.warn(
-        'El cambio fue aplicado; el estado de la tarjeta Vex requiere reconciliación.',
+        'El estado de la tarjeta Vex requiere reconciliación con el recibo de ejecución.',
       );
       return null;
     }

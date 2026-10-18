@@ -43,6 +43,16 @@ export class ObjectiveLeaseBusyException extends ConflictException {
   }
 }
 
+/** The executor released/advanced the objective after the caller read its version. */
+export class ObjectiveLeaseChangedException extends ConflictException {
+  constructor() {
+    super({
+      code: 'AI_OBJECTIVE_LEASE_CHANGED',
+      message: 'Objective executor version changed',
+    });
+  }
+}
+
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -417,14 +427,19 @@ export class AgentObjectiveRepository {
       if (!rows[0]) {
         const current = await this.find(tx, scope, id);
         if (
-          current.lease_until &&
-          current.lease_until.getTime() > Date.now() &&
           current.expires_at.getTime() > Date.now() &&
           ['active', 'partial', 'awaiting_input'].includes(
             current.semantic_status,
           )
-        )
-          throw new ObjectiveLeaseBusyException();
+        ) {
+          // An effect may have appeared since the first check. Functional
+          // reconciliation blocks must never become an operational retry.
+          await this.assertNoUnresolvedEffect(tx, scope, id);
+          if (current.lease_until && current.lease_until.getTime() > Date.now())
+            throw new ObjectiveLeaseBusyException();
+          if (current.version > expectedVersion)
+            throw new ObjectiveLeaseChangedException();
+        }
         throw new ConflictException(
           'Objective is leased, expired or superseded',
         );

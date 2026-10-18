@@ -11,6 +11,8 @@ import type { ToolExecutionReceipt } from '../tools/interfaces/tool.interface';
 import {
   addObjectiveBudget,
   AgentObjectiveRepository,
+  ObjectiveLeaseBusyException,
+  ObjectiveLeaseChangedException,
   requireObjectiveScope,
 } from './agent-objective.repository';
 import { ObjectiveMemoryDatabase } from './testing/objective-memory-db';
@@ -229,7 +231,8 @@ describe('AgentObjectiveRepository D1', () => {
       .mockResolvedValueOnce([row()])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([row()]); // fresh re-read distinguishes operational contention
+      .mockResolvedValueOnce([row()]) // fresh re-read distinguishes operational contention
+      .mockResolvedValueOnce([]);
     await expect(
       scoped(() => repository.acquireLease(ID, 2)),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -238,6 +241,69 @@ describe('AgentObjectiveRepository D1', () => {
     expect(sql).toContain(
       'lease_until IS NULL OR lease_until<=CURRENT_TIMESTAMP',
     );
+  });
+  it.each([null, new Date(1)])(
+    'classifies a released/stale CAS as operational (%s)',
+    async (lease_until) => {
+      tx.$queryRaw
+        .mockResolvedValueOnce([row()])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([row({ version: 4, lease_until })])
+        .mockResolvedValueOnce([]);
+      await expect(
+        scoped(() => repository.acquireLease(ID, 3)),
+      ).rejects.toBeInstanceOf(ObjectiveLeaseChangedException);
+    },
+  );
+  it.each([
+    'expired',
+    'blocked',
+    'awaiting_approval',
+    'unknown_effect',
+    'completed_verified',
+    'superseded',
+    'cancelled',
+    'paused',
+  ] as const)(
+    'does not classify %s as operational after a failed CAS',
+    async (semantic_status) => {
+      tx.$queryRaw
+        .mockResolvedValueOnce([row()])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          row({ version: 4, lease_until: null, semantic_status }),
+        ]);
+      const error = await scoped(() => repository.acquireLease(ID, 3)).catch(
+        (e) => e,
+      );
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(error).not.toBeInstanceOf(ObjectiveLeaseBusyException);
+      expect(error).not.toBeInstanceOf(ObjectiveLeaseChangedException);
+    },
+  );
+  it('does not turn TTL expiry or a newly uncertain effect into a handoff retry', async () => {
+    for (const expired of [true, false]) {
+      tx.$queryRaw
+        .mockResolvedValueOnce([row()])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          row({
+            version: 4,
+            lease_until: null,
+            ...(expired ? { expires_at: new Date(1) } : {}),
+          }),
+        ]);
+      if (!expired)
+        tx.$queryRaw.mockResolvedValueOnce([{ id: 'uncertain-effect' }]);
+      const error = await scoped(() => repository.acquireLease(ID, 3)).catch(
+        (e) => e,
+      );
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(error).not.toBeInstanceOf(ObjectiveLeaseChangedException);
+    }
   });
   it('blocks acquisition after an unacknowledged dispatch instead of recreating product', async () => {
     tx.$queryRaw

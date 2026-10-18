@@ -2593,42 +2593,45 @@ export class AIAgentService {
                 continue;
               }
               if (toolName === 'search_tools') {
+                const canExpand =
+                  !robust ||
+                  params.durable!.objective.budget.expansions <
+                    recoveryLimits.max_expansions;
+                const expansionsBefore = routingSession.expansions;
+                const result = await this.toolRouter!.search(
+                  routingSession,
+                  toolArgs,
+                  currentAuthority,
+                  canExpand,
+                );
+                const expanded = routingSession.expansions - expansionsBefore;
+                if (params.durable && expanded > 0)
+                  await params.durable.addBudget({ expansions: expanded });
+                // The router checks the budget only at its expansion boundary.
+                // A cursor (even at the cap), validation error or no-op is free.
                 if (
-                  robust &&
-                  params.durable!.objective.budget.expansions >=
-                    recoveryLimits.max_expansions
+                  !canExpand &&
+                  JSON.parse(result).error_code === 'AGENT_EXPANSION_LIMIT'
                 ) {
-                  const result = normalizeToolResult({
-                    error: 'Se agotaron las ampliaciones del objetivo.',
-                    error_code: 'AGENT_EXPANSION_LIMIT',
-                    next_step:
-                      'Usa el catálogo ya autorizado o informa la capacidad concreta que falta.',
-                  });
-                  await observeResult(toolName, toolArgs, result);
+                  const limited = normalizeToolResult(JSON.parse(result));
+                  await observeResult(toolName, toolArgs, limited);
                   semanticHalt = true;
                   messages.push({
                     role: 'tool',
                     tool_call_id: toolCall.id,
-                    content: JSON.stringify(result),
+                    content: JSON.stringify(limited),
                   });
                   yield {
                     type: 'tool_result',
                     tool: {
                       id: toolCall.id,
                       name: toolName,
-                      summary: result.next_action!,
-                      execution: toolReceipt(result),
+                      summary: limited.next_action!,
+                      execution: toolReceipt(limited),
                     },
                   };
                   continue;
                 }
-                const result = await this.toolRouter!.search(
-                  routingSession,
-                  toolArgs,
-                  currentAuthority,
-                );
-                if (params.durable)
-                  await params.durable.addBudget({ expansions: 1 });
                 messages.push({
                   role: 'tool',
                   content: result,

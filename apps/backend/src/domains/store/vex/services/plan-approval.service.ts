@@ -437,17 +437,18 @@ export class PlanApprovalService {
           this.stepHash(step.tool, step.arguments) === hash,
     );
     if (!target) return null;
-    const steps = loaded.plan.steps.map((step) =>
-      step === target
-        ? {
-            ...step,
-            status: input.outcome,
-            ...(input.outcome !== 'applied' && input.error
-              ? { error: input.error.slice(0, 500) }
-              : {}),
-          }
-        : step,
-    );
+    const steps = loaded.plan.steps.map((step) => {
+      if (step !== target) return step;
+      const updated: VexPlanStepRecord & { confirmation_token?: string } = {
+        ...step,
+        status: input.outcome,
+        ...(input.outcome !== 'applied' && input.error
+          ? { error: input.error.slice(0, 500) }
+          : {}),
+      };
+      delete updated.confirmation_token;
+      return updated;
+    });
     const allTerminal = steps.every((step) =>
       TERMINAL_STEP_STATUSES.includes(step.status),
     );

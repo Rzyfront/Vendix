@@ -12,6 +12,7 @@ import { SubscriptionAccessService } from '../../../domains/store/subscriptions/
 import {
   AgentObjectiveRepository,
   ObjectiveLeaseBusyException,
+  ObjectiveLeaseChangedException,
 } from '../../tasks/agent-objective.repository';
 
 import { AgentDurableSessionService } from '../../tasks/agent-durable-session.service';
@@ -117,10 +118,14 @@ export class AIAgentProcessor extends WorkerHost {
                   { objectiveId: job.data.objective_id, continuation: true },
                 );
               } catch (error) {
-                // The chat still owns the exclusive lease after queue_task. Yield
-                // the worker, not the lease. Reentry resolves ALL authority anew.
-                if (!(error instanceof ObjectiveLeaseBusyException) || !token)
+                // Yield on a live executor OR its release racing the open CAS.
+                // Reentry rereads the objective and resolves ALL authority anew.
+                if (
+                  !(error instanceof ObjectiveLeaseBusyException) &&
+                  !(error instanceof ObjectiveLeaseChangedException)
+                )
                   throw error;
+                if (!token) throw error;
                 const now = Date.now();
                 const wait = job.data.lease_wait ?? {
                   started_at: now,

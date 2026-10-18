@@ -1,6 +1,13 @@
 import { DelayedError } from 'bullmq';
 import { ConflictException } from '@nestjs/common';
-import { ObjectiveLeaseBusyException } from '../../tasks/agent-objective.repository';
+import {
+  AgentObjectiveRepository,
+  ObjectiveLeaseBusyException,
+  ObjectiveLeaseChangedException,
+} from '../../tasks/agent-objective.repository';
+import { AgentDurableSessionService } from '../../tasks/agent-durable-session.service';
+import { ObjectiveMemoryDatabase } from '../../tasks/testing/objective-memory-db';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { AIAgentProcessor } from './ai-agent.processor';
 
 describe('D1 worker authority and isolated durable reference', () => {
@@ -121,20 +128,93 @@ describe('D1 worker authority and isolated durable reference', () => {
     expect(runAgent).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledTimes(1);
   });
-  it('revalidates revocation after yielding rather than retaining old ALS permissions', async () => {
-    const task = job({ objective_id: 'objective' });
-    sessions.open.mockRejectedValueOnce(new ObjectiveLeaseBusyException());
-    await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
-      DelayedError,
-    );
-    prisma.user_roles.findMany.mockResolvedValue([assignment([])]);
-    await expect(processor.process(task, 'lock2')).rejects.toThrow(
-      'Worker permissions revoked',
-    );
-    expect(runAgent).not.toHaveBeenCalled();
-    expect(task.moveToDelayed).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledTimes(1);
-  });
+  it.each([ObjectiveLeaseBusyException, ObjectiveLeaseChangedException])(
+    'revalidates revocation after %s rather than retaining old ALS permissions',
+    async (Contention) => {
+      const task = job({ objective_id: 'objective' });
+      sessions.open.mockRejectedValueOnce(new Contention());
+      await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
+        DelayedError,
+      );
+      prisma.user_roles.findMany.mockResolvedValue([assignment([])]);
+      await expect(processor.process(task, 'lock2')).rejects.toThrow(
+        'Worker permissions revoked',
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(task.moveToDelayed).toHaveBeenCalledTimes(1);
+      expect(emit).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([false, true])(
+    'reenters the real repository/session after handoff contention (release during open: %s)',
+    async (releaseDuringOpen) => {
+      const db = new ObjectiveMemoryDatabase();
+      db.seedConversation(22, data);
+      const repo = new AgentObjectiveRepository(db.prisma);
+      const realSessions = new AgentDurableSessionService(repo, {
+        build: jest.fn().mockResolvedValue({ context: '', playbook_pins: [] }),
+      } as any);
+      const context = { ...data, is_owner: false, is_super_admin: false };
+      const owner = await RequestContextService.runIsolated(context, async () => {
+        const initial = await repo.createOrReplace(22, null, 'vexi', {
+          goal: data.goal,
+          authority_snapshot: data.permissions,
+        });
+        return repo.acquireLease(initial.id, initial.version, 650_000);
+      });
+      const acquire = repo.acquireLease.bind(repo);
+      const acquireSpy = jest.spyOn(repo, 'acquireLease');
+      if (releaseDuringOpen) {
+        acquireSpy.mockImplementationOnce(async (...args) => {
+          // open has read v2. The emitter releases v2 -> v3 before the CAS.
+          expect(await repo.releaseLease(owner.id, owner)).toBe(true);
+          return acquire(...args);
+        });
+      }
+      processor = new AIAgentProcessor(
+        { runAgent } as any,
+        { emit } as any,
+        prisma,
+        { canUseAIFeature: gate } as any,
+        repo,
+        realSessions,
+      );
+      const task = job({ objective_id: owner.id });
+      await expect(processor.process(task, 'lock1')).rejects.toBeInstanceOf(
+        DelayedError,
+      );
+      await expect(acquireSpy.mock.results[0].value).rejects.toBeInstanceOf(
+        releaseDuringOpen
+          ? ObjectiveLeaseChangedException
+          : ObjectiveLeaseBusyException,
+      );
+      expect(task.moveToDelayed).toHaveBeenCalledTimes(1);
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalled();
+      if (!releaseDuringOpen) {
+        await RequestContextService.runIsolated(context, () =>
+          repo.releaseLease(owner.id, owner),
+        );
+      }
+      runAgent.mockImplementationOnce(async ({ durable }) => {
+        expect(durable.objective.version).toBe(owner.version + 2);
+        expect(durable.objective.lease_generation).toBe(
+          owner.lease_generation + 1,
+        );
+        expect(durable.objective.budget).toEqual(owner.budget);
+        return { success: true, tools_used: [] };
+      });
+      await processor.process(task, 'lock2');
+      expect(acquireSpy.mock.calls.map((call) => call[1])).toEqual([
+        owner.version,
+        owner.version + 1,
+      ]);
+      expect(prisma.user_roles.findMany).toHaveBeenCalledTimes(2);
+      expect(gate).toHaveBeenCalledTimes(2);
+      expect(runAgent).toHaveBeenCalledTimes(1);
+      expect(emit).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each([
     new ConflictException('budget exhausted'),
     new ConflictException('unknown effect'),
@@ -146,19 +226,22 @@ describe('D1 worker authority and isolated durable reference', () => {
     expect(runAgent).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledTimes(1);
   });
-  it('bounds contention across worker reentries and eventually reports one real failure', async () => {
-    const task = job({
-      objective_id: 'objective',
-      lease_wait: { started_at: Date.now() - 660001, count: 133 },
-    });
-    sessions.open.mockRejectedValue(new ObjectiveLeaseBusyException());
-    await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
-      ObjectiveLeaseBusyException,
-    );
-    expect(task.moveToDelayed).not.toHaveBeenCalled();
-    expect(runAgent).not.toHaveBeenCalled();
-    expect(emit).toHaveBeenCalledTimes(1);
-  });
+  it.each([ObjectiveLeaseBusyException, ObjectiveLeaseChangedException])(
+    'bounds %s across worker reentries and eventually reports one real failure',
+    async (Contention) => {
+      const task = job({
+        objective_id: 'objective',
+        lease_wait: { started_at: Date.now() - 660001, count: 133 },
+      });
+      sessions.open.mockRejectedValue(new Contention());
+      await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
+        Contention,
+      );
+      expect(task.moveToDelayed).not.toHaveBeenCalled();
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(emit).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('does not execute when all snapshotted permissions were revoked', async () => {
     prisma.user_roles.findMany.mockResolvedValue([
