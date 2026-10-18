@@ -3467,17 +3467,6 @@ export class AIAgentService {
                     durableResult = normalizedApply
                       ? { ...normalizedApply }
                       : undefined;
-                    let appliedArtifactId: string | undefined;
-                    if (params.durable && durableResult) {
-                      appliedArtifactId = await params.durable.checkpointTool(
-                        toolCall.id,
-                        toolName,
-                        toolArgs,
-                        durableResult,
-                        this.toolRegistry.get(toolName)?.version ?? '1',
-                      );
-                      durableCheckpointed = true;
-                    }
                     toolOutcome = normalizedApply
                       ? await observeResult(toolName, toolArgs, normalizedApply)
                       : 'partial';
@@ -3485,7 +3474,7 @@ export class AIAgentService {
                       toolName,
                       appliedRaw,
                       params,
-                      appliedArtifactId,
+                      undefined,
                       toolArgs,
                     );
                     if (normalizedApply && applied !== appliedRaw)

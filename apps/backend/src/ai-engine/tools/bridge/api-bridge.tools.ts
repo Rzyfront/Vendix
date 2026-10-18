@@ -434,10 +434,16 @@ export function createApiBridgeTools({
               description:
                 'Ruta patrón exacta para consultar solo su contrato.',
             },
+            method: {
+              type: 'string',
+              enum: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+              description:
+                'Verbo exacto del endpoint. Requerido para continuar field_cursor.',
+            },
             field_cursor: {
               type: 'string',
               description:
-                'Cursor de campos de una ruta; úsalo junto con path.',
+                'Cursor de campos de una ruta y verbo; úsalo junto con domain, path y method.',
             },
             field_limit: {
               type: 'integer',
@@ -459,10 +465,25 @@ export function createApiBridgeTools({
       },
       handler: async (args) => {
         const scopes = callerScopes();
-        const methods = args.writable_only ? WRITE_METHODS : undefined;
+        let methods: CatalogMethod[] | undefined = args.writable_only
+          ? WRITE_METHODS
+          : undefined;
 
         {
           try {
+            if (args.method !== undefined) {
+              const method = String(args.method).toUpperCase();
+              if (method !== 'GET' && !isWriteMethod(method))
+                throw new Error('Verbo inválido.');
+              methods = args.writable_only && method === 'GET' ? [] : [method];
+            }
+            if (
+              args.field_cursor &&
+              (!args.path || !args.domain || !args.method)
+            )
+              throw new Error(
+                'Continúa field_cursor con domain, path y method exactos del endpoint.',
+              );
             if (!args.domain) {
               const page = discoveryPage(
                 catalog.domainsFor(scopes, methods),
@@ -526,7 +547,7 @@ export function createApiBridgeTools({
                     ['object', 'array', 'unknown'].includes(f.type),
                   ),
                 next_step:
-                  'Si faltan campos continúa field_cursor con path exacto. Un object/array no describe su DTO anidado: obtiene contrato/preflight del dominio antes de proponer.',
+                  'Si faltan campos continúa field_cursor con domain, path y method exactos. Un object/array no describe su DTO anidado: obtiene contrato/preflight del dominio antes de proponer.',
               };
             });
             return JSON.stringify({

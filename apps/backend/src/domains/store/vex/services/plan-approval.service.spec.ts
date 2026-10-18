@@ -819,6 +819,44 @@ describe('PlanApprovalService', () => {
       ).rejects.toMatchObject({ errorCode: 'SYS_NOT_FOUND_001' });
     });
 
+    it('persists uncertain effects across reload and prohibits confirmation or reapproval', async () => {
+      await service.approvePlan({
+        planId: PLAN,
+        conversationId: 7,
+        userId: 11,
+        clientSteps: steps,
+      });
+      expect(
+        await service.recordStepResult({
+          planId: PLAN,
+          conversationId: 7,
+          stepId: 's1',
+          outcome: 'unknown',
+          error: 'Reconciliar antes de repetir.',
+        }),
+      ).toEqual({
+        step_status: 'unknown',
+        plan_status: 'unknown_effect',
+      });
+      expect((await service.getPlan(7, PLAN))?.status).toBe('unknown_effect');
+      await expect(
+        service.resolveStepForConfirmation({
+          planId: PLAN,
+          conversationId: 7,
+          stepId: 's1',
+          userId: 11,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+      await expect(
+        service.approvePlan({
+          planId: PLAN,
+          conversationId: 7,
+          userId: 11,
+          clientSteps: steps,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+    });
+
     it('estados persistidos tras aplicar: approved → applied', async () => {
       await service.approvePlan({
         planId: PLAN,

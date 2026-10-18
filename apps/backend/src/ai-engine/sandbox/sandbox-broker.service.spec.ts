@@ -81,7 +81,7 @@ function fixture() {
   };
   const client = {
     configuration: jest.fn((): typeof config | null => config),
-    run: jest.fn(async (start, call) => {
+    run: jest.fn(async (start: any, call: any): Promise<unknown> => {
       const reply = await call(frame(start));
       return { result: reply.result.data };
     }),

@@ -24,6 +24,8 @@ export interface AIEmbeddingJob {
 }
 
 export interface AIAgentJob {
+  /** Server-owned, bounded contention wait; not a functional retry/authority grant. */
+  lease_wait?: { started_at: number; count: number };
   /** Optional durable reference; never decides the BullMQ job state. */
   objective_id?: string;
   goal: string;

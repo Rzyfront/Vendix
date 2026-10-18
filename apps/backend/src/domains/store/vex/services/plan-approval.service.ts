@@ -29,8 +29,14 @@ export type VexPlanStatus =
   | 'approved'
   | 'rejected'
   | 'applied'
-  | 'partially_applied';
-export type VexPlanStepStatus = 'pending' | 'applied' | 'failed' | 'cancelled';
+  | 'partially_applied'
+  | 'unknown_effect';
+export type VexPlanStepStatus =
+  | 'pending'
+  | 'applied'
+  | 'failed'
+  | 'cancelled'
+  | 'unknown';
 
 /** Un paso de `ai_messages.metadata.plan.steps` (contrato con el frontend). */
 export interface VexPlanStepRecord {
@@ -342,6 +348,7 @@ export class PlanApprovalService {
     if (
       loaded.plan.status === 'applied' ||
       loaded.plan.status === 'partially_applied' ||
+      loaded.plan.status === 'unknown_effect' ||
       loaded.plan.status === 'rejected'
     ) {
       throw new VendixHttpException(
@@ -410,7 +417,7 @@ export class PlanApprovalService {
     stepId?: string;
     tool?: string;
     args?: Record<string, any>;
-    outcome: 'applied' | 'failed';
+    outcome: 'applied' | 'failed' | 'unknown';
     error?: string;
   }): Promise<{
     step_status: VexPlanStepStatus;
@@ -435,7 +442,7 @@ export class PlanApprovalService {
         ? {
             ...step,
             status: input.outcome,
-            ...(input.outcome === 'failed' && input.error
+            ...(input.outcome !== 'applied' && input.error
               ? { error: input.error.slice(0, 500) }
               : {}),
           }
@@ -444,11 +451,15 @@ export class PlanApprovalService {
     const allTerminal = steps.every((step) =>
       TERMINAL_STEP_STATUSES.includes(step.status),
     );
-    const status: VexPlanStatus = allTerminal
-      ? steps.some((step) => step.status === 'failed')
-        ? 'partially_applied'
-        : 'applied'
-      : loaded.plan.status;
+    const status: VexPlanStatus = steps.some(
+      (step) => step.status === 'unknown',
+    )
+      ? 'unknown_effect'
+      : allTerminal
+        ? steps.some((step) => step.status === 'failed')
+          ? 'partially_applied'
+          : 'applied'
+        : loaded.plan.status;
     await this.savePlan(input.conversationId, loaded, {
       ...loaded.plan,
       status,
@@ -580,13 +591,17 @@ export class PlanApprovalService {
     return raw === 'approved' ||
       raw === 'rejected' ||
       raw === 'applied' ||
-      raw === 'partially_applied'
+      raw === 'partially_applied' ||
+      raw === 'unknown_effect'
       ? raw
       : 'proposed';
   }
 
   private normalizeStepStatus(raw: unknown): VexPlanStepStatus {
-    return raw === 'applied' || raw === 'failed' || raw === 'cancelled'
+    return raw === 'applied' ||
+      raw === 'failed' ||
+      raw === 'cancelled' ||
+      raw === 'unknown'
       ? raw
       : 'pending';
   }

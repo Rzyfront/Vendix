@@ -746,6 +746,48 @@ describe('VexiVoiceConsentService authenticated server-STT consent', () => {
       expect(writes).toBe(0);
     }));
 
+  it('planning step rebind invalidates old spoken challenges without extending authority', () =>
+    asOwner(async () => {
+      const fixture = await ready({ channel: 'realtime' });
+      const before = await service.validateSession(fixture.session.session_id);
+      now += 1000;
+      const next = await service.updateSessionCatalog(
+        before.sessionId,
+        tools,
+        undefined,
+        before.revision,
+        undefined,
+        { objectiveId: before.objectiveId, stepId: 'plan:abc:1' },
+      );
+      expect(next.stepId).toBe('plan:abc:1');
+      expect(next.expiresAt).toBe(before.expiresAt);
+      expect(next.playbookTokens).toBe(before.playbookTokens);
+      expect(next.userId).toBe(before.userId);
+      await expect(
+        service.consumeConsent(fixture.input, callbacks()),
+      ).rejects.toThrow();
+      await expect(
+        service.updateSessionCatalog(
+          before.sessionId,
+          tools,
+          undefined,
+          before.revision,
+          undefined,
+          { objectiveId: before.objectiveId, stepId: 'plan:abc:2' },
+        ),
+      ).rejects.toThrow();
+      await expect(
+        service.updateSessionCatalog(
+          before.sessionId,
+          tools,
+          undefined,
+          next.revision,
+          undefined,
+          { objectiveId: '22222222-2222-4222-8222-222222222222', stepId: null },
+        ),
+      ).rejects.toThrow();
+      expect(writes).toBe(0);
+    }));
   it('catalog expansion CAS preserves fixed expiry, accumulates budget and invalidates old proposal', () =>
     asOwner(async () => {
       const fixture = await ready();

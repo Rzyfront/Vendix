@@ -1,3 +1,7 @@
+import {
+  normalizeToolResult,
+  toolReceipt,
+} from '../tools/tool-result.normalizer';
 import type { AgentObjectiveRepository } from './agent-objective.repository';
 import { AgentTaskContextService } from './agent-task-context.service';
 import type {
@@ -32,18 +36,26 @@ const objective = () =>
 const storedResult = () =>
   ({
     id: artifactId,
+    objective_id: ID,
+    store_id: 10,
+    organization_id: 20,
+    user_id: 30,
+    task_id: null,
+    args_hash: 'a'.repeat(64),
+    evidence_refs: [],
+    lease_generation: 1,
     tool_call_id: 'call-5',
     tool_name: 'read_product',
     tool_version: '1',
     resource_ids: { product_id: 55 },
-    receipt: { status: 'ok' },
+    receipt: toolReceipt(normalizeToolResult({ id: 55 })),
     pagination: { complete: false, has_more: true, next_cursor: 2 },
     freshness: 'observed',
     created_at: new Date('2026-10-17T00:00:00Z'),
     stale_lease: false,
     data: { quantity: 7, unit: 'kg', date: '2026-10-18', subtotal: 140 },
     data_omitted: false,
-  }) as AgentToolResult;
+  }) satisfies AgentToolResult;
 
 describe('AgentTaskContextService', () => {
   let get: jest.Mock;

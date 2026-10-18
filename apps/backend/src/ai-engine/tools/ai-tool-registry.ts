@@ -1,3 +1,4 @@
+import { publicSandboxArgs } from '../sandbox/sandbox-invocation.context';
 import { agentDeadlineContext } from '../tasks/agent-deadline';
 import { Injectable, Logger } from '@nestjs/common';
 import { AIToolDefinition } from '../interfaces/ai-provider.interface';
@@ -566,7 +567,7 @@ export class AIToolRegistry {
 
     try {
       this.logger.log(
-        `Executing tool: ${name} with args: ${JSON.stringify(args).substring(0, 200)}`,
+        `Executing tool: ${name} with args: ${JSON.stringify(publicSandboxArgs(tool.name, args)).substring(0, 200)}`,
       );
       agentDeadlineContext.getStore()?.assertCanStart();
       onHandlerStart?.();
@@ -575,10 +576,14 @@ export class AIToolRegistry {
     } catch (error: any) {
       if (onHandlerStart) throw error;
       if (error instanceof VendixHttpException) throw error;
-      this.logger.error(`Tool "${name}" execution failed: ${error.message}`);
+      const message =
+        resolvedName === 'run_readonly_script'
+          ? 'SANDBOX_EXECUTION_FAILED'
+          : error.message;
+      this.logger.error(`Tool "${name}" execution failed: ${message}`);
       throw new VendixHttpException(
         ErrorCodes.AI_AGENT_003,
-        `Tool "${name}" failed: ${error.message}`,
+        `Tool "${name}" failed: ${message}`,
       );
     }
   }

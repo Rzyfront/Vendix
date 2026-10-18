@@ -1,3 +1,5 @@
+import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { RecipeRepository } from './recipe.repository';
 import { RequestContextService } from '../../common/context/request-context.service';
 import {
@@ -15,11 +17,11 @@ function setup() {
     $queryRaw: jest.fn().mockResolvedValue([{ id: 1 }]),
     $executeRaw: jest.fn().mockResolvedValue(1),
   };
-  const store = {
+  const storeClient = {
     $queryRaw: jest.fn().mockResolvedValue([recipe]),
     $executeRaw: jest.fn().mockResolvedValue(1),
   };
-  const system = {
+  const systemClient = {
     ...tx,
     $transaction: jest.fn((cb) => cb(tx)),
     users: {
@@ -44,15 +46,41 @@ function setup() {
       ]),
     },
   };
+  // Real service prototypes: mocks live ONLY at the PrismaClient transport seam.
+  const store = Object.assign(Object.create(StorePrismaService.prototype), {
+    baseClient: storeClient,
+  }) as StorePrismaService;
+  const system = Object.assign(Object.create(GlobalPrismaService.prototype), {
+    baseClient: systemClient,
+  }) as GlobalPrismaService;
   return {
     recipe,
-    store,
-    system,
+    store: storeClient,
+    system: systemClient,
     tx,
     repository: new RecipeRepository(store as never, system as never),
   };
 }
 describe('F repository SQL contracts (mocks, NOT PostgreSQL)', () => {
+  it('loaded pins and global retirement traverse real scoped-service delegates', () =>
+    scoped(async () => {
+      const f = setup();
+      f.store.$queryRaw.mockResolvedValue([
+        { data: { recipe_id: 41, hash: 'a'.repeat(64) } },
+      ]);
+      expect(await f.repository.loadedPins(objectiveId)).toEqual([
+        { id: 41, hash: 'a'.repeat(64) },
+      ]);
+      expect(f.store.$queryRaw.mock.calls[0][0].values).toEqual([
+        objectiveId,
+        7,
+        3,
+        11,
+      ]);
+      await f.repository.retire(41, 'a'.repeat(64), 'expired');
+      expect(f.system.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(f.system.$executeRaw.mock.calls[0][0].values).toContain(11);
+    }));
   it('private lookup explicitly binds all dimensions; foreign and unknown identical404', () =>
     scoped(async () => {
       const f = setup();

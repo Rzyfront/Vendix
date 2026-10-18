@@ -66,7 +66,7 @@ const DEFAULT_CLIENT_SECRET_TTL_SECONDS = 60;
 const MIN_CLIENT_SECRET_TTL_SECONDS = 10;
 const MAX_CLIENT_SECRET_TTL_SECONDS = 300;
 
-interface RealtimeToolDefinition {
+export interface RealtimeToolDefinition {
   type: 'function';
   name: string;
   description: string;
@@ -435,6 +435,48 @@ export class VexiRealtimeService {
           output,
           _callId,
         );
+        const nextAuthority = await this.authority!.resolveAuthority(
+          session.conversationId,
+          session.agentKey,
+        );
+        // Only the planning call that just ran may advance this binding. External
+        // drift still fails the guard above; changing objective requires reconnect.
+        if (nextAuthority.objective_id !== session.objectiveId)
+          throw new ConflictException(
+            'Cambió el objetivo. Abre una sesión de voz nueva.',
+          );
+        if (nextAuthority.step_id !== session.stepId) {
+          return this.authority!.runAuthorized(nextAuthority, async (fresh) => {
+            const definitions = this.voiceDefinitions(fresh);
+            const routing = session.routing
+              ? (JSON.parse(
+                  JSON.stringify(session.routing),
+                ) as ToolRoutingSession)
+              : this.router!.createSession(
+                  fresh.goal,
+                  this.routingSignature(fresh, definitions),
+                );
+            routing.signature = this.routingSignature(fresh, definitions);
+            const selection = await this.router!.select(
+              routing,
+              definitions,
+              true,
+              !!fresh.plan,
+            );
+            await this.consent!.updateSessionCatalog(
+              sessionId,
+              this.versionedTools(selection.definitions),
+              routing,
+              session.revision,
+              undefined,
+              { objectiveId: fresh.objective_id, stepId: fresh.step_id },
+            );
+            return {
+              output: this.safeProviderOutput(output),
+              tools: this.realtimeDefinitions(selection.definitions),
+            };
+          });
+        }
         return { output: this.safeProviderOutput(output) };
       }
       if (name === 'search_playbooks' || name === 'load_playbook') {

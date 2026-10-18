@@ -42,6 +42,8 @@ describe('H bridge preserves full data before persistence and bounded artifact r
         store_id: 3,
         permissions: readAllowed ? ['read'] : [],
         roles: [],
+        is_owner: false,
+        is_super_admin: false,
         access_token: 'synthetic-test-only',
       },
       () =>

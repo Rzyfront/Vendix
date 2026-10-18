@@ -283,11 +283,13 @@ export class VexiVoiceConsentService {
     routing?: ToolRoutingSession,
     expectedRevision?: number,
     playbookTokens?: number,
+    binding?: { objectiveId: string | null; stepId: string | null },
   ): Promise<VoiceConsentSession> {
     const session = await this.validateSession(sessionId);
     if (
       !Number.isSafeInteger(expectedRevision) ||
       expectedRevision !== session.revision ||
+      (binding !== undefined && binding.objectiveId !== session.objectiveId) ||
       (playbookTokens !== undefined &&
         (!Number.isSafeInteger(playbookTokens) ||
           playbookTokens < session.playbookTokens ||
@@ -298,6 +300,7 @@ export class VexiVoiceConsentService {
       ...session,
       tools: this.copy(tools, 40_000),
       revision: session.revision + 1,
+      ...(binding && { stepId: binding.stepId }),
       ...(playbookTokens !== undefined && { playbookTokens }),
       ...(routing && { routing: this.copy(routing, 20_000) }),
     };

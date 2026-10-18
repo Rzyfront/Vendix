@@ -1,6 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { ForbiddenException, Logger, Optional } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { DelayedError, Job } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AIAgentService, AgentRunParams } from '../../ai-agent.service';
@@ -9,7 +9,10 @@ import { AIAgentJob } from '../interfaces/ai-queue.interface';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { buildActiveUserRolesWhere } from '../../../common/utils/role-scope.util';
 import { SubscriptionAccessService } from '../../../domains/store/subscriptions/services/subscription-access.service';
-import { AgentObjectiveRepository } from '../../tasks/agent-objective.repository';
+import {
+  AgentObjectiveRepository,
+  ObjectiveLeaseBusyException,
+} from '../../tasks/agent-objective.repository';
 
 import { AgentDurableSessionService } from '../../tasks/agent-durable-session.service';
 import type { RequestContext } from '../../../common/context/request-context.service';
@@ -50,7 +53,7 @@ export class AIAgentProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<AIAgentJob>): Promise<any> {
+  async process(job: Job<AIAgentJob>, token?: string): Promise<any> {
     const { goal, task_id } = job.data;
 
     this.logger.log(
@@ -106,15 +109,45 @@ export class AIAgentProcessor extends WorkerHost {
               job.data,
             );
             if (job.data.objective_id) {
-              durable = await this.durableSessions!.open(
-                objectiveConversation!,
-                agentKey,
-                goal,
-                {
-                  objectiveId: job.data.objective_id,
-                  continuation: true,
-                },
-              );
+              try {
+                durable = await this.durableSessions!.open(
+                  objectiveConversation!,
+                  agentKey,
+                  goal,
+                  { objectiveId: job.data.objective_id, continuation: true },
+                );
+              } catch (error) {
+                // The chat still owns the exclusive lease after queue_task. Yield
+                // the worker, not the lease. Reentry resolves ALL authority anew.
+                if (!(error instanceof ObjectiveLeaseBusyException) || !token)
+                  throw error;
+                const now = Date.now();
+                const wait = job.data.lease_wait ?? {
+                  started_at: now,
+                  count: 0,
+                };
+                if (
+                  !Number.isSafeInteger(wait.started_at) ||
+                  !Number.isSafeInteger(wait.count) ||
+                  wait.started_at > now ||
+                  wait.count < 0 ||
+                  wait.count >= 134 ||
+                  now - wait.started_at >= 660_000
+                )
+                  throw error;
+                await job.updateData({
+                  ...job.data,
+                  lease_wait: {
+                    started_at: wait.started_at,
+                    count: wait.count + 1,
+                  },
+                });
+                await job.moveToDelayed(
+                  now + Math.min(1000 * (wait.count + 1), 5000),
+                  token,
+                );
+                throw new DelayedError();
+              }
             }
             try {
               return await this.aiAgent.runAgent({
@@ -165,6 +198,7 @@ export class AIAgentProcessor extends WorkerHost {
 
       return result;
     } catch (error: any) {
+      if (error instanceof DelayedError) throw error;
       this.logger.error(`Vexi agent task ${job.id} failed: ${error?.message}`);
 
       // Emitted, not swallowed: the person is not watching, so the only way they

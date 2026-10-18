@@ -458,6 +458,17 @@ export class AgentDurableSessionService {
         goal,
         authority_snapshot: ctx.permissions ?? [],
       });
+    if (row.semantic_status === 'completed_verified') {
+      // A human may start another goal in this chat; automatic/explicit resumes
+      // must retain the completed objective and cannot reset its budget.
+      if (options.continuation || options.objectiveId)
+        throw resumeRequired(row);
+      row = await this.repo.createOrReplace(conversationId, null, agentKey, {
+        goal,
+        authority_snapshot: ctx.permissions ?? [],
+        completed_objective_id: row.id,
+      });
+    }
     if (row.semantic_status === 'awaiting_approval')
       row = await this.repo.recoverAppliedReceipt(row.id, row.version);
     // Resume is explicit. Opening a message never refreshes expired facts or approval.

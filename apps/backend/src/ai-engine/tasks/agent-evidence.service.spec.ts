@@ -1,3 +1,7 @@
+import {
+  normalizeToolResult,
+  toolReceipt,
+} from '../tools/tool-result.normalizer';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { AgentObjectiveRepository } from './agent-objective.repository';
 import { AgentEvidenceService } from './agent-evidence.service';
@@ -15,13 +19,19 @@ const result = () =>
     user_id: 30,
     tool_call_id: 'call-1',
     task_id: 7,
+    tool_name: 'read_product',
+    tool_version: '1',
+    args_hash: 'a'.repeat(64),
+    evidence_refs: [reference],
+    lease_generation: 1,
+    created_at: new Date('2026-10-17T00:00:00Z'),
     resource_ids: { product_id: 55 },
-    receipt: { status: 'ok' },
+    receipt: toolReceipt(normalizeToolResult({ id: 55 })),
     freshness: 'observed',
     stale_lease: false,
     pagination: { complete: true, has_more: false },
     data: { id: 55 },
-  }) as AgentToolResult;
+  }) satisfies AgentToolResult;
 
 describe('AgentEvidenceService', () => {
   let getResult: jest.Mock;

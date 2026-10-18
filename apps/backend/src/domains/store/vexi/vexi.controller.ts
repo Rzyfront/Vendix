@@ -252,7 +252,7 @@ export class VexiController {
         tool: dto.tool,
         output,
         summary,
-        ...(voice && result && { execution: result }),
+        ...(result && { execution: result }),
         ...(voicePlanState && typeof voicePlanState === 'object'
           ? voicePlanState
           : {}),

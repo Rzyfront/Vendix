@@ -197,7 +197,7 @@ describe('SandboxAuditRepository phase E', () => {
   );
 
   it('rejects mismatched source/hash, oversized UTF8, malformed digest and unredacted limits', async () => {
-    for (const patch of [
+    const patches: Partial<SandboxAuditStart>[] = [
       { source_hash: 'd'.repeat(64) },
       {
         source: 'ñ'.repeat(17000),
@@ -208,7 +208,8 @@ describe('SandboxAuditRepository phase E', () => {
       { limits: { wall_ms: Infinity } },
       { manifest: ['read_products', 'read_products'] },
       { manifest: ['read_products;process.exit()'] },
-    ]) {
+    ];
+    for (const patch of patches) {
       await expect(
         scoped(() => repository.start(input(patch))),
       ).rejects.toBeInstanceOf(BadRequestException);

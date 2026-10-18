@@ -24,7 +24,7 @@ describe('H chat reattachment revalidates current access before transport lookup
       .fn()
       .mockResolvedValue({ id: 7, metadata: null, status: 'active' });
     const gate = jest.fn().mockResolvedValue(undefined);
-    const service = Object.assign(
+    const service: AIChatService = Object.assign(
       Object.create(AIChatService.prototype) as AIChatService,
       {
         streamReplay: new ChatStreamReplay(),
@@ -32,7 +32,7 @@ describe('H chat reattachment revalidates current access before transport lookup
         getConversation,
         assertVexTurnAccess: gate,
       },
-    );
+    ) as AIChatService;
     return { service, execute, getConversation, gate };
   }
 

@@ -108,7 +108,9 @@ export function fixture() {
       ],
     },
   } as unknown as PlaybookDocument;
-  const loader = { getPlaybooks: () => [doc] } as PlaybookLoaderService;
+  const loader = {
+    getPlaybooks: () => [doc],
+  } as unknown as PlaybookLoaderService;
   const quality = new RecipeQualityService(loader, registry),
     template = quality.template('crear-cliente');
   const recipe = {

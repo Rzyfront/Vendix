@@ -145,7 +145,6 @@ describe('SandboxClientService: fixed supervisor-only transport', () => {
         new AbortController().signal,
       );
       emit({
-        type: 'ready',
         execution_id: start.execution_id,
         nonce: start.nonce,
         isolation: 'gvisor',

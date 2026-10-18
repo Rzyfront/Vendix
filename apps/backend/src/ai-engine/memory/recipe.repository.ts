@@ -190,7 +190,7 @@ export class RecipeRepository {
   ): Promise<void> {
     const scope = requireObjectiveScope();
     const eventKey = catalogHash([scope, objectiveId, id, hash, kind]);
-    await this.system.$transaction(async (tx) => {
+    await this.system.$transaction(async (tx: Prisma.TransactionClient) => {
       const rows = await tx.$queryRaw<
         Array<{ id: number }>
       >(Prisma.sql`INSERT INTO ai_agent_recipe_events(recipe_id,store_id,organization_id,user_id,objective_id,event_key,kind,code)

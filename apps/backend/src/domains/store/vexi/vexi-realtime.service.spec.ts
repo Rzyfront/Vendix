@@ -510,7 +510,7 @@ describe('VexiRealtimeService G session authority', () => {
       updateSessionCatalog: jest
         .fn()
         .mockImplementation(
-          async (_id, tools, routing, revision, playbookTokens) => {
+          async (_id, tools, routing, revision, playbookTokens, binding) => {
             if (revision !== session.revision)
               throw new Error('session_changed');
             session = {
@@ -518,6 +518,7 @@ describe('VexiRealtimeService G session authority', () => {
               tools,
               routing: routing ?? session.routing,
               revision: revision + 1,
+              ...(binding ? { stepId: binding.stepId } : {}),
               playbookTokens: playbookTokens ?? session.playbookTokens,
             };
             return session;
@@ -987,6 +988,50 @@ describe('VexiRealtimeService G session authority', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('rebinds the current step after planning so a second tool works in the same live session', async () => {
+    authority.step_id = null;
+    session.stepId = null;
+    const expiresAt = session.expiresAt;
+    authorityService.executePlanningTool.mockImplementation(async () => {
+      authority = { ...authority, step_id: 'plan:abc:1' };
+      return '{"ok":true}';
+    });
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'propose_plan', {}),
+    );
+    expect(result.tools).toBeDefined();
+    expect(session.stepId).toBe('plan:abc:1');
+    expect(session.revision).toBe(1);
+    expect(session.expiresAt).toBe(expiresAt);
+    expect(session.objectiveId).toBe(objectiveId);
+    await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+  it('does not auto-rebind an externally changed step', async () => {
+    authority.step_id = 'plan:other:2';
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('Cambió el objetivo o el paso');
+    expect(consent.updateSessionCatalog).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('fails closed on a concurrent session CAS while planning advances the step', async () => {
+    authorityService.executePlanningTool.mockImplementation(async () => {
+      authority = { ...authority, step_id: 'plan:abc:2' };
+      return '{"ok":true}';
+    });
+    consent.updateSessionCatalog.mockRejectedValue(
+      new Error('session_changed'),
+    );
+    await expect(
+      run(() => service.executeSessionToolCall(sessionId, 'propose_plan', {})),
+    ).rejects.toThrow('session_changed');
+    expect(handler).not.toHaveBeenCalled();
+  });
   it('uses the existing router and CAS-swaps only currently authorized definitions', async () => {
     jest.spyOn(router, 'search').mockResolvedValue('{"expanded":true}');
     jest.spyOn(router, 'select').mockResolvedValue({

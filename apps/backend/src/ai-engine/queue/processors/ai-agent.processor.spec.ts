@@ -1,3 +1,6 @@
+import { DelayedError } from 'bullmq';
+import { ConflictException } from '@nestjs/common';
+import { ObjectiveLeaseBusyException } from '../../tasks/agent-objective.repository';
 import { AIAgentProcessor } from './ai-agent.processor';
 
 describe('D1 worker authority and isolated durable reference', () => {
@@ -11,6 +14,7 @@ describe('D1 worker authority and isolated durable reference', () => {
     conversation_id: 22,
   };
   let runAgent: jest.Mock;
+  let emit: jest.Mock;
   let prisma: any;
   let gate: jest.Mock;
   let objectives: any;
@@ -78,9 +82,10 @@ describe('D1 worker authority and isolated durable reference', () => {
         close: jest.fn(),
       }),
     };
+    emit = jest.fn();
     processor = new AIAgentProcessor(
       { runAgent } as any,
-      { emit: jest.fn() } as any,
+      { emit } as any,
       prisma,
       { canUseAIFeature: gate } as any,
       objectives,
@@ -88,8 +93,72 @@ describe('D1 worker authority and isolated durable reference', () => {
     );
   });
   afterAll(() => {});
-  const job = (extra: Record<string, unknown> = {}) =>
-    ({ id: 'synthetic', data: { ...data, ...extra } }) as any;
+  const job = (extra: Record<string, unknown> = {}) => {
+    const value: any = { id: 'synthetic', data: { ...data, ...extra } };
+    value.updateData = jest.fn(async (next) => {
+      value.data = next;
+    });
+    value.moveToDelayed = jest.fn().mockResolvedValue(undefined);
+    return value;
+  };
+
+  it('defers ONLY lease contention without consuming the single functional attempt or notifying failure', async () => {
+    const task = job({ objective_id: 'objective' });
+    sessions.open.mockRejectedValueOnce(new ObjectiveLeaseBusyException());
+    await expect(processor.process(task, 'worker-lock')).rejects.toBeInstanceOf(
+      DelayedError,
+    );
+    expect(task.moveToDelayed).toHaveBeenCalledWith(
+      expect.any(Number),
+      'worker-lock',
+    );
+    expect(task.data.lease_wait.count).toBe(1);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+    // After the emitting chat releases, the same job takes a fresh authority path.
+    await processor.process(task, 'worker-lock-2');
+    expect(prisma.user_roles.findMany).toHaveBeenCalledTimes(2);
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+  it('revalidates revocation after yielding rather than retaining old ALS permissions', async () => {
+    const task = job({ objective_id: 'objective' });
+    sessions.open.mockRejectedValueOnce(new ObjectiveLeaseBusyException());
+    await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
+      DelayedError,
+    );
+    prisma.user_roles.findMany.mockResolvedValue([assignment([])]);
+    await expect(processor.process(task, 'lock2')).rejects.toThrow(
+      'Worker permissions revoked',
+    );
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(task.moveToDelayed).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    new ConflictException('budget exhausted'),
+    new ConflictException('unknown effect'),
+  ])('does not defer a functional block %s', async (error) => {
+    const task = job({ objective_id: 'objective' });
+    sessions.open.mockRejectedValue(error);
+    await expect(processor.process(task, 'lock')).rejects.toBe(error);
+    expect(task.moveToDelayed).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+  it('bounds contention across worker reentries and eventually reports one real failure', async () => {
+    const task = job({
+      objective_id: 'objective',
+      lease_wait: { started_at: Date.now() - 660001, count: 133 },
+    });
+    sessions.open.mockRejectedValue(new ObjectiveLeaseBusyException());
+    await expect(processor.process(task, 'lock')).rejects.toBeInstanceOf(
+      ObjectiveLeaseBusyException,
+    );
+    expect(task.moveToDelayed).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
 
   it('does not execute when all snapshotted permissions were revoked', async () => {
     prisma.user_roles.findMany.mockResolvedValue([

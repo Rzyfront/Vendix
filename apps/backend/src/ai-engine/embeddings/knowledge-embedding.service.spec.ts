@@ -130,7 +130,7 @@ describe('KnowledgeEmbeddingService: metered platform-only embeddings', () => {
   it('separates platform tracing from a caller tenant trace without fabricating a successful business outcome', async () => {
     const root = { kind: 'root' };
     const trace = {
-      startTrace: jest.fn(() => root),
+      startTrace: jest.fn((_input: unknown) => root),
       run: jest.fn((_root, work) => work()),
       finishTrace: jest.fn(),
     };

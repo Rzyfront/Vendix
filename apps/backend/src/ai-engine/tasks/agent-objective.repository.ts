@@ -33,6 +33,16 @@ import {
   ResultPage,
 } from './interfaces/agent-objective.interface';
 
+/** Operational contention, not a failed business task. */
+export class ObjectiveLeaseBusyException extends ConflictException {
+  constructor() {
+    super({
+      code: 'AI_OBJECTIVE_LEASE_BUSY',
+      message: 'Objective executor is active',
+    });
+  }
+}
+
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -335,6 +345,7 @@ export class AgentObjectiveRepository {
       goal?: string;
       authority_snapshot?: string[];
       lease?: ObjectiveLease;
+      completed_objective_id?: string;
     } = {},
   ): Promise<AgentObjective> {
     const scope = this.scope();
@@ -346,6 +357,11 @@ export class AgentObjectiveRepository {
         true,
       );
       const metadata = objectMetadata(conversation.metadata);
+      if (
+        options.completed_objective_id &&
+        metadata.agent_objective_id !== options.completed_objective_id
+      )
+        throw new ConflictException('Conversation objective changed');
       if (typeof metadata.agent_objective_id === 'string') {
         const previous = await this.find(
           tx,
@@ -353,6 +369,11 @@ export class AgentObjectiveRepository {
           metadata.agent_objective_id,
           true,
         );
+        if (
+          options.completed_objective_id &&
+          previous.semantic_status !== 'completed_verified'
+        )
+          throw new ConflictException('Objective is not completed');
         if (plan && previous.plan?.id === plan.id) return previous;
         if (options.lease) this.assertLease(previous, options.lease);
         else if (
@@ -361,9 +382,10 @@ export class AgentObjectiveRepository {
         )
           throw new ConflictException('Objective executor is active');
         await this.assertNoUnresolvedEffect(tx, scope, previous.id);
-        await tx.$executeRaw(
-          Prisma.sql`UPDATE ai_agent_objectives SET semantic_status='superseded',lease_generation=lease_generation+1,version=version+1,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=${previous.id}::uuid AND ${scopeSql(scope)} AND version=${previous.version}`,
-        );
+        if (previous.semantic_status !== 'completed_verified')
+          await tx.$executeRaw(
+            Prisma.sql`UPDATE ai_agent_objectives SET semantic_status='superseded',lease_generation=lease_generation+1,version=version+1,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=${previous.id}::uuid AND ${scopeSql(scope)} AND version=${previous.version}`,
+          );
       }
       return this.insert(
         tx,
@@ -392,10 +414,21 @@ export class AgentObjectiveRepository {
       const rows = await tx.$queryRaw<AgentObjective[]>(
         Prisma.sql`UPDATE ai_agent_objectives SET version=version+1,lease_generation=lease_generation+1,lease_until=CURRENT_TIMESTAMP+${ttlMs}*INTERVAL '1 millisecond',updated_at=CURRENT_TIMESTAMP WHERE id=${id}::uuid AND ${scopeSql(scope)} AND version=${expectedVersion} AND (lease_until IS NULL OR lease_until<=CURRENT_TIMESTAMP) AND expires_at>CURRENT_TIMESTAMP AND semantic_status NOT IN ('superseded','cancelled','completed_verified','unknown_effect') RETURNING *`,
       );
-      if (!rows[0])
+      if (!rows[0]) {
+        const current = await this.find(tx, scope, id);
+        if (
+          current.lease_until &&
+          current.lease_until.getTime() > Date.now() &&
+          current.expires_at.getTime() > Date.now() &&
+          ['active', 'partial', 'awaiting_input'].includes(
+            current.semantic_status,
+          )
+        )
+          throw new ObjectiveLeaseBusyException();
         throw new ConflictException(
           'Objective is leased, expired or superseded',
         );
+      }
       return rows[0];
     });
   }

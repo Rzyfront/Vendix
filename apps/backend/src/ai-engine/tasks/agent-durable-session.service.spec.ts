@@ -193,3 +193,72 @@ it('does not count human wait as active runtime', async () => {
   await s.session.accountRuntime();
   expect(s.repo.addBudget).not.toHaveBeenCalled();
 });
+
+// Regression B2: real repository/session, deterministic SQL transport (not PostgreSQL).
+describe('completed objective does not terminate its conversation', () => {
+  async function completed() {
+    const { AgentObjectiveRepository } =
+      await import('./agent-objective.repository');
+    const { ObjectiveMemoryDatabase } =
+      await import('./testing/objective-memory-db');
+    const db = new ObjectiveMemoryDatabase();
+    db.seedConversation(7, ctx);
+    const repository = new AgentObjectiveRepository(db.prisma);
+    const old = await repository.createOrReplace(7, null, 'vexi', {
+      goal: 'consulta anterior',
+    });
+    // Model an independently verified terminal row at the SQL transport seam.
+    db.objectives.set(old.id, {
+      ...old,
+      semantic_status: 'completed_verified',
+      lease_until: null,
+    });
+    const service = new AgentDurableSessionService(repository, {
+      build: async () => ({ context: '', playbook_pins: [] }),
+    } as never);
+    return { db, repository, old, service };
+  }
+  it('starts a new human goal, preserves terminal evidence and fences concurrent replacement', () =>
+    RequestContextService.runIsolated(ctx, async () => {
+      const { service, old, repository, db } = await completed();
+      const session = await service.open(7, 'vexi', 'otra consulta');
+      expect(session?.objective_id).not.toBe(old.id);
+      expect((await repository.get(old.id)).semantic_status).toBe(
+        'completed_verified',
+      );
+      expect((await repository.getForConversation(7))?.id).toBe(
+        session?.objective_id,
+      );
+      const { ObjectiveLeaseBusyException } =
+        await import('./agent-objective.repository');
+      await expect(
+        repository.acquireLease(session!.objective_id, session!.lease.version),
+      ).rejects.toBeInstanceOf(ObjectiveLeaseBusyException);
+
+      await expect(
+        repository.createOrReplace(7, null, 'vexi', {
+          goal: 'concurrente',
+          completed_objective_id: old.id,
+        }),
+      ).rejects.toThrow('Conversation objective changed');
+      expect(db.objectives.size).toBe(2);
+      await session?.close();
+    }));
+  it.each([{ continuation: true }, { objectiveId: row().id }])(
+    'never creates a replacement for automatic/explicit continuation %j',
+    (options) =>
+      RequestContextService.runIsolated(ctx, async () => {
+        const { service, old, db } = await completed();
+        await expect(
+          service.open(7, 'vexi', 'continuar', {
+            ...options,
+            ...(options.objectiveId ? { objectiveId: old.id } : {}),
+          }),
+        ).rejects.toThrow();
+        expect(db.objectives.size).toBe(1);
+        expect(db.objectives.get(old.id)?.semantic_status).toBe(
+          'completed_verified',
+        );
+      }),
+  );
+});

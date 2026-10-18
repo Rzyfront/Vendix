@@ -72,6 +72,7 @@ describe('B bridge/capability authorized pages', () => {
     const next = await run('list_endpoints', {
       domain: 'things',
       path: 'store/things/01',
+      method: first.endpoints[0].method,
       field_cursor: first.endpoints[0].field_cursor,
     });
     expect(next.endpoints[0].campos.map((f) => f.name)).toEqual([
@@ -81,6 +82,40 @@ describe('B bridge/capability authorized pages', () => {
       'field_11',
     ]);
     expect(next.endpoints[0].contract_complete).toBe(false); // Nested object still needs a domain contract/preflight.
+  });
+  it('continues PATCH fields on a path shared by GET/PATCH/DELETE without applying its cursor to other verbs', async () => {
+    const entry = (catalog as any).entries[1];
+    (catalog as any).entries.push(
+      { ...entry, method: 'GET', bodySchema: [] },
+      { ...entry, method: 'DELETE', bodySchema: [] },
+    );
+    const first = await run('list_endpoints', {
+      domain: 'things',
+      path: entry.path,
+    });
+    const patch = first.endpoints.find((e: any) => e.method === 'PATCH');
+    expect(patch.fields_has_more).toBe(true);
+    const next = await run('list_endpoints', {
+      domain: 'things',
+      path: entry.path,
+      method: 'PATCH',
+      field_cursor: patch.field_cursor,
+    });
+    expect(next.error_code).toBeUndefined();
+    expect(next.endpoints).toHaveLength(1);
+    expect(next.endpoints[0].campos.map((f: any) => f.name)).toEqual([
+      'field_8',
+      'field_9',
+      'field_10',
+      'field_11',
+    ]);
+    const wrong = await run('list_endpoints', {
+      domain: 'things',
+      path: entry.path,
+      method: 'DELETE',
+      field_cursor: patch.field_cursor,
+    });
+    expect(wrong.error_code).toBe('INVALID_DISCOVERY_PAGE');
   });
   it('invalidates stale cursors after permission revocation and returns a legible error', async () => {
     const first = await run('list_endpoints', { domain: 'things' });

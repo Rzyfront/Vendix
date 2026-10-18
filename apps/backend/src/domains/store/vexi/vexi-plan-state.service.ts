@@ -312,49 +312,6 @@ export class VexiPlanStateService {
         throw new BadRequestException((error as Error).message);
       }
     }
-    const offset = query.offset ?? 0;
-    const limit = query.limit ?? 50;
-    const value = result.data;
-    const dataset = (
-      input: unknown,
-      depth = 0,
-    ): { rows: unknown[]; replace: (rows: unknown[]) => unknown } | null => {
-      if (Array.isArray(input)) return { rows: input, replace: (rows) => rows };
-      if (!input || typeof input !== 'object' || depth >= 4) return null;
-      const record = input as Record<string, unknown>;
-      for (const key of ['data', 'rows', 'items', 'results']) {
-        const nested = dataset(record[key], depth + 1);
-        if (nested)
-          return {
-            rows: nested.rows,
-            replace: (rows) => ({ ...record, [key]: nested.replace(rows) }),
-          };
-      }
-      return null;
-    };
-    const found = dataset(value);
-    const array = found?.rows;
-    const data = found
-      ? found.replace(found.rows.slice(offset, offset + limit))
-      : value;
-    const pagination = array
-      ? {
-          offset,
-          limit,
-          total: array.length,
-          complete: offset === 0 && offset + limit >= array.length,
-          has_more: offset + limit < array.length,
-          next_offset: offset + limit < array.length ? offset + limit : null,
-        }
-      : null;
-    return {
-      ...result,
-      data,
-      artifact_pagination: pagination,
-      artifact: true,
-      reusable_for_write: false,
-      observed_at: result.created_at,
-    };
   }
 
   async get(conversationId: number): Promise<AgentPlan | null> {

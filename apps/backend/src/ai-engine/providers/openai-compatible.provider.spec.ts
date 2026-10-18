@@ -1483,15 +1483,13 @@ describe('G consent STT observed logprob capability', () => {
     expect(body.get('model')).toBe('unchanged-current-model');
   });
   it('no capability preserves request options and refuses score even if injected', async () => {
-    const fetch = jest
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          text: 'yes',
-          logprobs: [{ token: 'yes', logprob: 0 }],
-        }),
-      });
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        text: 'yes',
+        logprobs: [{ token: 'yes', logprob: 0 }],
+      }),
+    });
     global.fetch = fetch;
     expect(
       (await provider(false).transcribeAudio(options)).confidence,
@@ -1508,12 +1506,10 @@ describe('G consent STT observed logprob capability', () => {
     [{ token: 'yes', logprob: NaN }],
     [{ token: 'yes', logprob: '0' }],
   ])('partial/malformed logprobs remain unknown %j', async (logprobs) => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ text: 'yes', logprobs }),
-      });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ text: 'yes', logprobs }),
+    });
     expect(
       (await provider(true).transcribeAudio(options)).confidence,
     ).toBeNull();
@@ -1526,7 +1522,9 @@ describe('G consent STT observed logprob capability', () => {
     const result = await provider(true).transcribeAudio({
       inputAudio: options.inputAudio,
     });
-    expect(Object.hasOwn(result, 'confidence')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result, 'confidence')).toBe(
+      false,
+    );
     expect(
       (fetch.mock.calls[0][1].body as FormData).get('include[]'),
     ).toBeNull();

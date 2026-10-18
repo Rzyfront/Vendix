@@ -82,7 +82,14 @@ describe('Vex durable objective aliases', () => {
     expect(c.activity.recordApplied).not.toHaveBeenCalled();
     expect(c.planState.markCurrentChangeStep).not.toHaveBeenCalled();
     expect(c.consumeVexQuota).not.toHaveBeenCalled();
-    expect(c.persistStepResult).not.toHaveBeenCalled();
+    expect(output.step_status).toBe('unknown');
+    expect(output.plan_status).toBe('unknown_effect');
+    expect(c.persistStepResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'unknown',
+        stepId: 's1',
+      }),
+    );
     expect(c.planState.applyDurableEffect.mock.calls[0][0]).not.toHaveProperty(
       'confirmation_token',
     );

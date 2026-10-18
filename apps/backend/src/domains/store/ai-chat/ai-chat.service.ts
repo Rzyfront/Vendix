@@ -464,14 +464,13 @@ export class AIChatService {
       );
       const durableArgs = await this.durableTurnArgs(
         conversation,
-        agentKey,
+        agentKey ?? 'vexi',
         goal,
         base,
       );
       const agentResult = await this.aiAgent.runAgent({
         goal,
         ...base,
-        messages: this.buildContextWindow(conversation),
         variables,
         ...durableArgs,
       });
@@ -886,7 +885,7 @@ export class AIChatService {
             });
       const durableArgs = await this.durableTurnArgs(
         conversation,
-        agentKey,
+        agentKey ?? 'vexi',
         goal,
         base,
         {
@@ -908,16 +907,6 @@ export class AIChatService {
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
         // hilo sigue por escrito en el turno siguiente, vuelve a prosa sola.
-        messages: this.buildContextWindow(
-          conversation,
-          undefined,
-          intent.speak,
-          {
-            active: activePlan,
-            paused: storedPlan?.status === 'paused' ? storedPlan : null,
-            isContinuation: !!intent.continuation,
-          },
-        ),
         // Vex no navega pantallas (`denied_tools` le quita las `ui_*`), así
         // que su snapshot no lleva `ui_context`: además de inútil, es
         // material no confiable compuesto en el navegador — en su lugar trae
@@ -928,7 +917,6 @@ export class AIChatService {
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
         stream_id: streamId,
-        plan: this.planState.createHook(conversation.id),
         shouldAbort: async () =>
           signal?.aborted === true ||
           !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
@@ -1159,7 +1147,7 @@ export class AIChatService {
               })) as unknown as Prisma.InputJsonValue)
             : undefined,
           ...(Object.keys(metadata).length > 0
-            ? { metadata: metadata as Prisma.InputJsonValue }
+            ? { metadata: metadata as unknown as Prisma.InputJsonValue }
             : {}),
         },
       });
@@ -1279,7 +1267,7 @@ export class AIChatService {
     // `conversation` propia colisionaría con la inyectada.
     const { count } = await this.prisma.ai_messages.updateMany({
       where: { id: message.id, conversation_id: conversationId },
-      data: { metadata: metadata as Prisma.InputJsonValue },
+      data: { metadata: metadata as unknown as Prisma.InputJsonValue },
     });
     return count > 0;
   }

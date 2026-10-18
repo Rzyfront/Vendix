@@ -228,7 +228,8 @@ describe('AgentObjectiveRepository D1', () => {
     tx.$queryRaw
       .mockResolvedValueOnce([row()])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([row()]); // fresh re-read distinguishes operational contention
     await expect(
       scoped(() => repository.acquireLease(ID, 2)),
     ).rejects.toBeInstanceOf(ConflictException);

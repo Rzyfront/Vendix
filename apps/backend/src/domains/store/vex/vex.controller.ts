@@ -330,12 +330,32 @@ export class VexController {
       ) {
         // Unknown is not failed/applied: do not charge a successful tool, narrate
         // success, close the plan, or issue a fresh confirmation for replay.
+        const uncertain =
+          execution.result.status === 'unknown_effect' ||
+          execution.result.effect_status !== 'not_applied';
+        const state =
+          planId && conversationId !== undefined
+            ? await this.persistStepResult({
+                planId,
+                conversationId,
+                stepId: dto.step_id,
+                tool,
+                args,
+                outcome: uncertain ? 'unknown' : 'failed',
+                error: execution.result.next_action ?? undefined,
+              })
+            : null;
         return this.responseService.success(
           {
             tool,
             output,
             summary: execution.result.next_action,
             execution: execution.result,
+            step_status:
+              state?.step_status ?? (uncertain ? 'unknown' : 'failed'),
+            plan_status:
+              state?.plan_status ??
+              (uncertain ? 'unknown_effect' : 'partially_applied'),
           },
           'Resultado pendiente de verificación',
         );
@@ -545,7 +565,7 @@ export class VexController {
     stepId?: string;
     tool: string;
     args: Record<string, any>;
-    outcome: 'applied' | 'failed';
+    outcome: 'applied' | 'failed' | 'unknown';
     error?: string;
   }) {
     try {
