@@ -4,6 +4,7 @@
 -- Destructive operations: none. No backfill, deletion, cascade, FK rewrite or enum change.
 -- FK/cascade risk: none; trace identity is explicitly scoped and intentionally independent of domain lifecycle.
 -- Idempotency: CREATE TABLE/INDEX IF NOT EXISTS; ADD COLUMN IF NOT EXISTS; guarded CHECK constraints.
+-- Locks: existing-log indexes are in separate single-statement concurrent migrations.
 -- Approval: approved phase-A brief, strictly additive/idempotent migration; do not apply to remote DBs.
 
 CREATE TABLE IF NOT EXISTS "ai_agent_trace_spans" (
@@ -83,5 +84,6 @@ ALTER TABLE "ai_engine_logs"
   ADD COLUMN IF NOT EXISTS "cost_source" VARCHAR(32),
   ADD COLUMN IF NOT EXISTS "telemetry_metadata" JSONB;
 
-CREATE INDEX IF NOT EXISTS "ai_engine_logs_request_id_created_at_idx" ON "ai_engine_logs"("request_id", "created_at");
-CREATE INDEX IF NOT EXISTS "ai_engine_logs_trace_id_created_at_idx" ON "ai_engine_logs"("trace_id", "created_at");
+-- Concurrent index ai_engine_logs_request_id_created_at_idx is isolated in 20261018090001_ai_engine_logs_request_index.
+
+-- Concurrent index ai_engine_logs_trace_id_created_at_idx is isolated in 20261018090002_ai_engine_logs_trace_index.

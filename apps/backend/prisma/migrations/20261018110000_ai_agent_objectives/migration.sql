@@ -4,6 +4,11 @@
 -- Destructive operations: none. No DROP/TRUNCATE/DELETE/UPDATE/CASCADE.
 -- FK/cascade risk: new references RESTRICT only; existing conversations/jobs are never cascade-deleted.
 -- Idempotency: IF NOT EXISTS tables/indexes/column, pg_constraint guards for all added FKs/checks.
+-- Locks: nullable column is metadata-only; existing-task index has a separate single-statement migration.
+-- Existing-task FK is NOT VALID: protect new rows without scanning historical jobs.
+-- Optional later validation in an approved window (never part of automatic deploy):
+-- ALTER TABLE ai_agent_tasks VALIDATE CONSTRAINT ai_agent_tasks_objective_id_fkey;
+-- No explicit transaction around concurrent indexes.
 -- Approval: approved D1 brief. Review/apply only in an explicitly authorized environment; not executed here.
 
 CREATE TABLE IF NOT EXISTS "ai_agent_objectives" (
@@ -82,7 +87,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "ai_agent_effects_proposal_uq" ON "ai_agent_ef
 CREATE INDEX IF NOT EXISTS "ai_agent_effects_owner_objective_status_idx" ON "ai_agent_effects"("store_id","organization_id","user_id","objective_id","status");
 CREATE INDEX IF NOT EXISTS "ai_agent_effects_evidence_result_id_idx" ON "ai_agent_effects"("evidence_result_id");
 ALTER TABLE "ai_agent_tasks" ADD COLUMN IF NOT EXISTS "objective_id" UUID;
-CREATE INDEX IF NOT EXISTS "ai_agent_tasks_objective_id_idx" ON "ai_agent_tasks"("objective_id");
+-- Concurrent index ai_agent_tasks_objective_id_idx is isolated in 20261018110001_ai_agent_tasks_objective_index.
+
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='ai_agent_objectives_conversation_id_fkey' AND conrelid='ai_agent_objectives'::regclass) THEN
@@ -113,6 +119,6 @@ DO $$ BEGIN
     ALTER TABLE "ai_agent_effects" ADD CONSTRAINT "ai_agent_effects_status_check" CHECK ("status" IN ('proposed','approved','applying','applied','verified','unknown','failed'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='ai_agent_tasks_objective_id_fkey' AND conrelid='ai_agent_tasks'::regclass) THEN
-    ALTER TABLE "ai_agent_tasks" ADD CONSTRAINT "ai_agent_tasks_objective_id_fkey" FOREIGN KEY ("objective_id") REFERENCES "ai_agent_objectives"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+    ALTER TABLE "ai_agent_tasks" ADD CONSTRAINT "ai_agent_tasks_objective_id_fkey" FOREIGN KEY ("objective_id") REFERENCES "ai_agent_objectives"("id") ON DELETE RESTRICT ON UPDATE RESTRICT NOT VALID;
   END IF;
 END $$;

@@ -3,7 +3,7 @@
 -- Expected row changes: zero; no backfill or mutation of historical data.
 -- Destructive operations: none. FK/cascade risk: no business FKs, no cascades.
 -- Idempotency: CREATE TABLE/INDEX IF NOT EXISTS; checks belong to new tables.
--- Approval: phase F execution brief. Apply twice in authorized QA before enabling F.
+-- Approval: phase F execution brief. Automatic migrate deploy; not executed in this session.
 CREATE TABLE IF NOT EXISTS ai_agent_recipes (
   id SERIAL PRIMARY KEY,
   identity_key VARCHAR(64) NOT NULL UNIQUE,

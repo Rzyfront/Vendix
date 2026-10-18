@@ -64,7 +64,7 @@ Migración aditiva `20261018100000_ai_tool_knowledge_catalog/migration.sql`:
   metadata/hash/version/release, estado pending/ready/error/retired, publicación active, tsvector/GIN.
 - `ai_embeddings.knowledge_scope TEXT NOT NULL DEFAULT 'store'`, índice y CHECK guardado.
   Store exige IDs>0; global exige ambos0 y tipo tool/skill/process/recipe. Unique/NOT NULL/HNSW
-  previos permanecen intactos. CHECK de embeddings NOT VALID: protege filas nuevas sin escanear ni rechazar datos históricos durante deploy. Validación posterior opcional.
+  previos permanecen intactos. El índice sobre embeddings vive en una migración unitaria separada para evitar transacciones implícitas del lote SQL. CHECK de embeddings NOT VALID: protege filas nuevas sin escanear ni rechazar datos históricos durante deploy. Validación posterior opcional.
 - **Cero DML histórico, backfill, eliminación de constraints o SQL destructivo.** CHECK NOT VALID no escanea filas históricas durante deploy; validación posterior sólo en ventana aprobada. Nuevas FKs incondicionales a stores/orgs
   serían incompatibles con el sentinel global; no añadirlas sin rediseñar namespace.
 - Selector documental: global/tenant-null, ready+active, hashes vigentes, IDs canónicos
