@@ -275,6 +275,44 @@ export class ObjectiveMemoryDatabase {
                 ? this.tasks
                 : (null as never);
     if (!map) throw new Error(`Unsupported test SQL table: ${q.sql}`);
+    if (q.sql.includes("DISTINCT ON (data->>'id')")) {
+      const latest = [...this.results.values()]
+        .filter(
+          (row) =>
+            this.matches(q, row as unknown as RecordRow) &&
+            row.tool_name === 'load_playbook' &&
+            row.receipt.status === 'ok' &&
+            !row.stale_lease &&
+            row.freshness === 'observed' &&
+            row.data &&
+            typeof row.data === 'object' &&
+            !Array.isArray(row.data) &&
+            typeof (row.data as RecordRow).id === 'string',
+        )
+        .sort(
+          (a, b) =>
+            Number(b.created_at) - Number(a.created_at) ||
+            b.tool_call_id.localeCompare(a.tool_call_id),
+        );
+      const seen = new Set<string>();
+      return latest
+        .filter((row) => {
+          const id = String((row.data as RecordRow).id);
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .slice(0, 2)
+        .map((row) => {
+          const data = row.data as RecordRow;
+          return {
+            id: data.id,
+            version: data.version,
+            hash: data.hash,
+            section: (data.section as RecordRow | undefined)?.id ?? null,
+          };
+        });
+    }
     if (q.sql.startsWith('INSERT')) {
       const data = insert(q);
       const duplicate = [...map.values()].find((r) => {

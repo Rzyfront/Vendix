@@ -1,3 +1,4 @@
+import { playbooksEnabled } from '../playbooks/playbook-flags';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { normalizeSearchText } from '../../common/utils/search-text.util';
@@ -46,7 +47,15 @@ export class KnowledgeSearchService {
     documents: ToolDocument[],
     scopeSignature: string,
     domain?: string,
+    type: 'tool' | 'process' = 'tool',
   ): Promise<KnowledgeRanking> {
+    if (type !== 'tool' && type !== 'process')
+      throw new Error('INVALID_KNOWLEDGE_TYPE');
+    if (type === 'process' && !playbooksEnabled())
+      return { names: [], degraded: ['playbooks_disabled'], cacheHit: false };
+    documents = documents.filter(
+      (d) => (d.metadata.entity_type ?? 'tool') === type,
+    );
     const boundedQuery = query.slice(0, 500);
     const local = localToolRanking(boundedQuery, documents, domain);
     if (!documents.length || !knowledgeIndexEnabled())
@@ -70,6 +79,7 @@ export class KnowledgeSearchService {
     const key = catalogHash([
       boundedQuery,
       domain,
+      type,
       documents.map((d) => [d.key, d.hash]),
       fingerprint,
       scopeSignature,
@@ -85,7 +95,7 @@ export class KnowledgeSearchService {
     const degraded: string[] = [];
     const rankings = [local];
     try {
-      const ready = await this.readyDocuments(documents);
+      const ready = await this.readyDocuments(documents, type);
       const byKey = new Map(documents.map((d) => [d.key, d]));
       // Recheck release hash/version/embedding fingerprint before including ANY DB ID.
       const valid = ready.filter(
@@ -102,12 +112,13 @@ export class KnowledgeSearchService {
         const lexical = await this.queryIds(
           `
           SELECT id FROM ai_knowledge_documents WHERE knowledge_scope = 'global'
-            AND store_id IS NULL AND organization_id IS NULL AND entity_type = 'tool'
+            AND store_id IS NULL AND organization_id IS NULL AND entity_type = $3
             AND active = true AND status = 'ready' AND id = ANY($1::int[])
             AND search_vector @@ plainto_tsquery('spanish', $2)
           ORDER BY ts_rank_cd(search_vector, plainto_tsquery('spanish', $2)) DESC, id LIMIT 100`,
           ids,
           normalizedQuery,
+          type,
         );
         rankings.push(lexical.map((id) => namesById.get(id)!).filter(Boolean));
         const vectorIds = valid
@@ -123,9 +134,9 @@ export class KnowledgeSearchService {
             const vector = await this.queryIds(
               `
               SELECT d.id FROM ai_knowledge_documents d JOIN ai_embeddings e
-                ON e.entity_id = d.id AND e.entity_type = 'tool'
+                ON e.entity_id = d.id AND e.entity_type = d.entity_type
               WHERE d.knowledge_scope = 'global' AND d.store_id IS NULL AND d.organization_id IS NULL
-                AND d.entity_type = 'tool' AND d.active = true AND d.status = 'ready' AND d.id = ANY($1::int[])
+                AND d.entity_type = $4 AND d.active = true AND d.status = 'ready' AND d.id = ANY($1::int[])
                 AND e.knowledge_scope = 'global' AND e.store_id = 0 AND e.organization_id = 0
                 AND d.embedding_fingerprint = $3 AND e.metadata->>'fingerprint' = $3
                 AND e.metadata->>'content_hash' = d.content_hash AND d.indexed_hash = d.content_hash
@@ -133,6 +144,7 @@ export class KnowledgeSearchService {
               vectorIds,
               `[${embedding.vector.join(',')}]`,
               fingerprint,
+              type,
             );
             rankings.push(
               vector.map((id) => namesById.get(id)!).filter(Boolean),
@@ -162,7 +174,10 @@ export class KnowledgeSearchService {
     return { names, degraded, cacheHit: false };
   }
 
-  private readyDocuments(documents: ToolDocument[]): Promise<ReadyDocument[]> {
+  private readyDocuments(
+    documents: ToolDocument[],
+    type: 'tool' | 'process',
+  ): Promise<ReadyDocument[]> {
     return this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
         await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '150ms'`);
@@ -170,9 +185,10 @@ export class KnowledgeSearchService {
           `
         SELECT id, document_key, content_hash, indexed_hash, embedding_fingerprint FROM ai_knowledge_documents
         WHERE knowledge_scope = 'global' AND store_id IS NULL AND organization_id IS NULL
-          AND entity_type = 'tool' AND active = true AND status = 'ready' AND document_key = ANY($1::text[])
+          AND entity_type = $2 AND active = true AND status = 'ready' AND document_key = ANY($1::text[])
         ORDER BY id LIMIT 1000`,
           documents.map((d) => d.key),
+          type,
         );
       },
       { timeout: 500, maxWait: 150 },

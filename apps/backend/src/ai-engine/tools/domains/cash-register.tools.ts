@@ -6,6 +6,7 @@ import {
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../domains/store/cash-registers/movements/movements.service';
 import { CloseSessionDto } from '../../../domains/store/cash-registers/dto/close-session.dto';
+import { playbooksEnabled } from '../../playbooks/playbook-flags';
 
 /**
  * Familia cash-register de Vex (paso 8 del plan vex-agent).
@@ -567,6 +568,23 @@ export function createCashRegisterTools(
           resumen: `${sessionLabel({ ...session, ...row })} cerrada con arqueo $${actual}.`,
           session_id: row.id ?? id,
           resultado: row,
+          ...(playbooksEnabled() &&
+          row.success !== false &&
+          !row.error &&
+          toPositiveInt(row.id) === id &&
+          row.status === 'closed' &&
+          row.actual_closing_amount != null &&
+          Number(row.actual_closing_amount) === actual &&
+          row.expected_closing_amount != null &&
+          Number.isFinite(Number(row.expected_closing_amount)) &&
+          row.difference != null &&
+          Number.isFinite(Number(row.difference)) &&
+          Math.abs(
+            Number(row.difference) -
+              (actual - Number(row.expected_closing_amount)),
+          ) < 0.001
+            ? { applied: true, resource_ids: { session_id: id } }
+            : {}),
         };
       }),
     },

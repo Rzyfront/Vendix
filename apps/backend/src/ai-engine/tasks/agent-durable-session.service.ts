@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
+import type { ActivePlaybookPin } from '../playbooks/playbook.service';
 import type { AgentResult } from '../ai-agent.service';
 import type { AIResponse } from '../interfaces/ai-provider.interface';
 import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
@@ -83,6 +84,7 @@ export class AgentDurableSession {
     context: string,
     private readonly repo: AgentObjectiveRepository,
     readonly automaticContinuation = false,
+    readonly playbook_pins: ActivePlaybookPin[] = [],
   ) {
     this.lease = {
       version: objective.version,
@@ -382,6 +384,7 @@ export class AgentDurableSessionService {
         facts.context,
         this.repo,
         options.continuation === true,
+        facts.playbook_pins ?? [],
       );
     } catch (error) {
       await this.repo.releaseLease(row.id, row);

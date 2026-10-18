@@ -23,6 +23,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-agent-durable-tasks` |
 | -- | `vendix-agent-evals-observability` |
 | -- | `vendix-agent-execution-contract` |
+| -- | `vendix-agent-playbooks` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -120,6 +121,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or changing a frontend analytics cache key | `vendix-analytics-metrics` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
+| Adding or changing runtime agent playbooks | `vendix-agent-playbooks` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing Vex UI blocks (vex_render_*, vex_block_*) | `vendix-vex-agent` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
@@ -156,6 +158,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
+| Changing playbook loading, contracts, packaging or verifiers | `vendix-agent-playbooks` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |

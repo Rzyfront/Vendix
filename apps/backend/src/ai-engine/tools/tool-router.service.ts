@@ -14,6 +14,8 @@ import {
 
 const DISCOVERY = new Set([
   'search_tools',
+  'search_playbooks',
+  'load_playbook',
   'list_capabilities',
   'list_endpoints',
 ]);

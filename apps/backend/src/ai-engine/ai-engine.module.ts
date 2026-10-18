@@ -12,6 +12,12 @@ import { AIAgentService } from './ai-agent.service';
 import { ToolRouterService } from './tools/tool-router.service';
 import { ToolCatalogIndexerService } from './tools/tool-catalog-indexer.service';
 import { createDiscoveryTools } from './tools/domains/discovery.tools';
+import {
+  PlaybookLoaderService,
+  playbooksEnabled,
+} from './playbooks/playbook-loader.service';
+import { PlaybookService } from './playbooks/playbook.service';
+import { createPlaybookTools } from './tools/domains/playbook.tools';
 import { toolRoutingEnabled } from './tools/tool-catalog';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { createSearchTools } from './tools/domains/search.tools';
@@ -74,6 +80,8 @@ import { S3Service } from '../common/services/s3.service';
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
+    PlaybookLoaderService,
+    PlaybookService,
     // Provided here rather than in VexiModule even though the class lives in
     // that folder: AIToolRegistry depends on it, and importing VexiModule into
     // this @Global() module would close a cycle (VexiModule imports this one).
@@ -111,6 +119,8 @@ import { S3Service } from '../common/services/s3.service';
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
+    PlaybookLoaderService,
+    PlaybookService,
     VexiConfirmationService,
     VexiAttachmentsService,
     VexiUiChannelService,
@@ -133,6 +143,8 @@ export class AIEngineModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    if (playbooksEnabled())
+      this.toolRegistry.registerMany(createPlaybookTools());
     if (toolRoutingEnabled())
       this.toolRegistry.registerMany(createDiscoveryTools());
     this.toolRegistry.registerMany(

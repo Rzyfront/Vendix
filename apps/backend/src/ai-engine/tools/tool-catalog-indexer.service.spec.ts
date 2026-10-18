@@ -267,4 +267,68 @@ describe('ToolCatalogIndexerService B', () => {
     );
     expect(commands).toContain('unexpected FK');
   });
+  it('C indexes section documents as global process on the same queue and preserves B-only rollback', async () => {
+    registry.register(tool('list_orders'));
+    const doc = {
+      key: 'process:cerrar-caja:1:steps',
+      name: 'cerrar-caja:steps',
+      version: '1',
+      domain: 'playbooks',
+      hash: 'a'.repeat(64),
+      content: 'Cerrar caja con conteo explícito',
+      lexicalText: 'cerrar caja conteo',
+      aliases: [],
+      dependencies: [],
+      metadata: { entity_type: 'process' },
+    };
+    const playbooks = {
+      getKnowledgeManifest: jest.fn(() => ({
+        hash: 'process-release',
+        documents: [doc],
+      })),
+    };
+    const loader = {
+      initializeRelease: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new ToolCatalogIndexerService(
+      registry,
+      prisma,
+      embeddings,
+      knowledge,
+      queue,
+      playbooks as any,
+      loader as any,
+    );
+    await service.onApplicationBootstrap();
+    expect(loader.initializeRelease).toHaveBeenCalledTimes(1);
+    const job = queue.add.mock.calls[0][1];
+    await service.indexBatch(job);
+    expect(embeddings.storeGlobalKnowledgeEmbedding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'process',
+        documentId: expect.any(Number),
+      }),
+    );
+    expect(rows.get(doc.key)).toMatchObject({
+      entity_type: 'process',
+      knowledge_scope: 'global',
+      store_id: null,
+      organization_id: null,
+      active: true,
+    });
+    playbooks.getKnowledgeManifest.mockReturnValue({
+      hash: 'off',
+      documents: [],
+    });
+    prisma.ai_knowledge_documents.updateMany.mockClear();
+    await service.enqueueSnapshot();
+    expect(
+      prisma.ai_knowledge_documents.updateMany.mock.calls.some(
+        ([arg]) => arg.where.entity_type === 'process',
+      ),
+    ).toBe(false);
+    await expect(service.indexBatch(job)).rejects.toThrow(
+      'STALE_KNOWLEDGE_RELEASE',
+    );
+  });
 });

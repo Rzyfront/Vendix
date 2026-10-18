@@ -16,6 +16,7 @@ import { buildDianCertificateS3Key } from '../../../domains/store/invoicing/dian
 import { S3Service } from '../../../common/services/s3.service';
 import { resolveDianPartyTaxScheme } from '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes';
 import { toDianTaxLevelCode } from '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes';
+import { playbooksEnabled } from '../../playbooks/playbook-flags';
 
 export interface InvoicingToolDeps {
   invoicingService: InvoicingService;
@@ -834,6 +835,15 @@ export function createInvoicingTools(
           status: validated?.status ?? 'validated',
           total_amount: toNumberOrNull(validated?.total_amount),
           enables: 'send_invoice_dian (F-30)',
+          // C opt-in: only the explicit domain result is an effect receipt.
+          // Fallback IDs/status above preserve the legacy display ABI, not proof.
+          ...(playbooksEnabled() &&
+          validated?.success !== false &&
+          !validated?.error &&
+          toPositiveInt(validated?.id) === invoiceId &&
+          validated?.status === 'validated'
+            ? { applied: true, resource_ids: { invoice_id: invoiceId } }
+            : {}),
         });
       },
     },
@@ -949,6 +959,13 @@ export function createInvoicingTools(
             remaining_before: gate.remaining,
           },
           emission_chain: EMISSION_CHAIN,
+          ...(playbooksEnabled() &&
+          sent?.success !== false &&
+          !sent?.error &&
+          toPositiveInt(sent?.id) === invoiceId &&
+          ['sent', 'accepted'].includes(sent?.status)
+            ? { applied: true, resource_ids: { invoice_id: invoiceId } }
+            : {}),
         });
       },
     },
@@ -1243,6 +1260,21 @@ export function createInvoicingTools(
           tax_amount: toNumberOrNull(created?.tax_amount),
           total_amount: toNumberOrNull(created?.total_amount),
           next_step: 'Evalúa el borrador con get_emit_readiness (F-32).',
+          ...(playbooksEnabled() &&
+          created?.success !== false &&
+          !created?.error &&
+          toPositiveInt(created?.id) !== null &&
+          created?.status === 'draft' &&
+          (created?.order_id === undefined ||
+            Number(created.order_id) === orderId)
+            ? {
+                applied: true,
+                resource_ids: {
+                  invoice_id: Number(created.id),
+                  order_id: orderId,
+                },
+              }
+            : {}),
         });
       },
     },

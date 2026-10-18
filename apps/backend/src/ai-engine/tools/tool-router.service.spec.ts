@@ -6,6 +6,7 @@ import {
   catalogHash,
   localToolRanking,
 } from './tool-catalog';
+import { createPlaybookTools } from './domains/playbook.tools';
 import { createDiscoveryTools } from './domains/discovery.tools';
 import { discoveryPage, bridgeDataPage } from './discovery-pagination';
 import { RegisteredTool } from './interfaces/tool.interface';
@@ -325,6 +326,41 @@ describe('ToolRouterService B: relevance is not authority', () => {
         },
       }),
     ).toThrow();
+  });
+  it('C discovery stays in authorized scaffold, pins only available step tools within K12', async () => {
+    registry.registerMany(createPlaybookTools());
+    const session = router.createSession('operation_00', 'scope', [
+      'find_coffee',
+      'not_authorized',
+    ]);
+    const selection = await router.select(
+      session,
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(selection.operationalCount).toBe(12);
+    expect(selection.definitions.map((d) => d.function.name)).toEqual(
+      expect.arrayContaining([
+        'search_playbooks',
+        'load_playbook',
+        'find_coffee',
+      ]),
+    );
+    expect(selection.definitions.map((d) => d.function.name)).not.toContain(
+      'not_authorized',
+    );
+    const denied = await router.select(
+      router.createSession('operation_00', 'denied'),
+      registry
+        .getAllDefinitions()
+        .filter((d) => d.function.name !== 'load_playbook'),
+      false,
+      false,
+    );
+    expect(denied.definitions.map((d) => d.function.name)).not.toContain(
+      'load_playbook',
+    );
   });
 });
 describe('Discovery pagination B', () => {

@@ -160,4 +160,48 @@ describe('KnowledgeSearchService B', () => {
     expect(transaction).not.toHaveBeenCalled();
     expect(embeddings.configuration).not.toHaveBeenCalled();
   });
+  it('C process retrieval binds its type separately and cannot read persisted docs after OFF', async () => {
+    const savedC = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+    try {
+      process.env.AI_AGENT_PLAYBOOKS_ENABLED = 'true';
+      const processDoc = {
+        ...docs[0],
+        key: 'process:reponer:1:steps',
+        name: 'reponer:steps',
+        metadata: { ...docs[0].metadata, entity_type: 'process' },
+      };
+      raw.mockImplementation(async (sql: string) =>
+        sql.includes('document_key')
+          ? [{ ...ready[0], document_key: processDoc.key }]
+          : [{ id: 1 }],
+      );
+      const result = await service.rank(
+        'necesito abastecer café',
+        [processDoc, docs[1]],
+        'scope',
+        undefined,
+        'process',
+      );
+      expect(result.names).toEqual([processDoc.name]);
+      expect(raw.mock.calls[0][2]).toBe('process');
+      expect(raw.mock.calls[1][3]).toBe('process');
+      expect(raw.mock.calls[2][4]).toBe('process');
+      expect(raw.mock.calls[2][0]).toContain('e.entity_type = d.entity_type');
+      raw.mockClear();
+      delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+      expect(
+        await service.rank(
+          'necesito abastecer café',
+          [processDoc],
+          'scope',
+          undefined,
+          'process',
+        ),
+      ).toMatchObject({ names: [], degraded: ['playbooks_disabled'] });
+      expect(raw).not.toHaveBeenCalled();
+    } finally {
+      if (savedC === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+      else process.env.AI_AGENT_PLAYBOOKS_ENABLED = savedC;
+    }
+  });
 });

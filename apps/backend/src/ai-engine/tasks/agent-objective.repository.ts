@@ -14,6 +14,7 @@ import {
   isHistoricalObjectiveArtifact,
   safeObjectiveArtifact,
 } from './agent-artifact-safety';
+import type { ActivePlaybookPin } from '../playbooks/playbook.service';
 import type { AgentPlan } from '../interfaces/agent-plan.interface';
 import {
   AgentEffect,
@@ -847,6 +848,44 @@ export class AgentObjectiveRepository {
         has_more: rows.length > limit,
         next_cursor: rows.length > limit ? items[items.length - 1].id : null,
       };
+    });
+  }
+
+  /** Latest two distinct release identities, not historical bodies/authority. */
+  async listPlaybookPins(id: string): Promise<ActivePlaybookPin[]> {
+    const scope = this.scope();
+    return this.transaction(async (tx) => {
+      await this.find(tx, scope, id);
+      const rows = await tx.$queryRaw<ActivePlaybookPin[]>(Prisma.sql`
+        SELECT id,version,hash,section FROM (
+          SELECT DISTINCT ON (data->>'id') data->>'id' AS id,
+            data->>'version' AS version, data->>'hash' AS hash,
+            data#>>'{section,id}' AS section,created_at,tool_call_id
+          FROM ai_agent_tool_results WHERE objective_id=${id}::uuid AND ${scopeSql(scope)}
+            AND tool_name='load_playbook' AND receipt->>'status'='ok'
+            AND stale_lease=false AND freshness='observed'
+            AND jsonb_typeof(data)='object' AND data->>'id' IS NOT NULL
+          ORDER BY data->>'id',created_at DESC,tool_call_id DESC
+        ) pins ORDER BY created_at DESC,tool_call_id DESC LIMIT 2`);
+      // A bad/old result is not adopted as executable metadata.
+      return rows
+        .filter(
+          (pin) =>
+            typeof pin.id === 'string' &&
+            /^[a-z][a-z0-9-]{0,63}$/.test(pin.id) &&
+            typeof pin.version === 'string' &&
+            /^\d+(?:\.\d+){0,2}$/.test(pin.version) &&
+            typeof pin.hash === 'string' &&
+            /^[a-f0-9]{64}$/.test(pin.hash) &&
+            (pin.section == null || /^[a-z][a-z0-9-]{0,99}$/.test(pin.section)),
+        )
+        .slice(0, 2)
+        .map((pin) => ({
+          id: pin.id,
+          version: pin.version,
+          hash: pin.hash,
+          ...(pin.section ? { section: pin.section } : {}),
+        }));
     });
   }
 

@@ -1,3 +1,5 @@
+import { playbooksEnabled } from '../playbooks/playbook-loader.service';
+import type { ActivePlaybookPin } from '../playbooks/playbook.service';
 import { Injectable } from '@nestjs/common';
 import { AgentObjectiveRepository } from './agent-objective.repository';
 import type {
@@ -8,6 +10,7 @@ import type {
 
 export interface AgentTaskContext {
   objective: AgentObjective;
+  playbook_pins?: ActivePlaybookPin[];
   context: string;
   results: AgentToolResult[];
   results_complete: boolean;
@@ -28,6 +31,9 @@ export class AgentTaskContextService {
       limit: options.max_results ?? 20,
     });
     const effects = await this.objectives.listEffects(id, 50);
+    const playbookPins = playbooksEnabled()
+      ? await this.objectives.listPlaybookPins(id)
+      : undefined;
     const maxChars = Math.max(512, Math.min(24000, options.max_chars ?? 8000));
     const now = Date.now();
     const entities = [...objective.entities]
@@ -54,8 +60,10 @@ export class AgentTaskContextService {
       pagination: result.pagination,
       artifact_ref: `agent-result:${result.id}`,
       artifact_path: `/store/${objective.agent_id === 'vex' ? 'vex' : 'vexi'}/objectives/${objective.id}/results/${result.id}`,
-      data: result.data,
-      data_omitted: result.data_omitted ?? false,
+      // Release text is never a durable business fact, even during rollback.
+      data: result.tool_name === 'load_playbook' ? null : result.data,
+      data_omitted:
+        result.tool_name === 'load_playbook' || (result.data_omitted ?? false),
       stale_executor: result.stale_lease,
     }));
     const effectRows = effects.map((effect) => ({
@@ -88,6 +96,7 @@ export class AgentTaskContextService {
     const render = () =>
       JSON.stringify({
         ...header,
+        ...(playbookPins ? { playbook_pins: playbookPins } : {}),
         goal: includedGoal,
         plan: includedPlan,
         next_step: includedNextStep,
@@ -156,6 +165,7 @@ export class AgentTaskContextService {
     }
     return {
       objective,
+      ...(playbookPins ? { playbook_pins: playbookPins } : {}),
       context,
       results: page.items,
       results_complete: !page.has_more,

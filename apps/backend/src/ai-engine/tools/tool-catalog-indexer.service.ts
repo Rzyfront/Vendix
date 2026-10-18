@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  Optional,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
@@ -6,6 +11,8 @@ import { GlobalPrismaService } from '../../prisma/services/global-prisma.service
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { KnowledgeEmbeddingService } from '../embeddings/knowledge-embedding.service';
 import { AIKnowledgeIndexJob } from '../queue/interfaces/ai-queue.interface';
+import { PlaybookLoaderService } from '../playbooks/playbook-loader.service';
+import { PlaybookService } from '../playbooks/playbook.service';
 import { AIToolRegistry } from './ai-tool-registry';
 import {
   buildToolManifest,
@@ -24,10 +31,21 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     private readonly embeddings: EmbeddingService,
     private readonly knowledgeEmbeddings: KnowledgeEmbeddingService,
     @InjectQueue('ai-embedding') private readonly queue: Queue,
+    @Optional() private readonly playbooks?: PlaybookService,
+    @Optional() private readonly playbookLoader?: PlaybookLoaderService,
   ) {}
 
   getReleaseManifest(): ToolCatalogManifest {
-    return buildToolManifest(this.registry);
+    const tools = buildToolManifest(this.registry);
+    const processes = this.playbooks?.getKnowledgeManifest().documents ?? [];
+    if (!processes.length) return tools; // OFF manifest remains byte-for-byte B.
+    const documents = [...tools.documents, ...processes].sort((a, b) =>
+      a.key.localeCompare(b.key),
+    );
+    return {
+      hash: catalogHash(documents.map((d) => [d.key, d.hash])),
+      documents,
+    };
   }
   isBootstrapped(): boolean {
     return this.bootstrapped;
@@ -35,6 +53,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     // All decentralized onModuleInit factories have registered BEFORE this hook.
+    await this.playbookLoader?.initializeRelease();
     this.bootstrapped = true;
     if (!knowledgeIndexEnabled()) return;
     try {
@@ -50,17 +69,29 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     if (!knowledgeIndexEnabled() || !this.bootstrapped) return;
     const manifest = this.getReleaseManifest();
     // Complete snapshot, including aliases/versions. Never infer retirement from a batch.
-    await this.prisma.ai_knowledge_documents.updateMany({
-      where: {
-        knowledge_scope: 'global',
-        entity_type: 'tool',
-        canonical_name: { notIn: manifest.documents.map((d) => d.name) },
-        store_id: null,
-        organization_id: null,
-        status: { not: 'retired' },
-      },
-      data: { active: false, status: 'retired', updated_at: new Date() },
-    });
+    for (const type of ['tool', 'process'] as const) {
+      // When C is OFF do not retire its historical process docs on B rollback.
+      if (
+        type === 'process' &&
+        !manifest.documents.some((d) => d.metadata.entity_type === type)
+      )
+        continue;
+      await this.prisma.ai_knowledge_documents.updateMany({
+        where: {
+          knowledge_scope: 'global',
+          entity_type: type,
+          canonical_name: {
+            notIn: manifest.documents
+              .filter((d) => (d.metadata.entity_type ?? 'tool') === type)
+              .map((d) => d.name),
+          },
+          store_id: null,
+          organization_id: null,
+          status: { not: 'retired' },
+        },
+        data: { active: false, status: 'retired', updated_at: new Date() },
+      });
+    }
     for (let offset = 0; offset < manifest.documents.length; offset += 50) {
       const documents = manifest.documents
         .slice(offset, offset + 50)
@@ -103,6 +134,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
     });
     const configuration = await this.knowledgeEmbeddings.configuration();
     for (const doc of selected) {
+      const type = doc.metadata.entity_type === 'process' ? 'process' : 'tool';
       const old = await this.prisma.ai_knowledge_documents.findUnique({
         where: { document_key: doc.key },
       });
@@ -115,7 +147,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       )
         continue;
       const data = {
-        entity_type: 'tool',
+        entity_type: type,
         knowledge_scope: 'global',
         store_id: null,
         organization_id: null,
@@ -139,7 +171,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       try {
         await this.embeddings.storeGlobalKnowledgeEmbedding({
           documentId: saved.id,
-          type: 'tool',
+          type,
           content: doc.content,
           hash: doc.hash,
           fingerprint: configuration.fingerprint,
@@ -165,7 +197,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         await this.prisma.ai_knowledge_documents.updateMany({
           where: {
             canonical_name: doc.name,
-            entity_type: 'tool',
+            entity_type: type,
             knowledge_scope: 'global',
             id: { not: saved.id },
             version: { not: doc.version },

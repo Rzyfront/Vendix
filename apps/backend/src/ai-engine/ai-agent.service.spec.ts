@@ -2177,3 +2177,39 @@ describe('D1 durable loop seam', () => {
     expect(durable.finish).not.toHaveBeenCalled();
   });
 });
+
+describe('C rollback with a boot-registered discovery declaration', () => {
+  it('does not expose playbooks when C is OFF even if registration happened before a flag flip', async () => {
+    const previous = process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+    delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+    const context = jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ permissions: [], roles: [] } as any);
+    try {
+      const chat = jest
+        .fn()
+        .mockResolvedValue(ok({ content: 'Sin procesos activos.' }));
+      const registry = {
+        getAvailableDefinitions: () => [
+          def('search_playbooks'),
+          def('load_playbook'),
+        ],
+        canonicalName: (n: string) => n,
+      };
+      const loop = new AIAgentService(
+        { chat } as any,
+        {} as any,
+        registry as any,
+        { emit: jest.fn() } as any,
+        {} as any,
+        {} as any,
+      );
+      await loop.runAgent({ goal: 'hola', max_iterations: 1 });
+      expect(chat.mock.calls[0][1].tools).toBeUndefined();
+    } finally {
+      context.mockRestore();
+      if (previous === undefined) delete process.env.AI_AGENT_PLAYBOOKS_ENABLED;
+      else process.env.AI_AGENT_PLAYBOOKS_ENABLED = previous;
+    }
+  });
+});
