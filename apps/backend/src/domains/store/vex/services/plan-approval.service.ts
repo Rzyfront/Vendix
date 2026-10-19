@@ -6,6 +6,8 @@ import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from '../../../../ai-engine/tools/bridge/capability-registry.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VexiPlanStateService } from '../../vexi/vexi-plan-state.service';
+import { requireObjectiveScope } from '../../../../ai-engine/tasks/agent-objective.repository';
+
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /** One approval covers the whole plan; 15 minutes to run it before re-asking. */
@@ -27,8 +29,14 @@ export type VexPlanStatus =
   | 'approved'
   | 'rejected'
   | 'applied'
-  | 'partially_applied';
-export type VexPlanStepStatus = 'pending' | 'applied' | 'failed' | 'cancelled';
+  | 'partially_applied'
+  | 'unknown_effect';
+export type VexPlanStepStatus =
+  | 'pending'
+  | 'applied'
+  | 'failed'
+  | 'cancelled'
+  | 'unknown';
 
 /** Un paso de `ai_messages.metadata.plan.steps` (contrato con el frontend). */
 export interface VexPlanStepRecord {
@@ -223,7 +231,10 @@ export class PlanApprovalService {
       const createdAt = record.created_at
         ? new Date(record.created_at).getTime()
         : NaN;
-      if (!Number.isFinite(createdAt) || Date.now() - createdAt >= PLAN_MAX_AGE_MS) {
+      if (
+        !Number.isFinite(createdAt) ||
+        Date.now() - createdAt >= PLAN_MAX_AGE_MS
+      ) {
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Este plan venció. Vuelve a pedirle a Vex que lo proponga.',
@@ -257,8 +268,13 @@ export class PlanApprovalService {
       );
     }
 
-    const { covered, reconfirm } = this.classifySteps(verified);
-    const token = await this.issuePlanToken(planId, userId, verified);
+    // D1 preserves the existing token circuit but never grants a batch of writes.
+    // Only this selected change is covered; every later write gets its own card.
+    const selected = verified.slice(0, 1);
+    const classified = this.classifySteps(selected);
+    const covered = classified.covered;
+    const reconfirm = [...classified.reconfirm, ...verified.slice(1)];
+    const token = await this.issuePlanToken(planId, userId, selected);
     if (loaded) {
       await this.savePlan(conversationId, loaded, {
         ...loaded.plan,
@@ -281,11 +297,14 @@ export class PlanApprovalService {
     userId: number | undefined,
   ): Promise<void> {
     // `user_id: undefined` lo ignora Prisma: sin usuario no hay dueño posible.
+    const scope = requireObjectiveScope();
     const conversation =
-      userId === undefined || userId === null
+      userId === undefined ||
+      userId === null ||
+      (scope && scope.user_id !== userId)
         ? null
         : await this.prisma.ai_conversations.findFirst({
-            where: { id: conversationId },
+            where: { id: conversationId, ...(scope ?? {}) },
             select: { user_id: true },
           });
     if (!conversation || conversation.user_id !== userId) {
@@ -323,9 +342,15 @@ export class PlanApprovalService {
         );
       }
       await this.planState.clearStepHashes(conversationId);
+      await this.planState.rejectPendingObjective(conversationId);
       return { plan_id: planId, status: 'rejected' };
     }
-    if (loaded.plan.status === 'applied' || loaded.plan.status === 'partially_applied' || loaded.plan.status === 'rejected') {
+    if (
+      loaded.plan.status === 'applied' ||
+      loaded.plan.status === 'partially_applied' ||
+      loaded.plan.status === 'unknown_effect' ||
+      loaded.plan.status === 'rejected'
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_CONFLICT_001,
         loaded.plan.status === 'rejected'
@@ -344,6 +369,7 @@ export class PlanApprovalService {
       ),
     });
     await this.planState.clearStepHashes(conversationId);
+    await this.planState.rejectPendingObjective(conversationId);
     return { plan_id: planId, status: 'rejected' };
   }
 
@@ -360,13 +386,7 @@ export class PlanApprovalService {
     userId: number | undefined;
   }): Promise<VexPlanStepRecord> {
     const step = await this.resolveOpenStep(input);
-    if (!step.irreversible) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_CONFLICT_001,
-        'Ese paso está cubierto por la aprobación del plan y no necesita confirmación aparte.',
-        { reason: 'step_not_irreversible' },
-      );
-    }
+
     return step;
   }
 
@@ -397,7 +417,7 @@ export class PlanApprovalService {
     stepId?: string;
     tool?: string;
     args?: Record<string, any>;
-    outcome: 'applied' | 'failed';
+    outcome: 'applied' | 'failed' | 'unknown';
     error?: string;
   }): Promise<{
     step_status: VexPlanStepStatus;
@@ -417,25 +437,30 @@ export class PlanApprovalService {
           this.stepHash(step.tool, step.arguments) === hash,
     );
     if (!target) return null;
-    const steps = loaded.plan.steps.map((step) =>
-      step === target
-        ? {
-            ...step,
-            status: input.outcome,
-            ...(input.outcome === 'failed' && input.error
-              ? { error: input.error.slice(0, 500) }
-              : {}),
-          }
-        : step,
-    );
+    const steps = loaded.plan.steps.map((step) => {
+      if (step !== target) return step;
+      const updated: VexPlanStepRecord & { confirmation_token?: string } = {
+        ...step,
+        status: input.outcome,
+        ...(input.outcome !== 'applied' && input.error
+          ? { error: input.error.slice(0, 500) }
+          : {}),
+      };
+      delete updated.confirmation_token;
+      return updated;
+    });
     const allTerminal = steps.every((step) =>
       TERMINAL_STEP_STATUSES.includes(step.status),
     );
-    const status: VexPlanStatus = allTerminal
-      ? steps.some((step) => step.status === 'failed')
-        ? 'partially_applied'
-        : 'applied'
-      : loaded.plan.status;
+    const status: VexPlanStatus = steps.some(
+      (step) => step.status === 'unknown',
+    )
+      ? 'unknown_effect'
+      : allTerminal
+        ? steps.some((step) => step.status === 'failed')
+          ? 'partially_applied'
+          : 'applied'
+        : loaded.plan.status;
     await this.savePlan(input.conversationId, loaded, {
       ...loaded.plan,
       status,
@@ -500,6 +525,10 @@ export class PlanApprovalService {
     conversationId: number,
     planId: string,
   ): Promise<LoadedPlan | null> {
+    await this.assertConversationOwner(
+      conversationId,
+      requireObjectiveScope().user_id,
+    );
     const messages = await this.prisma.ai_messages.findMany({
       where: { conversation_id: conversationId, role: 'assistant' },
       orderBy: { id: 'desc' },
@@ -544,23 +573,36 @@ export class PlanApprovalService {
     // `updateMany` y no `update`: `ai_messages` es relational-scoped y la
     // extensión funde `conversation: {...}` en el `where`, lo que rompe el
     // `WhereUniqueInput` de `update`.
-    await this.prisma.ai_messages.updateMany({
-      where: { id: loaded.message_id, conversation_id: conversationId },
+    const saved = await this.prisma.ai_messages.updateMany({
+      where: {
+        id: loaded.message_id,
+        conversation_id: conversationId,
+        ...{ metadata: { equals: loaded.metadata as any } },
+      },
       data: { metadata: { ...loaded.metadata, plan } as any },
     });
+    if (saved.count !== 1)
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        'El estado de la propuesta cambió; vuelve a consultarlo.',
+      );
   }
 
   private normalizePlanStatus(raw: unknown): VexPlanStatus {
     return raw === 'approved' ||
       raw === 'rejected' ||
       raw === 'applied' ||
-      raw === 'partially_applied'
+      raw === 'partially_applied' ||
+      raw === 'unknown_effect'
       ? raw
       : 'proposed';
   }
 
   private normalizeStepStatus(raw: unknown): VexPlanStepStatus {
-    return raw === 'applied' || raw === 'failed' || raw === 'cancelled'
+    return raw === 'applied' ||
+      raw === 'failed' ||
+      raw === 'cancelled' ||
+      raw === 'unknown'
       ? raw
       : 'pending';
   }

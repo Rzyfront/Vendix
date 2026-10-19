@@ -14,7 +14,11 @@ describe('AnthropicCompatibleProvider prompt caching (Vex step 5)', () => {
 
   const toolDef = (name: string) => ({
     type: 'function' as const,
-    function: { name, description: `${name} desc`, parameters: { type: 'object' } },
+    function: {
+      name,
+      description: `${name} desc`,
+      parameters: { type: 'object' },
+    },
   });
 
   it('marks system and the last tool block ephemeral in chat()', async () => {
@@ -199,53 +203,100 @@ describe('AnthropicCompatibleProvider prompt caching (Vex step 5)', () => {
 });
 
 describe('AnthropicCompatibleProvider ReAct history contract', () => {
-  const providerFor = () => new AnthropicCompatibleProvider({
-    provider: 'Anthropic', sdkType: 'anthropic_compatible',
-    apiKey: 'test-key', modelId: 'test-model',
-  });
+  const providerFor = () =>
+    new AnthropicCompatibleProvider({
+      provider: 'Anthropic',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'test-key',
+      modelId: 'test-model',
+    });
   const final = () => ({
-    content: [{ type: 'text', text: 'Listo' }], model: 'test-model',
-    stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 },
+    content: [{ type: 'text', text: 'Listo' }],
+    model: 'test-model',
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 5 },
   });
 
   it('runs two rounds, preserving assistant tool_use and grouped results with IDs', async () => {
     const provider = providerFor();
-    const create = jest.fn()
+    const create = jest
+      .fn()
       .mockResolvedValueOnce({
-        ...final(), stop_reason: 'tool_use', content: [
+        ...final(),
+        stop_reason: 'tool_use',
+        content: [
           { type: 'text', text: 'Consulto ambos' },
-          { type: 'tool_use', id: 'a', name: 'list_orders', input: { limit: 2 } },
+          {
+            type: 'tool_use',
+            id: 'a',
+            name: 'list_orders',
+            input: { limit: 2 },
+          },
           { type: 'tool_use', id: 'b', name: 'list_customers', input: {} },
         ],
       })
       .mockResolvedValueOnce(final());
     (provider as any).client.messages.create = create;
-    const messages: import('../interfaces/ai-provider.interface').AIMessage[] = [
-      { role: 'system', content: 'Base estable' },
-      { role: 'user', content: 'Consulta' },
-    ];
+    const messages: import('../interfaces/ai-provider.interface').AIMessage[] =
+      [
+        { role: 'system', content: 'Base estable' },
+        { role: 'user', content: 'Consulta' },
+      ];
     const first = await provider.chat(messages);
     expect(first.success).toBe(true);
-    messages.push({ role: 'assistant', content: first.content!, tool_calls: first.tool_calls });
+    messages.push({
+      role: 'assistant',
+      content: first.content!,
+      tool_calls: first.tool_calls,
+    });
     messages.push({ role: 'system', content: 'No aplicar sin aprobación' });
-    messages.push({ role: 'tool', tool_call_id: 'a', content: '{"data":[{"id":42}]}' });
-    messages.push({ role: 'tool', tool_call_id: 'b', content: '{"error":"Permiso revocado"}' });
+    messages.push({
+      role: 'tool',
+      tool_call_id: 'a',
+      content: '{"data":[{"id":42}]}',
+    });
+    messages.push({
+      role: 'tool',
+      tool_call_id: 'b',
+      content: '{"error":"Permiso revocado"}',
+    });
     const second = await provider.chat(messages);
     expect(second.content).toBe('Listo');
     expect(create.mock.calls[1][0].messages).toEqual([
       { role: 'user', content: [{ type: 'text', text: 'Consulta' }] },
-      { role: 'assistant', content: [
-        { type: 'text', text: 'Consulto ambos' },
-        { type: 'tool_use', id: 'a', name: 'list_orders', input: { limit: 2 } },
-        { type: 'tool_use', id: 'b', name: 'list_customers', input: {} },
-      ] },
-      { role: 'user', content: [
-        { type: 'tool_result', tool_use_id: 'a', content: '{"data":[{"id":42}]}' },
-        { type: 'tool_result', tool_use_id: 'b', content: '{"error":"Permiso revocado"}', is_error: true },
-      ] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Consulto ambos' },
+          {
+            type: 'tool_use',
+            id: 'a',
+            name: 'list_orders',
+            input: { limit: 2 },
+          },
+          { type: 'tool_use', id: 'b', name: 'list_customers', input: {} },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'a',
+            content: '{"data":[{"id":42}]}',
+          },
+          {
+            type: 'tool_result',
+            tool_use_id: 'b',
+            content: '{"error":"Permiso revocado"}',
+            is_error: true,
+          },
+        ],
+      },
     ]);
     expect(create.mock.calls[1][0].system.map((s: any) => s.text)).toEqual([
-      'Base estable', 'No aplicar sin aprobación',
+      'Base estable',
+      'No aplicar sin aprobación',
     ]);
   });
 
@@ -258,20 +309,39 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
     });
     (provider as any).client.messages.create = create;
     (provider as any).client.messages.stream = stream;
-    const messages: import('../interfaces/ai-provider.interface').AIMessage[] = [
-      { role: 'system', content: 'Base antigua' },
-      { role: 'system', content: [{ type: 'text', text: 'Plan activo' }] },
-      { role: 'system', content: 'Confirmación pendiente' },
-      { role: 'user', content: [
-        { type: 'text', text: 'Mira' },
-        { type: 'image_url', image_url: { url: 'https://example.com/a.png' } },
-      ] },
-      { role: 'assistant', content: '', tool_calls: [{
-        id: 'a', type: 'function', function: { name: 'probe', arguments: '{}' },
-      }] },
-      { role: 'tool', tool_call_id: 'a', content: '{"pending_confirmation":true}' },
-      { role: 'user', content: 'Continúa' },
-    ];
+    const messages: import('../interfaces/ai-provider.interface').AIMessage[] =
+      [
+        { role: 'system', content: 'Base antigua' },
+        { role: 'system', content: [{ type: 'text', text: 'Plan activo' }] },
+        { role: 'system', content: 'Confirmación pendiente' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Mira' },
+            {
+              type: 'image_url',
+              image_url: { url: 'https://example.com/a.png' },
+            },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'a',
+              type: 'function',
+              function: { name: 'probe', arguments: '{}' },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'a',
+          content: '{"pending_confirmation":true}',
+        },
+        { role: 'user', content: 'Continúa' },
+      ];
     const options = { systemPrompt: 'Base nueva' };
     await provider.chat(messages, options);
     for await (const chunk of provider.chatStream(messages, options)) {
@@ -280,37 +350,56 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
     const payload = create.mock.calls[0][0];
     expect(stream.mock.calls[0][0]).toEqual(payload);
     expect(payload.system.map((s: any) => s.text)).toEqual([
-      'Base nueva', 'Plan activo', 'Confirmación pendiente',
+      'Base nueva',
+      'Plan activo',
+      'Confirmación pendiente',
     ]);
     expect(payload.system.filter((s: any) => s.cache_control)).toHaveLength(1);
     expect(payload.messages[0].content[1]).toEqual({
-      type: 'image', source: { type: 'url', url: 'https://example.com/a.png' },
+      type: 'image',
+      source: { type: 'url', url: 'https://example.com/a.png' },
     });
     expect(payload.messages[1].content).toEqual([
       { type: 'tool_use', id: 'a', name: 'probe', input: {} },
     ]);
     expect(payload.messages[2].content).toEqual([
-      { type: 'tool_result', tool_use_id: 'a', content: '{"pending_confirmation":true}' },
+      {
+        type: 'tool_result',
+        tool_use_id: 'a',
+        content: '{"pending_confirmation":true}',
+      },
       { type: 'text', text: 'Continúa' },
     ]);
     expect(messages[0].content).toBe('Base antigua');
   });
 
   it.each(['{', '[]', 'null', '42', '"wrong"'])(
-    'rejects invalid tool arguments %s locally, never replacing them with {}', async (args) => {
+    'rejects invalid tool arguments %s locally, never replacing them with {}',
+    async (args) => {
       const provider = providerFor();
       const create = jest.fn();
       const stream = jest.fn();
       (provider as any).client.messages.create = create;
       (provider as any).client.messages.stream = stream;
-      const messages: import('../interfaces/ai-provider.interface').AIMessage[] = [{
-        role: 'assistant', content: '', tool_calls: [{
-          id: 'a', type: 'function', function: { name: 'write_endpoint', arguments: args },
-        }],
-      }];
+      const messages: import('../interfaces/ai-provider.interface').AIMessage[] =
+        [
+          {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'a',
+                type: 'function',
+                function: { name: 'write_endpoint', arguments: args },
+              },
+            ],
+          },
+        ];
       expect((await provider.chat(messages)).success).toBe(false);
-      const chunks: import('../interfaces/ai-provider.interface').AIStreamChunk[] = [];
-      for await (const chunk of provider.chatStream(messages)) chunks.push(chunk);
+      const chunks: import('../interfaces/ai-provider.interface').AIStreamChunk[] =
+        [];
+      for await (const chunk of provider.chatStream(messages))
+        chunks.push(chunk);
       expect(chunks.map((c) => c.type)).toEqual(['error']);
       expect(create).not.toHaveBeenCalled();
       expect(stream).not.toHaveBeenCalled();
@@ -321,8 +410,13 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
     const provider = providerFor();
     const create = jest.fn();
     (provider as any).client.messages.create = create;
-    const response = await provider.chat([{ role: 'tool', content: 'missing id' }]);
-    expect(response).toMatchObject({ success: false, error: 'Tool result is missing tool_call_id' });
+    const response = await provider.chat([
+      { role: 'tool', content: 'missing id' },
+    ]);
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Tool result is missing tool_call_id',
+    });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -331,20 +425,551 @@ describe('AnthropicCompatibleProvider ReAct history contract', () => {
     const create = jest.fn().mockResolvedValue(final());
     (provider as any).client.messages.create = create;
     const calls = Array.from({ length: 50 }, (_, i) => ({
-      id: `t${i}`, type: 'function' as const,
+      id: `t${i}`,
+      type: 'function' as const,
       function: { name: `read_${i}`, arguments: JSON.stringify({ id: i }) },
     }));
-    const messages: import('../interfaces/ai-provider.interface').AIMessage[] = [
-      { role: 'user', content: 'Lee' },
-      { role: 'assistant', content: '', tool_calls: calls },
-      ...calls.map((c) => ({ role: 'tool' as const, tool_call_id: c.id, content: c.id })),
-    ];
+    const messages: import('../interfaces/ai-provider.interface').AIMessage[] =
+      [
+        { role: 'user', content: 'Lee' },
+        { role: 'assistant', content: '', tool_calls: calls },
+        ...calls.map((c) => ({
+          role: 'tool' as const,
+          tool_call_id: c.id,
+          content: c.id,
+        })),
+      ];
     const before = JSON.stringify(messages);
     await provider.chat(messages);
     const payload = create.mock.calls[0][0];
-    expect(payload.messages.map((m: any) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(payload.messages[2].content.map((c: any) => c.tool_use_id)).toEqual(calls.map((c) => c.id));
+    expect(payload.messages.map((m: any) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(payload.messages[2].content.map((c: any) => c.tool_use_id)).toEqual(
+      calls.map((c) => c.id),
+    );
     expect(payload.messages[1].content).toHaveLength(50);
     expect(JSON.stringify(messages)).toBe(before);
+  });
+});
+
+describe('Anthropic D0 discriminated tool results', () => {
+  it.each([
+    ['recoverable_error', true],
+    ['blocked', true],
+    ['pending_confirmation', false],
+    ['needs_user_input', false],
+    ['unknown_effect', false],
+    ['ok', false],
+  ])('%s preserves native is_error semantics', (status, expected) => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: 'Anthropic',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'test-key',
+      modelId: 'test-model',
+    });
+    expect(
+      (provider as any).isToolError(
+        JSON.stringify({ schema_version: '1', status }),
+      ),
+    ).toBe(expected);
+  });
+});
+
+describe('Anthropic B generic routing compatibility (native search intentionally OFF)', () => {
+  it('accepts expanded catalogs across rounds without native/deferred fields or history loss', async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: 'Custom',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'test-key',
+      modelId: 'test-model',
+      baseUrl: 'https://example.invalid',
+    });
+    const create = jest.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      model: 'test-model',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    (provider as any).client.messages.create = create;
+    const definitions = Array.from({ length: 25 }, (_, i) => ({
+      type: 'function' as const,
+      function: {
+        name: `operation_${i}`,
+        description: 'sintética',
+        parameters: { type: 'object' },
+      },
+    }));
+    const messages: import('../interfaces/ai-provider.interface').AIMessage[] =
+      [
+        { role: 'user', content: 'Busca' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'discovery1',
+              type: 'function',
+              function: {
+                name: 'search_tools',
+                arguments: '{"query":"operation_24"}',
+              },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'discovery1',
+          content: '{"enabled_next_inference":true}',
+        },
+      ];
+    const before = JSON.stringify(messages);
+    await provider.chat(messages, { tools: definitions.slice(0, 13) });
+    await provider.chat(messages, { tools: definitions });
+    expect(create.mock.calls[1][0].tools).toHaveLength(25);
+    expect(create.mock.calls[0][0].messages).toEqual(
+      create.mock.calls[1][0].messages,
+    );
+    expect(JSON.stringify(messages)).toBe(before);
+    const payload = JSON.stringify(create.mock.calls[1][0]);
+    for (const native of [
+      'defer_loading',
+      'tool_search_tool',
+      'server_tool_use',
+      'tool_reference',
+      'pause_turn',
+    ])
+      expect(payload).not.toContain(native);
+  });
+});
+
+describe('Anthropic-compatible D2 opt-in cancellation', () => {
+  const provider = () =>
+    new AnthropicCompatibleProvider({
+      provider: 'QA',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'synthetic-test-only',
+      modelId: 'test-model',
+    });
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('passes AbortSignal in SDK request options without changing the model payload', async () => {
+    const instance = provider();
+    const create = jest.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    (instance as any).client.messages.create = create;
+    await expect(
+      instance.chat([{ role: 'user', content: 'read' }], {
+        deadlineMs: Date.now() + 1000,
+      }),
+    ).resolves.toMatchObject({ success: true });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('signal');
+    expect(create.mock.calls[0][0]).not.toHaveProperty('deadlineMs');
+    expect(create.mock.calls[0][1]).toEqual({
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('avoids a pre-aborted dispatch and fences a late provider completion', async () => {
+    const instance = provider();
+    let finish!: (value: any) => void;
+    const create = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    (instance as any).client.messages.create = create;
+    const caller = new AbortController();
+    caller.abort();
+    await expect(
+      instance.chat([], { signal: caller.signal }),
+    ).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_CANCELLED',
+      retryable: false,
+    });
+    expect(create).not.toHaveBeenCalled();
+    const result = instance.chat([], { deadlineMs: Date.now() + 50 });
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+      retryable: false,
+    });
+    finish({
+      content: [{ type: 'text', text: 'late success' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates cancellation to messages.stream and fences late frames', async () => {
+    const instance = provider();
+    const stream = jest.fn().mockReturnValue({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => undefined),
+      }),
+      finalMessage: jest.fn(),
+    });
+    (instance as any).client.messages.stream = stream;
+    const chunks: any[] = [];
+    const result = (async () => {
+      for await (const chunk of instance.chatStream([], {
+        deadlineMs: Date.now() + 20,
+      }))
+        chunks.push(chunk);
+    })();
+    await jest.advanceTimersByTimeAsync(20);
+    await result;
+    expect(chunks).toEqual([
+      { type: 'error', error: 'Agent deadline exceeded' },
+    ]);
+    expect(stream.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+
+  it('propagates abort into the installed SDK fetch without transport retry', async () => {
+    const fetcher = jest.fn(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          init?.signal?.addEventListener('abort', abort, { once: true });
+          if (init?.signal?.aborted) abort();
+        }),
+    );
+    const instance = new AnthropicCompatibleProvider({
+      provider: 'QA',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'synthetic-test-only',
+      modelId: 'test-model',
+      fetch: fetcher,
+    });
+    const result = instance.chat([], { deadlineMs: Date.now() + 30 });
+    await jest.advanceTimersByTimeAsync(30);
+    await expect(result).resolves.toMatchObject({
+      success: false,
+      retryable: false,
+      error_code: 'AGENT_DEADLINE_EXCEEDED',
+    });
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+});
+
+describe('Anthropic-compatible H assembled agent stream', () => {
+  const tools = ['z_read', 'a_read'].map((name) => ({
+    type: 'function' as const,
+    function: { name, description: name, parameters: { type: 'object' } },
+  }));
+  const build = (final: Record<string, any>, events: any[] = []) => {
+    const observeUsage = jest.fn();
+    const provider = new AnthropicCompatibleProvider({
+      provider: 'test',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'not-real',
+      modelId: 'configured',
+      observeUsage,
+    });
+    const finalMessage = jest.fn().mockResolvedValue(final);
+    const stream = jest.fn().mockReturnValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield* events;
+      },
+      finalMessage,
+    });
+    (provider as any).client.messages.stream = stream;
+    return { provider, stream, finalMessage, observeUsage };
+  };
+  const collect = async (source: AsyncIterable<unknown>) => {
+    const chunks: any[] = [];
+    for await (const chunk of source) chunks.push(chunk);
+    return chunks;
+  };
+
+  it('does not expose partial input JSON and emits the complete tool-only batch only in done', async () => {
+    const final = {
+      model: 'configured',
+      stop_reason: 'tool_use',
+      content: [
+        { type: 'tool_use', id: 'a', name: 'a_read', input: { quantity: 2 } },
+        { type: 'tool_use', id: 'b', name: 'z_read', input: {} },
+      ],
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 20,
+      },
+    };
+    const { provider, observeUsage } = build(final, [
+      {
+        type: 'content_block_delta',
+        delta: { type: 'input_json_delta', partial_json: '{"quantity":' },
+      },
+    ]);
+    const chunks = await collect(
+      provider.chatStream([], { agenticStream: true, tools }),
+    );
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      type: 'done',
+      finish_reason: 'tool_calls',
+      usage_state: 'reported',
+      usage: {
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 65,
+        cacheReadTokens: 30,
+        cacheCreationTokens: 20,
+      },
+    });
+    expect(chunks[0].tool_calls.map((c: any) => c.id)).toEqual(['a', 'b']);
+    expect(chunks[0].tool_calls[0].function.arguments).toBe('{"quantity":2}');
+    expect(observeUsage).toHaveBeenCalledWith({
+      promptTokens: 10,
+      completionTokens: 5,
+      cacheReadTokens: 30,
+      cacheCreationTokens: 20,
+    });
+  });
+
+  it.each([null, [], 42, 'malformed'])(
+    'rejects completed non-object input %p without any executable frame',
+    async (input) => {
+      const { provider } = build({
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: 'a', name: 'a_read', input }],
+      });
+      const chunks = await collect(
+        provider.chatStream([], { agenticStream: true, tools }),
+      );
+      expect(chunks.map((c) => c.type)).toEqual(['error']);
+    },
+  );
+
+  it('streams text before finalMessage and unknown usage remains absent, not fake zero/cache hit', async () => {
+    const { provider, finalMessage } = build(
+      {
+        model: 'configured',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'ok' }],
+      },
+      [
+        {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'ok' },
+        },
+      ],
+    );
+    const source = provider.chatStream([], { agenticStream: true });
+    expect((await source.next()).value).toEqual({
+      type: 'text',
+      content: 'ok',
+    });
+    expect(finalMessage).not.toHaveBeenCalled();
+    const done: any = (await source.next()).value;
+    expect(done.usage_state).toBe('unknown');
+    expect(done.usage).toBeUndefined();
+    await source.return(undefined);
+  });
+
+  it('canonical working set and stable cache boundaries retain dynamic systems and grouped tool results', async () => {
+    const final = {
+      model: 'configured',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 10, output_tokens: 2 },
+    };
+    const { provider, stream } = build(final);
+    const messages: any[] = [
+      { role: 'system', content: 'stable base' },
+      { role: 'system', content: 'tenant and pending approval' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'a',
+            type: 'function',
+            function: { name: 'a_read', arguments: '{}' },
+          },
+          {
+            id: 'b',
+            type: 'function',
+            function: { name: 'z_read', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'a', content: '{"ok":true}' },
+      {
+        role: 'tool',
+        tool_call_id: 'b',
+        content: '{"pending_confirmation":true}',
+      },
+    ];
+    await collect(
+      provider.chatStream(messages, {
+        agenticStream: true,
+        tools,
+        tool_choice: 'auto',
+      }),
+    );
+    const payload = stream.mock.calls[0][0];
+    expect(payload.tools.map((t: any) => t.name)).toEqual(['a_read', 'z_read']);
+    expect(payload.tools[1].cache_control).toEqual({ type: 'ephemeral' });
+    expect(payload.system).toEqual([
+      {
+        type: 'text',
+        text: 'stable base',
+        cache_control: { type: 'ephemeral' },
+      },
+      { type: 'text', text: 'tenant and pending approval' },
+    ]);
+    expect(payload.messages[1].content.map((b: any) => b.tool_use_id)).toEqual([
+      'a',
+      'b',
+    ]);
+    expect(payload.messages[1].content[1]).not.toHaveProperty('is_error');
+    expect(payload.tool_choice).toEqual({ type: 'auto' });
+    expect(JSON.stringify(payload)).not.toContain('agenticStream');
+  });
+
+  it('rejects tool batches truncated by max_tokens even when assembled input is valid', async () => {
+    const { provider } = build({
+      stop_reason: 'max_tokens',
+      content: [{ type: 'tool_use', id: 'a', name: 'a_read', input: {} }],
+    });
+    const chunks = await collect(
+      provider.chatStream([], { agenticStream: true, tools }),
+    );
+    expect(chunks.map((c) => c.type)).toEqual(['error']);
+  });
+
+  it('disconnect aborts live SDK signal and does not await finalMessage or retry', async () => {
+    const { provider, stream, finalMessage } = build({}, [
+      {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'partial' },
+      },
+    ]);
+    const source = provider.chatStream([], { agenticStream: true });
+    await source.next();
+    await source.return(undefined);
+    expect(stream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(finalMessage).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Anthropic-compatible H buffered/stream parity', () => {
+  it.each(['tool_use', 'end_turn'])(
+    'preserves cache boundaries and normalized tool-only results with %s',
+    async (stopReason) => {
+      const provider = new AnthropicCompatibleProvider({
+        provider: 'test',
+        sdkType: 'anthropic_compatible',
+        apiKey: 'not-real',
+        modelId: 'unchanged',
+      });
+      const tools = ['z', 'a'].map((name) => ({
+        type: 'function' as const,
+        function: {
+          name,
+          description: name,
+          parameters: {
+            type: 'object',
+            properties: { quantity: { type: 'integer' } },
+            required: ['quantity'],
+          },
+        },
+      }));
+      const final = {
+        model: 'unchanged',
+        stop_reason: stopReason,
+        usage: { input_tokens: 10, output_tokens: 5 },
+        content: [
+          { type: 'tool_use', id: 'one', name: 'a', input: { quantity: '2' } },
+          { type: 'tool_use', id: 'two', name: 'z', input: { quantity: 3 } },
+        ],
+      };
+      const messages: any[] = [
+        { role: 'system', content: 'base old' },
+        { role: 'system', content: 'runtime and pending approval' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: final.content.map((block) => ({
+            id: block.id,
+            type: 'function',
+            function: { name: block.name, arguments: '{}' },
+          })),
+        },
+        { role: 'tool', tool_call_id: 'one', content: '{}' },
+        { role: 'tool', tool_call_id: 'two', content: '{}' },
+      ];
+      const create = jest.fn().mockResolvedValue(final);
+      const stream = jest.fn().mockReturnValue({
+        [Symbol.asyncIterator]: async function* () {},
+        finalMessage: async () => final,
+      });
+      (provider as any).client.messages.create = create;
+      (provider as any).client.messages.stream = stream;
+      const options = {
+        agenticStream: true,
+        tools,
+        systemPrompt: 'base new',
+        tool_choice: 'auto' as const,
+      };
+      const buffered = await provider.chat(messages, options);
+      const chunks: any[] = [];
+      for await (const chunk of provider.chatStream(messages, options))
+        chunks.push(chunk);
+      expect(stream.mock.calls[0][0]).toEqual(create.mock.calls[0][0]);
+      expect(chunks[0].tool_calls).toEqual(buffered.tool_calls);
+      expect(chunks[0].usage).toEqual(buffered.usage);
+      expect(chunks[0].usage).not.toHaveProperty('cacheReadTokens');
+      expect(chunks[0].tool_calls[0].function.arguments).toBe('{"quantity":2}');
+      expect(messages[0].content).toBe('base old');
+    },
+  );
+});
+
+describe('Anthropic-compatible H metering capability', () => {
+  it('declares native metered streams and rejects empty tool_use terminals', async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: 'test',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'not-real',
+      modelId: 'unchanged',
+    });
+    expect(provider.supportsMeteredAgentStream()).toBe(true);
+    const final = {
+      stop_reason: 'tool_use',
+      content: [],
+      usage: { input_tokens: 10, output_tokens: 1 },
+    };
+    (provider as any).client.messages.create = jest
+      .fn()
+      .mockResolvedValue(final);
+    (provider as any).client.messages.stream = jest.fn().mockReturnValue({
+      [Symbol.asyncIterator]: async function* () {},
+      finalMessage: async () => final,
+    });
+    expect(await provider.chat([], { agenticStream: true })).toMatchObject({
+      success: false,
+    });
+    const chunks: any[] = [];
+    for await (const chunk of provider.chatStream([], { agenticStream: true }))
+      chunks.push(chunk);
+    expect(chunks.map((c) => c.type)).toEqual(['error']);
   });
 });

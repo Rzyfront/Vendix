@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "4.0"
   scope: [root]
   auto_invoke:
     - "Implementing AI streaming"
@@ -119,9 +119,36 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
 - A new stream consumer must tolerate `tool_call` / `tool_result` frames it does not
   understand rather than treating an unknown `type` as an error.
 
+## H safety, replay and recoverable results
+
+- Compact envelope has structural deterministic summary, IDs, source pagination,
+  units/evidence refs and complete:false. Guards/proposals/errors remain intact.
+  Readers return bounded pages with snapshot/query-bound cursor, total, has_more,
+  complete and units. End-of-cursor is not whole-dataset evidence; artifact reads
+  remain historical/not reusable for writes. D1 uses artifact_cursor/next_query,
+  distinct from listResults UUID cursor. Vex markdown text reader remains compatible.
+- Projection/aggregation allow direct field names only, bounded field counts, no
+  expression execution. Numeric aggregate rejects strings/missing/nonfinite values
+  rather than silently summing a subset. Giant rows fall back to explicit escaped
+  text pages; reconstruct before parsing JSON. Same principal reads are idempotent;
+  foreign artifact/block IDs stay404. Verify loop→sink→reader, not just mocked sinks.
+- QA includes exact specs + real Playwright Vex/dock Happy/Sad/Brute when the branch
+  is actually deployed. Missing Angular/Jest/browser/runtime dependencies must be a
+  named gate, never hidden with mocked reducers or empty replay metrics.
+
 ## Related Skills
 
 - `vendix-ai-platform-core`
 - `vendix-ai-chat`
 - `vendix-ai-agent-tools`
 - `vendix-notifications-system`
+
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

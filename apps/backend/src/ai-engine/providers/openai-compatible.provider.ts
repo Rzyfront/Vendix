@@ -1,4 +1,16 @@
 import OpenAI from 'openai';
+import { providerFailureMetadata } from './provider-failure';
+import {
+  canonicalAgentTools,
+  reportedAgentUsage,
+  validateAgentToolCalls,
+} from './agent-stream-contract';
+import {
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from '../tasks/agent-deadline';
 import {
   AIProvider,
   AIProviderConfig,
@@ -27,6 +39,10 @@ import {
 export class OpenAICompatibleProvider implements AIProvider {
   private client: OpenAI;
 
+  supportsMeteredAgentStream(): boolean {
+    return this.config.settings?.stream_usage_supported === true;
+  }
+
   constructor(private config: AIProviderConfig) {
     const baseUrl = this.cleanBaseUrl(config.baseUrl);
     const clientBaseUrl = this.toOpenAIClientBaseUrl(baseUrl);
@@ -36,6 +52,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     };
     this.client = new OpenAI({
       apiKey: config.apiKey,
+      ...(config.fetch && { fetch: config.fetch }),
       ...(clientBaseUrl && { baseURL: clientBaseUrl }),
     });
   }
@@ -44,27 +61,57 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
     try {
-      const response = await this.client.chat.completions.create({
-        model: options?.model || this.config.modelId,
-        messages: this.buildMessages(messages, options?.systemPrompt) as any,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
-            type: t.type as any,
-            function: t.function,
-          })),
-        }),
-        ...(options?.tool_choice && {
-          tool_choice: options.tool_choice as any,
-        }),
-      });
+      deadline?.assertCanStart();
+      const tools = options?.agenticStream
+        ? canonicalAgentTools(options.tools)
+        : options?.tools;
+      const request = () =>
+        this.client.chat.completions.create(
+          {
+            model: options?.model || this.config.modelId,
+            messages: this.buildMessages(
+              messages,
+              options?.systemPrompt,
+              options?.agenticStream,
+            ) as any,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            max_tokens:
+              options?.maxTokens ??
+              this.config.settings?.maxTokens ??
+              undefined,
+            ...(tools?.length && {
+              tools: tools.map((t) => ({
+                type: t.type as any,
+                function: t.function,
+              })),
+            }),
+            ...(options?.tool_choice && {
+              tool_choice: options.tool_choice as any,
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const response = deadline ? await deadline.run(request) : await request();
 
+      this.config.observeUsage?.(
+        response.usage
+          ? {
+              promptTokens:
+                response.usage.prompt_tokens -
+                (response.usage.prompt_tokens_details?.cached_tokens ?? 0),
+              completionTokens: response.usage.completion_tokens,
+              cacheReadTokens:
+                response.usage.prompt_tokens_details?.cached_tokens,
+            }
+          : undefined,
+      );
       const message = response.choices[0]?.message;
       const finishReason = response.choices[0]?.finish_reason;
 
@@ -79,19 +126,52 @@ export class OpenAICompatibleProvider implements AIProvider {
         }),
       );
 
+      const agentUsage = response.usage
+        ? reportedAgentUsage({
+            promptTokens:
+              response.usage.prompt_tokens -
+              (response.usage.prompt_tokens_details?.cached_tokens ?? 0),
+            completionTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens,
+            ...(response.usage.prompt_tokens_details?.cached_tokens !==
+              undefined && {
+              cacheReadTokens:
+                response.usage.prompt_tokens_details.cached_tokens,
+            }),
+          })
+        : undefined;
+      const completedCalls = options?.agenticStream
+        ? validateAgentToolCalls(toolCalls ?? [], tools)
+        : toolCalls;
+      if (
+        options?.agenticStream &&
+        finishReason === 'tool_calls' &&
+        !completedCalls?.length
+      )
+        throw new Error('Incomplete provider tool batch');
+      if (
+        options?.agenticStream &&
+        completedCalls?.length &&
+        !['tool_calls', 'stop'].includes(finishReason ?? '')
+      )
+        throw new Error('Incomplete provider tool batch');
+      deadline?.assertCanStart();
       return {
         success: true,
         content: message?.content || '',
-        usage: response.usage
-          ? {
-              promptTokens: response.usage.prompt_tokens || 0,
-              completionTokens: response.usage.completion_tokens || 0,
-              totalTokens: response.usage.total_tokens || 0,
-            }
-          : undefined,
+        usage: options?.agenticStream
+          ? agentUsage
+          : response.usage
+            ? {
+                promptTokens: response.usage.prompt_tokens || 0,
+                completionTokens: response.usage.completion_tokens || 0,
+                totalTokens: response.usage.total_tokens || 0,
+              }
+            : undefined,
         model: response.model,
-        tool_calls: toolCalls?.length ? toolCalls : undefined,
+        tool_calls: completedCalls?.length ? completedCalls : undefined,
         finish_reason:
+          (options?.agenticStream && completedCalls?.length) ||
           finishReason === 'tool_calls'
             ? 'tool_calls'
             : finishReason === 'length'
@@ -99,10 +179,15 @@ export class OpenAICompatibleProvider implements AIProvider {
               : 'stop',
       };
     } catch (error: any) {
+      if (deadline && isAgentAbort(error, deadline.signal))
+        return agentAbortFailure(error, deadline.signal);
       return {
         success: false,
         error: error.message || 'OpenAI-compatible request failed',
+        ...providerFailureMetadata(error),
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 
@@ -409,11 +494,15 @@ export class OpenAICompatibleProvider implements AIProvider {
       const parsed = (await response.json()) as {
         text?: string;
         usage?: any;
+        logprobs?: Array<{ token?: unknown; logprob?: unknown }>;
       } | null;
 
       return {
         success: typeof parsed?.text === 'string',
         text: parsed?.text,
+        ...(options.requireConfidence && {
+          confidence: this.transcriptionConfidence(parsed),
+        }),
         model,
         usage: this.mapTokenUsage(parsed?.usage),
         error:
@@ -475,10 +564,20 @@ export class OpenAICompatibleProvider implements AIProvider {
   ): { headers: Record<string, string>; body: FormData } {
     // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
     // parameter drifts between @types/node majors; a plain view never does.
-    const bytes = new Uint8Array(Buffer.from(options.inputAudio.data, 'base64'));
+    const bytes = new Uint8Array(
+      Buffer.from(options.inputAudio.data, 'base64'),
+    );
 
     const form = new FormData();
     form.append('model', model);
+    // Explicit endpoint capability, never guessed from model name/base URL.
+    if (
+      options.requireConfidence &&
+      this.config.settings?.transcription_logprobs_supported === true
+    ) {
+      form.append('response_format', 'json');
+      form.append('include[]', 'logprobs');
+    }
     // The extension matters as much as the MIME type: the API sniffs the
     // filename to pick a decoder, and a container it cannot name is refused
     // even when the bytes are valid.
@@ -494,6 +593,35 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     return { headers: this.buildProviderHeaders(false), body: form };
+  }
+
+  private transcriptionConfidence(
+    parsed: {
+      text?: string;
+      logprobs?: Array<{ token?: unknown; logprob?: unknown }>;
+    } | null,
+  ): number | null {
+    if (
+      this.isOpenRouterConfig() ||
+      this.config.settings?.transcription_logprobs_supported !== true ||
+      !parsed?.text ||
+      !Array.isArray(parsed.logprobs) ||
+      parsed.logprobs.length === 0 ||
+      parsed.logprobs.length > 1000 ||
+      parsed.logprobs.some(
+        (entry) =>
+          !entry ||
+          typeof entry.token !== 'string' ||
+          typeof entry.logprob !== 'number' ||
+          !Number.isFinite(entry.logprob) ||
+          entry.logprob > 0,
+      ) ||
+      parsed.logprobs.map((entry) => entry.token).join('') !== parsed.text
+    )
+      return null;
+    return Math.min(
+      ...parsed.logprobs.map((entry) => Math.exp(entry.logprob as number)),
+    );
   }
 
   /**
@@ -879,30 +1007,69 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
+    // A consumer return() must abort the live HTTP body even without a D2 deadline.
+    const controller = options?.agenticStream
+      ? new AbortController()
+      : undefined;
+    const deadline = createAgentOperation(
+      controller ? { ...options, signal: controller.signal } : options,
+    );
+    const abort = () => controller?.abort(options?.signal?.reason);
+    if (controller && options?.signal) {
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+    }
+    let reportedUsage: AIResponse['usage'];
     try {
-      const stream = await this.client.chat.completions.create({
-        model: options?.model || this.config.modelId,
-        messages: this.buildMessages(messages, options?.systemPrompt) as any,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
-        stream: true,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t) => ({
-            type: t.type as any,
-            function: t.function,
-          })),
-        }),
-        ...(options?.tool_choice && {
-          tool_choice: options.tool_choice as any,
-        }),
-      });
+      deadline?.assertCanStart();
+      const tools = options?.agenticStream
+        ? canonicalAgentTools(options.tools)
+        : options?.tools;
+      const request = () =>
+        this.client.chat.completions.create(
+          {
+            model: options?.model || this.config.modelId,
+            messages: this.buildMessages(
+              messages,
+              options?.systemPrompt,
+              options?.agenticStream,
+            ) as any,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            max_tokens:
+              options?.maxTokens ??
+              this.config.settings?.maxTokens ??
+              undefined,
+            stream: true,
+            // Compatible endpoints must opt in per concrete config. A cache hint
+            // or OpenAI SDK shape does not prove this capability is supported.
+            ...(options?.agenticStream &&
+              this.config.settings?.stream_usage_supported === true && {
+                stream_options: { include_usage: true },
+              }),
+            ...(tools?.length && {
+              tools: tools.map((t) => ({
+                type: t.type as any,
+                function: t.function,
+              })),
+            }),
+            ...(options?.tool_choice && {
+              tool_choice: options.tool_choice as any,
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const stream = deadline ? await deadline.run(request) : await request();
 
+      let model: string | undefined;
+      let finishReason: AIResponse['finish_reason'];
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
+      let observedUsage: Partial<NonNullable<AIResponse['usage']>> | undefined;
 
       // Tool calls arrive as deltas keyed by `index`, with `function.arguments`
       // split across chunks — often a few characters at a time. They have to be
@@ -914,7 +1081,16 @@ export class OpenAICompatibleProvider implements AIProvider {
         { id: string; name: string; args: string }
       >();
 
-      for await (const chunk of stream) {
+      for await (const chunk of agentDeadlineStream(stream, deadline)) {
+        if (chunk.model) model = chunk.model;
+        const finish = chunk.choices[0]?.finish_reason;
+        if (finish)
+          finishReason =
+            finish === 'tool_calls'
+              ? 'tool_calls'
+              : finish === 'length'
+                ? 'length'
+                : 'stop';
         const delta = chunk.choices[0]?.delta;
 
         if (delta?.content) {
@@ -927,7 +1103,11 @@ export class OpenAICompatibleProvider implements AIProvider {
             name: '',
             args: '',
           };
-          if (call.id) slot.id = call.id;
+          if (call.id) {
+            if (options?.agenticStream && slot.id && slot.id !== call.id)
+              throw new Error('Conflicting streamed tool call identity');
+            slot.id = call.id;
+          }
           if (call.function?.name) slot.name += call.function.name;
           if (call.function?.arguments) slot.args += call.function.arguments;
           pending.set(call.index, slot);
@@ -935,13 +1115,65 @@ export class OpenAICompatibleProvider implements AIProvider {
 
         // Capture usage from the final chunk
         if (chunk.usage) {
+          observedUsage = {
+            promptTokens:
+              chunk.usage.prompt_tokens -
+              (chunk.usage.prompt_tokens_details?.cached_tokens ?? 0),
+            completionTokens: chunk.usage.completion_tokens,
+            cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens,
+          };
+          reportedUsage = {
+            promptTokens:
+              chunk.usage.prompt_tokens -
+              (chunk.usage.prompt_tokens_details?.cached_tokens ?? 0),
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+            ...(chunk.usage.prompt_tokens_details?.cached_tokens !==
+              undefined && {
+              cacheReadTokens: chunk.usage.prompt_tokens_details.cached_tokens,
+            }),
+          };
           totalPromptTokens = chunk.usage.prompt_tokens || 0;
           totalCompletionTokens = chunk.usage.completion_tokens || 0;
         }
       }
 
+      if (options?.agenticStream)
+        reportedUsage = reportedAgentUsage(reportedUsage);
+      this.config.observeUsage?.(
+        options?.agenticStream ? reportedUsage : observedUsage,
+      );
+      if (options?.agenticStream) {
+        if (
+          finishReason === undefined ||
+          (finishReason === 'tool_calls' && pending.size === 0) ||
+          (pending.size > 0 && !['tool_calls', 'stop'].includes(finishReason))
+        )
+          throw new Error('Incomplete provider stream');
+        const calls = validateAgentToolCalls(
+          [...pending.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([, slot]) => ({
+              id: slot.id,
+              type: 'function' as const,
+              function: { name: slot.name, arguments: slot.args },
+            })),
+          tools,
+        );
+        deadline?.assertCanStart();
+        yield {
+          type: 'done',
+          ...(calls.length && { tool_calls: calls }),
+          finish_reason: calls.length ? 'tool_calls' : finishReason,
+          model,
+          usage: reportedUsage,
+          usage_state: reportedUsage ? 'reported' : 'unknown',
+        };
+        return;
+      }
       for (const slot of pending.values()) {
         if (!slot.name) continue;
+        deadline?.assertCanStart();
         yield {
           type: 'tool_call',
           tool: {
@@ -955,6 +1187,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         };
       }
 
+      deadline?.assertCanStart();
       yield {
         type: 'done',
         usage: {
@@ -966,8 +1199,25 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (error: any) {
       yield {
         type: 'error',
-        error: error.message || 'OpenAI-compatible streaming failed',
+        ...(options?.agenticStream && {
+          error_code:
+            deadline && isAgentAbort(error, deadline.signal)
+              ? agentAbortFailure(error, deadline.signal).error_code
+              : 'AI_STREAM_INVALID',
+          usage: reportedUsage,
+          usage_state: reportedUsage
+            ? ('reported' as const)
+            : ('unknown' as const),
+        }),
+        error:
+          deadline && isAgentAbort(error, deadline.signal)
+            ? agentAbortFailure(error, deadline.signal).error
+            : error.message || 'OpenAI-compatible streaming failed',
       };
+    } finally {
+      controller?.abort();
+      if (controller) options?.signal?.removeEventListener('abort', abort);
+      deadline?.dispose();
     }
   }
 
@@ -2003,12 +2253,29 @@ export class OpenAICompatibleProvider implements AIProvider {
   private buildMessages(
     messages: AIMessage[],
     systemPrompt?: string,
+    agentic?: boolean,
   ): AIMessage[] {
+    if (agentic && systemPrompt) {
+      const baseIndex = messages.findIndex(
+        (message) => message.role === 'system',
+      );
+      const copy = messages.map(
+        ({ context_retention: _retention, ...message }) => message,
+      );
+      if (baseIndex < 0)
+        copy.unshift({ role: 'system', content: systemPrompt });
+      else copy[baseIndex] = { ...copy[baseIndex], content: systemPrompt };
+      return copy;
+    }
     const result: AIMessage[] = [];
     if (systemPrompt) {
       result.push({ role: 'system', content: systemPrompt });
     }
-    result.push(...messages);
+    result.push(
+      ...messages.map(
+        ({ context_retention: _retention, ...message }) => message,
+      ),
+    );
     return result;
   }
 }

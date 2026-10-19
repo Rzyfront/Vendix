@@ -5,12 +5,20 @@ import {
   inject,
   input,
   output,
+  signal,
+  viewChild,
 } from '@angular/core';
 import type { VexiProposal } from '../../../core/store/vexi/vexi.actions';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../utils/date.util';
+import { VexiVoiceSafetyService } from '../../../core/services/vexi-voice-safety.service';
 import { IconComponent } from '../icon/icon.component';
+import { VexiVoiceConsentComponent } from './vexi-voice-consent.component';
+import type {
+  VoiceConsentApplied,
+  VoiceConsentContext,
+} from '../../../core/services/vexi-voice-consent.model';
 
 /**
  * Fields whose value is money. Checked *after* the percentage test so that
@@ -46,7 +54,7 @@ interface DiffRow {
 @Component({
   selector: 'app-vexi-confirmation-card',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, VexiVoiceConsentComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -58,25 +66,27 @@ interface DiffRow {
       [attr.aria-label]="'Cambio propuesto por ' + agentLabel()"
     >
       @if (!embedded()) {
-      <header class="vexi-card__header">
-        <span class="vexi-card__badge" aria-hidden="true">
-          @switch (status()) {
-            @case ('error') {
-              <app-icon name="x-circle" [size]="15" />
+        <header class="vexi-card__header">
+          <span class="vexi-card__badge" aria-hidden="true">
+            @switch (status()) {
+              @case ('error') {
+                <app-icon name="x-circle" [size]="15" />
+              }
+              @case ('warning') {
+                <app-icon name="alert-triangle" [size]="15" />
+              }
+              @default {
+                <app-icon name="pencil" [size]="15" />
+              }
             }
-            @case ('warning') {
-              <app-icon name="alert-triangle" [size]="15" />
-            }
-            @default {
-              <app-icon name="pencil" [size]="15" />
-            }
-          }
-        </span>
-        <span class="vexi-card__heading">
-          <strong class="vexi-card__title">{{ agentLabel() }} propone un cambio</strong>
-          <span class="vexi-card__target">{{ target() }}</span>
-        </span>
-      </header>
+          </span>
+          <span class="vexi-card__heading">
+            <strong class="vexi-card__title"
+              >{{ agentLabel() }} propone un cambio</strong
+            >
+            <span class="vexi-card__target">{{ target() }}</span>
+          </span>
+        </header>
       }
 
       @if (message()) {
@@ -100,8 +110,8 @@ interface DiffRow {
         </dl>
       } @else {
         <p class="vexi-card__message">
-          {{ agentLabel() }} no pudo detallar el cambio campo a campo. Revisa la conversación
-          antes de aprobar.
+          {{ agentLabel() }} no pudo detallar el cambio campo a campo. Revisa la
+          conversación antes de aprobar.
         </p>
       }
 
@@ -112,37 +122,48 @@ interface DiffRow {
            as a diff-only block ('hideFooter'), with the approval living on
            the plan footer or the step's own card instead. -->
       @if (!hideFooter()) {
-      <footer class="vexi-card__actions">
-        <button
-          type="button"
-          class="vexi-card__btn vexi-card__btn--reject"
-          (click)="reject.emit()"
-          [disabled]="applying()"
-        >
-          <app-icon name="x" [size]="15" />
-          Rechazar
-        </button>
-        <button
-          type="button"
-          class="vexi-card__btn vexi-card__btn--approve"
-          (click)="approve.emit()"
-          [disabled]="applying() || status() === 'error'"
-        >
-          @if (applying()) {
-            <app-icon name="loader-2" [size]="15" [spin]="true" />
-            Aplicando…
-          } @else {
-            <app-icon name="check" [size]="15" />
-            Aprobar
-          }
-        </button>
-      </footer>
+        <footer class="vexi-card__actions">
+          <button
+            type="button"
+            class="vexi-card__btn vexi-card__btn--reject"
+            (click)="onReject()"
+            [disabled]="applying()"
+          >
+            <app-icon name="x" [size]="15" />
+            Rechazar
+          </button>
+          <button
+            type="button"
+            class="vexi-card__btn vexi-card__btn--approve"
+            (click)="onApprove()"
+            [disabled]="applying() || status() === 'error'"
+          >
+            @if (applying()) {
+              <app-icon name="loader-2" [size]="15" [spin]="true" />
+              Aplicando…
+            } @else {
+              <app-icon name="check" [size]="15" />
+              Aprobar
+            }
+          </button>
+        </footer>
+      }
+
+      @if (voiceContext(); as context) {
+        @if (status() !== 'error') {
+          <app-vexi-voice-consent
+            [proposal]="proposal()"
+            [context]="context"
+            (applied)="voiceApplied.emit($event)"
+            (busy)="voiceBusy.set($event); voiceBusyChange.emit($event)"
+          />
+        }
       }
 
       @if (status() === 'error') {
         <p class="vexi-card__blocked">
-          Este cambio no se puede aplicar tal como está. Pídele a {{ agentLabel() }} que lo
-          corrija.
+          Este cambio no se puede aplicar tal como está. Pídele a
+          {{ agentLabel() }} que lo corrija.
         </p>
       }
     </section>
@@ -351,6 +372,17 @@ interface DiffRow {
 export class VexiConfirmationCardComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
   private readonly auth = inject(AuthFacade);
+  private readonly safety = inject(VexiVoiceSafetyService);
+  protected readonly voiceBusy = signal(false);
+  private readonly voiceControl = viewChild(VexiVoiceConsentComponent);
+  protected onApprove(): void {
+    this.voiceControl()?.cancelForClick();
+    this.approve.emit();
+  }
+  protected onReject(): void {
+    this.safety.invalidate();
+    this.reject.emit();
+  }
 
   readonly proposal = input.required<VexiProposal>();
   /** Hides the approve/reject footer, rendering the card as a diff-only block. */
@@ -359,6 +391,9 @@ export class VexiConfirmationCardComponent {
   readonly agentLabel = input<string>('Vexi');
   /** Renders only the diff (no header, border or padding), for hosts that frame it. */
   readonly embedded = input<boolean>(false);
+  readonly voiceContext = input<VoiceConsentContext | null>(null);
+  readonly voiceApplied = output<VoiceConsentApplied>();
+  readonly voiceBusyChange = output<boolean>();
   readonly approve = output<void>();
   readonly reject = output<void>();
 
@@ -370,7 +405,9 @@ export class VexiConfirmationCardComponent {
     void this.currencyFormat.loadCurrency();
   }
 
-  protected readonly applying = computed(() => this.proposal().applying);
+  protected readonly applying = computed(
+    () => this.proposal().applying || this.voiceBusy(),
+  );
   protected readonly status = computed(
     () => this.proposal().preview?.status ?? 'ok',
   );
@@ -438,7 +475,9 @@ export class VexiConfirmationCardComponent {
     const numeric =
       typeof value === 'number'
         ? value
-        : typeof value === 'string' && value.trim() !== '' && !isNaN(Number(value))
+        : typeof value === 'string' &&
+            value.trim() !== '' &&
+            !isNaN(Number(value))
           ? Number(value)
           : null;
 

@@ -56,7 +56,15 @@ export interface VexChartSeries {
 export interface VexChartSpec {
   kind: 'chart';
   title?: string;
-  chart_type: 'bar' | 'line' | 'pie' | 'doughnut' | 'area' | 'radar' | 'scatter' | 'gauge';
+  chart_type:
+    | 'bar'
+    | 'line'
+    | 'pie'
+    | 'doughnut'
+    | 'area'
+    | 'radar'
+    | 'scatter'
+    | 'gauge';
   /** Key of each row holding the category label (bar/line/area). */
   x_axis_key?: string;
   /** Keys of each row holding the series values. */
@@ -109,6 +117,7 @@ export interface VexBlockInteraction {
 }
 
 export type VexPlanStepStatus =
+  | 'unknown'
   | 'pending'
   | 'approved'
   | 'running'
@@ -148,6 +157,7 @@ export interface VexPlanStep {
 }
 
 export type VexPlanStatus =
+  | 'unknown_effect'
   | 'proposed'
   | 'approved'
   | 'rejected'
@@ -168,7 +178,7 @@ export interface VexToolStep {
   id: string;
   name: string;
   summary?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'waiting' | 'unknown';
 }
 
 export interface VexMessage {

@@ -1,9 +1,14 @@
+import type {
+  VoiceConsentApplied,
+  VoiceConsentContext,
+} from '../../../../../../core/services/vexi-voice-consent.model';
 import {
   ChangeDetectionStrategy,
   Component,
   computed,
   input,
   output,
+  signal,
 } from '@angular/core';
 import type { VexiProposal } from '../../../../../../core/store/vexi/vexi.actions';
 import { VexiConfirmationCardComponent } from '../../../../../../shared/components/vexi-dock/vexi-confirmation-card.component';
@@ -11,20 +16,12 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 
 /**
- * Approval card for a whole Vex plan.
+ * One-write approval card, also compatible with persisted multi-step plans.
+ * The initial click covers only the first eligible change. Every remaining
+ * pending write renders its own confirmation and requires a new human click.
+ * Cancelling is not rollback; already applied steps keep their receipts.
  *
- * Every step renders its diff through the shared
- * `app-vexi-confirmation-card` (same `from → to` rows the owner already
- * knows), footer hidden: steps are information, not buttons. One plan
- * approval executes the reversible steps only; each pending irreversible
- * step (once the plan is approved) renders its OWN card with its own
- * approve/reject footer, emitted via `stepApprove` / `cancel`. Rejecting
- * any step rejects the whole plan explicitly — there is no per-step undo.
- *
- * Token-clean: the card never sees the plan token and passes a step's own
- * token through untouched. There is no default action and no timeout:
- * neither button is autofocused, so an Enter pressed out of habit in the
- * composer can never approve a write.
+ * Tokens are opaque to this card. No action is selected or triggered by default.
  */
 @Component({
   selector: 'vendix-vex-plan-card',
@@ -46,10 +43,16 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             <app-icon name="sparkles" [size]="18"></app-icon>
           </span>
           <div class="min-w-0 flex-1">
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)] m-0">
-              Vex quiere: {{ step.summary || step.preview?.target || step.tool }}
+            <h4
+              class="text-sm font-semibold text-[var(--color-text-primary)] m-0"
+            >
+              Vex quiere:
+              {{ step.summary || step.preview?.target || step.tool }}
             </h4>
-            <p class="text-xs text-[var(--color-text-secondary)] m-0" role="status">
+            <p
+              class="text-xs text-[var(--color-text-secondary)] m-0"
+              role="status"
+            >
               {{ single_status_label(step) }}
             </p>
           </div>
@@ -65,12 +68,17 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 
         <app-vexi-confirmation-card
           [proposal]="toProposal(step)"
+          [voiceContext]="voiceContext(step)"
+          (voiceApplied)="voiceApplied.emit($event)"
+          (voiceBusyChange)="voiceSubmitting.set($event)"
           [hideFooter]="true"
           [embedded]="true"
           agentLabel="Vex"
         ></app-vexi-confirmation-card>
 
-        @if (step.status === 'failed' && step.error) {
+        @if (
+          (step.status === 'failed' || step.status === 'unknown') && step.error
+        ) {
           <p class="text-xs text-[var(--color-error)] m-0" role="alert">
             {{ step.error }}
           </p>
@@ -81,7 +89,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             <button
               type="button"
               class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
-              [disabled]="busy()"
+              [disabled]="isBusy()"
               (click)="cancel.emit()"
             >
               Cancelar
@@ -93,10 +101,10 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
               [class.text-[var(--color-text-on-primary)]]="!step.irreversible"
               [class.bg-[var(--color-error)]]="step.irreversible"
               [class.text-white]="step.irreversible"
-              [disabled]="busy() || step.preview?.status === 'error'"
+              [disabled]="isBusy() || step.preview?.status === 'error'"
               (click)="is_open() ? approve.emit() : onStepApprove(step)"
             >
-              @if (busy()) {
+              @if (isBusy()) {
                 <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
                 Aplicando…
               } @else {
@@ -106,142 +114,170 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             </button>
           </footer>
           @if (step.irreversible) {
-            <p class="text-xs text-[var(--color-error)] m-0 text-center" role="note">
+            <p
+              class="text-xs text-[var(--color-error)] m-0 text-center"
+              role="note"
+            >
               Esta acción no se puede deshacer
             </p>
           }
         }
       </section>
     } @else {
-    <section
-      class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
-      role="group"
-      aria-label="Plan propuesto por Vex"
-    >
-      <header class="flex items-start gap-2">
-        <span
-          class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.14)] text-[var(--color-primary)]"
-          aria-hidden="true"
-        >
-          <app-icon name="sparkles" [size]="18"></app-icon>
-        </span>
-        <div class="min-w-0 flex-1">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-            {{ plan().title || 'Vex propone un plan' }}
-          </h4>
-          <p class="text-xs text-[var(--color-text-secondary)]">
-            {{ plan().steps.length }} paso(s) · {{ status_label() }}
-          </p>
-        </div>
-        @if (irreversible_count() > 0) {
+      <section
+        class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
+        role="group"
+        aria-label="Plan propuesto por Vex"
+      >
+        <header class="flex items-start gap-2">
           <span
-            class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.14)] text-[var(--color-primary)]"
+            aria-hidden="true"
           >
-            <app-icon name="alert-triangle" [size]="14"></app-icon>
-            {{ irreversible_count() }} irreversible(s)
+            <app-icon name="sparkles" [size]="18"></app-icon>
           </span>
-        }
-      </header>
+          <div class="min-w-0 flex-1">
+            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+              {{ plan().title || 'Vex propone un plan' }}
+            </h4>
+            <p class="text-xs text-[var(--color-text-secondary)]">
+              {{ plan().steps.length }} paso(s) · {{ status_label() }}
+            </p>
+          </div>
+          @if (irreversible_count() > 0) {
+            <span
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+            >
+              <app-icon name="alert-triangle" [size]="14"></app-icon>
+              {{ irreversible_count() }} irreversible(s)
+            </span>
+          }
+        </header>
 
-      <ol class="flex flex-col gap-3 list-none m-0 p-0">
-        @for (step of plan().steps; track step.step_id; let i = $index) {
-          <li class="flex flex-col gap-1.5">
-            <div class="flex items-center gap-2 text-xs">
-              <span
-                class="w-6 h-6 shrink-0 rounded-full grid place-items-center font-semibold bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.07)] text-[var(--color-text-primary)]"
-                aria-hidden="true"
-              >
-                {{ i + 1 }}
-              </span>
-              <span class="flex-1 min-w-0 truncate font-medium text-[var(--color-text-primary)]">
-                {{ step.summary }}
-              </span>
-              @if (step.irreversible) {
+        <ol class="flex flex-col gap-3 list-none m-0 p-0">
+          @for (step of plan().steps; track step.step_id; let i = $index) {
+            <li class="flex flex-col gap-1.5">
+              <div class="flex items-center gap-2 text-xs">
                 <span
-                  class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+                  class="w-6 h-6 shrink-0 rounded-full grid place-items-center font-semibold bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.07)] text-[var(--color-text-primary)]"
+                  aria-hidden="true"
                 >
-                  Irreversible
+                  {{ i + 1 }}
                 </span>
-              }
-              <span class="shrink-0 text-[var(--color-text-secondary)]">
-                {{ step_status_label(step.status) }}
-              </span>
-            </div>
-            @if (step.status === 'failed' && step.error) {
-              <p class="text-xs text-[var(--color-error)] m-0" role="alert">
-                {{ step.error }}
-              </p>
-            }
-            @if (show_own_card(step)) {
-              <app-vexi-confirmation-card
-                [proposal]="toProposal(step)"
-                (approve)="onStepApprove(step)"
-                (reject)="cancel.emit()"
-                agentLabel="Vex"
-              ></app-vexi-confirmation-card>
-            } @else {
-              <app-vexi-confirmation-card
-                [proposal]="toProposal(step)"
-                [hideFooter]="true"
-                agentLabel="Vex"
-              ></app-vexi-confirmation-card>
-              @if (step.irreversible && is_open()) {
-                <p class="text-xs text-[var(--color-text-secondary)] m-0">
-                  Este paso pedirá tu confirmación por separado al aprobar el plan.
+                <span
+                  class="flex-1 min-w-0 truncate font-medium text-[var(--color-text-primary)]"
+                >
+                  {{ step.summary }}
+                </span>
+                @if (step.irreversible) {
+                  <span
+                    class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+                  >
+                    Irreversible
+                  </span>
+                }
+                <span class="shrink-0 text-[var(--color-text-secondary)]">
+                  {{ step_status_label(step.status) }}
+                </span>
+              </div>
+              @if (
+                (step.status === 'failed' || step.status === 'unknown') &&
+                step.error
+              ) {
+                <p class="text-xs text-[var(--color-error)] m-0" role="alert">
+                  {{ step.error }}
                 </p>
               }
-            }
-          </li>
-        }
-      </ol>
+              @if (show_own_card(step)) {
+                <app-vexi-confirmation-card
+                  [proposal]="toProposal(step)"
+                  [voiceContext]="voiceContext(step)"
+                  (voiceApplied)="voiceApplied.emit($event)"
+                  (voiceBusyChange)="voiceSubmitting.set($event)"
+                  (approve)="onStepApprove(step)"
+                  (reject)="cancel.emit()"
+                  agentLabel="Vex"
+                ></app-vexi-confirmation-card>
+              } @else {
+                <app-vexi-confirmation-card
+                  [proposal]="toProposal(step)"
+                  [voiceContext]="voiceContext(step)"
+                  (voiceApplied)="voiceApplied.emit($event)"
+                  (voiceBusyChange)="voiceSubmitting.set($event)"
+                  [hideFooter]="true"
+                  agentLabel="Vex"
+                ></app-vexi-confirmation-card>
+                @if (step.irreversible && is_open()) {
+                  <p class="text-xs text-[var(--color-text-secondary)] m-0">
+                    Este paso pedirá tu confirmación por separado al aprobar el
+                    plan.
+                  </p>
+                }
+              }
+            </li>
+          }
+        </ol>
 
-      @if (is_open()) {
-        @if (irreversible_count() > 0) {
-          <p class="text-xs text-[var(--color-text-secondary)] m-0" role="note">
-            Aprobar el plan ejecuta los pasos reversibles. Los irreversibles
-            quedan fuera y piden su propia confirmación.
+        @if (is_open()) {
+          @if (irreversible_count() > 0) {
+            <p
+              class="text-xs text-[var(--color-text-secondary)] m-0"
+              role="note"
+            >
+              Esta aprobación cubre una acción. Cada cambio restante pedirá su
+              propia confirmación.
+            </p>
+          }
+          <footer class="flex gap-2">
+            <button
+              type="button"
+              class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
+              [disabled]="isBusy()"
+              (click)="cancel.emit()"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              [disabled]="isBusy()"
+              (click)="approve.emit()"
+            >
+              @if (isBusy()) {
+                <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
+                Aprobando…
+              } @else {
+                <app-icon name="check" [size]="16"></app-icon>
+                Aprobar plan
+              }
+            </button>
+          </footer>
+        } @else {
+          <p class="text-xs text-[var(--color-text-secondary)]" role="status">
+            {{ closed_note() }}
           </p>
         }
-        <footer class="flex gap-2">
-          <button
-            type="button"
-            class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
-            [disabled]="busy()"
-            (click)="cancel.emit()"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
-            [disabled]="busy()"
-            (click)="approve.emit()"
-          >
-            @if (busy()) {
-              <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
-              Aprobando…
-            } @else {
-              <app-icon name="check" [size]="16"></app-icon>
-              Aprobar plan
-            }
-          </button>
-        </footer>
-      } @else {
-        <p class="text-xs text-[var(--color-text-secondary)]" role="status">
-          {{ closed_note() }}
-        </p>
-      }
-    </section>
+      </section>
     }
   `,
 })
 export class VexPlanCardComponent {
   readonly plan = input.required<VexPlanProposal>();
   readonly busy = input<boolean>(false);
+  protected readonly voiceSubmitting = signal(false);
+  protected readonly isBusy = computed(
+    () => this.busy() || this.voiceSubmitting(),
+  );
+  readonly conversationId = input<number | null>(null);
+  readonly objectiveId = input<string | undefined>(undefined);
+  readonly voiceApplied = output<VoiceConsentApplied>();
 
   readonly approve = output<void>();
   readonly cancel = output<void>();
-  readonly stepApprove = output<{ step_id: string; confirmation_token: string }>();
+  readonly stepApprove = output<{
+    step_id: string;
+    confirmation_token: string;
+  }>();
 
   readonly irreversible_count = computed(
     () => this.plan().steps.filter((s) => s.irreversible).length,
@@ -257,6 +293,8 @@ export class VexPlanCardComponent {
 
   readonly status_label = computed(() => {
     switch (this.plan().status) {
+      case 'unknown_effect':
+        return 'pendiente de verificación';
       case 'proposed':
         return 'esperando tu aprobación';
       case 'approved':
@@ -296,6 +334,8 @@ export class VexPlanCardComponent {
   readonly closed_note = computed(() => {
     const applied = this.done_count();
     switch (this.plan().status) {
+      case 'unknown_effect':
+        return 'El efecto no está confirmado. Verifica el resultado antes de otra acción; no repitas este cambio.';
       case 'executing':
         return 'Plan aprobado. Vex está ejecutando los pasos.';
       case 'approved': {
@@ -329,6 +369,8 @@ export class VexPlanCardComponent {
   });
 
   single_status_label(step: VexPlanStep): string {
+    if (step.status === 'unknown' || this.plan().status === 'unknown_effect')
+      return 'Pendiente de verificación';
     if (step.status === 'done') return 'Hecho';
     if (step.status === 'failed') return 'Falló';
     if (step.status === 'cancelled' || this.plan().status === 'rejected') {
@@ -345,6 +387,8 @@ export class VexPlanCardComponent {
 
   step_status_label(status: VexPlanStep['status']): string {
     switch (status) {
+      case 'unknown':
+        return 'por verificar';
       case 'pending':
         return 'pendiente';
       case 'approved':
@@ -364,6 +408,32 @@ export class VexPlanCardComponent {
     }
   }
 
+  voiceContext(step: VexPlanStep): VoiceConsentContext | null {
+    const conversation_id = this.conversationId();
+    if (!conversation_id || step.status !== 'pending') return null;
+    const single = this.plan().plan_id.startsWith('single-');
+    const exactSinglePlan =
+      !single &&
+      this.plan().steps.length === 1 &&
+      this.plan().status === 'proposed';
+    if (!step.confirmation_token && !exactSinglePlan) return null;
+    if (
+      !single &&
+      !exactSinglePlan &&
+      !['approved', 'executing'].includes(this.plan().status)
+    )
+      return null;
+    return {
+      conversation_id,
+      agent_key: 'vex',
+      channel: 'pipeline',
+      ...(this.objectiveId() ? { objective_id: this.objectiveId() } : {}),
+      ...(!single
+        ? { plan_id: this.plan().plan_id, step_id: step.step_id }
+        : {}),
+    };
+  }
+
   toProposal(step: VexPlanStep): VexiProposal {
     return {
       tool: step.tool,
@@ -374,30 +444,29 @@ export class VexPlanCardComponent {
             status: step.preview.status,
             target: step.preview.target,
             changes: step.preview.changes,
-            message: step.preview.message,
+            message: [
+              step.preview.message,
+              step.irreversible ? 'Esta acción no se puede deshacer.' : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
           }
         : undefined,
-      applying: this.busy(),
+      applying: this.isBusy(),
     };
   }
 
-  /**
-   * Whether the step renders its OWN confirmation card (with approve/reject
-   * footer) instead of a diff-only one. Only after the plan approval minted
-   * the plan token, only while the step is still pending, and only for
-   * steps outside the plan click: irreversibles, or reversibles the token
-   * routed to their own card (drifted args, replay) carrying a live token.
-   */
+  /** Every pending write in an approved plan has an individual confirmation. */
   show_own_card(step: VexPlanStep): boolean {
     const status = this.plan().status;
     if (status !== 'approved' && status !== 'executing') return false;
     if (step.status !== 'pending') return false;
-    return step.irreversible || !!step.confirmation_token;
+    return true; // Every remaining pending write requires a new individual click/token.
   }
 
   onStepApprove(step: VexPlanStep): void {
     // The step's own token travels through untouched; the store resolves
-    // the step fresh by `step_id` and falls back to a plan-token redeem
+    // the step fresh by `step_id` and requests a new individual confirmation
     // when no token is attached yet.
     this.stepApprove.emit({
       step_id: step.step_id,

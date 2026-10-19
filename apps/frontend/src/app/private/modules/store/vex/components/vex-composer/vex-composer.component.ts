@@ -1,5 +1,13 @@
+import { VexiVoicePipelineService } from '../../../../../../core/services/vexi-voice-pipeline.service';
+import { VexiRealtimeService } from '../../../../../../core/services/vexi-realtime.service';
+import { VexiApiService } from '../../../../../../core/services/vexi-api.service';
+import type { VoiceConsentApplied } from '../../../../../../core/services/vexi-voice-consent.model';
+import { VexiConfirmationCardComponent } from '../../../../../../shared/components/vexi-dock/vexi-confirmation-card.component';
 import {
   Component,
+  DestroyRef,
+  effect,
+  untracked,
   ElementRef,
   computed,
   inject,
@@ -37,7 +45,7 @@ interface StagedFile {
 @Component({
   selector: 'vendix-vex-composer',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, VexiConfirmationCardComponent],
   template: `
     <div class="w-full">
       @if (staged().length > 0) {
@@ -48,7 +56,9 @@ interface StagedFile {
               [class.border-[var(--color-border)]]="file.status !== 'error'"
               [class.bg-[var(--color-surface)]]="file.status !== 'error'"
               [class.border-[var(--color-error)]]="file.status === 'error'"
-              [class.bg-[rgba(var(--color-error-rgb),0.07)]]="file.status === 'error'"
+              [class.bg-[rgba(var(--color-error-rgb),0.07)]]="
+                file.status === 'error'
+              "
             >
               @if (file.status === 'uploading') {
                 <app-icon name="loader-2" [size]="14" [spin]="true"></app-icon>
@@ -108,16 +118,46 @@ interface StagedFile {
           (paste)="onPaste($event)"
         ></textarea>
 
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] opacity-40 cursor-not-allowed"
-          aria-label="Dictar por voz"
-          title="Próximamente"
-        >
-          <app-icon name="mic" [size]="20"></app-icon>
-        </button>
+        @if (voiceEnabled()) {
+          <button
+            type="button"
+            class="voice-button"
+            aria-label="Mantén para dictar un mensaje a Vex; no confirma cambios"
+            [attr.aria-pressed]="pipeline.recording()"
+            (pointerdown)="voiceDown($event)"
+            (pointerup)="voiceUp($event)"
+            (pointercancel)="pipeline.cancelRecording()"
+            (keydown.space)="voiceDown($event)"
+            (keyup.space)="voiceUp($event)"
+            (keydown.enter)="voiceDown($event)"
+            (keyup.enter)="voiceUp($event)"
+          >
+            <app-icon
+              [name]="pipeline.recording() ? 'square' : 'mic'"
+              [size]="20"
+            />
+          </button>
+          <button
+            type="button"
+            class="voice-button"
+            (click)="toggleRealtime()"
+            [attr.aria-pressed]="realtimeActive()"
+            aria-label="Iniciar o detener conversación de voz en tiempo real con Vex"
+          >
+            {{ realtimeActive() ? 'Detener voz' : 'Voz en vivo' }}
+          </button>
+        } @else {
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] opacity-40 cursor-not-allowed"
+            aria-label="Dictar por voz"
+            title="Próximamente"
+          >
+            <app-icon name="mic" [size]="20" />
+          </button>
+        }
 
         @if (can_send()) {
           <button
@@ -130,17 +170,206 @@ interface StagedFile {
           </button>
         }
       </div>
+      @if (voiceEnabled()) {
+        <p class="text-xs text-[var(--color-text-secondary)]" role="status">
+          {{
+            pipeline.errorMessage() || realtime.errorMessage() || voiceHint()
+          }}
+        </p>
+      }
+      @if (realtimeProposal(); as pending) {
+        <app-vexi-confirmation-card
+          [proposal]="pending.proposal"
+          [voiceContext]="pending.context"
+          agentLabel="Vex"
+          (approve)="approveRealtime()"
+          (reject)="rejectRealtime()"
+          (voiceApplied)="acceptRealtime($event)"
+        />
+      }
       <p class="mt-2 text-center text-xs text-[var(--color-text-secondary)]">
         Vex puede cometer errores. Verifica la información importante.
       </p>
     </div>
   `,
+  styles: [
+    `
+      .voice-button {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 4px 8px;
+        border-radius: 16px;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        touch-action: none;
+      }
+      .voice-button:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+    `,
+  ],
 })
 export class VexComposerComponent {
+  protected readonly pipeline = inject(VexiVoicePipelineService);
+  protected readonly realtime = inject(VexiRealtimeService);
+  private readonly voiceApi = inject(VexiApiService);
+  private readonly destroyRef = inject(DestroyRef);
+  readonly voiceEnabled = signal(false);
+  readonly realtimeActive = signal(false);
+  readonly voiceHint = signal(
+    'Mantén el micrófono para enviar un mensaje. El dictado no aprueba cambios.',
+  );
+  private voiceHeld = false;
+  readonly realtimeProposal = computed(() => {
+    const pending = this.realtime.pendingProposal();
+    return pending?.context.agent_key === 'vex' &&
+      String(pending.context.conversation_id) === this.store.active_id()
+      ? pending
+      : null;
+  });
+
+  constructor() {
+    void this.realtime
+      .voiceConsentEnabled()
+      .then((enabled) => this.voiceEnabled.set(enabled));
+    this.destroyRef.onDestroy(() => {
+      this.voiceHeld = false;
+      this.pipeline.cancelRecording();
+      this.pipeline.interrupt();
+      if (this.realtimeActive()) void this.realtime.stop();
+    });
+    let previous: string | null = null;
+    effect(() => {
+      const id = this.store.active_id();
+      if (id !== previous) {
+        previous = id;
+        untracked(() => {
+          if (this.realtimeActive()) {
+            this.realtimeActive.set(false);
+            void this.realtime.stop();
+          }
+        });
+      }
+    });
+  }
+
+  voiceDown(event: Event): void {
+    event.preventDefault();
+    if ((event as KeyboardEvent).repeat || !this.voiceEnabled()) return;
+    this.voiceHeld = true;
+    const pointer = event as PointerEvent;
+    if (pointer.pointerId !== undefined)
+      (event.currentTarget as HTMLElement).setPointerCapture?.(
+        pointer.pointerId,
+      );
+    if (this.realtimeActive()) {
+      this.realtimeActive.set(false);
+      void this.realtime.stop();
+    }
+    void this.store.ensureVoiceConversation().then(async (conversation_id) => {
+      if (
+        !conversation_id ||
+        !this.voiceHeld ||
+        this.store.activeNumericId() !== conversation_id
+      )
+        return;
+      const started = await this.pipeline.startRecording({
+        conversation_id,
+        agent_key: 'vex',
+      });
+      if (!this.voiceHeld && started) this.pipeline.cancelRecording();
+      if (!started)
+        this.voiceHint.set(
+          'Autoriza el micrófono y mantén otra vez para dictar.',
+        );
+    });
+  }
+
+  voiceUp(event: Event): void {
+    event.preventDefault();
+    this.voiceHeld = false;
+    const conversation = this.store.active_id();
+    void this.pipeline.stopRecording().then((text) => {
+      if (text && this.store.active_id() === conversation)
+        this.store.sendVoiceMessage(text);
+    });
+  }
+
+  async toggleRealtime(): Promise<void> {
+    if (!this.voiceEnabled()) return;
+    if (this.realtimeActive()) {
+      this.realtimeActive.set(false);
+      await this.realtime.stop();
+      return;
+    }
+    this.pipeline.cancelRecording();
+    this.pipeline.interrupt();
+    const conversation_id = await this.store.ensureVoiceConversation();
+    if (!conversation_id || this.store.activeNumericId() !== conversation_id)
+      return;
+    const opened = await this.realtime.start({
+      conversation_id,
+      agent_key: 'vex',
+    });
+    this.realtimeActive.set(opened);
+    if (!opened)
+      this.voiceHint.set('Autoriza el micrófono y abre de nuevo Voz en vivo.');
+  }
+
+  async approveRealtime(): Promise<void> {
+    const pending = this.realtimeProposal();
+    if (
+      !pending?.context.session_id ||
+      !pending.context.proposal_id ||
+      pending.proposal.applying
+    )
+      return;
+    this.realtime.pendingProposal.set({
+      ...pending,
+      proposal: { ...pending.proposal, applying: true },
+    });
+    try {
+      const receipt = await firstValueFrom(
+        this.voiceApi.applyDisplayedVoiceProposal(pending.context, true),
+      );
+      this.acceptRealtime({
+        context: pending.context,
+        confirmationToken: pending.proposal.confirmationToken,
+        receipt,
+      });
+    } catch (error) {
+      this.realtime.clearProposal();
+      this.toast.error(
+        extractApiErrorMessage(error),
+        'Consulta el estado antes de volver a proponer',
+      );
+    }
+  }
+
+  acceptRealtime(result: VoiceConsentApplied): void {
+    this.store.acceptRealtimeVoiceReceipt(result);
+    if (
+      this.realtimeProposal()?.context.proposal_id ===
+      result.context.proposal_id
+    ) {
+      this.realtime.clearProposal();
+      this.realtimeActive.set(false);
+      void this.realtime.stop();
+    }
+  }
+
+  rejectRealtime(): void {
+    this.realtime.clearProposal();
+    this.realtimeActive.set(false);
+    void this.realtime.stop();
+  }
+
   readonly store = inject(VexChatStore);
   private readonly api = inject(VexApiService);
   private readonly toast = inject(ToastService);
-  private readonly input = viewChild.required<ElementRef<HTMLTextAreaElement>>('input');
+  private readonly input =
+    viewChild.required<ElementRef<HTMLTextAreaElement>>('input');
 
   readonly text = signal('');
   readonly staged = signal<StagedFile[]>([]);
@@ -215,7 +444,9 @@ export class VexComposerComponent {
     }
     for (const file of files.slice(0, room)) {
       if (!isAcceptedFile(file)) {
-        this.toast.warning(`${file.name || 'El archivo'} no es un tipo permitido.`);
+        this.toast.warning(
+          `${file.name || 'El archivo'} no es un tipo permitido.`,
+        );
         continue;
       }
       if (file.size > MAX_FILE_BYTES) {
@@ -256,7 +487,11 @@ export class VexComposerComponent {
         this.staged.update((list) =>
           list.map((f) =>
             f.local_id === local_id
-              ? { ...f, status: 'ready' as const, attachment_id: attachment.attachment_id }
+              ? {
+                  ...f,
+                  status: 'ready' as const,
+                  attachment_id: attachment.attachment_id,
+                }
               : f,
           ),
         );

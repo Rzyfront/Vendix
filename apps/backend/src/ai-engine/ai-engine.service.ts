@@ -1,6 +1,34 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  AgentTraceService,
+  hashTraceValue,
+} from './observability/agent-trace.service';
+import { ProviderAttemptObserver } from './provider-attempt-observer';
+import {
+  canonicalAgentTools,
+  reportedAgentUsage,
+  validateAgentToolCalls,
+} from './providers/agent-stream-contract';
+import { applyAgentContextBudget } from './context/agent-context-budget';
+import {
+  objectiveProviderMeter,
+  objectiveMeteredFetch,
+} from './tasks/agent-budget-context';
 import { randomUUID } from 'crypto';
+import {
+  AgentDeadline,
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from './tasks/agent-deadline';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   AIProvider,
@@ -64,6 +92,10 @@ export class AIEngineService implements OnModuleInit {
   private configSettings: Map<number, Record<string, any>> = new Map();
   private configModelTypes: Map<number, AIModelType> = new Map();
   private defaultConfigId: number | null = null;
+  private readonly configFingerprints = new Map<number, string>();
+  private readonly providerObserver?: ProviderAttemptObserver;
+  /** Runtime evidence overrides a configured capability until configurations reload. */
+  private readonly degradedAgentStreamConfigs = new Set<number>();
 
   constructor(
     private readonly prisma: GlobalPrismaService,
@@ -73,16 +105,25 @@ export class AIEngineService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly subscriptionAccess: SubscriptionAccessService,
     private readonly gateConfig: SubscriptionGateConfig,
-  ) {}
+    @Optional() private readonly trace?: AgentTraceService,
+  ) {
+    if (trace)
+      this.providerObserver = new ProviderAttemptObserver(
+        trace,
+        aiLoggingService,
+      );
+  }
 
   async onModuleInit() {
     await this.loadConfigurations();
   }
 
   private async loadConfigurations() {
+    this.degradedAgentStreamConfigs.clear();
     this.providers.clear();
     this.configSettings.clear();
     this.configModelTypes.clear();
+    this.configFingerprints.clear();
     this.defaultConfigId = null;
 
     try {
@@ -138,6 +179,14 @@ export class AIEngineService implements OnModuleInit {
       baseUrl: config.base_url || undefined,
       modelType: config.model_type || undefined,
       settings: config.settings as Record<string, any>,
+      fetch: objectiveMeteredFetch(
+        this.providerObserver
+          ? this.providerObserver.wrapFetch(globalThis.fetch)
+          : globalThis.fetch,
+      ),
+      ...(this.providerObserver && {
+        observeUsage: (usage) => this.providerObserver!.observeUsage(usage),
+      }),
     };
 
     try {
@@ -160,6 +209,16 @@ export class AIEngineService implements OnModuleInit {
       }
 
       this.providers.set(config.id, provider);
+      this.configFingerprints.set(
+        config.id,
+        hashTraceValue({
+          provider: config.provider,
+          sdk_type: config.sdk_type,
+          model_id: config.model_id,
+          base_url: config.base_url,
+          settings: config.settings,
+        }),
+      );
       this.configSettings.set(
         config.id,
         (config.settings as Record<string, any>) || {},
@@ -258,9 +317,20 @@ export class AIEngineService implements OnModuleInit {
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
-    const response = await provider.chat(messages, options);
+    const response = await this.observeProviderCall(undefined, () =>
+      this.withProviderDeadline(options, (scoped) =>
+        this.observeProviderAttempt(
+          this.defaultConfigId,
+          messages,
+          scoped,
+          () => provider.chat(messages, scoped),
+        ),
+      ),
+    );
     if (!response.success) {
-      this.logger.error(`AI chat failed: ${response.error}`);
+      this.logger.error(
+        `AI chat failed: ${this.safeProviderError(response.error)}`,
+      );
     }
     const thinking =
       options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
@@ -272,9 +342,20 @@ export class AIEngineService implements OnModuleInit {
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     const provider = this.getDefaultProvider();
-    const response = await provider.complete(prompt, options);
+    const response = await this.observeProviderCall(undefined, () =>
+      this.withProviderDeadline(options, (scoped) =>
+        this.observeProviderAttempt(
+          this.defaultConfigId,
+          [{ role: 'user', content: prompt }],
+          scoped,
+          () => provider.complete(prompt, scoped),
+        ),
+      ),
+    );
     if (!response.success) {
-      this.logger.error(`AI complete failed: ${response.error}`);
+      this.logger.error(
+        `AI complete failed: ${this.safeProviderError(response.error)}`,
+      );
     }
     const thinking =
       options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
@@ -292,7 +373,13 @@ export class AIEngineService implements OnModuleInit {
     }
     const thinking = options?.thinking ?? this.isThinkingEnabled(configId);
     return this.sanitizeResponse(
-      await provider.chat(messages, options),
+      await this.observeProviderCall(undefined, () =>
+        this.withProviderDeadline(options, (scoped) =>
+          this.observeProviderAttempt(configId, messages, scoped, () =>
+            provider.chat(messages, scoped),
+          ),
+        ),
+      ),
       thinking,
     );
   }
@@ -425,6 +512,17 @@ export class AIEngineService implements OnModuleInit {
     extraMessages?: AIMessage[],
     optionsOverride?: AIRequestOptions,
   ): Promise<AIResponse> {
+    return this.observeProviderCall(appKey, () =>
+      this.runApplication(appKey, variables, extraMessages, optionsOverride),
+    );
+  }
+
+  private async runApplication(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
+  ): Promise<AIResponse> {
     const startTime = Date.now();
     const callId = randomUUID();
     let logStatus: 'success' | 'error' = 'error';
@@ -462,40 +560,8 @@ export class AIEngineService implements OnModuleInit {
         );
       }
 
-      // Build messages
-      const messages: AIMessage[] = [];
-
-      if (app.system_prompt) {
-        messages.push({
-          role: 'system',
-          content: this.interpolate(app.system_prompt, variables),
-        });
-      }
-
-      if (app.prompt_template) {
-        messages.push({
-          role: 'user',
-          content: this.interpolate(app.prompt_template, variables),
-        });
-      }
-
-      if (extraMessages) {
-        messages.push(...extraMessages);
-      }
-
-      // Build options from application config
-      const options: AIRequestOptions = {};
-      if (app.temperature !== null) {
-        options.temperature = Number(app.temperature);
-      }
-      if (app.max_tokens !== null) {
-        options.maxTokens = app.max_tokens;
-      }
-      // Merged last so the caller wins — this is how the agent loop injects its
-      // tool catalog while still going through the gate above.
-      if (optionsOverride) {
-        Object.assign(options, optionsOverride);
-      }
+      const messages = this.applicationMessages(app, variables, extraMessages);
+      const options = this.applicationOptions(app, optionsOverride);
 
       // Execute with retry
       const retryConfig = app.retry_config as {
@@ -511,7 +577,25 @@ export class AIEngineService implements OnModuleInit {
       };
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        lastResponse = await provider.chat(messages, options);
+        lastResponse = await this.withProviderDeadline(options, (scoped) =>
+          this.observeProviderAttempt(
+            resolvedConfigId,
+            messages,
+            scoped,
+            () => provider.chat(messages, scoped),
+            attempt + 1,
+          ),
+        );
+        // Cancellation is terminal even when the application's existing retry
+        // policy allows another request. Never spend a closing/retry inference.
+        if (
+          ['AGENT_CANCELLED', 'AGENT_DEADLINE_EXCEEDED'].includes(
+            lastResponse.error_code ?? '',
+          )
+        ) {
+          logResponse = lastResponse;
+          return lastResponse;
+        }
 
         if (lastResponse.success) {
           // Sanitize thinking blocks based on config setting
@@ -543,12 +627,21 @@ export class AIEngineService implements OnModuleInit {
           this.logger.warn(
             `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
           );
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          const wait = () => this.waitForProviderRetry(delayMs, options);
+          try {
+            if (this.providerObserver)
+              await this.providerObserver.retry(delayMs, wait);
+            else await wait();
+          } catch (error) {
+            if (!isAgentAbort(error, options.signal)) throw error;
+            logResponse = agentAbortFailure(error, options.signal);
+            return logResponse;
+          }
         }
       }
 
       this.logger.error(
-        `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${lastResponse.error}`,
+        `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${this.safeProviderError(lastResponse.error)}`,
       );
       logResponse = lastResponse;
       return lastResponse;
@@ -557,7 +650,7 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -572,6 +665,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(logResponse.usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -599,16 +695,108 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
+  /** Decide the transport before spending a provider request, never after tokens. */
+  async supportsAgentStreaming(appKey: string): Promise<boolean> {
+    const app = await this.prisma.ai_engine_applications.findUnique({
+      where: { key: appKey },
+    });
+    if (!app?.is_active) return false;
+    const configId = app.config_id || this.defaultConfigId;
+    const provider = configId ? this.providers.get(configId) : undefined;
+    return (
+      !!configId &&
+      !this.degradedAgentStreamConfigs.has(configId) &&
+      !!provider?.chatStream &&
+      provider.supportsMeteredAgentStream?.() === true
+    );
+  }
+
+  /** H opt-in agent transport. No buffered fallback and no second quota path. */
+  async *runAgentStream(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
+  ): AsyncGenerator<AIStreamChunk> {
+    yield* this.runStream(appKey, variables, extraMessages, {
+      ...optionsOverride,
+      agenticStream: true,
+    });
+  }
+
   async *runStream(
     appKey: string,
     variables?: Record<string, string>,
     extraMessages?: AIMessage[],
     optionsOverride?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
+    const factory = () =>
+      this.runApplicationStream(
+        appKey,
+        variables,
+        extraMessages,
+        optionsOverride,
+      );
+    if (!this.providerObserver || !this.trace) {
+      yield* factory();
+      return;
+    }
+    const root = this.trace.currentSpan()
+      ? undefined
+      : this.startStandaloneTrace();
+    let completed = false;
+    let failed = false;
+    try {
+      yield* this.providerObserver.callStream(factory, root, (status) => {
+        failed = status === 'error';
+      });
+      completed = true;
+    } catch (error) {
+      this.trace.finishTrace(root, 'failed', {
+        status: 'error',
+        error_code: 'PROVIDER_EXCEPTION',
+      });
+      throw error;
+    } finally {
+      this.trace.finishTrace(
+        root,
+        completed ? (failed ? 'failed' : 'partial') : 'cancelled',
+        {
+          status: completed ? (failed ? 'error' : 'ok') : 'cancelled',
+        },
+      );
+    }
+  }
+
+  private async *runApplicationStream(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
+  ): AsyncGenerator<AIStreamChunk> {
+    const agentic = optionsOverride?.agenticStream === true;
     const startTime = Date.now();
     const callId = randomUUID();
     let lastChunk: AIStreamChunk | null = null;
     let resolvedConfigId: number | null = null;
+    let deadline: AgentDeadline | undefined;
+    let providerDispatched = false;
+    let metered = false;
+    let terminal = false;
+    let quotaConsumed = false;
+    let accumulatedContent = '';
+    let pendingTerminal: AIStreamChunk | undefined;
+    let resultUsage: AIResponse['usage'];
+    let contextBudget: AIStreamChunk['context_budget'];
+    let tools: AIRequestOptions['tools'];
+    let reservedOutputTokens = 0;
+    const meter = agentic ? objectiveProviderMeter.getStore() : undefined;
+    const recordMeter = async (usage: AIResponse['usage']) => {
+      if (!meter || metered || !providerDispatched) return;
+      metered = true;
+      meter.observed = true;
+      await meter.usage(usage, this.agentStreamCost(resolvedConfigId, usage));
+    };
 
     try {
       const app = await this.prisma.ai_engine_applications.findUnique({
@@ -661,52 +849,204 @@ export class AIEngineService implements OnModuleInit {
         return;
       }
 
-      // Build messages
-      const messages: AIMessage[] = [];
+      if (
+        agentic &&
+        (provider.supportsMeteredAgentStream?.() !== true ||
+          (resolvedConfigId !== null &&
+            this.degradedAgentStreamConfigs.has(resolvedConfigId)))
+      ) {
+        lastChunk = {
+          type: 'error',
+          error:
+            'Metered agent streaming is unavailable for this configuration',
+          error_code: 'AI_STREAM_UNAVAILABLE',
+          usage_state: 'unknown',
+        };
+        yield lastChunk;
+        return;
+      }
 
-      if (app.system_prompt) {
-        messages.push({
-          role: 'system',
-          content: this.interpolate(app.system_prompt, variables),
+      let messages = this.applicationMessages(app, variables, extraMessages);
+      const options = this.applicationOptions(app, optionsOverride);
+      if (agentic) {
+        // Account for exactly the base override sent to the SDK, without
+        // overriding later runtime/tenant/pending-approval system messages.
+        if (options.systemPrompt) {
+          const baseIndex = messages.findIndex(
+            (message) => message.role === 'system',
+          );
+          if (baseIndex < 0)
+            messages.unshift({ role: 'system', content: options.systemPrompt });
+          else
+            messages[baseIndex] = {
+              ...messages[baseIndex],
+              content: options.systemPrompt,
+            };
+          delete options.systemPrompt;
+        }
+        options.tools = canonicalAgentTools(options.tools);
+        tools = options.tools;
+        const settings = resolvedConfigId
+          ? this.configSettings.get(resolvedConfigId)
+          : undefined;
+        const configured =
+          settings?.agent_context_window_tokens ??
+          settings?.context_window_tokens;
+        const contextWindowTokens = configured ?? 32768;
+        const maxOutputTokens =
+          options.maxTokens ?? settings?.maxTokens ?? 1024;
+        options.maxTokens = maxOutputTokens;
+        reservedOutputTokens = maxOutputTokens;
+        const budget = applyAgentContextBudget(messages, options.tools ?? [], {
+          contextWindowTokens,
+          maxOutputTokens,
         });
+        messages = budget.messages;
+        contextBudget = {
+          estimated_input_tokens: budget.estimatedInputTokens,
+          omitted_messages: budget.omittedMessages,
+          context_window_tokens: contextWindowTokens,
+          provenance: configured === undefined ? 'fallback' : 'configured',
+          method: budget.method,
+        };
       }
-
-      if (app.prompt_template) {
-        messages.push({
-          role: 'user',
-          content: this.interpolate(app.prompt_template, variables),
-        });
-      }
-
-      if (extraMessages) {
-        messages.push(...extraMessages);
-      }
-
-      const options: AIRequestOptions = {};
-      if (app.temperature !== null) {
-        options.temperature = Number(app.temperature);
-      }
-      if (app.max_tokens !== null) {
-        options.maxTokens = app.max_tokens;
-      }
-      // Without this the tool catalog never reached the streaming path, so
-      // opening a stream silently disabled the agent.
-      if (optionsOverride) {
-        Object.assign(options, optionsOverride);
+      // Always own an abortable operation for H, including bare consumer return().
+      deadline = createAgentOperation(
+        agentic
+          ? {
+              ...options,
+              signal: options.signal ?? new AbortController().signal,
+            }
+          : options,
+      );
+      if (deadline) {
+        options.signal = deadline.signal;
+        options.deadlineMs = deadline.deadlineMs;
       }
 
       try {
-        for await (const chunk of provider.chatStream(messages, options)) {
+        deadline?.assertCanStart();
+        if (agentic) {
+          if (meter) await meter.dispatch();
+          deadline?.assertCanStart();
+          providerDispatched = true;
+        }
+        const stream =
+          this.providerObserver && this.trace?.currentSpan()
+            ? this.providerObserver.attemptStream(
+                resolvedConfigId
+                  ? this.configSettings.get(resolvedConfigId)
+                  : undefined,
+                this.providerAttributes(resolvedConfigId, messages, options),
+                () => provider.chatStream!(messages, options),
+              )
+            : provider.chatStream(messages, options);
+        for await (const chunk of agentDeadlineStream(stream, deadline)) {
+          if (agentic) {
+            if (pendingTerminal)
+              throw new Error('Provider emitted data after a terminal frame');
+            // Only a complete terminal batch may become execution candidates.
+            if (chunk.type === 'tool_call' || chunk.type === 'tool_result')
+              throw new Error(
+                'Agent stream provider emitted a non-terminal tool call',
+              );
+            if (chunk.type === 'text')
+              accumulatedContent += chunk.content ?? '';
+            if (chunk.type === 'done' || chunk.type === 'error') {
+              pendingTerminal = chunk;
+              resultUsage = reportedAgentUsage(chunk.usage);
+              continue;
+            }
+          }
           lastChunk = chunk;
           yield chunk;
         }
+        if (agentic) {
+          if (!pendingTerminal)
+            throw new Error('Provider stream ended without a terminal result');
+          await recordMeter(resultUsage);
+          if (pendingTerminal.type === 'error') {
+            lastChunk = {
+              ...pendingTerminal,
+              usage: resultUsage,
+              usage_state: resultUsage ? 'reported' : 'unknown',
+            };
+            yield lastChunk;
+            return;
+          }
+          if (!resultUsage) {
+            if (resolvedConfigId !== null)
+              this.degradedAgentStreamConfigs.add(resolvedConfigId);
+            throw Object.assign(
+              new Error('Provider stream completed without reported usage'),
+              {
+                code: 'AI_STREAM_USAGE_UNAVAILABLE',
+              },
+            );
+          }
+          const completedCalls = validateAgentToolCalls(
+            pendingTerminal.tool_calls ?? [],
+            tools,
+          );
+          if (
+            (pendingTerminal.finish_reason === 'tool_calls' &&
+              !completedCalls.length) ||
+            (pendingTerminal.tool_calls?.length &&
+              pendingTerminal.finish_reason !== 'tool_calls')
+          )
+            throw new Error('Incomplete agent tool batch');
+          // Complete accounting before exposing done. Closing at this frame
+          // cannot turn the inference into a free or cancelled provider attempt.
+          await this.consumeSubscriptionQuota(
+            app.ai_feature_category,
+            resultUsage?.totalTokens ?? 0,
+            { appKey: app.key ?? appKey, callId },
+          );
+          quotaConsumed = true;
+          terminal = true;
+          const sanitized = this.sanitizeResponse(
+            { success: true, content: accumulatedContent },
+            this.isThinkingEnabled(resolvedConfigId),
+          );
+          lastChunk = {
+            ...pendingTerminal,
+            ...(completedCalls.length && { tool_calls: completedCalls }),
+            usage: resultUsage,
+            content: this.formatOutput(
+              sanitized.content ?? '',
+              app.output_format,
+            ),
+            usage_state: resultUsage ? 'reported' : 'unknown',
+            context_budget: contextBudget,
+          };
+          yield lastChunk;
+          return;
+        }
       } catch (error: any) {
-        lastChunk = { type: 'error', error: error.message };
+        lastChunk = {
+          type: 'error',
+          ...(agentic && {
+            error_code:
+              deadline && isAgentAbort(error, deadline.signal)
+                ? agentAbortFailure(error, deadline.signal).error_code
+                : error?.code === 'AI_STREAM_USAGE_UNAVAILABLE'
+                  ? error.code
+                  : 'AI_STREAM_INVALID',
+            usage: resultUsage,
+            usage_state: resultUsage
+              ? ('reported' as const)
+              : ('unknown' as const),
+          }),
+          error:
+            deadline && isAgentAbort(error, deadline.signal)
+              ? agentAbortFailure(error, deadline.signal).error
+              : error.message,
+        };
         yield lastChunk;
       }
 
       // Consume quota on successful completion.
-      if (lastChunk?.type === 'done') {
+      if (lastChunk?.type === 'done' && !quotaConsumed) {
         const usage = lastChunk.usage;
         const tokens =
           usage?.totalTokens ??
@@ -716,41 +1056,134 @@ export class AIEngineService implements OnModuleInit {
           callId,
         });
       }
+    } catch (error: any) {
+      if (!agentic) throw error;
+      lastChunk = {
+        type: 'error',
+        error: error?.message ?? 'Agent stream failed',
+        error_code: error?.errorCode ?? error?.code ?? 'AI_STREAM_FAILED',
+        usage_state: 'unknown',
+      };
+      yield lastChunk;
     } finally {
-      // Log after stream completes — always runs regardless of early returns
-      const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
-      const configSettings = resolvedConfigId
-        ? this.configSettings.get(resolvedConfigId)
-        : undefined;
+      deadline?.dispose();
+      try {
+        if (agentic) await recordMeter(resultUsage);
+      } finally {
+        // Log after stream completes — always runs regardless of early returns
+        const latencyMs = Date.now() - startTime;
+        const context = RequestContextService.asyncLocalStorage.getStore();
+        const configSettings = resolvedConfigId
+          ? this.configSettings.get(resolvedConfigId)
+          : undefined;
 
-      const usage = lastChunk?.type === 'done' ? lastChunk.usage : undefined;
-      const cacheTokens = extractCacheTokens(usage);
-      const costUsd = this.aiLoggingService.calculateCost(
-        configSettings,
-        usage?.promptTokens ?? 0,
-        usage?.completionTokens ?? 0,
-        cacheTokens.cache_read_tokens,
-        cacheTokens.cache_creation_tokens,
-      );
+        const usage = agentic
+          ? resultUsage
+          : lastChunk?.type === 'done'
+            ? lastChunk.usage
+            : undefined;
+        const cacheTokens = extractCacheTokens(usage);
+        const legacyCostUsd = this.aiLoggingService.calculateCost(
+          configSettings,
+          usage?.promptTokens ?? 0,
+          usage?.completionTokens ?? 0,
+          cacheTokens.cache_read_tokens,
+          cacheTokens.cache_creation_tokens,
+        );
 
-      this.aiLoggingService.logRequest({
-        app_key: appKey,
-        config_id: resolvedConfigId ?? undefined,
-        organization_id: context?.organization_id,
-        store_id: context?.store_id,
-        user_id: context?.user_id,
-        model: undefined,
-        prompt_tokens: usage?.promptTokens ?? 0,
-        completion_tokens: usage?.completionTokens ?? 0,
-        ...cacheTokens,
-        cost_usd: costUsd,
-        latency_ms: latencyMs,
-        status: lastChunk?.type === 'error' ? 'error' : 'success',
-        error_message:
-          lastChunk?.type === 'error' ? lastChunk.error : undefined,
-        input_preview: variables ? JSON.stringify(variables) : undefined,
-      });
+        const costUsd = agentic
+          ? this.agentStreamCost(resolvedConfigId, usage)
+          : legacyCostUsd;
+        const pricing = configSettings?.pricing;
+        const knownRate = (value: unknown): value is number =>
+          typeof value === 'number' && Number.isFinite(value) && value >= 0;
+        const estimatedCostMicrousd =
+          agentic &&
+          providerDispatched &&
+          !usage &&
+          contextBudget &&
+          knownRate(pricing?.input_per_1k) &&
+          knownRate(pricing?.output_per_1k)
+            ? Math.ceil(
+                ((contextBudget.estimated_input_tokens * pricing.input_per_1k +
+                  reservedOutputTokens * pricing.output_per_1k) /
+                  1000) *
+                  1_000_000,
+              )
+            : null;
+        const status = agentic
+          ? terminal
+            ? 'success'
+            : 'error'
+          : lastChunk?.type === 'error'
+            ? 'error'
+            : 'success';
+        this.aiLoggingService.logRequest({
+          request_id:
+            RequestContextService.asyncLocalStorage.getStore()?.request_id,
+          ...this.observedLogFields(usage),
+          app_key: appKey,
+          config_id: resolvedConfigId ?? undefined,
+          organization_id: context?.organization_id,
+          store_id: context?.store_id,
+          user_id: context?.user_id,
+          model: agentic ? lastChunk?.model : undefined,
+          prompt_tokens: usage?.promptTokens ?? 0,
+          completion_tokens: usage?.completionTokens ?? 0,
+          ...cacheTokens,
+          cost_usd: costUsd ?? 0,
+          latency_ms: latencyMs,
+          status,
+          error_message:
+            lastChunk?.type === 'error'
+              ? lastChunk.error
+              : agentic && !terminal
+                ? 'Agent stream cancelled'
+                : undefined,
+          input_preview: variables ? JSON.stringify(variables) : undefined,
+          ...(agentic && {
+            cost_source: 'logical_summary' as const,
+            usage_observed: {
+              prompt_tokens: usage?.promptTokens ?? null,
+              completion_tokens: usage?.completionTokens ?? null,
+              cache_read_tokens: usage?.cacheReadTokens ?? null,
+              cache_creation_tokens: usage?.cacheCreationTokens ?? null,
+            },
+            telemetry_metadata: {
+              streaming: true,
+              usage_known: usage !== undefined,
+              usage_source: usage ? 'provider' : 'unknown',
+              billable: usage ? 'reported_usage' : 'unknown',
+              context_tokens: contextBudget?.estimated_input_tokens ?? null,
+              context_window_tokens:
+                contextBudget?.context_window_tokens ?? null,
+              context_budget_source: contextBudget?.provenance ?? null,
+              omitted_messages: contextBudget?.omitted_messages ?? null,
+              estimated_output_tokens: reservedOutputTokens,
+              estimation_method: 'conservative_estimate',
+              estimated_cost_microusd: estimatedCostMicrousd,
+              cost_measurement:
+                costUsd !== null
+                  ? 'reported'
+                  : estimatedCostMicrousd !== null
+                    ? 'estimated'
+                    : 'unknown',
+              catalog_hash: hashTraceValue(tools ?? []),
+              catalog_version: '1.1',
+            },
+          }),
+        });
+        if (agentic)
+          this.eventEmitter.emit('ai.request.completed', {
+            app_key: appKey,
+            cost_usd: costUsd,
+            latency_ms: latencyMs,
+            status,
+            organization_id: context?.organization_id,
+            store_id: context?.store_id,
+            usage_state: usage ? 'reported' : 'unknown',
+          });
+      }
     }
   }
 
@@ -816,7 +1249,7 @@ export class AIEngineService implements OnModuleInit {
       throw error;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -831,6 +1264,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(logResponse.usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -979,7 +1415,7 @@ export class AIEngineService implements OnModuleInit {
       yield lastChunk;
     } finally {
       const latencyMs = Date.now() - startTime;
-      const context = RequestContextService.getContext();
+      const context = RequestContextService.asyncLocalStorage.getStore();
       const configSettings = resolvedConfigId
         ? this.configSettings.get(resolvedConfigId)
         : undefined;
@@ -995,6 +1431,9 @@ export class AIEngineService implements OnModuleInit {
       );
 
       this.aiLoggingService.logRequest({
+        request_id:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id,
+        ...this.observedLogFields(usage),
         app_key: appKey,
         config_id: resolvedConfigId ?? undefined,
         organization_id: context?.organization_id,
@@ -1443,6 +1882,269 @@ export class AIEngineService implements OnModuleInit {
     return app;
   }
 
+  private applicationMessages(
+    app: any,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+  ): AIMessage[] {
+    return [
+      ...(app.system_prompt
+        ? [
+            {
+              role: 'system' as const,
+              content: this.interpolate(app.system_prompt, variables),
+            },
+          ]
+        : []),
+      ...(app.prompt_template
+        ? [
+            {
+              role: 'user' as const,
+              content: this.interpolate(app.prompt_template, variables),
+            },
+          ]
+        : []),
+      ...(extraMessages ?? []),
+    ];
+  }
+
+  private applicationOptions(
+    app: any,
+    override?: AIRequestOptions,
+  ): AIRequestOptions {
+    return {
+      ...(app.temperature !== null
+        ? { temperature: Number(app.temperature) }
+        : {}),
+      ...(app.max_tokens !== null ? { maxTokens: app.max_tokens } : {}),
+      ...override,
+    };
+  }
+
+  /** Missing pricing or cache counters are unknown, never a fictitious free call. */
+  private agentStreamCost(
+    configId: number | null,
+    usage: AIResponse['usage'],
+  ): number | null {
+    if (!usage) return null;
+    const settings = configId ? this.configSettings.get(configId) : undefined;
+    const pricing = settings?.pricing;
+    const valid = (value: unknown): value is number =>
+      typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    if (
+      !pricing ||
+      !valid(usage.promptTokens) ||
+      !valid(usage.completionTokens) ||
+      (usage.promptTokens > 0 && !valid(pricing.input_per_1k)) ||
+      (usage.completionTokens > 0 && !valid(pricing.output_per_1k)) ||
+      ((usage.cacheReadTokens ?? 0) > 0 && !valid(pricing.cache_read_per_1k)) ||
+      ((usage.cacheCreationTokens ?? 0) > 0 &&
+        !valid(pricing.cache_creation_per_1k)) ||
+      (pricing.cache_read_per_1k !== undefined &&
+        usage.cacheReadTokens === undefined) ||
+      (pricing.cache_creation_per_1k !== undefined &&
+        usage.cacheCreationTokens === undefined)
+    )
+      return null;
+    return this.aiLoggingService.calculateCost(
+      settings,
+      usage.promptTokens,
+      usage.completionTokens,
+      usage.cacheReadTokens ?? 0,
+      usage.cacheCreationTokens ?? 0,
+    );
+  }
+
+  private safeProviderError(error: string | undefined): string | undefined {
+    return 'PROVIDER_ERROR';
+  }
+
+  private async observeProviderCall(
+    appKey: string | undefined,
+    callback: () => Promise<AIResponse>,
+  ): Promise<AIResponse> {
+    if (!this.providerObserver || !this.trace) return callback();
+    if (this.trace.currentSpan()) {
+      return this.providerObserver.call(
+        { call_reason: appKey ? 'application' : 'direct' },
+        callback,
+      );
+    }
+    const root = this.startStandaloneTrace();
+    if (!root) return callback();
+    try {
+      const result = await this.trace.run(root, () =>
+        this.providerObserver!.call(
+          { call_reason: appKey ? 'application' : 'direct' },
+          callback,
+        ),
+      );
+      if (!result.success)
+        this.trace.finishTrace(root, 'failed', { status: 'error' });
+      return result;
+    } catch (error) {
+      this.trace.finishTrace(root, 'failed', {
+        status: 'error',
+        error_code: 'PROVIDER_EXCEPTION',
+      });
+      throw error;
+    } finally {
+      // An inference is not proof of a completed business task.
+      this.trace.finishTrace(root, 'partial');
+    }
+  }
+
+  private async withProviderDeadline(
+    options: AIRequestOptions | undefined,
+    callback: (scoped: AIRequestOptions | undefined) => Promise<AIResponse>,
+  ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
+    if (!deadline) return callback(options);
+    try {
+      const scoped = {
+        ...options,
+        signal: deadline.signal,
+        deadlineMs: deadline.deadlineMs,
+      };
+      return await deadline.run(() => callback(scoped));
+    } catch (error) {
+      if (!isAgentAbort(error, deadline.signal)) throw error;
+      return agentAbortFailure(error, deadline.signal);
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  private async waitForProviderRetry(
+    delayMs: number,
+    options: AIRequestOptions,
+  ): Promise<void> {
+    const deadline = createAgentOperation(options);
+    if (!deadline)
+      return new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      // A backoff that fills the entire remaining budget cannot lead to work.
+      deadline.assertCanStart(delayMs + 1);
+      await deadline.run(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              clearTimeout(timer);
+              reject(deadline.signal.reason);
+            };
+            const timer = setTimeout(() => {
+              deadline.signal.removeEventListener('abort', abort);
+              resolve();
+            }, delayMs);
+            deadline.signal.addEventListener('abort', abort, { once: true });
+            if (deadline.signal.aborted) abort();
+          }),
+      );
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  private async observeProviderAttempt(
+    configId: number | null,
+    messages: AIMessage[],
+    options: AIRequestOptions | undefined,
+    callback: () => Promise<AIResponse>,
+    dispatchNumber = 1,
+  ): Promise<AIResponse> {
+    const execute = () =>
+      !this.providerObserver || !this.trace?.currentSpan()
+        ? callback()
+        : this.providerObserver.attempt(
+            configId ? this.configSettings.get(configId) : undefined,
+            {
+              ...this.providerAttributes(configId, messages, options),
+              dispatch_number: dispatchNumber,
+            },
+            callback,
+          );
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
+    const meter = objectiveProviderMeter.getStore();
+    if (meter) await meter.dispatch();
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
+    const response = await execute();
+    if (options?.signal?.aborted)
+      return agentAbortFailure(undefined, options.signal);
+    if (meter) {
+      meter.observed = true;
+      const usage = response.usage;
+      const settings = configId ? this.configSettings.get(configId) : undefined;
+      await meter.usage(
+        usage,
+        usage && settings?.pricing
+          ? this.aiLoggingService.calculateCost(
+              settings,
+              usage.promptTokens,
+              usage.completionTokens,
+              usage.cacheReadTokens,
+              usage.cacheCreationTokens,
+            )
+          : null,
+      );
+    }
+    return response;
+  }
+
+  private providerAttributes(
+    configId: number | null,
+    messages: AIMessage[],
+    options?: AIRequestOptions,
+  ) {
+    const tools = options?.tools ?? [];
+    return {
+      config_hash: configId
+        ? (this.configFingerprints.get(configId) ??
+          hashTraceValue({
+            config_id: configId,
+            settings: this.configSettings.get(configId),
+          }))
+        : null,
+      prompt_hash: hashTraceValue(messages),
+      options_hash: hashTraceValue(options ?? {}),
+      catalog_hash: hashTraceValue(tools),
+      tool_count: tools.length,
+      catalog_version: options?.agenticStream ? '1.1' : '1',
+      definition_tokens: null,
+      context_tokens: null,
+    };
+  }
+
+  private startStandaloneTrace() {
+    // Never borrow a tenant from the historical static RequestContext fallback.
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    return context?.organization_id && context.store_id
+      ? this.trace?.startTrace({
+          kind: 'tenant',
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          user_id: context.user_id,
+          request_id: context.request_id,
+          surface: 'api',
+          agent: 'engine',
+        })
+      : undefined;
+  }
+
+  private observedLogFields(usage: AIResponse['usage']) {
+    const observed = this.providerObserver?.observedUsage(usage);
+    return {
+      cost_source: 'logical_summary' as const,
+      usage_observed: {
+        prompt_tokens: observed?.promptTokens ?? null,
+        completion_tokens: observed?.completionTokens ?? null,
+        cache_read_tokens: observed?.cacheReadTokens ?? null,
+        cache_creation_tokens: observed?.cacheCreationTokens ?? null,
+      },
+    };
+  }
+
   private buildImagePrompt(
     app: any,
     variables?: Record<string, string>,
@@ -1625,7 +2327,7 @@ export class AIEngineService implements OnModuleInit {
     featureCategory?: string | null;
   }): void {
     const latencyMs = Date.now() - params.startTime;
-    const context = RequestContextService.getContext();
+    const context = RequestContextService.asyncLocalStorage.getStore();
     const configSettings = params.configId
       ? this.configSettings.get(params.configId)
       : undefined;
@@ -1641,6 +2343,9 @@ export class AIEngineService implements OnModuleInit {
     );
 
     this.aiLoggingService.logRequest({
+      request_id:
+        RequestContextService.asyncLocalStorage.getStore()?.request_id,
+      ...this.observedLogFields(usage),
       app_key: params.appKey,
       config_id: params.configId ?? undefined,
       organization_id: context?.organization_id,
@@ -1807,11 +2512,10 @@ export class AIEngineService implements OnModuleInit {
         }),
       );
       if (this.gateConfig.isEnforce()) {
-        throw new VendixHttpException(
-          ErrorCodes.SUBSCRIPTION_005,
-          undefined,
-          { app_key: appKey, feature_category: featureCategory ?? null },
-        );
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_005, undefined, {
+          app_key: appKey,
+          feature_category: featureCategory ?? null,
+        });
       }
       return;
     }

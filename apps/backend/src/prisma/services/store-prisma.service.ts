@@ -95,6 +95,13 @@ export class StorePrismaService extends BasePrismaService {
     // registro.
     'ai_attachments',
     'ai_agent_tasks',
+    'ai_agent_objectives',
+    'ai_agent_recipes',
+    'ai_agent_recipe_events',
+    'ai_agent_tool_results',
+    'ai_agent_effects',
+    // Explicit store ownership excludes system-only (NULL tenant) trace spans.
+    'ai_agent_trace_spans',
     // Bloques UI de Vex. `store_id` propio y NO nullable: scoping directo por
     // tienda, igual que `ai_attachments`. Sin este registro el getter
     // devolvería un delegate SIN scoping y un bloque sería legible por id
@@ -1552,6 +1559,30 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_attachments() {
     return this.scoped_client.ai_attachments;
+  }
+
+  get ai_agent_trace_spans() {
+    return this.scoped_client.ai_agent_trace_spans;
+  }
+
+  // F global recipes are never reached through StorePrisma. Repository ALSO filters owner.
+  get ai_agent_recipes() {
+    return this.scoped_client.ai_agent_recipes;
+  }
+  get ai_agent_recipe_events() {
+    return this.scoped_client.ai_agent_recipe_events;
+  }
+
+  get ai_agent_objectives() {
+    return this.scoped_client.ai_agent_objectives;
+  }
+
+  get ai_agent_tool_results() {
+    return this.scoped_client.ai_agent_tool_results;
+  }
+
+  get ai_agent_effects() {
+    return this.scoped_client.ai_agent_effects;
   }
 
   get ai_agent_tasks() {

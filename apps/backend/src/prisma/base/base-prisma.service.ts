@@ -4,7 +4,7 @@ import {
   OnModuleInit,
   Logger,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
@@ -52,6 +52,15 @@ export abstract class BasePrismaService implements OnModuleInit {
 
   $disconnect() {
     return this.baseClient.$disconnect();
+  }
+
+  // Raw SQL still bypasses scope extensions; callers must bind tenant predicates.
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T> {
+    return this.baseClient.$queryRaw<T>(query);
+  }
+
+  $executeRaw(query: Prisma.Sql): Promise<number> {
+    return this.baseClient.$executeRaw(query);
   }
 
   $queryRawUnsafe<T = unknown>(query: string, ...values: any[]): Promise<T> {

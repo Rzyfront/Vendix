@@ -1,3 +1,8 @@
+import { voiceReceiptWasApplied } from '../../services/vexi-voice-consent.model';
+import type {
+  VoiceConsentApplied,
+  VoiceConsentContext,
+} from '../../services/vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
@@ -8,13 +13,16 @@ import {
   AIConversation,
   AIMessage,
   VexiTask,
+  VexiObjective,
 } from '../../services/vexi-api.service';
 
 @Injectable({ providedIn: 'root' })
 export class VexiFacade {
   private store = inject(Store);
 
-  readonly conversations$ = this.store.select(VexiSelectors.selectConversations);
+  readonly conversations$ = this.store.select(
+    VexiSelectors.selectConversations,
+  );
   readonly activeConversationId$ = this.store.select(
     VexiSelectors.selectActiveConversationId,
   );
@@ -22,6 +30,17 @@ export class VexiFacade {
   readonly streamingContent$ = this.store.select(
     VexiSelectors.selectStreamingContent,
   );
+  readonly streamingProgress$ = this.store.select(
+    VexiSelectors.selectStreamingProgress,
+  );
+  readonly streamingProgress = toSignal(this.streamingProgress$, {
+    initialValue: '',
+  });
+
+  cancelStream(): void {
+    this.store.dispatch(VexiActions.cancelStream());
+  }
+
   readonly isStreaming$ = this.store.select(VexiSelectors.selectIsStreaming);
   readonly isSending$ = this.store.select(VexiSelectors.selectIsSending);
   readonly loading$ = this.store.select(VexiSelectors.selectLoading);
@@ -31,6 +50,27 @@ export class VexiFacade {
     VexiSelectors.selectPendingProposal,
   );
   readonly activeTask$ = this.store.select(VexiSelectors.selectActiveTask);
+
+  readonly objective$ = this.store.select(VexiSelectors.selectObjective);
+  readonly objectiveLoading$ = this.store.select(
+    VexiSelectors.selectObjectiveLoading,
+  );
+  readonly objective = toSignal(this.objective$, {
+    initialValue: null as VexiObjective | null,
+  });
+  readonly objectiveLoading = toSignal(this.objectiveLoading$, {
+    initialValue: false,
+  });
+
+  loadObjective(objectiveId: string): void {
+    this.store.dispatch(VexiActions.loadObjective({ objectiveId }));
+  }
+
+  resumeObjective(objectiveId: string, confirmExpired = false): void {
+    this.store.dispatch(
+      VexiActions.resumeObjective({ objectiveId, confirmExpired }),
+    );
+  }
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   readonly conversations = toSignal(this.conversations$, {
@@ -42,11 +82,15 @@ export class VexiFacade {
   readonly messages = toSignal(this.messages$, {
     initialValue: [] as AIMessage[],
   });
-  readonly streamingContent = toSignal(this.streamingContent$, { initialValue: '' });
+  readonly streamingContent = toSignal(this.streamingContent$, {
+    initialValue: '',
+  });
   readonly isStreaming = toSignal(this.isStreaming$, { initialValue: false });
   readonly isSending = toSignal(this.isSending$, { initialValue: false });
   readonly loading = toSignal(this.loading$, { initialValue: false });
-  readonly error = toSignal(this.error$, { initialValue: null as string | null });
+  readonly error = toSignal(this.error$, {
+    initialValue: null as string | null,
+  });
   readonly toolSteps = toSignal(this.toolSteps$, {
     initialValue: [] as ToolStep[],
   });
@@ -66,9 +110,7 @@ export class VexiFacade {
   }
 
   selectConversation(conversationId: number): void {
-    this.store.dispatch(
-      VexiActions.selectConversation({ conversationId }),
-    );
+    this.store.dispatch(VexiActions.selectConversation({ conversationId }));
   }
 
   /**
@@ -109,9 +151,7 @@ export class VexiFacade {
   }
 
   archiveConversation(conversationId: number): void {
-    this.store.dispatch(
-      VexiActions.archiveConversation({ conversationId }),
-    );
+    this.store.dispatch(VexiActions.archiveConversation({ conversationId }));
   }
 
   clearActiveConversation(): void {
@@ -125,6 +165,43 @@ export class VexiFacade {
    */
   confirmProposal(speak = false): void {
     this.store.dispatch(VexiActions.confirmProposal({ speak }));
+  }
+
+  receiveRealtimeProposal(
+    proposal: VexiProposal,
+    voiceContext: VoiceConsentContext,
+  ): void {
+    if (this.activeConversationId() !== voiceContext.conversation_id) return;
+    this.store.dispatch(
+      VexiActions.proposalReceived({ ...proposal, voiceContext }),
+    );
+  }
+
+  acceptVoiceReceipt(result: VoiceConsentApplied): void {
+    const proposal = this.pendingProposal();
+    if (
+      this.activeConversationId() !== result.context.conversation_id ||
+      proposal?.confirmationToken !== result.confirmationToken ||
+      proposal?.voiceContext?.proposal_id !== result.context.proposal_id
+    )
+      return;
+    const applied = voiceReceiptWasApplied(result.receipt);
+    this.store.dispatch(
+      VexiActions.confirmProposalSuccess({
+        receiptApplied: applied,
+        proposalId: result.context.proposal_id,
+        tool: result.receipt.tool,
+        output: result.receipt.output,
+        summary: result.receipt.summary,
+        audioBase64: applied ? result.receipt.audio_base64 : undefined,
+        contentType: result.receipt.content_type,
+        conversationId: result.context.conversation_id,
+        confirmationToken: result.confirmationToken,
+        domain: proposal.preview?.domain,
+        planActive: applied && proposal.planActive,
+        speak: true,
+      }),
+    );
   }
 
   rejectProposal(): void {

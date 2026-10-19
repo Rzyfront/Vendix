@@ -21,6 +21,7 @@ describe('AILoggingService cache tokens (vexR3-C)', () => {
       status: 'success',
     } as any);
     expect(create).toHaveBeenCalledWith({
+      select: { id: true },
       data: expect.objectContaining({
         cache_read_tokens: 900,
         cache_creation_tokens: 120,
@@ -56,5 +57,147 @@ describe('AILoggingService cache tokens (vexR3-C)', () => {
       },
     };
     expect(service.calculateCost(withCache, 1000, 1000, 1000, 1000)).toBe(4.35);
+  });
+});
+
+describe('AILoggingService phase A correlation/privacy', () => {
+  const UUID = '123e4567-e89b-42d3-a456-426614174000';
+  const entry = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cost_usd: 0,
+    latency_ms: 1,
+    status: 'error' as const,
+    input_preview:
+      'Bearer secret-token; cliente@example.test; audio;base64,AAAA',
+    error_message:
+      'failed body secret-token confirmation_token=secret-confirmation',
+  };
+  const build = () => {
+    const create = jest.fn().mockResolvedValue({});
+    const service = new AILoggingService(
+      { ai_engine_logs: { create } } as any,
+      {} as any,
+      undefined,
+    );
+    return { service, create };
+  };
+
+  it('persists a valid supplied request UUID instead of the database default', async () => {
+    const { service, create } = build();
+    await service.logRequest({ ...entry, request_id: UUID });
+    expect(create.mock.calls[0][0].data.request_id).toBe(UUID);
+  });
+
+  it('normalizes arbitrary IDs deterministically and stores only a bounded hash', async () => {
+    const { service, create } = build();
+    const external = 'external:request:Bearer secret-token';
+    await service.logRequest({ ...entry, request_id: external });
+    await service.logRequest({ ...entry, request_id: external });
+    const [first, second] = create.mock.calls.map(([arg]) => arg.data);
+    expect(first.request_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second.request_id).toBe(first.request_id);
+    expect(first.external_request_id_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(first)).not.toContain('secret-token');
+  });
+
+  it('tracing removes previews/errors and rejects arbitrary metadata/correlations', async () => {
+    const { service, create } = build();
+    await service.logRequest({
+      ...entry,
+      trace_id: 'Bearer secret-token',
+      provider_call_id: 'not-uuid',
+      conversation_id: 'private customer@example.test',
+      telemetry_metadata: {
+        body: 'secret-token',
+        prompt_hash: 'a'.repeat(64),
+        round: 2,
+      },
+      usage_observed: {
+        prompt_tokens: null,
+        completion_tokens: 0,
+        cache_read_tokens: -1,
+        cache_creation_tokens: Number.NaN,
+      },
+    });
+    const data = create.mock.calls[0][0].data;
+    expect(data.input_preview).toBeUndefined();
+    expect(data.error_message).toBe('[redacted]');
+    expect(data.trace_id).toBeUndefined();
+    expect(data.provider_call_id).toBeUndefined();
+    expect(data.conversation_id).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.telemetry_metadata).toEqual({
+      prompt_hash: 'a'.repeat(64),
+      round: 2,
+    });
+    expect(data.usage_observed).toEqual({
+      prompt_tokens: null,
+      completion_tokens: 0,
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+    });
+    expect(data.cost_source).toBe('logical_summary');
+    expect(JSON.stringify(data)).not.toMatch(
+      /secret-token|secret-confirmation|cliente@example|base64|private customer/,
+    );
+  });
+
+  it('swallows telemetry sink failure without returning or logging the payload', async () => {
+    const { service, create } = build();
+    create.mockRejectedValue(new Error('rejected body secret-token'));
+    const error = jest.spyOn((service as any).logger, 'error');
+    await expect(service.logRequest(entry)).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith('Failed to log AI request');
+  });
+});
+
+describe('H accounting is explicit without enabling tracing', () => {
+  it('persists unknown usage and redacts data on cancellation', async () => {
+    const create = jest.fn().mockResolvedValue({});
+    const service = new AILoggingService(
+      { ai_engine_logs: { create } } as never,
+      {} as never,
+      undefined,
+    );
+    const entry = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cost_usd: 0,
+      latency_ms: 2,
+      status: 'error' as const,
+      input_preview: 'private-message',
+      error_message: 'private-error',
+      usage_observed: {
+        prompt_tokens: null,
+        completion_tokens: null,
+        cache_read_tokens: null,
+        cache_creation_tokens: null,
+      },
+      telemetry_metadata: {
+        streaming: true,
+        usage_known: false,
+        usage_source: 'unknown',
+        billable: 'unknown',
+        cost_measurement: 'estimated',
+        estimated_cost_microusd: 120,
+        context_window_tokens: 32768,
+        context_budget_source: 'fallback',
+        estimation_method: 'conservative_estimate',
+        estimated_output_tokens: 512,
+        omitted_messages: 2,
+      },
+    };
+    try {
+      await service.logRequest(entry);
+      expect(create.mock.calls[0][0].data).toMatchObject({
+        usage_observed: entry.usage_observed,
+        telemetry_metadata: entry.telemetry_metadata,
+        error_message: '[redacted]',
+      });
+      expect(create.mock.calls[0][0].data.input_preview).toBeUndefined();
+    } finally {
+    }
   });
 });

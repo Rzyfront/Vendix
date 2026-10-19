@@ -20,6 +20,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
 | -- | `vendix-address-geocoding` |
+| -- | `vendix-agent-durable-tasks` |
+| -- | `vendix-agent-evals-observability` |
+| -- | `vendix-agent-execution-contract` |
+| -- | `vendix-agent-playbooks` |
+| -- | `vendix-agent-procedural-memory` |
+| -- | `vendix-agent-sandbox-security` |
+| -- | `vendix-agent-voice-consent` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -28,6 +35,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-ai-queue` |
 | -- | `vendix-ai-streaming` |
 | -- | `vendix-ai-style` |
+| -- | `vendix-ai-tool-routing` |
 | -- | `vendix-analytics-metrics` |
 | -- | `vendix-angular-forms` |
 | -- | `vendix-app-architecture` |
@@ -116,6 +124,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or changing a frontend analytics cache key | `vendix-analytics-metrics` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
+| Adding or changing runtime agent playbooks | `vendix-agent-playbooks` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing Vex UI blocks (vex_render_*, vex_block_*) | `vendix-vex-agent` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
@@ -146,10 +155,22 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Cambiando TRUST_PROXY_HOPS o el valor de trust proxy de Express | `vendix-trust-proxy-chain` |
 | Cambiando la topología de red de producción (nginx, Route53, CloudFront) | `vendix-trust-proxy-chain` |
+| Changing AgentPlan storage, objective leases or resume semantics | `vendix-agent-durable-tasks` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
+| Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
+| Changing Vex/Vexi spoken consent or voice confirmation challenges | `vendix-agent-voice-consent` |
+| Changing agent sandbox isolation, limits or deployment adapter | `vendix-agent-sandbox-security` |
+| Changing agent verification, recovery or audited read scheduling | `vendix-agent-durable-tasks` |
+| Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
+| Changing playbook loading, contracts, packaging or verifiers | `vendix-agent-playbooks` |
+| Changing recipe quality review, publication or quarantine | `vendix-agent-procedural-memory` |
+| Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
+| Changing runtime procedural recipes or recipe mining | `vendix-agent-procedural-memory` |
+| Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
+| Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |
 | Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
@@ -294,6 +315,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | El dev server cae en bucle o el dist queda inconsistente | `vendix-known-errors` |
 | Enabling or configuring Vex for a store (Agentes IA settings) | `vendix-vex-agent` |
+| Enabling realtime write proposals or dedicated approval audio capture | `vendix-agent-voice-consent` |
 | Escribir o revisar una migración de base de datos | `vendix-known-errors` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -330,8 +352,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa) | `vendix-restaurant-table-qr` |
 | Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file | `vendix-bulk-operations` |
+| Indexing platform tool knowledge or changing its global namespace | `vendix-ai-tool-routing` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
+| Instrumenting Vex/Vexi traces or provider attempts | `vendix-agent-evals-observability` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Interpretar un error de compilación de TypeScript, SWC, ngc o tsc | `vendix-known-errors` |
@@ -415,6 +439,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
+| Running or changing agentic evaluation datasets and graders | `vendix-agent-evals-observability` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |

@@ -1,5 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+
 import { VexiRealtimeService } from './vexi-realtime.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
@@ -10,8 +10,7 @@ import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscript
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
-import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
-import { RequestContextService } from '@common/context/request-context.service';
+
 import {
   CloseRealtimeSessionDto,
   CreateRealtimeSessionDto,
@@ -30,7 +29,7 @@ import {
  * segments and stock levels.
  */
 @Controller('store/vexi/realtime')
-@UseGuards(RolesGuard, VexiEnabledGuard)
+@UseGuards(RolesGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class VexiRealtimeController {
   constructor(
@@ -49,22 +48,26 @@ export class VexiRealtimeController {
   /**
    * Bridges one `function_call` from the live session into the tool registry.
    *
-   * Not gated by `AiAccessGuard`: the session was already authorized when it
-   * was granted, and re-running the gate on every tool call would let a
-   * mid-session cap rollover strand the model waiting on a result it can
-   * never receive. The read-only + permission checks still run in the service.
+   * G revalidates the server session, current permissions, agent scope and
+   * subscription inline on every call. OFF preserves the legacy read bridge.
    */
   @Post('tool-call')
   @SkipSubscriptionGate()
   async callTool(@Body() dto: RealtimeToolCallDto) {
-    const output = await this.realtime.executeToolCall(
-      dto.name,
-      dto.arguments,
-    );
-    return this.responseService.success(
-      { call_id: dto.call_id, output },
-      'Tool executed',
-    );
+    {
+      const result = await this.realtime.executeSessionToolCall(
+        dto.session_id,
+        dto.name,
+        dto.arguments,
+        dto.call_id,
+      );
+      // `proposal` is for the authenticated browser ONLY. It must never be
+      // concatenated with `output` sent back to the realtime provider.
+      return this.responseService.success(
+        { call_id: dto.call_id, ...result },
+        'Tool processed',
+      );
+    }
   }
 
   /**
@@ -74,14 +77,12 @@ export class VexiRealtimeController {
   @Post('session/close')
   @SkipSubscriptionGate()
   async closeSession(@Body() dto: CloseRealtimeSessionDto) {
-    const requestId =
-      RequestContextService.getContext()?.request_id ??
-      `vexi-voice-${randomUUID()}`;
-
-    await this.realtime.consumeSessionQuota(dto.duration_seconds, requestId);
-    return this.responseService.success(
-      { duration_seconds: dto.duration_seconds },
-      'Session closed',
-    );
+    {
+      await this.realtime.closeSession(dto.session_id, dto.duration_seconds);
+      return this.responseService.success(
+        { duration_seconds: dto.duration_seconds },
+        'Session closed',
+      );
+    }
   }
 }

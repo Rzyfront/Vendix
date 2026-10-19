@@ -9,6 +9,7 @@ import { AIGenerationProcessor } from './processors/ai-generation.processor';
       { name: 'ai-generation' },
       { name: 'ai-embedding' },
       { name: 'ai-agent' },
+      { name: 'ai-recipe-miner' },
     ),
   ],
   providers: [AIQueueService, AIGenerationProcessor],

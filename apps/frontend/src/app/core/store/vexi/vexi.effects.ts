@@ -1,14 +1,19 @@
+import { VexiRealtimeService } from '../../services/vexi-realtime.service';
+import { VexiVoiceSafetyService } from '../../services/vexi-voice-safety.service';
+import { voiceReceiptWasApplied } from '../../services/vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
-import { Observable, interval, of, timer } from 'rxjs';
+import { EMPTY, Observable, interval, of, timer } from 'rxjs';
 import {
   switchMap,
+  exhaustMap,
   map,
   catchError,
   filter,
   mergeMap,
   startWith,
+  take,
   takeUntil,
   takeWhile,
   withLatestFrom,
@@ -17,9 +22,19 @@ import * as VexiActions from './vexi.actions';
 import type { VexiProposalPreview } from './vexi.actions';
 import * as VexiSelectors from './vexi.selectors';
 import {
+  canResumeObjective,
+  objectivePointer,
+  persistedObjective,
+} from './vexi-objective.utils';
+import { vexiToolFailed } from './vexi-execution.utils';
+import {
   VexiApiService,
   VexiStreamChunk,
 } from '../../services/vexi-api.service';
+import {
+  VexiStreamTransportError,
+  isPersistedStreamReply,
+} from '../../services/vexi-stream-transport';
 import { VexiUiContextService } from '../../services/vexi-ui-context.service';
 import { VexiUiCommandService } from '../../services/vexi-ui-command.service';
 import { VexiVoicePipelineService } from '../../services/vexi-voice-pipeline.service';
@@ -65,6 +80,8 @@ export class VexiEffects {
   private uiContext = inject(VexiUiContextService);
   private uiCommands = inject(VexiUiCommandService);
   private voice = inject(VexiVoicePipelineService);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
+  private readonly realtime = inject(VexiRealtimeService);
 
   private readonly facadeProposal$ = this.store.select(
     VexiSelectors.selectPendingProposal,
@@ -157,11 +174,22 @@ export class VexiEffects {
       ofType(VexiActions.selectConversation),
       switchMap(({ conversationId }) =>
         this.chatApi.getConversation(conversationId).pipe(
-          map((conversation) =>
-            VexiActions.loadMessagesSuccess({
-              messages: conversation.messages || [],
-            }),
-          ),
+          switchMap((conversation) => {
+            const pointer =
+              objectivePointer(conversation.metadata) ??
+              [...(conversation.messages ?? [])]
+                .reverse()
+                .map((message) => objectivePointer(message.metadata))
+                .find(Boolean);
+            return of(
+              VexiActions.loadMessagesSuccess({
+                messages: conversation.messages || [],
+              }),
+              ...(pointer
+                ? [VexiActions.loadObjective({ objectiveId: pointer })]
+                : []),
+            );
+          }),
           catchError((error) =>
             of(
               VexiActions.selectConversationFailure({
@@ -171,6 +199,72 @@ export class VexiEffects {
           ),
         ),
       ),
+    ),
+  );
+
+  loadObjective$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.loadObjective),
+      switchMap(({ objectiveId }) =>
+        this.chatApi.getObjective(objectiveId).pipe(
+          map((objective) =>
+            VexiActions.objectiveReceived({
+              objective,
+              requestedId: objectiveId,
+            }),
+          ),
+          catchError(() =>
+            of(
+              VexiActions.objectiveFailure({
+                error: 'No pude consultar el objetivo.',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  resumeObjective$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.resumeObjective),
+      withLatestFrom(this.store.select(VexiSelectors.selectObjective)),
+      // Explicit objective + current version. No generic resume of whichever plan is latest.
+      exhaustMap(([{ objectiveId, confirmExpired }, objective]) => {
+        if (
+          !objective ||
+          objective.id !== objectiveId ||
+          !canResumeObjective(objective, confirmExpired)
+        ) {
+          return of(
+            VexiActions.objectiveFailure({
+              error:
+                'Revisa y selecciona el objetivo antes de reanudarlo; si expiró, confirma esa elección.',
+            }),
+          );
+        }
+        return this.chatApi
+          .resumeObjective(objectiveId, {
+            expected_version: objective.version,
+            ...(confirmExpired ? { confirm_expired: true } : {}),
+          })
+          .pipe(
+            map((resumed) =>
+              VexiActions.resumeObjectiveSuccess({
+                objective: resumed,
+                requestedId: objectiveId,
+              }),
+            ),
+            catchError(() =>
+              of(
+                VexiActions.objectiveFailure({
+                  error:
+                    'No se reanudó el objetivo. Actualiza su estado antes de intentarlo de nuevo.',
+                }),
+              ),
+            ),
+          );
+      }),
     ),
   );
 
@@ -220,6 +314,7 @@ export class VexiEffects {
                   isRetry === true,
                 ),
               ),
+              takeUntil(this.actions$.pipe(ofType(VexiActions.cancelStream))),
               startWith(VexiActions.streamStarted({ conversationId })),
               catchError((error) =>
                 of(
@@ -231,6 +326,51 @@ export class VexiEffects {
             ),
       ),
     ),
+  );
+
+  releaseRealtimeProposal$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          VexiActions.confirmProposalSuccess,
+          VexiActions.rejectProposalSuccess,
+        ),
+        map((action) => {
+          const pending = this.realtime.pendingProposal();
+          if (
+            pending?.context.agent_key === 'vexi' &&
+            pending.context.conversation_id === action.conversationId &&
+            pending.proposal.confirmationToken === action.confirmationToken
+          ) {
+            this.realtime.clearProposal();
+            void this.realtime.stop();
+          }
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  voiceBoundary$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          VexiActions.sendMessage,
+          VexiActions.selectConversation,
+          VexiActions.clearActiveConversation,
+          VexiActions.cancelStream,
+        ),
+        map(() => this.voiceSafety.invalidate()),
+      ),
+    { dispatch: false },
+  );
+
+  cancelStream$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(VexiActions.cancelStream),
+        map(() => this.voice.interrupt()),
+      ),
+    { dispatch: false },
   );
 
   /**
@@ -270,9 +410,18 @@ export class VexiEffects {
             // The turn completed. `loadMessagesSuccess` carries the real answer;
             // `streamReconciled` drops the partial buffer and clears the spinner
             // without ever setting `error`.
-            if (last?.role === 'assistant') {
+            if (isPersistedStreamReply(last, drop.streamId)) {
               return of(
                 VexiActions.loadMessagesSuccess({ messages }),
+                ...(() => {
+                  const objective = persistedObjective(
+                    last.metadata,
+                    drop.conversationId,
+                  );
+                  return objective
+                    ? [VexiActions.objectiveReceived({ objective })]
+                    : [];
+                })(),
                 VexiActions.streamReconciled(),
               );
             }
@@ -340,45 +489,61 @@ export class VexiEffects {
           );
         }
 
-        return this.chatApi
-          .applyConfirmation(
-            proposal.tool,
-            proposal.arguments,
-            proposal.confirmationToken,
-            conversationId ?? undefined,
-            speak,
-          )
-          .pipe(
-            map((result) =>
-              VexiActions.confirmProposalSuccess({
-                tool: proposal.tool,
-                output: result.output,
-                domain: proposal.preview?.domain,
-                // Solo el acuse que escribe la herramienta al aplicar. El
-                // `message` de la propuesta NO sirve de respaldo: es la frase
-                // que pide permiso ("Confírmalo y lo aplico."), así que usarla
-                // después de aplicar anunciaba el cambio ya hecho como si
-                // todavía lo estuviera pidiendo. Cuando no hay acuse, el
-                // reducer pone "Listo, apliqué el cambio." — honesto y en
-                // pasado.
-                summary: result.summary ?? null,
-                audioBase64: result.audio_base64,
-                contentType: result.content_type,
-                planActive: proposal.planActive === true,
+        const apply =
+          proposal.voiceContext?.session_id &&
+          proposal.voiceContext?.proposal_id
+            ? this.chatApi.applyDisplayedVoiceProposal(
+                proposal.voiceContext,
                 speak,
+              )
+            : this.chatApi.applyConfirmation(
+                proposal.tool,
+                proposal.arguments,
+                proposal.confirmationToken,
+                conversationId ?? undefined,
+                speak,
+              );
+        return apply.pipe(
+          map((result) =>
+            VexiActions.confirmProposalSuccess({
+              tool: proposal.tool,
+              conversationId: conversationId ?? undefined,
+              confirmationToken: proposal.confirmationToken,
+              proposalId: proposal.voiceContext?.proposal_id,
+              receiptApplied: voiceReceiptWasApplied(result),
+              output: result.output,
+              domain: proposal.preview?.domain,
+              // Solo el acuse que escribe la herramienta al aplicar. El
+              // `message` de la propuesta NO sirve de respaldo: es la frase
+              // que pide permiso ("Confírmalo y lo aplico."), así que usarla
+              // después de aplicar anunciaba el cambio ya hecho como si
+              // todavía lo estuviera pidiendo. Cuando no hay acuse, el
+              // reducer pone "Listo, apliqué el cambio." — honesto y en
+              // pasado.
+              summary: result.summary ?? null,
+              audioBase64: voiceReceiptWasApplied(result)
+                ? result.audio_base64
+                : undefined,
+              contentType: result.content_type,
+              planActive:
+                voiceReceiptWasApplied(result) && proposal.planActive === true,
+              speak,
+            }),
+          ),
+          catchError((error) =>
+            of(
+              VexiActions.confirmProposalFailure({
+                conversationId: conversationId ?? undefined,
+                confirmationToken: proposal.confirmationToken,
+                proposalId: proposal.voiceContext?.proposal_id,
+                error:
+                  error?.error?.message ||
+                  error?.message ||
+                  'No pude aplicar el cambio.',
               }),
             ),
-            catchError((error) =>
-              of(
-                VexiActions.confirmProposalFailure({
-                  error:
-                    error?.error?.message ||
-                    error?.message ||
-                    'No pude aplicar el cambio.',
-                }),
-              ),
-            ),
-          );
+          ),
+        );
       }),
     ),
   );
@@ -391,8 +556,15 @@ export class VexiEffects {
     this.actions$.pipe(
       ofType(VexiActions.confirmProposalSuccess),
       filter(({ planActive }) => planActive === true),
-      withLatestFrom(this.store.select(VexiSelectors.selectActiveConversationId)),
-      filter(([, conversationId]) => conversationId !== null),
+      withLatestFrom(
+        this.store.select(VexiSelectors.selectActiveConversationId),
+      ),
+      filter(
+        ([action, conversationId]) =>
+          conversationId !== null &&
+          (action.conversationId === undefined ||
+            action.conversationId === conversationId),
+      ),
       map(([{ speak }, conversationId]) =>
         VexiActions.sendMessage({
           conversationId: conversationId as number,
@@ -404,6 +576,72 @@ export class VexiEffects {
     ),
   );
 
+  rejectProposal$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.rejectProposal),
+      withLatestFrom(
+        this.facadeProposal$,
+        this.store.select(VexiSelectors.selectActiveConversationId),
+      ),
+      exhaustMap(([, proposal, conversationId]) => {
+        if (!proposal) return EMPTY;
+        const identity = {
+          conversationId,
+          confirmationToken: proposal.confirmationToken,
+        };
+        // A first D1 proposal arrives just before done.objective. Wait for that
+        // terminal snapshot before deciding that absent metadata means legacy.
+        return this.store.select(VexiSelectors.selectIsStreaming).pipe(
+          filter((streaming) => !streaming),
+          take(1),
+          withLatestFrom(
+            this.store.select(VexiSelectors.selectObjective),
+            this.store.select(VexiSelectors.selectActiveConversationId),
+            this.facadeProposal$,
+          ),
+          switchMap(([, objective, selectedConversation, currentProposal]) => {
+            if (
+              selectedConversation !== conversationId ||
+              currentProposal?.confirmationToken !== proposal.confirmationToken
+            )
+              return EMPTY;
+            // Legacy/default-OFF never probes a new endpoint.
+            if (!objective || objective.conversation_id !== conversationId) {
+              return of(VexiActions.rejectProposalSuccess(identity));
+            }
+            return this.chatApi
+              .rejectObjectiveProposal(objective.id, objective.version)
+              .pipe(
+                map((updated) =>
+                  VexiActions.rejectProposalSuccess({
+                    ...identity,
+                    objective: updated,
+                  }),
+                ),
+                catchError(() =>
+                  of(
+                    VexiActions.rejectProposalFailure({
+                      ...identity,
+                      error:
+                        'No se confirmó el rechazo. Actualiza el objetivo antes de intentarlo de nuevo.',
+                    }),
+                  ),
+                ),
+              );
+          }),
+          takeUntil(
+            this.actions$.pipe(
+              ofType(
+                VexiActions.selectConversation,
+                VexiActions.clearActiveConversation,
+              ),
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+
   /**
    * Same for a rejection. The reducer has already cleared the proposal by the
    * time effects run, so it leaves `rejectedPlanActive` behind for this to read;
@@ -411,13 +649,16 @@ export class VexiEffects {
    */
   continueAfterRejection$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(VexiActions.rejectProposal),
+      ofType(VexiActions.rejectProposalSuccess),
       withLatestFrom(
         this.store.select(VexiSelectors.selectRejectedPlanActive),
         this.store.select(VexiSelectors.selectActiveConversationId),
         this.store.select(VexiSelectors.selectLastTurn),
       ),
-      filter(([, planActive, conversationId]) => planActive && conversationId !== null),
+      filter(
+        ([, planActive, conversationId]) =>
+          planActive && conversationId !== null,
+      ),
       map(([, , conversationId, lastTurn]) =>
         VexiActions.sendMessage({
           conversationId: conversationId as number,
@@ -441,10 +682,17 @@ export class VexiEffects {
         this.store.select(VexiSelectors.selectAutoContinuations),
         this.store.select(VexiSelectors.selectActiveConversationId),
         this.store.select(VexiSelectors.selectLastTurn),
+        this.store.select(VexiSelectors.selectObjective),
       ),
-      filter(([, pending, , conversationId]) => pending && conversationId !== null),
-      map(([, , count, conversationId, lastTurn]) =>
-        count < VexiEffects.MAX_AUTO_CONTINUATIONS
+      filter(
+        ([, pending, , conversationId]) => pending && conversationId !== null,
+      ),
+      map(([, , count, conversationId, lastTurn, objective]) =>
+        count < VexiEffects.MAX_AUTO_CONTINUATIONS &&
+        (!objective ||
+          (!objective.requires_revalidation &&
+            ['active', 'partial'].includes(objective.semantic_status) &&
+            canResumeObjective(objective)))
           ? VexiActions.sendMessage({
               conversationId: conversationId as number,
               content: '',
@@ -507,23 +755,13 @@ export class VexiEffects {
     speak = false,
     isRetry = false,
   ): Observable<Action> {
-    const url = this.chatApi.getStreamUrl(conversationId, streamId);
-
-    if (!url) {
-      return of(
-        VexiActions.streamError({
-          error: 'Sesión no válida. Vuelve a iniciar sesión.',
-        }),
-      );
-    }
-
     // Claims playback for this stream. Frames from a turn the person interrupted
     // are dropped by id — the old EventSource is still open and still emitting
     // audio that was already paid for, and it must not talk over the new question.
     if (speak) this.voice.startTurn(streamId);
 
     return new Observable<Action>((subscriber) => {
-      const source = new EventSource(url);
+      const executedUiIds = new Set<string>();
 
       // Side effects this turn already produced, read only by `onerror`.
       //
@@ -533,218 +771,248 @@ export class VexiEffects {
       // duplicate the answer. A turn that dropped before either is inert, so
       // replaying it costs a provider call and nothing else.
       let emittedText = false;
+      let reconcileRequired = false;
       let ranTools = false;
 
-      source.addEventListener('ai-chunk', (event) => {
-        let chunk: VexiStreamChunk;
-        try {
-          chunk = JSON.parse((event as MessageEvent).data);
-        } catch {
-          return;
-        }
-
-        switch (chunk.type) {
-          case 'text':
-            if (chunk.content) {
-              emittedText = true;
-              subscriber.next(
-                VexiActions.receiveStreamChunk({ content: chunk.content }),
-              );
-            }
-            break;
-
-          case 'tool_call': {
-            if (!chunk.tool) break;
-            ranTools = true;
-            const { id, name, arguments: args } = chunk.tool;
-            subscriber.next(
-              VexiActions.toolCallStarted({ id, name, arguments: args }),
-            );
-
-            // UI commands run here, not on the server — there is no router or
-            // cart in that process. The backend emits the frame and moves on,
-            // so this is the only place the command actually happens.
-            if (this.uiCommands.handles(name)) {
-              void this.uiCommands
-                .execute(name, args ?? {})
-                .then((summary) => {
-                  // Back to the waiting turn. The agent loop is suspended on
-                  // this exact `(stream_id, tool_call_id)` pair, so this is what
-                  // lets the model reason about what really happened on screen
-                  // instead of assuming its command worked. Fire-and-forget: the
-                  // loop has its own timeout, and a failed POST must not also
-                  // break the trace the user is watching.
-                  this.chatApi.postUiResult(streamId, id, summary).subscribe({
-                    error: () => undefined,
-                  });
-
+      const transport = this.chatApi
+        .streamTurn(conversationId, streamId)
+        .subscribe({
+          next: (chunk) => {
+            switch (chunk.type) {
+              case 'progress':
+                reconcileRequired ||= chunk.reconcile_required === true;
+                if (chunk.content)
                   subscriber.next(
-                    VexiActions.toolCallFinished({
-                      id,
-                      name,
-                      summary,
-                      // A UI command that resolves with `status: 'error'` is a
-                      // failure the promise never rejected on — the cart
-                      // refused the product, the POS was not open. Without
-                      // this the trace narrates it in the past tense of
-                      // success ("Añadí Cafe sello rojo") over a refusal.
-                      failed: this.uiCommandFailed(summary),
+                    VexiActions.receiveStreamProgress({
+                      content: chunk.content,
                     }),
                   );
-                })
-                .catch(() => {
-                  // The turn is told about the failure too, otherwise it waits
-                  // out the full 25 s for a result that is never coming and then
-                  // reports "no llegó respuesta" for something that did answer.
-                  const failure = JSON.stringify({
-                    status: 'error',
-                    message: 'El comando de interfaz falló en el navegador.',
-                  });
-
-                  this.chatApi.postUiResult(streamId, id, failure).subscribe({
-                    error: () => undefined,
-                  });
-
+                break;
+              case 'text':
+                if (chunk.content) {
+                  emittedText = true;
                   subscriber.next(
-                    VexiActions.toolCallFinished({
-                      id,
-                      name,
-                      summary: 'El comando de interfaz falló.',
-                      failed: true,
+                    VexiActions.receiveStreamChunk({ content: chunk.content }),
+                  );
+                }
+                break;
+
+              case 'tool_call': {
+                if (!chunk.tool) break;
+                ranTools = true;
+                const { id, name, arguments: args } = chunk.tool;
+                subscriber.next(
+                  VexiActions.toolCallStarted({ id, name, arguments: args }),
+                );
+
+                // UI commands run here, not on the server — there is no router or
+                // cart in that process. The backend emits the frame and moves on,
+                // so this is the only place the command actually happens.
+                if (this.uiCommands.handles(name) && !executedUiIds.has(id)) {
+                  executedUiIds.add(id);
+                  void this.uiCommands
+                    .execute(name, args ?? {})
+                    .then((summary) => {
+                      // Back to the waiting turn. The agent loop is suspended on
+                      // this exact `(stream_id, tool_call_id)` pair, so this is what
+                      // lets the model reason about what really happened on screen
+                      // instead of assuming its command worked. Fire-and-forget: the
+                      // loop has its own timeout, and a failed POST must not also
+                      // break the trace the user is watching.
+                      this.chatApi
+                        .postUiResult(streamId, id, summary)
+                        .subscribe({
+                          error: () => undefined,
+                        });
+
+                      subscriber.next(
+                        VexiActions.toolCallFinished({
+                          id,
+                          name,
+                          summary,
+                          // A UI command that resolves with `status: 'error'` is a
+                          // failure the promise never rejected on — the cart
+                          // refused the product, the POS was not open. Without
+                          // this the trace narrates it in the past tense of
+                          // success ("Añadí Cafe sello rojo") over a refusal.
+                          failed: this.uiCommandFailed(summary),
+                          ...(chunk.tool?.execution
+                            ? { execution: chunk.tool.execution }
+                            : {}),
+                        }),
+                      );
+                    })
+                    .catch(() => {
+                      // The turn is told about the failure too, otherwise it waits
+                      // out the full 25 s for a result that is never coming and then
+                      // reports "no llegó respuesta" for something that did answer.
+                      const failure = JSON.stringify({
+                        status: 'error',
+                        message:
+                          'El comando de interfaz falló en el navegador.',
+                      });
+
+                      this.chatApi
+                        .postUiResult(streamId, id, failure)
+                        .subscribe({
+                          error: () => undefined,
+                        });
+
+                      subscriber.next(
+                        VexiActions.toolCallFinished({
+                          id,
+                          name,
+                          summary: 'El comando de interfaz falló.',
+                          failed: true,
+                          ...(chunk.tool?.execution
+                            ? { execution: chunk.tool.execution }
+                            : {}),
+                        }),
+                      );
+                    });
+                }
+                break;
+              }
+
+              case 'tool_result': {
+                if (!chunk.tool) break;
+
+                // A queued job is announced here and nowhere else. The result frame is
+                // the only place the id appears, so missing it means the person has no
+                // handle on work that is already running.
+                const queued = this.readQueuedTask(
+                  chunk.tool.name,
+                  chunk.tool.summary,
+                );
+                if (queued) {
+                  subscriber.next(VexiActions.taskQueued(queued));
+                }
+
+                const proposal = this.readProposal(chunk.tool.summary);
+                if (proposal) {
+                  // The backend signals a pending write by sending the token and
+                  // diff as a tool result — the same channel, so no extra frame
+                  // type and no second connection to keep in sync.
+                  subscriber.next(
+                    VexiActions.proposalReceived({
+                      tool: chunk.tool.name,
+                      arguments: proposal.arguments ?? {},
+                      confirmationToken: proposal.confirmation_token,
+                      preview: proposal.preview,
+                      planActive: proposal.plan_active === true,
                     }),
                   );
-                });
-            }
-            break;
-          }
+                }
+                subscriber.next(
+                  VexiActions.toolCallFinished({
+                    id: chunk.tool.id,
+                    name: chunk.tool.name,
+                    summary: proposal
+                      ? undefined
+                      : (chunk.tool.execution?.next_action ??
+                        chunk.tool.summary),
+                    failed: vexiToolFailed(
+                      chunk.tool.execution,
+                      chunk.tool.failed,
+                    ),
+                    ...(chunk.tool.execution
+                      ? { execution: chunk.tool.execution }
+                      : {}),
+                  }),
+                );
+                break;
+              }
 
-          case 'tool_result': {
-            if (!chunk.tool) break;
+              case 'plan_continue':
+                // The turn ran out of budget with work pending. Only noted here: the
+                // chain is opened when `done` completes the stream, never mid-turn.
+                subscriber.next(VexiActions.planContinueReceived());
+                break;
 
-            // A queued job is announced here and nowhere else. The result frame is
-            // the only place the id appears, so missing it means the person has no
-            // handle on work that is already running.
-            const queued = this.readQueuedTask(
-              chunk.tool.name,
-              chunk.tool.summary,
-            );
-            if (queued) {
-              subscriber.next(VexiActions.taskQueued(queued));
-            }
+              case 'audio':
+                // Handed straight to the player, never dispatched. A base64 mp3 in
+                // a reducer is megabytes of state the devtools cannot render and the
+                // store has no reason to remember — playback is browser state, like
+                // the `HTMLAudioElement` that holds it.
+                if (
+                  chunk.audio_base64 !== undefined &&
+                  chunk.index !== undefined
+                ) {
+                  this.voice.enqueue(streamId, {
+                    index: chunk.index,
+                    audio_base64: chunk.audio_base64,
+                    content_type: chunk.content_type ?? 'audio/mpeg',
+                    filler: chunk.filler,
+                  });
+                }
+                break;
 
-            const proposal = this.readProposal(chunk.tool.summary);
-            if (proposal) {
-              // The backend signals a pending write by sending the token and
-              // diff as a tool result — the same channel, so no extra frame
-              // type and no second connection to keep in sync.
-              subscriber.next(
-                VexiActions.proposalReceived({
-                  tool: chunk.tool.name,
-                  arguments: proposal.arguments ?? {},
-                  confirmationToken: proposal.confirmation_token,
-                  preview: proposal.preview,
-                  planActive: proposal.plan_active === true,
-                }),
-              );
+              case 'timing':
+                if (chunk.mark && chunk.ms !== undefined) {
+                  this.voice.serverMark(chunk.mark, chunk.ms);
+                }
+                break;
+
+              case 'done':
+                if (chunk.objective)
+                  subscriber.next(
+                    VexiActions.objectiveReceived({
+                      objective: chunk.objective,
+                    }),
+                  );
+                // Before completing: lets the player stop waiting on an index that a
+                // failed synthesis means will never arrive, instead of holding the
+                // remaining segments behind the gap.
+                this.voice.finishTurn(streamId);
+                subscriber.next(
+                  reconcileRequired
+                    ? VexiActions.streamDropped({
+                        conversationId,
+                        streamId,
+                        emittedText,
+                        ranTools,
+                        wasRetry: true,
+                      })
+                    : VexiActions.streamComplete(),
+                );
+                subscriber.complete();
+                break;
+
+              case 'error':
+                this.voice.finishTurn(streamId);
+                subscriber.next(
+                  VexiActions.streamError({
+                    error: chunk.error || 'La respuesta se interrumpió.',
+                  }),
+                );
+                subscriber.complete();
+                break;
             }
+          },
+          error: (error: unknown) => {
+            this.voice.finishTurn(streamId);
             subscriber.next(
-              VexiActions.toolCallFinished({
-                id: chunk.tool.id,
-                name: chunk.tool.name,
-                summary: proposal ? undefined : chunk.tool.summary,
-                failed: chunk.tool.failed,
+              VexiActions.streamDropped({
+                conversationId,
+                ...(error instanceof VexiStreamTransportError &&
+                error.replaySupported
+                  ? { streamId }
+                  : {}),
+                emittedText,
+                ranTools,
+                // H reconnects only attach to transport; exhausted replay MUST NOT
+                // fall through to the legacy fresh-intent retry, even before text.
+                wasRetry:
+                  isRetry ||
+                  (error instanceof VexiStreamTransportError &&
+                    error.replaySupported),
               }),
             );
-            break;
-          }
-
-          case 'plan_continue':
-            // The turn ran out of budget with work pending. Only noted here: the
-            // chain is opened when `done` completes the stream, never mid-turn.
-            subscriber.next(VexiActions.planContinueReceived());
-            break;
-
-          case 'audio':
-            // Handed straight to the player, never dispatched. A base64 mp3 in
-            // a reducer is megabytes of state the devtools cannot render and the
-            // store has no reason to remember — playback is browser state, like
-            // the `HTMLAudioElement` that holds it.
-            if (chunk.audio_base64 !== undefined && chunk.index !== undefined) {
-              this.voice.enqueue(streamId, {
-                index: chunk.index,
-                audio_base64: chunk.audio_base64,
-                content_type: chunk.content_type ?? 'audio/mpeg',
-                filler: chunk.filler,
-              });
-            }
-            break;
-
-          case 'timing':
-            if (chunk.mark && chunk.ms !== undefined) {
-              this.voice.serverMark(chunk.mark, chunk.ms);
-            }
-            break;
-
-          case 'done':
-            // Before completing: lets the player stop waiting on an index that a
-            // failed synthesis means will never arrive, instead of holding the
-            // remaining segments behind the gap.
-            this.voice.finishTurn(streamId);
-            subscriber.next(VexiActions.streamComplete());
             subscriber.complete();
-            break;
-
-          case 'error':
-            this.voice.finishTurn(streamId);
-            subscriber.next(
-              VexiActions.streamError({
-                error: chunk.error || 'La respuesta se interrumpió.',
-              }),
-            );
-            subscriber.complete();
-            break;
-        }
-      });
-
-      // Transport-level failure — and NOT, by itself, a failed turn.
-      //
-      // The connection dying says nothing about whether the answer exists: the
-      // backend keeps draining its generator after the browser goes away
-      // (`ai-chat.controller.ts`) precisely so the assistant reply and its tool
-      // trace still get persisted. Announcing an error here was reporting a
-      // failure over a turn that had already finished — the most common shape of
-      // it being a spoken turn whose text was complete and whose synthesis tail
-      // was the quiet stretch an idle timeout cut through.
-      //
-      // So this reports the *drop*, and the reconciliation effect decides what it
-      // meant. `EventSource` is still not allowed to reconnect on its own: the
-      // intent is single-use, so its retry would be answered with "la sesión ya
-      // se consumió", and a replay that did work could re-run tools.
-      source.onerror = () => {
-        // Releases the player before anything else. Without this the queue keeps
-        // waiting on an index that will never arrive and holds every segment
-        // behind the gap — audio that was already synthesized and paid for, and
-        // the reason a cut turn sometimes went silent early instead of just
-        // ending. The `done` and `error` frames already did this; the transport
-        // path was the one exit that did not.
-        this.voice.finishTurn(streamId);
-
-        subscriber.next(
-          VexiActions.streamDropped({
-            conversationId,
-            // What the turn already caused, which is what decides whether it can
-            // be retried. Tracked locally rather than read from the store: these
-            // describe this EventSource, and a turn the person interrupted must
-            // not be judged by the state of the one that replaced it.
-            emittedText,
-            ranTools,
-            wasRetry: isRetry,
-          }),
-        );
-        subscriber.complete();
-      };
-
-      return () => source.close();
+          },
+          complete: () => subscriber.complete(),
+        });
+      return () => transport.unsubscribe();
     });
   }
 
@@ -890,9 +1158,7 @@ export class VexiEffects {
       ofType(VexiActions.archiveConversation),
       mergeMap(({ conversationId }) =>
         this.chatApi.archiveConversation(conversationId).pipe(
-          map(() =>
-            VexiActions.archiveConversationSuccess({ conversationId }),
-          ),
+          map(() => VexiActions.archiveConversationSuccess({ conversationId })),
           catchError((error) =>
             of(
               VexiActions.archiveConversationFailure({

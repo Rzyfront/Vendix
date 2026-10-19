@@ -1,5 +1,28 @@
-import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { vexApplyState } from './vex-plan-state';
+import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
+import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
+import {
+  VoiceConsentApplied,
+  voiceReceiptWasApplied,
+} from '../../../../../core/services/vexi-voice-consent.model';
+import {
+  DestroyRef,
+  Injectable,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { Subscription, firstValueFrom } from 'rxjs';
+import {
+  VexiApiService,
+  VexiObjective,
+  VexiToolExecution,
+} from '../../../../../core/services/vexi-api.service';
+import {
+  canResumeObjective,
+  objectivePointer,
+} from '../../../../../core/store/vexi/vexi-objective.utils';
+import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
@@ -25,10 +48,7 @@ const TITLE_MAX_LENGTH = 40;
 const LIST_PAGE_SIZE = 50;
 
 function normalizeText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase();
+  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
 function buildMessage(
@@ -55,6 +75,7 @@ interface VexBlockRef {
 }
 
 const FRONTEND_PLAN_STATUSES: readonly VexPlanStatus[] = [
+  'unknown_effect',
   'proposed',
   'approved',
   'rejected',
@@ -105,6 +126,7 @@ function adaptStepStatus(raw: unknown): VexPlanStepStatus | null {
   switch (raw) {
     case 'applied':
       return 'done';
+    case 'unknown':
     case 'pending':
     case 'failed':
     case 'cancelled':
@@ -133,9 +155,7 @@ function adaptPlanStatus(raw: unknown): VexPlanStatus {
   return 'proposed';
 }
 
-function adaptPersistedPreview(
-  raw: unknown,
-): VexPlanStep['preview'] {
+function adaptPersistedPreview(raw: unknown): VexPlanStep['preview'] {
   if (!isRecord(raw)) return undefined;
   if (typeof raw['target'] !== 'string') return undefined;
   const status = raw['status'];
@@ -322,13 +342,19 @@ function adaptConversation(
 export class VexChatStore {
   private readonly destroyRef = inject(DestroyRef);
   private readonly api = inject(VexApiService);
+  private readonly voice = inject(VexiVoicePipelineService);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
+  private readonly objectiveApi = inject(VexiApiService);
   private readonly toast = inject(ToastService);
 
   private stream_sub?: Subscription;
+  private stream_generation = 0;
+  private readonly _stream_progress = signal('');
+  readonly stream_progress = this._stream_progress.asReadonly();
   private readonly loaded_ids = new Set<string>();
   /**
    * Plan tokens minted by approve, keyed by `plan_id`. In-memory only (TTL
-   * 15 min server-side): a reload drops them; irreversible steps then mint
+   * 15 min server-side): a reload drops them; pending steps then mint
    * their own single-use token on demand.
    * Plain map — never template-observed, so no signal needed.
    */
@@ -341,6 +367,13 @@ export class VexChatStore {
   private readonly _loading_list = signal(false);
   private readonly _loading_thread = signal(false);
   private readonly _error = signal<string | null>(null);
+  private readonly _objectives = signal<Record<string, VexiObjective>>({});
+  private readonly _objective_loading = signal(false);
+  readonly objective_loading = this._objective_loading.asReadonly();
+  readonly active_objective = computed(() => {
+    const id = this._active_id();
+    return id ? (this._objectives()[id] ?? null) : null;
+  });
   private readonly _busy_plan_id = signal<string | null>(null);
 
   readonly conversations = computed(() =>
@@ -349,6 +382,9 @@ export class VexChatStore {
     ),
   );
   readonly active_id = this._active_id.asReadonly();
+  readonly activeNumericId = computed(() =>
+    this._active_id() ? Number(this._active_id()) : null,
+  );
   readonly active_conversation = computed<VexConversation | null>(() => {
     const id = this._active_id();
     if (!id) return null;
@@ -377,12 +413,16 @@ export class VexChatStore {
   }
 
   newConversation(): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     this.closeStream();
     this._error.set(null);
     this._active_id.set(null);
   }
 
   selectConversation(id: string): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     if (!this._conversations().some((c) => c.id === id)) return;
     this.closeStream();
     this._error.set(null);
@@ -392,8 +432,170 @@ export class VexChatStore {
     }
   }
 
+  /** A state read only: opening a thread must never trigger an inference. */
+  refreshObjective(objectiveId: string): void {
+    this._objective_loading.set(true);
+    void firstValueFrom(this.objectiveApi.getObjective(objectiveId, 'vex'))
+      .then((objective) => this.rememberObjective(objective))
+      .catch(() => this._error.set('No pude consultar el objetivo.'))
+      .finally(() => this._objective_loading.set(false));
+  }
+
+  /** Resume is a specific state transition, never whole-plan/write approval. */
+  resumeObjective(objectiveId: string, confirmExpired = false): void {
+    const objective = this.active_objective();
+    if (
+      this._objective_loading() ||
+      !objective ||
+      objective.id !== objectiveId ||
+      !canResumeObjective(objective, confirmExpired)
+    ) {
+      this._error.set(
+        'Selecciona el objetivo y confirma explícitamente si expiró antes de reanudarlo.',
+      );
+      return;
+    }
+    this._objective_loading.set(true);
+    void firstValueFrom(
+      this.objectiveApi.resumeObjective(
+        objectiveId,
+        {
+          expected_version: objective.version,
+          ...(confirmExpired ? { confirm_expired: true } : {}),
+        },
+        'vex',
+      ),
+    )
+      .then((resumed) => this.rememberObjective(resumed))
+      .catch(() =>
+        this._error.set(
+          'No se reanudó el objetivo. Actualiza su estado e inténtalo de nuevo.',
+        ),
+      )
+      .finally(() => this._objective_loading.set(false));
+  }
+
+  private rememberObjective(objective: VexiObjective): void {
+    const key = String(objective.conversation_id);
+    this._objectives.update((values) => ({ ...values, [key]: objective }));
+  }
+
   setSearchTerm(term: string): void {
     this._search_term.set(term);
+  }
+
+  async ensureVoiceConversation(): Promise<number | null> {
+    const id = await this.ensureConversation('Conversación por voz');
+    return id ? Number(id) : null;
+  }
+
+  sendVoiceMessage(content: string): void {
+    if (!content.trim() || this._is_agent_typing()) return;
+    void this.runTurn(content.trim(), [], true);
+  }
+
+  /** Adopts only the receipt from the already consumed voice request; never reapplies. */
+  acceptVoiceReceipt(
+    message_id: string,
+    plan_id: string,
+    result: VoiceConsentApplied,
+  ): void {
+    const conversation_id = String(result.context.conversation_id);
+    const plan = this.findPlan(conversation_id, message_id, plan_id);
+    const step = plan?.steps.find((item) =>
+      result.confirmationToken
+        ? item.confirmation_token === result.confirmationToken
+        : item.step_id === result.context.step_id &&
+          item.tool === result.receipt.tool &&
+          result.proposalArguments !== undefined &&
+          argsEqual(item.arguments ?? {}, result.proposalArguments),
+    );
+    if (!plan || !step) return;
+    const applied =
+      voiceReceiptWasApplied(result.receipt) &&
+      vexApplyState(result.receipt as VexApplyStepResult).step_status === 'done';
+    // The same fail-closed fold as click, including non-applied/missing receipts.
+    // Unknown consumes the local token and closes every approval path.
+    this.applyServerResult(
+      conversation_id,
+      message_id,
+      plan_id,
+      step.step_id,
+      result.receipt as VexApplyStepResult,
+      false,
+    );
+    const text =
+      result.receipt.summary?.trim() ||
+      (applied ? 'Cambio aplicado.' : 'Resultado pendiente de verificación.');
+    this._conversations.update((list) =>
+      list.map((conversation) =>
+        conversation.id === conversation_id
+          ? {
+              ...conversation,
+              messages: [
+                ...conversation.messages,
+                buildMessage('agent', text, new Date()),
+              ],
+            }
+          : conversation,
+      ),
+    );
+    if (
+      applied &&
+      this._active_id() === conversation_id &&
+      result.receipt.audio_base64
+    ) {
+      const id = `voice-receipt-${Date.now()}`;
+      this.voice.startTurn(id);
+      this.voice.enqueue(id, {
+        index: 0,
+        audio_base64: result.receipt.audio_base64,
+        content_type: result.receipt.content_type || 'audio/mpeg',
+      });
+      this.voice.finishTurn(id);
+    }
+    if (this.active_objective()?.id && this._active_id() === conversation_id)
+      this.refreshObjective(this.active_objective()!.id);
+  }
+
+  acceptRealtimeVoiceReceipt(result: VoiceConsentApplied): void {
+    const conversation_id = String(result.context.conversation_id);
+    const applied = voiceReceiptWasApplied(result.receipt);
+    const text =
+      result.receipt.summary?.trim() ||
+      (applied
+        ? 'Cambio aplicado.'
+        : 'Resultado sin verificar. Consulta el estado.');
+    this._conversations.update((list) =>
+      list.map((conversation) =>
+        conversation.id === conversation_id
+          ? {
+              ...conversation,
+              messages: [
+                ...conversation.messages,
+                buildMessage('agent', text, new Date()),
+              ],
+            }
+          : conversation,
+      ),
+    );
+    if (
+      applied &&
+      this._active_id() === conversation_id &&
+      result.receipt.audio_base64
+    ) {
+      const id = `voice-receipt-${Date.now()}`;
+      this.voice.startTurn(id);
+      this.voice.enqueue(id, {
+        index: 0,
+        audio_base64: result.receipt.audio_base64,
+        content_type: result.receipt.content_type || 'audio/mpeg',
+      });
+      this.voice.finishTurn(id);
+    }
+    const objective = this.active_objective();
+    if (objective && this._active_id() === conversation_id)
+      this.refreshObjective(objective.id);
   }
 
   sendMessage(content: string, attachment_ids: string[] = []): void {
@@ -411,14 +613,18 @@ export class VexChatStore {
       this._active_id.set(null);
     }
     if (!Number.isFinite(numeric)) return;
-    void firstValueFrom(this.api.archiveConversation(numeric)).catch((error) => {
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo eliminar');
-      void this.loadConversations();
-    });
+    void firstValueFrom(this.api.archiveConversation(numeric)).catch(
+      (error) => {
+        this.toast.error(extractApiErrorMessage(error), 'No se pudo eliminar');
+        void this.loadConversations();
+      },
+    );
   }
 
   /** Stops the live stream; the turn already persisted stays as-is. */
   stopStream(): void {
+    this.voiceSafety.invalidate();
+    this.voice.interrupt();
     const active = this._active_id();
     this.closeStream();
     this._is_agent_typing.set(false);
@@ -429,7 +635,13 @@ export class VexChatStore {
             ? {
                 ...c,
                 messages: c.messages.map((m) =>
-                  m.streaming ? { ...m, streaming: false } : m,
+                  m.streaming
+                    ? {
+                        ...m,
+                        streaming: false,
+                        tool_steps: cancelVexToolSteps(m.tool_steps ?? []),
+                      }
+                    : m,
                 ),
               }
             : c,
@@ -439,6 +651,7 @@ export class VexChatStore {
   }
 
   approvePlan(message_id: string, plan_id: string): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -467,7 +680,12 @@ export class VexChatStore {
     // One irreversible step: the card IS that step's confirmation, so one
     // click chains approve -> request confirmation -> apply.
     if (plan.steps.length === 1 && plan.steps[0].irreversible) {
-      void this.runSingleIrreversibleChain(conversation_id, message_id, numeric, plan);
+      void this.runSingleIrreversibleChain(
+        conversation_id,
+        message_id,
+        numeric,
+        plan,
+      );
       return;
     }
     void this.runPlanApproval(conversation_id, message_id, numeric, plan);
@@ -487,9 +705,15 @@ export class VexChatStore {
     const step = plan.steps[0];
     this._busy_plan_id.set(plan.plan_id);
     this.patchPlan(conversation_id, message_id, { status: 'executing' });
-    this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-      status: 'running',
-    });
+    this.patchPlanStep(
+      conversation_id,
+      message_id,
+      plan.plan_id,
+      step.step_id,
+      {
+        status: 'running',
+      },
+    );
     try {
       const approved = await firstValueFrom(
         this.api.approvePlan(plan.plan_id, numeric, [
@@ -518,11 +742,17 @@ export class VexChatStore {
       );
     } catch (error) {
       const message = extractApiErrorMessage(error);
-      this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-        status: 'failed',
-        error: message,
-        confirmation_token: undefined,
-      });
+      this.patchPlanStep(
+        conversation_id,
+        message_id,
+        plan.plan_id,
+        step.step_id,
+        {
+          status: 'failed',
+          error: message,
+          confirmation_token: undefined,
+        },
+      );
       this.patchPlan(conversation_id, message_id, { status: 'failed' });
       this.toast.error(message, 'No se pudo aplicar');
     } finally {
@@ -531,8 +761,9 @@ export class VexChatStore {
   }
 
   /**
-   * One click approves the bundle and drives every reversible step, in order,
-   * through the plan token. The approve request EXCLUDES irreversible steps:
+   * One click covers only the first selected change. Later changes remain
+   * pending and need a fresh individual confirmation. The approve request
+   * EXCLUDES irreversible steps:
    * the plan token never covers them, they stay `pending` and render their own
    * card, which asks the server for a single-use confirmation when the person
    * confirms that step. Reversible steps the token does not cover (drifted
@@ -569,7 +800,11 @@ export class VexChatStore {
       }));
       const reversible = all.filter((s) => !s.irreversible);
       const payload = (reversible.length > 0 ? reversible : all).map(
-        ({ order, tool, arguments: args }) => ({ order, tool, arguments: args }),
+        ({ order, tool, arguments: args }) => ({
+          order,
+          tool,
+          arguments: args,
+        }),
       );
       const approved = await firstValueFrom(
         this.api.approvePlan(plan.plan_id, numeric, payload),
@@ -578,21 +813,46 @@ export class VexChatStore {
       this.patchPlan(conversation_id, message_id, { status: 'executing' });
       const covered = new Set(approved.covered_steps ?? []);
       const ignored = new Set(approved.ignored_steps ?? []);
+      const reconfirm = new Set(approved.reconfirm_steps ?? []);
       let last_plan_status: VexPlanStatus = 'approved';
       for (let i = 0; i < plan.steps.length; i++) {
         const step = plan.steps[i];
         const order = i + 1;
         // Irreversible: pending, own card, own confirmation. Never run here.
-        if (step.irreversible) continue;
-        if (ignored.has(order) || !covered.has(order)) {
-          this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-            status: 'skipped',
-          });
+        if (step.irreversible || reconfirm.has(order)) {
+          this.patchPlanStep(
+            conversation_id,
+            message_id,
+            plan.plan_id,
+            step.step_id,
+            {
+              status: 'pending',
+              confirmation_token: undefined,
+            },
+          );
           continue;
         }
-        this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-          status: 'running',
-        });
+        if (ignored.has(order) || !covered.has(order)) {
+          this.patchPlanStep(
+            conversation_id,
+            message_id,
+            plan.plan_id,
+            step.step_id,
+            {
+              status: 'skipped',
+            },
+          );
+          continue;
+        }
+        this.patchPlanStep(
+          conversation_id,
+          message_id,
+          plan.plan_id,
+          step.step_id,
+          {
+            status: 'running',
+          },
+        );
         try {
           const result = await firstValueFrom(
             this.api.applyConfirmation({
@@ -610,25 +870,42 @@ export class VexChatStore {
             result,
             true,
           );
+          if (
+            last_plan_status === 'unknown_effect' ||
+            last_plan_status === 'failed'
+          )
+            return;
         } catch (error) {
           const token = readSingleUseToken(error);
           if (token) {
             // Routed to its own card (drifted, replayed): stays pending with
             // a live token, the loop moves on.
-            this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-              status: 'pending',
-              confirmation_token: token,
-            });
+            this.patchPlanStep(
+              conversation_id,
+              message_id,
+              plan.plan_id,
+              step.step_id,
+              {
+                status: 'pending',
+                confirmation_token: token,
+              },
+            );
             this.toast.error(
               extractApiErrorMessage(error),
               'Necesita confirmación propia',
             );
             continue;
           }
-          this.patchPlanStep(conversation_id, message_id, plan.plan_id, step.step_id, {
-            status: 'failed',
-            error: extractApiErrorMessage(error),
-          });
+          this.patchPlanStep(
+            conversation_id,
+            message_id,
+            plan.plan_id,
+            step.step_id,
+            {
+              status: 'failed',
+              error: extractApiErrorMessage(error),
+            },
+          );
           this.patchPlan(conversation_id, message_id, { status: 'failed' });
           this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
           // The server recorded the failure: adopt its plan state when the
@@ -665,11 +942,19 @@ export class VexChatStore {
     result: VexApplyStepResult,
     in_loop: boolean,
   ): VexPlanStatus {
-    const plan_status = adaptPlanStatus(result.plan_status);
+    const state = vexApplyState(result);
+    const plan_status = state.plan_status;
     this.patchPlanStep(conversation_id, message_id, plan_id, step_id, {
-      status: adaptStepStatus(result.step_status) ?? 'done',
+      status: state.step_status,
+      error: state.error,
+      confirmation_token: undefined,
     });
-    if (!in_loop || isTerminalPlanStatus(plan_status)) {
+    if (
+      !in_loop ||
+      isTerminalPlanStatus(plan_status) ||
+      plan_status === 'unknown_effect' ||
+      plan_status === 'failed'
+    ) {
       this.patchPlan(conversation_id, message_id, { status: plan_status });
     }
     return plan_status;
@@ -735,9 +1020,7 @@ export class VexChatStore {
     const conversation = this._conversations().find(
       (c) => c.id === conversation_id,
     );
-    const plan = conversation?.messages.find(
-      (m) => m.id === message_id,
-    )?.plan;
+    const plan = conversation?.messages.find((m) => m.id === message_id)?.plan;
     return plan && plan.plan_id === plan_id ? plan : null;
   }
 
@@ -750,6 +1033,7 @@ export class VexChatStore {
    * fallback proposal has no server plan: cancelling it is local.
    */
   cancelPlan(message_id: string, plan_id: string): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -774,7 +1058,11 @@ export class VexChatStore {
         status: 'rejected',
         steps: plan.steps.map((s) =>
           s.status === 'pending' || s.status === 'running'
-            ? { ...s, status: 'cancelled' as const, confirmation_token: undefined }
+            ? {
+                ...s,
+                status: 'cancelled' as const,
+                confirmation_token: undefined,
+              }
             : s,
         ),
       });
@@ -800,6 +1088,7 @@ export class VexChatStore {
     step_id: string,
     confirmation_token?: string,
   ): void {
+    this.voiceSafety.invalidate();
     const conversation_id = this._active_id();
     if (!conversation_id || this._busy_plan_id()) return;
     const numeric = Number(conversation_id);
@@ -808,7 +1097,11 @@ export class VexChatStore {
     const current = this.findPlan(conversation_id, message_id, plan.plan_id);
     const step = current?.steps.find((s) => s.step_id === step_id);
     if (!current || !step) return;
-    if (step.status === 'done' || step.status === 'running') return;
+    if (
+      step.status !== 'pending' ||
+      !['proposed', 'approved', 'executing'].includes(current.status)
+    )
+      return;
     const token = confirmation_token || step.confirmation_token;
     if (token) {
       void this.runSingleUseApply(
@@ -821,12 +1114,12 @@ export class VexChatStore {
       );
       return;
     }
-    if (step.irreversible && !current.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
+    if (!current.plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
       // After a reload (or once the in-memory token is gone) the single-use
       // token is minted on demand from the persisted step: request, then apply
       // through `confirmations/apply`. The person already clicked this step's
       // own approve button.
-      void this.runIrreversibleApply(
+      void this.runStepConfirmationApply(
         conversation_id,
         message_id,
         numeric,
@@ -835,21 +1128,9 @@ export class VexChatStore {
       );
       return;
     }
-    const plan_token = this.plan_tokens.get(current.plan_id);
-    if (!plan_token) {
-      this.toast.error(
-        'Aprueba primero el plan para habilitar este paso.',
-        'Falta la aprobación',
-      );
-      return;
-    }
-    void this.runPlanStepRedeem(
-      conversation_id,
-      message_id,
-      numeric,
-      current.plan_id,
-      step,
-      plan_token,
+    this.toast.error(
+      'Esta propuesta venció. Solicita una propuesta nueva.',
+      'Falta la aprobación',
     );
   }
 
@@ -870,7 +1151,7 @@ export class VexChatStore {
     this._busy_plan_id.set(plan_id);
     try {
       if (plan_id.startsWith(VEX_SINGLE_PLAN_PREFIX)) {
-        await firstValueFrom(
+        const result = await firstValueFrom(
           this.api.applyStepConfirmation(
             step.tool,
             step.arguments ?? {},
@@ -878,11 +1159,25 @@ export class VexChatStore {
             numeric,
           ),
         );
-        this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
-          status: 'done',
-        });
-        this.patchPlan(conversation_id, message_id, { status: 'done' });
-        this.reopenNarration(numeric, conversation_id, message_id);
+        const applied =
+          result.execution?.status === 'ok' &&
+          result.execution.effect_status === 'applied';
+        this.finishStepApply(
+          conversation_id,
+          message_id,
+          numeric,
+          plan_id,
+          step.step_id,
+          {
+            ...result,
+            ...(applied
+              ? {
+                  step_status: 'applied' as const,
+                  plan_status: 'applied' as const,
+                }
+              : {}),
+          },
+        );
         return;
       }
       const result = await firstValueFrom(
@@ -915,11 +1210,11 @@ export class VexChatStore {
   }
 
   /**
-   * Irreversible step with no live token: `steps/:step_id/confirmation`
+   * Any pending server step without a live token: `steps/:step_id/confirmation`
    * mints one over the persisted tool+arguments (only for an `approved` plan
    * and a `pending` step), then `confirmations/apply` consumes it.
    */
-  private async runIrreversibleApply(
+  private async runStepConfirmationApply(
     conversation_id: string,
     message_id: string,
     numeric: number,
@@ -948,63 +1243,6 @@ export class VexChatStore {
         result,
       );
     } catch (error) {
-      await this.handleStepError(
-        error,
-        conversation_id,
-        numeric,
-        plan_id,
-        step,
-      );
-    } finally {
-      this._busy_plan_id.set(null);
-    }
-  }
-
-  /**
-   * Own-card approve of a reversible step without a token (the person routed
-   * it there, the plan token is still in memory): applies it under the plan
-   * token. A non-`ok` outcome answers a fresh single-use token and holds so
-   * the person reviews the server message and clicks again.
-   */
-  private async runPlanStepRedeem(
-    conversation_id: string,
-    message_id: string,
-    numeric: number,
-    plan_id: string,
-    step: VexPlanStep,
-    plan_token: string,
-  ): Promise<void> {
-    this._busy_plan_id.set(plan_id);
-    try {
-      const result = await firstValueFrom(
-        this.api.applyConfirmation({
-          conversationId: numeric,
-          planId: plan_id,
-          stepId: step.step_id,
-          planToken: plan_token,
-        }),
-      );
-      this.finishStepApply(
-        conversation_id,
-        message_id,
-        numeric,
-        plan_id,
-        step.step_id,
-        result,
-      );
-    } catch (error) {
-      const token = readSingleUseToken(error);
-      if (token) {
-        this.patchPlanStep(conversation_id, message_id, plan_id, step.step_id, {
-          status: 'pending',
-          confirmation_token: token,
-        });
-        this.toast.error(
-          `${extractApiErrorMessage(error)} Revísalo y pulsa de nuevo para aplicarlo.`,
-          'Necesita confirmación propia',
-        );
-        return;
-      }
       await this.handleStepError(
         error,
         conversation_id,
@@ -1059,9 +1297,15 @@ export class VexChatStore {
     const rejected = parseApiError(error).errorCode === 'AI_AGENT_005';
     if (rejected) {
       // A stale token must not keep the card on a dead one-click path.
-      this.patchPlanStep(conversation_id, this.messageOfPlan(conversation_id, plan_id), plan_id, step.step_id, {
-        confirmation_token: undefined,
-      });
+      this.patchPlanStep(
+        conversation_id,
+        this.messageOfPlan(conversation_id, plan_id),
+        plan_id,
+        step.step_id,
+        {
+          confirmation_token: undefined,
+        },
+      );
       this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
       return;
     }
@@ -1100,14 +1344,14 @@ export class VexChatStore {
     block_id: string,
     interaction: VexBlockInteraction,
   ): void {
-    void firstValueFrom(this.api.postBlockInteraction(block_id, interaction)).catch(
-      (error) => {
-        this.toast.error(
-          extractApiErrorMessage(error),
-          'No se pudo enviar la selección',
-        );
-      },
-    );
+    void firstValueFrom(
+      this.api.postBlockInteraction(block_id, interaction),
+    ).catch((error) => {
+      this.toast.error(
+        extractApiErrorMessage(error),
+        'No se pudo enviar la selección',
+      );
+    });
   }
 
   private loadConversations(): Promise<void> {
@@ -1142,6 +1386,8 @@ export class VexChatStore {
     this._loading_thread.set(true);
     return firstValueFrom(this.api.getConversation(numeric))
       .then((row) => {
+        const pointer = objectivePointer(row.metadata);
+        if (pointer) this.refreshObjective(pointer);
         const adapted = (row.messages ?? [])
           .map(adaptMessage)
           .filter(
@@ -1194,11 +1440,7 @@ export class VexChatStore {
       for (const result of results) {
         if (result.status !== 'fulfilled') continue;
         const block = result.value;
-        if (
-          !block ||
-          typeof block.block_id !== 'string' ||
-          !block.block_id
-        ) {
+        if (!block || typeof block.block_id !== 'string' || !block.block_id) {
           continue;
         }
         fetched.set(block.block_id, block);
@@ -1229,13 +1471,20 @@ export class VexChatStore {
     });
   }
 
-  private runTurn(text: string, attachment_ids: string[]): Promise<void> {
+  private runTurn(
+    text: string,
+    attachment_ids: string[],
+    speak = false,
+  ): Promise<void> {
+    this.voiceSafety.invalidate();
+    this.closeStream();
+    const generation = this.stream_generation;
     this._error.set(null);
     this._is_agent_typing.set(true);
 
-    return this
-      .ensureConversation(text)
+    return this.ensureConversation(text)
       .then((conversation_id) => {
+        if (generation !== this.stream_generation) return;
         if (!conversation_id) {
           this._is_agent_typing.set(false);
           return;
@@ -1245,7 +1494,11 @@ export class VexChatStore {
         this._conversations.update((list) =>
           list.map((c) =>
             c.id === conversation_id
-              ? { ...c, messages: [...c.messages, user_message], updated_at: now }
+              ? {
+                  ...c,
+                  messages: [...c.messages, user_message],
+                  updated_at: now,
+                }
               : c,
           ),
         );
@@ -1267,17 +1520,16 @@ export class VexChatStore {
         firstValueFrom(
           this.api.createStreamIntent(numeric, text, {
             attachmentIds: attachment_ids.length ? attachment_ids : undefined,
+            ...(speak ? { speak: true } : {}),
           }),
         )
           .then((stream_id) => {
-            this.subscribeStream(
-              numeric,
-              conversation_id,
-              full.id,
-              stream_id,
-            );
+            if (generation !== this.stream_generation) return;
+            if (speak) this.voice.startTurn(stream_id);
+            this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
+            if (generation !== this.stream_generation) return;
             this.failMessage(
               conversation_id,
               full.id,
@@ -1322,8 +1574,13 @@ export class VexChatStore {
     numeric: number,
     conversation_id: string,
     anchor_message_id: string,
-    options: { continuation: 'approved' | 'rejected' | 'resume'; skipUserMessage?: boolean },
+    options: {
+      continuation: 'approved' | 'rejected' | 'resume';
+      skipUserMessage?: boolean;
+    },
   ): void {
+    this.closeStream();
+    const generation = this.stream_generation;
     this._is_agent_typing.set(true);
     const continuation_message: VexMessage = {
       ...buildMessage('agent', '', new Date()),
@@ -1347,14 +1604,24 @@ export class VexChatStore {
         return { ...c, messages };
       }),
     );
-    firstValueFrom(
-      this.api.createStreamIntent(numeric, '', options),
-    )
+    firstValueFrom(this.api.createStreamIntent(numeric, '', options))
       .then((stream_id) => {
-        this.subscribeStream(numeric, conversation_id, message_id, stream_id, true);
+        if (generation !== this.stream_generation) return;
+        this.subscribeStream(
+          numeric,
+          conversation_id,
+          message_id,
+          stream_id,
+          true,
+        );
       })
       .catch((error) => {
-        this.failMessage(conversation_id, message_id, extractApiErrorMessage(error));
+        if (generation !== this.stream_generation) return;
+        this.failMessage(
+          conversation_id,
+          message_id,
+          extractApiErrorMessage(error),
+        );
       });
   }
 
@@ -1369,35 +1636,69 @@ export class VexChatStore {
     // Continuations adopt the server id of the new row (frame `message_id`)
     // when the backend reports it; otherwise the local id stays.
     let target = message_id;
-    this.stream_sub = this.api.streamConversation(numeric, stream_id).subscribe({
-      next: (chunk) => {
-        if (adopt_server_id && chunk.message_id !== undefined && chunk.message_id !== null) {
-          const server_id = String(chunk.message_id);
-          if (server_id && server_id !== target) {
-            this.renameMessage(conversation_id, target, server_id);
-            target = server_id;
+    let reconcileRequired = false;
+    this.stream_sub = this.api
+      .streamConversation(numeric, stream_id)
+      .subscribe({
+        next: (chunk) => {
+          reconcileRequired ||= chunk.reconcile_required === true;
+          if (
+            adopt_server_id &&
+            chunk.message_id !== undefined &&
+            chunk.message_id !== null
+          ) {
+            const server_id = String(chunk.message_id);
+            if (server_id && server_id !== target) {
+              this.renameMessage(conversation_id, target, server_id);
+              target = server_id;
+            }
           }
-        }
-        this.applyChunk(conversation_id, target, chunk);
-      },
-      error: (error: unknown) => {
-        this.failMessage(
-          conversation_id,
-          target,
-          error instanceof Error ? error.message : 'Se perdió la conexión con Vex.',
-        );
-      },
-      complete: () => {
-        this.stream_sub = undefined;
-      },
-    });
+          if (chunk.type === 'audio' && chunk.audio_base64)
+            this.voice.enqueue(stream_id, {
+              index: chunk.index ?? 0,
+              audio_base64: chunk.audio_base64,
+              content_type: chunk.content_type || 'audio/mpeg',
+              filler: chunk.filler,
+            });
+          if (chunk.type === 'done' || chunk.type === 'error')
+            this.voice.finishTurn(stream_id);
+          this.applyChunk(conversation_id, target, chunk);
+          if (
+            reconcileRequired &&
+            (chunk.type === 'done' || chunk.type === 'error')
+          ) {
+            void this.loadThread(conversation_id);
+          }
+        },
+        error: (error: unknown) => {
+          this.failMessage(
+            conversation_id,
+            target,
+            error instanceof Error
+              ? error.message
+              : 'Se perdió la conexión con Vex.',
+          );
+        },
+        complete: () => {
+          this.stream_sub = undefined;
+        },
+      });
   }
 
-  private renameMessage(conversation_id: string, from: string, to: string): void {
+  private renameMessage(
+    conversation_id: string,
+    from: string,
+    to: string,
+  ): void {
     this._conversations.update((list) =>
       list.map((c) =>
         c.id === conversation_id && !c.messages.some((m) => m.id === to)
-          ? { ...c, messages: c.messages.map((m) => (m.id === from ? { ...m, id: to } : m)) }
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === from ? { ...m, id: to } : m,
+              ),
+            }
           : c,
       ),
     );
@@ -1409,13 +1710,26 @@ export class VexChatStore {
     chunk: {
       type: string;
       content?: string;
-      tool?: { id: string; name: string; summary?: string; failed?: boolean };
+      tool?: {
+        id: string;
+        name: string;
+        summary?: string;
+        failed?: boolean;
+        execution?: VexiToolExecution;
+      };
       block?: VexUiBlock;
       plan?: VexPlanProposal;
       error?: string;
+      objective?: VexiObjective;
     },
   ): void {
+    if (chunk.objective?.conversation_id === Number(conversation_id)) {
+      this.rememberObjective(chunk.objective);
+    }
     switch (chunk.type) {
+      case 'progress':
+        this._stream_progress.set(chunk.content ?? '');
+        return;
       case 'text': {
         if (!chunk.content) return;
         const delta = chunk.content;
@@ -1437,7 +1751,11 @@ export class VexChatStore {
       }
       case 'tool_call': {
         if (!chunk.tool) return;
-        const step = { id: chunk.tool.id, name: chunk.tool.name, status: 'running' as const };
+        const step = {
+          id: chunk.tool.id,
+          name: chunk.tool.name,
+          status: 'running' as const,
+        };
         this._conversations.update((list) =>
           list.map((c) =>
             c.id === conversation_id
@@ -1445,7 +1763,15 @@ export class VexChatStore {
                   ...c,
                   messages: c.messages.map((m) =>
                     m.id === message_id
-                      ? { ...m, tool_steps: [...(m.tool_steps ?? []), step] }
+                      ? {
+                          ...m,
+                          tool_steps: [
+                            ...(m.tool_steps ?? []).filter(
+                              (existing) => existing.id !== step.id,
+                            ),
+                            step,
+                          ],
+                        }
                       : m,
                   ),
                 }
@@ -1456,26 +1782,25 @@ export class VexChatStore {
       }
       case 'tool_result': {
         if (!chunk.tool) return;
-        const { id, summary, failed } = chunk.tool;
+        const tool = chunk.tool;
         this._conversations.update((list) =>
-          list.map((c) =>
-            c.id === conversation_id
+          list.map((conversation) =>
+            conversation.id === conversation_id
               ? {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === message_id
+                  ...conversation,
+                  messages: conversation.messages.map((message) =>
+                    message.id === message_id
                       ? {
-                          ...m,
-                          tool_steps: (m.tool_steps ?? []).map((s) =>
-                            s.id === id
-                              ? { ...s, summary, status: failed ? 'failed' as const : 'done' as const }
-                              : s,
+                          ...message,
+                          tool_steps: settleVexToolStep(
+                            message.tool_steps ?? [],
+                            tool,
                           ),
                         }
-                      : m,
+                      : message,
                   ),
                 }
-              : c,
+              : conversation,
           ),
         );
         return;
@@ -1493,11 +1818,15 @@ export class VexChatStore {
                     const previous = m.blocks ?? [];
                     // A transform emits a new version of the same block: it
                     // replaces, it does not pile up.
-                    const exists = previous.some((b) => b.block_id === block.block_id);
+                    const exists = previous.some(
+                      (b) => b.block_id === block.block_id,
+                    );
                     return {
                       ...m,
                       blocks: exists
-                        ? previous.map((b) => (b.block_id === block.block_id ? block : b))
+                        ? previous.map((b) =>
+                            b.block_id === block.block_id ? block : b,
+                          )
                         : [...previous, block],
                     };
                   }),
@@ -1513,6 +1842,7 @@ export class VexChatStore {
         return;
       }
       case 'done': {
+        this._stream_progress.set('');
         const now = new Date();
         this._conversations.update((list) =>
           list.map((c) =>
@@ -1543,7 +1873,12 @@ export class VexChatStore {
     }
   }
 
-  private failMessage(conversation_id: string, message_id: string, error: string): void {
+  private failMessage(
+    conversation_id: string,
+    message_id: string,
+    error: string,
+  ): void {
+    this._stream_progress.set('');
     this.patchMessage(conversation_id, message_id, { streaming: false, error });
     this._is_agent_typing.set(false);
   }
@@ -1611,10 +1946,7 @@ export class VexChatStore {
                   s.status !== 'skipped' &&
                   !s.confirmation_token &&
                   s.tool === orphan.tool &&
-                  argsEqual(
-                    s.arguments ?? {},
-                    orphan.arguments ?? {},
-                  ),
+                  argsEqual(s.arguments ?? {}, orphan.arguments ?? {}),
               );
               if (idx >= 0) {
                 return {
@@ -1697,6 +2029,8 @@ export class VexChatStore {
   }
 
   private closeStream(): void {
+    this.stream_generation++;
+    this._stream_progress.set('');
     this.stream_sub?.unsubscribe();
     this.stream_sub = undefined;
   }

@@ -59,3 +59,11 @@ export type {
 export { uiTools } from './domains/ui.tools';
 
 export * from './interfaces/tool.interface';
+
+export { createDiscoveryTools } from './domains/discovery.tools';
+export { ToolRouterService } from './tool-router.service';
+
+export { createPlaybookTools } from './domains/playbook.tools';
+export { createCodeExecutionTools } from './domains/code-execution.tools';
+
+export { createProceduralRecipeTools } from './domains/recipe.tools';

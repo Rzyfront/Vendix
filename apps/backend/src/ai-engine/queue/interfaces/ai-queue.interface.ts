@@ -24,6 +24,10 @@ export interface AIEmbeddingJob {
 }
 
 export interface AIAgentJob {
+  /** Server-owned, bounded contention wait; not a functional retry/authority grant. */
+  lease_wait?: { started_at: number; count: number };
+  /** Optional durable reference; never decides the BullMQ job state. */
+  objective_id?: string;
   goal: string;
   tools?: string[];
   organization_id?: number;
@@ -40,8 +44,8 @@ export interface AIAgentJob {
    * catalog is filtered by exactly this list — so omitting them does not fail
    * loudly, it silently hands the agent an empty toolset and the task returns
    * "no pude hacer nada". Snapshotted at enqueue time on purpose: the task must
-   * run with the authority the person had when they approved it, not with
-   * whatever their role became in the meantime.
+   * never exceed that snapshot. With durable objectives enabled, current DB
+   * permissions are intersected with this ceiling, so revocation is respected.
    */
   permissions?: string[];
   roles?: string[];
@@ -66,4 +70,10 @@ export interface AIJobResult {
   result?: any;
   error?: string;
   progress?: number;
+}
+
+/** Platform job: deliberately no tenant=0/context or raw document content. */
+export interface AIKnowledgeIndexJob {
+  release_hash: string;
+  documents: Array<{ key: string; hash: string }>;
 }

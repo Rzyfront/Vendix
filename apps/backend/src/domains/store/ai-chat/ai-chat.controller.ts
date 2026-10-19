@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Headers,
   Sse,
   MessageEvent,
   ParseIntPipe,
@@ -92,7 +93,13 @@ export class AIChatController {
     @Body() dto: StreamIntentDto,
   ) {
     const streamId = await this.chatService.createStreamIntent(id, dto);
-    return this.responseService.success({ stream_id: streamId }, 'Stream ready');
+    return this.responseService.success(
+      {
+        stream_id: streamId,
+        ...{ replay_enabled: true },
+      },
+      'Stream ready',
+    );
   }
 
   @Sse('conversations/:id/stream')
@@ -101,6 +108,10 @@ export class AIChatController {
   streamMessage(
     @Param('id') id: string,
     @Query('stream_id') streamId: string,
+    @Query('after_sequence') afterSequence?: string,
+    @Query('objective_id') objectiveId?: string,
+    @Query('checkpoint') checkpoint?: string,
+    @Headers('last-event-id') lastEventId?: string,
   ): Observable<MessageEvent> {
     const conversationId = parseInt(id, 10);
 
@@ -114,10 +125,8 @@ export class AIChatController {
     const requestContext = RequestContextService.getContext();
 
     return new Observable<MessageEvent>((subscriber) => {
-      // Aborted by the teardown below when the browser goes away. Its only job is
-      // to stop the speech synthesis queue from billing for audio nobody will
-      // hear; the generator itself keeps draining so the assistant reply and its
-      // tool trace still get persisted.
+      // Disconnect cooperatively aborts work with H enabled (OFF: speech only).
+      // Always drain the producer so receipts/uncertain effects still persist.
       const abort = new AbortController();
 
       // Keeps the connection alive through the quiet stretches of a turn.
@@ -152,10 +161,20 @@ export class AIChatController {
             conversationId,
             streamId,
             abort.signal,
+            {
+              ...((afterSequence ?? lastEventId) !== undefined
+                ? { after_sequence: Number(afterSequence ?? lastEventId) }
+                : {}),
+              ...(objectiveId ? { objective_id: objectiveId } : {}),
+              ...(checkpoint !== undefined
+                ? { checkpoint: Number(checkpoint) }
+                : {}),
+            },
           )) {
             subscriber.next({
               data: JSON.stringify(chunk),
               type: 'ai-chunk',
+              ...(chunk.replay ? { id: String(chunk.replay.sequence) } : {}),
             } as MessageEvent);
 
             if (chunk.type === 'done' || chunk.type === 'error') {

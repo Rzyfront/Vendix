@@ -1,3 +1,8 @@
+import type {
+  AgentExecutionSummary,
+  ToolExecutionReceipt,
+} from '../tools/interfaces/tool.interface';
+
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
@@ -26,6 +31,8 @@ export interface AIMessageContentPart {
 }
 
 export interface AIMessage {
+  /** Server-only H retention hint; never forwarded to provider SDKs. */
+  context_retention?: 'required' | 'history';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | AIMessageContentPart[];
   tool_calls?: AIToolCall[];
@@ -33,6 +40,12 @@ export interface AIMessage {
 }
 
 export interface AIRequestOptions {
+  /** Internal H transport contract. Never serialize this into an SDK body. */
+  agenticStream?: boolean;
+  /** Opt-in D2 cancellation; never serialized into the provider request body. */
+  signal?: AbortSignal;
+  /** Epoch-millisecond dispatch deadline, already excluding closure reserve. */
+  deadlineMs?: number;
   model?: string;
   temperature?: number;
   maxTokens?: number;
@@ -76,6 +89,9 @@ export interface AIImageRequestOptions {
 
 export interface AIResponse {
   success: boolean;
+  /** Optional D0 transport classification, not a new retry policy. */
+  error_code?: string;
+  retryable?: boolean;
   content?: string;
   usage?: {
     promptTokens: number;
@@ -93,6 +109,8 @@ export interface AIResponse {
 }
 
 export interface AIStreamChunk {
+  /** D1 optional durable progress; no credentials or execution authority. */
+  objective?: import('../tasks/interfaces/agent-objective.interface').ObjectiveProgress;
   /**
    * `tool_call` and `tool_result` exist so the UI can narrate an agent turn
    * instead of showing a spinner for 30-40s. They are emitted by the agent
@@ -105,6 +123,7 @@ export interface AIStreamChunk {
    */
   type:
     | 'text'
+    | 'progress'
     | 'tool_call'
     | 'tool_result'
     | 'done'
@@ -113,6 +132,26 @@ export interface AIStreamChunk {
     | 'ui_block'
     | 'plan_approval';
   content?: string;
+  /** H provider terminal result; never contains partial tool arguments. */
+  tool_calls?: AIToolCall[];
+  finish_reason?: AIResponse['finish_reason'];
+  model?: string;
+  error_code?: string;
+  usage_state?: 'reported' | 'unknown';
+  context_budget?: {
+    estimated_input_tokens: number;
+    omitted_messages: number;
+    context_window_tokens: number;
+    provenance: 'configured' | 'fallback';
+    method: 'conservative_estimate';
+  };
+  /** Transport cursor is observational and grants no execution authority. */
+  replay?: {
+    stream_id: string;
+    sequence: number;
+    objective_id?: string;
+    checkpoint?: number;
+  };
   /**
    * Present on the chat `done` frame when the turn persisted an assistant row:
    * its `ai_messages.id`. For continuation turns the frontend links the new
@@ -172,6 +211,8 @@ export interface AIStreamChunk {
     summary?: string;
     /** Only on `tool_result`: the tool threw and the model was told so. */
     failed?: boolean;
+    /** D0 receipt is separate from the truncated display summary. */
+    execution?: ToolExecutionReceipt;
     /**
      * Only on `tool_call`, only when the tool is deprecated (T5): warns the
      * model — and the visible trace — that the name has a sunset. Spanish,
@@ -189,6 +230,8 @@ export interface AIStreamChunk {
     cacheCreationTokens?: number;
   };
   error?: string;
+  /** D0 terminal semantics; `done`/success alone never verifies an objective. */
+  execution?: AgentExecutionSummary;
 }
 
 export interface AIImageResponse {
@@ -303,11 +346,15 @@ export interface AITranscriptionRequestOptions {
   language?: string;
   temperature?: number;
   provider?: Record<string, any>;
+  /** G dedicated capture only; unsupported capability must return unknown. */
+  requireConfidence?: boolean;
 }
 
 export interface AITranscriptionResponse {
   success: boolean;
   text?: string;
+  /** Conservative observed minimum token probability, NOT biometric reliability. */
+  confidence?: number | null;
   model?: string;
   usage?: {
     promptTokens: number;
@@ -364,10 +411,21 @@ export interface AIToolDefinition {
   };
 }
 
+/** Transport hook for counting real SDK HTTP attempts, including SDK retries.
+ * It must not inspect or persist request/response bodies, URLs or headers.
+ */
+export type AIProviderFetch = typeof globalThis.fetch;
+
 export interface AIProviderConfig {
   provider: string;
   sdkType: SdkType;
   apiKey: string;
+  /** Optional telemetry transport; omission preserves the SDK default. */
+  fetch?: AIProviderFetch;
+  /** Numeric presence only; keeps legacy response/quota contracts unchanged. */
+  observeUsage?: (
+    usage: Partial<NonNullable<AIResponse['usage']>> | undefined,
+  ) => void;
   modelId: string;
   baseUrl?: string;
   /**
@@ -388,6 +446,8 @@ export interface AIProviderConfig {
 }
 
 export interface AIProvider {
+  /** Config-specific capability. A stream without final usage cannot meter an agent. */
+  supportsMeteredAgentStream?(): boolean;
   chat(messages: AIMessage[], options?: AIRequestOptions): Promise<AIResponse>;
   complete(prompt: string, options?: AIRequestOptions): Promise<AIResponse>;
   testConnection(): Promise<{ success: boolean; message: string }>;
