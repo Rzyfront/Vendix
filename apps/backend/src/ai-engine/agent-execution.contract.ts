@@ -9,9 +9,83 @@ import {
   toolReceipt,
 } from './tools/tool-result.normalizer';
 
+/**
+ * Texto para la persona, nunca para el modelo. Las `next_action` de recibos,
+ * de la política de recuperación y del objetivo durable son instrucciones
+ * internas ("usa search_tools", "postcondiciones", "playbook"): viajan al
+ * modelo y a la metadata, jamás al chat. Todo lo que el contrato o la sesión
+ * durable le muestren al usuario sale de aquí.
+ */
+export const USER_NOTICES = {
+  unknown_effect:
+    'No pude confirmar si el cambio quedó aplicado. Lo reviso en el registro antes de intentarlo otra vez. No repetiré el cambio.',
+  blocked:
+    'Parte de lo que pediste no está disponible con tu usuario o con tu plan actual; un administrador puede revisar esos permisos.',
+  failed:
+    'No pude obtener respuesta del sistema en este momento. Pídemelo de nuevo en un momento y lo intento otra vez.',
+  read_failed:
+    'No pude consultar toda la información que necesitaba en este momento. Pídemelo de nuevo y lo intento otra vez.',
+  exhausted:
+    'No alcancé a terminar en este turno. Si quieres, sigo desde donde quedé.',
+  pending_confirmation:
+    'Revisa y aprueba la propuesta; todavía no se aplicó ese cambio.',
+  needs_user_input: 'Indícame el dato que falta para continuar.',
+  write_pending_verification:
+    'Ya hice el cambio; si quieres, reviso que haya quedado bien registrado.',
+} as const;
+
+/**
+ * An authorized tool outside the routed top-K, staged for the next inference.
+ * Like BATCH_NOT_DISPATCHED it never ran: it is not a failed query.
+ */
+export const TOOL_STAGED_CODE = 'AI_AGENT_TOOL_STAGED';
+const NOT_EXECUTED = new Set([TOOL_STAGED_CODE, 'BATCH_NOT_DISPATCHED']);
+const notExecuted = (r: ToolExecutionReceipt) =>
+  NOT_EXECUTED.has(r.error_code ?? '');
+
+/** Vocabulario interno del runtime que nunca debe llegar al chat. */
+export const INTERNAL_JARGON =
+  /postcondici|search_tools|playbook|objetivo original|conservo el avance|\bschema\b|preflight|fingerprint|\blease\b|checkpoint|recuperaci[oó]n t[eé]cnica|\(interno\)|AI_AGENT_|inferencia/i;
+
+/** A tool-provided user string survives only if it carries no runtime jargon. */
+export function userFacingText(
+  text: string | null | undefined,
+  fallback: string,
+): string {
+  const value = text?.trim();
+  return value && !INTERNAL_JARGON.test(value) ? value : fallback;
+}
+
+function appendNotice(content: string, notice: string): string {
+  if (!content) return notice;
+  return content.includes(notice) ? content : `${content}\n\n${notice}`;
+}
+
+/** Trace row text for a failed tool: human, never the model instruction. */
+export function userToolSummary(
+  receipt: ToolExecutionReceipt,
+  summary: string | undefined,
+): string | undefined {
+  if (notExecuted(receipt)) return 'Preparando la consulta.';
+  switch (receipt.status) {
+    case 'ok':
+      return summary;
+    case 'blocked':
+      return 'Sin acceso con tu usuario o plan actual.';
+    case 'unknown_effect':
+      return 'No se pudo confirmar el resultado.';
+    case 'pending_confirmation':
+      return 'Esperando tu aprobación.';
+    case 'needs_user_input':
+      return userFacingText(summary, 'Falta un dato para continuar.');
+    default:
+      return 'No se pudo consultar este dato.';
+  }
+}
+
 export function describeIncompleteExecution(
   receipts: ToolExecutionReceipt[],
-  nextAction: string,
+  userNotice: string,
 ): string {
   const observed = receipts.filter(
     (r) => r.status === 'ok' && r.freshness === 'observed',
@@ -22,9 +96,9 @@ export function describeIncompleteExecution(
   const prefix = ids.length
     ? `Consulté los registros ${ids.slice(0, 5).join(', ')}. `
     : observed.length
-      ? 'Obtuve resultados de consulta, pero la solicitud no está verificada como terminada. '
-      : 'No tengo evidencia suficiente para dar tu solicitud por terminada. ';
-  return prefix + nextAction;
+      ? 'Alcancé a consultar parte de la información. '
+      : '';
+  return prefix + userNotice;
 }
 
 function terminalOutcome(
@@ -105,8 +179,11 @@ export async function* withExecutionContract(
           ...chunk,
           tool: {
             ...chunk.tool,
+            summary: userToolSummary(execution, chunk.tool.summary),
             execution,
-            failed: ['recoverable_error', 'blocked'].includes(execution.status),
+            failed:
+              !notExecuted(execution) &&
+              ['recoverable_error', 'blocked'].includes(execution.status),
           },
         });
         continue;
@@ -121,7 +198,9 @@ export async function* withExecutionContract(
     }
     const result = step.value;
     completed = true;
-    const outstanding = [...receipts.values()].filter((r) => r.status !== 'ok');
+    const outstanding = [...receipts.values()].filter(
+      (r) => r.status !== 'ok' && !notExecuted(r),
+    );
     const critical =
       outstanding.find((r) => r.status === 'unknown_effect') ??
       outstanding.find((r) => r.status === 'blocked') ??
@@ -136,18 +215,38 @@ export async function* withExecutionContract(
       evidence_refs: [...new Set(all.flatMap((r) => r.evidence_refs))],
       resource_ids: Object.assign({}, ...all.map((r) => r.resource_ids)),
     };
-    // Never let optimistic provider prose hide a known blocker or an uncertain
-    // effect. Legacy text/truncation and applied-without-verifier are not proof.
-    const unverified = all.some(
-      (r) =>
-        r.effect_status === 'applied' ||
-        r.effect_status === 'unverified' ||
-        r.freshness !== 'observed',
-    );
-    const mustDescribe =
-      critical || result.exhausted || unverified || !result.success;
+    // The model's answer is the answer. Read/analysis turns are never
+    // overwritten: a failed or truncated read is something the model already
+    // saw and must explain itself. Only a known blocker or an uncertain WRITE
+    // earns a short human notice, appended — never the internal next_action.
     let content = text || result.content;
-    if (mustDescribe) content = describeIncompleteExecution(all, nextAction);
+    const question =
+      critical?.status === 'needs_user_input' && !result.awaiting_input
+        ? userFacingText(critical.next_action, USER_NOTICES.needs_user_input)
+        : undefined;
+    // A failed loop's content is a provider/runtime diagnostic, not an answer.
+    if (!result.success)
+      content = result.exhausted
+        ? content || USER_NOTICES.failed
+        : USER_NOTICES.failed;
+    // Exhaustion text is ours (the model never closed), so it may be rebuilt.
+    else if (result.exhausted)
+      content = describeIncompleteExecution(
+        all,
+        question ?? USER_NOTICES.exhausted,
+      );
+    else if (question) content = appendNotice(content, question);
+    else if (!content && critical) content = USER_NOTICES.read_failed;
+    if (critical?.status === 'unknown_effect')
+      content = appendNotice(content, USER_NOTICES.unknown_effect);
+    else if (critical?.status === 'blocked')
+      content = appendNotice(content, USER_NOTICES.blocked);
+    else if (
+      critical?.status === 'pending_confirmation' &&
+      !result.pending_confirmation &&
+      !result.pending_plan
+    )
+      content = appendNotice(content, USER_NOTICES.pending_confirmation);
     if (
       (outcome === 'pending_confirmation' &&
         (result.pending_confirmation || result.pending_plan)) ||

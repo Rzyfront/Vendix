@@ -9,6 +9,7 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
+import { INTERNAL_JARGON, USER_NOTICES } from './agent-execution.contract';
 
 const def = (name: string) => ({
   type: 'function' as const,
@@ -581,9 +582,10 @@ describe('AIAgentService.runAgentStream', () => {
     });
     expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
-    expect(
-      chunks.find((c) => c.type === 'tool_result')?.tool?.summary,
-    ).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    // The trace row is user-facing: human text, never the internal code.
+    expect(chunks.find((c) => c.type === 'tool_result')?.tool?.summary).toBe(
+      'Sin acceso con tu usuario o plan actual.',
+    );
     expect(consumeAIQuota).not.toHaveBeenCalled();
   });
 
@@ -909,7 +911,9 @@ describe('AIAgentService.runAgentStream', () => {
     );
     const toolResult = chunks[0] as any;
     expect(toolResult.tool.failed).toBe(true);
-    expect(toolResult.tool.summary).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    expect(toolResult.tool.summary).toBe(
+      'Sin acceso con tu usuario o plan actual.',
+    );
     expect(chat).toHaveBeenCalledTimes(1); // permission blocks halt rather than re-infer.
   });
 
@@ -930,9 +934,8 @@ describe('AIAgentService.runAgentStream', () => {
       'ai.agent.tool_executed',
       expect.anything(),
     );
-    expect((chunks[0] as any).tool.summary).toContain(
-      'AI_AGENT_TOOL_NOT_ALLOWED',
-    );
+    expect((chunks[0] as any).tool.summary).not.toMatch(INTERNAL_JARGON);
+    expect((chunks[0] as any).tool.failed).toBe(true);
   });
 
   it('(rx2-b) planned budget is min(row + headroom, 60), not a fixed max', async () => {
@@ -1473,13 +1476,14 @@ describe('AIAgentService.runAgentStream', () => {
         .mockResolvedValueOnce(
           ok({ tool_calls: [call('t2', 'list_things', { id: 1 })] }),
         )
-        .mockResolvedValueOnce(ok({ content: 'Ya quedó completado' }));
+        .mockResolvedValueOnce(ok({ content: 'No encontré ese documento.' }));
       const { chunks, result } = await drain({});
       expect(executeTool).toHaveBeenCalledTimes(1);
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.execution).toMatchObject({ outcome: 'partial' });
-      expect(result.content).not.toContain('Ya quedó');
-      expect(result.content).toContain('otro documento');
+      // Read turn: the model's own answer is never replaced (hotfix Vexi).
+      expect(result.content).toBe('No encontré ese documento.');
+      expect(result.execution?.next_action).toContain('otro documento');
       expect(chunks.find((c) => c.type === 'done')?.execution).toEqual(
         result.execution,
       );
@@ -1672,12 +1676,12 @@ describe('AIAgentService.runAgentStream', () => {
       );
       chat
         .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
-        .mockResolvedValueOnce(ok({ content: 'Todo aplicado.' }));
+        .mockResolvedValueOnce(ok({ content: 'La consulta fue rechazada.' }));
       const { result } = await drain({});
       expect(handler).toHaveBeenCalledTimes(1);
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.execution?.outcome).toBe('partial');
-      expect(result.content).not.toContain('Todo aplicado');
+      expect(result.content).toBe('La consulta fue rechazada.');
     });
     it('provider transient emits a terminal failed outcome without another retry layer or lost usage', async () => {
       chat.mockResolvedValue({
@@ -1710,11 +1714,13 @@ describe('AIAgentService.runAgentStream', () => {
       executeTool.mockResolvedValue('Ya quedó');
       chat
         .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
-        .mockResolvedValueOnce(ok({ content: 'Todo completado' }));
+        .mockResolvedValueOnce(ok({ content: 'Esto fue lo que encontré.' }));
       const { result } = await drain({});
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.tools_used[0].execution?.freshness).toBe('unknown');
-      expect(result.content).not.toContain('Todo completado');
+      // A legacy read is not evidence of a write; the answer stays the model's.
+      expect(result.content).toBe('Esto fue lo que encontré.');
+      expect(result.execution?.outcome).not.toBe('completed_verified');
     });
   });
 });
@@ -1826,6 +1832,27 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(result.tools_used.map((t) => t.name)).toContain('operation_49');
     expect(result.execution?.outcome).not.toBe('blocked');
     expect(access.consumeAIQuota).toHaveBeenCalledTimes(1); // Discovery itself is not a business-success unit.
+  });
+  it('hotfix: an authorized but unoffered read is staged for the next inference, without search_tools nor a failed row', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('direct', 'operation_49', { id: 1 })] }),
+      )
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('again', 'operation_49', { id: 1 })] }),
+      )
+      .mockResolvedValueOnce(
+        ok({ content: 'La caja cerró con $20.000 de menos.' }),
+      );
+    const { result, chunks } = await drain();
+    expect(names(0)).not.toContain('operation_49');
+    expect(names(1)).toContain('operation_49');
+    expect(handler).toHaveBeenCalledTimes(1);
+    const rows = chunks.filter((c) => c.type === 'tool_result');
+    expect(rows.some((c) => c.tool?.failed)).toBe(false);
+    for (const row of rows)
+      expect(row.tool?.summary ?? '').not.toMatch(INTERNAL_JARGON);
+    expect(result.content).toBe('La caja cerró con $20.000 de menos.');
   });
   it('never emits an unoffered UI tool_call nor dispatches to the browser', async () => {
     registry.register({
@@ -2142,5 +2169,162 @@ describe('D1 durable loop seam', () => {
     });
     expect(durable.close).toHaveBeenCalledTimes(1);
     expect(durable.finish).not.toHaveBeenCalled();
+  });
+
+  describe('hotfix: la respuesta del modelo nunca se reemplaza por jerga interna', () => {
+    const INTERNAL_INSTRUCTION =
+      'Busca la herramienta autorizada con search_tools o la fase pertinente del playbook; conserva el objetivo original.';
+    const answer =
+      'Tu caja cerró con un faltante de $20.000 en efectivo: el esperado era $500.000 y contaste $480.000.';
+    const withOpenObjective = () => {
+      durable.objective.plan = makePlan({ steps: [step(1, 'in_progress')] });
+      durable.objective.requires_revalidation = true;
+      durable.objective.next_step = INTERNAL_INSTRUCTION;
+    };
+    const stream = (goal: string) =>
+      run(async () => {
+        const chunks: AIStreamChunk[] = [];
+        const gen = service.runAgentStream({ goal, durable });
+        let step = await gen.next();
+        while (!step.done) {
+          chunks.push(step.value);
+          step = await gen.next();
+        }
+        return { chunks, result: step.value };
+      });
+    const userVisible = (chunks: AIStreamChunk[], content: string) => [
+      content,
+      ...chunks.filter((c) => c.type === 'text').map((c) => c.content ?? ''),
+      ...chunks
+        .filter((c) => c.type === 'tool_result')
+        .map((c) => c.tool?.summary ?? ''),
+    ];
+
+    it('(a) un turno de lectura con plan/objetivo abierto conserva la respuesta del modelo', async () => {
+      withOpenObjective();
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }))
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream(
+        'Oe me ayudas a analizar un cierre de caja que no me dio?',
+      );
+      expect(result.content).toBe(answer);
+      expect(chunks.filter((c) => c.type === 'text')).toEqual([
+        { type: 'text', content: answer },
+      ]);
+    });
+
+    it('(b) lecturas fallidas conservan la respuesta del modelo y no filtran jerga', async () => {
+      withOpenObjective();
+      handler.mockResolvedValue(
+        '{"error":"fallo","error_code":"TOOL_BUSINESS_ERROR","next_step":"Inspecciona el schema y preflight autorizados."}',
+      );
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c1', 'read_rows', { session_id: 1 })] }),
+        )
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c2', 'read_rows', { session_id: 2 })] }),
+        )
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('que significa eso');
+      expect(result.content).toBe(answer);
+      const traces = chunks.filter((c) => c.type === 'tool_result');
+      expect(traces.length).toBeGreaterThan(0);
+      expect(traces.every((c) => c.tool?.failed)).toBe(true);
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(b) una consulta sin permiso se explica en lenguaje humano', async () => {
+      withOpenObjective();
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'restricted')] }))
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('analiza la caja');
+      expect(result.content).toBeTruthy();
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(b) sin texto del modelo, el aviso por lectura fallida es humano', async () => {
+      withOpenObjective();
+      handler.mockResolvedValue(
+        '{"error":"fallo","error_code":"TOOL_BUSINESS_ERROR","next_step":"x"}',
+      );
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }))
+        .mockResolvedValueOnce(ok({ content: '' }));
+      const { chunks, result } = await stream('analiza la caja');
+      expect(result.content).toBeTruthy();
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(c) una escritura sin postcondición verificada añade un aviso breve sin reemplazar la respuesta', async () => {
+      withOpenObjective();
+      const written = 'Listo, actualicé la nota del cierre.';
+      durable.finish.mockResolvedValue({
+        id: 'obj1',
+        version: 9,
+        semantic_status: 'partial',
+      });
+      async function* source(): AsyncGenerator<AIStreamChunk, any> {
+        yield { type: 'text', content: written };
+        yield { type: 'done' };
+        return {
+          content: written,
+          iterations: 2,
+          total_tokens: 10,
+          success: true,
+          tools_used: [
+            {
+              name: 'update_note',
+              args: {},
+              result: '{"applied":true}',
+              execution: { status: 'ok', effect_status: 'applied' },
+            },
+          ],
+        };
+      }
+      const gen = (service as any).withDurableSession(source(), durable);
+      const texts: string[] = [];
+      let next = await gen.next();
+      while (!next.done) {
+        if (next.value.type === 'text') texts.push(next.value.content);
+        next = await gen.next();
+      }
+      const result = next.value;
+      expect(result.content.startsWith(written)).toBe(true);
+      expect(result.content).toContain(USER_NOTICES.write_pending_verification);
+      expect(result.content).not.toMatch(INTERNAL_JARGON);
+      expect(result.content).not.toContain(INTERNAL_INSTRUCTION);
+      expect(texts).toEqual([result.content]);
+    });
+
+    it('(a) la sesión durable no toca la respuesta de un turno sin escrituras', async () => {
+      withOpenObjective();
+      async function* source(): AsyncGenerator<AIStreamChunk, any> {
+        yield { type: 'text', content: answer };
+        return {
+          content: answer,
+          iterations: 1,
+          total_tokens: 10,
+          success: true,
+          tools_used: [
+            {
+              name: 'read_rows',
+              args: {},
+              result: '{}',
+              execution: { status: 'ok', effect_status: 'unverified' },
+            },
+          ],
+        };
+      }
+      const gen = (service as any).withDurableSession(source(), durable);
+      let next = await gen.next();
+      while (!next.done) next = await gen.next();
+      expect(next.value.content).toBe(answer);
+    });
   });
 });

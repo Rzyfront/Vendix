@@ -63,6 +63,8 @@ import type {
 import {
   semanticToolOutcome,
   withExecutionContract,
+  TOOL_STAGED_CODE,
+  USER_NOTICES,
 } from './agent-execution.contract';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
@@ -1218,7 +1220,17 @@ export class AIAgentService {
           resource_ids: result.execution?.resource_ids ?? {},
         };
       }
+      // Server postconditions only exist for writes. A read/analysis turn
+      // never has them, so it is never "pending verification": the model's
+      // answer goes out untouched. When THIS turn applied a write that the
+      // verifier has not confirmed, a short human line is appended — the
+      // objective's next_step stays internal (it is an instruction for the
+      // model, e.g. recovery guidance) and never reaches the chat.
+      const wroteThisTurn = result.tools_used.some((t) =>
+        ['applied', 'unknown'].includes(t.execution?.effect_status ?? ''),
+      );
       if (
+        wroteThisTurn &&
         result.objective.semantic_status !== 'completed_verified' &&
         (session.objective.plan || session.objective.requires_revalidation) &&
         !result.pending_confirmation &&
@@ -1228,7 +1240,13 @@ export class AIAgentService {
         !result.plan_continue &&
         result.success
       ) {
-        result.content = `Conservo el avance, pero faltan postcondiciones de servidor para dar este trabajo por terminado. ${session.objective.next_step ?? result.execution?.next_action ?? 'Consultaré el estado del registro antes de repetir cualquier cambio.'}`;
+        const notice = USER_NOTICES.write_pending_verification;
+        const content = result.content ?? '';
+        if (
+          !content.includes(notice) &&
+          !content.includes(USER_NOTICES.unknown_effect)
+        )
+          result.content = content ? `${content}\n\n${notice}` : notice;
       }
       if ((textBuffered || result.content) && result.content && !result.aborted)
         yield { type: 'text', content: result.content };
@@ -1725,7 +1743,12 @@ export class AIAgentService {
         );
         await saveRecovery(next.state);
         recoveryDecision = next.decision;
-        if (next.decision.action !== 'continue')
+        // A needs_user_input receipt carries the question for the person;
+        // recovery guidance is for the model and must not replace it.
+        if (
+          next.decision.action !== 'continue' &&
+          normalized.status !== 'needs_user_input'
+        )
           normalized.next_action = next.decision.next_action;
         if (
           ['stop', 'ask_identifier', 'reconcile'].includes(next.decision.action)
@@ -2234,6 +2257,34 @@ export class AIAgentService {
             }
           }
           if (batchError) {
+            // An authorized tool the router did not offer is not a failure:
+            // stage every such call of the batch for the NEXT inference
+            // (same names, no search_tools round trip, no expansion spent),
+            // so the model repeats the batch before it answers.
+            let staged = false;
+            if (
+              batchError.code === 'AI_AGENT_TOOL_NOT_OFFERED' &&
+              routingSession &&
+              this.toolRouter
+            ) {
+              for (const call of calls)
+                if (
+                  liveNames.has(call.tool_name) &&
+                  !offeredNames.has(call.tool_name)
+                )
+                  staged =
+                    this.toolRouter.requestTool(
+                      routingSession,
+                      call.tool_name,
+                      authorized,
+                    ) || staged;
+              if (staged)
+                batchError = {
+                  ...batchError,
+                  code: TOOL_STAGED_CODE,
+                  next: 'La herramienta queda disponible en la siguiente inferencia: repite este mismo lote sin cambiar los argumentos.',
+                };
+            }
             for (const [index, call] of calls.entries()) {
               const culprit = index === batchError.culprit;
               const next = culprit
@@ -2256,7 +2307,8 @@ export class AIAgentService {
                 },
               );
               // An omitted sibling is not a failed tool, schema correction or discovery expansion.
-              if (culprit)
+              // Neither is a staged tool: it runs at the next inference.
+              if (culprit && batchError.code !== TOOL_STAGED_CODE)
                 await observeResult(call.tool_name, call.arguments, result);
               messages.push({
                 role: 'tool',
@@ -2280,7 +2332,7 @@ export class AIAgentService {
                   id: call.call_id,
                   name: call.tool_name,
                   summary: next,
-                  failed: true,
+                  failed: culprit && batchError.code !== TOOL_STAGED_CODE,
                   execution: toolReceipt(result),
                 },
               };
@@ -2558,12 +2610,25 @@ export class AIAgentService {
                   this.toolRegistry.canonicalName(d.function.name) === toolName,
               );
               if (!authorized || !offeredNames.has(toolName)) {
-                const code = authorized
-                  ? 'AI_AGENT_TOOL_NOT_OFFERED'
-                  : 'AI_AGENT_TOOL_NOT_ALLOWED';
-                const next = authorized
-                  ? 'Usa search_tools para habilitarla y llámala en la siguiente inferencia.'
-                  : 'Puedo preparar una consulta permitida o solicitar revisión al administrador.';
+                // Authorized but outside the top-K: stage it for the next
+                // inference instead of sending the model on a search_tools trip.
+                const staged =
+                  authorized &&
+                  this.toolRouter!.requestTool(
+                    routingSession,
+                    toolName,
+                    currentAuthority,
+                  );
+                const code = staged
+                  ? TOOL_STAGED_CODE
+                  : authorized
+                    ? 'AI_AGENT_TOOL_NOT_OFFERED'
+                    : 'AI_AGENT_TOOL_NOT_ALLOWED';
+                const next = staged
+                  ? 'La herramienta queda disponible en la siguiente inferencia: repite esta misma llamada sin cambiar los argumentos.'
+                  : authorized
+                    ? 'Usa search_tools para habilitarla y llámala en la siguiente inferencia.'
+                    : 'Puedo preparar una consulta permitida o solicitar revisión al administrador.';
                 const result = normalizeToolResult({
                   error: authorized
                     ? 'La herramienta no se ofreció en esta inferencia.'
@@ -2573,7 +2638,11 @@ export class AIAgentService {
                 });
                 if (!authorized)
                   await observeResult(toolName, toolArgs, result);
-                toolOutcome = authorized ? 'failed' : 'blocked_permission';
+                toolOutcome = staged
+                  ? 'partial'
+                  : authorized
+                    ? 'failed'
+                    : 'blocked_permission';
                 toolErrorCode = code;
                 messages.push({
                   role: 'tool',
@@ -2586,7 +2655,7 @@ export class AIAgentService {
                     id: toolCall.id,
                     name: toolName,
                     summary: next,
-                    failed: true,
+                    failed: !staged,
                     ...{ execution: toolReceipt(result) },
                   },
                 };
@@ -3851,7 +3920,7 @@ export class AIAgentService {
         closing ||
         (timedOut
           ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
-          : 'No tengo evidencia suficiente para dar tu solicitud por terminada. Puedo verificar el estado actual del registro y continuar desde el paso pendiente.');
+          : 'No alcancé a terminar en este turno. Si quieres, sigo desde donde quedé.');
 
       yield { type: 'text', content };
 
@@ -3867,7 +3936,7 @@ export class AIAgentService {
     } catch (error: any) {
       if ((robust || hTransport) && isAgentAbort(error)) {
         const content =
-          'Se agotó el plazo activo o se canceló el turno. Conservo el avance; una escritura incierta se verifica antes de volver a intentarla.';
+          'Se me acabó el tiempo para este turno. Si quieres, sigo desde donde quedé; no repetiré ningún cambio sin revisarlo antes.';
         yield { type: 'text', content };
         return {
           content,

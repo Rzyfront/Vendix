@@ -10,6 +10,15 @@ import { createPlaybookTools } from './domains/playbook.tools';
 import { createDiscoveryTools } from './domains/discovery.tools';
 import { discoveryPage, bridgeDataPage } from './discovery-pagination';
 import { RegisteredTool } from './interfaces/tool.interface';
+import { createAccountingTools } from './domains/accounting.tools';
+import { createAiToolboxTools } from './domains/ai-toolbox.tools';
+import { createCashRegisterTools } from './domains/cash-register.tools';
+import { createFiscalTools } from './domains/fiscal.tools';
+import { createOrdersTools } from './domains/orders.tools';
+import { createPaymentTools } from './domains/payments.tools';
+import { createProductTools } from './domains/products.tools';
+import { createReportingTools } from './domains/reporting.tools';
+import { createReportTools } from './domains/reports.tools';
 const tool = (
   name: string,
   domain = 'inventory',
@@ -347,6 +356,121 @@ describe('ToolRouterService B: relevance is not authority', () => {
     );
     expect(denied.definitions.map((d) => d.function.name)).not.toContain(
       'load_playbook',
+    );
+  });
+});
+describe('ToolRouterService (d): cierre de caja en lenguaje coloquial', () => {
+  // Regresión prod (hotfix Vexi): "me ayudas a analizar un cierre de caja que
+  // no me dio?" empataba las lecturas de caja con tools fiscales/contables y
+  // ai_summarize; el modelo pedía lecturas no ofrecidas (TOOL_NOT_OFFERED) y el
+  // chip mostraba "4 no se pudieron". Fábricas REALES, ranking léxico local.
+  const QUERY = 'Oe me ayudas a analizar un cierre de caja que no me dio?';
+  const CASH_READS = [
+    'get_active_cash_session',
+    'get_cash_session_close_report',
+    'get_cash_session_status',
+    'list_cash_session_movements',
+    'list_cash_sessions',
+  ];
+  let registry: AIToolRegistry;
+  let router: ToolRouterService;
+  beforeEach(() => {
+    const deps = {} as any;
+    registry = new AIToolRegistry(deps);
+    registry.registerMany(createDiscoveryTools());
+    for (const factory of [
+      createAccountingTools,
+      createAiToolboxTools,
+      createCashRegisterTools,
+      createFiscalTools,
+      createOrdersTools,
+      createPaymentTools,
+      createProductTools,
+      createReportingTools,
+      createReportTools,
+    ])
+      registry.registerMany(factory(deps));
+    router = new ToolRouterService(registry, {
+      rank: jest.fn(async (query, docs, _scope, domain) => ({
+        names: localToolRanking(query, docs, domain),
+        degraded: [],
+      })),
+    } as any);
+  });
+
+  it('(d) enruta las lecturas de caja en K12 sin search_tools', async () => {
+    const session = router.createSession(QUERY, 'scope');
+    const selection = await router.select(
+      session,
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(selection.operationalCount).toBe(12);
+    expect(session.expansions).toBe(0);
+    expect(selection.definitions.map((d) => d.function.name)).toEqual(
+      expect.arrayContaining(CASH_READS),
+    );
+  });
+
+  it('(d) las lecturas de caja encabezan el ranking, por delante de escrituras y de otros dominios', () => {
+    const docs = buildToolManifest(registry).documents;
+    const top = localToolRanking(QUERY, docs).slice(0, CASH_READS.length);
+    expect([...top].sort()).toEqual(CASH_READS);
+    expect(top.every((name) => registry.get(name)?.readOnly === true)).toBe(
+      true,
+    );
+  });
+
+  it('(d) usar list_cash_sessions fija el reporte de cierre y los movimientos como dependencias', async () => {
+    const session = router.createSession('operation', 'scope');
+    router.markUsed(session, 'list_cash_sessions');
+    const selection = await router.select(
+      session,
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(selection.definitions.map((d) => d.function.name)).toEqual(
+      expect.arrayContaining([
+        'list_cash_sessions',
+        'get_cash_session_close_report',
+        'list_cash_session_movements',
+      ]),
+    );
+  });
+
+  it('(d) una tool autorizada pero no ofrecida queda fijada para la siguiente inferencia sin gastar ampliación', async () => {
+    const auth = registry.getAllDefinitions();
+    const session = router.createSession('producto', 'scope');
+    const first = await router.select(session, auth, false, false);
+    expect(first.definitions.map((d) => d.function.name)).not.toContain(
+      'get_cash_session_close_report',
+    );
+    expect(
+      router.requestTool(session, 'get_cash_session_close_report', auth),
+    ).toBe(true);
+    const next = await router.select(session, auth, false, false);
+    expect(next.definitions.map((d) => d.function.name)).toContain(
+      'get_cash_session_close_report',
+    );
+    expect(session.expansions).toBe(0);
+    expect(next.operationalCount).toBe(12);
+  });
+
+  it('(d) requestTool nunca concede autoridad ni fija scaffolding', async () => {
+    const auth = registry
+      .getAllDefinitions()
+      .filter((d) => d.function.name !== 'list_cash_session_movements');
+    const session = router.createSession('producto', 'scope');
+    expect(
+      router.requestTool(session, 'list_cash_session_movements', auth),
+    ).toBe(false);
+    expect(router.requestTool(session, 'search_tools', auth)).toBe(false);
+    expect(router.requestTool(session, 'no_such_tool', auth)).toBe(false);
+    const selection = await router.select(session, auth, false, false);
+    expect(selection.definitions.map((d) => d.function.name)).not.toContain(
+      'list_cash_session_movements',
     );
   });
 });

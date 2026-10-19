@@ -21,6 +21,8 @@ const DISCOVERY = new Set([
   'list_endpoints',
 ]);
 const MIN_PLAN = new Set(['propose_plan', 'ask_user']);
+/** Bounded: a model naming many unoffered tools cannot widen the set past K. */
+const MAX_REQUESTED = 4;
 export interface ToolRoutingSession {
   query: string;
   signature: string;
@@ -29,6 +31,12 @@ export interface ToolRoutingSession {
   names: string[];
   used: string[];
   dependencies: string[];
+  /**
+   * Authorized tools the model already called by exact name while they were
+   * not offered (AI_AGENT_TOOL_NOT_OFFERED). Pinned like dependencies at the
+   * NEXT inference; never grants authority (re-filtered against `allowed`).
+   */
+  requested?: string[];
   pending?: { query: string; domain?: string };
   lastSearch?: { query: string; names: string[] };
 }
@@ -126,7 +134,11 @@ export class ToolRouterService {
       };
     }
     const opAllowed = new Set(operational.map((d) => d.name));
-    const pinned = [...session.used, ...session.dependencies]
+    const pinned = [
+      ...session.used,
+      ...session.dependencies,
+      ...(session.requested ?? []),
+    ]
       .map((n) => this.registry.canonicalName(n))
       .filter((n) => opAllowed.has(n));
     // Dependency closure is still bounded and never gives a denied tool authority.
@@ -303,6 +315,34 @@ export class ToolRouterService {
     } catch (error) {
       return discoveryError(error);
     }
+  }
+
+  /**
+   * Stage an authorized-but-unoffered tool the model called by its exact name,
+   * so the SAME call is valid at the next inference without spending a
+   * search_tools expansion slot. The guard still rejects it in this batch
+   * (atomic definitions+guard swap). Returns false, staging nothing, for
+   * unauthorized names, discovery/plan scaffolding or unknown tools.
+   */
+  requestTool(
+    session: ToolRoutingSession,
+    name: string,
+    authorized: AIToolDefinition[],
+  ): boolean {
+    const canonical = this.registry.canonicalName(name);
+    if (DISCOVERY.has(canonical) || isAgentPlanTool(canonical)) return false;
+    if (
+      !authorized.some(
+        (d) => this.registry.canonicalName(d.function.name) === canonical,
+      )
+    )
+      return false;
+    const requested = (session.requested ??= []);
+    if (!requested.includes(canonical)) {
+      requested.push(canonical);
+      if (requested.length > MAX_REQUESTED) requested.shift();
+    }
+    return true;
   }
 
   markUsed(session: ToolRoutingSession, name: string): void {
