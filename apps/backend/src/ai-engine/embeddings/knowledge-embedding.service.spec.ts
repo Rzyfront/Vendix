@@ -76,6 +76,27 @@ describe('KnowledgeEmbeddingService: metered platform-only embeddings', () => {
       expect(engine.runEmbedding).not.toHaveBeenCalled();
     },
   );
+  it('defaults the daily budget to 2.000.000 when the variable is not mapped', async () => {
+    delete settings.AI_KNOWLEDGE_DAILY_TOKEN_BUDGET;
+    const previous = process.env.AI_KNOWLEDGE_DAILY_TOKEN_BUDGET;
+    delete process.env.AI_KNOWLEDGE_DAILY_TOKEN_BUDGET;
+    try {
+      await service.generate('x');
+      expect(redis.eval.mock.calls[0][4]).toBe(2_000_000);
+    } finally {
+      if (previous !== undefined)
+        process.env.AI_KNOWLEDGE_DAILY_TOKEN_BUDGET = previous;
+    }
+  });
+  it('accepts the OpenRouter provider-prefixed model id', async () => {
+    app.config.model_id = 'openai/text-embedding-3-small';
+    engine.runEmbedding.mockResolvedValue({
+      success: true,
+      embedding: vector,
+      model: 'openai/text-embedding-3-small',
+    });
+    await expect(service.generate('x')).resolves.toMatchObject({ vector });
+  });
   it('fails closed when budget is exhausted or Redis is unavailable', async () => {
     redis.eval.mockResolvedValue(0);
     await expect(service.generate('x')).rejects.toThrow('BUDGET_EXHAUSTED');
