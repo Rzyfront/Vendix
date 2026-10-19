@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { INTERNAL_JARGON } from '../../src/ai-engine/agent-execution.contract';
 import { RequestContextService } from '../../src/common/context/request-context.service';
 import { AgentObjectiveRepository } from '../../src/ai-engine/tasks/agent-objective.repository';
 import { AgentTaskContextService } from '../../src/ai-engine/tasks/agent-task-context.service';
@@ -452,7 +453,7 @@ it('technical insertion remaps dependency identity, and incomplete additions or 
     expect(session.objective.plan?.steps[2].depends_on).toEqual([1]);
     await session.close();
   }));
-it('an unverified internal plan cannot narrate business completion from model prose', () =>
+it('model prose about completion never promotes an unverified plan (and its text is not replaced, P0-1/P0-3)', () =>
   RequestContextService.runIsolated(context, async () => {
     const w = await prepared();
     const chat = jest.fn().mockResolvedValue({
@@ -477,8 +478,12 @@ it('an unverified internal plan cannot narrate business completion from model pr
       agent_key: 'vexi',
       max_iterations: 1,
     });
+    // Verification is server state, never prose: the objective is not
+    // completed_verified. The answer is the model's own (owner rule: a read
+    // turn is never overwritten) and carries no runtime jargon.
     expect(result.objective?.semantic_status).not.toBe('completed_verified');
-    expect(result.content).not.toContain('Todo quedó cerrado');
+    expect(result.content).toBe('Todo quedó cerrado y verificado.');
+    expect(result.content).not.toMatch(INTERNAL_JARGON);
   }));
 it('approved-effect deadline fits live lease and counts active execution before preserving unknown', async () => {
   jest.useFakeTimers();

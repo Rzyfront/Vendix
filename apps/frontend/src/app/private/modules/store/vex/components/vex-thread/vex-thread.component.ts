@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
+import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
 import { VexBlockTableComponent } from '../vex-blocks/vex-block-table.component';
@@ -131,6 +132,15 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                   >
                     {{ message.error }}
                   </p>
+                  @if (message.restart_suggested) {
+                    <button
+                      type="button"
+                      class="self-start rounded-full border border-[var(--color-border)] px-3 py-1 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover,rgba(0,0,0,0.04))]"
+                      (click)="store.newConversation()"
+                    >
+                      {{ restartLabel }}
+                    </button>
+                  }
                 }
                 @if (
                   message.streaming &&
@@ -183,6 +193,7 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 })
 export class VexThreadComponent {
   readonly store = inject(VexChatStore);
+  protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
 

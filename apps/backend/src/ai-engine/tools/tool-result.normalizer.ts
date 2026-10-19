@@ -189,10 +189,16 @@ export function normalizeToolResult(
   const next = candidate?.next_action ?? candidate?.next_step;
   if (typeof next === 'string' && next.trim()) normalized.next_action = next;
   const structured = value !== null && typeof value === 'object';
+  // A transport-compacted payload (full result persisted, bounded summary +
+  // reference for the model) is not a partial read: its envelope says
+  // `truncated/has_more` about the summary, never about the data.
+  const compacted =
+    outer?.compacted === true || candidate?.compaction_version === '1';
   const truncated =
     context.truncated ||
-    candidate?.truncated === true ||
-    candidate?.freshness === 'truncated';
+    (!compacted &&
+      (candidate?.truncated === true || candidate?.freshness === 'truncated'));
+  if (compacted) normalized.compacted = true;
   normalized.freshness = truncated
     ? 'truncated'
     : typed && candidate?.freshness === 'unknown'
@@ -214,7 +220,7 @@ export function normalizeToolResult(
     (typeof candidate.id === 'string' || typeof candidate.id === 'number')
   )
     normalized.resource_ids.id = candidate.id;
-  const page = object(candidate?.pagination);
+  const page = compacted ? null : object(candidate?.pagination);
   if (page) {
     const cursor = page.next_cursor;
     normalized.pagination = {
@@ -247,8 +253,10 @@ export function normalizeToolResult(
         normalized.next_action = ACTIONS.unknown_effect;
       }
     } else
+      // A browser answer for a UI command (clientSide) that came back as a
+      // structured OK is observed, like any other read: it is not "pending
+      // verification". Only plain text or a truncated read stays unverified.
       normalized.effect_status =
-        context.clientSide ||
         !structured ||
         truncated ||
         (typed && candidate?.effect_status === 'unverified')

@@ -66,12 +66,14 @@ describe('cash-register.tools · caja', () => {
     return tool.preview!(args, CONTEXT);
   }
 
-  it('expone 2 reads + 3 writes con permisos del endpoint equivalente', () => {
+  it('expone 4 reads + 3 writes con permisos del endpoint equivalente', () => {
     const { tools } = buildTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         'close_cash_session',
         'get_active_cash_session',
+        'get_cash_session_close_report',
+        'list_cash_session_movements',
         'list_cash_sessions',
         'open_cash_session',
         'record_cash_movement',
@@ -83,6 +85,8 @@ describe('cash-register.tools · caja', () => {
     expect(perms).toEqual({
       get_active_cash_session: ['store:cash_registers:read'],
       list_cash_sessions: ['store:cash_registers:read'],
+      get_cash_session_close_report: ['store:cash_registers:read'],
+      list_cash_session_movements: ['store:cash_registers:movements'],
       open_cash_session: ['store:cash_registers:open_session'],
       close_cash_session: ['store:cash_registers:close_session'],
       record_cash_movement: ['store:cash_registers:movements'],
@@ -90,9 +94,13 @@ describe('cash-register.tools · caja', () => {
     expect(
       tools.find((t) => t.name === 'get_active_cash_session')!.readOnly,
     ).toBe(true);
-    expect(
-      tools.find((t) => t.name === 'list_cash_sessions')!.readOnly,
-    ).toBe(true);
+    for (const name of [
+      'list_cash_sessions',
+      'get_cash_session_close_report',
+      'list_cash_session_movements',
+    ]) {
+      expect(tools.find((t) => t.name === name)!.readOnly).toBe(true);
+    }
     for (const name of [
       'open_cash_session',
       'close_cash_session',
@@ -118,6 +126,60 @@ describe('cash-register.tools · caja', () => {
       next_step: 'Pasa el ID numérico del usuario u omítelo.',
     });
     expect(deps.sessionsService.getActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('get_cash_session_close_report devuelve el arqueo del backend y acota salidas', async () => {
+    const { deps, byName } = buildTools();
+    const outflows = Array.from({ length: 51 }, (_, i) => ({ id: i + 1 }));
+    deps.sessionsService.getCloseReport = jest.fn().mockResolvedValue({
+      session: { id: 5, status: 'closed' },
+      cash: { expected: 350000, declared: 320000, difference: -30000 },
+      outflows,
+    });
+    const out = await run(byName.get_cash_session_close_report, {
+      session_id: 5,
+    });
+    expect(deps.sessionsService.getCloseReport).toHaveBeenCalledWith(5);
+    expect(out.cash).toEqual({
+      expected: 350000,
+      declared: 320000,
+      difference: -30000,
+    });
+    expect(out.outflows).toHaveLength(50);
+    expect(out.outflows_total).toBe(51);
+    expect(out.outflows_truncated).toBe(true);
+  });
+
+  it('get_cash_session_close_report rechaza session_id inválido sin tocar deps', async () => {
+    const { deps, byName } = buildTools();
+    deps.sessionsService.getCloseReport = jest.fn();
+    const out = await run(byName.get_cash_session_close_report, {
+      session_id: 'abc',
+    });
+    expect(out).toEqual({
+      error: 'session_id inválido: abc.',
+      next_step:
+        'Ubica la sesión con list_cash_sessions y pasa su ID numérico.',
+    });
+    expect(deps.sessionsService.getCloseReport).not.toHaveBeenCalled();
+  });
+
+  it('list_cash_session_movements pagina los movimientos de la sesión', async () => {
+    const { deps, byName } = buildTools();
+    deps.movementsService.findBySession = jest
+      .fn()
+      .mockResolvedValue(Array.from({ length: 25 }, (_, i) => ({ id: i + 1 })));
+    const out = await run(byName.list_cash_session_movements, {
+      session_id: 5,
+      page: 2,
+      limit: 10,
+    });
+    expect(deps.movementsService.findBySession).toHaveBeenCalledWith(5);
+    expect(out.data.map((m: any) => m.id)).toEqual([
+      11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    ]);
+    expect(out.meta).toEqual({ total: 25, page: 2, limit: 10, total_pages: 3 });
+    expect(out.has_more).toBe(true);
   });
 
   it('open_cash_session previsualiza y abre', async () => {

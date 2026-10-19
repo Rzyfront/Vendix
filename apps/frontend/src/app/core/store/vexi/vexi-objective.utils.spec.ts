@@ -71,17 +71,35 @@ describe('D1 objective client contract (no inference, tokens or blocks)', () => 
       );
     }
   });
-  it('shows preserved progress when automatic continuation budget is exhausted', () => {
+  it('asks to continue at the cap without echoing objective fields', () => {
     const value = objective();
     const before = JSON.stringify(value);
-    const message = objectiveProgress(value);
-    expect(message).toContain('Revisar órdenes');
-    expect(message).toContain('partial');
-    expect(message).toContain('Consultar la página siguiente');
+    const message = objectiveProgress(value) ?? '';
     expect(message).toContain('límite de continuaciones automáticas');
+    expect(message).toContain('¿Sigo?');
+    for (const hidden of [
+      'Revisar órdenes',
+      'partial',
+      'Consultar la página siguiente',
+      'Objetivo conservado',
+      'Estado:',
+      'Siguiente:',
+    ]) {
+      expect(message).not.toContain(hidden);
+    }
     expect(JSON.stringify(value)).toBe(before);
     expect(value.budget?.['provider_attempts']).toBe(9);
     expect(objectiveProgress(null)).toContain('¿Sigo?');
+  });
+  it('generates no message when the objective cannot continue', () => {
+    for (const semantic_status of [
+      'awaiting_approval',
+      'unknown_effect',
+      'completed_verified',
+      'blocked',
+    ]) {
+      expect(objectiveProgress(objective({ semantic_status }))).toBeNull();
+    }
   });
 });
 

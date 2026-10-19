@@ -190,6 +190,39 @@ describe('AgentTaskContextService', () => {
     });
     expect(output.context.length).toBeLessThanOrEqual(512);
   });
+  // Hotfix P0-2: a turn without effects must not hand the model internal
+  // revalidation flags or recovery guidance it would echo to the person.
+  it('omits requires_revalidation and next_step when the objective has no effects', async () => {
+    const rendered = (await context.build(ID)).context;
+    const facts = JSON.parse(rendered);
+    expect(facts).not.toHaveProperty('requires_revalidation');
+    expect(facts).not.toHaveProperty('next_step');
+    expect(rendered).not.toContain('Preparar propuesta');
+    expect(facts.results[0].call_id).toBe('call-5');
+  });
+  it('omits them also from the overflow fallback without effects', async () => {
+    get.mockResolvedValue({ ...objective(), goal: 'x'.repeat(4000) });
+    const facts = JSON.parse(
+      (await context.build(ID, { max_chars: 512 })).context,
+    );
+    expect(facts.context_omitted).toBe(true);
+    expect(facts).not.toHaveProperty('requires_revalidation');
+    expect(facts).not.toHaveProperty('next_step');
+  });
+  it('keeps requires_revalidation and next_step when an effect exists', async () => {
+    listEffects.mockResolvedValue([
+      {
+        operation_id: 'op-1',
+        step_id: 'create',
+        status: 'applied',
+        domain_reference: '55',
+        domain_receipt: { resource_ids: { product_id: 55 } },
+      },
+    ]);
+    const facts = JSON.parse((await context.build(ID)).context);
+    expect(facts.requires_revalidation).toBe(true);
+    expect(facts.next_step).toBe('Preparar propuesta, sin aplicar');
+  });
   it('requires TTL and a resource version before reusing even nonvolatile reads', () => {
     expect(context.reusable(entity)).toBe(true);
     expect(context.reusable({ ...entity, valid_until: undefined })).toBe(false);

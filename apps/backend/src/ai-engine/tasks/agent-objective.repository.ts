@@ -33,12 +33,17 @@ import {
   ResultPage,
 } from './interfaces/agent-objective.interface';
 
-/** Operational contention, not a failed business task. */
+/**
+ * Operational contention, not a failed business task. The HTTP filter keeps
+ * only `error_code` + `message`, so both must be self-sufficient for a person.
+ */
 export class ObjectiveLeaseBusyException extends ConflictException {
   constructor() {
     super({
+      error_code: 'AI_OBJECTIVE_LEASE_BUSY',
       code: 'AI_OBJECTIVE_LEASE_BUSY',
-      message: 'Objective executor is active',
+      message:
+        'El asistente todavía está respondiendo tu mensaje anterior. Espera un momento y vuelve a intentarlo.',
     });
   }
 }
@@ -47,11 +52,34 @@ export class ObjectiveLeaseBusyException extends ConflictException {
 export class ObjectiveLeaseChangedException extends ConflictException {
   constructor() {
     super({
+      error_code: 'AI_OBJECTIVE_LEASE_CHANGED',
       code: 'AI_OBJECTIVE_LEASE_CHANGED',
-      message: 'Objective executor version changed',
+      message:
+        'La conversación acaba de cambiar. Vuelve a enviar tu mensaje en un momento.',
     });
   }
 }
+
+/** Expired/superseded/terminal objectives need an explicit resume or a new message. */
+export class ObjectiveNotExecutableException extends ConflictException {
+  constructor() {
+    super({
+      error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+      message:
+        'Ese trabajo ya no se puede continuar desde aquí. Escribe tu solicitud de nuevo o inicia una conversación nueva.',
+    });
+  }
+}
+
+/** Effect states that still need a person or reconciliation before a new goal. */
+const UNRESOLVED_EFFECT_STATUSES = [
+  'proposed',
+  'approved',
+  'applying',
+  'unknown',
+] as const;
+/** Tool names that never count as an observed business read. */
+const INTERNAL_RESULT_TOOLS = new Set(['agent_recovery_checkpoint']);
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -266,19 +294,22 @@ export class AgentObjectiveRepository {
       goal?: string;
       authority_snapshot?: string[];
       lease?: ObjectiveLease;
+      legacy_plan_id?: string;
     } = {},
   ): Promise<AgentObjective> {
     const id = randomUUID();
-    const legacyId = plan?.id ?? id;
+    const legacyId = plan?.id ?? options.legacy_plan_id ?? id;
     const now = new Date();
     const expiresAt = new Date(
       (plan ? Date.parse(plan.updated_at) || now.getTime() : now.getTime()) +
         TTL_MS,
     );
+    // requires_revalidation is explicit: the column DEFAULT TRUE would mark every
+    // new objective as owing a post-write read before anything was written.
     const rows = await tx.$queryRaw<
       AgentObjective[]
-    >(Prisma.sql`INSERT INTO ai_agent_objectives (id,store_id,organization_id,user_id,conversation_id,agent_id,legacy_plan_id,goal,plan,step_hashes,semantic_status,budget,authority_snapshot,expires_at)
-      VALUES (${id}::uuid,${scope.store_id},${scope.organization_id},${scope.user_id},${conversationId},${agentId ?? null},${legacyId},${plan?.goal ?? options.goal ?? ''},${json(plan)},${json(metadata.agent_plan_step_hashes ?? null)},${expiresAt.getTime() <= now.getTime() ? 'expired' : plan?.status === 'paused' ? 'paused' : plan?.status === 'superseded' ? 'superseded' : plan?.status === 'abandoned' ? 'cancelled' : plan?.status === 'done' ? 'partial' : 'active'},${json(emptyObjectiveBudget())},${json(options.authority_snapshot ?? [...(RequestContextService.asyncLocalStorage.getStore()?.permissions ?? [])])},${expiresAt})
+    >(Prisma.sql`INSERT INTO ai_agent_objectives (id,store_id,organization_id,user_id,conversation_id,agent_id,legacy_plan_id,goal,plan,step_hashes,semantic_status,budget,authority_snapshot,requires_revalidation,expires_at)
+      VALUES (${id}::uuid,${scope.store_id},${scope.organization_id},${scope.user_id},${conversationId},${agentId ?? null},${legacyId},${plan?.goal ?? options.goal ?? ''},${json(plan)},${json(metadata.agent_plan_step_hashes ?? null)},${expiresAt.getTime() <= now.getTime() ? 'expired' : plan?.status === 'paused' ? 'paused' : plan?.status === 'superseded' ? 'superseded' : plan?.status === 'abandoned' ? 'cancelled' : plan?.status === 'done' ? 'partial' : 'active'},${json(emptyObjectiveBudget())},${json(options.authority_snapshot ?? [...(RequestContextService.asyncLocalStorage.getStore()?.permissions ?? [])])},${false},${expiresAt})
       ON CONFLICT (store_id, organization_id, user_id, conversation_id, legacy_plan_id) DO NOTHING RETURNING *`);
     let row = rows[0];
     if (!row) {
@@ -308,6 +339,7 @@ export class AgentObjectiveRepository {
   async importLegacy(
     conversationId: number,
     agentId?: string,
+    goal?: string,
   ): Promise<AgentObjective | null> {
     const scope = this.scope();
     return this.transaction(async (tx) => {
@@ -330,6 +362,18 @@ export class AgentObjectiveRepository {
         !Array.isArray(plan.deliverables)
       )
         return null;
+      const authority_snapshot = [
+        ...(RequestContextService.asyncLocalStorage.getStore()?.permissions ??
+          []),
+      ];
+      // A finished/abandoned/replaced legacy plan is history, not live work:
+      // the objective starts without it (the tombstone keeps the full record).
+      if (['done', 'abandoned', 'superseded'].includes(String(plan.status)))
+        return this.insert(tx, scope, conversationId, null, agentId, metadata, {
+          goal: (goal ?? '').slice(0, 2000),
+          authority_snapshot,
+          legacy_plan_id: plan.id,
+        });
       return this.insert(
         tx,
         scope,
@@ -337,12 +381,7 @@ export class AgentObjectiveRepository {
         plan as unknown as AgentPlan,
         agentId,
         metadata,
-        {
-          authority_snapshot: [
-            ...(RequestContextService.asyncLocalStorage.getStore()
-              ?.permissions ?? []),
-          ],
-        },
+        { authority_snapshot },
       );
     });
   }
@@ -390,7 +429,7 @@ export class AgentObjectiveRepository {
           previous.lease_until &&
           previous.lease_until.getTime() > Date.now()
         )
-          throw new ConflictException('Objective executor is active');
+          throw new ObjectiveLeaseBusyException();
         await this.assertNoUnresolvedEffect(tx, scope, previous.id);
         if (previous.semantic_status !== 'completed_verified')
           await tx.$executeRaw(
@@ -440,9 +479,7 @@ export class AgentObjectiveRepository {
           if (current.version > expectedVersion)
             throw new ObjectiveLeaseChangedException();
         }
-        throw new ConflictException(
-          'Objective is leased, expired or superseded',
-        );
+        throw new ObjectiveNotExecutableException();
       }
       return rows[0];
     });
@@ -960,17 +997,32 @@ export class AgentObjectiveRepository {
         if (receipt.status === 'ok' && receipt.freshness === 'observed')
           for (const entity of resolved)
             entities.set(`${entity.type}:${entity.id}`, entity);
-        if (input.checkpoint || resolved.length) {
+        // A checkpoint may only CLEAR requires_revalidation with an observed,
+        // successful business read while no dispatch is in flight/uncertain.
+        // The read is created now, so it is necessarily after the last apply.
+        let checkpoint = input.checkpoint;
+        if (
+          checkpoint?.requires_revalidation === false &&
+          row.requires_revalidation &&
+          !(
+            receipt.status === 'ok' &&
+            receipt.freshness === 'observed' &&
+            receipt.effect_status === 'not_applicable' &&
+            !INTERNAL_RESULT_TOOLS.has(input.tool_name) &&
+            !(await this.hasUncertainEffect(tx, scope, id))
+          )
+        )
+          checkpoint = { ...checkpoint, requires_revalidation: undefined };
+        if (checkpoint || resolved.length) {
           try {
             row = await this.patch(
               tx,
               scope,
               row,
               {
-                ...input.checkpoint,
+                ...checkpoint,
                 entities:
-                  input.checkpoint?.entities ??
-                  [...entities.values()].slice(-200),
+                  checkpoint?.entities ?? [...entities.values()].slice(-200),
               },
               true,
             );
@@ -1128,6 +1180,17 @@ export class AgentObjectiveRepository {
     });
   }
 
+  private async hasUncertainEffect(
+    tx: Tx,
+    scope: ObjectiveScope,
+    id: string,
+  ): Promise<boolean> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`SELECT id FROM ai_agent_effects WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND status IN ('applying','unknown') LIMIT 1`,
+    );
+    return rows.length > 0;
+  }
+
   private async assertNoUnresolvedEffect(
     tx: Tx,
     scope: ObjectiveScope,
@@ -1140,6 +1203,29 @@ export class AgentObjectiveRepository {
       throw new ConflictException(
         'An uncertain effect requires reconciliation before continuing',
       );
+  }
+
+  /**
+   * True while the objective still owes something before a NEW human goal can
+   * replace it: a proposal awaiting a decision, a dispatch in flight, an
+   * uncertain effect, or an applied write not yet followed by an observed read
+   * (`requires_revalidation`, which is set by the apply and cleared by that read).
+   */
+  async hasPendingEffects(id: string): Promise<boolean> {
+    const scope = this.scope();
+    return this.transaction(async (tx) => {
+      const row = await this.find(tx, scope, id);
+      const effects = await tx.$queryRaw<Array<{ id: string; status: string }>>(
+        Prisma.sql`SELECT id,status FROM ai_agent_effects WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND status IN ('proposed','approved','applying','unknown','applied') LIMIT 100`,
+      );
+      return effects.some(
+        (effect) =>
+          (UNRESOLVED_EFFECT_STATUSES as readonly string[]).includes(
+            effect.status,
+          ) ||
+          (effect.status === 'applied' && row.requires_revalidation),
+      );
+    });
   }
 
   async listEffects(id: string, limit = 50): Promise<AgentEffect[]> {

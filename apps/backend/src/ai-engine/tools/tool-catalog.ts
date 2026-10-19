@@ -211,16 +211,20 @@ export function buildToolManifest(registry: {
   };
 }
 
-/** ts_rank is not BM25. Local branch shares Spanish accent/ñ normalization. */
-export function localToolRanking(
+/**
+ * Local lexical score per document. ts_rank is not BM25. Local branch shares
+ * Spanish accent/ñ normalization. Score 0 means "no lexical evidence at all":
+ * the document only appears in the ranking through the alphabetical tie-break.
+ */
+export function localToolScores(
   query: string,
   docs: ToolDocument[],
   domain?: string,
-): string[] {
+): Map<string, number> {
   const normalized = normalizeSearchText(query);
   const tokens = tokenizeInternal(query);
-  return docs
-    .map((doc) => {
+  return new Map(
+    docs.map((doc) => {
       const exact = [doc.name, ...doc.aliases].some(
         (name) => normalizeSearchText(name) === normalized,
       );
@@ -241,10 +245,36 @@ export function localToolRanking(
                 : 0),
           0,
         );
-      return { name: doc.name, score };
-    })
+      return [doc.name, score] as const;
+    }),
+  );
+}
+
+export function localToolRanking(
+  query: string,
+  docs: ToolDocument[],
+  domain?: string,
+): string[] {
+  const scores = localToolScores(query, docs, domain);
+  return docs
+    .map((doc) => ({ name: doc.name, score: scores.get(doc.name) ?? 0 }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .map((d) => d.name);
+}
+
+/**
+ * Fail-closed, like the voice surface: only a tool that opted into
+ * `readOnly: true` may fill the working set without lexical evidence. Writes
+ * (`requiresConfirmation`), irreversible tools, UI commands (`clientSide`) and
+ * any tool that forgot the flag need a score > 0 to be offered by relevance.
+ */
+export function mayFillWithoutEvidence(doc: ToolDocument): boolean {
+  return (
+    doc.metadata.read_only === true &&
+    doc.metadata.requires_confirmation !== true &&
+    doc.metadata.irreversible !== true &&
+    doc.metadata.client_side !== true
+  );
 }
 
 export function reciprocalRankFusion(rankings: string[][]): string[] {

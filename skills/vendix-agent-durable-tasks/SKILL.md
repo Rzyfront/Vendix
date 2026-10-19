@@ -58,7 +58,17 @@ plan. Release once; public progress must include the version AFTER release so
 `expected_version` can be used by resume/reject.
 
 Revising steps or re-proposing the same goal retains the objective and budget.
-A different human goal may replace it. Automatic continuations cannot create a
+A new human message (not `continuation`, not `objectiveId`) opens a NEW objective
+via `createOrReplace` (previous → `superseded`) unless it still owes something:
+a pending card, a ledger effect `proposed/approved/applying/unknown`, an applied
+write with `requires_revalidation`, `awaiting_input`, or a plan with live steps.
+Expired/blocked/paused objectives never trap the chat; an `unknown_effect` status
+without a ledger effect (an unanswered `ui_*`) does not either. Pending effects →
+409 `AI_OBJECTIVE_REQUIRES_RESUME` with a human `message` (no `next_step`).
+`requires_revalidation` is inserted `false` explicitly (column DEFAULT is TRUE) and
+cleared by an observed read after the apply; it and `next_step` are only rendered
+to the model when the objective has effects. `importLegacy` never revives a
+`done/abandoned/superseded` legacy plan. Automatic continuations cannot create a
 new goal to reset the accumulated budget: use `revise_plan`. Expired work is not
 completed; selecting that exact objective requires explicit expired consent and
 fresh domain preconditions. Reads/open/automatic continuation never renew TTL.
@@ -159,7 +169,9 @@ those limits. Never run whole suites/builds on the dev Mac.
   `scheduling.parallelSafe` + `idempotent_read` tools, resource-key templates,
   dependency metadata and max-result bytes. Today only `get_product` opts in.
   Planning/UI/blocks/proposals/writes/dependent calls stay serial. Validate the
-  ENTIRE batch before any dispatch; attribute rejection only to its culprit.
+  ENTIRE batch before any dispatch; attribute rejection only to its culprit. An
+  invalid-argument call is answered on its own (INVALID_ARGS, after its valid
+  siblings); an authorized-but-unoffered call is staged for the next inference.
 - Default concurrency: 3/objective, heavy1/store, global6/worker, further bounded
   by `DATABASE_POOL_MAX`; lower via `AI_PARALLEL_READS_OBJECTIVE_CAP` and
   `AI_PARALLEL_READS_GLOBAL_CAP`. Clone explicit ALS per call. Stable provider

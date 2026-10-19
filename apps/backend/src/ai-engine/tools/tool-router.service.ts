@@ -8,6 +8,8 @@ import {
   buildToolManifest,
   catalogHash,
   localToolRanking,
+  localToolScores,
+  mayFillWithoutEvidence,
   ToolDocument,
 } from './tool-catalog';
 
@@ -19,8 +21,59 @@ const DISCOVERY = new Set([
   'load_recipe',
   'list_capabilities',
   'list_endpoints',
+  // Bridge + capability detail: the prompts send the model to list_endpoints →
+  // call_endpoint/write_endpoint and list_capabilities → explain_capability.
+  // Offering the map without the way to use it produced AI_AGENT_TOOL_NOT_OFFERED
+  // on every bridge call (P0-7). Still authorization-filtered like all scaffold;
+  // write_endpoint keeps its mandatory confirmation.
+  'call_endpoint',
+  'write_endpoint',
+  'explain_capability',
 ]);
+/**
+ * Fixed per-agent core: every business tool the agent's system prompt names by
+ * exact identifier (Vexi: `chat_assistant` seed + migración
+ * 20260803234500_vexi_documentos_y_agente_integral; Vex: `vex_render_*` in
+ * 20261001120000_vex_agent_registration). The prompt orders the model to call
+ * them, so a lexical top-K that buries them guarantees NOT_OFFERED.
+ *
+ * Offered ON TOP of the K operative slots, like the scaffold, so the lexical
+ * working set keeps its full capacity; bounded (≤8) and never a grant: every
+ * name is intersected with the authorized definitions of the turn (permissions
+ * ∩ plan ∩ agent allowed − denied). Discovery and plan tools are handled by
+ * their own scaffolds and never listed here.
+ */
+export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
+  vexi: [
+    'ui_navigate',
+    'ui_refresh',
+    'ui_pos_checkout',
+    'get_report',
+    'queue_task',
+    'bulk_prepare',
+    'ai_extract_document',
+    'validate_extraction',
+  ],
+  vex: [
+    'vex_render_table',
+    'vex_render_chart',
+    'vex_render_kpi',
+    'vex_render_image',
+    'vex_render_file',
+    'vex_block_read',
+    'vex_block_transform',
+  ],
+};
+/**
+ * The engine treats a missing agent_key as Vexi (`params.agent_key ?? 'vexi'`);
+ * an unknown explicit key gets no core (safe default: scaffold + top-K only).
+ */
+export function agentToolCore(agent: string | undefined): readonly string[] {
+  return AGENT_TOOL_CORE[agent ?? 'vexi'] ?? [];
+}
 const MIN_PLAN = new Set(['propose_plan', 'ask_user']);
+/** Bounded: a model naming many unoffered tools cannot widen the set past K. */
+const MAX_REQUESTED = 4;
 export interface ToolRoutingSession {
   query: string;
   signature: string;
@@ -29,6 +82,19 @@ export interface ToolRoutingSession {
   names: string[];
   used: string[];
   dependencies: string[];
+  /** agent_key of the turn; selects the fixed core. Undefined = Vexi. */
+  agent?: string;
+  /**
+   * Text loop (Vex/Vexi chat): a write needs lexical evidence for the intent to
+   * enter the working set. The voice surface keeps its own preview-only filter.
+   */
+  writesNeedEvidence?: boolean;
+  /**
+   * Authorized tools the model already called by exact name while they were
+   * not offered (AI_AGENT_TOOL_NOT_OFFERED). Pinned like dependencies at the
+   * NEXT inference; never grants authority (re-filtered against `allowed`).
+   */
+  requested?: string[];
   pending?: { query: string; domain?: string };
   lastSearch?: { query: string; names: string[] };
 }
@@ -50,6 +116,8 @@ export class ToolRouterService {
     query: string,
     signature: string,
     dependencies: string[] = [],
+    agent?: string,
+    options: { writesNeedEvidence?: boolean } = {},
   ): ToolRoutingSession {
     return {
       query: query.slice(0, 500),
@@ -59,6 +127,8 @@ export class ToolRouterService {
       names: [],
       used: [],
       dependencies,
+      agent,
+      ...(options.writesNeedEvidence ? { writesNeedEvidence: true } : {}),
     };
   }
 
@@ -107,8 +177,22 @@ export class ToolRouterService {
           hasPlan &&
           (activePlan || MIN_PLAN.has(d.name))),
     );
+    const coreNames = new Set(
+      agentToolCore(session.agent).map((n) => this.registry.canonicalName(n)),
+    );
+    // `docs` is already the authorized subset: a core name the agent may not use
+    // simply has no document here and is never offered.
+    const core = docs.filter(
+      (d) =>
+        coreNames.has(d.name) &&
+        !DISCOVERY.has(d.name) &&
+        !isAgentPlanTool(d.name),
+    );
     const operational = docs.filter(
-      (d) => !DISCOVERY.has(d.name) && !isAgentPlanTool(d.name),
+      (d) =>
+        !DISCOVERY.has(d.name) &&
+        !isAgentPlanTool(d.name) &&
+        !coreNames.has(d.name),
     );
     const intent = session.pending ?? { query: session.query };
     let ranked: { names: string[]; degraded: string[] };
@@ -125,10 +209,41 @@ export class ToolRouterService {
         degraded: ['router_lexical_fallback'],
       };
     }
+    // Writes never enter by a score-0 tie (alphabetical tie-break): without
+    // lexical evidence for THIS intent only fail-closed reads may fill the set.
+    // Vector/ts ranks are not evidence here: the vector branch returns its
+    // nearest 100 regardless of relevance. Pinned/requested/previous names and
+    // search_tools (which re-enters here with its own query/domain) still reach
+    // a write deliberately.
+    if (session.writesNeedEvidence) {
+      const scores = localToolScores(intent.query, operational, intent.domain);
+      const byName = new Map(operational.map((d) => [d.name, d]));
+      ranked = {
+        ...ranked,
+        names: ranked.names.filter((name) => {
+          const doc = byName.get(name);
+          return (
+            !!doc &&
+            ((scores.get(name) ?? 0) > 0 || mayFillWithoutEvidence(doc))
+          );
+        }),
+      };
+    }
     const opAllowed = new Set(operational.map((d) => d.name));
-    const pinned = [...session.used, ...session.dependencies]
+    const pinned = [
+      ...session.used,
+      ...session.dependencies,
+      ...(session.requested ?? []),
+    ]
       .map((n) => this.registry.canonicalName(n))
       .filter((n) => opAllowed.has(n));
+    // Core tools are always offered; their authorized dependencies are pinned.
+    for (const doc of core)
+      for (const dependency of doc.dependencies) {
+        const canonical = this.registry.canonicalName(dependency);
+        if (opAllowed.has(canonical) && !pinned.includes(canonical))
+          pinned.push(canonical);
+      }
     // Dependency closure is still bounded and never gives a denied tool authority.
     for (let i = 0; i < pinned.length && i < session.capacity; i++) {
       for (const dependency of docs.find((d) => d.name === pinned[i])
@@ -162,7 +277,11 @@ export class ToolRouterService {
     }
     session.names = names;
     session.pending = undefined;
-    const offered = new Set([...names, ...scaffold.map((d) => d.name)]);
+    const offered = new Set([
+      ...names,
+      ...scaffold.map((d) => d.name),
+      ...core.map((d) => d.name),
+    ]);
     return {
       definitions: [...offered]
         .sort()
@@ -303,6 +422,34 @@ export class ToolRouterService {
     } catch (error) {
       return discoveryError(error);
     }
+  }
+
+  /**
+   * Stage an authorized-but-unoffered tool the model called by its exact name,
+   * so the SAME call is valid at the next inference without spending a
+   * search_tools expansion slot. The guard still rejects it in this batch
+   * (atomic definitions+guard swap). Returns false, staging nothing, for
+   * unauthorized names, discovery/plan scaffolding or unknown tools.
+   */
+  requestTool(
+    session: ToolRoutingSession,
+    name: string,
+    authorized: AIToolDefinition[],
+  ): boolean {
+    const canonical = this.registry.canonicalName(name);
+    if (DISCOVERY.has(canonical) || isAgentPlanTool(canonical)) return false;
+    if (
+      !authorized.some(
+        (d) => this.registry.canonicalName(d.function.name) === canonical,
+      )
+    )
+      return false;
+    const requested = (session.requested ??= []);
+    if (!requested.includes(canonical)) {
+      requested.push(canonical);
+      if (requested.length > MAX_REQUESTED) requested.shift();
+    }
+    return true;
   }
 
   markUsed(session: ToolRoutingSession, name: string): void {

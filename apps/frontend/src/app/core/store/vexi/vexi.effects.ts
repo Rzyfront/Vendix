@@ -28,6 +28,9 @@ import {
 } from './vexi-objective.utils';
 import { vexiToolFailed } from './vexi-execution.utils';
 import {
+  vexiObjectiveConflictNotice,
+} from './vexi-user-copy.utils';
+import {
   VexiApiService,
   VexiStreamChunk,
 } from '../../services/vexi-api.service';
@@ -316,13 +319,17 @@ export class VexiEffects {
               ),
               takeUntil(this.actions$.pipe(ofType(VexiActions.cancelStream))),
               startWith(VexiActions.streamStarted({ conversationId })),
-              catchError((error) =>
-                of(
+              catchError((error) => {
+                // 409 of a blocked/busy conversation: a human notice the panel
+                // pairs with "Empezar de nuevo", never the raw conflict body.
+                const conflict = vexiObjectiveConflictNotice(error);
+                return of(
                   VexiActions.sendMessageFailure({
-                    error: error?.message || 'No pude enviar el mensaje',
+                    error:
+                      conflict ?? (error?.message || 'No pude enviar el mensaje'),
                   }),
-                ),
-              ),
+                );
+              }),
             ),
       ),
     ),
@@ -688,10 +695,13 @@ export class VexiEffects {
         ([, pending, , conversationId]) => pending && conversationId !== null,
       ),
       map(([, , count, conversationId, lastTurn, objective]) =>
+        // `requires_revalidation` is not read here: it is born TRUE on every
+        // objective, so honouring it capped every read-only plan at its first
+        // turn. Pending effects already surface as non-resumable states
+        // (awaiting approval, unknown effect), which canResumeObjective rejects.
         count < VexiEffects.MAX_AUTO_CONTINUATIONS &&
         (!objective ||
-          (!objective.requires_revalidation &&
-            ['active', 'partial'].includes(objective.semantic_status) &&
+          (['active', 'partial'].includes(objective.semantic_status) &&
             canResumeObjective(objective)))
           ? VexiActions.sendMessage({
               conversationId: conversationId as number,
@@ -907,10 +917,14 @@ export class VexiEffects {
                   VexiActions.toolCallFinished({
                     id: chunk.tool.id,
                     name: chunk.tool.name,
-                    summary: proposal
-                      ? undefined
-                      : (chunk.tool.execution?.next_action ??
-                        chunk.tool.summary),
+                    // Internal recovery notes travel in the summary of a
+                    // non-ok receipt; the trace shows the catalog label instead.
+                    summary:
+                      proposal ||
+                      (chunk.tool.execution &&
+                        chunk.tool.execution.status !== 'ok')
+                        ? undefined
+                        : chunk.tool.summary,
                     failed: vexiToolFailed(
                       chunk.tool.execution,
                       chunk.tool.failed,
@@ -978,15 +992,18 @@ export class VexiEffects {
                 subscriber.complete();
                 break;
 
-              case 'error':
+              case 'error': {
                 this.voice.finishTurn(streamId);
+                const conflict = vexiObjectiveConflictNotice(chunk);
                 subscriber.next(
                   VexiActions.streamError({
-                    error: chunk.error || 'La respuesta se interrumpió.',
+                    error:
+                      conflict ?? (chunk.error || 'La respuesta se interrumpió.'),
                   }),
                 );
                 subscriber.complete();
                 break;
+              }
             }
           },
           error: (error: unknown) => {
