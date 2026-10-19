@@ -143,6 +143,12 @@ const HASH_KEYS = new Set([
 const COUNT_KEYS = new Set([
   'tool_count',
   'definition_tokens',
+  // Dynamic tool working set («el mecánico»), per inference.
+  'core_count',
+  'loaded_count',
+  'prefetch_hits',
+  'unloaded_authorized_calls',
+  'free_discovery_rounds',
   'context_tokens',
   'context_window_tokens',
   'estimated_output_tokens',
@@ -175,6 +181,13 @@ const BOOLEAN_KEYS = new Set([
   'streaming',
 ]);
 const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
+  retrieval_source: new Set([
+    'vector',
+    'lexical_sql',
+    'lexical_local',
+    'full_catalog_fallback',
+    'none',
+  ]),
   call_reason: new Set([
     'agent_round',
     'agent',

@@ -1974,6 +1974,15 @@ export class AIAgentService {
               offeredNames.add(
                 this.toolRegistry.canonicalName(definition.function.name),
               );
+            const workingSet = {
+              core_count: selection.coreCount,
+              loaded_count: selection.loadedCount,
+              retrieval_source: selection.retrievalSource,
+              prefetch_hits: routingSession.retrieval?.prefetchHits ?? 0,
+              unloaded_authorized_calls:
+                routingSession.unloadedAuthorizedCalls ?? 0,
+              free_discovery_rounds: freeDiscoveryRounds,
+            };
             this.eventEmitter.emit('ai.agent.router', {
               authorized_count: routingAuthority.length,
               offered_count: filteredTools.length,
@@ -1981,6 +1990,7 @@ export class AIAgentService {
               degraded: selection.degraded,
               catalog_hash: selection.catalogHash,
               iteration,
+              ...workingSet,
             });
             if (routerSpan)
               activeTrace?.endSpan(routerSpan, {
@@ -1990,6 +2000,7 @@ export class AIAgentService {
                   definition_tokens: Math.ceil(
                     JSON.stringify(filteredTools).length / 4,
                   ),
+                  ...workingSet,
                 },
               });
           } catch (error) {

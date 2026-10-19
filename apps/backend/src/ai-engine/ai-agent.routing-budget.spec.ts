@@ -5,6 +5,7 @@ import { createDiscoveryTools } from './tools/domains/discovery.tools';
 import { ForbiddenException } from '@nestjs/common';
 import { localToolRanking, localToolScores } from './tools/tool-catalog';
 import { INTERNAL_JARGON } from './agent-execution.contract';
+import { redactTraceAttributes } from './observability/agent-trace.service';
 import { emptyObjectiveBudget } from './tasks/interfaces/agent-objective.interface';
 import { RequestContextService } from '../common/context/request-context.service';
 
@@ -76,11 +77,12 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       close: jest.fn(),
     };
     const chat = jest.fn();
+    const emit = jest.fn();
     const service = new AIAgentService(
       { chat } as any,
       {} as any,
       registry,
-      { emit: jest.fn() } as any,
+      { emit } as any,
       {} as any,
       {
         canUseAIFeature: async () => ({ allowed: true }),
@@ -111,7 +113,7 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
             ...extra,
           }),
       );
-    return { chat, run, search, durable, objective, handler, registry };
+    return { chat, run, search, durable, objective, handler, registry, emit };
   }
   const response = (tool_calls: any[] = []) => ({
     success: true,
@@ -350,6 +352,42 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       expect(f.handler).toHaveBeenCalledTimes(1);
       expect(result.execution?.outcome).not.toBe('blocked');
       expect(result.content).not.toMatch(/usuario o con tu plan/);
+    });
+
+    it('F5: cada inferencia publica las métricas del conjunto de trabajo y el trace las conserva', async () => {
+      const f = fixture(0, true);
+      f.chat
+        .mockResolvedValueOnce(
+          response([call('s1', { query: 'operation_40' })]),
+        )
+        .mockResolvedValueOnce(response([toolCall('c1', 'operation_59')]))
+        .mockResolvedValueOnce(response());
+      await f.run();
+      const events = f.emit.mock.calls
+        .filter(([name]) => name === 'ai.agent.router')
+        .map(([, payload]) => payload);
+      expect(events).toHaveLength(3);
+      for (const event of events) {
+        expect(event.retrieval_source).toBe('lexical_local');
+        expect(event.core_count).toBeGreaterThan(0);
+        expect(event.prefetch_hits).toBeGreaterThan(0);
+      }
+      expect(events[0].loaded_count).toBeLessThan(events[1].loaded_count);
+      expect(events[1].free_discovery_rounds).toBe(1);
+      expect(events[2].unloaded_authorized_calls).toBe(1);
+      const kept = redactTraceAttributes({
+        ...events[2],
+        user_text: 'no debe pasar',
+      });
+      expect(kept).toMatchObject({
+        core_count: events[2].core_count,
+        loaded_count: events[2].loaded_count,
+        retrieval_source: 'lexical_local',
+        prefetch_hits: events[2].prefetch_hits,
+        unloaded_authorized_calls: 1,
+        free_discovery_rounds: 1,
+      });
+      expect(kept).not.toHaveProperty('user_text');
     });
 
     it('un 403 real del handler sí es bloqueo de permisos (la carga no lo enmascara)', async () => {
