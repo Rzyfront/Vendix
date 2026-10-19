@@ -15,7 +15,8 @@
         "build:prod": "ng build --configuration production",
         "// ----- CODE QUALITY -----": "",
         "lint": "ng lint",
-        "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\""
+        "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\"",
+        "build:marketing-preview": "ng build --configuration production,marketing-preview"
     },
     "private": true,
     "dependencies": {
