@@ -1,5 +1,6 @@
 import {
   Component,
+  afterRenderEffect,
   OnInit,
   inject,
   signal,
@@ -8,9 +9,9 @@ import {
   PLATFORM_ID,
   effect,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterModule } from '@angular/router';
-import { CommonModule, DecimalPipe, DOCUMENT } from '@angular/common';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { CommonModule, DecimalPipe, DOCUMENT, ViewportScroller } from '@angular/common';
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser';
 import { isPlatformBrowser } from '@angular/common';
 import { buildVendixStructuredData } from './vendix-landing-structured-data';
@@ -283,6 +284,21 @@ const COMMERCIAL_CAMPAIGN_PARAMS = [
 })
 export class VendixLandingComponent implements OnInit {
   readonly sectorGuidesEnabled = SECTOR_GUIDES_ENABLED;
+
+  private readonly landingRoute = inject(ActivatedRoute);
+  private readonly landingScroller = inject(ViewportScroller);
+  private readonly landingFragment = toSignal(this.landingRoute.fragment, {
+    initialValue: this.landingRoute.snapshot.fragment,
+  });
+  // Guide links return to sections that do not exist until the landing renders.
+  private readonly landingFragmentScroll = afterRenderEffect(() => {
+    const fragment = this.landingFragment();
+    if (fragment === 'precios-section' ||
+        (fragment === 'guias' && this.sectorGuidesEnabled)) {
+      this.landingScroller.scrollToAnchor(fragment);
+    }
+  });
+
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly sanitizer = inject(DomSanitizer);
