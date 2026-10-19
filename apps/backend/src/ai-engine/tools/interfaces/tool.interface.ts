@@ -29,6 +29,12 @@ export interface ToolExecutionReceipt {
     complete: boolean;
   } | null;
   freshness: 'observed' | 'unknown' | 'truncated';
+  /**
+   * Transport compaction (>6000 chars): the full payload was persisted and the
+   * model received a bounded summary plus a reference. It is NOT a partial
+   * read: freshness stays `observed` and no recovery is triggered.
+   */
+  compacted?: boolean;
   effect_status:
     | 'not_applicable'
     | 'unverified'

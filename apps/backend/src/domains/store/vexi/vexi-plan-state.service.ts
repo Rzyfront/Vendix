@@ -1,4 +1,5 @@
 import { maximumRecoveryReplans } from '../../../ai-engine/tasks/agent-recovery-limits';
+import { USER_NOTICES } from '../../../ai-engine/agent-execution.contract';
 import {
   AgentVerifierService,
   AgentVerificationOptions,
@@ -934,7 +935,9 @@ export class VexiPlanStateService {
           completion_verified: true,
         }),
         endTurn: {
-          text: `Verifiqué en el sistema los resultados solicitados. Referencias: ${result.evidence_refs.slice(-5).join(', ')}.`,
+          // Evidence refs (`agent-result:<uuid>`) stay in the receipt; the
+          // person reads the catalog line.
+          text: USER_NOTICES.verified,
         },
       };
     }

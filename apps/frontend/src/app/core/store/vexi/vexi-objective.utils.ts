@@ -16,16 +16,24 @@ export function objectivePointer(metadata: unknown): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
-export function objectiveProgress(objective: VexiObjective | null): string {
-  if (!objective)
-    return 'Voy avanzando, pero alcancé el límite de continuaciones automáticas. ¿Sigo?';
-  const next =
-    typeof objective.next_step === 'string' ? objective.next_step.trim() : '';
-  return (
-    `Objetivo conservado: ${objective.goal}. Estado: ${objective.semantic_status}.` +
-    (next ? ` Siguiente: ${next}.` : '') +
-    ' Alcancé el límite de continuaciones automáticas; puedes revisar el progreso y elegir reanudar.'
-  );
+/**
+ * Burbuja que se muestra cuando se agotan las continuaciones automáticas.
+ *
+ * Nunca repite la meta, el estado ni el siguiente paso del objetivo: esos
+ * campos son notas internas y en pantalla se leían como jerga. Si el objetivo
+ * no admite continuar (aprobación pendiente, cerrado, efecto incierto), no hay
+ * nada útil que preguntar y no se genera mensaje.
+ */
+export function objectiveProgress(
+  objective: VexiObjective | null,
+): string | null {
+  const ask =
+    'Voy avanzando, pero alcancé el límite de continuaciones automáticas. ¿Sigo?';
+  if (!objective) return ask;
+  return ['active', 'partial'].includes(objective.semantic_status) &&
+    canResumeObjective(objective)
+    ? ask
+    : null;
 }
 
 export function objectiveNeedsExpiredChoice(

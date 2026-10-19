@@ -9,6 +9,7 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
+import { INTERNAL_JARGON, USER_NOTICES } from './agent-execution.contract';
 
 const def = (name: string) => ({
   type: 'function' as const,
@@ -581,9 +582,10 @@ describe('AIAgentService.runAgentStream', () => {
     });
     expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
-    expect(
-      chunks.find((c) => c.type === 'tool_result')?.tool?.summary,
-    ).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    // The trace row is user-facing: human text, never the internal code.
+    expect(chunks.find((c) => c.type === 'tool_result')?.tool?.summary).toBe(
+      'Sin acceso con tu usuario o plan actual.',
+    );
     expect(consumeAIQuota).not.toHaveBeenCalled();
   });
 
@@ -909,7 +911,9 @@ describe('AIAgentService.runAgentStream', () => {
     );
     const toolResult = chunks[0] as any;
     expect(toolResult.tool.failed).toBe(true);
-    expect(toolResult.tool.summary).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    expect(toolResult.tool.summary).toBe(
+      'Sin acceso con tu usuario o plan actual.',
+    );
     expect(chat).toHaveBeenCalledTimes(1); // permission blocks halt rather than re-infer.
   });
 
@@ -930,9 +934,8 @@ describe('AIAgentService.runAgentStream', () => {
       'ai.agent.tool_executed',
       expect.anything(),
     );
-    expect((chunks[0] as any).tool.summary).toContain(
-      'AI_AGENT_TOOL_NOT_ALLOWED',
-    );
+    expect((chunks[0] as any).tool.summary).not.toMatch(INTERNAL_JARGON);
+    expect((chunks[0] as any).tool.failed).toBe(true);
   });
 
   it('(rx2-b) planned budget is min(row + headroom, 60), not a fixed max', async () => {
@@ -1473,15 +1476,19 @@ describe('AIAgentService.runAgentStream', () => {
         .mockResolvedValueOnce(
           ok({ tool_calls: [call('t2', 'list_things', { id: 1 })] }),
         )
-        .mockResolvedValueOnce(ok({ content: 'Ya quedó completado' }));
+        .mockResolvedValueOnce(ok({ content: 'No encontré ese documento.' }));
       const { chunks, result } = await drain({});
       expect(executeTool).toHaveBeenCalledTimes(1);
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.execution).toMatchObject({ outcome: 'partial' });
-      expect(result.content).not.toContain('Ya quedó');
-      expect(result.content).toContain('otro documento');
+      // Read turn: the model's own answer is never replaced (hotfix Vexi).
+      expect(result.content).toBe('No encontré ese documento.');
+      expect(result.execution?.next_action).toContain('otro documento');
+      // P0-14: next_action is for the model; the done frame carries the
+      // summary without it (the AgentResult keeps it for the runtime).
+      const { next_action: _internal, ...clientExecution } = result.execution!;
       expect(chunks.find((c) => c.type === 'done')?.execution).toEqual(
-        result.execution,
+        clientExecution,
       );
       expect(
         chunks
@@ -1527,7 +1534,9 @@ describe('AIAgentService.runAgentStream', () => {
       });
       expect(chat).toHaveBeenCalledTimes(1);
       expect(result.execution?.outcome).toBe('partial');
-      expect(result.content).toContain('O-QA1');
+      // Human partial-progress line; raw record ids never reach the chat.
+      expect(result.content).toContain('Alcancé a consultar');
+      expect(result.content).not.toContain('O-QA1');
       expect(result.content).not.toMatch(
         /reformula|otras palabras|otra forma/i,
       );
@@ -1580,7 +1589,10 @@ describe('AIAgentService.runAgentStream', () => {
       );
       const { chunks, result } = await drain({ stream_id: 's1' });
       expect(result.execution?.outcome).toBe('needs_user_input');
-      expect(result.content).toContain('variante');
+      // B1: the receipt's next_action is written for the model; the person
+      // reads the catalog line (the model asks in its own words).
+      expect(result.content).toContain(USER_NOTICES.needs_user_input);
+      expect(result.content).not.toContain('¿Cuál variante deseas?');
       expect(chunks.find((c) => c.type === 'tool_result')?.tool?.failed).toBe(
         false,
       );
@@ -1672,12 +1684,12 @@ describe('AIAgentService.runAgentStream', () => {
       );
       chat
         .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
-        .mockResolvedValueOnce(ok({ content: 'Todo aplicado.' }));
+        .mockResolvedValueOnce(ok({ content: 'La consulta fue rechazada.' }));
       const { result } = await drain({});
       expect(handler).toHaveBeenCalledTimes(1);
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.execution?.outcome).toBe('partial');
-      expect(result.content).not.toContain('Todo aplicado');
+      expect(result.content).toBe('La consulta fue rechazada.');
     });
     it('provider transient emits a terminal failed outcome without another retry layer or lost usage', async () => {
       chat.mockResolvedValue({
@@ -1710,11 +1722,13 @@ describe('AIAgentService.runAgentStream', () => {
       executeTool.mockResolvedValue('Ya quedó');
       chat
         .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
-        .mockResolvedValueOnce(ok({ content: 'Todo completado' }));
+        .mockResolvedValueOnce(ok({ content: 'Esto fue lo que encontré.' }));
       const { result } = await drain({});
       expect(consumeAIQuota).not.toHaveBeenCalled();
       expect(result.tools_used[0].execution?.freshness).toBe('unknown');
-      expect(result.content).not.toContain('Todo completado');
+      // A legacy read is not evidence of a write; the answer stays the model's.
+      expect(result.content).toBe('Esto fue lo que encontré.');
+      expect(result.execution?.outcome).not.toBe('completed_verified');
     });
   });
 });
@@ -1826,6 +1840,49 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(result.tools_used.map((t) => t.name)).toContain('operation_49');
     expect(result.execution?.outcome).not.toBe('blocked');
     expect(access.consumeAIQuota).toHaveBeenCalledTimes(1); // Discovery itself is not a business-success unit.
+  });
+  it('hotfix: an authorized but unoffered read is staged for the next inference, without search_tools nor a failed row', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('direct', 'operation_49', { id: 1 })] }),
+      )
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('again', 'operation_49', { id: 1 })] }),
+      )
+      .mockResolvedValueOnce(
+        ok({ content: 'La caja cerró con $20.000 de menos.' }),
+      );
+    const { result, chunks } = await drain();
+    expect(names(0)).not.toContain('operation_49');
+    expect(names(1)).toContain('operation_49');
+    expect(handler).toHaveBeenCalledTimes(1);
+    const rows = chunks.filter((c) => c.type === 'tool_result');
+    expect(rows.some((c) => c.tool?.failed)).toBe(false);
+    for (const row of rows)
+      expect(row.tool?.summary ?? '').not.toMatch(INTERNAL_JARGON);
+    expect(result.content).toBe('La caja cerró con $20.000 de menos.');
+  });
+  it('P0-5: search_tools emits a succeeded/observed execution and the answer is kept', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [call('s1', 'search_tools', { query: 'operation_49' })],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ tool_calls: [call('r1', 'operation_49')] }))
+      .mockResolvedValueOnce(ok({ content: 'La caja cuadra.' }));
+    const { result, chunks } = await drain();
+    const search = chunks.find(
+      (c) => c.type === 'tool_result' && c.tool?.name === 'search_tools',
+    );
+    expect(search?.tool?.execution).toMatchObject({
+      status: 'ok',
+      freshness: 'observed',
+      effect_status: 'not_applicable',
+    });
+    expect(search?.tool?.failed).toBe(false);
+    expect(search?.tool?.summary ?? '').not.toMatch(INTERNAL_JARGON);
+    expect(result.content).toBe('La caja cuadra.');
   });
   it('never emits an unoffered UI tool_call nor dispatches to the browser', async () => {
     registry.register({
@@ -2142,5 +2199,333 @@ describe('D1 durable loop seam', () => {
     });
     expect(durable.close).toHaveBeenCalledTimes(1);
     expect(durable.finish).not.toHaveBeenCalled();
+  });
+
+  describe('hotfix: la respuesta del modelo nunca se reemplaza por jerga interna', () => {
+    const INTERNAL_INSTRUCTION =
+      'Busca la herramienta autorizada con search_tools o la fase pertinente del playbook; conserva el objetivo original.';
+    const answer =
+      'Tu caja cerró con un faltante de $20.000 en efectivo: el esperado era $500.000 y contaste $480.000.';
+    const withOpenObjective = () => {
+      durable.objective.plan = makePlan({ steps: [step(1, 'in_progress')] });
+      durable.objective.requires_revalidation = true;
+      durable.objective.next_step = INTERNAL_INSTRUCTION;
+    };
+    const stream = (goal: string) =>
+      run(async () => {
+        const chunks: AIStreamChunk[] = [];
+        const gen = service.runAgentStream({ goal, durable });
+        let step = await gen.next();
+        while (!step.done) {
+          chunks.push(step.value);
+          step = await gen.next();
+        }
+        return { chunks, result: step.value };
+      });
+    const userVisible = (chunks: AIStreamChunk[], content: string) => [
+      content,
+      ...chunks.filter((c) => c.type === 'text').map((c) => c.content ?? ''),
+      ...chunks
+        .filter((c) => c.type === 'tool_result')
+        .map((c) => c.tool?.summary ?? ''),
+    ];
+
+    it('(a) un turno de lectura con plan/objetivo abierto conserva la respuesta del modelo', async () => {
+      withOpenObjective();
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }))
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream(
+        'Oe me ayudas a analizar un cierre de caja que no me dio?',
+      );
+      expect(result.content).toBe(answer);
+      expect(chunks.filter((c) => c.type === 'text')).toEqual([
+        { type: 'text', content: answer },
+      ]);
+    });
+
+    it('(b) lecturas fallidas conservan la respuesta del modelo y no filtran jerga', async () => {
+      withOpenObjective();
+      handler.mockResolvedValue(
+        '{"error":"fallo","error_code":"TOOL_BUSINESS_ERROR","next_step":"Inspecciona el schema y preflight autorizados."}',
+      );
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c1', 'read_rows', { session_id: 1 })] }),
+        )
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c2', 'read_rows', { session_id: 2 })] }),
+        )
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('que significa eso');
+      expect(result.content).toBe(answer);
+      const traces = chunks.filter((c) => c.type === 'tool_result');
+      expect(traces.length).toBeGreaterThan(0);
+      expect(traces.every((c) => c.tool?.failed)).toBe(true);
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(b) una consulta sin permiso se explica en lenguaje humano', async () => {
+      withOpenObjective();
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'restricted')] }))
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('analiza la caja');
+      expect(result.content).toBeTruthy();
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(b) sin texto del modelo, el aviso por lectura fallida es humano', async () => {
+      withOpenObjective();
+      handler.mockResolvedValue(
+        '{"error":"fallo","error_code":"TOOL_BUSINESS_ERROR","next_step":"x"}',
+      );
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }))
+        .mockResolvedValueOnce(ok({ content: '' }));
+      const { chunks, result } = await stream('analiza la caja');
+      expect(result.content).toBeTruthy();
+      for (const text of userVisible(chunks, result.content))
+        expect(text).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('(c) una escritura sin postcondición verificada añade un aviso breve sin reemplazar la respuesta', async () => {
+      withOpenObjective();
+      const written = 'Listo, actualicé la nota del cierre.';
+      durable.finish.mockResolvedValue({
+        id: 'obj1',
+        version: 9,
+        semantic_status: 'partial',
+      });
+      async function* source(): AsyncGenerator<AIStreamChunk, any> {
+        yield { type: 'text', content: written };
+        yield { type: 'done' };
+        return {
+          content: written,
+          iterations: 2,
+          total_tokens: 10,
+          success: true,
+          tools_used: [
+            {
+              name: 'update_note',
+              args: {},
+              result: '{"applied":true}',
+              execution: { status: 'ok', effect_status: 'applied' },
+            },
+          ],
+        };
+      }
+      const gen = (service as any).withDurableSession(source(), durable);
+      const texts: string[] = [];
+      let next = await gen.next();
+      while (!next.done) {
+        if (next.value.type === 'text') texts.push(next.value.content);
+        next = await gen.next();
+      }
+      const result = next.value;
+      expect(result.content.startsWith(written)).toBe(true);
+      expect(result.content).toContain(USER_NOTICES.write_pending_verification);
+      expect(result.content).not.toMatch(INTERNAL_JARGON);
+      expect(result.content).not.toContain(INTERNAL_INSTRUCTION);
+      expect(texts).toEqual([result.content]);
+    });
+
+    // §5.3 noJargon grader of the stabilization plan, over visible text.
+    const noJargon =
+      /postcondici|search_tools|search_playbooks|load_playbook|playbook|objetivo original|next_step|next_action|semantic_status|requires_revalidation|Conservo el avance|evidencia suficiente|no está verificada|RECUPERACIÓN TÉCNICA|inferencia|schema|preflight|fingerprint|lease|tool_call:|objective:|\(interno\)|BATCH_NOT|AI_AGENT_/i;
+    const visibleText = (chunks: AIStreamChunk[], content: string) => [
+      ...userVisible(chunks, content),
+      ...chunks
+        .filter((c) => c.type === 'progress' || c.type === 'error')
+        .map((c) => c.content ?? c.error ?? ''),
+    ];
+
+    it('P0-4: una lectura de 7000+ caracteres se compacta sin truncated ni incomplete_data y conserva la respuesta', async () => {
+      const raw = await handler();
+      expect(raw.length).toBeGreaterThan(7000);
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'read_rows')] }))
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('analiza el cierre de caja');
+      expect(result.content).toBe(answer);
+      const frame = chunks.find(
+        (c) => c.type === 'tool_result' && c.tool?.name === 'read_rows',
+      );
+      expect(frame?.tool?.execution).toMatchObject({
+        status: 'ok',
+        freshness: 'observed',
+        compacted: true,
+      });
+      expect(frame?.tool?.failed).toBe(false);
+      expect(result.tools_used[0].execution).toMatchObject({
+        freshness: 'observed',
+        compacted: true,
+      });
+      // The model got the bounded envelope, never a "truncated" receipt nor
+      // the old "Consulta el bloque completo…" recovery instruction.
+      const toModel = JSON.stringify(chat.mock.calls[1]);
+      expect(toModel).toContain('compacted');
+      expect(toModel).not.toContain('"freshness":"truncated"');
+      expect(toModel).not.toContain('Consulta el bloque completo');
+      expect(JSON.stringify(durable.checkpointRecovery.mock.calls)).not.toContain(
+        'incomplete_data',
+      );
+    });
+
+    it('P0-5: un ui_* con respuesta OK del navegador queda observed y conserva la respuesta', async () => {
+      registry.register({
+        name: 'ui_navigate',
+        domain: 'ui',
+        description: 'Navegar',
+        parameters: {},
+        requiredPermissions: ['read'],
+        readOnly: true,
+        clientSide: true,
+      });
+      (service as any).uiChannel.awaitResult.mockResolvedValue(
+        JSON.stringify({ status: 'navigated', landed_on: '/admin/caja' }),
+      );
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('u1', 'ui_navigate', { route: 'caja' })] }),
+        )
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await run(async () => {
+        const out: AIStreamChunk[] = [];
+        const gen = service.runAgentStream({
+          goal: 'llévame a caja',
+          durable,
+          stream_id: 's-1',
+        });
+        let step = await gen.next();
+        while (!step.done) {
+          out.push(step.value);
+          step = await gen.next();
+        }
+        return { chunks: out, result: step.value };
+      });
+      expect(result.content).toBe(answer);
+      const frame = chunks.find(
+        (c) => c.type === 'tool_result' && c.tool?.name === 'ui_navigate',
+      );
+      expect(frame?.tool?.execution).toMatchObject({
+        status: 'ok',
+        freshness: 'observed',
+        effect_status: 'not_applicable',
+      });
+    });
+
+    it('P0-8: un argumento inválido solo afecta a su llamada; la hermana válida se ejecuta', async () => {
+      const listSessions = jest
+        .fn()
+        .mockResolvedValue(JSON.stringify({ id: 5, sessions: [{ id: 5 }] }));
+      registry.register({
+        name: 'get_cash_session',
+        domain: 'cash',
+        description: 'Sesión',
+        parameters: {
+          type: 'object',
+          properties: { session_id: { type: 'number' } },
+          required: ['session_id'],
+        },
+        requiredPermissions: ['read'],
+        readOnly: true,
+        handler,
+      });
+      registry.register({
+        name: 'list_cash_sessions',
+        domain: 'cash',
+        description: 'Sesiones',
+        parameters: { type: 'object', properties: {} },
+        requiredPermissions: ['read'],
+        readOnly: true,
+        handler: listSessions,
+      });
+      chat
+        .mockResolvedValueOnce(
+          ok({
+            tool_calls: [
+              call('bad', 'get_cash_session', {}),
+              call('good', 'list_cash_sessions', {}),
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('analiza la caja');
+      expect(listSessions).toHaveBeenCalledTimes(1);
+      expect(handler).not.toHaveBeenCalled();
+      const rows = chunks.filter((c) => c.type === 'tool_result');
+      const bad = rows.find((c) => c.tool?.id === 'bad');
+      const good = rows.find((c) => c.tool?.id === 'good');
+      expect(bad?.tool?.execution?.error_code).toBe('INVALID_ARGS');
+      expect(bad?.tool?.failed).toBe(true);
+      expect(good?.tool?.execution?.status).toBe('ok');
+      expect(good?.tool?.failed).toBe(false);
+      expect(
+        rows.filter(
+          (c) =>
+            c.tool?.id !== 'bad' &&
+            (c.tool?.failed ||
+              c.tool?.execution?.error_code === 'BATCH_NOT_DISPATCHED'),
+        ),
+      ).toHaveLength(0);
+      expect(result.content).toBe(answer);
+    });
+
+    it('P0-14: los frames de un turno con recuperación no llevan next_action, next_step ni jerga', async () => {
+      withOpenObjective();
+      durable.finish.mockResolvedValue({
+        id: 'obj1',
+        version: 9,
+        semantic_status: 'partial',
+        next_step: INTERNAL_INSTRUCTION,
+      });
+      handler.mockResolvedValue(
+        '{"error":"fallo","error_code":"TOOL_BUSINESS_ERROR","next_step":"Inspecciona el schema y preflight autorizados."}',
+      );
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c1', 'read_rows', { session_id: 1 })] }),
+        )
+        .mockResolvedValueOnce(ok({ content: answer }));
+      const { chunks, result } = await stream('analiza la caja');
+      // The runtime keeps the model instruction; the client never sees it.
+      expect(result.execution?.next_action).toBeTruthy();
+      const serialized = JSON.stringify(chunks);
+      expect(serialized).not.toContain('next_action');
+      expect(serialized).not.toContain(INTERNAL_INSTRUCTION);
+      expect(chunks.find((c) => c.type === 'done')?.objective?.next_step).toBe(
+        null,
+      );
+      for (const text of visibleText(chunks, result.content))
+        expect(text).not.toMatch(noJargon);
+    });
+
+    it('(a) la sesión durable no toca la respuesta de un turno sin escrituras', async () => {
+      withOpenObjective();
+      async function* source(): AsyncGenerator<AIStreamChunk, any> {
+        yield { type: 'text', content: answer };
+        return {
+          content: answer,
+          iterations: 1,
+          total_tokens: 10,
+          success: true,
+          tools_used: [
+            {
+              name: 'read_rows',
+              args: {},
+              result: '{}',
+              execution: { status: 'ok', effect_status: 'unverified' },
+            },
+          ],
+        };
+      }
+      const gen = (service as any).withDurableSession(source(), durable);
+      let next = await gen.next();
+      while (!next.done) next = await gen.next();
+      expect(next.value.content).toBe(answer);
+    });
   });
 });

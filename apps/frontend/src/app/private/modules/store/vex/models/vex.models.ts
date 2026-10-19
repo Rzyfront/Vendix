@@ -196,6 +196,8 @@ export interface VexMessage {
   streaming?: boolean;
   /** Non-empty when the turn ended in an error. */
   error?: string | null;
+  /** The conversation is blocked or busy: offer "Empezar de nuevo". */
+  restart_suggested?: boolean;
 }
 
 export interface VexConversation {

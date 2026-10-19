@@ -46,6 +46,10 @@ import {
   PlanApprovalService,
 } from './services/plan-approval.service';
 import { VexBlockService } from './services/vex-block.service';
+import {
+  clientSafeReceipt,
+  USER_NOTICES,
+} from '../../../ai-engine/agent-execution.contract';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
 
 /**
@@ -333,6 +337,11 @@ export class VexController {
         const uncertain =
           execution.result.status === 'unknown_effect' ||
           execution.result.effect_status !== 'not_applied';
+        // `next_action` is guidance for the model; the card and the plan step
+        // show a human line.
+        const notice = uncertain
+          ? USER_NOTICES.unknown_effect
+          : USER_NOTICES.apply_failed;
         const state =
           planId && conversationId !== undefined
             ? await this.persistStepResult({
@@ -342,15 +351,15 @@ export class VexController {
                 tool,
                 args,
                 outcome: uncertain ? 'unknown' : 'failed',
-                error: execution.result.next_action ?? undefined,
+                error: notice,
               })
             : null;
         return this.responseService.success(
           {
             tool,
             output,
-            summary: execution.result.next_action,
-            execution: execution.result,
+            summary: notice,
+            execution: clientSafeReceipt(execution.result),
             step_status:
               state?.step_status ?? (uncertain ? 'unknown' : 'failed'),
             plan_status:

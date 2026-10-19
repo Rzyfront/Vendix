@@ -110,8 +110,50 @@ describe('D0 task listener lag', () => {
       ),
     ).toMatchObject({
       live_status: 'completed',
-      result: { execution },
+      result: { execution: { outcome: 'partial' } },
     });
+  });
+  it('never sends execution.next_action (model guidance) to the browser', async () => {
+    const service = new VexiTaskService(
+      {
+        ai_agent_tasks: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 1,
+            job_id: 'qa',
+            status: 'running',
+            result: null,
+          }),
+        },
+      } as any,
+      {} as any,
+      {
+        getJobStatus: jest.fn().mockResolvedValue({
+          status: 'completed',
+          result: {
+            content: 'Resultado parcial.',
+            execution: {
+              schema_version: '1',
+              outcome: 'partial',
+              next_action: 'Usa search_tools.',
+              evidence_refs: [],
+              resource_ids: {},
+            },
+          },
+        }),
+      } as any,
+      {} as any,
+    );
+    const task: any = await RequestContextService.runIsolated(
+      {
+        store_id: 11,
+        organization_id: 7,
+        user_id: 3,
+        is_owner: true,
+        is_super_admin: false,
+      },
+      () => service.get(1),
+    );
+    expect(task.result.execution).not.toHaveProperty('next_action');
   });
 });
 

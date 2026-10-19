@@ -999,6 +999,157 @@ describe('AgentObjectiveRepository D1', () => {
   });
 });
 
+// Hotfix P0-2: the DB column defaults to TRUE; the code must not inherit it.
+describe('requires_revalidation lifecycle (deterministic SQL transport)', () => {
+  const read = (patch: Partial<ToolExecutionReceipt> = {}) => ({
+    ...receipt,
+    resource_ids: {},
+    ...patch,
+  });
+  async function fresh() {
+    const db = new ObjectiveMemoryDatabase();
+    db.seedConversation(5, ctx);
+    const repository = new AgentObjectiveRepository(db.prisma);
+    const created = await repository.createOrReplace(5, null, 'vexi', {
+      goal: 'consulta',
+    });
+    return { db, repository, created };
+  }
+  it('a new objective is born with requires_revalidation === false (explicit in the INSERT)', () =>
+    scoped(async () => {
+      const { db, created } = await fresh();
+      expect(created.requires_revalidation).toBe(false);
+      const insert = db.statements.find((q) =>
+        q.sql.includes('INSERT INTO ai_agent_objectives'),
+      )!;
+      expect(insert.sql).toContain('requires_revalidation');
+      expect(insert.values).toContain(false);
+    }));
+  async function leasedWithFlag(status?: string) {
+    const ctxRepo = await fresh();
+    const { db, repository, created } = ctxRepo;
+    db.objectives.set(created.id, { ...created, requires_revalidation: true });
+    if (status)
+      db.effects.set('e1', {
+        id: 'e1',
+        ...ctx,
+        objective_id: created.id,
+        operation_id: 'op1',
+        proposal_hash: 'h',
+        step_id: 's',
+        status,
+        created_at: new Date(),
+        updated_at: new Date(),
+      } as unknown as AgentEffect);
+    const leased = await repository.acquireLease(
+      created.id,
+      created.version,
+      60000,
+    ).catch(() => {
+      // An uncertain effect blocks acquisition; model a live executor directly.
+      const row = {
+        ...db.objectives.get(created.id)!,
+        version: created.version + 1,
+        lease_generation: created.lease_generation + 1,
+        lease_until: new Date(Date.now() + 60000),
+      };
+      db.objectives.set(created.id, row);
+      return row;
+    });
+    return { ...ctxRepo, leased };
+  }
+  const append = (
+    repository: AgentObjectiveRepository,
+    leased: AgentObjective,
+    call: string,
+    toolReceipt: ToolExecutionReceipt,
+    tool = 'get_product',
+  ) =>
+    repository.appendToolResult(
+      leased.id,
+      { version: leased.version, lease_generation: leased.lease_generation },
+      {
+        tool_call_id: call,
+        tool_name: tool,
+        args_hash: 'a'.repeat(64),
+        receipt: toolReceipt,
+        data: { id: 1 },
+        checkpoint: { requires_revalidation: false },
+      },
+    );
+  it('an observed successful read after the applied write clears it', () =>
+    scoped(async () => {
+      const { repository, leased } = await leasedWithFlag('applied');
+      const saved = await append(repository, leased, 'r1', read());
+      expect(saved.advanced).toBe(true);
+      expect(saved.objective.requires_revalidation).toBe(false);
+    }));
+  it.each([
+    ['a truncated read', read({ freshness: 'truncated' })],
+    ['a failed read', read({ status: 'error' as never })],
+    ['a write receipt', read({ effect_status: 'applied' })],
+  ])('%s does not clear it', (_label, toolReceipt) =>
+    scoped(async () => {
+      const { repository, leased } = await leasedWithFlag('applied');
+      const saved = await append(repository, leased, 'r1', toolReceipt);
+      expect(saved.objective.requires_revalidation).toBe(true);
+    }),
+  );
+  it('an uncertain effect keeps it even after an observed read', () =>
+    scoped(async () => {
+      const { repository, leased } = await leasedWithFlag('unknown');
+      const saved = await append(repository, leased, 'r1', read());
+      expect(saved.objective.requires_revalidation).toBe(true);
+    }));
+  it('the recovery checkpoint never counts as the satisfying read', () =>
+    scoped(async () => {
+      const { repository, leased } = await leasedWithFlag('applied');
+      const saved = await append(
+        repository,
+        leased,
+        'r1',
+        read(),
+        'agent_recovery_checkpoint',
+      );
+      expect(saved.objective.requires_revalidation).toBe(true);
+    }));
+  it('hasPendingEffects: applied+unread and proposals are pending; verified/failed are not', () =>
+    scoped(async () => {
+      for (const [status, flag, expected] of [
+        ['applied', true, true],
+        ['applied', false, false],
+        ['proposed', false, true],
+        ['unknown', false, true],
+        ['verified', true, false],
+        ['failed', true, false],
+      ] as const) {
+        const { db, repository, created } = await fresh();
+        db.objectives.set(created.id, {
+          ...created,
+          requires_revalidation: flag,
+        });
+        db.effects.set('e1', {
+          id: 'e1',
+          ...ctx,
+          objective_id: created.id,
+          status,
+        } as unknown as AgentEffect);
+        expect(await repository.hasPendingEffects(created.id)).toBe(expected);
+      }
+    }));
+  it('409 bodies carry error_code and a human message', () => {
+    for (const error of [
+      new ObjectiveLeaseBusyException(),
+      new ObjectiveLeaseChangedException(),
+    ]) {
+      const body = error.getResponse() as Record<string, string>;
+      expect(error.getStatus()).toBe(409);
+      expect(body.error_code).toMatch(/^AI_OBJECTIVE_/);
+      expect(body.message).not.toMatch(/Objective|executor/);
+    }
+  });
+});
+
 describe('durable artifact privacy and budget accumulation', () => {
   it('accumulates all units across continuations, never negative/refund resets', () => {
     const initial = { ...emptyObjectiveBudget(), tools: 7, cost_usd: 0.25 };

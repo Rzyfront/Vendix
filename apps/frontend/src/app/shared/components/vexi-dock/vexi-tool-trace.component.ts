@@ -6,7 +6,14 @@ import {
   linkedSignal,
 } from '@angular/core';
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
-import { vexiToolLabel } from '../../../core/store/vexi/vexi-execution.utils';
+import {
+  vexiToolDeferred,
+  vexiToolLabel,
+} from '../../../core/store/vexi/vexi-execution.utils';
+import {
+  vexiIsScaffoldTool,
+  vexiVisibleDetail,
+} from '../../../core/store/vexi/vexi-user-copy.utils';
 import {
   STORE_MODULE_BY_KEY,
   resolveStoreModule,
@@ -27,20 +34,6 @@ type StepKind = 'data' | 'ui';
 
 const isUiStep = (name: string): boolean => name.startsWith('ui_');
 
-/**
- * The agent's internal plan is never shown. The backend no longer emits these;
- * this is defense in depth so a stray frame cannot leak the plan into the trace.
- */
-const HIDDEN_TOOLS: ReadonlySet<string> = new Set([
-  'propose_plan',
-  'update_plan_step',
-  'verify_deliverables',
-  'ask_user',
-  'revise_plan',
-  'pause_plan',
-  'resume_plan',
-]);
-
 /** Reads a string argument, tolerating the model sending a number. */
 function argText(
   args: Record<string, unknown> | undefined,
@@ -59,7 +52,9 @@ function argText(
 function moduleLabel(args: Record<string, unknown> | undefined): string {
   const key = argText(args, 'module_key');
   if (!key) return 'ese módulo';
-  return STORE_MODULE_BY_KEY[key]?.label ?? resolveStoreModule(key)?.label ?? key;
+  return (
+    STORE_MODULE_BY_KEY[key]?.label ?? resolveStoreModule(key)?.label ?? key
+  );
 }
 
 /**
@@ -144,7 +139,8 @@ function narrate(step: ToolStep): string {
       case 'ui_pos_add_item': {
         const query = argText(args, 'query') || 'el producto';
         const qty = Number(args?.['quantity']);
-        const what = Number.isFinite(qty) && qty > 1 ? `${qty} × ${query}` : query;
+        const what =
+          Number.isFinite(qty) && qty > 1 ? `${qty} × ${query}` : query;
         return running ? `Agrego ${what} al carrito` : `Añadí ${what}`;
       }
       case 'ui_pos_remove_item': {
@@ -427,7 +423,13 @@ export class VexiToolTraceComponent {
   readonly steps = input<ToolStep[]>([]);
 
   private readonly visibleSteps = computed(() =>
-    this.steps().filter((step) => !HIDDEN_TOOLS.has(step.name)),
+    // A call the backend held back (batch stopped, staged) runs again on its
+    // own: it is neither work done nor a failure, so it is not listed.
+    this.steps().filter(
+      (step) =>
+        // The agent's discovery and internal plan are never shown.
+        !vexiIsScaffoldTool(step.name) && !vexiToolDeferred(step.execution),
+    ),
   );
 
   protected readonly running = computed(() =>
@@ -450,7 +452,7 @@ export class VexiToolTraceComponent {
       kind: isUiStep(step.name) ? ('ui' as const) : ('data' as const),
       status: step.status,
       text: narrate(step),
-      summary: step.status === 'running' ? '' : (step.summary ?? '').trim(),
+      summary: step.status === 'running' ? '' : vexiVisibleDetail(step.summary),
     })),
   );
 

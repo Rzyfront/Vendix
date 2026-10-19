@@ -33,6 +33,14 @@ metadata:
   catalog (`discovery_not_authorized` degradation), NOT an unauthorized scaffold or
   an unexpandable top-K. Include these fallbacks in rollout/token metrics.
 
+- Scaffold includes `call_endpoint`, `write_endpoint`, `explain_capability` (the
+  prompts send the model there). `AGENT_TOOL_CORE` (tool-router.service.ts) offers
+  each agent's prompt-cited tools on top of the K slots, intersected with the
+  turn's authority (Vexi: `ui_*`, `get_report`…; Vex: `vex_render_*`/`vex_block_*`).
+- Text loop sessions (`writesNeedEvidence`): a write/irreversible/UI tool never
+  enters the top-K by a score-0 alphabetical tie; only `readOnly` tools fill.
+  Voice keeps its own preview-only filter.
+
 ## Source and indexing
 
 `ai-engine/tools/tool-catalog.ts`, `tool-router.service.ts`,

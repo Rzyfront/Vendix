@@ -4,6 +4,7 @@ import { validate } from 'class-validator';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 import { VexiController } from './vexi.controller';
 import { ResumeAgentObjectiveDto } from './dto/resume-agent-objective.dto';
+import { USER_NOTICES } from '../../../ai-engine/agent-execution.contract';
 
 function fixture() {
   const row: any = {
@@ -183,6 +184,32 @@ describe('Vexi durable objective endpoints', () => {
     expect(planState.applyDurableEffect.mock.calls[0][0]).not.toHaveProperty(
       'confirmation_token',
     );
+  });
+
+  it('A1: a failed or uncertain approval shows a catalog line, never next_action', async () => {
+    const MODEL_ONLY = 'Lista las reservas con list_bookings y usa su booking_id.';
+    for (const [result, notice] of [
+      [
+        { status: 'recoverable_error', effect_status: 'not_applied', next_action: MODEL_ONLY },
+        USER_NOTICES.apply_failed,
+      ],
+      [
+        { status: 'unknown_effect', effect_status: 'unknown', next_action: MODEL_ONLY },
+        USER_NOTICES.unknown_effect,
+      ],
+    ] as const) {
+      const { controller, planState } = fixture();
+      planState.applyDurableEffect.mockResolvedValue({ output: '{}', result });
+      const output: any = await controller.applyConfirmation({
+        tool: 'cancel_booking',
+        arguments: {},
+        confirmation_token: 'secret',
+        conversation_id: 1,
+      });
+      expect(output.summary).toBe(notice);
+      expect(output.execution).not.toHaveProperty('next_action');
+      expect(JSON.stringify(output)).not.toContain(MODEL_ONLY);
+    }
   });
 });
 

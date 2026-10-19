@@ -26,7 +26,8 @@ export interface VexiToolExecution {
     | 'unknown_effect';
   error_code: string | null;
   retryable: boolean;
-  next_action: string | null;
+  /** Solo para el modelo; nunca se muestra. */
+  next_action?: string | null;
   effect_status:
     | 'not_applicable'
     | 'unverified'
@@ -35,6 +36,8 @@ export interface VexiToolExecution {
     | 'applied'
     | 'unknown';
   freshness: 'observed' | 'unknown' | 'truncated';
+  /** La lectura se resumió por tamaño; sigue siendo una lectura válida. */
+  compacted?: boolean;
   evidence_refs: string[];
   resource_ids: Record<string, string | number>;
 }
@@ -50,7 +53,8 @@ export interface VexiExecutionSummary {
     | 'unknown_effect'
     | 'failed'
     | 'cancelled';
-  next_action: string;
+  /** Solo para el modelo; el backend deja de enviarlo y nunca se muestra. */
+  next_action?: string;
   evidence_refs: string[];
   resource_ids: Record<string, string | number>;
 }
@@ -577,7 +581,11 @@ export class VexiApiService {
     return this.http
       .post<{
         data: VoiceConsentReceipt;
-      }>(`${environment.apiUrl}/store/vexi/voice/confirmations/apply`, { session_id, proposal_id, ...(speak ? { speak: true } : {}) })
+      }>(`${environment.apiUrl}/store/vexi/voice/confirmations/apply`, {
+        session_id,
+        proposal_id,
+        ...(speak ? { speak: true } : {}),
+      })
       .pipe(map((response) => response.data));
   }
 

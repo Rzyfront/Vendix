@@ -172,6 +172,9 @@ export const vexiReducer = createReducer(
     messages: [],
     streamingContent: '',
     streamingProgress: '',
+    // The previous thread's notice (e.g. the 409 conflict) does not belong
+    // to the new one.
+    error: null,
   })),
 
   on(VexiActions.selectConversation, (state, { conversationId }) => ({
@@ -184,6 +187,7 @@ export const vexiReducer = createReducer(
     streamingContent: '',
     streamingProgress: '',
     isStreaming: false,
+    error: null,
   })),
 
   on(VexiActions.loadMessagesSuccess, (state, { messages }) => ({
@@ -545,26 +549,30 @@ export const vexiReducer = createReducer(
     planContinuePending: true,
   })),
 
-  on(VexiActions.planContinueCapped, (state) => ({
-    ...state,
-    planContinuePending: false,
-    messages: state.activeConversationId
-      ? [
-          ...state.messages,
-          {
-            id: -Date.now(),
-            conversation_id: state.activeConversationId,
-            role: 'assistant' as const,
-            content: objectiveProgress(state.objective),
-            tool_calls: null,
-            tokens_used: 0,
-            cost_usd: 0,
-            metadata: null,
-            created_at: new Date().toISOString(),
-          },
-        ]
-      : state.messages,
-  })),
+  on(VexiActions.planContinueCapped, (state) => {
+    const notice = objectiveProgress(state.objective);
+    return {
+      ...state,
+      planContinuePending: false,
+      messages:
+        state.activeConversationId && notice
+          ? [
+              ...state.messages,
+              {
+                id: -Date.now(),
+                conversation_id: state.activeConversationId,
+                role: 'assistant' as const,
+                content: notice,
+                tool_calls: null,
+                tokens_used: 0,
+                cost_usd: 0,
+                metadata: null,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : state.messages,
+    };
+  }),
 
   on(VexiActions.streamComplete, (state) => {
     // A turn that only ended to be chained may have said nothing; an empty

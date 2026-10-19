@@ -26,6 +26,7 @@ import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import { vexiObjectiveConflictNotice } from '../../../../../core/store/vexi/vexi-user-copy.utils';
 import {
   VEX_SINGLE_PLAN_PREFIX,
   VexApiService,
@@ -513,7 +514,8 @@ export class VexChatStore {
     if (!plan || !step) return;
     const applied =
       voiceReceiptWasApplied(result.receipt) &&
-      vexApplyState(result.receipt as VexApplyStepResult).step_status === 'done';
+      vexApplyState(result.receipt as VexApplyStepResult).step_status ===
+        'done';
     // The same fail-closed fold as click, including non-applied/missing receipts.
     // Unknown consumes the local token and closes every approval path.
     this.applyServerResult(
@@ -1530,11 +1532,7 @@ export class VexChatStore {
           })
           .catch((error) => {
             if (generation !== this.stream_generation) return;
-            this.failMessage(
-              conversation_id,
-              full.id,
-              extractApiErrorMessage(error),
-            );
+            this.failFromError(conversation_id, full.id, error);
           });
       })
       .catch((error) => {
@@ -1617,11 +1615,7 @@ export class VexChatStore {
       })
       .catch((error) => {
         if (generation !== this.stream_generation) return;
-        this.failMessage(
-          conversation_id,
-          message_id,
-          extractApiErrorMessage(error),
-        );
+        this.failFromError(conversation_id, message_id, error);
       });
   }
 
@@ -1861,10 +1855,17 @@ export class VexChatStore {
         return;
       }
       case 'error': {
+        const conflict = vexiObjectiveConflictNotice(chunk);
+        if (conflict) {
+          this.failMessage(conversation_id, message_id, conflict, true);
+          return;
+        }
+        // Closed catalog, like Vexi: the frame's text comes from the provider
+        // or an exception and is written for the logs, never for the person.
         this.failMessage(
           conversation_id,
           message_id,
-          chunk.error || 'Vex no pudo completar la respuesta.',
+          'Vex no pudo completar la respuesta.',
         );
         return;
       }
@@ -1877,10 +1878,36 @@ export class VexChatStore {
     conversation_id: string,
     message_id: string,
     error: string,
+    restart_suggested = false,
   ): void {
     this._stream_progress.set('');
-    this.patchMessage(conversation_id, message_id, { streaming: false, error });
+    this.patchMessage(conversation_id, message_id, {
+      streaming: false,
+      error,
+      restart_suggested,
+    });
     this._is_agent_typing.set(false);
+  }
+
+  /**
+   * A 409 of a blocked or busy conversation becomes a human notice with the
+   * "Empezar de nuevo" action; anything else keeps the usual API message.
+   */
+  private failFromError(
+    conversation_id: string,
+    message_id: string,
+    error: unknown,
+  ): void {
+    const conflict = vexiObjectiveConflictNotice(error);
+    if (conflict) {
+      this.failMessage(conversation_id, message_id, conflict, true);
+      return;
+    }
+    this.failMessage(
+      conversation_id,
+      message_id,
+      extractApiErrorMessage(error),
+    );
   }
 
   private patchMessage(
