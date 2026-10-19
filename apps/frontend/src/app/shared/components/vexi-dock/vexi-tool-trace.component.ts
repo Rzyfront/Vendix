@@ -10,7 +10,10 @@ import {
   vexiToolDeferred,
   vexiToolLabel,
 } from '../../../core/store/vexi/vexi-execution.utils';
-import { vexiVisibleDetail } from '../../../core/store/vexi/vexi-user-copy.utils';
+import {
+  vexiIsScaffoldTool,
+  vexiVisibleDetail,
+} from '../../../core/store/vexi/vexi-user-copy.utils';
 import {
   STORE_MODULE_BY_KEY,
   resolveStoreModule,
@@ -30,20 +33,6 @@ import { IconComponent } from '../icon/icon.component';
 type StepKind = 'data' | 'ui';
 
 const isUiStep = (name: string): boolean => name.startsWith('ui_');
-
-/**
- * The agent's internal plan is never shown. The backend no longer emits these;
- * this is defense in depth so a stray frame cannot leak the plan into the trace.
- */
-const HIDDEN_TOOLS: ReadonlySet<string> = new Set([
-  'propose_plan',
-  'update_plan_step',
-  'verify_deliverables',
-  'ask_user',
-  'revise_plan',
-  'pause_plan',
-  'resume_plan',
-]);
 
 /** Reads a string argument, tolerating the model sending a number. */
 function argText(
@@ -438,7 +427,8 @@ export class VexiToolTraceComponent {
     // own: it is neither work done nor a failure, so it is not listed.
     this.steps().filter(
       (step) =>
-        !HIDDEN_TOOLS.has(step.name) && !vexiToolDeferred(step.execution),
+        // The agent's discovery and internal plan are never shown.
+        !vexiIsScaffoldTool(step.name) && !vexiToolDeferred(step.execution),
     ),
   );
 

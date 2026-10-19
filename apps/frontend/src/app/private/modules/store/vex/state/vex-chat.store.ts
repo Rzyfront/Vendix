@@ -26,11 +26,7 @@ import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
-import {
-  VEXI_OBJECTIVE_CONFLICT_COPY,
-  parseVexiObjectiveConflict,
-  vexiVisibleDetail,
-} from '../../../../../core/store/vexi/vexi-user-copy.utils';
+import { vexiObjectiveConflictNotice } from '../../../../../core/store/vexi/vexi-user-copy.utils';
 import {
   VEX_SINGLE_PLAN_PREFIX,
   VexApiService,
@@ -1859,24 +1855,17 @@ export class VexChatStore {
         return;
       }
       case 'error': {
-        const conflict = parseVexiObjectiveConflict(chunk);
+        const conflict = vexiObjectiveConflictNotice(chunk);
         if (conflict) {
-          this.failMessage(
-            conversation_id,
-            message_id,
-            VEXI_OBJECTIVE_CONFLICT_COPY[conflict],
-            true,
-          );
+          this.failMessage(conversation_id, message_id, conflict, true);
           return;
         }
-        // Raw server text only when it reads as a person would say it; a
-        // code or an internal note falls back to the generic notice.
-        const raw = (chunk.error ?? '').trim();
+        // Closed catalog, like Vexi: the frame's text comes from the provider
+        // or an exception and is written for the logs, never for the person.
         this.failMessage(
           conversation_id,
           message_id,
-          (/^[A-Z][A-Z0-9_]+$/.test(raw) ? '' : vexiVisibleDetail(raw)) ||
-            'Vex no pudo completar la respuesta.',
+          'Vex no pudo completar la respuesta.',
         );
         return;
       }
@@ -1909,14 +1898,9 @@ export class VexChatStore {
     message_id: string,
     error: unknown,
   ): void {
-    const conflict = parseVexiObjectiveConflict(error);
+    const conflict = vexiObjectiveConflictNotice(error);
     if (conflict) {
-      this.failMessage(
-        conversation_id,
-        message_id,
-        VEXI_OBJECTIVE_CONFLICT_COPY[conflict],
-        true,
-      );
+      this.failMessage(conversation_id, message_id, conflict, true);
       return;
     }
     this.failMessage(

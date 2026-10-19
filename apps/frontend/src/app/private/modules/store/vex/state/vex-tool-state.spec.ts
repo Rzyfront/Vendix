@@ -111,10 +111,17 @@ describe('H Vex trace uses the same honest semantic states as Vexi', () => {
     ]);
     expect(steps[0].summary).toContain('verificarse');
   });
-  it('keeps OFF legacy status/summary when receipts are absent', () => {
+  it('keeps OFF legacy status when receipts are absent; summary is catalog-only', () => {
     expect(
       settleVexToolStep([], { id: 'one', name: 'read', summary: 'legacy' })[0],
-    ).toEqual(jasmine.objectContaining({ status: 'done', summary: 'legacy' }));
+    ).toEqual(jasmine.objectContaining({ status: 'done', summary: undefined }));
+    expect(
+      settleVexToolStep([], {
+        id: 'one',
+        name: 'read',
+        summary: 'Esperando tu aprobación.',
+      })[0].summary,
+    ).toBe('Esperando tu aprobación.');
     expect(
       settleVexToolStep([], { id: 'one', name: 'read', failed: true })[0]
         .status,

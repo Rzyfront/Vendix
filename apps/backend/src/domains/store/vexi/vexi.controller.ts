@@ -46,6 +46,10 @@ import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
 import { VexiSpeechService } from './vexi-speech.service';
 import { VexiPlanStateService } from './vexi-plan-state.service';
+import {
+  clientSafeReceipt,
+  USER_NOTICES,
+} from '../../../ai-engine/agent-execution.contract';
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -168,20 +172,25 @@ export class VexiController {
       const uncertain =
         result.status === 'unknown_effect' ||
         result.effect_status !== 'not_applied';
+      // `next_action` is guidance for the model; the bubble, the voice and the
+      // plan step show a catalog line (same boundary as vex.controller).
+      const notice = uncertain
+        ? USER_NOTICES.unknown_effect
+        : USER_NOTICES.apply_failed;
       // Voice shares the click path's persisted semantic outcome, not just its
       // successful receipt sink. No applied activity/quota/narration below.
       const voicePlanState = voice
         ? await this.voiceConfirmations!.recordResult(voice.proposal, {
             outcome: uncertain ? 'unknown' : 'failed',
-            error: result.next_action ?? undefined,
+            error: notice,
           })
         : null;
       return this.responseService.success(
         {
           tool: dto.tool,
           output,
-          summary: result.next_action,
-          execution: result,
+          summary: notice,
+          execution: clientSafeReceipt(result),
           ...(voice?.proposal.agentKey === 'vex' && {
             step_status: uncertain ? 'unknown' : 'failed',
             plan_status: uncertain ? 'unknown_effect' : 'partially_applied',

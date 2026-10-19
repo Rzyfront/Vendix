@@ -124,12 +124,36 @@ describe('VexiToolTraceComponent (texto visible del rastro)', () => {
         'Conservo el avance, faltan postcondiciones',
       ),
       step('c', 'done', undefined, 'Caja abierta desde las 8:00'),
+      step(
+        'd',
+        'done',
+        undefined,
+        'Cuéntale exactamente qué pasó y qué tiene que hacer él.',
+      ),
+      step('e', 'done', undefined, 'Esperando tu aprobación.'),
     ]);
+    // Whitelist: free prose never survives, however human it reads.
     expect(component.rows().map((row) => row.summary)).toEqual([
       '',
       '',
-      'Caja abierta desde las 8:00',
+      '',
+      '',
+      'Esperando tu aprobación.',
     ]);
     expect(host.textContent ?? '').not.toMatch(NO_JARGON);
+    expect(host.textContent ?? '').not.toContain('Cuéntale');
+  });
+
+  it('hides discovery scaffolding from the trace and from the count', async () => {
+    const { host, component } = await render([
+      step('a', 'done', receipt({})),
+      { ...step('b', 'done', receipt({})), name: 'search_tools' },
+      { ...step('c', 'done', receipt({})), name: 'load_playbook' },
+      { ...step('d', 'done', receipt({})), name: 'search_playbooks' },
+      { ...step('e', 'done', receipt({})), name: 'load_recipe' },
+    ]);
+    expect(component.summary()).toBe('Consulté 1 dato');
+    expect(component.rows().length).toBe(1);
+    expect(host.textContent ?? '').not.toMatch(/search tools|playbook|recipe/i);
   });
 });

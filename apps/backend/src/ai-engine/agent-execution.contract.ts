@@ -12,10 +12,14 @@ import {
 
 /**
  * Texto para la persona, nunca para el modelo. Las `next_action` de recibos,
- * de la política de recuperación y del objetivo durable son instrucciones
- * internas ("usa search_tools", "postcondiciones", "playbook"): viajan al
- * modelo y a la metadata, jamás al chat. Todo lo que el contrato o la sesión
- * durable le muestren al usuario sale de aquí.
+ * de la política de recuperación y del objetivo durable, y los `next_step` de
+ * las tools (incluidos los comandos `ui_*` del navegador: «Cuéntale…»,
+ * «Dile…»), son instrucciones internas: viajan al modelo y a la metadata,
+ * jamás al chat, a `ai_messages.content` ni a la voz.
+ *
+ * Lista blanca, no lista negra: el texto visible sale SOLO de la prosa del
+ * modelo o de este catálogo cerrado. Ninguna cadena de un recibo se muestra,
+ * aunque parezca humana.
  */
 export const USER_NOTICES = {
   unknown_effect:
@@ -33,6 +37,23 @@ export const USER_NOTICES = {
   needs_user_input: 'Indícame el dato que falta para continuar.',
   write_pending_verification:
     'Ya hice el cambio; si quieres, reviso que haya quedado bien registrado.',
+  apply_failed:
+    'No se pudo aplicar el cambio. Revisa los datos e inténtalo de nuevo.',
+  verified: 'Verifiqué en el sistema que los cambios quedaron registrados.',
+  stopped:
+    'La respuesta se detuvo. El avance se conserva; verifica los cambios en curso antes de volver a intentarlos.',
+  no_answer:
+    'No tengo evidencia de que la solicitud esté terminada. Puedo verificar el registro y continuar desde el paso pendiente.',
+} as const;
+
+/** Detalle de un paso del rastro: catálogo cerrado, nunca la nota del recibo. */
+export const USER_TOOL_NOTES = {
+  staged: 'Preparando la consulta.',
+  blocked: 'Sin acceso con tu usuario o plan actual.',
+  unknown_effect: 'No se pudo confirmar el resultado.',
+  pending_confirmation: 'Esperando tu aprobación.',
+  needs_user_input: 'Falta un dato para continuar.',
+  failed: 'No se pudo consultar este dato.',
 } as const;
 
 /**
@@ -44,43 +65,45 @@ const NOT_EXECUTED = new Set([TOOL_STAGED_CODE, 'BATCH_NOT_DISPATCHED']);
 const notExecuted = (r: ToolExecutionReceipt) =>
   NOT_EXECUTED.has(r.error_code ?? '');
 
-/** Vocabulario interno del runtime que nunca debe llegar al chat. */
+/**
+ * Detector para graders y specs (gate `noJargon`). NO es un filtro de salida:
+ * lo visible se decide por lista blanca ({@link USER_NOTICES}), no por esta
+ * regex.
+ */
 export const INTERNAL_JARGON =
-  /postcondici|search_tools|playbook|objetivo original|conservo el avance|\bschema\b|preflight|fingerprint|\blease\b|checkpoint|recuperaci[oó]n t[eé]cnica|\(interno\)|AI_AGENT_|inferencia/i;
-
-/** A tool-provided user string survives only if it carries no runtime jargon. */
-export function userFacingText(
-  text: string | null | undefined,
-  fallback: string,
-): string {
-  const value = text?.trim();
-  return value && !INTERNAL_JARGON.test(value) ? value : fallback;
-}
+  /postcondici|search_tools|playbook|objetivo original|conservo el avance|\bschema\b|preflight|fingerprint|\blease\b|checkpoint|recuperaci[oó]n t[eé]cnica|\(interno\)|AI_AGENT_|inferencia|agent-result:|tool_call:|next_step|next_action/i;
 
 function appendNotice(content: string, notice: string): string {
   if (!content) return notice;
   return content.includes(notice) ? content : `${content}\n\n${notice}`;
 }
 
-/** Trace row text for a failed tool: human, never the model instruction. */
+/**
+ * Trace row text. A non-ok row is always a catalog line; an ok row keeps its
+ * data preview unless it carries the receipt's model instruction.
+ */
 export function userToolSummary(
   receipt: ToolExecutionReceipt,
   summary: string | undefined,
 ): string | undefined {
-  if (notExecuted(receipt)) return 'Preparando la consulta.';
+  if (notExecuted(receipt)) return USER_TOOL_NOTES.staged;
   switch (receipt.status) {
     case 'ok':
-      return summary;
+      return summary &&
+        ((receipt.next_action && summary.includes(receipt.next_action)) ||
+          /"next_(step|action)"/.test(summary))
+        ? undefined
+        : summary;
     case 'blocked':
-      return 'Sin acceso con tu usuario o plan actual.';
+      return USER_TOOL_NOTES.blocked;
     case 'unknown_effect':
-      return 'No se pudo confirmar el resultado.';
+      return USER_TOOL_NOTES.unknown_effect;
     case 'pending_confirmation':
-      return 'Esperando tu aprobación.';
+      return USER_TOOL_NOTES.pending_confirmation;
     case 'needs_user_input':
-      return userFacingText(summary, 'Falta un dato para continuar.');
+      return USER_TOOL_NOTES.needs_user_input;
     default:
-      return 'No se pudo consultar este dato.';
+      return USER_TOOL_NOTES.failed;
   }
 }
 
@@ -310,15 +333,29 @@ export async function* withExecutionContract(
     // saw and must explain itself. Only a known blocker or an uncertain WRITE
     // earns a short human notice, appended — never the internal next_action.
     let content = text || result.content;
+    // The receipt's `next_action` is written FOR THE MODEL ("Cuéntale qué
+    // pasó…"): the person only ever reads the catalog line.
     const question =
       critical?.status === 'needs_user_input' && !result.awaiting_input
-        ? userFacingText(critical.next_action, USER_NOTICES.needs_user_input)
+        ? USER_NOTICES.needs_user_input
         : undefined;
+    const wroteUnknown = all.some(
+      (r) => r.status === 'unknown_effect' || r.effect_status === 'unknown',
+    );
+    const wroteApplied = all.some(
+      (r) => r.status === 'ok' && r.effect_status === 'applied',
+    );
     // A failed loop's content is a provider/runtime diagnostic, not an answer.
+    // After a write that landed (or may have), "pídemelo de nuevo" would invite
+    // a second approval: say what is known about the change instead.
     if (!result.success)
-      content = result.exhausted
-        ? content || USER_NOTICES.failed
-        : USER_NOTICES.failed;
+      content = wroteUnknown
+        ? USER_NOTICES.unknown_effect
+        : wroteApplied
+          ? USER_NOTICES.write_pending_verification
+          : result.exhausted
+            ? content || USER_NOTICES.failed
+            : USER_NOTICES.failed;
     // Exhaustion text is ours (the model never closed), so it may be rebuilt.
     else if (result.exhausted)
       content = describeIncompleteExecution(
@@ -344,7 +381,7 @@ export async function* withExecutionContract(
       !critical &&
       result.success &&
       !result.exhausted &&
-      all.some((r) => r.status === 'ok' && r.effect_status === 'applied')
+      wroteApplied
     )
       content = appendNotice(content, USER_NOTICES.write_pending_verification);
     if (

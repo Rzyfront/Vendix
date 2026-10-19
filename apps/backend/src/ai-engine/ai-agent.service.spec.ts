@@ -1589,7 +1589,10 @@ describe('AIAgentService.runAgentStream', () => {
       );
       const { chunks, result } = await drain({ stream_id: 's1' });
       expect(result.execution?.outcome).toBe('needs_user_input');
-      expect(result.content).toContain('variante');
+      // B1: the receipt's next_action is written for the model; the person
+      // reads the catalog line (the model asks in its own words).
+      expect(result.content).toContain(USER_NOTICES.needs_user_input);
+      expect(result.content).not.toContain('¿Cuál variante deseas?');
       expect(chunks.find((c) => c.type === 'tool_result')?.tool?.failed).toBe(
         false,
       );

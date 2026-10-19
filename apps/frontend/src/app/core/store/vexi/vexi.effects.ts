@@ -28,8 +28,7 @@ import {
 } from './vexi-objective.utils';
 import { vexiToolFailed } from './vexi-execution.utils';
 import {
-  VEXI_OBJECTIVE_CONFLICT_COPY,
-  parseVexiObjectiveConflict,
+  vexiObjectiveConflictNotice,
 } from './vexi-user-copy.utils';
 import {
   VexiApiService,
@@ -323,12 +322,11 @@ export class VexiEffects {
               catchError((error) => {
                 // 409 of a blocked/busy conversation: a human notice the panel
                 // pairs with "Empezar de nuevo", never the raw conflict body.
-                const conflict = parseVexiObjectiveConflict(error);
+                const conflict = vexiObjectiveConflictNotice(error);
                 return of(
                   VexiActions.sendMessageFailure({
-                    error: conflict
-                      ? VEXI_OBJECTIVE_CONFLICT_COPY[conflict]
-                      : error?.message || 'No pude enviar el mensaje',
+                    error:
+                      conflict ?? (error?.message || 'No pude enviar el mensaje'),
                   }),
                 );
               }),
@@ -996,12 +994,11 @@ export class VexiEffects {
 
               case 'error': {
                 this.voice.finishTurn(streamId);
-                const conflict = parseVexiObjectiveConflict(chunk);
+                const conflict = vexiObjectiveConflictNotice(chunk);
                 subscriber.next(
                   VexiActions.streamError({
-                    error: conflict
-                      ? VEXI_OBJECTIVE_CONFLICT_COPY[conflict]
-                      : chunk.error || 'La respuesta se interrumpió.',
+                    error:
+                      conflict ?? (chunk.error || 'La respuesta se interrumpió.'),
                   }),
                 );
                 subscriber.complete();

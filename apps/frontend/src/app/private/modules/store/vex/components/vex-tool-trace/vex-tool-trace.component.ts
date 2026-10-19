@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexToolStep } from '../../models/vex.models';
+import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 
 /**
  * Collapsible live trace of a Vex turn: which tools ran, in which order, and
@@ -19,7 +20,7 @@ import { VexToolStep } from '../../models/vex.models';
   imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (steps().length > 0) {
+    @if (visibleSteps().length > 0) {
       <div
         class="rounded-xl border border-[var(--color-border)] bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.03)]"
       >
@@ -34,7 +35,7 @@ import { VexToolStep } from '../../models/vex.models';
             {{
               running_count() > 0 ? 'Vex está trabajando' : 'Actividad de Vex'
             }}
-            ({{ steps().length }})
+            ({{ visibleSteps().length }})
           </span>
           <app-icon
             name="chevron-down"
@@ -45,7 +46,7 @@ import { VexToolStep } from '../../models/vex.models';
         </button>
         @if (open()) {
           <ol class="px-3 pb-2 flex flex-col">
-            @for (step of steps(); track step.id) {
+            @for (step of visibleSteps(); track step.id) {
               <li class="flex items-start gap-2 py-1 text-xs">
                 <span
                   class="mt-0.5 shrink-0"
@@ -102,8 +103,13 @@ export class VexToolTraceComponent {
   readonly steps = input<VexToolStep[]>([]);
   readonly open = signal(false);
 
+  /** Discovery and internal-plan tools are scaffolding, not work on the store. */
+  readonly visibleSteps = computed(() =>
+    this.steps().filter((s) => !vexiIsScaffoldTool(s.name)),
+  );
+
   readonly running_count = computed(
-    () => this.steps().filter((s) => s.status === 'running').length,
+    () => this.visibleSteps().filter((s) => s.status === 'running').length,
   );
 
   toggle(): void {

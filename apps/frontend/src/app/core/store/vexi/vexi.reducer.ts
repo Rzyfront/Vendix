@@ -172,6 +172,9 @@ export const vexiReducer = createReducer(
     messages: [],
     streamingContent: '',
     streamingProgress: '',
+    // The previous thread's notice (e.g. the 409 conflict) does not belong
+    // to the new one.
+    error: null,
   })),
 
   on(VexiActions.selectConversation, (state, { conversationId }) => ({
@@ -184,6 +187,7 @@ export const vexiReducer = createReducer(
     streamingContent: '',
     streamingProgress: '',
     isStreaming: false,
+    error: null,
   })),
 
   on(VexiActions.loadMessagesSuccess, (state, { messages }) => ({

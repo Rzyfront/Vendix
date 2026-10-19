@@ -341,7 +341,7 @@ export class VexController {
         // show a human line.
         const notice = uncertain
           ? USER_NOTICES.unknown_effect
-          : 'No se pudo aplicar el cambio. Revisa los datos e inténtalo de nuevo.';
+          : USER_NOTICES.apply_failed;
         const state =
           planId && conversationId !== undefined
             ? await this.persistStepResult({

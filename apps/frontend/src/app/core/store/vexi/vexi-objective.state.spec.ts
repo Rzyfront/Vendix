@@ -204,3 +204,30 @@ describe('D1 rejection and stale objective snapshots', () => {
     ).toBe(streamed);
   });
 });
+
+describe('M3: a fresh or selected conversation drops the previous notice', () => {
+  const blocked = {
+    ...initialVexiState,
+    activeConversationId: 1,
+    error: 'Esta conversación quedó con un cambio pendiente de revisar.',
+  };
+
+  it('createConversationSuccess clears the 409 notice', () => {
+    const state = vexiReducer(
+      blocked,
+      actions.createConversationSuccess({
+        conversation: { id: 2 } as never,
+      }),
+    );
+    expect(state.activeConversationId).toBe(2);
+    expect(state.error).toBeNull();
+  });
+
+  it('selectConversation clears the 409 notice', () => {
+    const state = vexiReducer(
+      blocked,
+      actions.selectConversation({ conversationId: 3 }),
+    );
+    expect(state.error).toBeNull();
+  });
+});

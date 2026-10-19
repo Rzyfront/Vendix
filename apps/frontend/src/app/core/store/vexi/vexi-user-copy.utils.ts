@@ -108,11 +108,53 @@ export function parseVexiObjectiveConflict(
   return conflictFromBody(error, 0);
 }
 
+/**
+ * Mensajes humanos del 409 `AI_OBJECTIVE_REQUIRES_RESUME` tal como los escribe
+ * el backend (`agent-durable-session.service.ts`, `resumeRequired`). Lista
+ * blanca: solo una de estas frases exactas se muestra tal cual; cualquier otro
+ * texto del 409 cae en {@link VEXI_OBJECTIVE_CONFLICT_COPY}.
+ */
+export const VEXI_OBJECTIVE_SERVER_NOTICES: readonly string[] = [
+  'Tienes una propuesta pendiente en esta conversación. Apruébala o recházala antes de pedir otra cosa.',
+  'No pude confirmar si el último cambio se aplicó. Revisa ese registro antes de pedir otro cambio, o inicia una conversación nueva.',
+  'Este trabajo venció. Para retomarlo, confírmalo de nuevo; sus datos se volverán a consultar.',
+  'Este trabajo está detenido. Reanúdalo cuando esté resuelto, o inicia una conversación nueva para otra solicitud.',
+];
+
+function serverNoticeFrom(body: unknown, depth: number): string | null {
+  if (depth > 3 || body === null || body === undefined) return null;
+  if (typeof body === 'string') {
+    const text = body.trim();
+    return VEXI_OBJECTIVE_SERVER_NOTICES.includes(text) ? text : null;
+  }
+  if (typeof body !== 'object') return null;
+  const value = body as Record<string, unknown>;
+  return (
+    serverNoticeFrom(value['message'], depth + 1) ??
+    serverNoticeFrom(value['error'], depth + 1)
+  );
+}
+
+/**
+ * Aviso visible de un 409 de objetivo: la frase específica del backend si es
+ * una del catálogo (propuesta pendiente, efecto incierto, vencido, detenido);
+ * si no, la genérica del tipo de conflicto. `null` si no es un 409 de objetivo.
+ */
+export function vexiObjectiveConflictNotice(error: unknown): string | null {
+  const kind = parseVexiObjectiveConflict(error);
+  if (!kind) return null;
+  return (
+    (kind === 'requires_resume' ? serverNoticeFrom(error, 0) : null) ??
+    VEXI_OBJECTIVE_CONFLICT_COPY[kind]
+  );
+}
+
 /** Inverso del catálogo: ¿este aviso visible es un conflicto de objetivo? */
 export function vexiConflictFromNotice(
   notice: string | null | undefined,
 ): VexiObjectiveConflict | null {
   if (!notice) return null;
+  if (VEXI_OBJECTIVE_SERVER_NOTICES.includes(notice)) return 'requires_resume';
   const match = (
     Object.entries(VEXI_OBJECTIVE_CONFLICT_COPY) as [
       VexiObjectiveConflict,
@@ -122,20 +164,58 @@ export function vexiConflictFromNotice(
   return match ? match[0] : null;
 }
 
-// ─── Detalle libre de un paso ───────────────────────────────────────────────
-
-/** Vocabulario que delata una nota interna (misma familia que el gate noJargon). */
-const INTERNAL_TEXT =
-  /postcondici|search_tools|search_playbooks|load_playbook|playbook|objetivo original|next_step|next_action|semantic_status|requires_revalidation|Conservo el avance|evidencia suficiente|no está verificada|RECUPERACIÓN TÉCNICA|inferencia|schema|preflight|fingerprint|lease|tool_call:|objective:|\(interno\)|BATCH_NOT|AI_AGENT_/i;
+// ─── Detalle de un paso ─────────────────────────────────────────────────────
 
 /**
- * Detalle de un paso apto para pantalla: vacío si es un payload crudo (JSON)
- * o si trae vocabulario interno. Mejor no decir nada que filtrar una nota del
- * modelo.
+ * Notas de paso que el backend emite para la persona (`USER_TOOL_NOTES` en
+ * `agent-execution.contract.ts`) más las propias del frontend. Lista blanca:
+ * el resumen de un paso solo se muestra si es exactamente una de estas.
+ */
+export const VEXI_STEP_DETAIL_COPY: readonly string[] = [
+  'Preparando la consulta.',
+  'Sin acceso con tu usuario o plan actual.',
+  'No se pudo confirmar el resultado.',
+  'Esperando tu aprobación.',
+  'Falta un dato para continuar.',
+  'No se pudo consultar este dato.',
+  'Faltan argumentos válidos.',
+  'Esperando confirmación del usuario.',
+  'No se pudo preparar el cambio.',
+  'Pendiente de la aprobación anterior.',
+];
+
+/**
+ * Detalle de un paso apto para pantalla: solo una frase del catálogo cerrado.
+ * Un payload, una nota del recibo o un `next_step` («Cuéntale…», «Usa
+ * search_tools…») nunca se muestran: mejor no decir nada que filtrar una nota
+ * del modelo.
  */
 export function vexiVisibleDetail(text: string | null | undefined): string {
   const value = (text ?? '').trim();
-  if (!value) return '';
-  if (value.startsWith('{') || value.startsWith('[')) return '';
-  return INTERNAL_TEXT.test(value) ? '' : value;
+  return VEXI_STEP_DETAIL_COPY.includes(value) ? value : '';
+}
+
+// ─── Andamiaje del runtime ──────────────────────────────────────────────────
+
+/**
+ * Herramientas de descubrimiento y del plan interno: andamiaje del agente,
+ * no trabajo sobre el negocio. No aparecen en el rastro ni cuentan como
+ * «consulté N datos».
+ */
+const SCAFFOLD_TOOLS: ReadonlySet<string> = new Set([
+  'search_tools',
+  'search_playbooks',
+  'load_playbook',
+  'load_recipe',
+  'propose_plan',
+  'update_plan_step',
+  'verify_deliverables',
+  'ask_user',
+  'revise_plan',
+  'pause_plan',
+  'resume_plan',
+]);
+
+export function vexiIsScaffoldTool(name: string): boolean {
+  return SCAFFOLD_TOOLS.has(name);
 }

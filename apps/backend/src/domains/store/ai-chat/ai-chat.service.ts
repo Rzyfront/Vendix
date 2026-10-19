@@ -21,6 +21,7 @@ import {
   clientSafeExecution,
   clientSafeObjective,
   clientSafeReceipt,
+  USER_NOTICES,
 } from '../../../ai-engine/agent-execution.contract';
 import type {
   AgentResult,
@@ -987,8 +988,7 @@ export class AIChatService {
       if (result.aborted && !fullContent) {
         // Cancelling transport is not rollback. Persist an honest terminal turn
         // even when the durable wrapper suppressed all buffered model prose.
-        fullContent =
-          'La respuesta se detuvo. El avance se conserva; verifica los cambios en curso antes de volver a intentarlos.';
+        fullContent = USER_NOTICES.stopped;
         yield { type: 'text', content: fullContent };
       }
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
@@ -1009,8 +1009,7 @@ export class AIChatService {
         // still thinking. Whatever the agent returned goes out as text, and if
         // even that is empty the silence is named rather than shipped.
         fullContent =
-          result.content?.trim() ||
-          'No tengo evidencia de que la solicitud esté terminada. Puedo verificar el registro y continuar desde el paso pendiente.';
+          result.content?.trim() || USER_NOTICES.no_answer;
         yield { type: 'text', content: fullContent };
         // Spoken too, fallback included. A turn that only ran tools already got
         // its human filler at the top; leaving the failure text unspoken as well

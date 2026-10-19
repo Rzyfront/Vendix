@@ -1,10 +1,14 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import {
   VEXI_OBJECTIVE_CONFLICT_COPY,
+  VEXI_OBJECTIVE_SERVER_NOTICES,
+  VEXI_STEP_DETAIL_COPY,
   parseVexiObjectiveConflict,
   vexiConflictFromNotice,
   vexiErrorText,
   vexiIsNonFailureCode,
+  vexiIsScaffoldTool,
+  vexiObjectiveConflictNotice,
   vexiVisibleDetail,
 } from './vexi-user-copy.utils';
 
@@ -60,6 +64,27 @@ describe('vexi-user-copy: conversación bloqueada (409)', () => {
     expect(vexiConflictFromNotice('Otro error')).toBeNull();
     expect(vexiConflictFromNotice(null)).toBeNull();
   });
+
+  it('shows the specific server message only when it is in the closed catalog', () => {
+    const pending = VEXI_OBJECTIVE_SERVER_NOTICES[0];
+    const notice = vexiObjectiveConflictNotice(
+      http409({ error_code: 'AI_OBJECTIVE_REQUIRES_RESUME', message: pending }),
+    );
+    expect(notice).toBe(pending);
+    expect(vexiConflictFromNotice(notice)).toBe('requires_resume');
+    expect(
+      vexiObjectiveConflictNotice(
+        http409({
+          error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+          message: 'Usa resume_plan con el objective:42',
+        }),
+      ),
+    ).toBe(VEXI_OBJECTIVE_CONFLICT_COPY.requires_resume);
+    expect(
+      vexiObjectiveConflictNotice(http409({ error_code: 'AI_OBJECTIVE_LEASE_BUSY' })),
+    ).toBe(VEXI_OBJECTIVE_CONFLICT_COPY.lease_busy);
+    expect(vexiObjectiveConflictNotice(http409({ error_code: 'X' }))).toBeNull();
+  });
 });
 
 describe('vexi-user-copy: catálogo cerrado', () => {
@@ -81,9 +106,21 @@ describe('vexi-user-copy: catálogo cerrado', () => {
     expect(vexiIsNonFailureCode(null)).toBeFalse();
   });
 
-  it('visible detail drops payloads and internal notes', () => {
+  it('visible detail is a whitelist: only catalog lines survive', () => {
     expect(vexiVisibleDetail('{"a":1}')).toBe('');
     expect(vexiVisibleDetail('Usa search_tools')).toBe('');
-    expect(vexiVisibleDetail(' Caja cerrada ')).toBe('Caja cerrada');
+    // Real next_step of a ui_* command: human-looking, written for the model.
+    expect(
+      vexiVisibleDetail('Cuéntale exactamente qué pasó y qué tiene que hacer él.'),
+    ).toBe('');
+    expect(vexiVisibleDetail(' Caja cerrada ')).toBe('');
+    for (const line of VEXI_STEP_DETAIL_COPY)
+      expect(vexiVisibleDetail(` ${line} `)).toBe(line);
+  });
+
+  it('discovery and plan tools are scaffolding', () => {
+    for (const name of ['search_tools', 'search_playbooks', 'load_playbook', 'load_recipe', 'propose_plan'])
+      expect(vexiIsScaffoldTool(name)).toBeTrue();
+    expect(vexiIsScaffoldTool('list_cash_sessions')).toBeFalse();
   });
 });
