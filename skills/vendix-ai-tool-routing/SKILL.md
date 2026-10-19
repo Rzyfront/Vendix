@@ -23,23 +23,29 @@ metadata:
 - **Authorization first:** permissions ∩ agent ∩ subscription ∩ caller, denies last.
   Revalidate per inference AND execution; B subscription lookup errors fail closed.
   Relevance NEVER adds authority. Plan-hook exceptions remain planning-only.
-- Keep definitions and offered-name guard atomic at inference boundaries. An authorized
-  but unoffered call returns recoverable `AI_AGENT_TOOL_NOT_OFFERED`, BEFORE UI/handler.
-  Do not tombstone its args in business recovery: after discovery the SAME call is valid.
-- `search_tools` stages K12→K24→K40, at most two expansions. It cannot execute business
-  handlers, waive approval or consume successful-business-tool quota. Schema pages
-  do not spend expansion slots. Pinned used/dependency names are filtered again.
-- Strict caller/agent/plan scopes excluding `search_tools` retain the legacy authorized
-  catalog (`discovery_not_authorized` degradation), NOT an unauthorized scaffold or
-  an unexpandable top-K. Include these fallbacks in rollout/token metrics.
+- **Full authorized catalog, always (fix router 2026-10).** `ToolRouterService.select`
+  returns EVERY authorized definition; relevance only ORDERS it (core → ranked by the
+  goal, computed once per session → rest → scaffold). Never a top-K that excludes: an
+  authorized-but-unoffered call produced false «sin permisos» notices and rounds spent
+  on staging in prod. An authorized call runs in the SAME round. Plan tools keep hook
+  gating. `vex_*` block tools are offered only to Vex (`isForeignSurfaceTool`).
+- `search_tools` is an optional ranking helper over the already offered catalog: no
+  staging, no expansions, no `enabled_next_inference`, never consumes rounds/budget.
+- `AI_AGENT_TOOL_NOT_ALLOWED` = name outside the turn's authority (hallucinated or
+  denied to the agent): `recoverable_error`, trace note «Paso no disponible…», never
+  `blocked`. Only real 401/403 and SUBSCRIPTION_/PLAN_/TRIAL_ codes are `blocked`.
+- Exhausted rounds get ONE tool-free closing inference (span `closing_inference`);
+  the canned `exhausted` notice only if that closing fails, and never after an
+  `unknown_effect` write. With model prose, the contract appends notices only for
+  pending/uncertain writes.
+- Scopes excluding `search_tools` get the same full catalog, flagged
+  `discovery_not_authorized` in `degraded`. Cost: the owner catalog is ~220 tools
+  (~80k prompt tokens per call on DeepSeek via OpenRouter, no cache); track it.
 
-- Scaffold includes `call_endpoint`, `write_endpoint`, `explain_capability` (the
-  prompts send the model there). `AGENT_TOOL_CORE` (tool-router.service.ts) offers
-  each agent's prompt-cited tools on top of the K slots, intersected with the
-  turn's authority (Vexi: `ui_*`, `get_report`…; Vex: `vex_render_*`/`vex_block_*`).
-- Text loop sessions (`writesNeedEvidence`): a write/irreversible/UI tool never
-  enters the top-K by a score-0 alphabetical tie; only `readOnly` tools fill.
-  Voice keeps its own preview-only filter.
+- `AGENT_TOOL_CORE` (tool-router.service.ts) puts each agent's prompt-cited tools
+  first in the order, intersected with the turn's authority. Writes stay offered
+  and keep their mandatory approval at execution. Voice keeps its own
+  preview-only filter.
 
 ## Source and indexing
 

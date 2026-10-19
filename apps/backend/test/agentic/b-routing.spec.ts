@@ -1,3 +1,4 @@
+import { isAgentPlanTool } from '../../src/ai-engine/interfaces/agent-plan.interface';
 import { resolve } from 'path';
 import { writeFileSync } from 'fs';
 import { loadCorpus } from './runner';
@@ -66,7 +67,7 @@ afterAll(() => {
 
 describe('B 50-case corpus routing contract (NOT a measured product baseline)', () => {
   it.each(corpus.map((c) => [c.id, c] as const))(
-    'case %s never offers unauthorized/restricted tools even with embeddings degraded',
+    'case %s offers the whole authorized catalog and never unauthorized/restricted tools, even with embeddings degraded',
     async (_id, c) => {
       const permitted = registry
         .getAll()
@@ -105,7 +106,11 @@ describe('B 50-case corpus routing contract (NOT a measured product baseline)', 
         selected.definitions.every((d) => allowed.has(d.function.name)),
       ).toBe(true);
       expect(JSON.stringify(selected)).not.toContain('MUST_NOT_LEAK');
-      expect(selected.operationalCount).toBeLessThanOrEqual(12);
+      // Fix router 2026-10: relevance orders, never excludes. The whole
+      // authorized catalog (minus plan tools without a hook) is offered.
+      expect(selected.definitions).toHaveLength(
+        auth.filter((d) => !isAgentPlanTool(d.function.name)).length,
+      );
       expect(selected.degraded).toContain('vector_unavailable');
       reports.push({
         case_id: c.id,

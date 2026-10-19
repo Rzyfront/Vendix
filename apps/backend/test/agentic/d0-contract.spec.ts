@@ -92,14 +92,19 @@ describe('D0 50-case corpus terminal smoke (synthetic, no live adjudication)', (
         type: 'done',
         execution: step.value.execution,
       });
-      // P0-3: the model's text is never replaced. A blocker, an uncertain
-      // effect, a pending card or a missing datum APPEND a human notice, so
-      // the claim never stands alone; a failed read is explained by the model.
+      // P0-3: the model's text is never replaced. An uncertain effect or a
+      // pending card (a write) APPEND a human notice, so the claim never
+      // stands alone. Fix router 2026-10: a blocker, a missing datum or a
+      // failed read the model answered in prose earn no generic notice.
       const content = step.value.content;
       expect(content).not.toMatch(INTERNAL_JARGON);
       if (normalized.status === 'ok')
         expect(content).toBe('Resultado de consulta sintética.');
-      else if (normalized.status === 'recoverable_error')
+      else if (
+        ['recoverable_error', 'blocked', 'needs_user_input'].includes(
+          normalized.status,
+        )
+      )
         expect(content).toBe('Ya completé todo.');
       else {
         expect(content.startsWith('Ya completé todo.\n\n')).toBe(true);

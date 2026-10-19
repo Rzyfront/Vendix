@@ -1,5 +1,5 @@
 import { AIToolRegistry } from './ai-tool-registry';
-import { ToolRouterService } from './tool-router.service';
+import { agentToolCore, ToolRouterService } from './tool-router.service';
 import {
   buildToolManifest,
   buildToolDocument,
@@ -58,19 +58,19 @@ describe('ToolRouterService B: relevance is not authority', () => {
   });
   afterAll(() => {});
   it.each(['find_coffee', 'buscar_cafe', 'CAFÉ', 'reposición'])(
-    'finds ES/snake_case/exact alias %s at K12',
+    'offers the FULL authorized catalog and ranks ES/snake_case/alias %s first',
     async (query) => {
+      const all = registry.getAllDefinitions();
       const selection = await router.select(
         router.createSession(query, 'scope'),
-        registry.getAllDefinitions(),
+        all,
         false,
         false,
       );
-      expect(selection.operationalCount).toBe(12);
-      expect(selection.definitions.map((d) => d.function.name)).toContain(
-        'find_coffee',
-      );
-      expect(selection.definitions.length).toBe(13);
+      // Relevance orders, never excludes (prod 2026-10: top-K → false «sin permisos»).
+      expect(selection.definitions).toHaveLength(all.length);
+      expect(selection.operationalCount).toBe(62);
+      expect(selection.definitions[0].function.name).toBe('find_coffee');
     },
   );
   it('keeps ñ distinct from n', () => {
@@ -81,38 +81,26 @@ describe('ToolRouterService B: relevance is not authority', () => {
     expect(localToolRanking('año', docs)[0]).toBe('a');
     expect(localToolRanking('ano', docs)[0]).toBe('b');
   });
-  it('expands 12→24→40 exactly twice, not during the provider batch', async () => {
+  it('search_tools never stages, expands or changes the offered catalog', async () => {
     const session = router.createSession('operation_00', 'scope');
     const auth = registry.getAllDefinitions();
     const first = await router.select(session, auth, false, false);
-    const names = [...session.names];
-    expect(
-      JSON.parse(await router.search(session, { query: 'operation_59' }, auth))
-        .enabled_next_inference,
-    ).toBe(true);
-    expect(session.names).toEqual(names);
-    expect(first.definitions.map((d) => d.function.name)).not.toContain(
-      'operation_59',
+    const names = first.definitions.map((d) => d.function.name);
+    expect(names).toContain('operation_59');
+    const found = JSON.parse(
+      await router.search(session, { query: 'operation_59' }, auth),
     );
+    expect(found.enabled_next_inference).toBeUndefined();
+    expect(found.results[0].name).toBe('operation_59');
+    expect(found.next_step).toMatch(/directamente/);
+    // A second search is allowed (no pending/expansion lock).
     expect(
       JSON.parse(await router.search(session, { query: 'find_coffee' }, auth))
-        .error,
-    ).toBeTruthy();
+        .results[0].name,
+    ).toBe('find_coffee');
     const second = await router.select(session, auth, false, false);
-    expect(second.operationalCount).toBe(24);
-    expect(second.definitions.map((d) => d.function.name)).toContain(
-      'operation_59',
-    );
-    await router.search(session, { query: 'find_child' }, auth);
-    const third = await router.select(session, auth, false, false);
-    expect(third.operationalCount).toBe(40);
-    expect(third.definitions.map((d) => d.function.name)).toContain(
-      'find_child',
-    );
-    expect(
-      JSON.parse(await router.search(session, { query: 'anything' }, auth))
-        .expanded,
-    ).toBe(false);
+    expect(second.definitions.map((d) => d.function.name)).toEqual(names);
+    expect(session.expansions).toBe(0);
   });
   it('paginates discovery schemas without consuming more expansion slots and rechecks revoked names', async () => {
     const session = router.createSession('x', 's');
@@ -323,7 +311,7 @@ describe('ToolRouterService B: relevance is not authority', () => {
       }),
     ).toThrow();
   });
-  it('C discovery stays in authorized scaffold, pins only available step tools within K12', async () => {
+  it('C discovery stays in authorized scaffold and never offers unauthorized names', async () => {
     registry.registerMany(createPlaybookTools());
     const session = router.createSession('operation_00', 'scope', [
       'find_coffee',
@@ -335,7 +323,7 @@ describe('ToolRouterService B: relevance is not authority', () => {
       false,
       false,
     );
-    expect(selection.operationalCount).toBe(12);
+    expect(selection.operationalCount).toBe(62);
     expect(selection.definitions.map((d) => d.function.name)).toEqual(
       expect.arrayContaining([
         'search_playbooks',
@@ -398,19 +386,18 @@ describe('ToolRouterService (d): cierre de caja en lenguaje coloquial', () => {
     } as any);
   });
 
-  it('(d) enruta las lecturas de caja en K12 sin search_tools', async () => {
+  it('(d) ofrece las lecturas de caja al frente del catálogo completo, sin search_tools', async () => {
     const session = router.createSession(QUERY, 'scope');
-    const selection = await router.select(
-      session,
-      registry.getAllDefinitions(),
-      false,
-      false,
-    );
-    expect(selection.operationalCount).toBe(12);
+    const all = registry.getAllDefinitions();
+    const selection = await router.select(session, all, false, false);
+    const names = selection.definitions.map((d) => d.function.name);
+    expect(names).toHaveLength(all.length);
     expect(session.expansions).toBe(0);
-    expect(selection.definitions.map((d) => d.function.name)).toEqual(
-      expect.arrayContaining(CASH_READS),
-    );
+    // Vexi core first, then the ranked cash reads.
+    const core = new Set(agentToolCore('vexi'));
+    const ranked = names.filter((n) => !core.has(n));
+    expect(names.slice(0, names.length - ranked.length).every((n) => core.has(n))).toBe(true);
+    expect([...ranked.slice(0, CASH_READS.length)].sort()).toEqual(CASH_READS);
   });
 
   it('(d) las lecturas de caja encabezan el ranking, por delante de escrituras y de otros dominios', () => {
@@ -440,38 +427,27 @@ describe('ToolRouterService (d): cierre de caja en lenguaje coloquial', () => {
     );
   });
 
-  it('(d) una tool autorizada pero no ofrecida queda fijada para la siguiente inferencia sin gastar ampliación', async () => {
+  it('(d) una tool autorizada fuera del ranking se ofrece desde la primera inferencia', async () => {
     const auth = registry.getAllDefinitions();
     const session = router.createSession('producto', 'scope');
     const first = await router.select(session, auth, false, false);
-    expect(first.definitions.map((d) => d.function.name)).not.toContain(
-      'get_cash_session_close_report',
-    );
-    expect(
-      router.requestTool(session, 'get_cash_session_close_report', auth),
-    ).toBe(true);
-    const next = await router.select(session, auth, false, false);
-    expect(next.definitions.map((d) => d.function.name)).toContain(
+    expect(first.definitions.map((d) => d.function.name)).toContain(
       'get_cash_session_close_report',
     );
     expect(session.expansions).toBe(0);
-    expect(next.operationalCount).toBe(12);
   });
 
-  it('(d) requestTool nunca concede autoridad ni fija scaffolding', async () => {
+  it('(d) nunca ofrece una tool fuera de la autoridad del turno', async () => {
     const auth = registry
       .getAllDefinitions()
       .filter((d) => d.function.name !== 'list_cash_session_movements');
-    const session = router.createSession('producto', 'scope');
-    expect(
-      router.requestTool(session, 'list_cash_session_movements', auth),
-    ).toBe(false);
-    expect(router.requestTool(session, 'search_tools', auth)).toBe(false);
-    expect(router.requestTool(session, 'no_such_tool', auth)).toBe(false);
+    const session = router.createSession(QUERY, 'scope');
+    router.markUsed(session, 'list_cash_session_movements');
     const selection = await router.select(session, auth, false, false);
     expect(selection.definitions.map((d) => d.function.name)).not.toContain(
       'list_cash_session_movements',
     );
+    expect(selection.definitions).toHaveLength(auth.length);
   });
 });
 describe('Discovery pagination B', () => {

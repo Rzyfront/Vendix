@@ -9,7 +9,11 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
-import { INTERNAL_JARGON, USER_NOTICES } from './agent-execution.contract';
+import {
+  INTERNAL_JARGON,
+  USER_NOTICES,
+  USER_TOOL_NOTES,
+} from './agent-execution.contract';
 
 const def = (name: string) => ({
   type: 'function' as const,
@@ -582,9 +586,10 @@ describe('AIAgentService.runAgentStream', () => {
     });
     expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
-    // The trace row is user-facing: human text, never the internal code.
+    // The trace row is user-facing: human text, never the internal code,
+    // and never «tu usuario o plan» for a tool denied to the agent.
     expect(chunks.find((c) => c.type === 'tool_result')?.tool?.summary).toBe(
-      'Sin acceso con tu usuario o plan actual.',
+      USER_TOOL_NOTES.unavailable,
     );
     expect(consumeAIQuota).not.toHaveBeenCalled();
   });
@@ -665,11 +670,11 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({ agent_key: 'vex' });
     // 40 tool iterations + 1 closing turn without tools.
-    expect(chat).toHaveBeenCalledTimes(40);
+    expect(chat).toHaveBeenCalledTimes(41);
 
     chat.mockClear();
     await drain({});
-    expect(chat).toHaveBeenCalledTimes(10);
+    expect(chat).toHaveBeenCalledTimes(11);
   });
 
   it('(vex-iii) vex results over 6000 chars compact to summary+block_id+rows', async () => {
@@ -728,7 +733,9 @@ describe('AIAgentService.runAgentStream', () => {
       )
       .mockResolvedValueOnce(ok({ content: 'listo' }));
 
-    const { chunks } = await drain({});
+    // Vex blocks belong to Vex turns: Vexi never receives vex_* (its panel
+    // cannot paint a block — fix router 2026-10).
+    const { chunks } = await drain({ agent_key: 'vex' });
 
     expect(chunks).toContainEqual({
       type: 'ui_block',
@@ -911,10 +918,11 @@ describe('AIAgentService.runAgentStream', () => {
     );
     const toolResult = chunks[0] as any;
     expect(toolResult.tool.failed).toBe(true);
-    expect(toolResult.tool.summary).toBe(
-      'Sin acceso con tu usuario o plan actual.',
-    );
-    expect(chat).toHaveBeenCalledTimes(1); // permission blocks halt rather than re-infer.
+    // Denied to THIS agent: a model mistake, not the user's permissions.
+    expect(toolResult.tool.summary).toBe(USER_TOOL_NOTES.unavailable);
+    // The model gets the error and answers on its own next inference.
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.content).toBe('entendido');
   });
 
   it('(rx2-a2) hallucinated tool name is rejected without reaching executeTool', async () => {
@@ -978,7 +986,8 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({ agent_key: 'vex', max_iterations: 40 });
 
-    expect(chat).toHaveBeenCalledTimes(40);
+    // 40 tool iterations + 1 closing turn without tools.
+    expect(chat).toHaveBeenCalledTimes(41);
   });
 
   it('(rx2-c) vex turn meters vex_agent, vexi keeps tool_agents', async () => {
@@ -1329,10 +1338,10 @@ describe('AIAgentService.runAgentStream', () => {
         .mockResolvedValueOnce(ok({ content: 'Cierre sin verificar' }));
       const { result } = await traced({ max_iterations: 1 });
       await trace.flush();
-      expect(chat).toHaveBeenCalledTimes(2);
+      expect(chat).toHaveBeenCalledTimes(3);
       expect(result.iterations).toBe(1);
       expect(byKind('provider_retry')).toHaveLength(1);
-      expect(byKind('closing_inference')).toHaveLength(0);
+      expect(byKind('closing_inference')).toHaveLength(1);
       expect(byKind('tool')).toHaveLength(1);
       expect(byKind('context')[0].attributes).toEqual(
         expect.objectContaining({
@@ -1542,10 +1551,15 @@ describe('AIAgentService.runAgentStream', () => {
       );
       expect(chunks.filter((c) => c.type === 'done')).toHaveLength(1);
     });
-    it('iteration exhaustion uses no closing inference even with time left', async () => {
-      chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'list_things')] }));
+    it('iteration exhaustion gets ONE tool-free closing inference while time is left', async () => {
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: 'Encontré 3 cosas.' }));
       const { result } = await drain({ max_iterations: 1 });
-      expect(chat).toHaveBeenCalledTimes(1);
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(chat.mock.calls[1][1]?.tools).toBeUndefined();
+      expect(result.content).toBe('Encontré 3 cosas.');
+      expect(result.exhausted).not.toBe(true);
       expect(result.execution?.next_action).toBeTruthy();
     });
     it('unknown write halts the batch and plan continuation, without retry or successful tool quota', async () => {
@@ -1577,8 +1591,10 @@ describe('AIAgentService.runAgentStream', () => {
       configureStorePlan(['list_things']);
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_navigate')] }));
       const { chunks, result } = await drain({});
-      expect(result.execution?.outcome).toBe('blocked');
-      expect(result.content).toContain('administrador');
+      // A tool outside the turn's authority is a model mistake, never the
+      // «tu usuario o plan / administrador» notice.
+      expect(result.execution?.outcome).not.toBe('blocked');
+      expect(result.content).not.toContain(USER_NOTICES.blocked);
       expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
       expect(awaitResult).not.toHaveBeenCalled();
     });
@@ -1814,53 +1830,37 @@ describe('AIAgentService B routed catalog boundary', () => {
   }
   const names = (index: number) =>
     chat.mock.calls[index][1].tools.map((d: any) => d.function.name);
-  it('enables discovered definitions ONLY on the next inference and same args then execute despite D0 recovery', async () => {
+  it('fix router: the model receives EVERY authorized tool from the first inference', async () => {
     chat
       .mockResolvedValueOnce(
-        ok({
-          tool_calls: [
-            call('s1', 'search_tools', { query: 'operation_49' }),
-            call('bad-batch', 'operation_49', { id: 1 }),
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        ok({ tool_calls: [call('next', 'operation_49', { id: 1 })] }),
+        ok({ tool_calls: [call('direct', 'operation_49', { id: 1 })] }),
       )
       .mockResolvedValueOnce(ok({ content: 'Leído' }));
-    const { result, chunks } = await drain();
-    expect(names(0)).toHaveLength(13);
-    expect(names(0)).not.toContain('operation_49');
-    expect(names(1)).toHaveLength(25);
-    expect(names(1)).toContain('operation_49');
+    const { result } = await drain();
+    // 50 operations + discovery scaffold (search_tools…), none dropped by relevance.
+    expect(names(0)).toEqual(expect.arrayContaining(['operation_49', 'search_tools']));
+    expect(names(0).filter((n: string) => n.startsWith('operation_'))).toHaveLength(50);
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(
-      chunks.some((c) => c.type === 'tool_call' && c.tool?.id === 'bad-batch'),
-    ).toBe(false);
-    expect(result.tools_used.map((t) => t.name)).toContain('operation_49');
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.content).toBe('Leído');
     expect(result.execution?.outcome).not.toBe('blocked');
-    expect(access.consumeAIQuota).toHaveBeenCalledTimes(1); // Discovery itself is not a business-success unit.
   });
-  it('hotfix: an authorized but unoffered read is staged for the next inference, without search_tools nor a failed row', async () => {
+  it('fix router: an authorized call runs in the SAME round, without search_tools, staging nor a failed row', async () => {
     chat
       .mockResolvedValueOnce(
         ok({ tool_calls: [call('direct', 'operation_49', { id: 1 })] }),
       )
       .mockResolvedValueOnce(
-        ok({ tool_calls: [call('again', 'operation_49', { id: 1 })] }),
-      )
-      .mockResolvedValueOnce(
         ok({ content: 'La caja cerró con $20.000 de menos.' }),
       );
     const { result, chunks } = await drain();
-    expect(names(0)).not.toContain('operation_49');
-    expect(names(1)).toContain('operation_49');
     expect(handler).toHaveBeenCalledTimes(1);
     const rows = chunks.filter((c) => c.type === 'tool_result');
     expect(rows.some((c) => c.tool?.failed)).toBe(false);
     for (const row of rows)
       expect(row.tool?.summary ?? '').not.toMatch(INTERNAL_JARGON);
     expect(result.content).toBe('La caja cerró con $20.000 de menos.');
+    expect(result.content).not.toMatch(/No alcancé|usuario o con tu plan/);
   });
   it('P0-5: search_tools emits a succeeded/observed execution and the answer is kept', async () => {
     chat
@@ -1884,7 +1884,7 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(search?.tool?.summary ?? '').not.toMatch(INTERNAL_JARGON);
     expect(result.content).toBe('La caja cuadra.');
   });
-  it('never emits an unoffered UI tool_call nor dispatches to the browser', async () => {
+  it('never emits an unauthorized UI tool_call nor dispatches to the browser', async () => {
     registry.register({
       name: 'zz_ui',
       domain: 'ui',
@@ -1895,7 +1895,10 @@ describe('AIAgentService B routed catalog boundary', () => {
     chat
       .mockResolvedValueOnce(ok({ tool_calls: [call('forged', 'zz_ui')] }))
       .mockResolvedValueOnce(ok({ content: 'No se ejecutó' }));
-    const { chunks } = await drain({ stream_id: 's' });
+    const { chunks } = await drain({
+      stream_id: 's',
+      agent_denied_tools: ['zz_ui'],
+    });
     expect(ui).not.toHaveBeenCalled();
     expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
     expect(access.consumeAIQuota).not.toHaveBeenCalled();
@@ -1930,7 +1933,9 @@ describe('AIAgentService B routed catalog boundary', () => {
     });
     const { result, chunks } = await drain();
     expect(handler).not.toHaveBeenCalled();
-    expect(result.execution?.outcome).toBe('blocked');
+    // Revalidated at execution: rejected before dispatch, as a recoverable
+    // receipt (not a domain 403, so no «tu usuario o plan» notice).
+    expect(result.execution?.outcome).not.toBe('blocked');
     expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
   });
   it('fails authorization closed on plan lookup outage with routing ON', async () => {
@@ -2179,7 +2184,7 @@ describe('D1 durable loop seam', () => {
     );
     expect(handler).not.toHaveBeenCalled();
     expect(JSON.stringify(chat.mock.calls[0][1])).not.toContain('secret');
-    expect(result.execution?.outcome).toBe('blocked');
+    expect(result.execution?.outcome).not.toBe('blocked');
   });
   it('lease replaced during a provider call cannot dispatch another tool', async () => {
     chat.mockImplementationOnce(async () => {
