@@ -37,6 +37,7 @@ import {
 } from './degenerate-output.util';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
+import { recentToolNames } from './tools/tool-working-set';
 import {
   ToolRouterService,
   ToolRoutingSession,
@@ -1550,13 +1551,10 @@ export class AIAgentService {
         }),
         [],
         params.agent_key,
-        { writesNeedEvidence: true },
+        // Working set rebuilt per turn from the recent history: tools used in
+        // the last 3 user turns are reloaded (authority re-checked on select).
+        { history: recentToolNames(params.messages) },
       );
-      // Prior turns may carry used tools; pin names only after current authorization.
-      for (const message of params.messages ?? [])
-        for (const call of message.tool_calls ?? []) {
-          this.toolRouter!.markUsed(routingSession, call.function.name);
-        }
     }
 
     if (params.durable && this.proceduralMemory) {
@@ -2660,45 +2658,11 @@ export class AIAgentService {
               // this inference was built before (authority changes, races).
               offeredNames.add(toolName);
               if (toolName === 'search_tools') {
-                const canExpand =
-                  !robust ||
-                  params.durable!.objective.budget.expansions <
-                    recoveryLimits.max_expansions;
-                const expansionsBefore = routingSession.expansions;
                 const result = await this.toolRouter!.search(
                   routingSession,
                   toolArgs,
                   currentAuthority,
-                  canExpand,
                 );
-                const expanded = routingSession.expansions - expansionsBefore;
-                if (params.durable && expanded > 0)
-                  await params.durable.addBudget({ expansions: expanded });
-                // The router checks the budget only at its expansion boundary.
-                // A cursor (even at the cap), validation error or no-op is free.
-                if (
-                  !canExpand &&
-                  JSON.parse(result).error_code === 'AGENT_EXPANSION_LIMIT'
-                ) {
-                  const limited = normalizeToolResult(JSON.parse(result));
-                  await observeResult(toolName, toolArgs, limited);
-                  semanticHalt = true;
-                  messages.push({
-                    role: 'tool',
-                    tool_call_id: toolCall.id,
-                    content: JSON.stringify(limited),
-                  });
-                  yield {
-                    type: 'tool_result',
-                    tool: {
-                      id: toolCall.id,
-                      name: toolName,
-                      summary: limited.next_action!,
-                      execution: toolReceipt(limited),
-                    },
-                  };
-                  continue;
-                }
                 messages.push({
                   role: 'tool',
                   content: result,
@@ -2718,7 +2682,11 @@ export class AIAgentService {
                 };
                 continue;
               }
-              this.toolRouter!.markUsed(routingSession, toolName);
+              this.toolRouter!.markUsed(
+                routingSession,
+                toolName,
+                currentAuthority,
+              );
             }
 
             if (params.durable && !routingSession) {

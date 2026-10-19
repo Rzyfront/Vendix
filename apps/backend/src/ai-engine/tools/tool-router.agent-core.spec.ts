@@ -1,15 +1,12 @@
 import { AIToolRegistry } from './ai-tool-registry';
-import { isAgentPlanTool } from '../interfaces/agent-plan.interface';
 import {
   AGENT_TOOL_CORE,
   agentToolCore,
   ToolRouterService,
 } from './tool-router.service';
-import {
-  buildToolManifest,
-  localToolRanking,
-  mayFillWithoutEvidence,
-} from './tool-catalog';
+import { isAgentPlanTool } from '../interfaces/agent-plan.interface';
+import { localToolRanking, localToolScores } from './tool-catalog';
+import { CORE_DISCOVERY, TOOL_WORKING_SET } from './tool-working-set';
 import { createApiBridgeTools } from './bridge/api-bridge.tools';
 import { createCapabilityTools } from './bridge/capability.tools';
 import { createAccountingTools } from './domains/accounting.tools';
@@ -29,6 +26,7 @@ import { createProductTools } from './domains/products.tools';
 import { createPurchasingTools } from './domains/purchasing.tools';
 import { createReportingTools } from './domains/reporting.tools';
 import { createReportTools } from './domains/reports.tools';
+import { createSalesTools } from './domains/sales.tools';
 import { createTaskTools } from './domains/tasks.tools';
 import { uiTools } from './domains/ui.tools';
 import { createVexBlockTools } from './domains/vex-blocks.tools';
@@ -75,6 +73,7 @@ function realRegistry(): AIToolRegistry {
     createProductTools,
     createPurchasingTools,
     createReportingTools,
+    createSalesTools,
     createInventoryWriteTools,
     createProductWriteTools,
     createCustomerWriteTools,
@@ -87,23 +86,33 @@ function realRegistry(): AIToolRegistry {
 const names = (selection: { definitions: { function: { name: string } }[] }) =>
   selection.definitions.map((d) => d.function.name);
 
-/** Sessions as the Vex/Vexi text loop creates them. */
-const TEXT_LOOP = { writesNeedEvidence: true };
+/** Lexical-only ranking with a complete index, as prod without vectors. */
+const lexicalRank = jest.fn(async (query, docs, _scope, domain) => ({
+  names: localToolRanking(query, docs, domain),
+  degraded: ['vector_unavailable'],
+  scores: Object.fromEntries(
+    [...localToolScores(query, docs, domain)].filter(([, s]) => s > 0),
+  ),
+  coverage: 1,
+  source: 'lexical_local',
+}));
 
-describe('ToolRouterService Paso 6: núcleo fijo por agente y escrituras sin evidencia', () => {
+const MAX_TOOLS =
+  CORE_DISCOVERY.length +
+  Math.max(...Object.values(AGENT_TOOL_CORE).map((c) => c.length)) +
+  TOOL_WORKING_SET.maxLoaded;
+
+describe('ToolRouterService: núcleo fijo por agente + conjunto dinámico (registry real)', () => {
   let registry: AIToolRegistry;
   let router: ToolRouterService;
   /** Vex niega los ui_* (fila `vex` del seed de agentes). */
   let vexAuth: ReturnType<AIToolRegistry['getAgentDefinitions']>;
+  /** Vexi no recibe bloques de Vex (isForeignSurfaceTool en el loop). */
+  let vexiAuth: ReturnType<AIToolRegistry['getAgentDefinitions']>;
 
   beforeEach(() => {
     registry = realRegistry();
-    router = new ToolRouterService(registry, {
-      rank: jest.fn(async (query, docs, _scope, domain) => ({
-        names: localToolRanking(query, docs, domain),
-        degraded: [],
-      })),
-    } as any);
+    router = new ToolRouterService(registry, { rank: lexicalRank } as any);
     // Owner con todos los permisos: la fila de agente es el único recorte.
     const every = [
       ...new Set(registry.getAll().flatMap((t) => t.requiredPermissions ?? [])),
@@ -114,57 +123,65 @@ describe('ToolRouterService Paso 6: núcleo fijo por agente y escrituras sin evi
         .map((t) => t.name)
         .filter((n) => n.startsWith('ui_')),
     });
+    vexiAuth = registry
+      .getAgentDefinitions(every, {})
+      .filter((d) => !d.function.name.startsWith('vex_'));
   });
 
   it('el registry real contiene las tools del núcleo citadas en los prompts', () => {
-    for (const name of [...AGENT_TOOL_CORE.vexi, ...AGENT_TOOL_CORE.vex])
+    for (const name of [
+      ...AGENT_TOOL_CORE.vexi,
+      ...AGENT_TOOL_CORE.vex,
+      ...CORE_DISCOVERY,
+    ])
       expect(registry.get(name)).toBeDefined();
+    expect(
+      CORE_DISCOVERY.length + AGENT_TOOL_CORE.vexi.length,
+    ).toBeLessThanOrEqual(14);
+    expect(
+      CORE_DISCOVERY.length + AGENT_TOOL_CORE.vex.length,
+    ).toBeLessThanOrEqual(14);
   });
 
-  it('Vexi: "analiza el cierre de caja de hoy" ofrece TODO lo autorizado, con caja y bridge', async () => {
-    const query = 'analiza el cierre de caja de hoy';
-    const session = router.createSession(query, 's', [], 'vexi', TEXT_LOOP);
-    const all = registry.getAllDefinitions();
-    const selection = await router.select(session, all, false, false);
+  it('Vexi: "analiza el cierre de caja de hoy" carga caja + núcleo, no el catálogo completo', async () => {
+    const session = router.createSession(
+      'analiza el cierre de caja de hoy',
+      's',
+      [],
+      'vexi',
+    );
+    const selection = await router.select(session, vexiAuth, false, false);
     expect(names(selection)).toEqual(
       expect.arrayContaining([
-        'call_endpoint',
+        ...CORE_DISCOVERY,
         'list_cash_sessions',
         'get_cash_session_status',
-        'list_endpoints',
-        'explain_capability',
-        'write_endpoint',
       ]),
     );
-    // Prod 2026-10: un top-K hacía que el modelo llamara tools autorizadas
-    // no ofrecidas → aviso falso de permisos. Ahora se ofrece el catálogo
-    // autorizado completo (sin herramientas de plan sin hook).
-    expect(selection.definitions).toHaveLength(
-      all.filter((d) => !isAgentPlanTool(d.function.name)).length,
-    );
-    expect(session.expansions).toBe(0);
+    expect(selection.degraded).not.toContain('full_catalog_fallback');
+    expect(selection.definitions.length).toBeLessThanOrEqual(MAX_TOOLS);
+    expect(selection.definitions.length).toBeLessThan(vexiAuth.length / 3);
+    expect(selection.retrievalSource).toBe('lexical_local');
   });
 
-  it('Vexi: el núcleo incluye ui_navigate y encabeza el catálogo ordenado', async () => {
+  it('Vexi: el núcleo (discovery + agente) encabeza la lista ordenado por nombre', async () => {
     const selection = await router.select(
-      router.createSession('analiza el cierre de caja de hoy', 's', [], 'vexi', TEXT_LOOP),
-      registry.getAllDefinitions(),
+      router.createSession('analiza el cierre de caja de hoy', 's', [], 'vexi'),
+      vexiAuth,
       false,
       false,
     );
-    const offered = names(selection);
-    expect(offered).toEqual(expect.arrayContaining([...AGENT_TOOL_CORE.vexi]));
-    expect(offered.slice(0, AGENT_TOOL_CORE.vexi.length).sort()).toEqual(
-      [...AGENT_TOOL_CORE.vexi].sort(),
+    const core = [...CORE_DISCOVERY, ...AGENT_TOOL_CORE.vexi].sort((a, b) =>
+      a.localeCompare(b),
     );
-    // El router ordena, no recorta: excluir los bloques de Vex de un turno
-    // Vexi es decisión de autoridad del loop (isForeignSurfaceTool), no suya.
+    expect(names(selection).slice(0, core.length)).toEqual(core);
+    expect(selection.coreCount).toBe(core.length);
   });
 
   it('sin agent_key se resuelve como Vexi (default del motor)', async () => {
     const selection = await router.select(
       router.createSession('producto', 's'),
-      registry.getAllDefinitions(),
+      vexiAuth,
       false,
       false,
     );
@@ -172,10 +189,9 @@ describe('ToolRouterService Paso 6: núcleo fijo por agente y escrituras sin evi
     expect(agentToolCore('agente_desconocido')).toEqual([]);
   });
 
-  it('Vex: "Hazme una gráfica de ventas" ofrece vex_render_chart y nunca un ui_*', async () => {
-    const query = 'Hazme una gráfica de ventas';
+  it('Vex: "Hazme una gráfica de ventas" trae vex_render_chart y ventas, nunca un ui_*', async () => {
     const selection = await router.select(
-      router.createSession(query, 's', [], 'vex', TEXT_LOOP),
+      router.createSession('Hazme una gráfica de ventas', 's', [], 'vex'),
       vexAuth,
       false,
       false,
@@ -184,34 +200,41 @@ describe('ToolRouterService Paso 6: núcleo fijo por agente y escrituras sin evi
       expect.arrayContaining([...AGENT_TOOL_CORE.vex, 'call_endpoint']),
     );
     expect(names(selection).filter((n) => n.startsWith('ui_'))).toEqual([]);
-    expect(selection.definitions).toHaveLength(
-      vexAuth.filter((d) => !isAgentPlanTool(d.function.name)).length,
-    );
+    expect(names(selection).some((n) => /sales/.test(n))).toBe(true);
+    expect(selection.definitions.length).toBeLessThanOrEqual(MAX_TOOLS);
   });
 
-  it('el núcleo y el andamiaje nunca ofrecen una tool no autorizada', async () => {
+  it('Vexi nunca recibe bloques vex_* aunque la petición hable de gráficas', async () => {
+    const selection = await router.select(
+      router.createSession('Hazme una gráfica de ventas', 's', [], 'vexi'),
+      vexiAuth,
+      false,
+      false,
+    );
+    expect(names(selection).filter((n) => n.startsWith('vex_'))).toEqual([]);
+  });
+
+  it('el núcleo y lo cargado nunca incluyen una tool no autorizada', async () => {
     const denied = new Set([
       'ui_navigate',
       'get_report',
       'call_endpoint',
       'write_endpoint',
       'explain_capability',
+      'list_cash_sessions',
     ]);
-    const auth = registry
-      .getAllDefinitions()
-      .filter((d) => !denied.has(d.function.name));
+    const auth = vexiAuth.filter((d) => !denied.has(d.function.name));
     const selection = await router.select(
-      router.createSession('analiza el cierre de caja de hoy', 's', [], 'vexi', TEXT_LOOP),
+      router.createSession('analiza el cierre de caja de hoy', 's', [], 'vexi'),
       auth,
       false,
       false,
     );
     for (const name of denied) expect(names(selection)).not.toContain(name);
     expect(names(selection)).toContain('ui_pos_checkout');
-    // Vex sin autorización a sus bloques tampoco los recibe.
     const noBlocks = vexAuth.filter((d) => !d.function.name.startsWith('vex_'));
     const vex = await router.select(
-      router.createSession('Hazme una gráfica de ventas', 's', [], 'vex', TEXT_LOOP),
+      router.createSession('Hazme una gráfica de ventas', 's', [], 'vex'),
       noBlocks,
       false,
       false,
@@ -219,47 +242,25 @@ describe('ToolRouterService Paso 6: núcleo fijo por agente y escrituras sin evi
     expect(names(vex).filter((n) => n.startsWith('vex_'))).toEqual([]);
   });
 
-  it('sin evidencia léxica igual se ofrecen lecturas y escrituras autorizadas (la escritura exige aprobación al ejecutar)', async () => {
-    const all = registry.getAllDefinitions();
+  it('sin evidencia en ninguna capa cae al catálogo autorizado completo (piso de la cascada)', async () => {
     const selection = await router.select(
-      router.createSession('qwxz', 's', [], 'vexi', TEXT_LOOP),
-      all,
+      router.createSession('qwxz', 's', [], 'vexi'),
+      vexiAuth,
       false,
       false,
     );
-    const docs = buildToolManifest(registry).documents;
+    expect(selection.degraded).toContain('full_catalog_fallback');
+    expect(selection.retrievalSource).toBe('full_catalog_fallback');
     expect(names(selection)).toContain('adjust_stock');
-    expect(
-      names(selection).some((n) => {
-        const doc = docs.find((d) => d.name === n);
-        return !!doc && !mayFillWithoutEvidence(doc);
-      }),
-    ).toBe(true);
-  });
-
-  it('fuera del loop de texto (voz) no aplica el filtro de escrituras', async () => {
-    const selection = await router.select(
-      router.createSession('qwxz', 's'),
-      registry.getAllDefinitions(),
-      false,
-      false,
+    expect(selection.definitions).toHaveLength(
+      vexiAuth.filter((d) => !isAgentPlanTool(d.function.name)).length,
     );
-    const docs = buildToolManifest(registry).documents;
-    expect(
-      names(selection).some((n) => {
-        const doc = docs.find((d) => d.name === n);
-        return !!doc && !mayFillWithoutEvidence(doc);
-      }),
-    ).toBe(true);
   });
 
-  it('una escritura autorizada se ofrece desde la primera inferencia, sin fijarla', async () => {
-    const auth = registry.getAllDefinitions();
-    for (const query of ['ajustar stock', 'qwxz']) {
-      const session = router.createSession(query, 's', [], 'vexi', TEXT_LOOP);
-      expect(names(await router.select(session, auth, false, false))).toContain(
-        'adjust_stock',
-      );
-    }
+  it('una escritura autorizada con evidencia se carga desde la primera inferencia', async () => {
+    const session = router.createSession('ajustar stock', 's', [], 'vexi');
+    expect(
+      names(await router.select(session, vexiAuth, false, false)),
+    ).toContain('adjust_stock');
   });
 });
