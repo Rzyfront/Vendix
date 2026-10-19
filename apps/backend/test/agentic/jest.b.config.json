@@ -1,0 +1,31 @@
+{
+  "rootDir": "../..",
+  "testMatch": [
+    "**/src/ai-engine/**/*.spec.ts",
+    "**/test/agentic/b-routing.spec.ts"
+  ],
+  "transform": {
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "tsconfig": {
+          "module": "CommonJS",
+          "target": "ES2022",
+          "esModuleInterop": true,
+          "isolatedModules": true,
+          "experimentalDecorators": true,
+          "emitDecoratorMetadata": true
+        }
+      }
+    ]
+  },
+  "testEnvironment": "node",
+  "moduleNameMapper": {
+    "^@common/(.*)$": "<rootDir>/src/common/$1",
+    "^@/(.*)$": "<rootDir>/src/$1",
+    "^src/(.*)$": "<rootDir>/src/$1"
+  },
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "maxWorkers": 1,
+  "setupFilesAfterEnv": ["<rootDir>/src/testing/jest.setup.ts"]
+}

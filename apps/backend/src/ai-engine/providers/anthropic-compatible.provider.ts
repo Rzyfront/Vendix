@@ -1,4 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { providerFailureMetadata } from './provider-failure';
+import {
+  canonicalAgentTools,
+  reportedAgentUsage,
+  validateAgentToolCalls,
+} from './agent-stream-contract';
+import {
+  createAgentOperation,
+  agentDeadlineStream,
+  agentAbortFailure,
+  isAgentAbort,
+} from '../tasks/agent-deadline';
 import {
   AIProvider,
   AIProviderConfig,
@@ -13,9 +25,14 @@ import {
 export class AnthropicCompatibleProvider implements AIProvider {
   private client: Anthropic;
 
+  supportsMeteredAgentStream(): boolean {
+    return true;
+  }
+
   constructor(private config: AIProviderConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
+      ...(config.fetch && { fetch: config.fetch }),
       ...(config.baseUrl && { baseURL: config.baseUrl }),
     });
   }
@@ -111,8 +128,14 @@ export class AnthropicCompatibleProvider implements AIProvider {
     if (typeof content !== 'string') return false;
     try {
       const result = JSON.parse(content);
-      return result?.success === false || result?.status === 'error' ||
-        (typeof result?.error === 'string' && result.error.length > 0);
+      if (result?.schema_version === '1') {
+        return ['recoverable_error', 'blocked'].includes(result.status);
+      }
+      return (
+        result?.success === false ||
+        result?.status === 'error' ||
+        (typeof result?.error === 'string' && result.error.length > 0)
+      );
     } catch {
       return content.startsWith('Error:');
     }
@@ -122,11 +145,16 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Anthropic.TextBlockParam[] {
-    const prompts = messages.filter((m) => m.role === 'system').map((m) =>
-      typeof m.content === 'string' ? m.content : m.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text ?? '').join('\n'),
-    );
+    const prompts = messages
+      .filter((m) => m.role === 'system')
+      .map((m) =>
+        typeof m.content === 'string'
+          ? m.content
+          : m.content
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text ?? '')
+              .join('\n'),
+      );
     // An explicit prompt overrides the base prompt, not runtime restrictions,
     // active plans or pending confirmations carried by subsequent systems.
     if (options?.systemPrompt) {
@@ -145,31 +173,55 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
+    const deadline = createAgentOperation(options);
     try {
+      deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
       const transformedMessages = this.transformMessages(messages);
+      const tools = options?.agenticStream
+        ? canonicalAgentTools(options.tools)
+        : options?.tools;
 
-      const response = await this.client.messages.create({
-        model: options?.model || this.config.modelId,
-        ...(system.length && { system }),
-        messages: transformedMessages,
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t, i, arr) => ({
-            name: t.function.name,
-            description: t.function.description,
-            input_schema: t.function.parameters as any,
-            ...(i === arr.length - 1
-              ? { cache_control: { type: 'ephemeral' as const } }
-              : {}),
-          })),
-        }),
-      });
+      const request = () =>
+        this.client.messages.create(
+          {
+            model: options?.model || this.config.modelId,
+            ...(system.length && { system }),
+            messages: transformedMessages,
+            max_tokens:
+              options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            ...(options?.agenticStream &&
+              options.tool_choice && {
+                tool_choice:
+                  options.tool_choice === 'auto'
+                    ? { type: 'auto' as const }
+                    : options.tool_choice === 'none'
+                      ? { type: 'none' as const }
+                      : {
+                          type: 'tool' as const,
+                          name: options.tool_choice.function.name,
+                        },
+              }),
+            ...(tools?.length && {
+              tools: tools.map((t, i, arr) => ({
+                name: t.function.name,
+                description: t.function.description,
+                input_schema: t.function.parameters as any,
+                ...(i === arr.length - 1
+                  ? { cache_control: { type: 'ephemeral' as const } }
+                  : {}),
+              })),
+            }),
+          },
+          ...(deadline
+            ? ([{ signal: deadline.signal }] as const)
+            : ([] as const)),
+        );
+      const response = deadline ? await deadline.run(request) : await request();
 
       let textContent = '';
       const toolCalls: AIToolCall[] = [];
@@ -189,6 +241,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
         }
       }
 
+      this.config.observeUsage?.(
+        response.usage
+          ? {
+              promptTokens: response.usage.input_tokens,
+              completionTokens: response.usage.output_tokens,
+              cacheReadTokens:
+                response.usage.cache_read_input_tokens ?? undefined,
+              cacheCreationTokens:
+                response.usage.cache_creation_input_tokens ?? undefined,
+            }
+          : undefined,
+      );
       const finishReason =
         response.stop_reason === 'tool_use'
           ? 'tool_calls'
@@ -196,32 +260,75 @@ export class AnthropicCompatibleProvider implements AIProvider {
             ? 'length'
             : 'stop';
 
+      const completedCalls = options?.agenticStream
+        ? validateAgentToolCalls(toolCalls, tools)
+        : toolCalls;
+      if (
+        options?.agenticStream &&
+        response.stop_reason === 'tool_use' &&
+        !completedCalls.length
+      )
+        throw new Error('Incomplete provider tool batch');
+      if (
+        options?.agenticStream &&
+        completedCalls.length &&
+        !['tool_use', 'end_turn'].includes(response.stop_reason ?? '')
+      )
+        throw new Error('Incomplete provider tool batch');
+      deadline?.assertCanStart();
       return {
         success: true,
         content: textContent,
-        usage: response.usage
-          ? {
-              promptTokens: response.usage.input_tokens || 0,
-              completionTokens: response.usage.output_tokens || 0,
-              totalTokens:
-                (response.usage.input_tokens || 0) +
-                (response.usage.output_tokens || 0) +
-                (response.usage.cache_read_input_tokens || 0) +
-                (response.usage.cache_creation_input_tokens || 0),
-              cacheReadTokens: response.usage.cache_read_input_tokens || 0,
-              cacheCreationTokens:
-                response.usage.cache_creation_input_tokens || 0,
-            }
-          : undefined,
+        usage: options?.agenticStream
+          ? response.usage
+            ? reportedAgentUsage({
+                promptTokens: response.usage.input_tokens,
+                completionTokens: response.usage.output_tokens,
+                totalTokens:
+                  response.usage.input_tokens +
+                  response.usage.output_tokens +
+                  (response.usage.cache_read_input_tokens ?? 0) +
+                  (response.usage.cache_creation_input_tokens ?? 0),
+                ...(response.usage.cache_read_input_tokens != null && {
+                  cacheReadTokens: response.usage.cache_read_input_tokens,
+                }),
+                ...(response.usage.cache_creation_input_tokens != null && {
+                  cacheCreationTokens:
+                    response.usage.cache_creation_input_tokens,
+                }),
+              })
+            : undefined
+          : response.usage
+            ? {
+                promptTokens: response.usage.input_tokens || 0,
+                completionTokens: response.usage.output_tokens || 0,
+                totalTokens:
+                  (response.usage.input_tokens || 0) +
+                  (response.usage.output_tokens || 0) +
+                  (response.usage.cache_read_input_tokens || 0) +
+                  (response.usage.cache_creation_input_tokens || 0),
+                cacheReadTokens: response.usage.cache_read_input_tokens || 0,
+                cacheCreationTokens:
+                  response.usage.cache_creation_input_tokens || 0,
+              }
+            : undefined,
         model: response.model,
-        tool_calls: toolCalls.length ? toolCalls : undefined,
-        finish_reason: finishReason,
+        tool_calls: completedCalls.length ? completedCalls : undefined,
+        finish_reason:
+          options?.agenticStream && completedCalls.length
+            ? 'tool_calls'
+            : finishReason,
       };
     } catch (error: any) {
+      if (deadline && isAgentAbort(error, deadline.signal))
+        return agentAbortFailure(error, deadline.signal);
       return {
         success: false,
         error: error.message || 'Anthropic-compatible request failed',
+        ...providerFailureMetadata(error),
       };
+    } finally {
+      deadline?.dispose();
     }
   }
 
@@ -253,32 +360,65 @@ export class AnthropicCompatibleProvider implements AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
+    const controller = options?.agenticStream
+      ? new AbortController()
+      : undefined;
+    const deadline = createAgentOperation(
+      controller ? { ...options, signal: controller.signal } : options,
+    );
+    const abort = () => controller?.abort(options?.signal?.reason);
+    if (controller && options?.signal) {
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+    }
+    let reportedUsage: AIResponse['usage'];
     try {
+      deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
+      const tools = options?.agenticStream
+        ? canonicalAgentTools(options.tools)
+        : options?.tools;
 
-      const stream = this.client.messages.stream({
-        model: options?.model || this.config.modelId,
-        ...(system.length && { system }),
-        messages: this.transformMessages(messages),
-        max_tokens:
-          options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-        temperature:
-          options?.temperature ??
-          this.config.settings?.temperature ??
-          undefined,
-        ...(options?.tools?.length && {
-          tools: options.tools.map((t, i, arr) => ({
-            name: t.function.name,
-            description: t.function.description,
-            input_schema: t.function.parameters as any,
-            ...(i === arr.length - 1
-              ? { cache_control: { type: 'ephemeral' as const } }
-              : {}),
-          })),
-        }),
-      });
+      const stream = this.client.messages.stream(
+        {
+          model: options?.model || this.config.modelId,
+          ...(system.length && { system }),
+          messages: this.transformMessages(messages),
+          max_tokens:
+            options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+          temperature:
+            options?.temperature ??
+            this.config.settings?.temperature ??
+            undefined,
+          ...(options?.agenticStream &&
+            options.tool_choice && {
+              tool_choice:
+                options.tool_choice === 'auto'
+                  ? { type: 'auto' as const }
+                  : options.tool_choice === 'none'
+                    ? { type: 'none' as const }
+                    : {
+                        type: 'tool' as const,
+                        name: options.tool_choice.function.name,
+                      },
+            }),
+          ...(tools?.length && {
+            tools: tools.map((t, i, arr) => ({
+              name: t.function.name,
+              description: t.function.description,
+              input_schema: t.function.parameters as any,
+              ...(i === arr.length - 1
+                ? { cache_control: { type: 'ephemeral' as const } }
+                : {}),
+            })),
+          }),
+        },
+        ...(deadline
+          ? ([{ signal: deadline.signal }] as const)
+          : ([] as const)),
+      );
 
-      for await (const event of stream) {
+      for await (const event of agentDeadlineStream(stream, deadline)) {
         if (
           event.type === 'content_block_delta' &&
           event.delta.type === 'text_delta'
@@ -287,13 +427,86 @@ export class AnthropicCompatibleProvider implements AIProvider {
         }
       }
 
-      const finalMessage = await stream.finalMessage();
+      const finalMessage = deadline
+        ? await deadline.run(() => stream.finalMessage())
+        : await stream.finalMessage();
+      this.config.observeUsage?.(
+        finalMessage.usage
+          ? {
+              promptTokens: finalMessage.usage.input_tokens,
+              completionTokens: finalMessage.usage.output_tokens,
+              cacheReadTokens:
+                finalMessage.usage.cache_read_input_tokens ?? undefined,
+              cacheCreationTokens:
+                finalMessage.usage.cache_creation_input_tokens ?? undefined,
+            }
+          : undefined,
+      );
+
+      reportedUsage = finalMessage.usage
+        ? {
+            promptTokens: finalMessage.usage.input_tokens,
+            completionTokens: finalMessage.usage.output_tokens,
+            totalTokens:
+              finalMessage.usage.input_tokens +
+              finalMessage.usage.output_tokens +
+              (finalMessage.usage.cache_read_input_tokens ?? 0) +
+              (finalMessage.usage.cache_creation_input_tokens ?? 0),
+            ...(finalMessage.usage.cache_read_input_tokens != null && {
+              cacheReadTokens: finalMessage.usage.cache_read_input_tokens,
+            }),
+            ...(finalMessage.usage.cache_creation_input_tokens != null && {
+              cacheCreationTokens:
+                finalMessage.usage.cache_creation_input_tokens,
+            }),
+          }
+        : undefined;
+      if (options?.agenticStream) {
+        reportedUsage = reportedAgentUsage(reportedUsage);
+        this.config.observeUsage?.(reportedUsage);
+        const calls = validateAgentToolCalls(
+          (finalMessage.content ?? [])
+            .filter((block) => block.type === 'tool_use')
+            .map((block) => ({
+              id: block.id,
+              type: 'function' as const,
+              function: {
+                name: block.name,
+                arguments: JSON.stringify(block.input),
+              },
+            })),
+          tools,
+        );
+        if (
+          !finalMessage.stop_reason ||
+          (finalMessage.stop_reason === 'tool_use' && !calls.length) ||
+          (calls.length &&
+            !['tool_use', 'end_turn'].includes(finalMessage.stop_reason))
+        )
+          throw new Error('Incomplete provider stream');
+        deadline?.assertCanStart();
+        yield {
+          type: 'done',
+          ...(calls.length && { tool_calls: calls }),
+          model: finalMessage.model,
+          finish_reason:
+            calls.length || finalMessage.stop_reason === 'tool_use'
+              ? 'tool_calls'
+              : finalMessage.stop_reason === 'max_tokens'
+                ? 'length'
+                : 'stop',
+          usage: reportedUsage,
+          usage_state: reportedUsage ? 'reported' : 'unknown',
+        };
+        return;
+      }
 
       // Anthropic assembles tool calls into `tool_use` content blocks on the
       // final message, so unlike the OpenAI path there is nothing to
       // accumulate — the deltas would only give us partial JSON.
       for (const block of finalMessage.content ?? []) {
         if (block.type !== 'tool_use') continue;
+        deadline?.assertCanStart();
         yield {
           type: 'tool_call',
           tool: {
@@ -304,6 +517,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
         };
       }
 
+      deadline?.assertCanStart();
       yield {
         type: 'done',
         usage: {
@@ -322,8 +536,25 @@ export class AnthropicCompatibleProvider implements AIProvider {
     } catch (error: any) {
       yield {
         type: 'error',
-        error: error.message || 'Anthropic-compatible streaming failed',
+        ...(options?.agenticStream && {
+          error_code:
+            deadline && isAgentAbort(error, deadline.signal)
+              ? agentAbortFailure(error, deadline.signal).error_code
+              : 'AI_STREAM_INVALID',
+          usage: reportedUsage,
+          usage_state: reportedUsage
+            ? ('reported' as const)
+            : ('unknown' as const),
+        }),
+        error:
+          deadline && isAgentAbort(error, deadline.signal)
+            ? agentAbortFailure(error, deadline.signal).error
+            : error.message || 'Anthropic-compatible streaming failed',
       };
+    } finally {
+      controller?.abort();
+      if (controller) options?.signal?.removeEventListener('abort', abort);
+      deadline?.dispose();
     }
   }
 }

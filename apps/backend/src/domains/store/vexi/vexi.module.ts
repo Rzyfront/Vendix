@@ -1,5 +1,4 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { PrismaModule } from '../../../prisma/prisma.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createBusinessTools } from '../../../ai-engine/tools/domains/business.tools';
 import { createTaskTools } from '../../../ai-engine/tools/domains/tasks.tools';
@@ -23,6 +22,10 @@ import { VexiActivityService } from './vexi-activity.service';
 import { VexiAttachmentsService } from './vexi-attachments.service';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
+import { VexiSurfaceEnabledGuard } from './guards/vexi-surface-enabled.guard';
+import { VexiVoiceConsentService } from './vexi-voice-consent.service';
+import { VexiVoiceAuthorityService } from './vexi-voice-authority.service';
+import { VexiVoiceConfirmationService } from './vexi-voice-confirmation.service';
 
 /**
  * Vexi realtime voice and business context. Text chat still lives in
@@ -38,7 +41,6 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
  */
 @Module({
   imports: [
-    PrismaModule,
     ResponseModule,
     AIEngineModule,
     SubscriptionsModule,
@@ -50,6 +52,10 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
   controllers: [VexiRealtimeController, VexiVoiceController, VexiController],
   providers: [
     VexiRealtimeService,
+    VexiSurfaceEnabledGuard,
+    VexiVoiceConsentService,
+    VexiVoiceAuthorityService,
+    VexiVoiceConfirmationService,
     VexiVoiceService,
     VexiSpeechService,
     // Singleton on purpose: the pinned filler bank is only worth warming once
@@ -63,6 +69,7 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
     VexiEnabledGuard,
   ],
   exports: [
+    VexiVoiceConfirmationService,
     VexiRealtimeService,
     VexiContextService,
     VexiStreamIntentService,

@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { RecipeMiningJob } from '../memory/recipe.interface';
+import { catalogHash } from '../tools/tool-catalog';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
 import { randomUUID } from 'crypto';
@@ -19,6 +21,9 @@ export class AIQueueService {
     @InjectQueue('ai-generation') private readonly generationQueue: Queue,
     @InjectQueue('ai-embedding') private readonly embeddingQueue: Queue,
     @InjectQueue('ai-agent') private readonly agentQueue: Queue,
+    @Optional()
+    @InjectQueue('ai-recipe-miner')
+    private readonly recipeQueue?: Queue,
   ) {}
 
   async enqueueGeneration(params: AIGenerationJob): Promise<Job> {
@@ -80,6 +85,43 @@ export class AIQueueService {
       this.logger.error(`Failed to enqueue agent task: ${error.message}`);
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     }
+  }
+
+  async enqueueRecipeMining(params: RecipeMiningJob): Promise<void> {
+    if (!this.recipeQueue) return;
+    // Identity only. No goal, args, trace text, results or bearer in Redis.
+    await this.recipeQueue.add(
+      'mine-recipe',
+      {
+        objective_id: params.objective_id,
+        store_id: params.store_id,
+        organization_id: params.organization_id,
+        user_id: params.user_id,
+      },
+      {
+        jobId: `recipe-mine-${catalogHash([params.objective_id, params.store_id, params.organization_id, params.user_id])}`,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 3000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 50 },
+      },
+    );
+  }
+  async enqueueRecipeIndex(params: {
+    id: number;
+    hash: string;
+    store_id?: number;
+    organization_id?: number;
+    user_id?: number;
+  }): Promise<void> {
+    if (!this.recipeQueue) return;
+    await this.recipeQueue.add('index-recipe', params, {
+      jobId: `recipe-index-${catalogHash(params)}`,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 3000 },
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 50 },
+    });
   }
 
   /**

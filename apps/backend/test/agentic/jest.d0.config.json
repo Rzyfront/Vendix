@@ -1,0 +1,20 @@
+{
+  "rootDir": "../..",
+  "testMatch": ["**/test/agentic/d0-contract.spec.ts"],
+  "transform": {
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "tsconfig": {
+          "module": "CommonJS",
+          "target": "ES2022",
+          "esModuleInterop": true,
+          "isolatedModules": true
+        }
+      }
+    ]
+  },
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "maxWorkers": 1
+}

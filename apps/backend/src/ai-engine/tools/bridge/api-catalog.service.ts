@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common/constants';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { getMetadataStorage } from 'class-validator';
+import { discoveryPage } from '../discovery-pagination';
 import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.decorator';
 
 /**
@@ -371,6 +372,13 @@ export class ApiCatalogService implements OnApplicationBootstrap {
       if (methods && !methods.includes(e.method)) return false;
       return e.requiredPermissions.every((p) => scopes.includes(p));
     });
+  }
+
+  pageFor(scopes: string[], filters: { area?: string; domain?: string; methods?: CatalogMethod[]; path?: string }, args: { cursor?: unknown; limit?: unknown }) {
+    const authorized = this.listFor(scopes, filters.area, filters.domain, filters.methods)
+      .filter((entry) => !filters.path || entry.path === this.normalize(filters.path))
+      .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+    return discoveryPage(authorized, args, filters);
   }
 
   /**

@@ -1,8 +1,11 @@
+import type { VoiceConsentContext } from '../../services/vexi-voice-consent.model';
 import { createAction, props } from '@ngrx/store';
 import {
   AIConversation,
   AIMessage,
   VexiTask,
+  VexiToolExecution,
+  VexiObjective,
 } from '../../services/vexi-api.service';
 
 /**
@@ -23,7 +26,8 @@ export interface ToolStep {
   name: string;
   arguments?: Record<string, unknown>;
   summary?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'waiting' | 'unknown';
+  execution?: VexiToolExecution;
 }
 
 export interface VexiProposal {
@@ -37,6 +41,7 @@ export interface VexiProposal {
    * approving/rejecting reopens a continuation turn.
    */
   planActive?: boolean;
+  voiceContext?: VoiceConsentContext;
 }
 
 /**
@@ -182,6 +187,13 @@ export const streamStarted = createAction(
   props<{ conversationId: number }>(),
 );
 
+/** Progress is transient status, never assistant answer/evidence of an applied effect. */
+export const receiveStreamProgress = createAction(
+  '[Vexi] Receive Stream Progress',
+  props<{ content: string }>(),
+);
+export const cancelStream = createAction('[Vexi] Cancel Stream');
+
 export const receiveStreamChunk = createAction(
   '[Vexi] Receive Stream Chunk',
   props<{ content: string }>(),
@@ -199,7 +211,13 @@ export const toolCallStarted = createAction(
 
 export const toolCallFinished = createAction(
   '[Vexi] Tool Call Finished',
-  props<{ id: string; name: string; summary?: string; failed?: boolean }>(),
+  props<{
+    id: string;
+    name: string;
+    summary?: string;
+    failed?: boolean;
+    execution?: VexiToolExecution;
+  }>(),
 );
 
 /**
@@ -216,6 +234,7 @@ export const proposalReceived = createAction(
     confirmationToken: string;
     preview?: VexiProposalPreview;
     planActive?: boolean;
+    voiceContext?: VoiceConsentContext;
   }>(),
 );
 
@@ -223,7 +242,9 @@ export const proposalReceived = createAction(
  * The stream announced it ran out of budget with work pending (`plan_continue`).
  * The turn is chained when it completes.
  */
-export const planContinueReceived = createAction('[Vexi] Plan Continue Received');
+export const planContinueReceived = createAction(
+  '[Vexi] Plan Continue Received',
+);
 
 /** The automatic chain hit its cap: say so instead of looping. */
 export const planContinueCapped = createAction('[Vexi] Plan Continue Capped');
@@ -246,6 +267,10 @@ export const confirmProposalSuccess = createAction(
     tool: string;
     output: string;
     domain?: string;
+    conversationId?: number;
+    confirmationToken?: string;
+    proposalId?: string;
+    receiptApplied?: boolean;
     /**
      * What the tool said it changed. Becomes the visible turn that closes the
      * confirmation — without it, approving cleared the card and the conversation
@@ -264,10 +289,31 @@ export const confirmProposalSuccess = createAction(
 
 export const confirmProposalFailure = createAction(
   '[Vexi] Confirm Proposal Failure',
-  props<{ error: string }>(),
+  props<{
+    error: string;
+    conversationId?: number;
+    confirmationToken?: string;
+    proposalId?: string;
+  }>(),
 );
 
 export const rejectProposal = createAction('[Vexi] Reject Proposal');
+export const rejectProposalSuccess = createAction(
+  '[Vexi] Reject Proposal Success',
+  props<{
+    conversationId: number | null;
+    confirmationToken: string;
+    objective?: VexiObjective;
+  }>(),
+);
+export const rejectProposalFailure = createAction(
+  '[Vexi] Reject Proposal Failure',
+  props<{
+    conversationId: number | null;
+    confirmationToken: string;
+    error: string;
+  }>(),
+);
 
 export const streamComplete = createAction('[Vexi] Stream Complete');
 
@@ -292,6 +338,8 @@ export const streamDropped = createAction(
   '[Vexi] Stream Dropped',
   props<{
     conversationId: number;
+    /** H binds reconciliation to this exact persisted turn, not an older reply. */
+    streamId?: string;
     /** A turn that already said something cannot be re-sent without duplicating it. */
     emittedText: boolean;
     /** A turn that already ran a tool cannot be re-sent without running it twice. */
@@ -377,3 +425,25 @@ export const pollTaskFailure = createAction(
 
 /** La persona cerró la tira del trabajo. No cancela el trabajo, solo lo oculta. */
 export const dismissTask = createAction('[Vexi] Dismiss Task');
+
+// Durable objectives deliberately do not share the background-task slot or job poller.
+export const loadObjective = createAction(
+  '[Vexi] Load Objective',
+  props<{ objectiveId: string }>(),
+);
+export const objectiveReceived = createAction(
+  '[Vexi] Objective Received',
+  props<{ objective: VexiObjective; requestedId?: string }>(),
+);
+export const objectiveFailure = createAction(
+  '[Vexi] Objective Failure',
+  props<{ error: string }>(),
+);
+export const resumeObjective = createAction(
+  '[Vexi] Resume Objective',
+  props<{ objectiveId: string; confirmExpired?: boolean }>(),
+);
+export const resumeObjectiveSuccess = createAction(
+  '[Vexi] Resume Objective Success',
+  props<{ objective: VexiObjective; requestedId?: string }>(),
+);

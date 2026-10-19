@@ -1,5 +1,32 @@
-import { Injectable } from '@nestjs/common';
+import { maximumRecoveryReplans } from '../../../ai-engine/tasks/agent-recovery-limits';
+import {
+  AgentVerifierService,
+  AgentVerificationOptions,
+} from '../../../ai-engine/tasks/agent-verifier.service';
+import { AgentDurableSession } from '../../../ai-engine/tasks/agent-durable-session.service';
+import {
+  AgentDeadline,
+  agentDeadlineContext,
+} from '../../../ai-engine/tasks/agent-deadline';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import {
+  AgentObjectiveRepository,
+  requireObjectiveScope,
+  objectiveOperationId,
+} from '../../../ai-engine/tasks/agent-objective.repository';
+import type {
+  AgentObjective,
+  ObjectiveLease,
+} from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
+
 import { createHash, randomUUID } from 'crypto';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { canonicalJson } from './vexi-confirmation.service';
 import {
@@ -12,10 +39,29 @@ import {
   AgentPlanToolName,
   AgentPlanToolOutcome,
 } from '../../../ai-engine/interfaces/agent-plan.interface';
+import {
+  normalizeToolException,
+  normalizeToolResult,
+  toolReceipt,
+} from '../../../ai-engine/tools/tool-result.normalizer';
+import type { ToolExecutionResult } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { MAX_PLAN_STEPS } from '../../../ai-engine/tools/domains/planning.tools';
+import {
+  ArtifactAggregate,
+  ArtifactPage,
+  readArtifactPage,
+} from '../../../ai-engine/context/tool-result-compaction';
 
 /** Un plan sin movimiento en este lapso se da por abandonado. */
 export const PLAN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Mutable cursor shared by plan changes and result checkpoints in one turn. */
+export interface DurablePlanSession {
+  objective: AgentObjective;
+  lease: ObjectiveLease;
+  /** Automated plan_continue cannot mint a fresh budget by replacing its goal. */
+  automaticContinuation?: boolean;
+}
 
 /**
  * Canonical hash of one approved-plan step: `sha256(tool|canonicalJson(args))`.
@@ -114,13 +160,159 @@ export function renderPlanForModel(plan: AgentPlan): string {
 }
 
 /**
- * Estado persistido del task list interno de Vexi:
- * `ai_conversations.metadata.agent_plan`. Read-modify-write que preserva las
- * llaves ajenas de `metadata` (p. ej. `agent_key`).
+ * Estado del task list interno en el repositorio de objetivos durables.
+ * La metadata histórica se importa una sola vez y nunca vuelve a ser autoridad.
  */
 @Injectable()
 export class VexiPlanStateService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  private readonly durableStates = new WeakMap<
+    object,
+    { objective: AgentObjective; session?: DurablePlanSession }
+  >();
+
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Optional() private readonly objectives?: AgentObjectiveRepository,
+    @Optional() private readonly verifier?: AgentVerifierService,
+  ) {}
+
+  private durableRepository(): AgentObjectiveRepository {
+    if (!this.objectives)
+      throw new ConflictException(
+        'El almacenamiento durable no está disponible. El objetivo permanece pausado.',
+      );
+    return this.objectives;
+  }
+
+  private objectiveApiRepository(): AgentObjectiveRepository {
+    if (!this.objectives) throw new NotFoundException('Objective not found');
+    return this.objectives;
+  }
+
+  private progress(objective: AgentObjective) {
+    return {
+      id: objective.id,
+      conversation_id: objective.conversation_id,
+      goal: objective.goal,
+      semantic_status:
+        objective.expires_at.getTime() <= Date.now()
+          ? 'expired'
+          : objective.semantic_status,
+      version: objective.version,
+      expires_at: objective.expires_at.toISOString(),
+      next_step: objective.next_step,
+      budget: objective.budget,
+      requires_revalidation: objective.requires_revalidation,
+    };
+  }
+
+  async getObjectiveProgress(id: string) {
+    return this.progress(await this.objectiveApiRepository().get(id));
+  }
+
+  async resumeObjective(
+    id: string,
+    options: { expected_version: number; allow_expired: boolean },
+  ) {
+    return this.progress(
+      await this.objectiveApiRepository().resume(id, options),
+    );
+  }
+
+  async rejectObjectiveProposal(id: string, expectedVersion: number) {
+    return this.progress(
+      await this.objectiveApiRepository().rejectProposal(id, expectedVersion),
+    );
+  }
+
+  /** Explicit rejection intent from an already authenticated conversation turn. */
+  async rejectPendingObjective(conversationId: number) {
+    const repository = this.durableRepository();
+    const objective = await repository.importLegacy(conversationId);
+    if (!objective || objective.semantic_status !== 'awaiting_approval')
+      return null;
+    return this.progress(
+      await repository.rejectProposal(objective.id, objective.version),
+    );
+  }
+
+  async listObjectiveResults(
+    id: string,
+    query: { cursor?: string; limit?: number },
+  ) {
+    const page = await this.objectiveApiRepository().listResults(id, query);
+    return {
+      ...page,
+      items: page.items.map(({ data: _data, ...result }) => result),
+    };
+  }
+
+  async getObjectiveArtifact(
+    id: string,
+    resultId: string,
+    query: {
+      offset?: number;
+      limit?: number;
+      artifact_cursor?: string;
+      text_offset?: number;
+      text_limit?: number;
+      columns?: string[];
+      aggregate_field?: string;
+      aggregate_function?: ArtifactAggregate['function'];
+    },
+  ) {
+    const result = await this.objectiveApiRepository().getResult(id, resultId);
+    {
+      // getResult enforces explicit ALS store/org/user+objective ownership BEFORE paging.
+      // Historical snapshots never become fresh write evidence through this reader.
+      const { data: value, ...metadata } = result;
+      const aggregate =
+        query.aggregate_field && query.aggregate_function
+          ? { field: query.aggregate_field, function: query.aggregate_function }
+          : undefined;
+      if (!!query.aggregate_field !== !!query.aggregate_function)
+        throw new BadRequestException(
+          'Both aggregate_field and aggregate_function are required',
+        );
+      const envelope = (page: ArtifactPage) => ({
+        ...metadata,
+        ...page,
+        data: page.data ?? null,
+        source_freshness: result.freshness,
+        freshness: page.complete ? result.freshness : 'truncated',
+        observed_at: result.created_at,
+        artifact_pagination: {
+          offset: page.offset,
+          limit: page.returned,
+          total: page.total,
+          has_more: page.has_more,
+          complete: page.complete,
+          next_offset: page.next_offset,
+          cursor: page.cursor,
+        },
+        next_query: page.cursor
+          ? {
+              artifact_cursor: page.cursor,
+              ...(query.columns ? { columns: query.columns } : {}),
+            }
+          : null,
+      });
+      try {
+        return envelope(
+          readArtifactPage(value, {
+            ...query,
+            cursor: query.artifact_cursor,
+            aggregate,
+            // Leave room for ResponseService's outer API envelope and bridge fields.
+            max_json_chars: 4200,
+            envelope,
+          }),
+        );
+      } catch (error) {
+        throw new BadRequestException((error as Error).message);
+      }
+    }
+  }
 
   async get(conversationId: number): Promise<AgentPlan | null> {
     const { plan } = await this.load(conversationId);
@@ -151,7 +343,9 @@ export class VexiPlanStateService {
     const { plan, metadata } = await this.load(conversationId);
     if (!plan) return null;
     const step =
-      plan.steps.find((s) => s.kind === 'cambio' && s.status === 'in_progress') ??
+      plan.steps.find(
+        (s) => s.kind === 'cambio' && s.status === 'in_progress',
+      ) ??
       plan.steps.find((s) => s.kind === 'cambio' && s.status === 'pending');
     if (!step) return plan;
     step.status = status;
@@ -175,6 +369,98 @@ export class VexiPlanStateService {
     return (await this.getStepHashRecord(conversationId)).steps;
   }
 
+  /** G voice can approve only the one diff actually shown in this owned thread. */
+  async assertVoiceProposalPreview(
+    conversationId: number,
+    planId: string,
+    tool: string,
+    args: Record<string, unknown>,
+    previewHash: string,
+  ): Promise<{ stepId: string }> {
+    await this.load(conversationId);
+    const message = await this.prisma.ai_messages.findFirst({
+      where: {
+        conversation_id: conversationId,
+        role: 'assistant',
+        metadata: { path: ['plan', 'plan_id'], equals: planId },
+      },
+      orderBy: { created_at: 'desc' },
+      select: { metadata: true },
+    });
+    const plan = (
+      message?.metadata as {
+        plan?: {
+          status?: string;
+          steps?: Array<{
+            step_id?: string;
+            status?: string;
+            tool: string;
+            arguments: Record<string, unknown>;
+            preview?: unknown;
+          }>;
+        };
+      } | null
+    )?.plan;
+    const step = plan?.steps?.length === 1 ? plan.steps[0] : undefined;
+    if (
+      !step ||
+      !step.step_id ||
+      step.status !== 'pending' ||
+      !['proposed', 'approved'].includes(plan?.status ?? '') ||
+      step.tool !== tool ||
+      canonicalStepHash(tool, step.arguments) !==
+        canonicalStepHash(tool, args) ||
+      createHash('sha256').update(canonicalJson(step.preview)).digest('hex') !==
+        previewHash
+    )
+      throw new ConflictException(
+        'La propuesta visible cambió o no está pendiente. Revisa una nueva propuesta.',
+      );
+    return { stepId: step.step_id };
+  }
+
+  /** Realtime creates the same single-step Vex proposal identity as text. */
+  async persistVoiceWriteProposal(
+    conversationId: number,
+    tool: string,
+    args: Record<string, unknown>,
+    preview: unknown,
+  ): Promise<{ planId: string; stepId: string }> {
+    await this.load(conversationId);
+    const planId = randomUUID();
+    const stepId = 's1';
+    await this.setStepHashes(
+      conversationId,
+      [{ order: 1, tool, args }],
+      planId,
+    );
+    await this.prisma.ai_messages.create({
+      data: {
+        conversation_id: conversationId,
+        role: 'assistant',
+        content:
+          'Cambio propuesto por voz. Espera tu aprobación; todavía no se aplicó.',
+        metadata: {
+          plan: {
+            plan_id: planId,
+            status: 'proposed',
+            steps: [
+              {
+                step_id: stepId,
+                order: 1,
+                tool,
+                arguments: args,
+                preview,
+                status: 'pending',
+              },
+            ],
+          },
+        } as any,
+      },
+    });
+    return { planId, stepId };
+  }
+
   /**
    * Registro completo de hashes: `{plan_id, created_at, steps}`. Lee también
    * la forma antigua (arreglo plano sin identidad): `plan_id`/`created_at`
@@ -187,7 +473,8 @@ export class VexiPlanStateService {
     // escrituras sin lista interna (el loop ni siquiera recibe `params.plan`)
     // y sus hashes deben leerse igual. Hallazgo live E2E-1 (2026-10-01).
     const { metadata } = await this.load(conversationId);
-    const raw = (metadata as Record<string, any>).agent_plan_step_hashes;
+    const state = this.durableStates.get(metadata);
+    const raw = state?.objective.step_hashes ?? null;
     const list: unknown = Array.isArray(raw) ? raw : raw?.steps;
     const steps = Array.isArray(list)
       ? list.filter(
@@ -215,9 +502,10 @@ export class VexiPlanStateService {
     conversationId: number,
     steps: Array<{ order: number; tool: string; args: Record<string, any> }>,
     planId?: string,
+    session?: DurablePlanSession,
   ): Promise<PlanStepHash[]> {
     // Sin gate de `agent_plan`: ver `getStepHashRecord`.
-    const { metadata } = await this.load(conversationId);
+    const { metadata } = await this.load(conversationId, session);
     const hashes: PlanStepHash[] = [...steps]
       .sort((a, b) => a.order - b.order)
       .map((s) => ({
@@ -230,30 +518,322 @@ export class VexiPlanStateService {
       created_at: new Date().toISOString(),
       steps: hashes,
     };
-    await this.prisma.ai_conversations.updateMany({
-      where: { id: conversationId },
-      data: {
-        metadata: { ...metadata, agent_plan_step_hashes: record } as any,
-      },
-    });
+    let state = this.durableStates.get(metadata);
+    if (!state) {
+      const objective = await this.durableRepository().createOrReplace(
+        conversationId,
+        null,
+        undefined,
+        { goal: 'Aplicar la propuesta seleccionada' },
+      );
+      state = { objective };
+    }
+    if (state) {
+      const saved = await this.durableRepository().updateHashes(
+        state.objective.id,
+        session?.lease.version ?? state.objective.version,
+        record as unknown as Record<string, unknown>,
+        session?.lease,
+      );
+      if (session) {
+        session.objective = saved;
+        Object.assign(session.lease, {
+          version: saved.version,
+          lease_generation: saved.lease_generation,
+        });
+      }
+    }
     return hashes;
   }
 
   /** Borra los hashes (rechazo del plan): un plan cancelado deja de ser aprobable. */
   async clearStepHashes(conversationId: number): Promise<void> {
     const { metadata } = await this.load(conversationId);
-    if (!('agent_plan_step_hashes' in metadata)) return;
-    const { agent_plan_step_hashes: _dropped, ...rest } = metadata;
-    await this.prisma.ai_conversations.updateMany({
-      where: { id: conversationId },
-      data: { metadata: rest as any },
-    });
+    const state = this.durableStates.get(metadata);
+    if (state) {
+      await this.durableRepository().updateHashes(
+        state.objective.id,
+        state.objective.version,
+        null,
+      );
+      return;
+    }
   }
 
-  createHook(conversationId: number): AgentPlanHook {
+  /** Intent is durable BEFORE dispatch. A consumed confirmation is not an exactly-once guarantee. */
+  async applyDurableEffect(
+    input: {
+      conversationId?: number;
+      stepId?: string;
+      tool: string;
+      args: Record<string, any>;
+      consent?: {
+        channel: 'voice';
+        challenge_hash: string;
+        proposal_hash: string;
+      };
+    },
+    dispatch: () => Promise<string>,
+  ): Promise<{ output: string; result?: ToolExecutionResult }> {
+    if (!input.conversationId)
+      throw new ConflictException(
+        'Selecciona la conversación del objetivo antes de aplicar el cambio.',
+      );
+    const repository = this.durableRepository();
+    let objective = await repository.importLegacy(input.conversationId);
+    if (!objective)
+      objective = await repository.createOrReplace(
+        input.conversationId,
+        null,
+        undefined,
+        { goal: `Aplicar ${input.tool}` },
+      );
+    const leased = await repository.acquireLease(
+      objective.id,
+      objective.version,
+    );
+    const lease: ObjectiveLease = {
+      version: leased.version,
+      lease_generation: leased.lease_generation,
+    };
+    const consentAudit =
+      input.consent &&
+      /^[a-f0-9]{64}$/.test(input.consent.challenge_hash) &&
+      /^[a-f0-9]{64}$/.test(input.consent.proposal_hash)
+        ? {
+            consent: {
+              ...input.consent,
+              observed_at: new Date().toISOString(),
+            },
+          }
+        : {};
+    const effectStarted = Date.now();
+    const effectDeadline = new AgentDeadline({
+      wallDeadlineMs: Math.min(
+        Date.now() + 180_000,
+        new Date(leased.expires_at).getTime(),
+        new Date(leased.lease_until!).getTime(),
+      ),
+      activeBudgetMs: Math.max(0, 1_800_000 - leased.budget.active_runtime_ms),
+      reserveMs: 2000,
+    });
+    const proposalHash = canonicalStepHash(input.tool, input.args);
+    const currentStep = leased.plan?.steps.find(
+      (step) =>
+        step.kind === 'cambio' &&
+        ['pending', 'in_progress', 'waiting_user'].includes(step.status),
+    );
+    const stepId =
+      input.stepId ??
+      (currentStep
+        ? `plan:${leased.plan!.id}:${currentStep.order}`
+        : `write:${proposalHash}`);
+    const operationId = objectiveOperationId(leased.id, stepId, proposalHash);
+    let applying = false;
+    const checkpoint = async (result: ToolExecutionResult) => {
+      const { objective: saved, advanced } = await repository.appendToolResult(
+        leased.id,
+        lease,
+        {
+          tool_call_id: `effect:${operationId}`,
+          tool_name: input.tool,
+          args_hash: proposalHash,
+          receipt: toolReceipt(result),
+          data: result.data,
+          budget_delta: {
+            tools: 1,
+            ...(effectDeadline
+              ? { active_runtime_ms: Math.max(0, Date.now() - effectStarted) }
+              : {}),
+          },
+          checkpoint: {
+            semantic_status:
+              result.status === 'unknown_effect'
+                ? 'unknown_effect'
+                : result.status === 'blocked'
+                  ? 'blocked'
+                  : result.status === 'pending_confirmation'
+                    ? 'awaiting_approval'
+                    : result.status === 'needs_user_input'
+                      ? 'awaiting_input'
+                      : 'active',
+            next_step: result.next_action,
+            requires_revalidation: true,
+          },
+        },
+      );
+      if (!advanced)
+        throw new ConflictException(
+          'El resultado quedó en auditoría; el ejecutor ya fue reemplazado.',
+        );
+      Object.assign(lease, {
+        version: saved.version,
+        lease_generation: saved.lease_generation,
+      });
+    };
+    try {
+      effectDeadline?.assertCanStart();
+      let effect = await repository.proposeEffect(
+        leased.id,
+        {
+          operation_id: operationId,
+          proposal_hash: proposalHash,
+          step_id: stepId,
+        },
+        lease,
+      );
+      // Even a new token cannot replay an operation whose dispatch may have committed.
+      if (!['proposed', 'approved'].includes(effect.status))
+        throw new ConflictException(
+          'Este cambio ya fue enviado o su efecto es incierto. Verifica el registro antes de continuar.',
+        );
+      if (effect.status === 'proposed')
+        effect = await repository.transitionEffect(
+          leased.id,
+          operationId,
+          'proposed',
+          'approved',
+          { domain_receipt: consentAudit },
+          lease,
+        );
+      await repository.transitionEffect(
+        leased.id,
+        operationId,
+        'approved',
+        'applying',
+        { domain_receipt: consentAudit },
+        lease,
+      );
+      applying = true;
+      let output: string;
+      let result: ToolExecutionResult;
+      try {
+        output = effectDeadline
+          ? await agentDeadlineContext.run(effectDeadline, () =>
+              effectDeadline.run(dispatch),
+            )
+          : await dispatch();
+        result = normalizeToolResult(output, {
+          write: true,
+          handlerStarted: true,
+        });
+      } catch (error) {
+        result = normalizeToolException(error, {
+          write: true,
+          handlerStarted: true,
+        });
+        await repository.transitionEffect(
+          leased.id,
+          operationId,
+          'applying',
+          result.status === 'unknown_effect' ? 'unknown' : 'failed',
+          {
+            domain_receipt: {
+              ...consentAudit,
+              status: result.status,
+              error_code: result.error_code,
+            },
+          },
+          lease,
+        );
+        applying = false;
+        await checkpoint(result);
+        if (result.status !== 'unknown_effect') throw error;
+        return { output: JSON.stringify(result), result };
+      }
+      const status =
+        result.effect_status === 'applied' && result.status === 'ok'
+          ? 'applied'
+          : result.effect_status === 'not_applied'
+            ? 'failed'
+            : 'unknown';
+      await repository.transitionEffect(
+        leased.id,
+        operationId,
+        'applying',
+        status,
+        {
+          domain_receipt: {
+            ...consentAudit,
+            status: result.status,
+            error_code: result.error_code,
+            resource_ids: result.resource_ids,
+          },
+          domain_reference: Object.values(result.resource_ids)[0]?.toString(),
+        },
+        lease,
+      );
+      applying = false;
+      await checkpoint(result);
+      return { output, result };
+    } finally {
+      // A crash before this boundary leaves applying durable; that state blocks replay.
+      // Never turn an unresolved applying receipt into a success or blindly redispatch it.
+      if (applying) {
+        try {
+          await repository.transitionEffect(
+            leased.id,
+            operationId,
+            'applying',
+            'unknown',
+            {},
+            lease,
+          );
+        } catch {
+          /* durable applying also blocks replay */
+        }
+      }
+      effectDeadline?.dispose();
+      await repository.releaseLease(leased.id, lease).catch(() => false);
+    }
+  }
+
+  createHook(
+    conversationId: number,
+    sharedSession?: DurablePlanSession,
+  ): AgentPlanHook {
+    let session = sharedSession;
+    let released = false;
+    const prepare = async () => {
+      if (released) throw new ConflictException('Este ejecutor ya terminó.');
+      if (session) return;
+      const objective =
+        await this.durableRepository().importLegacy(conversationId);
+      if (objective) {
+        const leased = await this.durableRepository().acquireLease(
+          objective.id,
+          objective.version,
+        );
+        session = {
+          objective: leased,
+          lease: {
+            version: leased.version,
+            lease_generation: leased.lease_generation,
+          },
+        };
+      }
+    };
     return {
-      execute: (name, args) => this.execute(conversationId, name, args ?? {}),
-      snapshot: () => this.getActive(conversationId),
+      get objectiveId() {
+        return session?.objective.id;
+      },
+      execute: async (name, args, options) => {
+        await prepare();
+        return this.execute(conversationId, name, args ?? {}, session, options);
+      },
+      snapshot: async () => {
+        await prepare();
+        const { plan } = await this.load(conversationId, session);
+        return plan?.status === 'active' ? plan : null;
+      },
+      release: async () => {
+        released = true;
+        if (!sharedSession && session)
+          await this.durableRepository().releaseLease(
+            session.objective.id,
+            session.lease,
+          );
+      },
     };
   }
 
@@ -263,14 +843,22 @@ export class VexiPlanStateService {
     conversationId: number,
     name: AgentPlanToolName,
     args: Record<string, any>,
+    session?: DurablePlanSession,
+    options?: AgentVerificationOptions,
   ): Promise<AgentPlanToolOutcome> {
-    const { plan: current, metadata } = await this.load(conversationId);
+    const { plan: current, metadata } = await this.load(
+      conversationId,
+      session,
+    );
 
     if (name === 'propose_plan') {
       return this.propose(conversationId, metadata, current, args);
     }
     if (name === 'resume_plan') {
-      if (!current || (current.status !== 'paused' && current.status !== 'active')) {
+      if (
+        !current ||
+        (current.status !== 'paused' && current.status !== 'active')
+      ) {
         return reject('no hay plan activo');
       }
       current.status = 'active';
@@ -282,6 +870,100 @@ export class VexiPlanStateService {
       return reject('no hay plan activo');
     }
     const plan = current;
+    const robust = !!session;
+    if (robust && name === 'verify_deliverables') {
+      if (
+        !this.verifier ||
+        !options ||
+        !(session instanceof AgentDurableSession)
+      )
+        return reject(
+          'unsupported_capability: verificación de servidor no disponible en esta superficie',
+        );
+      if (
+        !plan.deliverables.every((d) => d.verification) ||
+        !plan.steps.every((step) => step.status === 'done')
+      )
+        return reject(
+          'Faltan postcondiciones de servidor o pasos pendientes. Un texto o verified:true no verifica el objetivo.',
+        );
+      const supplied = Array.isArray(args.deliverables)
+        ? args.deliverables
+        : [];
+      if (
+        supplied.length !== plan.deliverables.length ||
+        new Set(supplied.map((item) => item?.id)).size !== supplied.length ||
+        supplied.some(
+          (item) => !plan.deliverables.some((d) => d.id === item?.id),
+        )
+      )
+        return reject(
+          'Incluye referencias para todos los entregables del contrato fijo.',
+        );
+      const requests = plan.deliverables.map((d) => ({
+        ...d.verification!,
+        evidence_refs: supplied.find((item) => item?.id === d.id)
+          ?.evidence_refs,
+      }));
+      const result = await this.verifier.verifyMany(session, requests, options);
+      if (result.verified === false) {
+        const detail = `Postcondiciones no satisfechas: ${result.reasons.join('; ')}`;
+        if (
+          result.reasons.some((reason) =>
+            reason.startsWith('unsupported_capability:'),
+          )
+        ) {
+          const next = `La operación ${requests.map((r) => r.workflow_key).join(', ')} no dispone de verificación completa: ${result.reasons.join('; ')}. Conservé lo aplicado; revisa ese resultado en su módulo antes de repetir cambios.`;
+          session.objective =
+            (await this.durableRepository().checkpoint(
+              session.objective_id,
+              session.lease,
+              { semantic_status: 'partial', next_step: next },
+            )) ?? session.objective;
+          Object.assign(session.lease, {
+            version: session.objective.version,
+            lease_generation: session.objective.lease_generation,
+          });
+        }
+        return reject(detail);
+      }
+      await session.completeVerified(result.capability);
+      return {
+        result: ok(session.objective.plan!, {
+          evidence_refs: result.evidence_refs,
+          completion_verified: true,
+        }),
+        endTurn: {
+          text: `Verifiqué en el sistema los resultados solicitados. Referencias: ${result.evidence_refs.slice(-5).join(', ')}.`,
+        },
+      };
+    }
+    if (robust && name === 'revise_plan') {
+      if (str(args.goal) && str(args.goal) !== plan.goal)
+        return reject(
+          'No puedo cambiar el objetivo económico durante una recuperación técnica. Inicia otro objetivo para un trabajo distinto.',
+        );
+      if (Array.isArray(args.add_deliverables) && args.add_deliverables.length)
+        return reject(
+          'Una recuperación técnica no puede ampliar el objetivo económico.',
+        );
+      if ((session!.objective.budget.recovery ?? 0) >= maximumRecoveryReplans())
+        return reject(
+          'Se agotaron las dos revisiones técnicas del objetivo; conserva lo ya aplicado.',
+        );
+    }
+    if (robust && name === 'update_plan_step') {
+      const step = this.findStep(plan, args.order);
+      if (
+        step &&
+        ['in_progress', 'done'].includes(args.status) &&
+        (step.depends_on ?? []).some(
+          (order) =>
+            plan.steps.find((s) => s.order === order)?.status !== 'done',
+        )
+      )
+        return reject('Las dependencias del paso aún no tienen resultado.');
+    }
     let outcome: AgentPlanToolOutcome;
 
     switch (name) {
@@ -305,6 +987,25 @@ export class VexiPlanStateService {
         return reject(`herramienta desconocida: ${String(name)}`);
     }
 
+    if (
+      robust &&
+      name === 'revise_plan' &&
+      !outcome.result.startsWith('{"ok":false')
+    ) {
+      if (
+        plan.steps.length < 3 ||
+        plan.steps.length > 7 ||
+        plan.steps.some((step) =>
+          (step.depends_on ?? []).some(
+            (order) => order >= step.order || order < 1,
+          ),
+        )
+      )
+        return reject(
+          'El bloque ejecutable requiere entre 3 y 7 pasos con dependencias previas válidas.',
+        );
+      await (session as AgentDurableSession).addBudget({ recovery: 1 });
+    }
     // Un rechazo no cambia estado: no se persiste.
     if (!outcome.result.startsWith('{"ok":false')) {
       await this.save(conversationId, metadata, plan);
@@ -320,7 +1021,9 @@ export class VexiPlanStateService {
   ): Promise<AgentPlanToolOutcome> {
     const rawDel = Array.isArray(args.deliverables) ? args.deliverables : [];
     const rawSteps = Array.isArray(args.steps) ? args.steps : [];
-    const descriptions = rawDel.map((d: any) => str(d?.description)).filter(Boolean);
+    const descriptions = rawDel
+      .map((d: any) => str(d?.description))
+      .filter(Boolean);
     if (descriptions.length === 0) {
       return reject(
         'define al menos un entregable verificable (deliverables[].description)',
@@ -329,6 +1032,31 @@ export class VexiPlanStateService {
     if (rawSteps.length === 0) {
       return reject('define al menos un paso');
     }
+
+    if (rawSteps.length < 3 || rawSteps.length > 7)
+      return reject(
+        'El bloque multietapa debe tener de 3 a 7 pasos. Una consulta simple no necesita plan.',
+      );
+    if (previous && str(args.goal) !== previous.goal)
+      return reject(
+        'La recuperación no puede cambiar el objetivo económico. Inicia otra conversación para otro trabajo.',
+      );
+    if (
+      rawDel.some(
+        (d) =>
+          !str(d?.description) ||
+          !d?.verification ||
+          typeof d.verification.workflow_key !== 'string' ||
+          typeof d.verification.step_id !== 'string' ||
+          !d.verification.inputs ||
+          typeof d.verification.inputs !== 'object' ||
+          Array.isArray(d.verification.inputs) ||
+          Buffer.byteLength(JSON.stringify(d.verification.inputs)) > 64000,
+      )
+    )
+      return reject(
+        'unsupported_capability: cada entregable requiere un workflow de servidor, step_id e inputs explícitos.',
+      );
     const steps: AgentPlanStep[] = [];
     for (const [i, raw] of rawSteps.slice(0, MAX_PLAN_STEPS).entries()) {
       const kind = raw?.kind === 'cambio' ? 'cambio' : 'verificacion';
@@ -338,7 +1066,31 @@ export class VexiPlanStateService {
           `el paso ${i + 1} es un cambio y necesita done_when (criterio verificable)`,
         );
       }
+      if (
+        !str(raw.expected_input) ||
+        !str(raw.expected_output) ||
+        !Array.isArray(raw.candidate_tools) ||
+        !raw.candidate_tools.length ||
+        raw.candidate_tools.some((name) => typeof name !== 'string') ||
+        !str(raw.verifier) ||
+        !Array.isArray(raw.depends_on) ||
+        raw.depends_on.some(
+          (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
+        ) ||
+        raw.approval !== (kind === 'cambio' ? 'individual' : 'none')
+      )
+        return reject(
+          `El paso ${i + 1} requiere entrada/salida, tools candidatas, aprobación individual, verifier y dependencias previas.`,
+        );
       steps.push({
+        ...{
+          depends_on: [...raw.depends_on],
+          expected_input: str(raw.expected_input),
+          expected_output: str(raw.expected_output),
+          candidate_tools: [...raw.candidate_tools],
+          approval: raw.approval,
+          verifier: str(raw.verifier),
+        },
         order: i + 1,
         title: str(raw?.title) || `Paso ${i + 1}`,
         kind,
@@ -349,16 +1101,18 @@ export class VexiPlanStateService {
     }
     const now = new Date().toISOString();
     const plan: AgentPlan = {
-      id: randomUUID(),
+      id: previous?.goal.trim() === str(args.goal) ? previous.id : randomUUID(),
       status: 'active',
       goal: str(args.goal),
       deliverables: descriptions.map((description: string, i: number) => ({
         id: `d${i + 1}`,
         description,
         verified: false,
+        ...{ verification: structuredClone(rawDel[i].verification) },
       })),
       steps,
-      created_at: now,
+      created_at:
+        previous?.goal.trim() === str(args.goal) ? previous.created_at : now,
       updated_at: now,
     };
     // Solo se guarda el último plan; el previo queda superseded solo en el
@@ -402,18 +1156,15 @@ export class VexiPlanStateService {
     let extra: Record<string, unknown> = {};
     if (status === 'failed') {
       step.attempts += 1;
-      if (step.attempts >= 2) {
-        extra = {
-          instruccion:
-            'explícale a la persona qué pasó y pregúntale cómo seguir con ask_user',
-        };
-      }
     }
     plan.updated_at = new Date().toISOString();
     return { result: ok(plan, extra) };
   }
 
-  private verify(plan: AgentPlan, args: Record<string, any>): AgentPlanToolOutcome {
+  private verify(
+    plan: AgentPlan,
+    args: Record<string, any>,
+  ): AgentPlanToolOutcome {
     const items = Array.isArray(args.deliverables) ? args.deliverables : [];
     if (items.length === 0) return reject('indica los entregables a verificar');
     for (const it of items) {
@@ -426,7 +1177,9 @@ export class VexiPlanStateService {
       }
     }
     for (const it of items) {
-      const d = plan.deliverables.find((x) => x.id === String(it.id)) as AgentPlanDeliverable;
+      const d = plan.deliverables.find(
+        (x) => x.id === String(it.id),
+      ) as AgentPlanDeliverable;
       d.verified = it.verified === true;
       if (str(it.evidence)) d.evidence = str(it.evidence);
     }
@@ -444,11 +1197,16 @@ export class VexiPlanStateService {
     return { result: ok(plan) };
   }
 
-  private ask(plan: AgentPlan, args: Record<string, any>): AgentPlanToolOutcome {
+  private ask(
+    plan: AgentPlan,
+    args: Record<string, any>,
+  ): AgentPlanToolOutcome {
     const question = str(args.question);
     if (!question) return reject('escribe la pregunta para la persona');
     const step =
-      (args.step_order != null ? this.findStep(plan, args.step_order) : undefined) ??
+      (args.step_order != null
+        ? this.findStep(plan, args.step_order)
+        : undefined) ??
       plan.steps.find((s) => s.status === 'in_progress') ??
       plan.steps.find((s) => s.status === 'pending');
     if (step) {
@@ -459,19 +1217,41 @@ export class VexiPlanStateService {
     return { result: ok(plan, { asked: true }), endTurn: { text: question } };
   }
 
-  private revise(plan: AgentPlan, args: Record<string, any>): AgentPlanToolOutcome {
+  private revise(
+    plan: AgentPlan,
+    args: Record<string, any>,
+  ): AgentPlanToolOutcome {
     const removeOrders: number[] = Array.isArray(args.remove_orders)
       ? args.remove_orders.map(Number)
       : [];
-    const updates: any[] = Array.isArray(args.update_steps) ? args.update_steps : [];
+    const updates: any[] = Array.isArray(args.update_steps)
+      ? args.update_steps
+      : [];
     const adds: any[] = Array.isArray(args.add_steps) ? args.add_steps : [];
 
-    for (const o of [...removeOrders, ...updates.map((u) => Number(u?.order))]) {
+    for (const o of [
+      ...removeOrders,
+      ...updates.map((u) => Number(u?.order)),
+    ]) {
       const s = this.findStep(plan, o);
       if (!s) return reject(`el paso ${o} no existe`);
       if (s.status === 'done') {
-        return reject(`el paso ${o} ya está hecho: no se modifica ni se elimina`);
+        return reject(
+          `el paso ${o} ya está hecho: no se modifica ni se elimina`,
+        );
       }
+    }
+
+    const dependencies = new Map<AgentPlanStep, AgentPlanStep[]>();
+    for (const step of plan.steps) {
+      const refs = (step.depends_on ?? []).map((order) =>
+        plan.steps.find((s) => s.order === order),
+      );
+      if (refs.some((ref) => !ref || removeOrders.includes(ref.order)))
+        return reject(
+          'No elimines una dependencia requerida; revisa el DAG completo.',
+        );
+      dependencies.set(step, refs as AgentPlanStep[]);
     }
     const newSteps: Array<{ raw: any; step: AgentPlanStep }> = [];
     for (const raw of adds) {
@@ -483,6 +1263,18 @@ export class VexiPlanStateService {
       newSteps.push({
         raw,
         step: {
+          ...{
+            depends_on: Array.isArray(raw.depends_on)
+              ? [...raw.depends_on]
+              : undefined,
+            expected_input: str(raw.expected_input),
+            expected_output: str(raw.expected_output),
+            candidate_tools: Array.isArray(raw.candidate_tools)
+              ? [...raw.candidate_tools]
+              : undefined,
+            approval: raw.approval,
+            verifier: str(raw.verifier),
+          },
           order: 0,
           title: str(raw?.title) || 'Paso',
           kind,
@@ -503,8 +1295,21 @@ export class VexiPlanStateService {
       if (str(u.done_when)) s.done_when = str(u.done_when);
     }
     for (const { raw, step } of newSteps) {
+      {
+        if (
+          !Array.isArray(raw.depends_on) ||
+          raw.depends_on.some((order) => !byOriginal.has(order))
+        )
+          return reject('La dependencia nueva debe referir un paso existente.');
+        dependencies.set(
+          step,
+          raw.depends_on.map((order) => byOriginal.get(order)!),
+        );
+      }
       const ref =
-        raw?.after_order != null ? byOriginal.get(Number(raw.after_order)) : undefined;
+        raw?.after_order != null
+          ? byOriginal.get(Number(raw.after_order))
+          : undefined;
       const idx = ref ? steps.indexOf(ref) : -1;
       if (idx >= 0) steps.splice(idx + 1, 0, step);
       else steps.push(step);
@@ -514,10 +1319,42 @@ export class VexiPlanStateService {
         `el plan quedaría con ${steps.length} pasos y el máximo es ${MAX_PLAN_STEPS}`,
       );
     }
+    {
+      if (
+        steps.some(
+          (step) =>
+            !step.expected_input ||
+            !step.expected_output ||
+            !step.candidate_tools?.length ||
+            step.candidate_tools.some((name) => typeof name !== 'string') ||
+            !step.verifier ||
+            step.approval !== (step.kind === 'cambio' ? 'individual' : 'none'),
+        )
+      )
+        return reject(
+          'Cada paso revisado requiere contrato completo de entrada/salida, tools, aprobación y verifier.',
+        );
+      for (const step of steps) {
+        const refs = dependencies.get(step) ?? [];
+        if (
+          refs.some(
+            (ref) =>
+              steps.indexOf(ref) < 0 ||
+              steps.indexOf(ref) >= steps.indexOf(step),
+          )
+        )
+          return reject(
+            'El DAG revisado requiere dependencias previas no eliminadas.',
+          );
+        step.depends_on = refs.map((ref) => steps.indexOf(ref) + 1);
+      }
+    }
     steps = steps.map((s, i) => ({ ...s, order: i + 1 }));
     plan.steps = steps;
 
-    const addDel: any[] = Array.isArray(args.add_deliverables) ? args.add_deliverables : [];
+    const addDel: any[] = Array.isArray(args.add_deliverables)
+      ? args.add_deliverables
+      : [];
     let n = plan.deliverables.length;
     for (const d of addDel) {
       const description = str(d?.description);
@@ -534,23 +1371,43 @@ export class VexiPlanStateService {
 
   private async load(
     conversationId: number,
+    session?: DurablePlanSession,
   ): Promise<{ metadata: Record<string, any>; plan: AgentPlan | null }> {
+    const scope = requireObjectiveScope();
     const row = await this.prisma.ai_conversations.findFirst({
-      where: { id: conversationId },
+      where: { id: conversationId, ...(scope ?? {}) },
       select: { metadata: true },
     });
     const raw = row?.metadata;
     const metadata: Record<string, any> =
-      raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as any) } : {};
-    const plan = (metadata.agent_plan as AgentPlan | undefined) ?? null;
-    if (!plan) return { metadata, plan: null };
-
-    const age = Date.now() - new Date(plan.updated_at).getTime();
-    if ((plan.status === 'active' || plan.status === 'paused') && age > PLAN_TTL_MS) {
-      plan.status = 'abandoned';
-      await this.save(conversationId, metadata, plan, false);
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? { ...(raw as any) }
+        : {};
+    {
+      const objective =
+        await this.durableRepository().importLegacy(conversationId);
+      if (!objective) return { metadata, plan: null };
+      if (
+        session &&
+        (session.objective.id !== objective.id ||
+          session.lease.lease_generation !== objective.lease_generation)
+      ) {
+        throw new ConflictException(
+          'El objetivo cambió de ejecutor. No se avanzó el plan.',
+        );
+      }
+      this.durableStates.set(metadata, { objective, session });
+      const plan = objective.plan
+        ? (JSON.parse(JSON.stringify(objective.plan)) as AgentPlan)
+        : null;
+      if (
+        plan &&
+        objective.expires_at.getTime() <= Date.now() &&
+        ['active', 'paused'].includes(plan.status)
+      )
+        plan.status = 'abandoned';
+      return { metadata, plan };
     }
-    return { metadata, plan };
   }
 
   private async save(
@@ -560,9 +1417,52 @@ export class VexiPlanStateService {
     touch = true,
   ): Promise<void> {
     if (touch) plan.updated_at = new Date().toISOString();
-    await this.prisma.ai_conversations.updateMany({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, agent_plan: plan } as any },
-    });
+    {
+      const repository = this.durableRepository();
+      const state = this.durableStates.get(metadata);
+      const sameObjective =
+        state && (!state.objective.plan || state.objective.plan.id === plan.id);
+      if (!sameObjective && state?.session?.automaticContinuation) {
+        throw new ConflictException(
+          'Una continuación automática no puede crear otro objetivo. Usa revise_plan para continuar el objetivo vigente.',
+        );
+      }
+      let saved = sameObjective
+        ? await repository.savePlan(
+            state.objective.id,
+            state.session?.lease.version ?? state.objective.version,
+            plan,
+            state.session?.lease,
+          )
+        : await repository.createOrReplace(
+            conversationId,
+            plan,
+            state?.objective.agent_id ?? undefined,
+            {
+              lease: state?.session?.lease,
+              authority_snapshot: (
+                state?.objective.authority_snapshot ??
+                RequestContextService.asyncLocalStorage.getStore()
+                  ?.permissions ??
+                []
+              ).filter((permission) =>
+                (
+                  RequestContextService.asyncLocalStorage.getStore()
+                    ?.permissions ?? []
+                ).includes(permission),
+              ),
+            },
+          );
+      if (state?.session && saved.id !== state.objective.id)
+        saved = await repository.acquireLease(saved.id, saved.version);
+      if (state?.session) {
+        state.session.objective = saved;
+        Object.assign(state.session.lease, {
+          version: saved.version,
+          lease_generation: saved.lease_generation,
+        });
+      }
+      return;
+    }
   }
 }

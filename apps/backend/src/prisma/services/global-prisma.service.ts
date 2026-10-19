@@ -408,6 +408,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_messages;
   }
 
+  get ai_knowledge_documents() {
+    return this.baseClient.ai_knowledge_documents;
+  }
+
   get ai_embeddings() {
     return this.baseClient.ai_embeddings;
   }
@@ -417,6 +421,25 @@ export class GlobalPrismaService extends BasePrismaService {
   // `store_id` lo pone explícitamente quien consulta desde ahí.
   get ai_attachments() {
     return this.baseClient.ai_attachments;
+  }
+
+  // System telemetry writer supplies explicit immutable tenant/system scope.
+  get ai_agent_trace_spans() {
+    return this.baseClient.ai_agent_trace_spans;
+  }
+
+  // System sink only. Tenant access uses SandboxAuditRepository's org/store/user
+  // predicates, never a generic store/org delegate (which lacks owner ACL).
+  // F system-only curated publication and private metering sink.
+  get ai_agent_recipes() {
+    return this.baseClient.ai_agent_recipes;
+  }
+  get ai_agent_recipe_events() {
+    return this.baseClient.ai_agent_recipe_events;
+  }
+
+  get ai_agent_script_runs() {
+    return this.baseClient.ai_agent_script_runs;
   }
 
   get ai_agent_tasks() {

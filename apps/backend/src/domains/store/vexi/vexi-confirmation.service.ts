@@ -5,6 +5,21 @@ import { REDIS_CLIENT } from '../../../common/redis/redis.module';
 
 export type RedeemOutcome = 'ok' | 'missing' | 'mismatch';
 
+/** G-only sidecar. The legacy token/fingerprint and click ABI remain unchanged. */
+export interface ConfirmationMetadata {
+  previewHash: string;
+  organizationId: number;
+  storeId: number;
+  toolVersion: string;
+  conversationId?: number;
+}
+
+export interface ConfirmationInspection {
+  outcome: RedeemOutcome;
+  ttlSeconds: number;
+  metadata?: ConfirmationMetadata;
+}
+
 /** Long enough to read a diff and decide; short enough that a forgotten tab expires. */
 const TOKEN_TTL_SECONDS = 300;
 
@@ -23,6 +38,22 @@ if not stored then return 0 end
 if stored ~= ARGV[1] then return -1 end
 redis.call('DEL', KEYS[1])
 return 1
+`;
+
+const ISSUE_BOUND_SCRIPT = `
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+return 1
+`;
+
+/** Inspect without consuming: voice must validate the exact issued preview first. */
+const INSPECT_SCRIPT = `
+local stored = redis.call('GET', KEYS[1])
+if not stored then return {0, 0, ''} end
+if stored ~= ARGV[1] then return {-1, 0, ''} end
+local ttl = redis.call('TTL', KEYS[1])
+if ttl <= 0 then return {0, 0, ''} end
+return {1, ttl, redis.call('GET', KEYS[2]) or ''}
 `;
 
 /**
@@ -71,8 +102,24 @@ export class VexiConfirmationService {
     toolName: string,
     args: Record<string, any>,
     userId: number | undefined,
+    metadata?: ConfirmationMetadata,
   ): Promise<string> {
     const token = randomUUID();
+    if (metadata) {
+      if (!this.validMetadata(metadata)) {
+        throw new Error('Invalid confirmation preview binding');
+      }
+      await this.redis.eval(
+        ISSUE_BOUND_SCRIPT,
+        2,
+        this.key(token),
+        this.metadataKey(token),
+        this.fingerprint(toolName, args, userId),
+        canonicalJson(metadata),
+        TOKEN_TTL_SECONDS,
+      );
+      return token;
+    }
     await this.redis.set(
       this.key(token),
       this.fingerprint(toolName, args, userId),
@@ -80,6 +127,40 @@ export class VexiConfirmationService {
       TOKEN_TTL_SECONDS,
     );
     return token;
+  }
+
+  async inspect(
+    token: string,
+    toolName: string,
+    args: Record<string, any>,
+    userId: number | undefined,
+  ): Promise<ConfirmationInspection> {
+    const result = (await this.redis.eval(
+      INSPECT_SCRIPT,
+      2,
+      this.key(token),
+      this.metadataKey(token),
+      this.fingerprint(toolName, args, userId),
+    )) as [number, number, string];
+    if (Number(result?.[0]) === -1)
+      return { outcome: 'mismatch', ttlSeconds: 0 };
+    if (Number(result?.[0]) !== 1 || Number(result?.[1]) <= 0) {
+      return { outcome: 'missing', ttlSeconds: 0 };
+    }
+    let metadata: ConfirmationMetadata | undefined;
+    if (result[2]) {
+      try {
+        const parsed: unknown = JSON.parse(String(result[2]));
+        if (this.validMetadata(parsed)) metadata = parsed;
+      } catch {
+        // Corrupt/missing G metadata cannot authorize voice; legacy clicks still work.
+      }
+    }
+    return {
+      outcome: 'ok',
+      ttlSeconds: Number(result[1]),
+      ...(metadata && { metadata }),
+    };
   }
 
   async redeem(
@@ -107,6 +188,27 @@ export class VexiConfirmationService {
 
   private key(token: string): string {
     return `vexi:confirm:${token}`;
+  }
+
+  private metadataKey(token: string): string {
+    return `vexi:confirm-meta:${token}`;
+  }
+
+  private validMetadata(value: unknown): value is ConfirmationMetadata {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return false;
+    const meta = value as ConfirmationMetadata;
+    return (
+      /^[a-f0-9]{64}$/.test(meta.previewHash) &&
+      Number.isSafeInteger(meta.organizationId) &&
+      meta.organizationId > 0 &&
+      Number.isSafeInteger(meta.storeId) &&
+      meta.storeId > 0 &&
+      typeof meta.toolVersion === 'string' &&
+      /^[a-zA-Z0-9._-]{1,40}$/.test(meta.toolVersion) &&
+      (meta.conversationId === undefined ||
+        (Number.isSafeInteger(meta.conversationId) && meta.conversationId > 0))
+    );
   }
 
   /**

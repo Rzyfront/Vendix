@@ -545,3 +545,210 @@ describe('ai-tool-registry · consistent scope matching', () => {
     );
   });
 });
+
+// D0's opt-in API must coexist with the exact legacy string ABI above.
+describe('AIToolRegistry D0 execution contract', () => {
+  const confirmations = {
+    issue: jest.fn().mockResolvedValue('single-use-qa'),
+    redeem: jest.fn().mockResolvedValue('ok'),
+  };
+  const make = (handler: jest.Mock, write = false) => {
+    const registry = new AIToolRegistry(confirmations as any);
+    registry.register({
+      name: 'qa_tool',
+      domain: 'qa',
+      description: 'qa',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'number' } },
+        required: ['id'],
+      },
+      readOnly: !write,
+      requiresConfirmation: write,
+      handler,
+    });
+    return registry;
+  };
+  beforeEach(() => jest.clearAllMocks());
+  it('keeps strings/aliases unchanged for legacy callers, but types the opt-in result', async () => {
+    const registry = make(jest.fn().mockResolvedValue('{"id":1}'));
+    registry.registerAlias('qa_old', 'qa_tool');
+    expect(await registry.executeTool('qa_old', { id: 1 })).toBe('{"id":1}');
+    expect(
+      await registry.executeToolResult(
+        'default_api.qa_old',
+        { id: 1 },
+        { evidenceRef: 'tool_call:1' },
+      ),
+    ).toMatchObject({ status: 'ok', resource_ids: { id: 1 } });
+  });
+  it('labels invalid args before handler, preview or token generation', async () => {
+    const handler = jest.fn();
+    const registry = make(handler, true);
+    expect(await registry.executeToolResult('qa_tool', {})).toMatchObject({
+      status: 'recoverable_error',
+      error_code: 'INVALID_ARGS',
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(confirmations.issue).not.toHaveBeenCalled();
+  });
+  it('a write still proposes without running its handler', async () => {
+    const handler = jest.fn();
+    const registry = make(handler, true);
+    await expect(
+      registry.executeToolResult('qa_tool', { id: 1 }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+    expect(confirmations.issue).toHaveBeenCalledTimes(1);
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('an approved timeout is unknown_effect, not a successful write or permission error', async () => {
+    const handler = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('sensitive timeout'), { code: 'ETIMEDOUT' }),
+      );
+    const registry = make(handler, true);
+    const result = await registry.executeToolResult(
+      'qa_tool',
+      { id: 1 },
+      { confirmationToken: 'single-use-qa' },
+    );
+    expect(result).toMatchObject({
+      status: 'unknown_effect',
+      retryable: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('sensitive');
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+  it('does not classify an HTTP200 failure envelope as ok', async () => {
+    const registry = make(
+      jest
+        .fn()
+        .mockResolvedValue(
+          '{"statusCode":200,"success":false,"message":"rejected"}',
+        ),
+    );
+    expect(
+      (await registry.executeToolResult('qa_tool', { id: 1 })).status,
+    ).toBe('recoverable_error');
+  });
+});
+
+describe('G registry proposal and preview fences', () => {
+  const ctx = {
+    user_id: 3,
+    store_id: 1,
+    organization_id: 2,
+    permissions: ['write'],
+    roles: ['owner'],
+    is_owner: true,
+    is_super_admin: false,
+  };
+  const scope = <T>(work: () => T) =>
+    require('../../common/context/request-context.service').RequestContextService.runIsolated(
+      ctx,
+      work,
+    );
+  function fixture() {
+    const confirmations = {
+      issue: jest.fn().mockResolvedValue('token'),
+      redeem: jest.fn().mockResolvedValue('ok'),
+    };
+    const handler = jest.fn().mockResolvedValue('{"applied":true}');
+    const preview = jest
+      .fn()
+      .mockResolvedValue({
+        status: 'ok',
+        target: 'Registro',
+        changes: [{ field: 'quantity', label: 'Cantidad', from: 1, to: 2 }],
+      });
+    const registry = new AIToolRegistry(confirmations as any);
+    registry.register({
+      name: 'change_record',
+      domain: 'records',
+      description: 'Change',
+      requiresConfirmation: true,
+      requiredPermissions: ['write'],
+      parameters: {
+        type: 'object',
+        properties: { quantity: { type: 'number' } },
+        required: ['quantity'],
+      },
+      handler,
+      preview,
+    });
+    registry.register({
+      name: 'read_record',
+      domain: 'records',
+      description: 'Read',
+      readOnly: true,
+      parameters: { type: 'object' },
+      handler,
+    });
+    return { registry, confirmations, handler, preview };
+  }
+  it('proposalOnly never redeems even if a caller supplies a valid token', () =>
+    scope(async () => {
+      const f = fixture();
+      await expect(
+        f.registry.executeTool(
+          'change_record',
+          { quantity: 2 },
+          { confirmationToken: 'stolen', proposalOnly: true },
+        ),
+      ).rejects.toMatchObject({ errorCode: 'AI_AGENT_005' });
+      expect(f.confirmations.redeem).not.toHaveBeenCalled();
+      expect(f.handler).not.toHaveBeenCalled();
+    }));
+  it('proposalOnly is not an arbitrary read handler bypass', () =>
+    scope(async () => {
+      const f = fixture();
+      await expect(
+        f.registry.executeTool('read_record', {}, { proposalOnly: true }),
+      ).rejects.toBeDefined();
+      expect(f.handler).not.toHaveBeenCalled();
+    }));
+  it('changed fresh preview rejects before token redemption', () =>
+    scope(async () => {
+      const f = fixture();
+      await expect(
+        f.registry.executeTool(
+          'change_record',
+          { quantity: 2 },
+          { confirmationToken: 'token', expectedPreviewHash: 'a'.repeat(64) },
+        ),
+      ).rejects.toBeDefined();
+      expect(f.confirmations.redeem).not.toHaveBeenCalled();
+      expect(f.handler).not.toHaveBeenCalled();
+    }));
+  it('same preview passes the one existing token choke', () =>
+    scope(async () => {
+      const f = fixture();
+      const { toolPreviewHash } = require('./ai-tool-registry');
+      const fresh = await f.registry.previewForConsent('change_record', {
+        quantity: 2,
+      });
+      await f.registry.executeTool(
+        'change_record',
+        { quantity: 2 },
+        {
+          confirmationToken: 'token',
+          expectedPreviewHash: toolPreviewHash(fresh.preview),
+        },
+      );
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(f.confirmations.redeem).toHaveBeenCalledTimes(1);
+    }));
+  it('preview helper cannot execute, read, or accept invalid args', () =>
+    scope(async () => {
+      const f = fixture();
+      await expect(
+        f.registry.previewForConsent('read_record', {}),
+      ).rejects.toBeDefined();
+      await expect(
+        f.registry.previewForConsent('change_record', {}),
+      ).rejects.toBeDefined();
+      expect(f.preview).not.toHaveBeenCalled();
+      expect(f.handler).not.toHaveBeenCalled();
+    }));
+});

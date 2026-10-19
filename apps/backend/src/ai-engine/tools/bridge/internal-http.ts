@@ -1,4 +1,36 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  agentDeadlineContext,
+  createAgentOperation,
+} from '../../tasks/agent-deadline';
+
+/** D2 never borrows the historical process-global RequestContext fallback. */
+export function internalRequestContext() {
+  return agentDeadlineContext.getStore()
+    ? RequestContextService.asyncLocalStorage.getStore()
+    : RequestContextService.getContext();
+}
+
+/** Same guarded HTTP hop; the deadline covers headers AND response-body IO. */
+export async function internalApiText(
+  input: string | URL,
+  init: RequestInit,
+): Promise<{ response: Response; body: string }> {
+  const deadline = createAgentOperation({ signal: init.signal ?? undefined });
+  const request = async () => {
+    const response = await fetch(
+      input,
+      deadline ? { ...init, signal: deadline.signal } : init,
+    );
+    const body = await response.text();
+    return { response, body };
+  };
+  try {
+    return deadline ? await deadline.run(request) : await request();
+  } finally {
+    deadline?.dispose();
+  }
+}
 
 /**
  * How Vexi reaches the rest of the application: over HTTP, against this same
@@ -26,7 +58,7 @@ export function internalApiBase(): string {
 export function internalAuthHeaders(
   extra: Record<string, string> = {},
 ): Record<string, string> {
-  const context = RequestContextService.getContext();
+  const context = internalRequestContext();
   return {
     Authorization: `Bearer ${context?.access_token ?? ''}`,
     Accept: 'application/json',

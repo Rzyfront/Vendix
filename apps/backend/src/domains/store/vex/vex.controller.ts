@@ -1,4 +1,10 @@
 import {
+  AgentObjectiveResultsQueryDto,
+  ResumeAgentObjectiveDto,
+  RejectAgentObjectiveProposalDto,
+} from '../vexi/dto/resume-agent-objective.dto';
+
+import {
   Body,
   Controller,
   Get,
@@ -34,9 +40,7 @@ import { VexiActivityService } from '../vexi/vexi-activity.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { ApprovePlanDto } from './dto/approve-plan.dto';
 import { ApplyVexStepDto, PlanConversationDto } from './dto/plan-lifecycle.dto';
-import {
-  BlockInteractionDto,
-} from './dto/block-interaction.dto';
+import { BlockInteractionDto } from './dto/block-interaction.dto';
 import {
   PLAN_TOKEN_TTL_SECONDS,
   PlanApprovalService,
@@ -278,10 +282,7 @@ export class VexController {
       // Un plan cancelado conserva su token vivo hasta 15 min en Redis: el
       // estado persistido es lo que lo invalida.
       if (conversationId !== undefined) {
-        await this.planApproval.assertConversationOwner(
-          conversationId,
-          userId,
-        );
+        await this.planApproval.assertConversationOwner(conversationId, userId);
         const persisted = await this.planApproval.getPlan(
           conversationId,
           dto.plan_id,
@@ -309,26 +310,63 @@ export class VexController {
 
     let output: string;
     try {
-      output = await this.toolRegistry.executeTool(tool, args, {
-        confirmationToken: singleUseToken,
-      });
+      const execution = await this.planState.applyDurableEffect(
+        {
+          conversationId,
+          stepId: dto.step_id ? `${planId}:${dto.step_id}` : undefined,
+          tool,
+          args,
+        },
+        () =>
+          this.toolRegistry.executeTool(tool, args, {
+            confirmationToken: singleUseToken,
+          }),
+      );
+      output = execution.output;
+      if (
+        execution.result &&
+        (execution.result.status !== 'ok' ||
+          execution.result.effect_status !== 'applied')
+      ) {
+        // Unknown is not failed/applied: do not charge a successful tool, narrate
+        // success, close the plan, or issue a fresh confirmation for replay.
+        const uncertain =
+          execution.result.status === 'unknown_effect' ||
+          execution.result.effect_status !== 'not_applied';
+        const state =
+          planId && conversationId !== undefined
+            ? await this.persistStepResult({
+                planId,
+                conversationId,
+                stepId: dto.step_id,
+                tool,
+                args,
+                outcome: uncertain ? 'unknown' : 'failed',
+                error: execution.result.next_action ?? undefined,
+              })
+            : null;
+        return this.responseService.success(
+          {
+            tool,
+            output,
+            summary: execution.result.next_action,
+            execution: execution.result,
+            step_status:
+              state?.step_status ?? (uncertain ? 'unknown' : 'failed'),
+            plan_status:
+              state?.plan_status ??
+              (uncertain ? 'unknown_effect' : 'partially_applied'),
+          },
+          'Resultado pendiente de verificación',
+        );
+      }
     } catch (err) {
       // Una propuesta/confirmación rechazada no ejecutó nada: el paso sigue
       // pendiente. Cualquier otro fallo sí lo consumió: queda `failed`.
       const isConfirmationRejection =
         err instanceof VendixHttpException &&
         err.errorCode === ErrorCodes.AI_AGENT_005.code;
-      if (!isConfirmationRejection && planId && conversationId !== undefined) {
-        await this.persistStepResult({
-          planId,
-          conversationId,
-          stepId: dto.step_id,
-          tool,
-          args,
-          outcome: 'failed',
-          error: (err as Error)?.message,
-        });
-      }
+
       throw err;
     }
 
@@ -383,6 +421,63 @@ export class VexController {
         plan_status: state?.plan_status ?? 'approved',
       },
       'Paso del plan aplicado',
+    );
+  }
+
+  // Vex readers use the Vex switch/guards, never the independent Vexi setting.
+  @Get('objectives/:id')
+  async getObjective(@Param('id', ParseUUIDPipe) id: string) {
+    return this.responseService.success(
+      await this.planState.getObjectiveProgress(id),
+      'Estado del objetivo',
+    );
+  }
+
+  @Post('objectives/:id/resume')
+  async resumeObjective(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResumeAgentObjectiveDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.resumeObjective(id, {
+        expected_version: dto.expected_version,
+        allow_expired: dto.confirm_expired === true,
+      }),
+      'Objetivo seleccionado; requiere revalidación',
+    );
+  }
+
+  @Post('objectives/:id/reject-proposal')
+  async rejectObjectiveProposal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectAgentObjectiveProposalDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.rejectObjectiveProposal(id, dto.expected_version),
+      'Propuesta rechazada; no se aplicó ningún cambio',
+    );
+  }
+
+  @Get('objectives/:id/results')
+  async getObjectiveResults(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: AgentObjectiveResultsQueryDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.listObjectiveResults(id, query),
+      'Resultados del objetivo',
+    );
+  }
+
+  @Get('objectives/:id/results/:resultId')
+  async getObjectiveResult(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('resultId', ParseUUIDPipe) resultId: string,
+    @Query() query: AgentObjectiveResultsQueryDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.getObjectiveArtifact(id, resultId, query),
+      'Resultado observado del objetivo',
     );
   }
 
@@ -470,7 +565,7 @@ export class VexController {
     stepId?: string;
     tool: string;
     args: Record<string, any>;
-    outcome: 'applied' | 'failed';
+    outcome: 'applied' | 'failed' | 'unknown';
     error?: string;
   }) {
     try {
@@ -538,11 +633,11 @@ export class VexController {
           : outcome === 'replayed'
             ? `El paso "${tool}" ya se ejecutó con esta aprobación.`
             : `La aprobación del plan expiró o ya se usó. Vuelve a aprobar el plan.`;
-    throw new VendixHttpException(
-      ErrorCodes.AI_AGENT_005,
-      message,
-      { tool, arguments: args, confirmation_token: token } as any,
-    );
+    throw new VendixHttpException(ErrorCodes.AI_AGENT_005, message, {
+      tool,
+      arguments: args,
+      confirmation_token: token,
+    } as any);
   }
 
   /**

@@ -133,7 +133,10 @@ function toValidatedWriteDto<T extends object>(
 }
 
 /** Traduce una excepción del dominio a texto que el modelo pueda narrar. */
-function describeWriteError(error: unknown): { code?: string; message: string } {
+function describeWriteError(error: unknown): {
+  code?: string;
+  message: string;
+} {
   if (error instanceof VendixHttpException) {
     const response = error.getResponse() as { message?: string } | string;
     const message =
@@ -215,11 +218,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
   async function hydrateProductCards(orderedIds: number[]) {
     if (!orderedIds.length) return [];
 
-    const rows: any[] =
-      await productsService.findProductCardsForAgent(
-        orderedIds,
-        MAX_VARIANTS_INLINE,
-      );
+    const rows: any[] = await productsService.findProductCardsForAgent(
+      orderedIds,
+      MAX_VARIANTS_INLINE,
+    );
 
     const byId = new Map<number, any>(rows.map((row) => [row.id, row]));
 
@@ -402,7 +404,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     if (toNumberOrNull(args.base_price) !== null) {
       const basePrice = toNumberOrNull(args.base_price)!;
       if (basePrice < 0) {
-        return writeFailure(targetLabel, 'El precio base no puede ser negativo.');
+        return writeFailure(
+          targetLabel,
+          'El precio base no puede ser negativo.',
+        );
       }
       dto.base_price = round2(basePrice);
     }
@@ -868,8 +873,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       );
     }
 
-    const target =
-      await productsService.findProductImageForAgent(imageId);
+    const target = await productsService.findProductImageForAgent(imageId);
     if (!target) {
       return writeFailure(
         label,
@@ -1227,10 +1231,11 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
 
         if (!matches.length) {
           usedFuzzyPass = true;
-          const pool: any[] = await productsService.findProductFuzzyPoolForAgent(
-            base,
-            FUZZY_SCAN_CAP,
-          );
+          const pool: any[] =
+            await productsService.findProductFuzzyPoolForAgent(
+              base,
+              FUZZY_SCAN_CAP,
+            );
           scanCapReached = pool.length === FUZZY_SCAN_CAP;
 
           const normalizedTokens = normalize(rawQuery)
@@ -1298,6 +1303,13 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'products',
       readOnly: true,
+      // Audited D2 point read: local variables, no scratch/plan/HTTP writes.
+      scheduling: {
+        parallelSafe: true,
+        idempotent_read: true,
+        resource_keys: ['product:{product_id}'],
+        max_result_bytes: 65536,
+      },
       description:
         'Ficha completa de UN producto ya identificado: precios, impuestos, categorías, marca, existencias por bodega/local, variantes y configuración (control de inventario, seriales, reserva de servicios, unidades de medida). Úsala cuando el usuario pida el detalle de un producto concreto. Requiere product_id: si solo tienes el nombre, llama primero a find_product.',
       parameters: {
@@ -1944,8 +1956,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           description: { type: 'string', description: 'Nueva descripción.' },
           sku: {
             type: 'string',
-            description:
-              'Nuevo SKU. Debe seguir siendo único en la tienda.',
+            description: 'Nuevo SKU. Debe seguir siendo único en la tienda.',
           },
           barcode: { type: 'string', description: 'Nuevo código de barras.' },
           base_price: {
@@ -1958,7 +1969,8 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           },
           profit_margin: {
             type: 'number',
-            description: 'Nuevo margen de ganancia en porcentaje sobre el costo.',
+            description:
+              'Nuevo margen de ganancia en porcentaje sobre el costo.',
           },
           is_on_sale: {
             type: 'boolean',
@@ -2156,8 +2168,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         const { productId, label, state, plan, hasActiveReservations } =
           resolved.value;
 
-        const blocked =
-          hasActiveReservations || plan.out_of_scope_units > 0;
+        const blocked = hasActiveReservations || plan.out_of_scope_units > 0;
         return JSON.stringify({
           product: { product_id: productId, name: label, state },
           requires_confirmation: plan.requires_confirmation,
@@ -2327,8 +2338,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           },
           image_url: {
             type: 'string',
-            description:
-              'URL o clave S3 de la imagen. Obligatoria para add.',
+            description: 'URL o clave S3 de la imagen. Obligatoria para add.',
           },
           image_id: {
             type: 'number',
@@ -2337,8 +2347,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           },
           is_main: {
             type: 'boolean',
-            description:
-              'Si la imagen agregada queda como principal (add).',
+            description: 'Si la imagen agregada queda como principal (add).',
           },
           alt_text: {
             type: 'string',
@@ -2548,11 +2557,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             return writeToolError(resolved.message, resolved.nextStep);
           }
 
-          const updated =
-            await productsService.updateProductPromotions(
-              resolved.value.productId,
-              resolved.value.promotionIds,
-            );
+          const updated = await productsService.updateProductPromotions(
+            resolved.value.productId,
+            resolved.value.promotionIds,
+          );
 
           return JSON.stringify({
             summary:
@@ -2626,10 +2634,9 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             return writeToolError(resolved.message, resolved.nextStep);
           }
 
-          const generated =
-            await productsService.generateOnlinePurchaseLink(
-              resolved.value.productId,
-            );
+          const generated = await productsService.generateOnlinePurchaseLink(
+            resolved.value.productId,
+          );
 
           // La respuesta porta solo lo público: la URL, el dominio visible y
           // la fecha. Ni el `online_purchase_domain_id` interno ni el QR en
@@ -2642,8 +2649,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
               online_purchase_url:
                 (generated as any)?.online_purchase_url ??
                 resolved.value.pendingUrl,
-              domain_hostname:
-                (generated as any)?.domain_hostname ?? null,
+              domain_hostname: (generated as any)?.domain_hostname ?? null,
               online_purchase_generated_at:
                 (generated as any)?.online_purchase_generated_at ?? null,
               qr_available: true,

@@ -1,0 +1,27 @@
+{
+  "rootDir": "../../../..",
+  "testMatch": ["**/core/store/vexi/vexi-objective*.spec.ts"],
+  "transform": {
+    "^.+\\.[cm]?[tj]s$": [
+      "<rootDir>/apps/backend/node_modules/ts-jest",
+      {
+        "tsconfig": {
+          "module": "CommonJS",
+          "target": "ES2022",
+          "isolatedModules": true,
+          "allowJs": true,
+          "esModuleInterop": true,
+          "experimentalDecorators": true
+        }
+      }
+    ]
+  },
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["ts", "js", "mjs", "json"],
+  "maxWorkers": 1,
+  "moduleDirectories": [
+    "node_modules",
+    "<rootDir>/apps/frontend/node_modules",
+    "<rootDir>/apps/backend/node_modules"
+  ]
+}

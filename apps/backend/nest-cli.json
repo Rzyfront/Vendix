@@ -8,6 +8,10 @@
       {
         "include": "domains/store/print-formats/schemas/*.json",
         "outDir": "dist/src"
+      },
+      {
+        "include": "ai-engine/playbooks/content/*.md",
+        "outDir": "dist/src"
       }
     ]
   }

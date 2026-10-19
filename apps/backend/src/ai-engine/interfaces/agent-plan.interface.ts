@@ -1,8 +1,10 @@
+import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
 /**
  * Internal task list of an agent turn chain.
  *
  * The plan is cognitive scaffolding, never product surface: it is persisted in
- * `ai_conversations.metadata.agent_plan` so it survives the turn boundaries a
+ * the objective repository (or legacy conversation metadata with the flag OFF),
+ * so it survives the turn boundaries a
  * write approval or a clarifying question impose, and it is fed back to the
  * model on every turn so the model never re-derives what is left. It is never
  * rendered, streamed or narrated to the person.
@@ -23,10 +25,19 @@ export type AgentPlanStepStatus =
   | 'waiting_user'
   | 'skipped';
 
+export interface AgentPlanVerificationContract {
+  workflow_key: string;
+  step_id: string;
+  inputs: Record<string, unknown>;
+}
+
 export interface AgentPlanDeliverable {
   id: string;
   description: string;
   verified: boolean;
+  /** Fixed at plan declaration, checked by a server-owned workflow verifier. */
+  verification?: AgentPlanVerificationContract;
+  evidence_refs?: string[];
   /** Real value read from the system (id, number, state) proving it exists. */
   evidence?: string;
 }
@@ -43,6 +54,13 @@ export interface AgentPlanStep {
   /** Only while `waiting_user`: the question asked. */
   question?: string;
   attempts: number;
+  /** D2 executable DAG metadata, not private reasoning or authorization. */
+  depends_on?: number[];
+  expected_input?: string;
+  expected_output?: string;
+  candidate_tools?: string[];
+  approval?: 'none' | 'individual';
+  verifier?: string;
 }
 
 export interface AgentPlan {
@@ -89,9 +107,28 @@ export interface AgentPlanToolOutcome {
  * bridge), where the planning tools fall back to their stateless handlers.
  */
 export interface AgentPlanHook {
+  /** Durable identity only; never an approval or credential. */
+  readonly objectiveId?: string;
+  /** Releases a hook-owned lease; shared turn sessions release at their boundary. */
+  release?(): Promise<void>;
   execute(
     name: AgentPlanToolName,
     args: Record<string, any>,
+    options?: {
+      assertToolAllowed: (
+        name: string,
+        args: Record<string, unknown>,
+      ) => boolean | Promise<boolean>;
+      onRead?: (
+        result: ToolExecutionResult,
+        meta: {
+          tool_name: string;
+          call_id: string;
+          artifact_id: string;
+          arguments: Record<string, unknown>;
+        },
+      ) => Promise<void>;
+    },
   ): Promise<AgentPlanToolOutcome>;
   /** The plan if its status is `active`, else null. */
   snapshot(): Promise<AgentPlan | null>;
