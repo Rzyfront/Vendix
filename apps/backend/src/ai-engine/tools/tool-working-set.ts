@@ -136,3 +136,30 @@ export function composeWorkingSet(
   );
   return { core: coreNames, loaded: loadedNames };
 }
+
+/**
+ * Natural-language signature of a tool for an invalid-args recovery on a tool
+ * the model called without having its definition loaded (hard rule).
+ */
+export function describeToolSignature(
+  parameters: Record<string, unknown> | undefined,
+): string {
+  const properties = (parameters?.properties ?? {}) as Record<
+    string,
+    { type?: unknown; description?: unknown }
+  >;
+  const required = new Set(
+    Array.isArray(parameters?.required)
+      ? (parameters!.required as string[])
+      : [],
+  );
+  const fields = Object.entries(properties)
+    .slice(0, 12)
+    .map(([name, schema]) => {
+      const type = typeof schema?.type === 'string' ? schema.type : 'valor';
+      return `${name} (${type}${required.has(name) ? ', obligatorio' : ''})`;
+    });
+  return fields.length
+    ? `Campos que acepta: ${fields.join(', ')}.`
+    : 'No necesita campos.';
+}

@@ -1116,7 +1116,7 @@ describe('OpenAI-compatible H assembled agent stream', () => {
     await source.return(undefined);
     expect(
       create.mock.calls[0][0].tools.map((t: any) => t.function.name),
-    ).toEqual(['a_read', 'z_read']);
+    ).toEqual(['z_read', 'a_read']);
     expect(create.mock.calls[0][0]).not.toHaveProperty('stream_options');
   });
 

@@ -52,6 +52,12 @@ export interface AIRequestOptions {
   systemPrompt?: string;
   thinking?: boolean;
   tools?: AIToolDefinition[];
+  /**
+   * Leading tools that form the byte-stable prefix (agent working-set core).
+   * Prompt-caching providers put their tool breakpoint on the last of them;
+   * absent, the breakpoint goes on the last tool.
+   */
+  toolCachePrefix?: number;
   tool_choice?:
     | 'auto'
     | 'none'

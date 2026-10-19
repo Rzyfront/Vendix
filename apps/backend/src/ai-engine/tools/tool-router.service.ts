@@ -273,6 +273,39 @@ export class ToolRouterService {
   }
 
   /**
+   * D4: preload for a plan/playbook step (its title as intent). Best effort:
+   * loads up to `searchDefault` relevant tools; a failure loads nothing (the
+   * hard rule and search_tools still cover the step).
+   */
+  async preload(
+    session: ToolRoutingSession,
+    intent: string,
+    authorizedDefinitions: AIToolDefinition[],
+  ): Promise<string[]> {
+    const query = intent.trim().slice(0, 500);
+    if (!query || session.fullCatalog) return [];
+    const operational = this.operational(
+      this.documents(authorizedDefinitions).docs,
+    );
+    const core = new Set(this.coreNames(session.agent));
+    try {
+      const result = await withTimeout(
+        this.knowledge.rank(query, operational, session.signature),
+        TOOL_WORKING_SET.prefetchTimeoutMs,
+      );
+      const top = relevantTop(
+        Object.fromEntries(
+          Object.entries(result.scores ?? {}).filter(([n]) => !core.has(n)),
+        ),
+        TOOL_WORKING_SET.searchDefault,
+      );
+      return this.load(session, top, authorizedDefinitions);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * D2/D3/D4: appends authorized operational names to the working set. Hard
    * rule calls pass `cap: null` (a call that must run always loads).
    */

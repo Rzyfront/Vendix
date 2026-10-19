@@ -15,12 +15,12 @@ describe('H provider terminal contract', () => {
     function: { name, arguments: args },
   });
 
-  it('canonically sorts only the authorized working set without mutating definitions or adding tools', () => {
+  it('preserves the working-set order (core prefix + loads) without mutating definitions or adding tools', () => {
     const tools = [tool('z'), tool('a')];
     const ordered = canonicalAgentTools(tools)!;
-    expect(ordered.map((t) => t.function.name)).toEqual(['a', 'z']);
-    expect(tools.map((t) => t.function.name)).toEqual(['z', 'a']);
-    expect(ordered[0]).toBe(tools[1]);
+    expect(ordered.map((t) => t.function.name)).toEqual(['z', 'a']);
+    expect(ordered).not.toBe(tools);
+    expect(ordered[0]).toBe(tools[0]);
     expect(canonicalAgentTools(undefined)).toBeUndefined();
   });
   it('rejects duplicate working-set names before SDK dispatch', () => {

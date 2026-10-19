@@ -22,6 +22,11 @@ import {
   AIToolCall,
 } from '../interfaces/ai-provider.interface';
 
+/** Index of the tool carrying cache_control: last core tool, else last tool. */
+function toolCacheBreakpoint(count: number, prefix?: number): number {
+  return prefix && prefix > 0 && prefix <= count ? prefix - 1 : count - 1;
+}
+
 export class AnthropicCompatibleProvider implements AIProvider {
   private client: Anthropic;
 
@@ -211,7 +216,8 @@ export class AnthropicCompatibleProvider implements AIProvider {
                 name: t.function.name,
                 description: t.function.description,
                 input_schema: t.function.parameters as any,
-                ...(i === arr.length - 1
+                ...(i ===
+                toolCacheBreakpoint(arr.length, options?.toolCachePrefix)
                   ? { cache_control: { type: 'ephemeral' as const } }
                   : {}),
               })),
@@ -407,7 +413,8 @@ export class AnthropicCompatibleProvider implements AIProvider {
               name: t.function.name,
               description: t.function.description,
               input_schema: t.function.parameters as any,
-              ...(i === arr.length - 1
+              ...(i ===
+              toolCacheBreakpoint(arr.length, options?.toolCachePrefix)
                 ? { cache_control: { type: 'ephemeral' as const } }
                 : {}),
             })),

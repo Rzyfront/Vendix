@@ -116,6 +116,41 @@ describe('AnthropicCompatibleProvider prompt caching (Vex step 5)', () => {
     expect(chunks.map((c) => c.type)).toEqual(['text', 'done']);
   });
 
+  it('carga dinámica: cache_control va en la última tool del núcleo y el orden se preserva', async () => {
+    const provider = buildProvider();
+    const create = jest.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'hola' }],
+      model: 'test-model',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    (provider as any).client.messages.create = create;
+
+    await provider.chat([{ role: 'system', content: 'eres Vex' }], {
+      tools: [
+        toolDef('core_a'),
+        toolDef('core_b'),
+        toolDef('z_loaded'),
+        toolDef('a_loaded'),
+      ],
+      toolCachePrefix: 2,
+    });
+
+    const payload = create.mock.calls[0][0];
+    expect(payload.tools.map((t: any) => t.name)).toEqual([
+      'core_a',
+      'core_b',
+      'z_loaded',
+      'a_loaded',
+    ]);
+    expect(
+      payload.tools
+        .map((t: any, i: number) => (t.cache_control ? i : -1))
+        .filter((i: number) => i >= 0),
+    ).toEqual([1]);
+    expect(payload).not.toHaveProperty('toolCachePrefix');
+  });
+
   it('maps cache_read_input_tokens/cache_creation_input_tokens in chat()', async () => {
     const provider = buildProvider();
     const create = jest.fn().mockResolvedValue({
@@ -824,7 +859,7 @@ describe('Anthropic-compatible H assembled agent stream', () => {
       }),
     );
     const payload = stream.mock.calls[0][0];
-    expect(payload.tools.map((t: any) => t.name)).toEqual(['a_read', 'z_read']);
+    expect(payload.tools.map((t: any) => t.name)).toEqual(['z_read', 'a_read']);
     expect(payload.tools[1].cache_control).toEqual({ type: 'ephemeral' });
     expect(payload.system).toEqual([
       {
