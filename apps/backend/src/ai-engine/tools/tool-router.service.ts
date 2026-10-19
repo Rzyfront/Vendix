@@ -435,8 +435,13 @@ export class ToolRouterService {
         ([domain, names]) =>
           `- ${domain}: ${names.sort((a, b) => a.localeCompare(b)).join(', ')}`,
       );
+    const canSearch = authorizedDefinitions.some(
+      (definition) => definition.function.name === 'search_tools',
+    );
     return [
-      'Índice del taller: herramientas que existen y puedes usar en este turno, por área. Las que no tengas cargadas búscalas con search_tools o llámalas directamente por su nombre exacto.',
+      canSearch
+        ? 'Índice del taller: herramientas que existen y puedes usar en este turno, por área. Las que no tengas cargadas búscalas con search_tools o llámalas directamente por su nombre exacto.'
+        : 'Índice del taller: herramientas que existen y puedes usar en este turno, por área. Las que no tengas cargadas llámalas directamente por su nombre exacto.',
       ...lines,
     ].join('\n');
   }

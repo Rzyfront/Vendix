@@ -194,6 +194,16 @@ describe('ToolRouterService: conjunto dinámico por turno (fábricas reales)', (
     expect(router.buildToolIndexDigest(auth)).toBe(digest);
   });
 
+  it('índice del taller sin search_tools autorizado: no lo menciona', () => {
+    const auth = registry
+      .getAllDefinitions()
+      .filter((d) => d.function.name !== 'search_tools');
+    const digest = router.buildToolIndexDigest(auth);
+    expect(digest).toMatch(/^Índice del taller/);
+    expect(digest).not.toContain('search_tools');
+    expect(digest).toContain('llámalas directamente por su nombre exacto');
+  });
+
   it('alternativas ante un nombre alucinado: devuelve y carga herramientas reales', async () => {
     const auth = registry.getAllDefinitions();
     const session = router.createSession('proveedores', 's', [], 'vexi');
