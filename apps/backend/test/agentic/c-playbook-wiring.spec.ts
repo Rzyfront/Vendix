@@ -227,7 +227,9 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
       });
       expect(load).not.toHaveBeenCalled();
       expect(result.tools_used).toEqual([]);
-      expect(result.execution?.outcome).toBe('blocked');
+      // Denied to the agent/caller scope: a recoverable model mistake, never
+      // the «tu usuario o plan» blocked notice (fix router 2026-10).
+      expect(result.execution?.outcome).not.toBe('blocked');
     }));
   it('missing explicit ALS cannot borrow static user identity for the runtime session', async () => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx);

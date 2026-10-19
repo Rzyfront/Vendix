@@ -443,7 +443,8 @@ describe('Salidas visibles de Vexi: solo prosa del modelo o catálogo humano', (
     const out = await runTurn(SCENARIOS[0]);
     for (const channel of [out.streamed, out.persisted, out.spoken]) {
       expect(channel).not.toContain(UI_ADD_ITEM_FAIL);
-      expect(channel).toContain(USER_NOTICES.needs_user_input);
+      // The model already asked in prose: no generic notice is appended.
+      expect(channel).not.toContain(USER_NOTICES.needs_user_input);
     }
   });
 

@@ -9,7 +9,6 @@ import {
   catalogHash,
   localToolRanking,
   localToolScores,
-  mayFillWithoutEvidence,
   ToolDocument,
 } from './tool-catalog';
 
@@ -35,13 +34,11 @@ const DISCOVERY = new Set([
  * exact identifier (Vexi: `chat_assistant` seed + migración
  * 20260803234500_vexi_documentos_y_agente_integral; Vex: `vex_render_*` in
  * 20261001120000_vex_agent_registration). The prompt orders the model to call
- * them, so a lexical top-K that buries them guarantees NOT_OFFERED.
+ * them, so they lead the ordered catalog.
  *
- * Offered ON TOP of the K operative slots, like the scaffold, so the lexical
- * working set keeps its full capacity; bounded (≤8) and never a grant: every
- * name is intersected with the authorized definitions of the turn (permissions
- * ∩ plan ∩ agent allowed − denied). Discovery and plan tools are handled by
- * their own scaffolds and never listed here.
+ * Ordering only, never a grant: every name is intersected with the authorized
+ * definitions of the turn (permissions ∩ plan ∩ agent allowed − denied).
+ * Discovery and plan tools are ordered last and never listed here.
  */
 export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
   vexi: [
@@ -72,8 +69,6 @@ export function agentToolCore(agent: string | undefined): readonly string[] {
   return AGENT_TOOL_CORE[agent ?? 'vexi'] ?? [];
 }
 const MIN_PLAN = new Set(['propose_plan', 'ask_user']);
-/** Bounded: a model naming many unoffered tools cannot widen the set past K. */
-const MAX_REQUESTED = 4;
 export interface ToolRoutingSession {
   query: string;
   signature: string;
@@ -89,12 +84,6 @@ export interface ToolRoutingSession {
    * enter the working set. The voice surface keeps its own preview-only filter.
    */
   writesNeedEvidence?: boolean;
-  /**
-   * Authorized tools the model already called by exact name while they were
-   * not offered (AI_AGENT_TOOL_NOT_OFFERED). Pinned like dependencies at the
-   * NEXT inference; never grants authority (re-filtered against `allowed`).
-   */
-  requested?: string[];
   pending?: { query: string; domain?: string };
   lastSearch?: { query: string; names: string[] };
 }
@@ -146,6 +135,18 @@ export class ToolRouterService {
     };
   }
 
+  /**
+   * The model ALWAYS receives every tool the turn authorizes (permissions ∩
+   * plan ∩ agent allowed − denied ∩ caller). Relevance only ORDERS the list
+   * (core → ranked for the goal → rest → scaffold); it never excludes. A top-K
+   * working set made the model call authorized-but-unoffered tools, which the
+   * loop rejected as AI_AGENT_TOOL_NOT_ALLOWED / staged for another round:
+   * false «sin permisos» notices and turns that ran out of rounds (prod 2026-10).
+   *
+   * The order is computed once per session (the goal does not change inside a
+   * turn), so the tool block stays byte-stable across rounds for prompt caching.
+   * Plan tools keep their hook gating: without a plan hook they are not offered.
+   */
   async select(
     session: ToolRoutingSession,
     authorizedDefinitions: AIToolDefinition[],
@@ -159,146 +160,64 @@ export class ToolRouterService {
         d,
       ]),
     );
-    // A strict agent/plan/caller scope that excludes discovery retains the FULL authorized
-    // catalog, rather than getting stranded at K12 or receiving an unauthorized scaffold.
-    if (!allowed.has('search_tools'))
-      return {
-        definitions: authorizedDefinitions,
-        operationalCount: authorizedDefinitions.filter(
-          (d) => !isAgentPlanTool(d.function.name),
-        ).length,
-        degraded: ['discovery_not_authorized'],
-        catalogHash: hash,
-      };
-    const scaffold = docs.filter(
-      (d) =>
-        DISCOVERY.has(d.name) ||
-        (isAgentPlanTool(d.name) &&
-          hasPlan &&
-          (activePlan || MIN_PLAN.has(d.name))),
-    );
-    const coreNames = new Set(
-      agentToolCore(session.agent).map((n) => this.registry.canonicalName(n)),
-    );
-    // `docs` is already the authorized subset: a core name the agent may not use
-    // simply has no document here and is never offered.
-    const core = docs.filter(
-      (d) =>
-        coreNames.has(d.name) &&
-        !DISCOVERY.has(d.name) &&
-        !isAgentPlanTool(d.name),
+    const offerPlanTool = (name: string) =>
+      hasPlan && (activePlan || MIN_PLAN.has(name));
+    const coreNames = agentToolCore(session.agent).map((n) =>
+      this.registry.canonicalName(n),
     );
     const operational = docs.filter(
-      (d) =>
-        !DISCOVERY.has(d.name) &&
-        !isAgentPlanTool(d.name) &&
-        !coreNames.has(d.name),
+      (d) => !DISCOVERY.has(d.name) && !isAgentPlanTool(d.name),
     );
-    const intent = session.pending ?? { query: session.query };
-    let ranked: { names: string[]; degraded: string[] };
-    try {
-      ranked = await this.knowledge.rank(
-        intent.query,
-        operational,
-        session.signature,
-        intent.domain,
-      );
-    } catch {
-      ranked = {
-        names: localToolRanking(intent.query, operational, intent.domain),
-        degraded: ['router_lexical_fallback'],
-      };
-    }
-    // Writes never enter by a score-0 tie (alphabetical tie-break): without
-    // lexical evidence for THIS intent only fail-closed reads may fill the set.
-    // Vector/ts ranks are not evidence here: the vector branch returns its
-    // nearest 100 regardless of relevance. Pinned/requested/previous names and
-    // search_tools (which re-enters here with its own query/domain) still reach
-    // a write deliberately.
-    if (session.writesNeedEvidence) {
-      const scores = localToolScores(intent.query, operational, intent.domain);
-      const byName = new Map(operational.map((d) => [d.name, d]));
-      ranked = {
-        ...ranked,
-        names: ranked.names.filter((name) => {
-          const doc = byName.get(name);
-          return (
-            !!doc &&
-            ((scores.get(name) ?? 0) > 0 || mayFillWithoutEvidence(doc))
-          );
-        }),
-      };
-    }
-    const opAllowed = new Set(operational.map((d) => d.name));
-    const pinned = [
-      ...session.used,
-      ...session.dependencies,
-      ...(session.requested ?? []),
-    ]
-      .map((n) => this.registry.canonicalName(n))
-      .filter((n) => opAllowed.has(n));
-    // Core tools are always offered; their authorized dependencies are pinned.
-    for (const doc of core)
-      for (const dependency of doc.dependencies) {
-        const canonical = this.registry.canonicalName(dependency);
-        if (opAllowed.has(canonical) && !pinned.includes(canonical))
-          pinned.push(canonical);
+    let degraded: string[] = [];
+    if (!session.names.length && operational.length) {
+      let ranked: string[];
+      try {
+        const result = await this.knowledge.rank(
+          session.query,
+          operational,
+          session.signature,
+        );
+        ranked = result.names;
+        degraded = result.degraded;
+      } catch {
+        ranked = localToolRanking(session.query, operational);
+        degraded = ['router_lexical_fallback'];
       }
-    // Dependency closure is still bounded and never gives a denied tool authority.
-    for (let i = 0; i < pinned.length && i < session.capacity; i++) {
-      for (const dependency of docs.find((d) => d.name === pinned[i])
-        ?.dependencies ?? []) {
-        const canonical = this.registry.canonicalName(dependency);
-        if (opAllowed.has(canonical) && !pinned.includes(canonical))
-          pinned.push(canonical);
-      }
+      session.names = [...new Set([...coreNames, ...ranked])];
     }
-    const previous = session.names.filter((n) => opAllowed.has(n));
-    const candidates = [
-      ...new Set([...pinned, ...previous, ...ranked.names]),
-    ].filter((n) => opAllowed.has(n));
-    const names = candidates.slice(0, session.capacity);
-    // Exact/alias/dependency fast path must not be buried by prior unused definitions.
-    if (session.pending) {
-      const requested = ranked.names.slice(
-        0,
-        Math.max(
-          1,
-          session.capacity - Math.min(pinned.length, session.capacity),
-        ),
-      );
-      names.splice(
-        0,
-        names.length,
-        ...[...new Set([...pinned, ...requested, ...previous, ...ranked.names])]
-          .filter((n) => opAllowed.has(n))
-          .slice(0, session.capacity),
-      );
-    }
-    session.names = names;
-    session.pending = undefined;
-    const offered = new Set([
-      ...names,
-      ...scaffold.map((d) => d.name),
-      ...core.map((d) => d.name),
-    ]);
+    const order = new Map<string, number>();
+    for (const name of [...session.used, ...session.names])
+      if (!order.has(name)) order.set(name, order.size);
+    const rank = (name: string) => {
+      if (DISCOVERY.has(name) || isAgentPlanTool(name))
+        return Number.MAX_SAFE_INTEGER;
+      return order.get(name) ?? Number.MAX_SAFE_INTEGER - 1;
+    };
+    const names = [...allowed.keys()]
+      .filter((name) => !isAgentPlanTool(name) || offerPlanTool(name))
+      .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     return {
-      definitions: [...offered]
-        .sort()
-        .map((n) => allowed.get(n)!)
-        .filter(Boolean),
-      operationalCount: names.length,
-      degraded: ranked.degraded,
+      definitions: names.map((n) => allowed.get(n)!),
+      operationalCount: names.filter(
+        (n) => !DISCOVERY.has(n) && !isAgentPlanTool(n),
+      ).length,
+      degraded: allowed.has('search_tools')
+        ? degraded
+        : [...degraded, 'discovery_not_authorized'],
       catalogHash: hash,
     };
   }
 
-  /** Stage only. Caller swaps definitions+guard together at the NEXT inference. */
+  /**
+   * Optional helper: ranks the ALREADY OFFERED authorized catalog for an
+   * intent. It never stages, expands or gates anything — every authorized
+   * tool is callable in the same round.
+   */
   async search(
     session: ToolRoutingSession,
     args: Record<string, unknown>,
     authorized: AIToolDefinition[],
-    allowExpansion = true,
+    _allowExpansion = true,
   ): Promise<string> {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (
@@ -329,28 +248,6 @@ export class ToolRouterService {
         );
       return this.searchPage(session, args, authorized);
     }
-    if (session.pending)
-      return JSON.stringify({
-        error: 'Ya hay una ampliación preparada para la siguiente inferencia.',
-        next_step:
-          'Usa el catálogo de la siguiente inferencia antes de volver a buscar.',
-      });
-    if (session.expansions >= 2)
-      return JSON.stringify({
-        expanded: false,
-        capacity: session.capacity,
-        next_step:
-          'Ya se alcanzó el máximo de 40 operativas. Usa list_capabilities/list_endpoints y el bridge autorizado; no inventes herramientas ni DTOs.',
-      });
-    // Validation, schema cursors and no-op results above do not expand the
-    // working set. Only the actual expansion needs an objective budget slot.
-    if (!allowExpansion)
-      return JSON.stringify({
-        error: 'Se agotaron las ampliaciones del objetivo.',
-        error_code: 'AGENT_EXPANSION_LIMIT',
-        next_step:
-          'Usa el catálogo ya autorizado o informa la capacidad concreta que falta.',
-      });
     const searchQuery = [
       query,
       typeof args.intent === 'string' ? args.intent.slice(0, 200) : '',
@@ -358,37 +255,41 @@ export class ToolRouterService {
       .filter(Boolean)
       .join(' ')
       .slice(0, 500);
-    const shadow = {
-      ...session,
-      names: [...session.names],
-      used: [...session.used],
-      capacity: session.capacity === 12 ? (24 as const) : (40 as const),
-      pending: {
-        query: searchQuery,
-        domain: args.domain as string | undefined,
-      },
-    };
-    const next = await this.select(shadow, authorized, true, true);
-    // select clears shadow.pending; never mutate current offered names here.
-    session.capacity = shadow.capacity;
-    session.expansions++;
-    session.pending = {
-      query: searchQuery,
-      domain: args.domain as string | undefined,
-    };
-    const result = next.definitions.filter(
-      (d) =>
-        !DISCOVERY.has(d.function.name) && !isAgentPlanTool(d.function.name),
+    const domain = args.domain as string | undefined;
+    const operational = this.documents(authorized).docs.filter(
+      (d) => !DISCOVERY.has(d.name) && !isAgentPlanTool(d.name),
     );
+    let ranked: string[];
+    let degraded: string[] = [];
+    try {
+      const result = await this.knowledge.rank(
+        searchQuery,
+        operational,
+        session.signature,
+        domain,
+      );
+      ranked = result.names;
+      degraded = result.degraded;
+    } catch {
+      ranked = localToolRanking(searchQuery, operational, domain);
+      degraded = ['router_lexical_fallback'];
+    }
+    const scores = localToolScores(searchQuery, operational, domain);
+    const opNames = new Set(operational.map((d) => d.name));
     const exact = this.registry.canonicalName(query);
-    const selectedNames = new Set(result.map((d) => d.function.name));
     session.lastSearch = {
       query,
-      names: [...new Set([exact, ...shadow.names])].filter((name) =>
-        selectedNames.has(name),
-      ),
+      names: [
+        ...new Set([
+          exact,
+          ...ranked.filter((name) => (scores.get(name) ?? 0) > 0),
+          ...ranked,
+        ]),
+      ]
+        .filter((name) => opNames.has(name))
+        .slice(0, 24),
     };
-    return this.searchPage(session, args, authorized, next.degraded);
+    return this.searchPage(session, args, authorized, degraded);
   }
 
   private searchPage(
@@ -409,47 +310,17 @@ export class ToolRouterService {
         3,
       );
       return JSON.stringify({
-        enabled_next_inference: true,
-        capacity: session.capacity,
         total: page.total,
         results: page.data,
         has_more: page.has_more,
         cursor: page.cursor,
         degraded,
         next_step:
-          'Las definiciones se habilitan en la SIGUIENTE inferencia, no en este lote. Continúa con cursor y la misma query para más schemas sin ampliar otra vez. Cada escritura necesita su aprobación.',
+          'Todas estas herramientas ya están en tu catálogo actual: llama la adecuada directamente en esta misma respuesta. Cada escritura necesita su aprobación.',
       });
     } catch (error) {
       return discoveryError(error);
     }
-  }
-
-  /**
-   * Stage an authorized-but-unoffered tool the model called by its exact name,
-   * so the SAME call is valid at the next inference without spending a
-   * search_tools expansion slot. The guard still rejects it in this batch
-   * (atomic definitions+guard swap). Returns false, staging nothing, for
-   * unauthorized names, discovery/plan scaffolding or unknown tools.
-   */
-  requestTool(
-    session: ToolRoutingSession,
-    name: string,
-    authorized: AIToolDefinition[],
-  ): boolean {
-    const canonical = this.registry.canonicalName(name);
-    if (DISCOVERY.has(canonical) || isAgentPlanTool(canonical)) return false;
-    if (
-      !authorized.some(
-        (d) => this.registry.canonicalName(d.function.name) === canonical,
-      )
-    )
-      return false;
-    const requested = (session.requested ??= []);
-    if (!requested.includes(canonical)) {
-      requested.push(canonical);
-      if (requested.length > MAX_REQUESTED) requested.shift();
-    }
-    return true;
   }
 
   markUsed(session: ToolRoutingSession, name: string): void {

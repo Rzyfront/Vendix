@@ -63,12 +63,9 @@ function classify(code: string, status?: number): ToolExecutionStatus {
     status === 401 ||
     status === 403 ||
     /^(SUBSCRIPTION_|PLAN_|TRIAL_)/.test(code) ||
-    [
-      'AI_AGENT_004',
-      'AI_AGENT_TOOL_NOT_ALLOWED',
-      'FORBIDDEN',
-      'PERMISSION_DENIED',
-    ].includes(code)
+    // AI_AGENT_TOOL_NOT_ALLOWED is NOT here: an unknown/denied-to-agent name
+    // is a model mistake it corrects, not a user or plan permission.
+    ['AI_AGENT_004', 'FORBIDDEN', 'PERMISSION_DENIED'].includes(code)
   )
     return 'blocked';
   return 'recoverable_error';

@@ -321,6 +321,13 @@ function buildUrl(
  * - A-1 `export_report` SOLO se invoca ante un pedido explícito de descarga
  *   ("descarga/exporta el XLSX"); nunca como paso intermedio de un análisis.
  */
+/** `["property offset should not exist"]` → `['offset']` (ValidationPipe whitelist). */
+function undeclaredQueryParams(body: string): string[] {
+  return [...body.matchAll(/property (\w+) should not exist/g)].map(
+    (match) => match[1],
+  );
+}
+
 export function createReportingTools({ s3 }: ReportingToolDeps): RegisteredTool[] {
   return [
     // ─── A-2: analyze_report (READ) ────────────────────────────────
@@ -373,21 +380,39 @@ export function createReportingTools({ s3 }: ReportingToolDeps): RegisteredTool[
         );
         const offset = Math.max(Number(args.offset ?? 0) || 0, 0);
 
-        const url = buildUrl(entry.data, {
+        // The tool paginates locally (`data.slice(offset, …)`), so the
+        // endpoint never receives `offset`: forwarding it double-skipped rows
+        // and, on DTOs with forbidNonWhitelisted (sales/by-customer), turned
+        // every call into a 400 «property offset should not exist».
+        const params: Record<string, string | number | undefined> = {
           date_from: args.date_from as string | undefined,
           date_to: args.date_to as string | undefined,
-          limit,
-          offset,
-        });
+          limit: offset + limit,
+        };
 
         try {
-          const response = await fetch(url, {
+          let response = await fetch(buildUrl(entry.data, params), {
             method: 'GET',
             headers: internalAuthHeaders(),
           });
+          // One retry without the query params the endpoint DTO declares
+          // unknown; the local pagination still applies.
+          let detail: string | undefined;
+          if (response.status === 400) {
+            detail = await response.text();
+            const rejected = undeclaredQueryParams(detail);
+            if (rejected.length && rejected.every((key) => key in params)) {
+              for (const key of rejected) delete params[key];
+              response = await fetch(buildUrl(entry.data, params), {
+                method: 'GET',
+                headers: internalAuthHeaders(),
+              });
+              detail = undefined;
+            }
+          }
 
           if (!response.ok) {
-            const detail = await response.text();
+            detail ??= await response.text();
             return guidedError(
               `El reporte de ${entry.label} devolvió ${response.status}.`,
               response.status === 403
