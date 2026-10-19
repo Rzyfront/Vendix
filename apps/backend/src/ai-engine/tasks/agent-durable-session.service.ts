@@ -50,21 +50,61 @@ function canonical(value: unknown): string {
 export function objectiveArgsHash(args: unknown): string {
   return createHash('sha256').update(canonical(args)).digest('hex');
 }
+/**
+ * 409 with a stable `error_code` and a message written for the person: the
+ * HTTP filter forwards only `error_code`, `message` and `details`, and the SSE
+ * transport forwards `message`. Internal guidance (`next_step`) never travels.
+ */
 function resumeRequired(row: AgentObjective): ConflictException {
-  const next =
+  const message =
     row.semantic_status === 'awaiting_approval'
-      ? 'Revisa y aprueba o rechaza la propuesta pendiente; todavía no autoriza continuar.'
+      ? 'Tienes una propuesta pendiente en esta conversación. Apruébala o recházala antes de pedir otra cosa.'
       : row.semantic_status === 'unknown_effect'
-        ? 'Verifica el registro o recibo del cambio incierto antes de intentar otra escritura.'
+        ? 'No pude confirmar si el último cambio se aplicó. Revisa ese registro antes de pedir otro cambio, o inicia una conversación nueva.'
         : row.semantic_status === 'expired'
-          ? 'Selecciona este objetivo vencido y confirma su reanudación; sus datos deberán consultarse de nuevo.'
-          : 'Selecciona reanudar este objetivo después de resolver su bloqueo, o inicia una conversación para un trabajo distinto.';
+          ? 'Este trabajo venció. Para retomarlo, confírmalo de nuevo; sus datos se volverán a consultar.'
+          : 'Este trabajo está detenido. Reanúdalo cuando esté resuelto, o inicia una conversación nueva para otra solicitud.';
   return new ConflictException({
     error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
-    message: next,
-    objective: objectiveProgress(row),
-    next_action: next,
+    message,
+    details: {
+      objective_id: row.id,
+      semantic_status: row.semantic_status,
+      version: row.version,
+    },
   });
+}
+/** Statuses a new human message cannot run on without an explicit resume. */
+const RESUME_REQUIRED_STATUSES = [
+  'expired',
+  'paused',
+  'superseded',
+  'cancelled',
+  'unknown_effect',
+  'blocked',
+  'awaiting_approval',
+];
+/** Projection of TTL expiry; terminal/uncertain rows keep their own status. */
+function projectExpiry(row: AgentObjective): AgentObjective {
+  return new Date(row.expires_at).getTime() <= Date.now() &&
+    ![
+      'cancelled',
+      'superseded',
+      'completed_verified',
+      'unknown_effect',
+      'expired',
+    ].includes(row.semantic_status)
+    ? { ...row, semantic_status: 'expired' }
+    : row;
+}
+/** A plan still executing steps; answering it must not discard it. */
+function hasLivePlan(row: AgentObjective): boolean {
+  return (
+    row.plan?.status === 'active' &&
+    row.plan.steps.some((step) =>
+      ['pending', 'in_progress', 'waiting_user'].includes(step.status),
+    )
+  );
 }
 
 /** One fenced executor. Facts survive this instance; credentials never do. */
@@ -358,6 +398,13 @@ export class AgentDurableSession {
                 | 'awaiting_approval')
             : status,
         next_step: result.next_action,
+        // Request only: the repository clears it under the row lock when this
+        // is an observed successful read and no dispatch is in flight/uncertain.
+        ...(result.status === 'ok' &&
+        result.freshness === 'observed' &&
+        result.effect_status === 'not_applicable'
+          ? { requires_revalidation: false }
+          : {}),
       },
     });
     if (!advanced) throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
@@ -423,6 +470,35 @@ export class AgentDurableSessionService {
     private readonly repo: AgentObjectiveRepository,
     private readonly contexts: AgentTaskContextService,
   ) {}
+  /**
+   * A new human message replaces the objective unless it still owes something:
+   * a pending card, an uncertain/in-flight or unverified-applied effect, a
+   * question the person is answering, or a plan still executing steps. Expired,
+   * blocked, paused or failed work without pending effects never traps the chat.
+   */
+  private async startsNewGoal(row: AgentObjective): Promise<boolean> {
+    // A pending card is answered on the card. An `unknown_effect` status only
+    // holds the chat while the effect ledger still has the uncertain write: a
+    // browser command that never answered (ui_*) is not a business effect.
+    if (row.semantic_status === 'awaiting_approval') return false;
+    const stuck =
+      new Date(row.expires_at).getTime() <= Date.now() ||
+      [
+        'expired',
+        'blocked',
+        'paused',
+        'failed',
+        'superseded',
+        'cancelled',
+        'unknown_effect',
+      ].includes(row.semantic_status);
+    if (
+      !stuck &&
+      (row.semantic_status === 'awaiting_input' || hasLivePlan(row))
+    )
+      return false;
+    return !(await this.repo.hasPendingEffects(row.id));
+  }
   async canContinue(conversationId: number): Promise<boolean> {
     let row = await this.repo.getForConversation(conversationId);
     if (row?.semantic_status === 'awaiting_approval')
@@ -433,31 +509,49 @@ export class AgentDurableSessionService {
       ['active', 'partial', 'awaiting_input'].includes(row.semantic_status)
     );
   }
+  /**
+   * `freshGoal` marks a NEW human message (not a plan continuation, approval,
+   * rejection or explicit resume). Default: a turn without `continuation` and
+   * without `objectiveId`, which is exactly a human message in every caller.
+   */
   async open(
     conversationId: number,
     agentKey: string,
     goal: string,
-    options: { continuation?: boolean; objectiveId?: string } = {},
+    options: {
+      continuation?: boolean;
+      objectiveId?: string;
+      freshGoal?: boolean;
+    } = {},
   ): Promise<AgentDurableSession | null> {
     // Do not borrow another request's historical static tenant context.
     const ctx = RequestContextService.asyncLocalStorage.getStore();
     if (!ctx?.store_id || !ctx.organization_id || !ctx.user_id)
       throw new NotFoundException();
+    const freshGoal =
+      options.freshGoal ?? (!options.continuation && !options.objectiveId);
+    // A row created by THIS call already carries this goal; never replace it.
+    let createdNow = false;
     let row = options.objectiveId
       ? await this.repo.get(options.objectiveId)
-      : ((await this.repo.importLegacy(conversationId, agentKey)) ??
-        (await this.repo.getForConversation(conversationId)));
+      : await this.repo.getForConversation(conversationId);
+    if (!row && !options.objectiveId) {
+      row = await this.repo.importLegacy(conversationId, agentKey, goal);
+      createdNow = !!row && !row.plan;
+    }
     if (
       row &&
       (row.conversation_id !== conversationId ||
         (row.agent_id && row.agent_id !== agentKey))
     )
       throw new NotFoundException();
-    if (!row)
+    if (!row) {
       row = await this.repo.createOrReplace(conversationId, null, agentKey, {
         goal,
         authority_snapshot: ctx.permissions ?? [],
       });
+      createdNow = true;
+    }
     if (row.semantic_status === 'completed_verified') {
       // A human may start another goal in this chat; automatic/explicit resumes
       // must retain the completed objective and cannot reset its budget.
@@ -468,21 +562,20 @@ export class AgentDurableSessionService {
         authority_snapshot: ctx.permissions ?? [],
         completed_objective_id: row.id,
       });
+    } else if (freshGoal && !createdNow && (await this.startsNewGoal(row))) {
+      // One objective per human question: goal, facts, recovery, budget,
+      // catalog expansions and playbook pins all live under objective_id, so
+      // they restart here. The previous objective stays as `superseded`.
+      row = await this.repo.createOrReplace(conversationId, null, agentKey, {
+        goal,
+        authority_snapshot: ctx.permissions ?? [],
+      });
     }
+    row = projectExpiry(row);
     if (row.semantic_status === 'awaiting_approval')
       row = await this.repo.recoverAppliedReceipt(row.id, row.version);
     // Resume is explicit. Opening a message never refreshes expired facts or approval.
-    if (
-      [
-        'expired',
-        'paused',
-        'superseded',
-        'cancelled',
-        'unknown_effect',
-        'blocked',
-        'awaiting_approval',
-      ].includes(row.semantic_status)
-    )
+    if (RESUME_REQUIRED_STATUSES.includes(row.semantic_status))
       throw resumeRequired(row);
     row = await this.repo.acquireLease(row.id, row.version, 650_000);
     try {

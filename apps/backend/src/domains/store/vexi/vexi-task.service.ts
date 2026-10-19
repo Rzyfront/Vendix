@@ -1,4 +1,5 @@
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
+import { clientSafeExecution } from '../../../ai-engine/agent-execution.contract';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -226,7 +227,8 @@ export class VexiTaskService {
           live_status: job.status,
           result: {
             content: job.result.content ?? '',
-            execution: job.result.execution,
+            // Sent to the browser: model guidance (`next_action`) stripped.
+            execution: clientSafeExecution(job.result.execution),
           },
         };
       }
@@ -316,9 +318,8 @@ export class VexiTaskService {
           ? 'Vexi terminó tu trabajo'
           : 'Vexi no pudo terminar',
       payload.success
-        ? this.summarize(payload.content) ||
-            payload.execution?.next_action ||
-            payload.goal
+        ? // Never `execution.next_action`: it is guidance for the model.
+          this.summarize(payload.content) || payload.goal
         : `${payload.goal} — ${payload.error ?? 'no se pudo completar'}`,
       { kind: 'vexi_task', task_id: payload.task_id },
     );

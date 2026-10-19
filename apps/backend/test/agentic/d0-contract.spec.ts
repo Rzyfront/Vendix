@@ -1,6 +1,9 @@
 import { resolve } from 'node:path';
 import { loadCorpus } from './runner';
-import { withExecutionContract } from '../../src/ai-engine/agent-execution.contract';
+import {
+  INTERNAL_JARGON,
+  withExecutionContract,
+} from '../../src/ai-engine/agent-execution.contract';
 import {
   normalizeToolResult,
   toolReceipt,
@@ -89,8 +92,19 @@ describe('D0 50-case corpus terminal smoke (synthetic, no live adjudication)', (
         type: 'done',
         execution: step.value.execution,
       });
-      if (normalized.status !== 'ok')
-        expect(step.value.content).not.toContain('Ya completé');
+      // P0-3: the model's text is never replaced. A blocker, an uncertain
+      // effect, a pending card or a missing datum APPEND a human notice, so
+      // the claim never stands alone; a failed read is explained by the model.
+      const content = step.value.content;
+      expect(content).not.toMatch(INTERNAL_JARGON);
+      if (normalized.status === 'ok')
+        expect(content).toBe('Resultado de consulta sintética.');
+      else if (normalized.status === 'recoverable_error')
+        expect(content).toBe('Ya completé todo.');
+      else {
+        expect(content.startsWith('Ya completé todo.\n\n')).toBe(true);
+        expect(content.length).toBeGreaterThan('Ya completé todo.'.length + 2);
+      }
     },
   );
 });

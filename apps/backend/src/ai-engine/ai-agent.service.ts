@@ -63,6 +63,8 @@ import type {
 import {
   semanticToolOutcome,
   withExecutionContract,
+  clientSafeStream,
+  observedReceipt,
   TOOL_STAGED_CODE,
   USER_NOTICES,
 } from './agent-execution.contract';
@@ -958,11 +960,14 @@ export class AIAgentService {
         const normalized = normalizeToolResult(result, {
           write: this.toolRegistry.get(toolName)?.requiresConfirmation === true,
         });
+        // Transport compaction, not a partial read: the full payload is
+        // persisted behind the reference. The receipt stays `observed` and
+        // carries no recovery instruction; how to page the stored result is
+        // in the envelope's own `next_step`, for the model.
         return JSON.stringify({
           ...toolReceipt(normalized),
           data: JSON.parse(compacted),
-          freshness: 'truncated',
-          next_action: JSON.parse(compacted).next_step,
+          compacted: true,
         });
       }
     }
@@ -1099,7 +1104,9 @@ export class AIAgentService {
         ? this.withDurableSession(source, params.durable)
         : source;
     };
-    if (!root || !this.trace) return yield* runLoop();
+    // Model instructions (`next_action`, objective `next_step`) never leave
+    // the server: every frame is client-safe; the AgentResult stays intact.
+    if (!root || !this.trace) return yield* clientSafeStream(runLoop());
 
     let outcome: AgentOutcome = 'partial';
     let returned = false;
@@ -1170,7 +1177,7 @@ export class AIAgentService {
         }
       }
     };
-    return yield* trace.runGenerator(root, observedLoop);
+    return yield* clientSafeStream(trace.runGenerator(root, observedLoop));
   }
 
   private async *withDurableSession(
@@ -1219,6 +1226,12 @@ export class AIAgentService {
             ) ?? [],
           resource_ids: result.execution?.resource_ids ?? {},
         };
+        // Verified: the contract's "pending verification" line no longer applies.
+        const pending = `\n\n${USER_NOTICES.write_pending_verification}`;
+        if (result.content?.endsWith(pending))
+          result.content = result.content.slice(0, -pending.length);
+        else if (result.content === USER_NOTICES.write_pending_verification)
+          result.content = '';
       }
       // Server postconditions only exist for writes. A read/analysis turn
       // never has them, so it is never "pending verification": the model's
@@ -1518,6 +1531,9 @@ export class AIAgentService {
           names: routingAuthority.map((d) => d.function.name).sort(),
           auth: authScopes,
         }),
+        [],
+        params.agent_key,
+        { writesNeedEvidence: true },
       );
       // Prior turns may carry used tools; pin names only after current authorization.
       for (const message of params.messages ?? [])
@@ -2165,6 +2181,10 @@ export class AIAgentService {
         const parallelResults = new Map<string, string>();
         const parallelArtifacts = new Map<string, string>();
         const parallelAudited = new Set<string>();
+        // Calls whose arguments failed validation: each is answered on its
+        // own (INVALID_ARGS) by the serial circuit and never takes its valid
+        // siblings down with it. Value = schema guidance for the model.
+        const invalidArgCalls = new Map<string, string>();
         if (robust) {
           const authorized = await this.resolveRoutedAuthority(params);
           const liveNames = new Set(
@@ -2220,12 +2240,11 @@ export class AIAgentService {
               typeof call.arguments !== 'object' ||
               Array.isArray(call.arguments)
             ) {
-              batchError = {
-                code: 'INVALID_ARGS',
-                next: 'Corrige el JSON del lote según el schema ofrecido.',
-                culprit: index,
-              };
-              break;
+              invalidArgCalls.set(
+                call.call_id,
+                'Corrige los argumentos de esta llamada según el schema ofrecido.',
+              );
+              continue;
             }
             const definition = filteredTools.find(
               (d) =>
@@ -2246,14 +2265,12 @@ export class AIAgentService {
                 call.arguments,
               );
             if (!check?.ok) {
-              batchError = {
-                code: 'INVALID_ARGS',
-                next:
-                  check?.next_step ??
+              invalidArgCalls.set(
+                call.call_id,
+                check?.next_step ??
                   'Inspecciona el schema y corrige el campo inválido.',
-                culprit: index,
-              };
-              break;
+              );
+              continue;
             }
           }
           if (batchError) {
@@ -2340,9 +2357,12 @@ export class AIAgentService {
             if (semanticHalt) break;
             continue;
           }
+          const validCalls = calls.filter(
+            (call) => !invalidArgCalls.has(call.call_id),
+          );
           const safeBatch =
-            calls.length > 1 &&
-            calls.every((call) => {
+            validCalls.length > 1 &&
+            validCalls.every((call) => {
               const tool = this.toolRegistry.get(call.tool_name);
               return (
                 tool?.readOnly === true &&
@@ -2380,8 +2400,8 @@ export class AIAgentService {
               this.scheduler.executeBatch({
                 objective_id: params.durable!.objective_id,
                 context: RequestContextService.asyncLocalStorage.getStore()!,
-                calls,
-                offered_tools: calls.map(
+                calls: validCalls,
+                offered_tools: validCalls.map(
                   (c) => this.toolRegistry.get(c.tool_name)!,
                 ),
                 signal: deadline?.signal,
@@ -2509,7 +2529,15 @@ export class AIAgentService {
           }
         }
 
-        for (const toolCall of response.tool_calls) {
+        // Valid calls first: a sibling with invalid arguments is answered
+        // last, so its recovery decision can never halt the valid ones.
+        const orderedToolCalls = invalidArgCalls.size
+          ? [
+              ...response.tool_calls.filter((c) => !invalidArgCalls.has(c.id)),
+              ...response.tool_calls.filter((c) => invalidArgCalls.has(c.id)),
+            ]
+          : response.tool_calls;
+        for (const toolCall of orderedToolCalls) {
           // Normalized once, here, so the whole turn speaks one name: the
           // streamed frames, the trace, the clientSide check and the browser's
           // command dispatcher. Gemini prefixes calls with `default_api.`, and
@@ -2564,7 +2592,9 @@ export class AIAgentService {
                 streamDefinition.function.parameters,
                 toolArgs,
               ).ok;
+            const batchInvalid = invalidArgCalls.get(toolCall.id);
             if (
+              batchInvalid !== undefined ||
               invalidStreamSchema ||
               malformedArgs ||
               !toolArgs ||
@@ -2574,7 +2604,9 @@ export class AIAgentService {
               const normalized = normalizeToolResult({
                 error: 'Argumentos JSON inválidos.',
                 error_code: 'INVALID_ARGS',
-                next_step: 'Corrige los argumentos usando el esquema ofrecido.',
+                next_step:
+                  batchInvalid ??
+                  'Corrige los argumentos usando el esquema ofrecido.',
               });
               await observeResult(
                 toolName,
@@ -2712,8 +2744,10 @@ export class AIAgentService {
                   tool: {
                     id: toolCall.id,
                     name: toolName,
-                    summary:
-                      'Búsqueda autorizada preparada; el catálogo cambia en la siguiente inferencia.',
+                    summary: 'Buscando la herramienta adecuada.',
+                    // Routing scaffolding answered: succeeded and observed,
+                    // never an "unverified" read nor a failed query.
+                    execution: observedReceipt(),
                   },
                 };
                 continue;
@@ -3351,11 +3385,10 @@ export class AIAgentService {
                 artifactId,
                 toolArgs,
               );
-              if (normalized && result !== raw) {
-                normalized.freshness = 'truncated';
-                normalized.next_action =
-                  'Consulta el bloque completo por partes antes de dar la solicitud por terminada.';
-              }
+              // Compaction is transport: the full result is persisted behind a
+              // reference, so the receipt stays `observed` (no `truncated`, no
+              // recovery instruction, no incomplete_data).
+              if (normalized && result !== raw) normalized.compacted = true;
 
               toolsUsed.push({
                 name: toolName,
@@ -3550,7 +3583,7 @@ export class AIAgentService {
                       toolArgs,
                     );
                     if (normalizedApply && applied !== appliedRaw)
-                      normalizedApply.freshness = 'truncated';
+                      normalizedApply.compacted = true;
                     toolsUsed.push({
                       name: toolName,
                       args: publicSandboxArgs(toolName, toolArgs),

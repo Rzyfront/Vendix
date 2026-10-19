@@ -1,5 +1,6 @@
 import type { VexApplyStepResult } from '../services/vex-api.service';
 import type { VexPlanStatus, VexPlanStepStatus } from '../models/vex.models';
+import { vexiErrorText } from '../../../../../core/store/vexi/vexi-user-copy.utils';
 
 /** HTTP success is transport only. Missing or contradictory receipts fail closed. */
 export function vexApplyState(result: VexApplyStepResult): {
@@ -23,15 +24,14 @@ export function vexApplyState(result: VexApplyStepResult): {
       return {
         step_status: 'failed',
         plan_status: 'failed',
-        error: receipt.next_action ?? undefined,
+        error: `${vexiErrorText(receipt.error_code)}.`,
       };
     }
     return {
       step_status: 'unknown',
       plan_status: 'unknown_effect',
       error:
-        receipt?.next_action ??
-        'El efecto no está confirmado. Verifica el resultado; no repitas el cambio.',
+        'No pude confirmar si el cambio se aplicó. Revisa el resultado antes de repetirlo.',
     };
   }
   return {

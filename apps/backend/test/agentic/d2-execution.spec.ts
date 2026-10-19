@@ -255,7 +255,7 @@ describe('D2 real execution seams, synthetic provider/domain', () => {
       expect(result.execution?.outcome).not.toBe('completed_verified');
     }));
 
-  it('rejects a malformed full batch before all handlers, with recovery attributed only to the culprit', async () =>
+  it('a malformed call is answered on its own: the valid sibling runs, recovery attributed only to the culprit (P0-8)', async () =>
     scope(async () => {
       const handler = jest.fn(async () => '{"id":1}');
       const w = wiring(readTool(handler));
@@ -264,15 +264,15 @@ describe('D2 real execution seams, synthetic provider/domain', () => {
       malformed.function.arguments = '{bad-json';
       w.queue.push(answer([call(1), malformed]), answer());
       await drain(w.agent, session);
-      expect(handler).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledTimes(1);
       const page = await w.repo.listResults(session.objective_id, {
         limit: 100,
       });
       expect(page.items).toHaveLength(2);
       expect(
         page.items.find((row) => row.tool_call_id.endsWith(':call_1'))?.receipt
-          .error_code,
-      ).toBe('BATCH_NOT_DISPATCHED');
+          .status,
+      ).toBe('ok');
       expect(
         page.items.find((row) => row.tool_call_id.endsWith(':call_2'))?.receipt
           .error_code,

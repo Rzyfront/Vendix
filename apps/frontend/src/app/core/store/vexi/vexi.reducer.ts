@@ -545,26 +545,30 @@ export const vexiReducer = createReducer(
     planContinuePending: true,
   })),
 
-  on(VexiActions.planContinueCapped, (state) => ({
-    ...state,
-    planContinuePending: false,
-    messages: state.activeConversationId
-      ? [
-          ...state.messages,
-          {
-            id: -Date.now(),
-            conversation_id: state.activeConversationId,
-            role: 'assistant' as const,
-            content: objectiveProgress(state.objective),
-            tool_calls: null,
-            tokens_used: 0,
-            cost_usd: 0,
-            metadata: null,
-            created_at: new Date().toISOString(),
-          },
-        ]
-      : state.messages,
-  })),
+  on(VexiActions.planContinueCapped, (state) => {
+    const notice = objectiveProgress(state.objective);
+    return {
+      ...state,
+      planContinuePending: false,
+      messages:
+        state.activeConversationId && notice
+          ? [
+              ...state.messages,
+              {
+                id: -Date.now(),
+                conversation_id: state.activeConversationId,
+                role: 'assistant' as const,
+                content: notice,
+                tool_calls: null,
+                tokens_used: 0,
+                cost_usd: 0,
+                metadata: null,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : state.messages,
+    };
+  }),
 
   on(VexiActions.streamComplete, (state) => {
     // A turn that only ended to be chained may have said nothing; an empty

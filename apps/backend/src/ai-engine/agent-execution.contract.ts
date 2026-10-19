@@ -1,5 +1,6 @@
 import type { AgentResult } from './ai-agent.service';
 import type { AIStreamChunk } from './interfaces/ai-provider.interface';
+import type { ObjectiveProgress } from './tasks/interfaces/agent-objective.interface';
 import type {
   AgentExecutionSummary,
   ToolExecutionReceipt,
@@ -83,22 +84,111 @@ export function userToolSummary(
   }
 }
 
+/**
+ * Text for a turn the model never closed. Human only: it never concatenates a
+ * receipt's `next_action` (model instruction) nor raw resource ids.
+ */
 export function describeIncompleteExecution(
   receipts: ToolExecutionReceipt[],
   userNotice: string,
 ): string {
-  const observed = receipts.filter(
+  const observed = receipts.some(
     (r) => r.status === 'ok' && r.freshness === 'observed',
   );
-  const ids = [
-    ...new Set(observed.flatMap((r) => Object.values(r.resource_ids))),
-  ];
-  const prefix = ids.length
-    ? `Consulté los registros ${ids.slice(0, 5).join(', ')}. `
-    : observed.length
-      ? 'Alcancé a consultar parte de la información. '
-      : '';
-  return prefix + userNotice;
+  return (
+    (observed ? 'Alcancé a consultar parte de la información. ' : '') +
+    userNotice
+  );
+}
+
+/** Receipt for runtime scaffolding that answered (e.g. `search_tools`). */
+export function observedReceipt(): ToolExecutionReceipt {
+  return {
+    schema_version: '1',
+    status: 'ok',
+    error_code: null,
+    retryable: false,
+    next_action: null,
+    evidence_refs: [],
+    resource_ids: {},
+    pagination: null,
+    freshness: 'observed',
+    effect_status: 'not_applicable',
+  };
+}
+
+/*
+ * Client boundary. `next_action` (receipts and turn summary) and the
+ * objective's `next_step` are instructions for the MODEL. They stay intact in
+ * the AgentResult the runtime and the durable session consume, and are
+ * stripped from everything serialized to a client: SSE frames, the POST
+ * response and the message metadata the frontend reads back.
+ */
+export function clientSafeReceipt(
+  receipt: ToolExecutionReceipt,
+): ToolExecutionReceipt {
+  const { next_action: _internal, ...rest } = receipt;
+  // The key is omitted, not nulled: the client contract has no such field.
+  return rest as ToolExecutionReceipt;
+}
+
+export function clientSafeExecution(
+  execution: AgentExecutionSummary,
+): AgentExecutionSummary {
+  const { next_action: _internal, ...rest } = execution;
+  return rest as AgentExecutionSummary;
+}
+
+export function clientSafeObjective(
+  objective: ObjectiveProgress,
+): ObjectiveProgress {
+  return { ...objective, next_step: null };
+}
+
+export function clientSafeChunk(chunk: AIStreamChunk): AIStreamChunk {
+  if (!chunk.execution && !chunk.objective && !chunk.tool?.execution)
+    return chunk;
+  return {
+    ...chunk,
+    ...(chunk.execution
+      ? { execution: clientSafeExecution(chunk.execution) }
+      : {}),
+    ...(chunk.objective
+      ? { objective: clientSafeObjective(chunk.objective) }
+      : {}),
+    ...(chunk.tool?.execution
+      ? {
+          tool: {
+            ...chunk.tool,
+            execution: clientSafeReceipt(chunk.tool.execution),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Maps every yielded frame through `clientSafeChunk`; the return value is untouched. */
+export async function* clientSafeStream(
+  source: AsyncGenerator<AIStreamChunk, AgentResult>,
+): AsyncGenerator<AIStreamChunk, AgentResult> {
+  let completed = false;
+  try {
+    let step = await source.next();
+    while (!step.done) {
+      let input: unknown;
+      try {
+        input = yield clientSafeChunk(step.value);
+      } catch (error) {
+        step = await source.throw(error);
+        continue;
+      }
+      step = await source.next(input);
+    }
+    completed = true;
+    return step.value;
+  } finally {
+    if (!completed) await source.return(undefined as never);
+  }
 }
 
 function terminalOutcome(
@@ -247,6 +337,16 @@ export async function* withExecutionContract(
       !result.pending_plan
     )
       content = appendNotice(content, USER_NOTICES.pending_confirmation);
+    // A write applied in THIS turn has no server verifier at this layer: the
+    // model's text stays and a short human line is appended. The durable
+    // session removes it again if its verifier confirms the effect.
+    else if (
+      !critical &&
+      result.success &&
+      !result.exhausted &&
+      all.some((r) => r.status === 'ok' && r.effect_status === 'applied')
+    )
+      content = appendNotice(content, USER_NOTICES.write_pending_verification);
     if (
       (outcome === 'pending_confirmation' &&
         (result.pending_confirmation || result.pending_plan)) ||

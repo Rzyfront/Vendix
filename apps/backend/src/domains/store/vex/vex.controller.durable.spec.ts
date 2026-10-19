@@ -84,6 +84,12 @@ describe('Vex durable objective aliases', () => {
     expect(c.consumeVexQuota).not.toHaveBeenCalled();
     expect(output.step_status).toBe('unknown');
     expect(output.plan_status).toBe('unknown_effect');
+    // Model guidance never reaches the card nor the plan step.
+    expect(output.summary).not.toContain('Reconciliar');
+    expect(output.execution).not.toHaveProperty('next_action');
+    expect(c.persistStepResult.mock.calls[0][0].error).not.toContain(
+      'Reconciliar',
+    );
     expect(c.persistStepResult).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: 'unknown',

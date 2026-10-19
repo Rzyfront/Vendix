@@ -16,6 +16,12 @@ import {
 } from '../../../ai-engine/tasks/agent-durable-session.service';
 
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
+import {
+  clientSafeChunk,
+  clientSafeExecution,
+  clientSafeObjective,
+  clientSafeReceipt,
+} from '../../../ai-engine/agent-execution.contract';
 import type {
   AgentResult,
   AgentBlockSink,
@@ -474,8 +480,11 @@ export class AIChatService {
         variables,
         ...durableArgs,
       });
-      execution = agentResult.execution;
-      objective = agentResult.objective;
+      // Persisted and returned to the browser: model instructions stripped.
+      execution =
+        agentResult.execution && clientSafeExecution(agentResult.execution);
+      objective =
+        agentResult.objective && clientSafeObjective(agentResult.objective);
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
       vexPlan = agentResult.pending_plan ?? null;
@@ -962,8 +971,9 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
-      execution = result.execution;
-      objective = result.objective;
+      // Persisted, replayed and sent in `done`: model instructions stripped.
+      execution = result.execution && clientSafeExecution(result.execution);
+      objective = result.objective && clientSafeObjective(result.objective);
       if (!doneChunk) {
         // H can be enabled independently of D0/D1. The legacy loop sometimes
         // returns on cancellation without yielding done; do not leave clients
@@ -1143,7 +1153,9 @@ export class AIChatService {
                 // artifact refs when the conversation is reopened. No sink means
                 // keeping full data, not inventing a complete truncated result.
                 result: tool.result,
-                ...(tool.execution ? { execution: tool.execution } : {}),
+                ...(tool.execution
+                  ? { execution: clientSafeReceipt(tool.execution) }
+                  : {}),
               })) as unknown as Prisma.InputJsonValue)
             : undefined,
           ...(Object.keys(metadata).length > 0
@@ -1164,9 +1176,11 @@ export class AIChatService {
     // que el frontend enlace la continuación (el cliente cierra el SSE al
     // recibirlo, así que nada que viaje después se vería).
     if (doneChunk) {
+      // Client boundary: model guidance never rides on the final frame.
+      const safeDone = clientSafeChunk(doneChunk);
       yield assistantMessage
-        ? { ...doneChunk, message_id: assistantMessage.id }
-        : doneChunk;
+        ? { ...safeDone, message_id: assistantMessage.id }
+        : safeDone;
     }
 
     // Auto-generate title if first message

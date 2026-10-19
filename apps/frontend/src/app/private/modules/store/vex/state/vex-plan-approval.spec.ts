@@ -139,7 +139,9 @@ describe('B4/M3 Vex plan store and own cards', () => {
         expect(value.status).toBe('unknown_effect');
         expect(value.steps[0].status).toBe('unknown');
         expect(value.steps[0].confirmation_token).toBeUndefined();
-        expect(value.steps[0].error).toBe('Reconciliar antes de repetir.');
+        expect(value.steps[0].error).toBe(
+          'No pude confirmar si el cambio se aplicó. Revisa el resultado antes de repetirlo.',
+        );
         const card = TestBed.runInInjectionContext(
           () => new VexPlanCardComponent(),
         );
@@ -370,5 +372,39 @@ describe('B4/M3 Vex plan store and own cards', () => {
     expect(api.applyConfirmation).toHaveBeenCalledTimes(1);
     expect(api.approvePlan).toHaveBeenCalledTimes(1);
     expect(api.requestStepConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('P0 paso 8: a 409 of a blocked conversation shows human copy and offers "Empezar de nuevo"', () => {
+    const http409 = {
+      status: 409,
+      error: {
+        error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+        message: 'No pude confirmar si el último cambio se aplicó.',
+      },
+    };
+    (store as any).failFromError('7', 'm1', http409);
+    let message = (store as any)
+      ._conversations()[0]
+      .messages.find((m: any) => m.id === 'm1');
+    expect(message.restart_suggested).toBeTrue();
+    expect(message.error).not.toContain('AI_OBJECTIVE');
+    (store as any).applyChunk('7', 'm1', {
+      type: 'error',
+      error: 'AI_OBJECTIVE_LEASE_BUSY',
+    });
+    message = (store as any)
+      ._conversations()[0]
+      .messages.find((m: any) => m.id === 'm1');
+    expect(message.restart_suggested).toBeTrue();
+    expect(message.error).not.toContain('AI_OBJECTIVE');
+    (store as any).applyChunk('7', 'm1', {
+      type: 'error',
+      error: 'Usa search_tools para cargar la capacidad',
+    });
+    message = (store as any)
+      ._conversations()[0]
+      .messages.find((m: any) => m.id === 'm1');
+    expect(message.error).toBe('Vex no pudo completar la respuesta.');
+    expect(message.restart_suggested).toBeFalse();
   });
 });

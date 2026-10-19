@@ -16,7 +16,14 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
-import { vexiTaskExecution } from '../../../core/store/vexi/vexi-execution.utils';
+import {
+  vexiOutcomeText,
+  vexiTaskExecution,
+} from '../../../core/store/vexi/vexi-execution.utils';
+import {
+  VEXI_RESTART_LABEL,
+  vexiConflictFromNotice,
+} from '../../../core/store/vexi/vexi-user-copy.utils';
 import {
   VexiApiService,
   VexiAttachment,
@@ -347,6 +354,15 @@ const SUGGESTIONS: readonly string[] = [
                empty-handed and what to try next. -->
           @if (error()) {
             <p class="vexi-panel__notice" role="status">{{ noticeText() }}</p>
+            @if (conversationConflict()) {
+              <button
+                type="button"
+                class="vexi-panel__restart"
+                (click)="newConversation()"
+              >
+                {{ restartLabel }}
+              </button>
+            }
           }
         </div>
       </div>
@@ -894,6 +910,18 @@ const SUGGESTIONS: readonly string[] = [
         font-size: 0.8rem;
         color: var(--color-text-secondary, #6b7280);
         font-style: italic;
+      }
+
+      .vexi-panel__restart {
+        align-self: flex-start;
+        margin-top: 4px;
+        padding: 4px 10px;
+        font-size: 0.8rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-border, #e5e7eb);
+        background: transparent;
+        color: var(--color-text-primary, #111827);
+        cursor: pointer;
       }
 
       .vexi-msg--working {
@@ -1529,7 +1557,7 @@ export class VexiPanelComponent {
     if (this.taskIsDone()) {
       const execution = vexiTaskExecution(task.result);
       if (execution)
-        return `Resultado para revisar: ${goal}. ${execution.next_action}`;
+        return `Resultado para revisar: ${goal}. ${vexiOutcomeText(execution)}`;
       return `Terminé: ${goal}. Te lo cuento en la campana.`;
     }
     return `Trabajando en segundo plano: ${goal}`;
@@ -1597,7 +1625,16 @@ export class VexiPanelComponent {
    * here is a genuine breakdown — network, session, provider — and those all
    * come down to the same advice.
    */
+  /** A blocked or busy conversation: the notice offers a fresh one. */
+  protected readonly conversationConflict = computed(() =>
+    vexiConflictFromNotice(this.error()),
+  );
+
+  protected readonly restartLabel = VEXI_RESTART_LABEL;
+
   protected readonly noticeText = computed(() => {
+    // Already human copy from the closed catalog; shown as-is.
+    if (this.conversationConflict()) return this.error() ?? '';
     const raw = (this.error() ?? '').toLowerCase();
 
     if (raw.includes('network') || raw.includes('conex')) {

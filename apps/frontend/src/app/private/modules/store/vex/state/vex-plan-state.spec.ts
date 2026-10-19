@@ -21,7 +21,8 @@ describe('B4 Vex apply receipt is not HTTP success', () => {
     expect(vexApplyState(unknown)).toEqual({
       step_status: 'unknown',
       plan_status: 'unknown_effect',
-      error: 'Reconciliar antes de repetir.',
+      error:
+        'No pude confirmar si el cambio se aplicó. Revisa el resultado antes de repetirlo.',
     });
   });
   it('never turns missing statuses or contradictory applied flags into done/proposed', () => {

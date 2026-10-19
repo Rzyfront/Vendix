@@ -79,18 +79,33 @@ describe('D1 objective state remains separate from job state and approvals', () 
     ).toBe(previous);
   });
 
-  it('at the existing cap it shows durable progress without a write or another automatic turn', () => {
+  it('at the existing cap it asks to continue without a write or another automatic turn', () => {
     const capped = vexiReducer(
       { ...state, objective, planContinuePending: true },
       actions.planContinueCapped(),
     );
-    expect(capped.messages[capped.messages.length - 1].content).toContain(
-      'Consultar página siguiente',
-    );
+    const content = capped.messages[capped.messages.length - 1].content;
+    expect(content).toContain('¿Sigo?');
+    // The objective's own fields are never echoed into the transcript.
+    expect(content).not.toContain('Consultar página siguiente');
+    expect(content).not.toContain('Revisar órdenes');
     expect(capped.planContinuePending).toBe(false);
     expect(capped.autoContinuations).toBe(3);
     expect(capped.objective?.budget).toBe(objective.budget);
     expect(capped.activeTask).toBe(task);
+  });
+
+  it('adds no bubble when the objective cannot continue (pending approval)', () => {
+    const capped = vexiReducer(
+      {
+        ...state,
+        objective: { ...objective, semantic_status: 'awaiting_approval' },
+        planContinuePending: true,
+      },
+      actions.planContinueCapped(),
+    );
+    expect(capped.messages.length).toBe(state.messages.length);
+    expect(capped.planContinuePending).toBe(false);
   });
 });
 

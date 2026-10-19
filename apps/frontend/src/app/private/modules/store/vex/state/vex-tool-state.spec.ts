@@ -44,16 +44,55 @@ describe('H Vex trace uses the same honest semantic states as Vexi', () => {
       },
     );
   });
-  (['unknown', 'truncated'] as const).forEach((freshness, index) => {
-    it('treats %s evidence as unverified' + ' (caso ' + index + ')', () => {
-      expect(
-        settleVexToolStep([], {
+  it('treats unknown evidence as unconfirmed', () => {
+    expect(
+      settleVexToolStep([], {
+        id: 'one',
+        name: 'read',
+        execution: receipt('ok', 'unknown'),
+      })[0].status,
+    ).toBe('unknown');
+  });
+  it('a compacted read is a valid read: done, no warning label', () => {
+    for (const execution of [
+      receipt('ok', 'truncated'),
+      { ...receipt('ok'), compacted: true },
+    ]) {
+      const [step] = settleVexToolStep([], {
+        id: 'one',
+        name: 'read',
+        execution,
+      });
+      expect(step.status).toBe('done');
+      expect(step.summary).toBeUndefined();
+    }
+  });
+  it('a held-back call (batch stopped, staged) leaves the trace, never as failed', () => {
+    for (const error_code of ['BATCH_NOT_DISPATCHED', 'AI_AGENT_TOOL_STAGED']) {
+      const steps = settleVexToolStep(
+        [{ id: 'one', name: 'read', status: 'running' }],
+        {
           id: 'one',
           name: 'read',
-          execution: receipt('ok', freshness),
-        })[0].status,
-      ).toBe('unknown');
+          summary: 'internal note',
+          execution: { ...receipt('recoverable_error'), error_code },
+        },
+      );
+      expect(steps).toEqual([]);
+    }
+  });
+  it('maps a denied read to the catalog text, not the receipt note', () => {
+    const [step] = settleVexToolStep([], {
+      id: 'one',
+      name: 'read',
+      execution: {
+        ...receipt('blocked'),
+        error_code: 'NOT_ALLOWED',
+        next_action: 'internal recovery note',
+      },
     });
+    expect(step.status).toBe('failed');
+    expect(step.summary).toBe('No tienes permiso para esta consulta.');
   });
   it('upserts exactly one step when a result repeats or its call was not observed', () => {
     const tool = { id: 'same', name: 'read', execution: receipt('ok') };

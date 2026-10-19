@@ -35,6 +35,19 @@ metadata:
   wrapping an HTTP200 failure, is `unknown_effect`. Stop; reconcile before any
   future retry. A single-use approval token is not distributed exactly-once.
 
+## User-visible text (hotfix P0, 2026-10)
+
+- The model's answer is never replaced on read/analysis turns (truncated,
+  compacted, `ui_*` OK, `search_tools`, failed reads). Only a blocker, an
+  uncertain effect, a pending card, a missing datum or an applied-unverified
+  write APPEND one line from `USER_NOTICES`. Loop failure/exhaustion (text that
+  is not the model's) uses fixed human copy.
+- `next_action` / objective `next_step` are model guidance. `clientSafeStream`,
+  `clientSafeExecution/Receipt/Objective/Chunk` strip them from every SSE frame,
+  POST response, persisted message metadata, task GET and Vex apply response.
+- Transport compaction (>6000 chars) sets `compacted:true` and keeps
+  `freshness:'observed'`; it is not `truncated` nor `incomplete_data`.
+
 ## Contract and interpretation
 
 Source: `apps/backend/src/ai-engine/tools/interfaces/tool.interface.ts` and

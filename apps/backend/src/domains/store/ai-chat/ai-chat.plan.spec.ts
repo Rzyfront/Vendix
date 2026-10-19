@@ -1350,6 +1350,8 @@ describe('AIChat D0 receipt persistence', () => {
     evidence_refs: [],
     resource_ids: {},
   };
+  // What leaves the server: `next_action` is guidance for the model (P0-14).
+  const { next_action: _modelOnly, ...clientExecution } = execution;
   beforeEach(() =>
     jest
       .spyOn(RequestContextService, 'getContext')
@@ -1366,13 +1368,13 @@ describe('AIChat D0 receipt persistence', () => {
       execution,
     });
     const response = await b.service.sendMessage(7, { content: 'consulta' });
-    expect(response.assistant_message.execution).toEqual(execution);
+    expect(response.assistant_message.execution).toEqual(clientExecution);
     const rows = b.prisma.ai_messages.create.mock.calls.map(
       (c: any) => c[0].data,
     );
     expect(
       rows.find((r: any) => r.role === 'assistant').metadata.execution,
-    ).toEqual(execution);
+    ).toEqual(clientExecution);
   });
   it('SSE preserves done execution after persistence and stores tool receipt separately from truncated text', async () => {
     const toolExecution = {
@@ -1415,14 +1417,17 @@ describe('AIChat D0 receipt persistence', () => {
     const row = b.prisma.ai_messages.create.mock.calls
       .map((c: any) => c[0].data)
       .find((r: any) => r.role === 'assistant');
-    expect(row.metadata.execution).toEqual(execution);
-    expect(row.tool_calls[0].execution).toEqual(toolExecution);
+    expect(row.metadata.execution).toEqual(clientExecution);
+    const { next_action: _toolModelOnly, ...clientToolExecution } =
+      toolExecution;
+    expect(row.tool_calls[0].execution).toEqual(clientToolExecution);
     expect(row.tool_calls[0].result.length).toBe(20000);
     expect(frames.at(-1)).toMatchObject({
       type: 'done',
-      execution,
+      execution: clientExecution,
       message_id: 1,
     });
+    expect(frames.at(-1).execution).not.toHaveProperty('next_action');
   });
 });
 
@@ -1515,7 +1520,7 @@ describe('D1 chat durable real wiring', () => {
     usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 },
     ...extra,
   });
-  it('sync checkpoint survives reload/25 messages and feeds the SAME IDs to SSE without rediscovery', async () => {
+  it('sync checkpoint survives reload; a follow-up human question opens a clean objective (P0-9)', async () => {
     await RequestContextService.runIsolated(scope, async () => {
       const w = wiring();
       w.chat
@@ -1563,19 +1568,31 @@ describe('D1 chat durable real wiring', () => {
       });
       const frames = await collect(w.b.service, null);
       expect(w.read).toHaveBeenCalledTimes(1);
+      // The persisted read survived the restart under the first objective...
+      expect(
+        (await w.repo.listResults(objective!.id)).items[0].resource_ids,
+      ).toEqual(expect.objectContaining({ product_id: 42 }));
+      // ...but a new human question starts a clean objective: its goal, budget
+      // and recovery do not inherit the previous question's. The transcript
+      // window is the conversational bridge.
       const nextMessages = w.chat.mock.calls[2][0];
-      expect(nextMessages.map((m: any) => m.content).join(' ')).toContain(
-        '"product_id":42',
-      );
-      expect(JSON.stringify(nextMessages)).toContain('quantity');
-      expect(frames.at(-1)).toMatchObject({
+      const joined = nextMessages.map((m: any) => m.content).join(' ');
+      expect(joined).toContain('¿Y la cantidad de ese producto?');
+      expect(joined).not.toContain('"goal":"Busca el producto"');
+      const done = frames.at(-1);
+      expect(done).toMatchObject({
         type: 'done',
-        objective: { id: objective!.id, semantic_status: 'partial' },
+        objective: { semantic_status: 'partial' },
       });
-      const final = await w.repo.get(objective!.id);
-      expect(final.budget.provider_attempts).toBe(3);
-      expect(final.lease_until).toBeNull();
-      expect(final.semantic_status).not.toBe('completed_verified');
+      expect(done.objective.id).not.toBe(objective!.id);
+      expect(done.objective.next_step).toBeNull();
+      const previous = await w.repo.get(objective!.id);
+      expect(previous.semantic_status).toBe('superseded');
+      expect(previous.lease_until).toBeNull();
+      const fresh = await w.repo.get(done.objective.id);
+      expect(fresh.budget.provider_attempts).toBe(1);
+      expect(fresh.requires_revalidation).toBe(false);
+      expect(fresh.semantic_status).not.toBe('completed_verified');
     });
   });
   it('blocks a foreign owner before inference and never adopts the static ALS fallback', async () => {

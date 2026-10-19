@@ -109,6 +109,38 @@ describe('D0 tool execution normalization', () => {
     expect(result.evidence_refs).toEqual([]);
     expect(countsAsToolSuccess(result)).toBe(false);
   });
+  it('P0-4: a transport-compacted result is observed, not truncated', () => {
+    const envelope = {
+      compaction_version: '1',
+      bounded: true,
+      tool: 'get_cash_session_close_report',
+      block_id: 'b-1',
+      has_more: true,
+      complete: false,
+      truncated: true,
+      next_step: 'Read block_id with vex_block_read.',
+    };
+    for (const raw of [
+      envelope,
+      { schema_version: '1', status: 'ok', compacted: true, data: envelope },
+    ]) {
+      const result = normalizeToolResult(JSON.stringify(raw), context);
+      expect(result.status).toBe('ok');
+      expect(result.freshness).toBe('observed');
+      expect(result.compacted).toBe(true);
+      expect(result.pagination).toBeNull();
+      expect(result.effect_status).toBe('not_applicable');
+    }
+  });
+  it('P0-5: an OK browser answer to a UI command is observed, not unverified', () => {
+    const result = normalizeToolResult(
+      JSON.stringify({ status: 'navigated', landed_on: '/admin/caja' }),
+      { ...context, clientSide: true },
+    );
+    expect(result.status).toBe('ok');
+    expect(result.freshness).toBe('observed');
+    expect(result.effect_status).toBe('not_applicable');
+  });
   it('requires explicit application evidence for writes, not HTTP200/success', () => {
     expect(
       normalizeToolResult({ success: true, id: 8 }, { ...context, write: true })

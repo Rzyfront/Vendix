@@ -90,10 +90,16 @@ export class AgentTaskContextService {
     let includedPlan = objective.plan;
     let includedGoal: string | null = objective.goal;
     let includedNextStep = objective.next_step;
+    // `requires_revalidation` and `next_step` only describe obligations created
+    // by effects (writes). Without any effect they are recovery/legacy residue
+    // the model would echo as an instruction, so they are not rendered.
+    const hasEffects = effectRows.length > 0;
     const header = {
       objective_id: objective.id,
       status: objective.semantic_status,
-      requires_revalidation: objective.requires_revalidation,
+      ...(hasEffects
+        ? { requires_revalidation: objective.requires_revalidation }
+        : {}),
       budget: objective.budget,
       authority:
         'facts_only_current_permissions_and_per_write_approval_required',
@@ -110,7 +116,7 @@ export class AgentTaskContextService {
         ...(playbookPins ? { playbook_pins: playbookPins } : {}),
         goal: includedGoal,
         plan: includedPlan,
-        next_step: includedNextStep,
+        ...(hasEffects ? { next_step: includedNextStep } : {}),
         goal_omitted: includedGoal === null && !!objective.goal,
         plan_omitted: includedPlan === null && !!objective.plan,
         effects: includedEffects,
@@ -164,13 +170,17 @@ export class AgentTaskContextService {
       context = JSON.stringify({
         objective_id: objective.id,
         status: objective.semantic_status,
-        next_step:
-          objective.next_step?.length && objective.next_step.length <= 256
-            ? objective.next_step
-            : null,
+        ...(hasEffects
+          ? {
+              next_step:
+                objective.next_step?.length && objective.next_step.length <= 256
+                  ? objective.next_step
+                  : null,
+              requires_revalidation: true,
+            }
+          : {}),
         context_omitted: true,
         results_complete: false,
-        requires_revalidation: true,
         fetch_objective: true,
       });
     }
