@@ -72,6 +72,7 @@ import {
   ChatReplayRequest,
   ChatReplayCursor,
 } from './chat-stream-replay';
+import { resumeReferenceBlock } from './resume-reference';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -1590,6 +1591,10 @@ export class AIChatService {
           isContinuation: !!options.continuation,
         },
       );
+      if (!active && !options.continuation) {
+        const resume = resumeReferenceBlock(conversation.messages, goal);
+        if (resume) messages.push({ role: 'system', content: resume });
+      }
       // Durable structured facts take precedence; transcript is a bounded secondary window.
       if (session.context)
         messages.unshift({ role: 'system', content: session.context });
