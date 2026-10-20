@@ -4,6 +4,8 @@ import {
   resetNativeToolSearchCapabilityCache,
 } from './anthropic-compatible.provider';
 import { AIProviderConfig } from '../interfaces/ai-provider.interface';
+import { Logger } from '@nestjs/common';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 describe('AnthropicCompatibleProvider prompt caching (Vex step 5)', () => {
   const buildProvider = (): AnthropicCompatibleProvider => {
@@ -1014,13 +1016,17 @@ describe('Anthropic-compatible H metering capability', () => {
 });
 
 describe('AnthropicCompatibleProvider native tool search (F7)', () => {
-  const buildProvider = (baseUrl?: string): AnthropicCompatibleProvider =>
+  const buildProvider = (
+    baseUrl?: string,
+    extra: Partial<AIProviderConfig> = {},
+  ): AnthropicCompatibleProvider =>
     new AnthropicCompatibleProvider({
       provider: 'Anthropic',
       sdkType: 'anthropic_compatible',
       apiKey: 'test-key',
       modelId: 'test-model',
       ...(baseUrl && { baseUrl }),
+      ...extra,
     });
 
   const toolDef = (name: string) => ({
@@ -1044,6 +1050,20 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
     model: 'test-model',
     stop_reason: 'tool_use',
     usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  // Negative check passes: without a reference only the search tool is callable.
+  const probeNegativeOk = {
+    content: [
+      {
+        type: 'tool_use',
+        id: 'toolu_y',
+        name: 'vendix_probe_search',
+        input: { query: 'echo' },
+      },
+    ],
+    model: 'test-model',
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 2, output_tokens: 3 },
   };
   const plainReply = {
     content: [{ type: 'text', text: 'hola' }],
@@ -1098,17 +1118,26 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
     ],
   };
 
-  beforeEach(() => resetNativeToolSearchCapabilityCache());
+  let warn: jest.SpyInstance;
+  beforeEach(() => {
+    resetNativeToolSearchCapabilityCache();
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(Logger.prototype, 'debug').mockImplementation();
+  });
+  afterEach(() => jest.restoreAllMocks());
 
   it('probe: supported when 2xx and the referenced tool is callable; cached by (baseUrl, model)', async () => {
     const provider = buildProvider();
-    const create = jest.fn().mockResolvedValue(probeAccepted);
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
     (provider as any).client.messages.create = create;
 
     await expect(provider.probeNativeToolSearch()).resolves.toEqual({
       native: true,
     });
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2); // positive + negative check
     const [body, requestOptions] = create.mock.calls[0];
     expect(body.tools).toEqual([
       expect.objectContaining({
@@ -1149,7 +1178,8 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
           status: 400,
         }),
       )
-      .mockResolvedValueOnce(probeAccepted);
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
     (provider as any).client.messages.create = create;
 
     await expect(provider.probeNativeToolSearch()).resolves.toEqual({
@@ -1204,7 +1234,10 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
 
   it('native: sends the authorized catalog deferred, cache_control on the last core tool, search_tools → tool_reference', async () => {
     const provider = buildProvider();
-    const create = jest.fn().mockResolvedValueOnce(probeAccepted);
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
     (provider as any).client.messages.create = create;
     await provider.probeNativeToolSearch();
     create.mockReset().mockResolvedValue(plainReply);
@@ -1246,7 +1279,10 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
 
   it('native: a referenced deferred tool call validates; unauthorized names still rejected', async () => {
     const provider = buildProvider();
-    const create = jest.fn().mockResolvedValueOnce(probeAccepted);
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
     (provider as any).client.messages.create = create;
     await provider.probeNativeToolSearch();
     create.mockReset().mockResolvedValueOnce({
@@ -1283,7 +1319,8 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
     const create = jest
       .fn()
       .mockRejectedValueOnce(new Error('400'))
-      .mockResolvedValueOnce(probeAccepted);
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
     (provider as any).client.messages.create = create;
     await provider.probeNativeToolSearch();
     const stream = jest.fn().mockReturnValue({
@@ -1310,6 +1347,287 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
     expect(requestOptions).toMatchObject({
       headers: { 'anthropic-beta': NATIVE_TOOL_SEARCH_BETA },
     });
+  });
+
+  const rejection = (status: number, message = 'invalid_request_error') =>
+    Object.assign(new Error(`${status} ${message}`), { status });
+  const nativeProvider = async (extra: Partial<AIProviderConfig> = {}) => {
+    const provider = buildProvider(undefined, extra);
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
+    (provider as any).client.messages.create = create;
+    await expect(provider.probeNativeToolSearch()).resolves.toEqual({
+      native: true,
+    });
+    create.mockReset();
+    return { provider, create };
+  };
+  const ownPathNames = ['core_a', 'search_tools', 'loaded_x'];
+
+  it('N2 chat: a native 4xx retries once without deferring and the turn succeeds; cache turns negative', async () => {
+    const { provider, create } = await nativeProvider();
+    create
+      .mockRejectedValueOnce(rejection(400, 'tools.4.input_schema invalid'))
+      .mockResolvedValue(plainReply);
+
+    const result = await provider.chat(history, agentOptions);
+    expect(result).toMatchObject({ success: true, content: 'hola' });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(
+      create.mock.calls[0][0].tools.some((t: any) => t.defer_loading),
+    ).toBe(true);
+    const [retry, retryOptions] = create.mock.calls[1];
+    expect(retry.tools.map((t: any) => t.name)).toEqual(ownPathNames);
+    expect(retry.tools.some((t: any) => 'defer_loading' in t)).toBe(false);
+    expect(retry.messages[2].content[0].content).toBe(searchResult);
+    expect(retryOptions).toBeUndefined(); // no beta header, no signal
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Native tool search rejected in chat'),
+    );
+    expect(warn.mock.calls[0][0]).toContain('"status":400');
+
+    // Negative cache: next turn goes straight to our own path, no new probe.
+    await provider.chat(history, agentOptions);
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[2][0].tools.map((t: any) => t.name)).toEqual(
+      ownPathNames,
+    );
+  });
+
+  it('N2 chat: when the non-native retry also fails the error propagates (no loop)', async () => {
+    const { provider, create } = await nativeProvider();
+    create.mockRejectedValue(rejection(400));
+    const result = await provider.chat(history, agentOptions);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('400');
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('N2 chat: errors not attributable to the native payload are not retried', async () => {
+    const { provider, create } = await nativeProvider();
+    create.mockRejectedValueOnce(rejection(401, 'authentication_error'));
+    expect((await provider.chat(history, agentOptions)).success).toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+    // Capability untouched: the next turn is still native.
+    create.mockResolvedValueOnce(plainReply);
+    await provider.chat(history, agentOptions);
+    expect(
+      create.mock.calls[1][0].tools.some((t: any) => t.defer_loading),
+    ).toBe(true);
+
+    // A 400 on a non-native request (no deferredTools) is never retried.
+    create.mockReset().mockRejectedValueOnce(rejection(400));
+    const { deferredTools: _omit, ...withoutCatalog } = agentOptions;
+    expect((await provider.chat(history, withoutCatalog)).success).toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  const finalText = {
+    content: [{ type: 'text', text: 'hola' }],
+    model: 'test-model',
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 5 },
+  };
+
+  it('N2 chatStream: a native 4xx before any chunk retries without deferring', async () => {
+    const { provider } = await nativeProvider();
+    const stream = jest
+      .fn()
+      .mockReturnValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          throw rejection(413, 'request_too_large');
+        },
+        finalMessage: jest.fn(),
+      })
+      .mockReturnValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'hola' },
+          };
+        },
+        finalMessage: jest.fn().mockResolvedValue(finalText),
+      });
+    (provider as any).client.messages.stream = stream;
+
+    const chunks: any[] = [];
+    for await (const chunk of provider.chatStream(history, agentOptions))
+      chunks.push(chunk);
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'done']);
+    expect(stream).toHaveBeenCalledTimes(2);
+    const [retry, retryOptions] = stream.mock.calls[1];
+    expect(retry.tools.map((t: any) => t.name)).toEqual(ownPathNames);
+    expect(retry.messages[2].content[0].content).toBe(searchResult);
+    expect(retryOptions).not.toHaveProperty('headers');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('rejected in chatStream'),
+    );
+  });
+
+  it('N2 chatStream: after a chunk reached the consumer the error propagates without retry', async () => {
+    const { provider } = await nativeProvider();
+    const stream = jest.fn().mockReturnValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'ho' },
+        };
+        throw rejection(400);
+      },
+      finalMessage: jest.fn(),
+    });
+    (provider as any).client.messages.stream = stream;
+
+    const chunks: any[] = [];
+    for await (const chunk of provider.chatStream(history, agentOptions))
+      chunks.push(chunk);
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'error']);
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('N2 probe: an unreferenced deferred tool that is callable (defer_loading ignored) is unsupported', async () => {
+    const provider = buildProvider();
+    // Proxy that drops defer_loading: the echo tool is called in both checks.
+    const create = jest.fn().mockResolvedValue(probeAccepted);
+    (provider as any).client.messages.create = create;
+    await expect(provider.probeNativeToolSearch()).resolves.toEqual({
+      native: false,
+    });
+    expect(create).toHaveBeenCalledTimes(4); // (positive + negative) × 2 variants
+    const negative = create.mock.calls[1][0];
+    expect(negative.messages).toHaveLength(1);
+    expect(JSON.stringify(negative.messages)).not.toContain('tool_reference');
+    expect(negative.tools[1]).toMatchObject({
+      name: 'vendix_probe_echo',
+      defer_loading: true,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('unreferenced deferred tool was callable'),
+    );
+  });
+
+  it('N2 probe: an inconclusive negative check fails closed', async () => {
+    const provider = buildProvider();
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(plainReply)
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(plainReply);
+    (provider as any).client.messages.create = create;
+    await expect(provider.probeNativeToolSearch()).resolves.toEqual({
+      native: false,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('negative check inconclusive'),
+    );
+  });
+
+  it('N3 probe: records usage through recordBackgroundUsage (not observeUsage) and logs failures without secrets', async () => {
+    const observeUsage = jest.fn();
+    const recordBackgroundUsage = jest.fn();
+    const provider = buildProvider(undefined, {
+      apiKey: 'sk-ant-super-secret',
+      observeUsage,
+      recordBackgroundUsage,
+    });
+    const create = jest
+      .fn()
+      .mockRejectedValueOnce(rejection(400, 'unknown field defer_loading'))
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
+    (provider as any).client.messages.create = create;
+    await provider.probeNativeToolSearch();
+
+    expect(recordBackgroundUsage.mock.calls).toEqual([
+      [
+        {
+          purpose: 'tool_search_probe',
+          model: 'test-model',
+          usage: { promptTokens: 1, completionTokens: 1 },
+          latencyMs: expect.any(Number),
+        },
+      ],
+      [
+        {
+          purpose: 'tool_search_probe',
+          model: 'test-model',
+          usage: { promptTokens: 2, completionTokens: 3 },
+          latencyMs: expect.any(Number),
+        },
+      ],
+    ]);
+    // The dispatch-scoped seam is never touched by the probe.
+    expect(observeUsage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = warn.mock.calls[0][0] as string;
+    expect(line).toContain('probe (plain, positive) failed');
+    expect(line).toContain('"status":400');
+    expect(line).not.toContain('sk-ant-super-secret');
+  });
+
+  it('N3 probe: a background probe runs detached from the triggering request context', async () => {
+    const requestContext = new AsyncLocalStorage<string>();
+    const seen: Array<[string | undefined, number | undefined]> = [];
+    const provider = buildProvider(undefined, {
+      observeUsage: (usage) =>
+        seen.push([requestContext.getStore(), usage?.promptTokens]),
+      recordBackgroundUsage: ({ usage }) =>
+        seen.push([requestContext.getStore(), usage?.promptTokens]),
+    });
+    const isProbe = (body: any) =>
+      body.tools?.some((t: any) => t.name === 'vendix_probe_echo');
+    (provider as any).client.messages.create = jest.fn((body: any) =>
+      Promise.resolve(
+        isProbe(body)
+          ? plainReply
+          : { ...plainReply, usage: { input_tokens: 77, output_tokens: 1 } },
+      ),
+    );
+    await requestContext.run('turn-1', () =>
+      provider.chat(history, agentOptions),
+    );
+    await new Promise((r) => setImmediate(r));
+    const turn = seen.filter(([, prompt]) => prompt === 77);
+    const probe = seen.filter(([, prompt]) => prompt !== 77);
+    expect(turn).toEqual([['turn-1', 77]]);
+    expect(probe.length).toBeGreaterThan(0);
+    expect(probe.every(([store]) => store === undefined)).toBe(true);
+  });
+
+  it('N3 cache key: includes a short credential fingerprint, never the key itself', async () => {
+    const a = buildProvider(undefined, { apiKey: 'sk-ant-AAA' });
+    const b = buildProvider(undefined, { apiKey: 'sk-ant-BBB' });
+    const keyA = (a as any).capabilityKey('test-model') as string;
+    const keyB = (b as any).capabilityKey('test-model') as string;
+    expect(keyA).toMatch(
+      /^https:\/\/api\.anthropic\.com\|test-model\|[0-9a-f]{12}$/,
+    );
+    expect(keyA).not.toContain('sk-ant-AAA');
+    expect(keyA).not.toBe(keyB);
+
+    // Editing the credential invalidates: A's verdict is not served to B.
+    const createA = jest
+      .fn()
+      .mockResolvedValueOnce(probeAccepted)
+      .mockResolvedValueOnce(probeNegativeOk);
+    (a as any).client.messages.create = createA;
+    await a.probeNativeToolSearch();
+    const createB = jest.fn().mockResolvedValue(plainReply);
+    (b as any).client.messages.create = createB;
+    await b.chat(history, agentOptions);
+    const isProbeBody = (body: any) =>
+      body.tools?.some((t: any) => t.name === 'vendix_probe_echo');
+    const turn = createB.mock.calls.filter(([body]) => !isProbeBody(body));
+    expect(turn[0][0].tools.map((t: any) => t.name)).toEqual(ownPathNames);
+    await new Promise((r) => setImmediate(r));
+    expect(
+      createB.mock.calls.filter(([body]) =>
+        body.tools?.some((t: any) => t.name === 'vendix_probe_echo'),
+      ).length,
+    ).toBeGreaterThan(0); // B probes on its own
   });
 
   it('without deferredTools no probe runs and the request is unchanged', async () => {

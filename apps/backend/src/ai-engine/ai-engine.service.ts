@@ -33,6 +33,7 @@ import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   AIProvider,
   AIProviderConfig,
+  AIBackgroundUsageRecord,
   AIMessage,
   AIRequestOptions,
   AIResponse,
@@ -187,6 +188,8 @@ export class AIEngineService implements OnModuleInit {
       ...(this.providerObserver && {
         observeUsage: (usage) => this.providerObserver!.observeUsage(usage),
       }),
+      recordBackgroundUsage: (record) =>
+        this.logBackgroundUsage(config.id, config.settings, record),
     };
 
     try {
@@ -2130,6 +2133,43 @@ export class AIEngineService implements OnModuleInit {
           agent: 'engine',
         })
       : undefined;
+  }
+
+  /**
+   * One ai_engine_logs row per background provider call (capability probe),
+   * identifiable by `app_key`/`telemetry_metadata.purpose`. Tenant fields come
+   * from the request context only if one exists; none are invented.
+   */
+  private logBackgroundUsage(
+    configId: number,
+    settings: Record<string, any> | undefined,
+    record: AIBackgroundUsageRecord,
+  ): void {
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    const promptTokens = record.usage?.promptTokens ?? 0;
+    const completionTokens = record.usage?.completionTokens ?? 0;
+    const cacheTokens = extractCacheTokens(record.usage);
+    void this.aiLoggingService.logRequest({
+      app_key: record.purpose,
+      telemetry_metadata: { purpose: record.purpose, background: true },
+      config_id: configId,
+      organization_id: context?.organization_id,
+      store_id: context?.store_id,
+      user_id: context?.user_id,
+      model: record.model,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      ...cacheTokens,
+      cost_usd: this.aiLoggingService.calculateCost(
+        settings,
+        promptTokens,
+        completionTokens,
+        cacheTokens.cache_read_tokens,
+        cacheTokens.cache_creation_tokens,
+      ),
+      latency_ms: record.latencyMs,
+      status: 'success',
+    });
   }
 
   private observedLogFields(usage: AIResponse['usage']) {

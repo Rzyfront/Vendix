@@ -429,6 +429,13 @@ export interface AIToolDefinition {
  */
 export type AIProviderFetch = typeof globalThis.fetch;
 
+export interface AIBackgroundUsageRecord {
+  purpose: 'tool_search_probe';
+  model: string;
+  usage: Partial<NonNullable<AIResponse['usage']>> | undefined;
+  latencyMs: number;
+}
+
 export interface AIProviderConfig {
   provider: string;
   sdkType: SdkType;
@@ -439,6 +446,13 @@ export interface AIProviderConfig {
   observeUsage?: (
     usage: Partial<NonNullable<AIResponse['usage']>> | undefined,
   ) => void;
+  /**
+   * Usage of provider calls made OUTSIDE any request dispatch (e.g. the native
+   * tool-search capability probe). `observeUsage` is dispatch-scoped and drops
+   * these, so this is the only path that puts their tokens in ai_engine_logs.
+   * Numeric usage only: no prompts, headers or credentials cross this seam.
+   */
+  recordBackgroundUsage?: (record: AIBackgroundUsageRecord) => void;
   modelId: string;
   baseUrl?: string;
   /**

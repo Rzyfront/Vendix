@@ -1,4 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { Logger } from '@nestjs/common';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 import { providerFailureMetadata } from './provider-failure';
 import {
   canonicalAgentTools,
@@ -44,6 +47,43 @@ const PROBE_TIMEOUT_MS = 10_000;
 const PROBE_SEARCH_TOOL = 'vendix_probe_search';
 const PROBE_DEFERRED_TOOL = 'vendix_probe_echo';
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
+/** A real request rejected the native payload: stay on our own path longer. */
+const NATIVE_REJECTED_TTL_MS = 6 * 60 * 60 * 1000;
+/** 4xx statuses a native payload (unknown block/field, schema, size) can earn. */
+const NATIVE_REJECTION_STATUSES = new Set([400, 404, 413, 422]);
+
+const logger = new Logger('AnthropicCompatibleProvider');
+
+/**
+ * Captured at module load (bootstrap, outside any request). The background
+ * probe runs here so its HTTP calls and usage never land in the turn that
+ * happened to trigger it: the per-dispatch observer keeps the LAST usage it
+ * sees and the objective meter counts every fetch as a retry.
+ */
+const runDetached = AsyncLocalStorage.snapshot();
+
+function isNativeRejection(error: unknown): boolean {
+  return NATIVE_REJECTION_STATUSES.has(
+    (error as { status?: number })?.status ?? 0,
+  );
+}
+
+/** Log-safe failure facts: status, SDK class/code and a bounded message. */
+function failureFacts(error: unknown): Record<string, unknown> {
+  const err = error as {
+    status?: number;
+    code?: string;
+    name?: string;
+    message?: string;
+  };
+  return {
+    status: err?.status ?? null,
+    code: err?.code ?? null,
+    name: err?.name ?? null,
+    message:
+      typeof err?.message === 'string' ? err.message.slice(0, 200) : null,
+  };
+}
 
 export interface NativeToolSearchCapability {
   native: boolean;
@@ -51,7 +91,10 @@ export interface NativeToolSearchCapability {
   headers?: Record<string, string>;
 }
 
-/** Process-wide: keyed by (baseUrl, model), shared by every provider instance. */
+/**
+ * Process-wide: keyed by (baseUrl, model, credential fingerprint), shared by
+ * every provider instance; editing the config's key yields a fresh entry.
+ */
 const capabilityCache = new Map<
   string,
   { value: NativeToolSearchCapability; expiresAt: number }
@@ -246,7 +289,33 @@ export class AnthropicCompatibleProvider implements AIProvider {
       /\/+$/,
       '',
     );
-    return `${baseUrl}|${model}`;
+    // Short one-way fingerprint: the key itself never enters the cache key.
+    const credential = createHash('sha256')
+      .update(this.config.apiKey ?? '')
+      .digest('hex')
+      .slice(0, 12);
+    return `${baseUrl}|${model}|${credential}`;
+  }
+
+  /**
+   * N2 fallback: a real request rejected the native payload. Record the
+   * negative (long TTL, no probe re-runs meanwhile) so the caller's single
+   * retry, and every request until expiry, takes our own path.
+   */
+  private disableNativeToolSearch(
+    model: string,
+    error: unknown,
+    surface: 'chat' | 'chatStream',
+  ): void {
+    capabilityCache.set(this.capabilityKey(model), {
+      value: { native: false },
+      expiresAt: Date.now() + NATIVE_REJECTED_TTL_MS,
+    });
+    logger.warn(
+      `Native tool search rejected in ${surface}; retrying once without deferred tools ${JSON.stringify(
+        { model, ...failureFacts(error) },
+      )}`,
+    );
   }
 
   /**
@@ -259,16 +328,22 @@ export class AnthropicCompatibleProvider implements AIProvider {
     const key = this.capabilityKey(model);
     const cached = capabilityCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    if (!capabilityProbes.has(key)) void this.probeNativeToolSearch(model);
+    if (!capabilityProbes.has(key))
+      void runDetached(() => this.probeNativeToolSearch(model));
     return undefined;
   }
 
   /**
-   * Capability probe: one deferred tool plus a custom search tool, and a
-   * synthetic turn whose search result is a tool_reference. Supported only
-   * when the endpoint answers 2xx AND the model can call the referenced tool.
-   * Any error (400, proxy dropping the block, timeout) → own path. Safe to
-   * call at bootstrap; concurrent callers share one in-flight probe.
+   * Capability probe, fail-closed. Per header variant, two checks:
+   * - positive: a synthetic turn whose search result is a tool_reference; the
+   *   model must call the referenced deferred tool;
+   * - negative: the same tools with NO reference; the deferred tool must not
+   *   be callable, so with `tool_choice: any` the model has to call the search
+   *   tool. A proxy that ignores `defer_loading` exposes the echo tool and
+   *   fails here; anything inconclusive also counts as unsupported.
+   * Errors are logged (status/code, never secrets) and every response reports
+   * usage through `recordBackgroundUsage` (one ai_engine_logs row each).
+   * Safe to call at bootstrap; concurrent callers share one in-flight probe.
    */
   probeNativeToolSearch(model?: string): Promise<NativeToolSearchCapability> {
     const resolvedModel = model || this.config.modelId;
@@ -302,6 +377,45 @@ export class AnthropicCompatibleProvider implements AIProvider {
     model: string,
     headers?: Record<string, string>,
   ): Promise<boolean> {
+    const variant = headers ? 'beta' : 'plain';
+    const calls = (response: Anthropic.Message | undefined, name: string) =>
+      (response?.content ?? []).some(
+        (block) => block.type === 'tool_use' && block.name === name,
+      );
+    const positive = await this.probeRequest(model, headers, variant, true);
+    if (!positive) return false;
+    if (!calls(positive, PROBE_DEFERRED_TOOL)) {
+      logger.warn(
+        `Native tool search probe (${variant}): referenced deferred tool was not called ${JSON.stringify({ model })}`,
+      );
+      return false;
+    }
+    const negative = await this.probeRequest(model, headers, variant, false);
+    if (!negative) return false;
+    if (calls(negative, PROBE_DEFERRED_TOOL)) {
+      logger.warn(
+        `Native tool search probe (${variant}): unreferenced deferred tool was callable, defer_loading ignored ${JSON.stringify({ model })}`,
+      );
+      return false;
+    }
+    if (!calls(negative, PROBE_SEARCH_TOOL)) {
+      logger.warn(
+        `Native tool search probe (${variant}): negative check inconclusive ${JSON.stringify({ model })}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /** One probe request; undefined on error (logged). Usage always reported. */
+  private async probeRequest(
+    model: string,
+    headers: Record<string, string> | undefined,
+    variant: string,
+    referenced: boolean,
+  ): Promise<Anthropic.Message | undefined> {
+    const check = referenced ? 'positive' : 'negative';
+    const startedAt = Date.now();
     try {
       const response = await this.client.messages.create(
         {
@@ -330,44 +444,58 @@ export class AnthropicCompatibleProvider implements AIProvider {
               defer_loading: true,
             },
           ],
-          messages: [
-            {
-              role: 'user',
-              content: 'Find a tool that echoes text, then call it with "ok".',
-            },
-            {
-              role: 'assistant',
-              content: [
+          messages: referenced
+            ? [
                 {
-                  type: 'tool_use',
-                  id: 'toolu_vendix_probe_1',
-                  name: PROBE_SEARCH_TOOL,
-                  input: { query: 'echo text' },
+                  role: 'user',
+                  content:
+                    'Find a tool that echoes text, then call it with "ok".',
                 },
-              ],
-            },
-            {
-              role: 'user',
-              content: [
                 {
-                  type: 'tool_result',
-                  tool_use_id: 'toolu_vendix_probe_1',
-                  // Same shape the native branch sends: our JSON + references
-                  // (one deferred, one already loaded).
+                  role: 'assistant',
                   content: [
                     {
-                      type: 'text',
-                      text: JSON.stringify({
-                        results: [{ name: PROBE_DEFERRED_TOOL }],
-                      }),
+                      type: 'tool_use',
+                      id: 'toolu_vendix_probe_1',
+                      name: PROBE_SEARCH_TOOL,
+                      input: { query: 'echo text' },
                     },
-                    { type: 'tool_reference', tool_name: PROBE_DEFERRED_TOOL },
-                    { type: 'tool_reference', tool_name: PROBE_SEARCH_TOOL },
                   ],
                 },
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'tool_result',
+                      tool_use_id: 'toolu_vendix_probe_1',
+                      // Same shape the native branch sends: our JSON +
+                      // references (one deferred, one already loaded).
+                      content: [
+                        {
+                          type: 'text',
+                          text: JSON.stringify({
+                            results: [{ name: PROBE_DEFERRED_TOOL }],
+                          }),
+                        },
+                        {
+                          type: 'tool_reference',
+                          tool_name: PROBE_DEFERRED_TOOL,
+                        },
+                        {
+                          type: 'tool_reference',
+                          tool_name: PROBE_SEARCH_TOOL,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ]
+            : [
+                {
+                  role: 'user',
+                  content: `Call ${PROBE_DEFERRED_TOOL} with text "ok".`,
+                },
               ],
-            },
-          ],
         },
         {
           timeout: PROBE_TIMEOUT_MS,
@@ -375,12 +503,35 @@ export class AnthropicCompatibleProvider implements AIProvider {
           ...(headers && { headers }),
         },
       );
-      return (response?.content ?? []).some(
-        (block) =>
-          block.type === 'tool_use' && block.name === PROBE_DEFERRED_TOOL,
+      const usage = response?.usage
+        ? {
+            promptTokens: response.usage.input_tokens,
+            completionTokens: response.usage.output_tokens,
+            cacheReadTokens:
+              response.usage.cache_read_input_tokens ?? undefined,
+            cacheCreationTokens:
+              response.usage.cache_creation_input_tokens ?? undefined,
+          }
+        : undefined;
+      // Not observeUsage: that seam is dispatch-scoped and would overwrite the
+      // usage of whatever turn is current. The background sink owns the row.
+      this.config.recordBackgroundUsage?.({
+        purpose: 'tool_search_probe',
+        model: response?.model || model,
+        usage,
+        latencyMs: Date.now() - startedAt,
+      });
+      logger.debug(
+        `Native tool search probe (${variant}, ${check}) usage ${JSON.stringify({ model, ...usage })}`,
       );
-    } catch {
-      return false;
+      return response;
+    } catch (error) {
+      logger.warn(
+        `Native tool search probe (${variant}, ${check}) failed ${JSON.stringify(
+          { model, ...failureFacts(error) },
+        )}`,
+      );
+      return undefined;
     }
   }
 
@@ -490,42 +641,59 @@ export class AnthropicCompatibleProvider implements AIProvider {
       deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
       const model = options?.model || this.config.modelId;
-      const {
-        tools: toolPayload,
-        callable: tools,
-        native,
-      } = this.buildToolPayload(options, model);
-      const transformedMessages = this.transformMessages(messages, native);
-
-      const request = () =>
-        this.client.messages.create(
-          {
-            model,
-            ...(system.length && { system }),
-            messages: transformedMessages,
-            max_tokens:
-              options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-            temperature:
-              options?.temperature ??
-              this.config.settings?.temperature ??
-              undefined,
-            ...(options?.agenticStream &&
-              options.tool_choice && {
-                tool_choice:
-                  options.tool_choice === 'auto'
-                    ? { type: 'auto' as const }
-                    : options.tool_choice === 'none'
-                      ? { type: 'none' as const }
-                      : {
-                          type: 'tool' as const,
-                          name: options.tool_choice.function.name,
-                        },
-              }),
-            ...(toolPayload?.length && { tools: toolPayload }),
-          },
-          ...this.requestOptions(deadline?.signal, native),
-        );
-      const response = deadline ? await deadline.run(request) : await request();
+      let payload = this.buildToolPayload(options, model);
+      const send = (attempt: ToolPayload) => {
+        const { tools: toolPayload, native } = attempt;
+        const transformedMessages = this.transformMessages(messages, native);
+        const request = () =>
+          this.client.messages.create(
+            {
+              model,
+              ...(system.length && { system }),
+              messages: transformedMessages,
+              max_tokens:
+                options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+              temperature:
+                options?.temperature ??
+                this.config.settings?.temperature ??
+                undefined,
+              ...(options?.agenticStream &&
+                options.tool_choice && {
+                  tool_choice:
+                    options.tool_choice === 'auto'
+                      ? { type: 'auto' as const }
+                      : options.tool_choice === 'none'
+                        ? { type: 'none' as const }
+                        : {
+                            type: 'tool' as const,
+                            name: options.tool_choice.function.name,
+                          },
+                }),
+              ...(toolPayload?.length && { tools: toolPayload }),
+            },
+            ...this.requestOptions(deadline?.signal, native),
+          );
+        return deadline ? deadline.run(request) : request();
+      };
+      let response: Anthropic.Message;
+      try {
+        response = await send(payload);
+      } catch (error) {
+        // N2: a native payload rejected with a 4xx gets ONE retry with the
+        // non-native payload (working set only, no tool_reference, no beta
+        // header). The negative cache makes a second failure propagate.
+        if (
+          !payload.native ||
+          !isNativeRejection(error) ||
+          (deadline && isAgentAbort(error, deadline.signal))
+        )
+          throw error;
+        this.disableNativeToolSearch(model, error, 'chat');
+        deadline?.assertCanStart();
+        payload = this.buildToolPayload(options, model);
+        response = await send(payload);
+      }
+      const tools = payload.callable;
 
       let textContent = '';
       const toolCalls: AIToolCall[] = [];
@@ -680,52 +848,72 @@ export class AnthropicCompatibleProvider implements AIProvider {
       deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
       const model = options?.model || this.config.modelId;
-      const {
-        tools: toolPayload,
-        callable: tools,
-        native,
-      } = this.buildToolPayload(options, model);
+      let payload = this.buildToolPayload(options, model);
+      const open = (attempt: ToolPayload) =>
+        this.client.messages.stream(
+          {
+            model,
+            ...(system.length && { system }),
+            messages: this.transformMessages(messages, attempt.native),
+            max_tokens:
+              options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
+            temperature:
+              options?.temperature ??
+              this.config.settings?.temperature ??
+              undefined,
+            ...(options?.agenticStream &&
+              options.tool_choice && {
+                tool_choice:
+                  options.tool_choice === 'auto'
+                    ? { type: 'auto' as const }
+                    : options.tool_choice === 'none'
+                      ? { type: 'none' as const }
+                      : {
+                          type: 'tool' as const,
+                          name: options.tool_choice.function.name,
+                        },
+              }),
+            ...(attempt.tools?.length && { tools: attempt.tools }),
+          },
+          ...this.requestOptions(deadline?.signal, attempt.native),
+        );
 
-      const stream = this.client.messages.stream(
-        {
-          model,
-          ...(system.length && { system }),
-          messages: this.transformMessages(messages, native),
-          max_tokens:
-            options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
-          temperature:
-            options?.temperature ??
-            this.config.settings?.temperature ??
-            undefined,
-          ...(options?.agenticStream &&
-            options.tool_choice && {
-              tool_choice:
-                options.tool_choice === 'auto'
-                  ? { type: 'auto' as const }
-                  : options.tool_choice === 'none'
-                    ? { type: 'none' as const }
-                    : {
-                        type: 'tool' as const,
-                        name: options.tool_choice.function.name,
-                      },
-            }),
-          ...(toolPayload?.length && { tools: toolPayload }),
-        },
-        ...this.requestOptions(deadline?.signal, native),
-      );
-
-      for await (const event of agentDeadlineStream(stream, deadline)) {
-        if (
-          event.type === 'content_block_delta' &&
-          event.delta.type === 'text_delta'
-        ) {
-          yield { type: 'text', content: event.delta.text };
+      // N2: a native payload rejected with a 4xx is retried ONCE without
+      // deferring, but only while nothing has reached the consumer yet (an
+      // HTTP rejection arrives before any delta, so this is the normal case).
+      // After the first emitted chunk the error propagates unchanged.
+      let emitted = false;
+      let finalMessage: Anthropic.Message;
+      for (;;) {
+        const stream = open(payload);
+        try {
+          for await (const event of agentDeadlineStream(stream, deadline)) {
+            if (
+              event.type === 'content_block_delta' &&
+              event.delta.type === 'text_delta'
+            ) {
+              emitted = true;
+              yield { type: 'text', content: event.delta.text };
+            }
+          }
+          finalMessage = deadline
+            ? await deadline.run(() => stream.finalMessage())
+            : await stream.finalMessage();
+          break;
+        } catch (error) {
+          if (
+            emitted ||
+            !payload.native ||
+            !isNativeRejection(error) ||
+            (deadline && isAgentAbort(error, deadline.signal))
+          )
+            throw error;
+          this.disableNativeToolSearch(model, error, 'chatStream');
+          deadline?.assertCanStart();
+          payload = this.buildToolPayload(options, model);
         }
       }
-
-      const finalMessage = deadline
-        ? await deadline.run(() => stream.finalMessage())
-        : await stream.finalMessage();
+      const tools = payload.callable;
       this.config.observeUsage?.(
         finalMessage.usage
           ? {

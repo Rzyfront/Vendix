@@ -415,6 +415,46 @@ describe('AIEngineService cache token logging (vexR3-C)', () => {
     );
   });
 
+  it('initializeProvider() wires background (probe) usage to an identifiable ai_engine_logs row', () => {
+    const { service, aiLogging } = buildService();
+    const settings = { pricing: { input: 1 } };
+    expect(
+      (service as any).initializeProvider({
+        id: 9,
+        provider: 'Anthropic',
+        sdk_type: 'anthropic_compatible',
+        model_id: 'claude-x',
+        api_key_ref: 'sk-test',
+        settings,
+      }),
+    ).toBeNull();
+    const provider = (service as any).providers.get(9);
+    provider.config.recordBackgroundUsage({
+      purpose: 'tool_search_probe',
+      model: 'claude-x',
+      usage: { promptTokens: 40, completionTokens: 6, cacheReadTokens: 3 },
+      latencyMs: 12,
+    });
+
+    expect(aiLogging.calculateCost).toHaveBeenCalledWith(settings, 40, 6, 3, 0);
+    expect(aiLogging.logRequest).toHaveBeenCalledWith({
+      app_key: 'tool_search_probe',
+      telemetry_metadata: { purpose: 'tool_search_probe', background: true },
+      config_id: 9,
+      organization_id: undefined,
+      store_id: undefined,
+      user_id: undefined,
+      model: 'claude-x',
+      prompt_tokens: 40,
+      completion_tokens: 6,
+      cache_read_tokens: 3,
+      cache_creation_tokens: 0,
+      cost_usd: 0.5,
+      latency_ms: 12,
+      status: 'success',
+    });
+  });
+
   it('logApplicationRequest() forwards cache tokens and defaults to 0', () => {
     const { service, aiLogging } = buildService();
     (service as any).logApplicationRequest({
