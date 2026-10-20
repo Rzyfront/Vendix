@@ -1,3 +1,8 @@
+-- N6: abort on the first error even when run by hand (`psql -f` without
+-- `-v ON_ERROR_STOP=1`): otherwise the guard below would only print its
+-- exception and the UPDATE/INSERT statements after it would still run.
+\set ON_ERROR_STOP on
+
 -- Golden conversations E2E fixture. LOCAL DISPOSABLE CLONE ONLY.
 --
 -- Applied by live-http.adapter.ts before a run, after it refused any database
