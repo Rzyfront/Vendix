@@ -85,6 +85,9 @@ function isProtocolFailure(item: Record<string, unknown> | null): boolean {
       (typeof item.error === 'string' &&
         (typeof item.next_step === 'string' ||
           typeof item.error_code === 'string' ||
+          // `toolError(msg, undefined, code)` of the domain tools
+          // (inventory, dispatch, suppliers, purchasing…) emits `{error, code}`.
+          typeof item.code === 'string' ||
           Object.keys(item).every((k) =>
             ['error', 'message', 'detail', 'note', 'tool', 'version'].includes(
               k,
@@ -99,6 +102,29 @@ function isProtocolFailure(item: Record<string, unknown> | null): boolean {
         'redirected',
         'no_refresh_available',
       ].includes(String(item.status)))
+  );
+}
+
+/**
+ * Any error signal on a confirmed write result, recognised or not. Fail-closed:
+ * the in-process stamp needs a result that is clearly a success, so a shape
+ * carrying an `error`, a falsy outcome flag or an HTTP-like error status is
+ * never called applied — it stays without evidence and the normalizer resolves
+ * it to `unknown_effect` (or to its classified failure).
+ */
+function hasErrorSignal(item: Record<string, unknown>): boolean {
+  const nested = object(item.data);
+  return (
+    isProtocolFailure(item) ||
+    isProtocolFailure(nested) ||
+    (item.error !== undefined &&
+      item.error !== null &&
+      item.error !== false &&
+      item.error !== '') ||
+    (Array.isArray(item.errors) && item.errors.length > 0) ||
+    (typeof item.status === 'number' && item.status >= 400) ||
+    (typeof item.statusCode === 'string' && Number(item.statusCode) >= 400) ||
+    /^(error|errored|failure|fail|failed)$/i.test(String(item.status ?? ''))
   );
 }
 
@@ -128,7 +154,7 @@ export function markInProcessWriteApplied(raw: unknown): unknown {
     !record ||
     'applied' in record ||
     record.schema_version !== undefined ||
-    isProtocolFailure(record) ||
+    hasErrorSignal(record) ||
     record.result_unknown === true ||
     record.requires_confirmation === true ||
     record.pending_confirmation === true ||
@@ -197,9 +223,11 @@ export function normalizeToolResult(
     code =
       typeof failure.error_code === 'string'
         ? failure.error_code
-        : failure.status === 'not_found' || failure.statusCode === 404
-          ? 'NOT_FOUND'
-          : 'TOOL_BUSINESS_ERROR';
+        : typeof failure.error === 'string' && typeof failure.code === 'string'
+          ? failure.code
+          : failure.status === 'not_found' || failure.statusCode === 404
+            ? 'NOT_FOUND'
+            : 'TOOL_BUSINESS_ERROR';
     const httpStatus =
       Number(failure.statusCode ?? failure.status) || undefined;
     status = classify(
