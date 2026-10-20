@@ -4,6 +4,8 @@ import {
   renderPlanForModel,
   PLAN_TTL_MS,
 } from './vexi-plan-state.service';
+import { createPlanningTools } from '../../../ai-engine/tools/domains/planning.tools';
+import { validateToolArgs } from '../../../ai-engine/tools/tool-args.validator';
 
 function makeService(initial: any = { agent_key: 'vexi' }) {
   const row = { metadata: initial as any };
@@ -81,6 +83,45 @@ describe('renderPlanForModel', () => {
     expect(text).toContain(
       'Esto es tu guía interna; nunca la menciones a la persona',
     );
+  });
+});
+
+describe('propose_plan: published schema = contract the hook enforces', () => {
+  const schema = createPlanningTools().find((t) => t.name === 'propose_plan')!
+    .parameters as Record<string, any>;
+
+  it('a plan the hook accepts is valid against the published schema', () => {
+    expect(validateToolArgs('propose_plan', schema, propose).ok).toBe(true);
+  });
+
+  it.each([
+    ['verifier', 'steps[1].verifier'],
+    ['depends_on', 'steps[1].depends_on'],
+    ['candidate_tools', 'steps[1].candidate_tools'],
+  ])(
+    'a step without %s fails at the schema, naming the field',
+    (field, path) => {
+      const steps = propose.steps.map((step, i) => {
+        if (i !== 1) return step;
+        const copy: Record<string, unknown> = { ...step };
+        delete copy[field];
+        return copy;
+      });
+      const check = validateToolArgs('propose_plan', schema, {
+        ...propose,
+        steps,
+      });
+      expect(check.ok).toBe(false);
+      expect(check.error).toContain(`"${path}"`);
+    },
+  );
+
+  it('a deliverable without verification fails at the schema', () => {
+    const check = validateToolArgs('propose_plan', schema, {
+      ...propose,
+      deliverables: [{ description: 'Juan existe' }],
+    });
+    expect(check.error).toContain('"deliverables[0].verification"');
   });
 });
 
@@ -274,6 +315,33 @@ describe('VexiPlanStateService durable adapter', () => {
       );
       expect(repo.createOrReplace).not.toHaveBeenCalled();
       expect(prisma.ai_conversations.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  scopedIt(
+    'a refused plan names the missing step field and the no-plan path',
+    async () => {
+      const f = fixture();
+      f.replace({ ...f.row(), plan: null });
+      f.session.objective = f.row();
+      const hook = f.svc.createHook(1, f.session);
+      const outcome = await hook.execute('propose_plan', {
+        ...propose,
+        steps: propose.steps.map((step, i) =>
+          i === 1 ? { ...step, verifier: '' } : step,
+        ),
+      });
+      expect(JSON.parse(outcome.result).error).toContain(
+        'Falta o es inválido: verifier',
+      );
+      const unverified = await hook.execute('propose_plan', {
+        ...propose,
+        deliverables: [{ description: 'Juan existe' }],
+      });
+      expect(JSON.parse(unverified.result).error).toContain(
+        'propón el cambio directamente',
+      );
+      expect(f.repo.savePlan).not.toHaveBeenCalled();
     },
   );
 

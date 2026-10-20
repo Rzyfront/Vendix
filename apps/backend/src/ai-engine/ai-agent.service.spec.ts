@@ -1838,8 +1838,12 @@ describe('AIAgentService B routed catalog boundary', () => {
       .mockResolvedValueOnce(ok({ content: 'Leído' }));
     const { result } = await drain();
     // 50 operations + discovery scaffold (search_tools…), none dropped by relevance.
-    expect(names(0)).toEqual(expect.arrayContaining(['operation_49', 'search_tools']));
-    expect(names(0).filter((n: string) => n.startsWith('operation_'))).toHaveLength(50);
+    expect(names(0)).toEqual(
+      expect.arrayContaining(['operation_49', 'search_tools']),
+    );
+    expect(
+      names(0).filter((n: string) => n.startsWith('operation_')),
+    ).toHaveLength(50);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(chat).toHaveBeenCalledTimes(2);
     expect(result.content).toBe('Leído');
@@ -1937,6 +1941,15 @@ describe('AIAgentService B routed catalog boundary', () => {
     // receipt (not a domain 403, so no «tu usuario o plan» notice).
     expect(result.execution?.outcome).not.toBe('blocked');
     expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
+  });
+  it('tells the model the approval card is the confirmation, not a prior question', async () => {
+    await drain();
+    const system = chat.mock.calls[0][0]
+      .filter((m: { role: string }) => m.role === 'system')
+      .map((m: { content: string }) => m.content)
+      .join('\n');
+    expect(system).toContain('la tarjeta de aprobación es la confirmación');
+    expect(system).toContain('Pregunta antes solo por un dato');
   });
   it('fails authorization closed on plan lookup outage with routing ON', async () => {
     access.getAIFeatureConfig.mockRejectedValue(new Error('redis down'));
@@ -2147,6 +2160,35 @@ describe('D1 durable loop seam', () => {
       'pending_confirmation',
     );
     expect(result.execution?.outcome).toBe('pending_confirmation');
+  });
+  it('a refused preview checkpoints a recoverable receipt, never an uncertain effect', async () => {
+    registry.register({
+      name: 'create_product',
+      domain: 'products',
+      description: 'Crear',
+      parameters: {},
+      requiresConfirmation: true,
+      preview: async () => ({
+        status: 'error',
+        target: 'Sintético',
+        changes: [],
+        message: 'El proveedor no surte ese producto.',
+      }),
+      handler,
+    });
+    chat.mockResolvedValueOnce(
+      ok({ tool_calls: [call('write', 'create_product', { name: 'x' })] }),
+    );
+    const result = await run(() => service.runAgent({ goal: 'crea', durable }));
+    expect(handler).not.toHaveBeenCalled();
+    expect(durable.proposeWrite).not.toHaveBeenCalled();
+    const persisted = durable.checkpointTool.mock.calls[0][3];
+    expect(persisted).toMatchObject({
+      status: 'recoverable_error',
+      error_code: 'TOOL_PREVIEW_REJECTED',
+      effect_status: 'not_applicable',
+    });
+    expect(result.execution?.outcome).not.toBe('unknown_effect');
   });
   it('binds queue_task to the server conversation, so background work inherits this objective without trusting a model ID', async () => {
     const enqueue = jest.fn().mockResolvedValue('{"queued":true}');
@@ -2374,9 +2416,9 @@ describe('D1 durable loop seam', () => {
       expect(toModel).toContain('compacted');
       expect(toModel).not.toContain('"freshness":"truncated"');
       expect(toModel).not.toContain('Consulta el bloque completo');
-      expect(JSON.stringify(durable.checkpointRecovery.mock.calls)).not.toContain(
-        'incomplete_data',
-      );
+      expect(
+        JSON.stringify(durable.checkpointRecovery.mock.calls),
+      ).not.toContain('incomplete_data');
     });
 
     it('P0-5: un ui_* con respuesta OK del navegador queda observed y conserva la respuesta', async () => {
@@ -2466,6 +2508,15 @@ describe('D1 durable loop seam', () => {
       const good = rows.find((c) => c.tool?.id === 'good');
       expect(bad?.tool?.execution?.error_code).toBe('INVALID_ARGS');
       expect(bad?.tool?.failed).toBe(true);
+      // The model must learn WHICH field failed, not only the field list.
+      const badMessage = chat.mock.calls[1][0].find(
+        (m: { role: string; tool_call_id?: string }) =>
+          m.role === 'tool' && m.tool_call_id === 'bad',
+      );
+      expect(badMessage.content).toContain(
+        'Falta el campo obligatorio \\"session_id\\"',
+      );
+      expect(badMessage.content).toContain('no cumplen el esquema');
       expect(good?.tool?.execution?.status).toBe('ok');
       expect(good?.tool?.failed).toBe(false);
       expect(

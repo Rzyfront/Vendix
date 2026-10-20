@@ -1105,6 +1105,9 @@ describe('VexiRealtimeService G session authority', () => {
         (d: any) => d.function.name === 'read_product',
       ),
       operationalCount: 1,
+      coreCount: 0,
+      loadedCount: 1,
+      retrievalSource: 'lexical',
       degraded: [],
       catalogHash: 'hash',
     });
