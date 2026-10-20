@@ -680,6 +680,26 @@ describe('VexiRealtimeService G session authority', () => {
     expect(session.routing.unloadedAuthorizedCalls).toBe(1);
   });
 
+  it('L3: a routing session persisted by #934 (no loaded/used) loads the unoffered tool without a TypeError', async () => {
+    session.tools = session.tools.filter(
+      (tool: any) => tool.name !== 'read_product',
+    );
+    session.routing = {
+      query: authority.goal,
+      signature: 'legacy',
+      dependencies: [],
+      unloadedAuthorizedCalls: 0,
+    };
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.tools?.map((tool) => tool.name)).toContain('read_product');
+    expect(session.routing.loaded).toContain('read_product');
+    expect(session.routing.used).toContain('read_product');
+    expect(session.routing.unloadedAuthorizedCalls).toBe(1);
+  });
+
   it('an authorized unoffered write only becomes a proposal (consent still required)', async () => {
     session.tools = [];
     const result = await run(() =>

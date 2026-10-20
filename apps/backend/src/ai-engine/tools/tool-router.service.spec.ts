@@ -9,6 +9,7 @@ import {
 } from './tool-catalog';
 import { TOOL_WORKING_SET } from './tool-working-set';
 import { createPlaybookTools } from './domains/playbook.tools';
+import { createProceduralRecipeTools } from './domains/recipe.tools';
 import { createDiscoveryTools } from './domains/discovery.tools';
 import { discoveryPage, bridgeDataPage } from './discovery-pagination';
 import { RegisteredTool } from './interfaces/tool.interface';
@@ -383,6 +384,154 @@ describe('ToolRouterService B: relevance is not authority', () => {
     expect(denied.definitions.map((d) => d.function.name)).not.toContain(
       'load_playbook',
     );
+  });
+});
+describe('ToolRouterService M1/L2/L3: discovery con sesión, contador y sesiones legadas', () => {
+  let registry: AIToolRegistry;
+  let router: ToolRouterService;
+  const names = (s: { definitions: { function: { name: string } }[] }) =>
+    s.definitions.map((d) => d.function.name);
+  const SESSION_TOOLS = [
+    'search_playbooks',
+    'load_playbook',
+    'search_recipes',
+    'load_recipe',
+  ];
+  beforeEach(() => {
+    registry = new AIToolRegistry({} as any);
+    registry.registerMany(createDiscoveryTools());
+    registry.registerMany(createPlaybookTools());
+    registry.registerMany(createProceduralRecipeTools());
+    for (let i = 0; i < 40; i++)
+      registry.register(tool(`operation_${String(i).padStart(2, '0')}`));
+    router = new ToolRouterService(registry, {
+      rank: jest.fn(async (q, docs, scope, domain) =>
+        lexicalRank(q, docs, scope, domain),
+      ),
+    } as any);
+  });
+
+  it('M1: sin sesión, playbooks y recetas no se ofrecen ni se cargan', async () => {
+    const session = router.createSession('operation_00', 's');
+    const auth = registry.getAllDefinitions();
+    const selection = await router.select(session, auth, false, false);
+    for (const name of SESSION_TOOLS)
+      expect(names(selection)).not.toContain(name);
+    expect(router.load(session, SESSION_TOOLS, auth)).toEqual([]);
+  });
+
+  it('M1: con playbookSession/recipeSession se ofrecen en el núcleo, estable y ∩ autoridad', async () => {
+    const session = router.createSession('operation_00', 's');
+    router.enableSessionDiscovery(session, { playbooks: true, recipes: true });
+    const auth = registry.getAllDefinitions();
+    const first = await router.select(session, auth, false, false);
+    const core = names(first).slice(0, first.coreCount);
+    expect(core).toEqual(expect.arrayContaining(SESSION_TOOLS));
+    // El núcleo sigue ordenado por nombre (prefijo cacheable).
+    expect(core).toEqual([...core].sort((a, b) => a.localeCompare(b)));
+    expect(router.isLoaded(session, 'load_playbook')).toBe(true);
+    expect(router.isUnloadedOperational(session, 'search_recipes')).toBe(false);
+    // Otra ronda: mismo prefijo.
+    const second = await router.select(session, auth, false, false);
+    expect(names(second).slice(0, second.coreCount)).toEqual(core);
+  });
+
+  it('M1: sólo los de la sesión existente; sin autoridad no se ofrecen', async () => {
+    const session = router.createSession('operation_00', 's');
+    router.enableSessionDiscovery(session, { playbooks: true });
+    const auth = registry
+      .getAllDefinitions()
+      .filter((d) => d.function.name !== 'load_playbook');
+    const selection = await router.select(session, auth, false, false);
+    expect(names(selection)).toContain('search_playbooks');
+    expect(names(selection)).not.toContain('load_playbook');
+    expect(names(selection)).not.toContain('search_recipes');
+    expect(names(selection)).not.toContain('load_recipe');
+    expect(router.load(session, ['load_playbook'], auth)).toEqual([]);
+  });
+
+  it('M1: enableSessionDiscovery no admite nombres ajenos a playbooks/recetas', async () => {
+    const session = router.createSession('operation_00', 's');
+    session.sessionDiscovery = ['list_endpoints', 'search_playbooks'];
+    const auth = registry.getAllDefinitions();
+    const selection = await router.select(session, auth, false, false);
+    expect(names(selection)).toContain('search_playbooks');
+    expect(names(selection)).not.toContain('list_endpoints');
+    expect(router.load(session, ['list_endpoints'], auth)).toEqual([]);
+  });
+
+  it('M1: load() no duplica en `loaded` la discovery de la sesión (ya es núcleo) y sin autoridad la rechaza', () => {
+    const session = router.createSession('operation_00', 's');
+    router.enableSessionDiscovery(session, { recipes: true });
+    const auth = registry.getAllDefinitions();
+    // En el núcleo: ya ofrecida, load no la duplica en `loaded`.
+    expect(router.load(session, ['load_recipe'], auth)).toEqual([]);
+    expect(router.isLoaded(session, 'load_recipe')).toBe(true);
+    // Sin autoridad sigue fuera.
+    expect(
+      router.load(
+        session,
+        ['load_recipe'],
+        auth.filter((d) => d.function.name !== 'load_recipe'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('M1: con fullCatalog el orden y el conjunto no cambian por tener sesión', async () => {
+    const auth = registry.getAllDefinitions();
+    const plain = router.createSession('operation_00', 's');
+    plain.fullCatalog = 'router_error';
+    plain.prefetched = true;
+    const withSessions = router.createSession('operation_00', 's');
+    withSessions.fullCatalog = 'router_error';
+    withSessions.prefetched = true;
+    router.enableSessionDiscovery(withSessions, {
+      playbooks: true,
+      recipes: true,
+    });
+    router.markUsed(withSessions, 'search_playbooks', auth);
+    router.markUsed(plain, 'search_playbooks', auth);
+    const a = await router.select(plain, auth, false, false);
+    const b = await router.select(withSessions, auth, false, false);
+    expect(names(b)).toEqual(names(a));
+    expect(b.coreCount).toBe(a.coreCount);
+    expect(withSessions.loaded).not.toContain('search_playbooks');
+  });
+
+  it('L2: discovery fuera del núcleo no cuenta como llamada autorizada no cargada', () => {
+    const session = router.createSession('operation_00', 's');
+    expect(router.isUnloadedOperational(session, 'list_endpoints')).toBe(false);
+    expect(router.isUnloadedOperational(session, 'search_playbooks')).toBe(
+      false,
+    );
+    expect(router.isUnloadedOperational(session, 'operation_39')).toBe(true);
+    expect(router.isUnloadedOperational(session, 'search_tools')).toBe(false);
+  });
+
+  it('L3: una sesión persistida con la forma de #934 (sin loaded/used) no da TypeError', async () => {
+    const legacy = JSON.parse(
+      JSON.stringify({
+        query: 'operation_00',
+        signature: 's',
+        dependencies: [],
+        unloadedAuthorizedCalls: 0,
+      }),
+    );
+    const auth = registry.getAllDefinitions();
+    expect(router.isLoaded(legacy, 'operation_39')).toBe(false);
+    expect(() => router.markUsed(legacy, 'operation_39', auth)).not.toThrow();
+    expect(legacy.loaded).toContain('operation_39');
+    expect(legacy.used).toContain('operation_39');
+    const selection = await router.select(legacy, auth, false, false);
+    expect(names(selection)).toContain('operation_39');
+    const bare: any = { query: 'x', signature: 's' };
+    expect(router.restore(bare)).toMatchObject({
+      loaded: [],
+      used: [],
+      dependencies: [],
+      unloadedAuthorizedCalls: 0,
+    });
+    expect(router.load(bare, ['operation_01'], auth)).toEqual(['operation_01']);
   });
 });
 describe('ToolRouterService (d): cierre de caja en lenguaje coloquial', () => {
