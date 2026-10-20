@@ -1942,6 +1942,28 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(result.execution?.outcome).not.toBe('blocked');
     expect(chunks.some((c) => c.type === 'tool_call')).toBe(false);
   });
+  it('E2E g18: recent_tool_names gana sobre el historial al reconstruir el working set', async () => {
+    const createSession = jest.spyOn(router, 'createSession');
+    const messages = [
+      { role: 'user' as const, content: 'cuánto vendí ayer en efectivo' },
+      {
+        role: 'assistant' as const,
+        content: '',
+        tool_calls: [call('h1', 'operation_07')],
+      },
+    ];
+    await drain({ messages, recent_tool_names: ['operation_42'] });
+    expect(createSession.mock.calls[0][4]).toEqual({
+      history: ['operation_42'],
+    });
+    // Sin el parámetro conserva el comportamiento previo: se lee de messages.
+    createSession.mockClear();
+    await drain({ messages });
+    expect(createSession.mock.calls[0][4]).toEqual({
+      history: ['operation_07'],
+    });
+  });
+
   it('tells the model the approval card is the confirmation, not a prior question', async () => {
     await drain();
     const system = chat.mock.calls[0][0]

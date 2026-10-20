@@ -29,6 +29,7 @@ import type {
   AgentPlanApprovalHook,
 } from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
+import { recentStoredToolNames } from '../../../ai-engine/tools/tool-working-set';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
@@ -1606,6 +1607,11 @@ export class AIChatService {
         conversation_id: conversation.id,
         plan: hook,
         messages,
+        // `messages` viaja como `{ role, content }`: el agente no puede sacar de
+        // ahí qué tools se usaron, y el seguimiento («y con tarjeta») perdía la
+        // del turno anterior (E2E g18). Se calculan de las filas persistidas,
+        // con la misma ventana de turnos que usa el agente.
+        recent_tool_names: recentStoredToolNames(conversation.messages),
         ...(approval
           ? {
               plan_approval: {

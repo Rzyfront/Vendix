@@ -492,6 +492,49 @@ describe('AIChatService — agente configurable del chat por defecto', () => {
     expect(b.run.mock.calls[0][0].tools).toEqual(['list_products']);
   });
 
+  it('E2E g18: el turno recibe las tools usadas antes, leídas del formato persistido, sin tool_calls en messages', async () => {
+    const stored = [
+      { id: 1, role: 'user', content: 'cuánto vendí ayer en efectivo' },
+      {
+        id: 2,
+        role: 'assistant',
+        content: 'Vendiste $120.000 en efectivo.',
+        tool_calls: [
+          {
+            name: 'get_sales_report',
+            arguments: { payment_method: 'cash' },
+            result: '{"total":120000}',
+          },
+        ],
+      },
+    ].map((m) => ({ metadata: null, created_at: new Date(), ...m }));
+    const b = build({ plan: null, messages: stored });
+    const service = b.service as any;
+    service.durableTurnArgs.mockRestore();
+    b.planState.createHook.mockReturnValue({ snapshot: async () => null });
+    service.durableSessions = {
+      open: jest.fn().mockResolvedValue({
+        objective: { plan: null },
+        objective_id: 'o1',
+        turn_id: 't1',
+        lease: { version: 1 },
+        context: null,
+        close: jest.fn(),
+      }),
+    };
+    const args = await service.durableTurnArgs(
+      conversation(stored),
+      'vexi',
+      'y con tarjeta',
+      {},
+    );
+    expect(args.recent_tool_names).toEqual(['get_sales_report']);
+    // El historial al proveedor sigue siendo { role, content }: un tool_call sin
+    // su resultado rompería el protocolo.
+    for (const message of args.messages)
+      expect(message).not.toHaveProperty('tool_calls');
+  });
+
   it('no usa vexi para una app distinta sin agente explícito', async () => {
     const b = build({ conversation: { app_key: 'otra_app' } });
     await b.service.sendMessage(7, { content: 'hola' });

@@ -4,6 +4,7 @@ import { localToolRanking, localToolScores } from './tool-catalog';
 import {
   appendLoaded,
   composeWorkingSet,
+  recentStoredToolNames,
   recentToolNames,
   relevantTop,
   TOOL_WORKING_SET,
@@ -48,6 +49,46 @@ describe('tool-working-set (funciones puras)', () => {
     ]);
     expect(recentToolNames(undefined)).toEqual([]);
     expect(recentToolNames([{ role: 'assistant' }])).toEqual([]);
+  });
+
+  it('recentStoredToolNames: lee el formato persistido {name}, misma ventana y sin duplicados (E2E g18)', () => {
+    const stored = (...names: string[]) =>
+      names.map((name) => ({ name, arguments: {}, result: '{}' }));
+    const messages = [
+      { role: 'user', tool_calls: null },
+      { role: 'assistant', tool_calls: stored('old_turn_tool') },
+      { role: 'user', tool_calls: null },
+      { role: 'assistant', tool_calls: stored('get_sales_report') },
+      { role: 'user', tool_calls: null },
+      { role: 'assistant', tool_calls: null },
+      { role: 'user', tool_calls: null },
+      {
+        role: 'assistant',
+        tool_calls: [
+          ...stored('get_sales_report', 'find_product'),
+          { function: { name: 'list_cash_sessions' } },
+          { name: '' },
+          null,
+        ],
+      },
+    ];
+    expect(recentStoredToolNames(messages)).toEqual([
+      'get_sales_report',
+      'find_product',
+      'list_cash_sessions',
+    ]);
+    // El formato persistido es invisible para el lector del protocolo: este
+    // era el defecto, el historial del chat nunca recuperaba tools.
+    expect(recentToolNames(messages as never)).toEqual(['list_cash_sessions']);
+    expect(recentStoredToolNames(messages, 1)).toEqual([
+      'get_sales_report',
+      'find_product',
+      'list_cash_sessions',
+    ]);
+    expect(recentStoredToolNames(undefined)).toEqual([]);
+    expect(
+      recentStoredToolNames([{ role: 'assistant', tool_calls: { name: 'x' } }]),
+    ).toEqual([]);
   });
 
   it('appendLoaded: append-only, sin duplicados, sin núcleo, sin no autorizadas y con tope', () => {

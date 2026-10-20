@@ -194,6 +194,15 @@ export interface AgentRunParams {
    */
   messages?: AIMessage[];
   /**
+   * Nombres de tools usadas en los últimos turnos, calculados por el llamante
+   * desde su propio almacenamiento. Cuando viene definido gana sobre
+   * `recentToolNames(messages)`: el chat manda el historial como `{ role,
+   * content }` (los `tool_calls` sin sus resultados romperían el protocolo del
+   * proveedor), así que de `messages` no se puede recuperar nada y el
+   * seguimiento perdía las tools del turno anterior (E2E g18).
+   */
+  recent_tool_names?: string[];
+  /**
    * Interpolation variables for the application's stored `system_prompt`.
    * Only consulted when `app_key` is set, because that is the only path where
    * the prompt comes from the database instead of the caller.
@@ -1576,7 +1585,12 @@ export class AIAgentService {
         params.agent_key,
         // Working set rebuilt per turn from the recent history: tools used in
         // the last 3 user turns are reloaded (authority re-checked on select).
-        { history: recentToolNames(params.messages) },
+        // `recent_tool_names` gana cuando el llamante lo calcula desde su
+        // almacenamiento (el historial del chat no trae tool_calls).
+        {
+          history:
+            params.recent_tool_names ?? recentToolNames(params.messages),
+        },
       );
     }
 

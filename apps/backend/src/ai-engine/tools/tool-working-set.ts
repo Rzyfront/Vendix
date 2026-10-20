@@ -62,6 +62,26 @@ interface HistoryMessage {
   tool_calls?: Array<{ function?: { name?: string } }>;
 }
 
+/** Index where the last `turns` user turns start (0 if there are fewer). */
+function windowStart(
+  list: readonly { role?: string }[],
+  turns: number,
+): number {
+  let seen = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i]?.role !== 'user') continue;
+    seen++;
+    if (seen === turns) return i;
+  }
+  return 0;
+}
+
+/** Appends a name once, ignoring anything that is not a non-empty string. */
+function pushName(names: string[], name: unknown): void {
+  if (typeof name === 'string' && name && !names.includes(name))
+    names.push(name);
+}
+
 /**
  * Tool names called in the last `turns` user turns, oldest first, deduped.
  * The working set is rebuilt from the history every turn (no DB state): a
@@ -73,23 +93,48 @@ export function recentToolNames(
   turns: number = TOOL_WORKING_SET.historyTurns,
 ): string[] {
   const list = messages ?? [];
-  let start = 0;
-  let seen = 0;
-  for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i]?.role !== 'user') continue;
-    seen++;
-    if (seen === turns) {
-      start = i;
-      break;
+  const names: string[] = [];
+  for (const message of list.slice(windowStart(list, turns)))
+    for (const call of message?.tool_calls ?? [])
+      pushName(names, call?.function?.name);
+  return names;
+}
+
+/** A persisted `ai_messages` row as the chat loads it (`tool_calls` is JSON). */
+interface StoredHistoryMessage {
+  role?: string;
+  tool_calls?: unknown;
+}
+
+/**
+ * Lo mismo que `recentToolNames`, pero sobre las filas persistidas de
+ * `ai_messages`, donde `tool_calls` se guarda como `[{ name, arguments, result }]`
+ * y no con `function.name`.
+ *
+ * Existe porque el historial que el chat le pasa al agente lleva solo
+ * `{ role, content }`: inyectar ahí los `tool_calls` sin sus resultados rompería
+ * el protocolo de tool calls del proveedor, así que el chat calcula los nombres
+ * aparte y los pasa en `recent_tool_names`. Sin esto el seguimiento («y con
+ * tarjeta») perdía la tool del turno anterior y el modelo adivinaba rutas
+ * (E2E g18). Tolera también la forma `function.name` por si una fila la trae.
+ */
+export function recentStoredToolNames(
+  messages: readonly StoredHistoryMessage[] | undefined,
+  turns: number = TOOL_WORKING_SET.historyTurns,
+): string[] {
+  const list = messages ?? [];
+  const names: string[] = [];
+  for (const message of list.slice(windowStart(list, turns))) {
+    const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    for (const call of calls) {
+      if (!call || typeof call !== 'object') continue;
+      const record = call as {
+        name?: unknown;
+        function?: { name?: unknown } | null;
+      };
+      pushName(names, record.name ?? record.function?.name);
     }
   }
-  const names: string[] = [];
-  for (const message of list.slice(start))
-    for (const call of message?.tool_calls ?? []) {
-      const name = call?.function?.name;
-      if (typeof name === 'string' && name && !names.includes(name))
-        names.push(name);
-    }
   return names;
 }
 
