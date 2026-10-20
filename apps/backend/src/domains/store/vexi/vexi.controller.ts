@@ -53,7 +53,6 @@ import {
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
-  AgentObjectiveResultsQueryDto,
   ResumeAgentObjectiveDto,
   RejectAgentObjectiveProposalDto,
 } from './dto/resume-agent-objective.dto';
@@ -546,28 +545,9 @@ export class VexiController {
     );
   }
 
-  @Get('objectives/:id/results')
-  async getObjectiveResults(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query() query: AgentObjectiveResultsQueryDto,
-  ) {
-    return this.responseService.success(
-      await this.planState.listObjectiveResults(id, query),
-      'Resultados del objetivo',
-    );
-  }
-
-  @Get('objectives/:id/results/:resultId')
-  async getObjectiveResult(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('resultId', ParseUUIDPipe) resultId: string,
-    @Query() query: AgentObjectiveResultsQueryDto,
-  ) {
-    return this.responseService.success(
-      await this.planState.getObjectiveArtifact(id, resultId, query),
-      'Resultado observado del objetivo',
-    );
-  }
+  // `GET objectives/:id/results` y `.../results/:resultId` viven en
+  // `VexiObjectiveResultsController`: el @Roles de esta clase le negaba al
+  // cajero la lectura de sus propios artefactos (ver ese archivo).
 
   /** State of a background task, for the panel's task strip. */
   @Get('tasks/:id')
