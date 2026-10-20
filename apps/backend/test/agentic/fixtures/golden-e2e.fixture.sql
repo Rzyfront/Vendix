@@ -27,3 +27,43 @@ UPDATE store_subscriptions ss
    AND s.slug = 'roku'
    AND (ss.plan_id IS DISTINCT FROM full_plan.id
         OR ss.paid_plan_id IS DISTINCT FROM full_plan.id);
+
+-- g23 (owner = tech-bogota): the only low-stock product, "Cargador USB-C 65W"
+-- (CHG-USB65-GAN), had no supplier that carries it, so no purchase order could
+-- be proposed. A dedicated E2E supplier carries it as the preferred source.
+INSERT INTO suppliers (organization_id, store_id, name, code, contact_person,
+                       email, phone, state, is_active, updated_at)
+SELECT s.organization_id, s.id, 'Distribuidora E2E Tecnología', 'E2E-TEC-001',
+       'Compras E2E', 'compras@e2e-tecnologia.test', '3000000000',
+       'active', true, CURRENT_TIMESTAMP
+  FROM stores s
+ WHERE s.slug = 'tech-bogota'
+   AND NOT EXISTS (SELECT 1 FROM suppliers x
+                    WHERE x.organization_id = s.organization_id
+                      AND x.store_id = s.id AND x.code = 'E2E-TEC-001');
+
+INSERT INTO supplier_products (supplier_id, product_id, supplier_sku,
+                               cost_per_unit, min_order_qty, lead_time_days,
+                               is_preferred, updated_at)
+SELECT sup.id, p.id, 'E2E-CHG-65', 80000, 10, 3, true, CURRENT_TIMESTAMP
+  FROM stores s
+  JOIN suppliers sup ON sup.store_id = s.id AND sup.code = 'E2E-TEC-001'
+  JOIN products p ON p.store_id = s.id AND p.sku = 'CHG-USB65-GAN'
+ WHERE s.slug = 'tech-bogota'
+ON CONFLICT (supplier_id, product_id) DO NOTHING;
+
+-- Same product: the alert reads stock_levels.reorder_point (empty → the
+-- store's default of 10) while the product sheet says 40, so the agent saw two
+-- different shortfalls and asked which one to buy. The location carries the
+-- product's own reorder point so both readings agree.
+UPDATE stock_levels sl
+   SET reorder_point = p.reorder_point,
+       updated_at = CURRENT_TIMESTAMP
+  FROM products p
+  JOIN stores s ON s.id = p.store_id
+ WHERE sl.product_id = p.id
+   AND sl.product_variant_id IS NULL
+   AND s.slug = 'tech-bogota'
+   AND p.sku = 'CHG-USB65-GAN'
+   AND p.reorder_point IS NOT NULL
+   AND sl.reorder_point IS DISTINCT FROM p.reorder_point;
