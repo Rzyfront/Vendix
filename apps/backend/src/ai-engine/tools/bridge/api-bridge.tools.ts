@@ -724,6 +724,8 @@ export function createApiBridgeTools({
       name: 'write_endpoint',
       version: '1',
       domain: 'api-bridge',
+      // The effect crosses HTTP: the handler states `applied` itself.
+      effectTransport: 'http',
       // NOT readOnly, and confirmation is mandatory: this is the only tool that
       // can mutate an arbitrary part of the system, so the user approves every
       // single call. The registry turns the rejection into the proposal, so no

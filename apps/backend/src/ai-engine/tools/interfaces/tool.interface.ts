@@ -117,6 +117,15 @@ export interface RegisteredTool {
    */
   irreversible?: boolean;
   /**
+   * Where a confirmed write lands. Default (absent): IN PROCESS — the handler
+   * awaits a domain service, so returning a structured result without a
+   * protocol failure is definitive evidence that the change was applied and the
+   * registry stamps `applied: true` on it. `'http'` marks a transport boundary
+   * (the generic `write_endpoint` bridge) where an HTTP 200 or `success` proves
+   * nothing: that handler must report `applied` itself.
+   */
+  effectTransport?: 'http';
+  /**
    * Marks the tool as free of side effects. Surfaces that cannot show a
    * confirmation step before executing — realtime voice, where the model acts
    * on a transcription the user never reviews — expose ONLY tools with this

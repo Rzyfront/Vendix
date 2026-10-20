@@ -111,7 +111,8 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
     `Propusiste: ${operation}.`,
     'La tarjeta con «Aprobar» y «Rechazar» ya está en pantalla, encima de este mensaje.',
     'Si la persona confirma en palabras («sí», «dale», «hazlo», «apruebo»), NO vuelvas a llamar `write_endpoint`: eso solo genera otra tarjeta idéntica y se ve como si le pidieras permiso en círculos. Contéstale en una frase que toque «Aprobar» en la tarjeta que ya tiene.',
-    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos.',
+    'Si la rechaza o la cancela en palabras («no», «cancela», «déjalo»), no llames ninguna herramienta de escritura: confírmale en una frase que no se aplicó nada.',
+    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos. Si pide otra cosa, atiéndela: la tarjeta sigue en pantalla por si la quiere aprobar después.',
   ].join(' ');
 
 /**
@@ -1008,8 +1009,7 @@ export class AIChatService {
         // is left staring at an empty bubble with no idea whether Vexi is
         // still thinking. Whatever the agent returned goes out as text, and if
         // even that is empty the silence is named rather than shipped.
-        fullContent =
-          result.content?.trim() || USER_NOTICES.no_answer;
+        fullContent = result.content?.trim() || USER_NOTICES.no_answer;
         yield { type: 'text', content: fullContent };
         // Spoken too, fallback included. A turn that only ran tools already got
         // its human filler at the top; leaving the failure text unspoken as well

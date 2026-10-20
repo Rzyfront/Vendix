@@ -620,6 +620,42 @@ describe('AIToolRegistry D0 execution contract', () => {
     expect(JSON.stringify(result)).not.toContain('sensitive');
     expect(handler).toHaveBeenCalledTimes(1);
   });
+  it('an approved in-process write that returns without failure is applied', async () => {
+    const registry = make(
+      jest
+        .fn()
+        .mockResolvedValue(
+          '{"summary":"Cliente creado.","data":{"customer_id":9}}',
+        ),
+      true,
+    );
+    expect(
+      await registry.executeToolResult(
+        'qa_tool',
+        { id: 1 },
+        { confirmationToken: 'single-use-qa' },
+      ),
+    ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+  });
+  it('a write across HTTP must state application itself', async () => {
+    const registry = new AIToolRegistry(confirmations as any);
+    registry.register({
+      name: 'qa_bridge',
+      domain: 'qa',
+      description: 'qa',
+      parameters: { type: 'object', properties: {} },
+      requiresConfirmation: true,
+      effectTransport: 'http',
+      handler: jest.fn().mockResolvedValue('{"success":true,"id":8}'),
+    });
+    expect(
+      await registry.executeToolResult(
+        'qa_bridge',
+        {},
+        { confirmationToken: 'single-use-qa' },
+      ),
+    ).toMatchObject({ status: 'unknown_effect', effect_status: 'unknown' });
+  });
   it('does not classify an HTTP200 failure envelope as ok', async () => {
     const registry = make(
       jest
@@ -655,13 +691,11 @@ describe('G registry proposal and preview fences', () => {
       redeem: jest.fn().mockResolvedValue('ok'),
     };
     const handler = jest.fn().mockResolvedValue('{"applied":true}');
-    const preview = jest
-      .fn()
-      .mockResolvedValue({
-        status: 'ok',
-        target: 'Registro',
-        changes: [{ field: 'quantity', label: 'Cantidad', from: 1, to: 2 }],
-      });
+    const preview = jest.fn().mockResolvedValue({
+      status: 'ok',
+      target: 'Registro',
+      changes: [{ field: 'quantity', label: 'Cantidad', from: 1, to: 2 }],
+    });
     const registry = new AIToolRegistry(confirmations as any);
     registry.register({
       name: 'change_record',
