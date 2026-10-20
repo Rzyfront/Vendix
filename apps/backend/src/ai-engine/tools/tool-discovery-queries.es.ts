@@ -635,6 +635,8 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Necesito encontrar el proveedor de bebidas',
     'Cómo busco un proveedor por su código?',
     "Muéstrame los proveedores que coincidan con 'Lácteos'",
+    'Lista mis proveedores',
+    '¿Qué proveedores tengo registrados?',
   ],
   fire_kitchen_order: [
     'Manda esos platos a la cocina ya',

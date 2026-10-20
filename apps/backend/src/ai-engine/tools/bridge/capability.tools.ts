@@ -101,8 +101,9 @@ export function createCapabilityTools({
               total: page.total,
               has_more: page.has_more,
               cursor: page.cursor,
-              next_step:
-                'Obtén el contrato completo en list_endpoints antes de escribir; no adivines DTOs anidados.',
+              next_step: page.total
+                ? 'Obtén el contrato completo en list_endpoints antes de escribir; no adivines DTOs anidados.'
+                : 'Esta área no tiene rutas del puente: no adivines rutas con call_endpoint. Busca la herramienta propia con search_tools usando la intención de la persona.',
             });
           } catch (error) {
             return discoveryError(error);
