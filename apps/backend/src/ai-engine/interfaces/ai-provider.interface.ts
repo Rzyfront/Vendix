@@ -58,6 +58,13 @@ export interface AIRequestOptions {
    * absent, the breakpoint goes on the last tool.
    */
   toolCachePrefix?: number;
+  /**
+   * Full server-authorized catalog the offered `tools` were selected from.
+   * Only providers with a verified native deferred-loading protocol (Anthropic
+   * `defer_loading` + `tool_reference`) use it; every other provider ignores
+   * it. It never widens authority: the loop still validates every call.
+   */
+  deferredTools?: AIToolDefinition[];
   tool_choice?:
     | 'auto'
     | 'none'

@@ -2049,6 +2049,11 @@ export class AIAgentService {
             : {}),
           tools: filteredTools.length > 0 ? filteredTools : undefined,
           ...(toolCachePrefix ? { toolCachePrefix } : {}),
+          // Native deferred loading (Anthropic F7) needs the authorized catalog;
+          // providers without a verified protocol ignore it.
+          ...(routingSession && filteredTools.length > 0
+            ? { deferredTools: routingAuthority }
+            : {}),
           tool_choice: (filteredTools.length > 0 ? 'auto' : undefined) as
             | 'auto'
             | undefined,

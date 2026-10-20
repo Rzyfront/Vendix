@@ -20,11 +20,84 @@ import {
   AIResponse,
   AIStreamChunk,
   AIToolCall,
+  AIToolDefinition,
 } from '../interfaces/ai-provider.interface';
 
 /** Index of the tool carrying cache_control: last core tool, else last tool. */
 function toolCacheBreakpoint(count: number, prefix?: number): number {
   return prefix && prefix > 0 && prefix <= count ? prefix - 1 : count - 1;
+}
+
+/**
+ * F7 native deferred loading. Our own `search_tools` (hybrid, server-side
+ * authority) answers with `tool_reference` blocks so Anthropic expands the
+ * discovered definitions instead of us re-sending them as loaded tools.
+ * Format: https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool
+ * (custom tool search implementation). The cookbook sends this beta header;
+ * the probe tries without it first and records which variant was accepted.
+ */
+export const NATIVE_TOOL_SEARCH_BETA = 'advanced-tool-use-2025-11-20';
+const SEARCH_TOOLS_NAME = 'search_tools';
+const PROBE_TTL_SUPPORTED_MS = 6 * 60 * 60 * 1000;
+const PROBE_TTL_UNSUPPORTED_MS = 30 * 60 * 1000;
+const PROBE_TIMEOUT_MS = 10_000;
+const PROBE_SEARCH_TOOL = 'vendix_probe_search';
+const PROBE_DEFERRED_TOOL = 'vendix_probe_echo';
+const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
+
+export interface NativeToolSearchCapability {
+  native: boolean;
+  /** Extra request headers the accepted probe variant needed. */
+  headers?: Record<string, string>;
+}
+
+/** Process-wide: keyed by (baseUrl, model), shared by every provider instance. */
+const capabilityCache = new Map<
+  string,
+  { value: NativeToolSearchCapability; expiresAt: number }
+>();
+const capabilityProbes = new Map<string, Promise<NativeToolSearchCapability>>();
+
+/** Test hook: forget every cached or in-flight capability probe. */
+export function resetNativeToolSearchCapabilityCache(): void {
+  capabilityCache.clear();
+  capabilityProbes.clear();
+}
+
+interface NativeToolSearchRequest {
+  /** Every tool name sent in this request (offered + deferred). */
+  sentNames: Set<string>;
+  headers?: Record<string, string>;
+}
+
+interface ToolPayload {
+  tools?: any[];
+  /** Definitions a completed call may name (offered, plus deferred if native). */
+  callable?: AIToolDefinition[];
+  native?: NativeToolSearchRequest;
+}
+
+/** `search_tools` JSON → tool_reference blocks, only for tools sent in-request. */
+function searchToolReferences(
+  content: string,
+  sentNames: Set<string>,
+): Anthropic.ToolReferenceBlockParam[] {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed?.results)) return [];
+  const names = new Set<string>();
+  for (const result of parsed.results) {
+    const name = result?.name;
+    if (typeof name === 'string' && sentNames.has(name)) names.add(name);
+  }
+  return [...names].map((tool_name) => ({
+    type: 'tool_reference' as const,
+    tool_name,
+  }));
 }
 
 export class AnthropicCompatibleProvider implements AIProvider {
@@ -79,9 +152,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
     });
   }
 
-  /** The Messages API has no `tool` role: preserve the ReAct history as blocks. */
-  private transformMessages(messages: AIMessage[]): Anthropic.MessageParam[] {
+  /**
+   * The Messages API has no `tool` role: preserve the ReAct history as blocks.
+   * With native tool search, every `search_tools` result is re-derived from
+   * the same JSON on every request, so its tool_reference blocks are
+   * reproduced identically turn after turn (filtered to the tools sent).
+   */
+  private transformMessages(
+    messages: AIMessage[],
+    native?: NativeToolSearchRequest,
+  ): Anthropic.MessageParam[] {
     const transformed: Anthropic.MessageParam[] = [];
+    const callNames = new Map<string, string>();
     for (const message of messages) {
       if (message.role === 'system') continue;
       const role = message.role === 'tool' ? 'user' : message.role;
@@ -90,10 +172,22 @@ export class AnthropicCompatibleProvider implements AIProvider {
         if (!message.tool_call_id) {
           throw new Error('Tool result is missing tool_call_id');
         }
+        const callName = callNames.get(message.tool_call_id);
+        const references =
+          native &&
+          typeof message.content === 'string' &&
+          callName?.slice(callName.lastIndexOf('.') + 1) === SEARCH_TOOLS_NAME
+            ? searchToolReferences(message.content, native.sentNames)
+            : [];
         content.push({
           type: 'tool_result',
           tool_use_id: message.tool_call_id,
-          content: this.transformContentForAnthropic(message.content),
+          content: references.length
+            ? [
+                { type: 'text' as const, text: message.content as string },
+                ...references,
+              ]
+            : this.transformContentForAnthropic(message.content),
           ...(this.isToolError(message.content) && { is_error: true }),
         });
       } else {
@@ -105,6 +199,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
           content.push(...body);
         }
         for (const call of message.tool_calls ?? []) {
+          callNames.set(call.id, call.function.name);
           const input: unknown = JSON.parse(call.function.arguments);
           if (!input || typeof input !== 'object' || Array.isArray(input)) {
             throw new Error(`Tool call ${call.id} arguments must be an object`);
@@ -146,6 +241,218 @@ export class AnthropicCompatibleProvider implements AIProvider {
     }
   }
 
+  private capabilityKey(model: string): string {
+    const baseUrl = (this.config.baseUrl || DEFAULT_ANTHROPIC_BASE_URL).replace(
+      /\/+$/,
+      '',
+    );
+    return `${baseUrl}|${model}`;
+  }
+
+  /**
+   * Cached capability, never awaited: a miss starts the probe in the
+   * background and this request takes our own path.
+   */
+  private nativeToolSearch(
+    model: string,
+  ): NativeToolSearchCapability | undefined {
+    const key = this.capabilityKey(model);
+    const cached = capabilityCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (!capabilityProbes.has(key)) void this.probeNativeToolSearch(model);
+    return undefined;
+  }
+
+  /**
+   * Capability probe: one deferred tool plus a custom search tool, and a
+   * synthetic turn whose search result is a tool_reference. Supported only
+   * when the endpoint answers 2xx AND the model can call the referenced tool.
+   * Any error (400, proxy dropping the block, timeout) → own path. Safe to
+   * call at bootstrap; concurrent callers share one in-flight probe.
+   */
+  probeNativeToolSearch(model?: string): Promise<NativeToolSearchCapability> {
+    const resolvedModel = model || this.config.modelId;
+    const key = this.capabilityKey(resolvedModel);
+    const inflight = capabilityProbes.get(key);
+    if (inflight) return inflight;
+    const probe = (async (): Promise<NativeToolSearchCapability> => {
+      let value: NativeToolSearchCapability = { native: false };
+      for (const headers of [
+        undefined,
+        { 'anthropic-beta': NATIVE_TOOL_SEARCH_BETA },
+      ]) {
+        if (await this.runCapabilityProbe(resolvedModel, headers)) {
+          value = { native: true, ...(headers && { headers }) };
+          break;
+        }
+      }
+      capabilityCache.set(key, {
+        value,
+        expiresAt:
+          Date.now() +
+          (value.native ? PROBE_TTL_SUPPORTED_MS : PROBE_TTL_UNSUPPORTED_MS),
+      });
+      return value;
+    })().finally(() => capabilityProbes.delete(key));
+    capabilityProbes.set(key, probe);
+    return probe;
+  }
+
+  private async runCapabilityProbe(
+    model: string,
+    headers?: Record<string, string>,
+  ): Promise<boolean> {
+    try {
+      const response = await this.client.messages.create(
+        {
+          model,
+          max_tokens: 64,
+          tool_choice: { type: 'any' },
+          tools: [
+            {
+              name: PROBE_SEARCH_TOOL,
+              description: 'Finds tools by intent.',
+              input_schema: {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+              },
+              cache_control: { type: 'ephemeral' },
+            },
+            {
+              name: PROBE_DEFERRED_TOOL,
+              description: 'Echoes the given text back.',
+              input_schema: {
+                type: 'object',
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+              },
+              defer_loading: true,
+            },
+          ],
+          messages: [
+            {
+              role: 'user',
+              content: 'Find a tool that echoes text, then call it with "ok".',
+            },
+            {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'toolu_vendix_probe_1',
+                  name: PROBE_SEARCH_TOOL,
+                  input: { query: 'echo text' },
+                },
+              ],
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'toolu_vendix_probe_1',
+                  // Same shape the native branch sends: our JSON + references
+                  // (one deferred, one already loaded).
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify({
+                        results: [{ name: PROBE_DEFERRED_TOOL }],
+                      }),
+                    },
+                    { type: 'tool_reference', tool_name: PROBE_DEFERRED_TOOL },
+                    { type: 'tool_reference', tool_name: PROBE_SEARCH_TOOL },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          timeout: PROBE_TIMEOUT_MS,
+          maxRetries: 0,
+          ...(headers && { headers }),
+        },
+      );
+      return (response?.content ?? []).some(
+        (block) =>
+          block.type === 'tool_use' && block.name === PROBE_DEFERRED_TOOL,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Offered tools keep today's shape (cache_control on the last core tool).
+   * Only with a verified capability, the rest of the authorized catalog is
+   * appended with `defer_loading: true` (never carrying cache_control).
+   */
+  private buildToolPayload(
+    options: AIRequestOptions | undefined,
+    model: string,
+  ): ToolPayload {
+    const offered = options?.agenticStream
+      ? canonicalAgentTools(options.tools)
+      : options?.tools;
+    if (!offered?.length) return { callable: offered };
+    const tools: any[] = offered.map((t, i, arr) => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: t.function.parameters as any,
+      ...(i === toolCacheBreakpoint(arr.length, options?.toolCachePrefix)
+        ? { cache_control: { type: 'ephemeral' as const } }
+        : {}),
+    }));
+    const capability = options?.deferredTools?.length
+      ? this.nativeToolSearch(model)
+      : undefined;
+    if (!capability?.native) return { tools, callable: offered };
+
+    const sentNames = new Set(offered.map((t) => t.function.name));
+    const deferred = new Map<string, AIToolDefinition>();
+    for (const tool of options!.deferredTools!) {
+      const name = tool.function?.name;
+      if (name && !sentNames.has(name) && !deferred.has(name))
+        deferred.set(name, tool);
+    }
+    // Sorted so the deferred tail is byte-stable across rounds.
+    const tail = [...deferred.values()].sort((a, b) =>
+      a.function.name.localeCompare(b.function.name),
+    );
+    for (const tool of tail) sentNames.add(tool.function.name);
+    return {
+      tools: [
+        ...tools,
+        ...tail.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters as any,
+          defer_loading: true,
+        })),
+      ],
+      callable: [...offered, ...tail],
+      native: {
+        sentNames,
+        ...(capability.headers && { headers: capability.headers }),
+      },
+    };
+  }
+
+  private requestOptions(
+    signal: AbortSignal | undefined,
+    native: NativeToolSearchRequest | undefined,
+  ): [] | [{ signal?: AbortSignal; headers?: Record<string, string> }] {
+    if (!signal && !native?.headers) return [];
+    return [
+      {
+        ...(signal && { signal }),
+        ...(native?.headers && { headers: native.headers }),
+      },
+    ];
+  }
+
   private transformSystem(
     messages: AIMessage[],
     options?: AIRequestOptions,
@@ -182,15 +489,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
     try {
       deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
-      const transformedMessages = this.transformMessages(messages);
-      const tools = options?.agenticStream
-        ? canonicalAgentTools(options.tools)
-        : options?.tools;
+      const model = options?.model || this.config.modelId;
+      const {
+        tools: toolPayload,
+        callable: tools,
+        native,
+      } = this.buildToolPayload(options, model);
+      const transformedMessages = this.transformMessages(messages, native);
 
       const request = () =>
         this.client.messages.create(
           {
-            model: options?.model || this.config.modelId,
+            model,
             ...(system.length && { system }),
             messages: transformedMessages,
             max_tokens:
@@ -211,21 +521,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
                           name: options.tool_choice.function.name,
                         },
               }),
-            ...(tools?.length && {
-              tools: tools.map((t, i, arr) => ({
-                name: t.function.name,
-                description: t.function.description,
-                input_schema: t.function.parameters as any,
-                ...(i ===
-                toolCacheBreakpoint(arr.length, options?.toolCachePrefix)
-                  ? { cache_control: { type: 'ephemeral' as const } }
-                  : {}),
-              })),
-            }),
+            ...(toolPayload?.length && { tools: toolPayload }),
           },
-          ...(deadline
-            ? ([{ signal: deadline.signal }] as const)
-            : ([] as const)),
+          ...this.requestOptions(deadline?.signal, native),
         );
       const response = deadline ? await deadline.run(request) : await request();
 
@@ -381,15 +679,18 @@ export class AnthropicCompatibleProvider implements AIProvider {
     try {
       deadline?.assertCanStart();
       const system = this.transformSystem(messages, options);
-      const tools = options?.agenticStream
-        ? canonicalAgentTools(options.tools)
-        : options?.tools;
+      const model = options?.model || this.config.modelId;
+      const {
+        tools: toolPayload,
+        callable: tools,
+        native,
+      } = this.buildToolPayload(options, model);
 
       const stream = this.client.messages.stream(
         {
-          model: options?.model || this.config.modelId,
+          model,
           ...(system.length && { system }),
-          messages: this.transformMessages(messages),
+          messages: this.transformMessages(messages, native),
           max_tokens:
             options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
           temperature:
@@ -408,21 +709,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
                         name: options.tool_choice.function.name,
                       },
             }),
-          ...(tools?.length && {
-            tools: tools.map((t, i, arr) => ({
-              name: t.function.name,
-              description: t.function.description,
-              input_schema: t.function.parameters as any,
-              ...(i ===
-              toolCacheBreakpoint(arr.length, options?.toolCachePrefix)
-                ? { cache_control: { type: 'ephemeral' as const } }
-                : {}),
-            })),
-          }),
+          ...(toolPayload?.length && { tools: toolPayload }),
         },
-        ...(deadline
-          ? ([{ signal: deadline.signal }] as const)
-          : ([] as const)),
+        ...this.requestOptions(deadline?.signal, native),
       );
 
       for await (const event of agentDeadlineStream(stream, deadline)) {

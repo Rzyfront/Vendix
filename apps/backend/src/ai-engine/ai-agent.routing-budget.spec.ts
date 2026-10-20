@@ -296,6 +296,19 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       expect(result.content).not.toMatch(INTERNAL_JARGON);
     });
 
+    it('F7: el loop pasa el catálogo autorizado como deferredTools (superconjunto de lo ofrecido)', async () => {
+      const f = fixture(0, true);
+      f.chat.mockImplementationOnce(async (_messages, options: any) => {
+        const deferred = options.deferredTools.map((t: any) => t.function.name);
+        expect(deferred).toContain('operation_59');
+        expect(deferred.length).toBeGreaterThan(offered(options).length);
+        for (const name of offered(options)) expect(deferred).toContain(name);
+        return response();
+      });
+      await f.run();
+      expect(f.chat).toHaveBeenCalledTimes(1);
+    });
+
     it('3 rondas de búsqueda no gastan max_iterations; la 4.ª sí cuenta', async () => {
       const f = fixture(0, true);
       // max_iterations 2 + 3 free rounds: 3 searches, then the real call, then the answer.

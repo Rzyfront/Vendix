@@ -21,6 +21,39 @@ describe('OpenAICompatibleProvider', () => {
     return new OpenAICompatibleProvider(config);
   };
 
+  it('ignores deferredTools: same payload with or without the catalog (F7)', async () => {
+    const provider = buildProvider('https://openrouter.ai/api/v1');
+    const create = jest.fn().mockResolvedValue({
+      choices: [{ message: { content: 'hola' }, finish_reason: 'stop' }],
+      model: 'test-model',
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+    (provider as any).client.chat.completions.create = create;
+    const tool = (name: string) => ({
+      type: 'function' as const,
+      function: { name, description: name, parameters: { type: 'object' } },
+    });
+    const base = {
+      agenticStream: true,
+      tools: [tool('core_a'), tool('search_tools')],
+      toolCachePrefix: 2,
+      tool_choice: 'auto' as const,
+    };
+    const messages = [{ role: 'user' as const, content: 'hola' }];
+
+    await provider.chat(messages, base);
+    await provider.chat(messages, {
+      ...base,
+      deferredTools: [tool('core_a'), tool('search_tools'), tool('z_deferred')],
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+    expect(JSON.stringify(create.mock.calls[1][0])).not.toMatch(
+      /defer_loading|z_deferred|deferredTools/,
+    );
+  });
+
   it('keeps the configured base URL trimmed but otherwise unchanged', () => {
     const provider = buildProvider('  https://api.example.com/v1/responses/  ');
 
