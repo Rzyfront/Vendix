@@ -115,6 +115,15 @@ class Db {
     if (!/e2e/.test(name))
       throw new Error('Refusing to run outside a cloned e2e database');
   }
+  file(path: string): void {
+    execFileSync(
+      this.psql,
+      [this.url, '-q', '-v', 'ON_ERROR_STOP=1', '-f', path],
+      {
+        encoding: 'utf8',
+      },
+    );
+  }
   query(sql: string): string {
     return execFileSync(this.psql, [this.url, '-At', '-F', '|', '-c', sql], {
       encoding: 'utf8',
@@ -374,9 +383,26 @@ function compareOracle(expected: string, actual: string): boolean {
   return actual === expected;
 }
 
+/**
+ * Idempotent local fixture (`fixtures/golden-e2e.fixture.sql`). Returns true
+ * when it changed a row: the subscription feature cache (`sub:features:*`,
+ * 60 s TTL) must expire before the first case sees the new plan.
+ */
+function applyFixture(db: Db): boolean {
+  const before = db.query(FIXTURE_PROBE);
+  db.file(join(__dirname, 'fixtures', 'golden-e2e.fixture.sql'));
+  return db.query(FIXTURE_PROBE) !== before;
+}
+const FIXTURE_PROBE =
+  "select coalesce(string_agg(ss.plan_id||':'||ss.paid_plan_id, ','), '') from store_subscriptions ss join stores s on s.id=ss.store_id where s.slug='roku'";
+
 export async function runLiveSuite(options: Options): Promise<void> {
   mkdirSync(options.out, { recursive: true });
   const db = new Db(options.dbUrlFile, options.psql);
+  if (applyFixture(db)) {
+    process.stdout.write('fixture aplicado; esperando 61 s la caché de plan\n');
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
+  }
   const api = new Api(options);
   const known = knownTools(db);
   const suite = loadSuite(options.suite, options.label).filter(
