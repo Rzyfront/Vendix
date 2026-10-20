@@ -81,9 +81,15 @@ export class PlaybookLoaderService implements OnApplicationBootstrap {
       return parsePlaybookMarkdown(readFileSync(path, 'utf8'), file);
     });
     // Full release catalog, NOT caller scopes. This validates contracts, grants nothing.
-    const endpoints = this.apiCatalog.listFor([
-      ...this.apiCatalog.coveredPermissions(),
-    ]);
+    // Sin frontera de dominio: el filtro por `app_type` es del llamante y aquí
+    // no hay llamante (y un contexto residual ocultaría rutas válidas).
+    const endpoints = this.apiCatalog.listFor(
+      [...this.apiCatalog.coveredPermissions()],
+      undefined,
+      undefined,
+      undefined,
+      { ignoreDomainScope: true },
+    );
     const validated = validatePlaybookCatalog(candidates, {
       tools: this.registry.getAll(),
       endpoints,

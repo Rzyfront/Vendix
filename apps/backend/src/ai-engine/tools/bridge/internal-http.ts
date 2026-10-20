@@ -3,12 +3,40 @@ import {
   agentDeadlineContext,
   createAgentOperation,
 } from '../../tasks/agent-deadline';
+import {
+  domainScopeDecision,
+  type DomainScopeDecision,
+} from '../../../common/guards/domain-scope.rule';
 
 /** D2 never borrows the historical process-global RequestContext fallback. */
 export function internalRequestContext() {
   return agentDeadlineContext.getStore()
     ? RequestContextService.asyncLocalStorage.getStore()
     : RequestContextService.getContext();
+}
+
+/**
+ * Si el `DomainScopeGuard` dejaría pasar al llamante por una ruta del catálogo
+ * (`store/...`, `organization/...`, sin el prefijo `/api`).
+ *
+ * El puente replica la petición con el token del usuario, así que una ruta de
+ * otro dominio termina SIEMPRE en 403: ofrecerla o despacharla solo produce un
+ * resultado `blocked` y el aviso falso de permisos (E2E g09: a un STORE_ADMIN
+ * se le ofreció `organization/payroll/settings`). Misma regla que el guard,
+ * no una copia.
+ *
+ * Sin `app_type` en el contexto no se filtra: esa superficie no viene de un
+ * request con JWT de dominio (pruebas, procesos internos) y el guard decide
+ * igual en el salto HTTP; ocultar todo el catálogo ahí sería peor.
+ */
+export function callerDomainScope(catalogPath: string): DomainScopeDecision {
+  const context = internalRequestContext();
+  if (!context?.app_type && context?.is_super_admin !== true)
+    return { allowed: true };
+  return domainScopeDecision(
+    context,
+    `/api/${String(catalogPath ?? '').replace(/^\/+/, '')}`,
+  );
 }
 
 /** Same guarded HTTP hop; the deadline covers headers AND response-body IO. */
