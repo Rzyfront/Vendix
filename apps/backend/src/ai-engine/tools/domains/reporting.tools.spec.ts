@@ -224,6 +224,47 @@ describe('reporting.tools · A-1 export_report / A-2 analyze_report', () => {
       expect(answer.next_step).toContain('offset 100');
     });
 
+    it('(fix router) nunca envía offset al endpoint: la tool pagina localmente', async () => {
+      const rows = Array.from({ length: 30 }, (_, i) => ({ cliente: `C-${i}` }));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: rows }));
+      const { tools } = buildTools();
+      const answer = await run(tools, 'analyze_report', {
+        report_id: 'sales-by-customer',
+        limit: 10,
+        offset: 10,
+      });
+      const calledUrl = String(fetchMock.mock.calls[0][0]);
+      expect(calledUrl).not.toContain('offset=');
+      expect(calledUrl).toContain('limit=20');
+      expect(answer.rows[0]).toEqual({ cliente: 'C-10' });
+    });
+
+    it('(fix router) reintenta una vez sin el parámetro que el DTO rechaza como no declarado', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          jsonResponse(
+            {
+              statusCode: 400,
+              error_code: 'SYS_VALIDATION_001',
+              details: { validationErrors: ['property limit should not exist'] },
+            },
+            400,
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ success: true, data: [{ cliente: 'Ana', total: 9 }] }),
+        );
+      const { tools } = buildTools();
+      const answer = await run(tools, 'analyze_report', {
+        report_id: 'sales-by-customer',
+        date_from: '2026-10-01',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchMock.mock.calls[1][0])).not.toContain('limit=');
+      expect(String(fetchMock.mock.calls[1][0])).toContain('date_from=2026-10-01');
+      expect(answer.rows).toEqual([{ cliente: 'Ana', total: 9 }]);
+    });
+
     it('(a) sad: report_id desconocido → error y cero fetch', async () => {
       const { tools } = buildTools();
 

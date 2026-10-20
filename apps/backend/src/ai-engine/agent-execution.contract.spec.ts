@@ -197,7 +197,7 @@ describe('agent-execution.contract (B1): receipt instructions are never visible'
   // Verbatim from vexi-ui-command.service.ts (posAddItem, non-ok branch).
   const UI_NEXT_STEP = 'Cuéntale exactamente qué pasó y qué tiene que hacer él.';
 
-  it('a ui_* needs_user_input appends the catalog line, not its next_action', async () => {
+  it('a ui_* needs_user_input the model already answered adds no notice and never its next_action', async () => {
     const { result, chunks } = await runContract(
       [
         {
@@ -211,9 +211,9 @@ describe('agent-execution.contract (B1): receipt instructions are never visible'
       ],
       'Te abrí el selector de la camiseta.',
     );
-    expect(result.content).toBe(
-      `Te abrí el selector de la camiseta.\n\n${USER_NOTICES.needs_user_input}`,
-    );
+    // Fix router 2026-10: the model answered in prose; it already handled
+    // the receipt, so no generic catalog notice is appended.
+    expect(result.content).toBe('Te abrí el selector de la camiseta.');
     // The receipt keeps it for the model (clientSafeStream strips it later);
     // the text and the trace row never carry it.
     for (const chunk of chunks) {
@@ -322,5 +322,73 @@ describe('agent-execution.contract (P0-14): client-safe frames', () => {
     });
     expect(tool.tool?.execution).not.toHaveProperty('next_action');
     expect(tool.tool?.execution?.status).toBe('ok');
+  });
+});
+
+describe('agent-execution.contract (fix router 2026-10): notices only without a model answer', () => {
+  it('a real 403 the model explained in prose earns no generic permissions notice', async () => {
+    const { result } = await runContract(
+      [
+        {
+          name: 'list_expenses',
+          execution: receipt({ status: 'blocked', error_code: 'FORBIDDEN' }),
+        },
+      ],
+      MODEL_TEXT,
+    );
+    expect(result.content).toBe(MODEL_TEXT);
+    expect(result.content).not.toContain(USER_NOTICES.blocked);
+  });
+
+  it('a real 403 without a model answer still gets the permissions notice', async () => {
+    const { result } = await runContract(
+      [
+        {
+          name: 'list_expenses',
+          execution: receipt({ status: 'blocked', error_code: 'FORBIDDEN' }),
+        },
+      ],
+      '',
+    );
+    expect(result.content).toContain(USER_NOTICES.blocked);
+  });
+
+  it('an unknown/denied tool name is a recoverable model mistake, never «tu usuario o tu plan»', async () => {
+    const { result, chunks } = await runContract(
+      [
+        {
+          name: 'get_cash_session_close_report',
+          execution: receipt({
+            status: 'recoverable_error',
+            error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+          }),
+        },
+        { name: 'list_cash_sessions', execution: receipt() },
+      ],
+      MODEL_TEXT,
+    );
+    expect(result.content).toBe(MODEL_TEXT);
+    expect(result.execution?.outcome).not.toBe('blocked');
+    const rows = chunks.filter((c) => c.type === 'tool_result');
+    expect(rows[0].tool?.summary).toBe(USER_TOOL_NOTES.unavailable);
+    expect(rows[0].tool?.summary).not.toBe(USER_TOOL_NOTES.blocked);
+    for (const chunk of chunks)
+      expect(chunk.content ?? '').not.toMatch(INTERNAL_JARGON);
+  });
+
+  it('an uncertain write keeps its notice even with prose', async () => {
+    const { result } = await runContract(
+      [
+        {
+          name: 'update_product',
+          execution: receipt({
+            status: 'unknown_effect',
+            effect_status: 'unknown',
+          }),
+        },
+      ],
+      MODEL_TEXT,
+    );
+    expect(result.content).toContain(USER_NOTICES.unknown_effect);
   });
 });

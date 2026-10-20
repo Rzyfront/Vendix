@@ -49,6 +49,7 @@ export const USER_NOTICES = {
 /** Detalle de un paso del rastro: catálogo cerrado, nunca la nota del recibo. */
 export const USER_TOOL_NOTES = {
   staged: 'Preparando la consulta.',
+  unavailable: 'Paso no disponible en este asistente; sigo con otra vía.',
   blocked: 'Sin acceso con tu usuario o plan actual.',
   unknown_effect: 'No se pudo confirmar el resultado.',
   pending_confirmation: 'Esperando tu aprobación.',
@@ -62,6 +63,16 @@ export const USER_TOOL_NOTES = {
  */
 export const TOOL_STAGED_CODE = 'AI_AGENT_TOOL_STAGED';
 const NOT_EXECUTED = new Set([TOOL_STAGED_CODE, 'BATCH_NOT_DISPATCHED']);
+
+/**
+ * A call to a name outside the turn's authority: hallucinated, or denied to
+ * THIS agent. It is a model mistake the model corrects (recoverable), never a
+ * «tu usuario o tu plan» notice — real 401/403 and subscription codes are the
+ * only `blocked` receipts.
+ */
+export const TOOL_NOT_ALLOWED_CODE = 'AI_AGENT_TOOL_NOT_ALLOWED';
+export const TOOL_NOT_AVAILABLE_NEXT_STEP =
+  'Esa herramienta no existe para este asistente. Usa solo las herramientas de tu catálogo actual; si ninguna sirve, responde con lo que sí sabes sin mencionar herramientas.';
 const notExecuted = (r: ToolExecutionReceipt) =>
   NOT_EXECUTED.has(r.error_code ?? '');
 
@@ -87,6 +98,8 @@ export function userToolSummary(
   summary: string | undefined,
 ): string | undefined {
   if (notExecuted(receipt)) return USER_TOOL_NOTES.staged;
+  if (receipt.error_code === TOOL_NOT_ALLOWED_CODE)
+    return USER_TOOL_NOTES.unavailable;
   switch (receipt.status) {
     case 'ok':
       return summary &&
@@ -333,10 +346,17 @@ export async function* withExecutionContract(
     // saw and must explain itself. Only a known blocker or an uncertain WRITE
     // earns a short human notice, appended — never the internal next_action.
     let content = text || result.content;
+    // The model answered in prose: intermediate receipts it already saw and
+    // handled (a failed read, a corrected call, a 403 it explained) earn NO
+    // generic notice. Catalog notices are for a turn without a model answer,
+    // or for a write that is pending/uncertain.
+    const answered = !!content.trim() && !result.exhausted;
     // The receipt's `next_action` is written FOR THE MODEL ("Cuéntale qué
     // pasó…"): the person only ever reads the catalog line.
     const question =
-      critical?.status === 'needs_user_input' && !result.awaiting_input
+      critical?.status === 'needs_user_input' &&
+      !result.awaiting_input &&
+      !answered
         ? USER_NOTICES.needs_user_input
         : undefined;
     const wroteUnknown = all.some(
@@ -366,7 +386,7 @@ export async function* withExecutionContract(
     else if (!content && critical) content = USER_NOTICES.read_failed;
     if (critical?.status === 'unknown_effect')
       content = appendNotice(content, USER_NOTICES.unknown_effect);
-    else if (critical?.status === 'blocked')
+    else if (critical?.status === 'blocked' && !answered)
       content = appendNotice(content, USER_NOTICES.blocked);
     else if (
       critical?.status === 'pending_confirmation' &&

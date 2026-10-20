@@ -308,7 +308,9 @@ describe('D2 real execution seams, synthetic provider/domain', () => {
       w.queue.push(answer([call(1), call(2, {}, 'forbidden_write')]));
       const { result } = await drain(w.agent, session);
       expect(handler).not.toHaveBeenCalled();
-      expect(result.objective?.semantic_status).toBe('blocked');
+      // A name outside the authorized catalog is a model mistake (recoverable),
+      // not a user/plan permission block (fix router 2026-10).
+      expect(result.objective?.semantic_status).not.toBe('blocked');
       expect([...w.db.effects.values()]).toHaveLength(0);
       const publicRows = await w.repo.listResults(session.objective_id);
       expect(publicRows.items).toHaveLength(2);
