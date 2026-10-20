@@ -243,9 +243,7 @@ class LineResolveContext {
 
   /** Un solo `findMany` por las unidades que todavía no se han leído. */
   async loadUoms(tx: any, ids: number[]): Promise<Map<number, any>> {
-    const missing = Array.from(new Set(ids)).filter(
-      (id) => !this.uoms.has(id),
-    );
+    const missing = Array.from(new Set(ids)).filter((id) => !this.uoms.has(id));
     if (missing.length > 0) {
       const rows = await tx.units_of_measure.findMany({
         where: { id: { in: missing } },
@@ -630,8 +628,7 @@ export class PurchaseOrdersService {
     if (!(discount > 0) || items.length === 0) return shares;
 
     const grossPerLine = items.map(
-      (i) =>
-        Number(i.unit_price ?? i.unit_cost ?? 0) * Number(i.quantity ?? 0),
+      (i) => Number(i.unit_price ?? i.unit_cost ?? 0) * Number(i.quantity ?? 0),
     );
     const grossTotal = grossPerLine.reduce((s, v) => s + v, 0);
     // A discount over a zero-value order has nothing to attach to; dropping it
@@ -760,7 +757,12 @@ export class PurchaseOrdersService {
     const zeroShares = new Array(params.netPerLine.length).fill(0);
 
     if (!(freight > 0) || requested !== 'prorate') {
-      return { requested, applied: requested, shares: zeroShares, total: freight };
+      return {
+        requested,
+        applied: requested,
+        shares: zeroShares,
+        total: freight,
+      };
     }
 
     const { shares, basis } = this.prorateShipping(
@@ -774,7 +776,12 @@ export class PurchaseOrdersService {
           `la orden no tiene ni neto ni cantidad sobre la que repartirlo; ` +
           `se degrada a 'expense' y el flete NO entra al costo del inventario.`,
       );
-      return { requested, applied: 'expense', shares: zeroShares, total: freight };
+      return {
+        requested,
+        applied: 'expense',
+        shares: zeroShares,
+        total: freight,
+      };
     }
     return { requested, applied: 'prorate', shares, total: freight };
   }
@@ -937,12 +944,14 @@ export class PurchaseOrdersService {
    * volviendo a meterle una consulta dentro.
    */
   private static applyUoMConversion(
-    product: {
-      is_ingredient?: boolean | null;
-      purchase_to_stock_factor?: unknown;
-      stock_uom_id?: number | null;
-      purchase_uom_id?: number | null;
-    } | null
+    product:
+      | {
+          is_ingredient?: boolean | null;
+          purchase_to_stock_factor?: unknown;
+          stock_uom_id?: number | null;
+          purchase_uom_id?: number | null;
+        }
+      | null
       | undefined,
     purchaseQuantity: number,
     purchaseUnitCost: number,
@@ -975,9 +984,7 @@ export class PurchaseOrdersService {
     // 10 L × 1000 ml/L = 10000 ml in stock.
     // unit_cost was 5000 COP per L → 5 COP per ml.
     const stockQuantity = Math.round(purchaseQuantity * factor);
-    const stockUnitCost = Number(
-      (purchaseUnitCost / factor).toFixed(6),
-    );
+    const stockUnitCost = Number((purchaseUnitCost / factor).toFixed(6));
 
     return {
       stockQuantity,
@@ -1100,7 +1107,9 @@ export class PurchaseOrdersService {
     const baseLineProductIds = Array.from(
       new Set(
         lines
-          .filter((line) => !line.product_variant_id && Number(line.product_id) > 0)
+          .filter(
+            (line) => !line.product_variant_id && Number(line.product_id) > 0,
+          )
           .map((line) => Number(line.product_id)),
       ),
     );
@@ -1120,9 +1129,7 @@ export class PurchaseOrdersService {
       where: { id: { in: offendingIds } },
       select: { id: true, name: true },
     });
-    const names = offendingProducts
-      .map((p: any) => `«${p.name}»`)
-      .join(', ');
+    const names = offendingProducts.map((p: any) => `«${p.name}»`).join(', ');
 
     let detail: string;
     if (context.stage === 'create') {
@@ -1216,7 +1223,10 @@ export class PurchaseOrdersService {
     const allowedTaxCategoryIds = new Set<number>();
     if (requestedTaxCategoryIds.size > 0) {
       const taxScopeStoreId =
-        ctxStoreId ?? (await this.resolveTaxScopeStoreId({ location_id: locationId } as CreatePurchaseOrderDto));
+        ctxStoreId ??
+        (await this.resolveTaxScopeStoreId({
+          location_id: locationId,
+        } as CreatePurchaseOrderDto));
       if (!taxScopeStoreId) {
         throw new BadRequestException(
           'No se pudo resolver la tienda de la orden para validar las categorías de impuesto.',
@@ -1364,8 +1374,7 @@ export class PurchaseOrdersService {
       const manualFactor = item.purchase_to_stock_factor;
       const isCrossDimensionPackaging =
         purchaseUom.dimension === 'count' &&
-        (stockUom.dimension === 'mass' ||
-          stockUom.dimension === 'volume');
+        (stockUom.dimension === 'mass' || stockUom.dimension === 'volume');
 
       if (
         manualFactor != null &&
@@ -1384,8 +1393,7 @@ export class PurchaseOrdersService {
           );
         }
         const derived = Math.round(
-          Number(purchaseUom.factor_to_base) /
-            Number(stockUom.factor_to_base),
+          Number(purchaseUom.factor_to_base) / Number(stockUom.factor_to_base),
         );
         if (!Number.isFinite(derived) || derived < 1) {
           throw new BadRequestException(
@@ -1477,14 +1485,9 @@ export class PurchaseOrdersService {
       const s = normalizeText(item.state);
       if (s === 'activo' || s === 'active' || s === 'habilitado')
         productState = 'active';
-      else if (
-        s === 'inactivo' ||
-        s === 'inactive' ||
-        s === 'deshabilitado'
-      )
+      else if (s === 'inactivo' || s === 'inactive' || s === 'deshabilitado')
         productState = 'inactive';
-      else if (s === 'archivado' || s === 'archived')
-        productState = 'archived';
+      else if (s === 'archivado' || s === 'archived') productState = 'archived';
     }
 
     // Price calculation
@@ -1499,10 +1502,7 @@ export class PurchaseOrdersService {
     // honour the line's own discount and the include/added VAT mode,
     // which is what `resolveLineTaxes` owns.
     let basePrice = item.base_price || 0;
-    const cost = this.resolveLineTaxes(
-      item,
-      header,
-    ).unit_price_net;
+    const cost = this.resolveLineTaxes(item, header).unit_price_net;
     let margin = item.profit_margin || 0;
     if (margin > 0 && margin < 1) margin = margin * 100;
 
@@ -1571,15 +1571,13 @@ export class PurchaseOrdersService {
     }
 
     // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
-          const categoryIds: number[] = [];
-          const categoryNames =
-            typeof item.category_names === 'string'
-              ? item.category_names
-              : '';
-          const hasCategoryNames =
+    const categoryIds: number[] = [];
+    const categoryNames =
+      typeof item.category_names === 'string' ? item.category_names : '';
+    const hasCategoryNames =
       !matchedVariant && !readOnlyExisting && categoryNames.trim().length > 0;
-          if (hasCategoryNames) {
-            const names = categoryNames
+    if (hasCategoryNames) {
+      const names = categoryNames
         .split(',')
         .map((n) => n.trim())
         .filter((n) => n);
@@ -1634,7 +1632,12 @@ export class PurchaseOrdersService {
       // Mismo guard que create(): el padre con variantes exige elegir variante.
       await this.assertNoBaseLineOnVariantProduct(
         tx,
-        [{ product_id: existingProduct.id, product_variant_id: finalVariantId }],
+        [
+          {
+            product_id: existingProduct.id,
+            product_variant_id: finalVariantId,
+          },
+        ],
         { stage: 'create' },
       );
     } else if (existingProduct) {
@@ -1643,20 +1646,15 @@ export class PurchaseOrdersService {
       const productUpdateData: any = {
         state: productState,
         weight: item.weight || existingProduct.weight,
-        brand_id:
-          brandId !== undefined ? brandId : existingProduct.brand_id,
-        base_price:
-          basePrice > 0 ? basePrice : existingProduct.base_price,
-        profit_margin:
-          margin > 0 ? margin : existingProduct.profit_margin,
+        brand_id: brandId !== undefined ? brandId : existingProduct.brand_id,
+        base_price: basePrice > 0 ? basePrice : existingProduct.base_price,
+        profit_margin: margin > 0 ? margin : existingProduct.profit_margin,
         cost_price: cost > 0 ? cost : existingProduct.cost_price,
-        description:
-          item.product_description || existingProduct.description,
+        description: item.product_description || existingProduct.description,
       };
 
       if ((item as any).available_for_ecommerce !== undefined) {
-        productUpdateData.available_for_ecommerce =
-          availableForEcommerce;
+        productUpdateData.available_for_ecommerce = availableForEcommerce;
       }
       if ((item as any).is_on_sale !== undefined) {
         productUpdateData.is_on_sale = isOnSale;
@@ -1681,12 +1679,10 @@ export class PurchaseOrdersService {
         productUpdateData.is_featured = isFeatured;
       }
       if ((item as any).allow_pos_price_override !== undefined) {
-        productUpdateData.allow_pos_price_override =
-          allowPosPriceOverride;
+        productUpdateData.allow_pos_price_override = allowPosPriceOverride;
       }
       if ((item as any).has_multiple_price_tiers !== undefined) {
-        productUpdateData.has_multiple_price_tiers =
-          hasMultiplePriceTiers;
+        productUpdateData.has_multiple_price_tiers = hasMultiplePriceTiers;
       }
 
       if (hasCategoryNames) {
@@ -1722,8 +1718,7 @@ export class PurchaseOrdersService {
           productUpdateData.stock_uom_id = item.stock_uom_id;
         }
         if (purchaseToStockFactor != null) {
-          productUpdateData.purchase_to_stock_factor =
-            purchaseToStockFactor;
+          productUpdateData.purchase_to_stock_factor = purchaseToStockFactor;
         }
       }
 
@@ -1794,43 +1789,44 @@ export class PurchaseOrdersService {
       let newProduct: { id: number };
       try {
         newProduct = await tx.products.create({
-        data: {
-          name: item.product_name,
-          slug:
-            item.product_name
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
-          description: item.product_description || '',
-          sku: desiredSku,
-          barcode: item.barcode || undefined,
-          cost_price: cost,
-          profit_margin: margin,
-          stock_quantity: 0,
-          state: productState,
-          store_id: storeId,
-          weight: item.weight || 0,
-          product_type: productType,
-          track_inventory: trackInventory,
-          min_stock_level:
-            item.min_stock_level !== undefined && item.min_stock_level !== null
-              ? Number(item.min_stock_level)
-              : 0,
-          pricing_type: pricingType,
-          brand_id: brandId,
-          ...ingredientOverrides,
-          product_categories: {
-            create: categoryIds.map((id) => ({ category_id: id })),
+          data: {
+            name: item.product_name,
+            slug:
+              item.product_name
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
+            description: item.product_description || '',
+            sku: desiredSku,
+            barcode: item.barcode || undefined,
+            cost_price: cost,
+            profit_margin: margin,
+            stock_quantity: 0,
+            state: productState,
+            store_id: storeId,
+            weight: item.weight || 0,
+            product_type: productType,
+            track_inventory: trackInventory,
+            min_stock_level:
+              item.min_stock_level !== undefined &&
+              item.min_stock_level !== null
+                ? Number(item.min_stock_level)
+                : 0,
+            pricing_type: pricingType,
+            brand_id: brandId,
+            ...ingredientOverrides,
+            product_categories: {
+              create: categoryIds.map((id) => ({ category_id: id })),
+            },
+            product_tax_assignments:
+              taxCategoryIds !== undefined
+                ? {
+                    create: taxCategoryIds.map((id) => ({
+                      tax_category_id: id,
+                    })),
+                  }
+                : undefined,
           },
-          product_tax_assignments:
-            taxCategoryIds !== undefined
-              ? {
-                  create: taxCategoryIds.map((id) => ({
-                    tax_category_id: id,
-                  })),
-                }
-              : undefined,
-        },
         });
       } catch (error: any) {
         // Carrera: entre la comprobación de arriba y este INSERT otra
@@ -1844,8 +1840,7 @@ export class PurchaseOrdersService {
         // P2002 escondería colisiones de `slug` o `barcode`, que exigen
         // otra explicación y otro remedio.
         const rawTarget = error?.meta?.target;
-        const constraint =
-          error?.meta?.driverAdapterError?.cause?.constraint;
+        const constraint = error?.meta?.driverAdapterError?.cause?.constraint;
         const targetText = [
           Array.isArray(rawTarget) ? rawTarget.join(', ') : rawTarget,
           // Driver adapter: { fields: [...] } o { index: '<nombre>' }.
@@ -1874,7 +1869,6 @@ export class PurchaseOrdersService {
       finalProductId = newProduct.id;
       created = true;
     }
-
 
     return {
       product_id: finalProductId,
@@ -2052,13 +2046,15 @@ export class PurchaseOrdersService {
         .withoutScope()
         .inventory_locations.findUnique({
           where: { id: dto.location_id },
-          select: { store_id: true, stores: { select: { organization_id: true } } },
+          select: {
+            store_id: true,
+            stores: { select: { organization_id: true } },
+          },
         });
       // La ubicación tiene que ser del inquilino: si no, no sirve como ancla.
       if (
         location?.store_id &&
-        (!organizationId ||
-          location.stores?.organization_id === organizationId)
+        (!organizationId || location.stores?.organization_id === organizationId)
       ) {
         return location.store_id;
       }
@@ -2134,7 +2130,9 @@ export class PurchaseOrdersService {
     // La transacción devuelve la orden + (si hubo abono) el pago de anticipo
     // registrado: el evento contable se emite por FUERA, después del commit.
     const txResult = await this.prisma.$transaction(
-      async (tx): Promise<{
+      async (
+        tx,
+      ): Promise<{
         order: any;
         advance: { paymentId: number; amount: number } | null;
         // C.11 — el modo de flete SOLICITADO y el APLICADO salen de la
@@ -2151,560 +2149,567 @@ export class PurchaseOrdersService {
           paymentId: number;
           amount: number;
         } | null = null;
-      // 1. Process items to handle new product creation
-      const processedItems: any[] = [];
-      const organization_id = RequestContextService.getOrganizationId();
+        // 1. Process items to handle new product creation
+        const processedItems: any[] = [];
+        const organization_id = RequestContextService.getOrganizationId();
 
-      if (!organization_id) {
-        throw new BadRequestException('Organization ID not found in context');
-      }
-
-      // QUI-486: rechazo temprano — la OC inválida no llega a nacer, así el
-      // operador no queda con una orden `approved` que nunca podrá recibir.
-      await this.assertNoBaseLineOnVariantProduct(
-        tx,
-        createPurchaseOrderDto.items,
-        { stage: 'create' },
-      );
-
-      // Fase 2: read order_type up-front so the new-product creation block
-      // (below) can inherit ingredient flags. Defaults to `retail` for
-      // backward compat; new orders from the POP modal always carry a value.
-      const orderType =
-        (createPurchaseOrderDto as any).order_type ?? 'retail';
-
-      // FASE A — resolver las líneas nuevas (producto / variante / marca /
-      // categorías). Tienda, industrias, unidades, marcas y categorías se leen
-      // UNA vez por contexto; el resto (SKU, código, variante) es por línea y
-      // está acotado a PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX líneas sin resolver.
-      const lineCtx = new LineResolveContext({
-        organizationId: organization_id,
-        locationId: createPurchaseOrderDto.location_id,
-        orderType,
-        header: createPurchaseOrderDto,
-        allowedTaxCategoryIds,
-      });
-      const resolvedLines: Array<{
-        item: any;
-        productId: number;
-        variantId: number | null | undefined;
-      }> = [];
-      let lineIndexInOrder = -1;
-      for (const item of createPurchaseOrderDto.items) {
-        lineIndexInOrder++;
-        let finalProductId = item.product_id;
-        let finalVariantId: number | null | undefined =
-          (item as any).product_variant_id;
-
-        // If product_id is 0 or missing, and we have name/sku, create the product
-        if ((!finalProductId || finalProductId === 0) && item.product_name) {
-          const resolved = await this.resolveNewLine(
-            tx,
-            item,
-            lineCtx,
-            'create',
-            lineIndexInOrder,
-          );
-          finalProductId = resolved.product_id;
-          finalVariantId = resolved.product_variant_id;
-        }
-        resolvedLines.push({
-          item,
-          productId: finalProductId,
-          variantId: finalVariantId,
-        });
-      }
-
-      // FASE B — configuración de insumo / unidad de venta por línea, con las
-      // lecturas (producto, tienda, unidades, presentación, variantes)
-      // agrupadas en una sola pasada para todo el lote.
-      const preload = await this.buildPersistPreload(
-        tx,
-        resolvedLines,
-        orderType,
-        lineCtx,
-      );
-      for (const { item, productId, variantId } of resolvedLines) {
-        const finalProductId = productId;
-        const finalVariantId = variantId;
-
-        // Insumo por product_id (flujo POP: configure de producto EXISTENTE). El
-        // bloque de creación anterior solo corre para líneas SIN product_id; el
-        // POP siempre envía product_id, por lo que la config UoM + factor de un
-        // insumo existente se persiste aquí. purchase_order_items NO almacena el
-        // factor y el caso cross-dimension (count→mass/volume) no es re-derivable
-        // en receive, así que el producto es el único portador del factor hasta
-        // la recepción (resolveUoMConversion exige is_ingredient=true + factor).
-        if (orderType === 'ingredient' && item.product_id && finalProductId) {
-          await this.persistIngredientConfigToProduct(
-            finalProductId,
-            item,
-            tx,
-            preload,
-          );
+        if (!organization_id) {
+          throw new BadRequestException('Organization ID not found in context');
         }
 
-        // Unidad de venta (QUI-648): configurar en qué presentación se venderá
-        // el producto sin salir del flujo de compra. Corre para productos
-        // nuevos y existentes por igual, y NUNCA para un insumo puro (un insumo
-        // no se vende, de ahí que su rama fuerce has_multiple_price_tiers=false).
-        if (
-          finalProductId &&
-          item.sale_unit_name &&
-          orderType !== 'ingredient'
-        ) {
-          await this.persistSaleUnitConfigToProduct(
-            finalProductId,
-            item,
-            tx,
-            preload,
-          );
-        }
-
-        processedItems.push({
-          ...item,
-          product_id: finalProductId,
-          ...(finalVariantId ? { product_variant_id: finalVariantId } : {}),
-          product_name: undefined,
-          sku: undefined,
-          product_description: undefined,
-        });
-      }
-
-      // QUI-486 (bulk): la validación temprana solo ve `product_id > 0` del DTO.
-      // Las líneas nuevas (product_id 0) se resuelven por SKU/código en el
-      // bucle de arriba y pueden caer en un producto CON variantes sin variante.
-      // Se re-valida sobre las líneas YA resueltas antes de persistir la OC; el
-      // helper es el mismo, así el mensaje y el código (PO_VARIANT_001) son uno.
-      await this.assertNoBaseLineOnVariantProduct(tx, processedItems, {
-        stage: 'create',
-      });
-
-      // FASE 4 — total_amount BRUTO consistente. Antes se sumaba
-      // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
-      // `tax_amount` de header, dando un total inconsistente entre modos (y a
-      // veces doble-contando el IVA). Ahora derivamos neto + IVA por línea vía
-      // `resolveLineTaxes` (la MISMA derivación que persiste cada línea en :848),
-      // de modo que:
-      //   subtotal_amount = Σ neto           (base independiente del modo)
-      //   total_amount    = neto + IVA − descuento + flete   (BRUTO)
-      // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
-      // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
-      // consistente frente a los pagos (que pagan el bruto de factura).
-      //
-      // QUI-661: el descuento comercial YA NO se resta al final. Antes era
-      //   total = subtotal − descuento + IVA + flete
-      // con `lineTax` derivado del subtotal SIN descontar, lo que inflaba el
-      // IVA descontable que llega a la declaración. Ahora el descuento de
-      // cabecera se prorratea por línea y entra DENTRO de `resolveLineTaxes`, que
-      // baja `unit_price_net` antes de derivar el IVA. Como consecuencia
-      // `subtotal_amount` ya viene neto de descuento y restarlo otra vez sería
-      // contarlo dos veces.
-      const round2 = (n: number) => Math.round(n * 100) / 100;
-      const headerShares = this.prorateHeaderDiscount(
-        processedItems,
-        Number(createPurchaseOrderDto.discount_amount || 0),
-      );
-      let netSubtotal = 0;
-      let lineTax = 0;
-      // C.2 — el prorrateo del flete necesita el NETO por línea DESPUÉS de
-      // descuentos, que es justo lo que este bucle ya deriva. Se guarda en vez
-      // de recalcularse: una segunda aritmética sería una segunda verdad.
-      const netPerLine: number[] = [];
-      const quantitiesPerLine: number[] = [];
-      for (let i = 0; i < processedItems.length; i++) {
-        const d = this.resolveLineTaxes(
-          processedItems[i],
-          createPurchaseOrderDto,
-          headerShares[i],
+        // QUI-486: rechazo temprano — la OC inválida no llega a nacer, así el
+        // operador no queda con una orden `approved` que nunca podrá recibir.
+        await this.assertNoBaseLineOnVariantProduct(
+          tx,
+          createPurchaseOrderDto.items,
+          { stage: 'create' },
         );
-        const qty = Number(processedItems[i].quantity ?? 0);
-        netPerLine.push(d.net_total);
-        quantitiesPerLine.push(qty);
-        netSubtotal += d.net_total;
-        lineTax += d.tax_amount;
-      }
-      const subtotal = round2(netSubtotal);
-      const totalAmount = round2(
-        subtotal + round2(lineTax) + (createPurchaseOrderDto.shipping_cost || 0),
-      );
 
-      // C.2/C.4 — reparto del flete resuelto sobre el lote COMPLETO, antes de
-      // escribir nada. La orden sella el modo APLICADO (que puede diferir del
-      // solicitado si hubo degradación) y cada línea su porción; recibir no
-      // vuelve a repartir.
-      const freight = this.resolveFreightAllocation({
-        shippingCost: Number(createPurchaseOrderDto.shipping_cost || 0),
-        requested: createPurchaseOrderDto.shipping_cost_allocation,
-        netPerLine,
-        quantities: quantitiesPerLine,
-        context: `create() para la ubicación ${createPurchaseOrderDto.location_id}`,
-      });
+        // Fase 2: read order_type up-front so the new-product creation block
+        // (below) can inherit ingredient flags. Defaults to `retail` for
+        // backward compat; new orders from the POP modal always carry a value.
+        const orderType =
+          (createPurchaseOrderDto as any).order_type ?? 'retail';
 
-      // ===== QUI-647: validación del plan de pago =====
-      //
-      // Se valida ANTES de escribir nada: un calendario cuyas cuotas no suman
-      // el saldo no puede cerrar la deuda nunca, y descubrirlo después de crear
-      // la orden deja al usuario con una OC a medio configurar que tiene que
-      // ir a arreglar a mano en Cuentas por Pagar — exactamente el trabajo que
-      // este ticket viene a eliminar.
-      //
-      // `paymentPlan`/`downPayment` son `let` porque la matriz anti-doble-
-      // registro reconduce un caso límite: partial con abono == total significa
-      // "pago todo ahora", que se trata como immediate SIN abono (el pago
-      // completo viaja por el flujo post-creación, jamás como anticipo 133005).
-      let paymentPlan = createPurchaseOrderDto.payment_plan;
-      let downPayment = Number(
-        createPurchaseOrderDto.down_payment_amount ?? 0,
-      );
-      const installments = createPurchaseOrderDto.payment_installments ?? [];
-      const dueDate = createPurchaseOrderDto.payment_due_date;
+        // FASE A — resolver las líneas nuevas (producto / variante / marca /
+        // categorías). Tienda, industrias, unidades, marcas y categorías se leen
+        // UNA vez por contexto; el resto (SKU, código, variante) es por línea y
+        // está acotado a PURCHASE_ORDER_UNRESOLVED_ITEMS_MAX líneas sin resolver.
+        const lineCtx = new LineResolveContext({
+          organizationId: organization_id,
+          locationId: createPurchaseOrderDto.location_id,
+          orderType,
+          header: createPurchaseOrderDto,
+          allowedTaxCategoryIds,
+        });
+        const resolvedLines: Array<{
+          item: any;
+          productId: number;
+          variantId: number | null | undefined;
+        }> = [];
+        let lineIndexInOrder = -1;
+        for (const item of createPurchaseOrderDto.items) {
+          lineIndexInOrder++;
+          let finalProductId = item.product_id;
+          let finalVariantId: number | null | undefined = (item as any)
+            .product_variant_id;
 
-      // "Hoy" en el calendario de la tienda. Las fechas del plan son strings
-      // date-only (YYYY-MM-DD) y se comparan LEXICOGRÁFICAMENTE contra esta
-      // referencia: convertir a instante UTC correría la fecha un día en
-      // tiendas con offset negativo (contrato vendix-date-timezone).
-      const todayLocal = localDateString(new Date(), storeTz);
-      const dateOnly = (s: string) => s.slice(0, 10);
-      const isPast = (s: string) => dateOnly(s) < todayLocal;
+          // If product_id is 0 or missing, and we have name/sku, create the product
+          if ((!finalProductId || finalProductId === 0) && item.product_name) {
+            const resolved = await this.resolveNewLine(
+              tx,
+              item,
+              lineCtx,
+              'create',
+              lineIndexInOrder,
+            );
+            finalProductId = resolved.product_id;
+            finalVariantId = resolved.product_variant_id;
+          }
+          resolvedLines.push({
+            item,
+            productId: finalProductId,
+            variantId: finalVariantId,
+          });
+        }
 
-      if (paymentPlan === 'partial') {
-        if (!(downPayment > 0)) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_001,
-            'Un abono parcial requiere un monto abonado mayor que cero.',
-          );
-        }
-        if (downPayment > totalAmount) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_002,
-            `El abono ($${downPayment}) no puede superar el total de la orden ($${totalAmount}).`,
-          );
-        }
-        // Matriz anti-doble-registro: abono == total se reconduce a immediate
-        // SIN abono registrado (ver comentario de los `let` de arriba).
-        if (downPayment === totalAmount) {
-          paymentPlan = 'immediate';
-          downPayment = 0;
-        } else if (dueDate && isPast(dueDate)) {
-          // QUI-647 — la fecha del saldo (opcional) materializa la cuota
-          // planeada del saldo; si viene debe ser hoy o futura (misma regla que
-          // deferred). Solo aplica cuando QUEDA saldo: abono == total se
-          // recondujo a immediate arriba y no hay cuota que fechar.
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_004,
-            `La fecha de pago del saldo ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
-          );
-        }
-      }
+        // FASE B — configuración de insumo / unidad de venta por línea, con las
+        // lecturas (producto, tienda, unidades, presentación, variantes)
+        // agrupadas en una sola pasada para todo el lote.
+        const preload = await this.buildPersistPreload(
+          tx,
+          resolvedLines,
+          orderType,
+          lineCtx,
+        );
+        for (const { item, productId, variantId } of resolvedLines) {
+          const finalProductId = productId;
+          const finalVariantId = variantId;
 
-      if (paymentPlan === 'deferred') {
-        if (!dueDate) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_003,
-            'Un pago diferido requiere una fecha de pago.',
-          );
-        }
-        if (isPast(dueDate)) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_004,
-            `La fecha de pago ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
-          );
-        }
-      }
-
-      if (paymentPlan === 'installments') {
-        if (installments.length === 0) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_006,
-            'Un pago en cuotas requiere al menos una cuota programada.',
-          );
-        }
-        // El abono de un plan de cuotas es opcional y DEBE dejar saldo para
-        // las cuotas: 0 <= down < total (down >= total haría imposible que
-        // las cuotas, con piso 0.01 cada una, sumen el saldo).
-        if (downPayment < 0 || downPayment >= totalAmount) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_002,
-            `El abono ($${downPayment}) debe ser menor que el total de la orden ($${totalAmount}) para un pago en cuotas.`,
-          );
-        }
-        for (const inst of installments) {
-          if (!(Number(inst.amount) >= 0.01)) {
-            throw new VendixHttpException(
-              ErrorCodes.PO_PAYMENT_006,
-              'Cada cuota debe tener un monto mayor que cero.',
+          // Insumo por product_id (flujo POP: configure de producto EXISTENTE). El
+          // bloque de creación anterior solo corre para líneas SIN product_id; el
+          // POP siempre envía product_id, por lo que la config UoM + factor de un
+          // insumo existente se persiste aquí. purchase_order_items NO almacena el
+          // factor y el caso cross-dimension (count→mass/volume) no es re-derivable
+          // en receive, así que el producto es el único portador del factor hasta
+          // la recepción (resolveUoMConversion exige is_ingredient=true + factor).
+          if (orderType === 'ingredient' && item.product_id && finalProductId) {
+            await this.persistIngredientConfigToProduct(
+              finalProductId,
+              item,
+              tx,
+              preload,
             );
           }
-          if (isPast(inst.scheduled_date)) {
+
+          // Unidad de venta (QUI-648): configurar en qué presentación se venderá
+          // el producto sin salir del flujo de compra. Corre para productos
+          // nuevos y existentes por igual, y NUNCA para un insumo puro (un insumo
+          // no se vende, de ahí que su rama fuerce has_multiple_price_tiers=false).
+          if (
+            finalProductId &&
+            item.sale_unit_name &&
+            orderType !== 'ingredient'
+          ) {
+            await this.persistSaleUnitConfigToProduct(
+              finalProductId,
+              item,
+              tx,
+              preload,
+            );
+          }
+
+          processedItems.push({
+            ...item,
+            product_id: finalProductId,
+            ...(finalVariantId ? { product_variant_id: finalVariantId } : {}),
+            product_name: undefined,
+            sku: undefined,
+            product_description: undefined,
+          });
+        }
+
+        // QUI-486 (bulk): la validación temprana solo ve `product_id > 0` del DTO.
+        // Las líneas nuevas (product_id 0) se resuelven por SKU/código en el
+        // bucle de arriba y pueden caer en un producto CON variantes sin variante.
+        // Se re-valida sobre las líneas YA resueltas antes de persistir la OC; el
+        // helper es el mismo, así el mensaje y el código (PO_VARIANT_001) son uno.
+        await this.assertNoBaseLineOnVariantProduct(tx, processedItems, {
+          stage: 'create',
+        });
+
+        // FASE 4 — total_amount BRUTO consistente. Antes se sumaba
+        // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
+        // `tax_amount` de header, dando un total inconsistente entre modos (y a
+        // veces doble-contando el IVA). Ahora derivamos neto + IVA por línea vía
+        // `resolveLineTaxes` (la MISMA derivación que persiste cada línea en :848),
+        // de modo que:
+        //   subtotal_amount = Σ neto           (base independiente del modo)
+        //   total_amount    = neto + IVA − descuento + flete   (BRUTO)
+        // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
+        // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
+        // consistente frente a los pagos (que pagan el bruto de factura).
+        //
+        // QUI-661: el descuento comercial YA NO se resta al final. Antes era
+        //   total = subtotal − descuento + IVA + flete
+        // con `lineTax` derivado del subtotal SIN descontar, lo que inflaba el
+        // IVA descontable que llega a la declaración. Ahora el descuento de
+        // cabecera se prorratea por línea y entra DENTRO de `resolveLineTaxes`, que
+        // baja `unit_price_net` antes de derivar el IVA. Como consecuencia
+        // `subtotal_amount` ya viene neto de descuento y restarlo otra vez sería
+        // contarlo dos veces.
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const headerShares = this.prorateHeaderDiscount(
+          processedItems,
+          Number(createPurchaseOrderDto.discount_amount || 0),
+        );
+        let netSubtotal = 0;
+        let lineTax = 0;
+        // C.2 — el prorrateo del flete necesita el NETO por línea DESPUÉS de
+        // descuentos, que es justo lo que este bucle ya deriva. Se guarda en vez
+        // de recalcularse: una segunda aritmética sería una segunda verdad.
+        const netPerLine: number[] = [];
+        const quantitiesPerLine: number[] = [];
+        for (let i = 0; i < processedItems.length; i++) {
+          const d = this.resolveLineTaxes(
+            processedItems[i],
+            createPurchaseOrderDto,
+            headerShares[i],
+          );
+          const qty = Number(processedItems[i].quantity ?? 0);
+          netPerLine.push(d.net_total);
+          quantitiesPerLine.push(qty);
+          netSubtotal += d.net_total;
+          lineTax += d.tax_amount;
+        }
+        const subtotal = round2(netSubtotal);
+        const totalAmount = round2(
+          subtotal +
+            round2(lineTax) +
+            (createPurchaseOrderDto.shipping_cost || 0),
+        );
+
+        // C.2/C.4 — reparto del flete resuelto sobre el lote COMPLETO, antes de
+        // escribir nada. La orden sella el modo APLICADO (que puede diferir del
+        // solicitado si hubo degradación) y cada línea su porción; recibir no
+        // vuelve a repartir.
+        const freight = this.resolveFreightAllocation({
+          shippingCost: Number(createPurchaseOrderDto.shipping_cost || 0),
+          requested: createPurchaseOrderDto.shipping_cost_allocation,
+          netPerLine,
+          quantities: quantitiesPerLine,
+          context: `create() para la ubicación ${createPurchaseOrderDto.location_id}`,
+        });
+
+        // ===== QUI-647: validación del plan de pago =====
+        //
+        // Se valida ANTES de escribir nada: un calendario cuyas cuotas no suman
+        // el saldo no puede cerrar la deuda nunca, y descubrirlo después de crear
+        // la orden deja al usuario con una OC a medio configurar que tiene que
+        // ir a arreglar a mano en Cuentas por Pagar — exactamente el trabajo que
+        // este ticket viene a eliminar.
+        //
+        // `paymentPlan`/`downPayment` son `let` porque la matriz anti-doble-
+        // registro reconduce un caso límite: partial con abono == total significa
+        // "pago todo ahora", que se trata como immediate SIN abono (el pago
+        // completo viaja por el flujo post-creación, jamás como anticipo 133005).
+        let paymentPlan = createPurchaseOrderDto.payment_plan;
+        let downPayment = Number(
+          createPurchaseOrderDto.down_payment_amount ?? 0,
+        );
+        const installments = createPurchaseOrderDto.payment_installments ?? [];
+        const dueDate = createPurchaseOrderDto.payment_due_date;
+
+        // "Hoy" en el calendario de la tienda. Las fechas del plan son strings
+        // date-only (YYYY-MM-DD) y se comparan LEXICOGRÁFICAMENTE contra esta
+        // referencia: convertir a instante UTC correría la fecha un día en
+        // tiendas con offset negativo (contrato vendix-date-timezone).
+        const todayLocal = localDateString(new Date(), storeTz);
+        const dateOnly = (s: string) => s.slice(0, 10);
+        const isPast = (s: string) => dateOnly(s) < todayLocal;
+
+        if (paymentPlan === 'partial') {
+          if (!(downPayment > 0)) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_001,
+              'Un abono parcial requiere un monto abonado mayor que cero.',
+            );
+          }
+          if (downPayment > totalAmount) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_002,
+              `El abono ($${downPayment}) no puede superar el total de la orden ($${totalAmount}).`,
+            );
+          }
+          // Matriz anti-doble-registro: abono == total se reconduce a immediate
+          // SIN abono registrado (ver comentario de los `let` de arriba).
+          if (downPayment === totalAmount) {
+            paymentPlan = 'immediate';
+            downPayment = 0;
+          } else if (dueDate && isPast(dueDate)) {
+            // QUI-647 — la fecha del saldo (opcional) materializa la cuota
+            // planeada del saldo; si viene debe ser hoy o futura (misma regla que
+            // deferred). Solo aplica cuando QUEDA saldo: abono == total se
+            // recondujo a immediate arriba y no hay cuota que fechar.
             throw new VendixHttpException(
               ErrorCodes.PO_PAYMENT_004,
-              `La cuota del ${dateOnly(inst.scheduled_date)} no puede programarse en una fecha anterior a hoy (${todayLocal}).`,
+              `La fecha de pago del saldo ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
             );
           }
         }
-        // Suma EXACTA con Prisma.Decimal contra totalAmount − downPayment
-        // (tolerancia 0.01). Reemplaza el round2 anterior: la aritmética de
-        // punto flotante puede desviar la suma de cuotas en centavos.
-        const scheduledSum = installments.reduce(
-          (sum, i) => sum.plus(new Prisma.Decimal(i.amount ?? 0)),
-          new Prisma.Decimal(0),
-        );
-        const balance = new Prisma.Decimal(totalAmount).minus(downPayment);
-        if (!scheduledSum.minus(balance).abs().lte(new Prisma.Decimal('0.01'))) {
-          throw new VendixHttpException(
-            ErrorCodes.PO_PAYMENT_005,
-            `Las cuotas suman $${scheduledSum.toFixed(2)} y el saldo de la orden es $${balance.toFixed(2)}. Deben coincidir.`,
-          );
+
+        if (paymentPlan === 'deferred') {
+          if (!dueDate) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_003,
+              'Un pago diferido requiere una fecha de pago.',
+            );
+          }
+          if (isPast(dueDate)) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_004,
+              `La fecha de pago ${dateOnly(dueDate)} no puede ser anterior a hoy (${todayLocal}).`,
+            );
+          }
         }
-      }
 
-      // Generate order number
-      const date = new Date();
-      const order_number = `PO-${date.getFullYear()}${(date.getMonth() + 1)
-        .toString()
-        .padStart(
-          2,
-          '0',
-        )}${date.getDate().toString().padStart(2, '0')}-${Math.floor(
-        Math.random() * 1000,
-      )
-        .toString()
-        .padStart(3, '0')}`;
-
-      const {
-        items,
-        created_by_user_id,
-        scan_attachment: scanAttachment,
-        ...orderData
-      } = createPurchaseOrderDto;
-      const user_id = RequestContextService.getUserId();
-
-      // Validate Location and Supplier existence to prevent FK errors
-      if (orderData.location_id) {
-        const locationExists = await tx.inventory_locations.findFirst({
-          where: { id: orderData.location_id, organization_id },
-        });
-        if (!locationExists) {
-          throw new BadRequestException(
-            `La bodega con ID ${orderData.location_id} no existe o no está activa.`,
-          );
-        }
-      }
-
-      if (orderData.supplier_id) {
-        // Solo proveedores activos pueden recibir una OC nueva: `inactive` y
-        // `archived` existen para el histórico, no para abrir trabajo.
-        const supplierExists = await tx.suppliers.findFirst({
-          where: {
-            id: orderData.supplier_id,
-            organization_id,
-            state: 'active',
-          },
-        });
-        if (!supplierExists) {
-          throw new BadRequestException(
-            `El proveedor con ID ${orderData.supplier_id} no existe o no está activo.`,
-          );
-        }
-      }
-
-      // Coerce ISO-string dates to Date before Prisma. `@IsDateString` only
-      // validates the wire format; Prisma DateTime columns require Date or a
-      // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
-      // would otherwise blow up here.
-      const toDate = PurchaseOrdersService.toDateOrUndefined;
-      // QUI-647: `payment_installments` es un campo del DTO, no una columna.
-      // Se saca del spread o Prisma lo rechaza como argumento desconocido; las
-      // cuotas se escriben más abajo por la relación `payment_schedules`.
-      // `down_payment_amount` también se saca: la reconducción de la matriz
-      // anti-doble-registro (partial con abono==total → immediate SIN abono)
-      // convierte `downPayment` en 0, y si el valor crudo del DTO quedara en
-      // el spread, el conditional `...(downPayment > 0 ? ...)` vacío no lo
-      // sobreescribiría y la orden immediate quedaría con un abono fantasma.
-      //
-      // A.10 — `status` sale del spread. El DTO lo sigue aceptando (el POP web
-      // lo envía en cada creación y quitarlo devolvería 400 a la pantalla
-      // principal de compras) pero el servicio lo IGNORA: una orden nace en
-      // borrador y la aprobación es un acto con permiso propio. Antes el spread
-      // lo derramaba a Prisma tal cual, así que un `POST` con
-      // `"status":"approved"` hacía nacer la orden aprobada saltándose ese
-      // permiso — y `approved_by_user_id`, que también estaba en el DTO,
-      // permitía además nombrar al aprobador de una orden que nadie aprobó.
-      const {
-        expected_date: rawExpectedDate,
-        payment_due_date: rawPaymentDueDate,
-        payment_installments: _installmentsInput,
-        down_payment_amount: _downPaymentInput,
-        status: _clientStatusIgnored,
-        shipping_cost_allocation: _requestedAllocationIgnored,
-        ...orderDataRest
-      } = orderData;
-
-      // Fase 2: `orderType` was resolved at the top of the transaction so the
-      // new-product creation block could inherit ingredient flags.
-      // Fase 2: when the order is `ingredient`, every line MUST carry the
-      // UoM FKs. We do a soft guard here (log + default) instead of a hard
-      // 400 to keep legacy clients working. The receive() flow is the
-      // authoritative validator when the order is actually received.
-      const isIngredient = orderType === 'ingredient';
-      const purchaseOrder = await tx.purchase_orders.create({
-        data: {
-          ...orderDataRest,
-          // A.10 — de oficio, no del cliente. Ver el comentario del destructuring.
-          status: purchase_order_status_enum.draft,
-          approved_by_user_id: null,
-          // C.4 — el modo APLICADO (el solicitado pudo degradar). Se sella acá
-          // y `receive()` lo obedece sin volver a decidir.
-          shipping_cost_allocation: freight.applied,
-          order_type: orderType,
-          expected_date: toDate(rawExpectedDate),
-          // Bug 1: `payment_due_date` viene como `YYYY-MM-DD` (string) del
-          // input HTML; Prisma exige `Date`. Conversión defensiva antes de
-          // persistir para no reventar contra la columna DateTime.
-          payment_due_date: toDate(rawPaymentDueDate),
-          created_by_user_id: user_id,
-          organization_id,
-          order_number,
-          subtotal_amount: subtotal,
-          // QUI-661: `create()` nunca escribía el `tax_amount` de cabecera y lo
-          // dejaba en 0 mientras `total_amount` sí incluía el IVA — cabecera
-          // internamente incoherente. `update()` sí lo escribía. La métrica de
-          // compras lee la LÍNEA (ver QUI-624), pero dejar el header mintiendo
-          // es la trampa que hace caer al próximo lector.
-          tax_amount: round2(lineTax),
-          total_amount: totalAmount,
-          order_date: new Date(),
-          // QUI-647: el plan acordado queda en la orden. `payment_terms` ya
-          // existía como texto libre; `payment_plan` es el modo tipado que el
-          // motor lee, para no tener que interpretar una cadena.
-          ...(paymentPlan ? { payment_plan: paymentPlan } : {}),
-          ...(downPayment > 0 ? { down_payment_amount: downPayment } : {}),
-          // Las cuotas se guardan contra la ORDEN porque la CxP todavía no
-          // existe: nace con la recepción. Se materializan en
-          // `ap_payment_schedules` cuando esa CxP aparece.
-          ...(installments.length > 0
-            ? {
-                payment_schedules: {
-                  create: installments.map((i) => ({
-                    // Bug 1: convertir scheduled_date string → Date aquí también
-                    scheduled_date: toDate(i.scheduled_date) ?? new Date(i.scheduled_date),
-                    amount: i.amount,
-                    status: 'planned',
-                  })),
-                },
-              }
-            : {}),
-          purchase_order_items: {
-            create: processedItems.map((item, index) => {
-              // F1 IVA lifecycle: derive net/tax from the entered unit_price
-              // and the effective include-tax mode (line override ?? header).
-              // `unit_cost` persists the NET price (single source of truth for
-              // costing); the VAT treatment for inventory cost is decided later
-              // in receive() by fiscal responsibility.
-              //
-              // QUI-661: the SAME prorated header share used for the order
-              // totals is passed here, so the persisted `unit_cost` — the value
-              // the FIFO engine capitalizes at reception — already carries the
-              // commercial discount. This is what closes the old gap where the
-              // CxP was rebated but the inventory was not.
-              const derived = this.resolveLineTaxes(
-                item,
-                createPurchaseOrderDto,
-                headerShares[index],
+        if (paymentPlan === 'installments') {
+          if (installments.length === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_006,
+              'Un pago en cuotas requiere al menos una cuota programada.',
+            );
+          }
+          // El abono de un plan de cuotas es opcional y DEBE dejar saldo para
+          // las cuotas: 0 <= down < total (down >= total haría imposible que
+          // las cuotas, con piso 0.01 cada una, sumen el saldo).
+          if (downPayment < 0 || downPayment >= totalAmount) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_002,
+              `El abono ($${downPayment}) debe ser menor que el total de la orden ($${totalAmount}) para un pago en cuotas.`,
+            );
+          }
+          for (const inst of installments) {
+            if (!(Number(inst.amount) >= 0.01)) {
+              throw new VendixHttpException(
+                ErrorCodes.PO_PAYMENT_006,
+                'Cada cuota debe tener un monto mayor que cero.',
               );
-              return {
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id,
-                quantity_ordered: item.quantity,
-                unit_cost: derived.unit_price_net,
-                unit_price_net: derived.unit_price_net,
-                // QUI-855 — columnas legacy derivadas de la fila IVA (ver
-                // `resolveLineTaxes`); la verdad por impuesto vive en las filas
-                // hijas, que existen para TODA línea con impuestos.
-                tax_rate: derived.legacy_tax_rate,
-                tax_type: derived.legacy_tax_type,
-                prices_include_tax: item.prices_include_tax ?? null,
-                tax_amount: derived.tax_amount,
-                purchase_order_item_taxes: this.buildItemTaxRows(derived),
-                // Total discount actually applied (own + prorated header), and
-                // the percentage the user typed to get there. The amount is the
-                // source of truth; the percentage is provenance only.
-                discount_amount: derived.discount_total,
-                discount_percentage: item.discount_percentage ?? 0,
-                // C.2 — porción del flete que aterriza en esta línea. Cero en
-                // modo `expense`. La suma de las líneas es EXACTAMENTE
-                // `purchase_orders.shipping_cost` (el residuo va a la última),
-                // y `receive()` lo lee de acá en vez de repartir otra vez.
-                allocated_shipping_amount: freight.shares[index] ?? 0,
-                notes: item.notes,
-                batch_number: item.batch_number,
-                manufacturing_date: toDate(item.manufacturing_date),
-                expiration_date: toDate(item.expiration_date),
-                // Fase 2: UoM FKs. Required when the parent is `ingredient`;
-                // we pass `null` otherwise to keep the column clean.
-                purchase_uom_id: isIngredient
-                  ? (item.purchase_uom_id ?? null)
-                  : null,
-                stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
-              };
-            }),
-          },
-        },
-        include: {
-          suppliers: true,
-          location: true,
-          purchase_order_items: {
-            include: {
-              products: true,
-              product_variants: true,
+            }
+            if (isPast(inst.scheduled_date)) {
+              throw new VendixHttpException(
+                ErrorCodes.PO_PAYMENT_004,
+                `La cuota del ${dateOnly(inst.scheduled_date)} no puede programarse en una fecha anterior a hoy (${todayLocal}).`,
+              );
+            }
+          }
+          // Suma EXACTA con Prisma.Decimal contra totalAmount − downPayment
+          // (tolerancia 0.01). Reemplaza el round2 anterior: la aritmética de
+          // punto flotante puede desviar la suma de cuotas en centavos.
+          const scheduledSum = installments.reduce(
+            (sum, i) => sum.plus(new Prisma.Decimal(i.amount ?? 0)),
+            new Prisma.Decimal(0),
+          );
+          const balance = new Prisma.Decimal(totalAmount).minus(downPayment);
+          if (
+            !scheduledSum.minus(balance).abs().lte(new Prisma.Decimal('0.01'))
+          ) {
+            throw new VendixHttpException(
+              ErrorCodes.PO_PAYMENT_005,
+              `Las cuotas suman $${scheduledSum.toFixed(2)} y el saldo de la orden es $${balance.toFixed(2)}. Deben coincidir.`,
+            );
+          }
+        }
+
+        // Generate order number
+        const date = new Date();
+        const order_number = `PO-${date.getFullYear()}${(date.getMonth() + 1)
+          .toString()
+          .padStart(
+            2,
+            '0',
+          )}${date.getDate().toString().padStart(2, '0')}-${Math.floor(
+          Math.random() * 1000,
+        )
+          .toString()
+          .padStart(3, '0')}`;
+
+        const {
+          items,
+          created_by_user_id,
+          scan_attachment: scanAttachment,
+          ...orderData
+        } = createPurchaseOrderDto;
+        const user_id = RequestContextService.getUserId();
+
+        // Validate Location and Supplier existence to prevent FK errors
+        if (orderData.location_id) {
+          const locationExists = await tx.inventory_locations.findFirst({
+            where: { id: orderData.location_id, organization_id },
+          });
+          if (!locationExists) {
+            throw new BadRequestException(
+              `La bodega con ID ${orderData.location_id} no existe o no está activa.`,
+            );
+          }
+        }
+
+        if (orderData.supplier_id) {
+          // Solo proveedores activos pueden recibir una OC nueva: `inactive` y
+          // `archived` existen para el histórico, no para abrir trabajo.
+          const supplierExists = await tx.suppliers.findFirst({
+            where: {
+              id: orderData.supplier_id,
+              organization_id,
+              state: 'active',
+            },
+          });
+          if (!supplierExists) {
+            throw new BadRequestException(
+              `El proveedor con ID ${orderData.supplier_id} no existe o no está activo.`,
+            );
+          }
+        }
+
+        // Coerce ISO-string dates to Date before Prisma. `@IsDateString` only
+        // validates the wire format; Prisma DateTime columns require Date or a
+        // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
+        // would otherwise blow up here.
+        const toDate = PurchaseOrdersService.toDateOrUndefined;
+        // QUI-647: `payment_installments` es un campo del DTO, no una columna.
+        // Se saca del spread o Prisma lo rechaza como argumento desconocido; las
+        // cuotas se escriben más abajo por la relación `payment_schedules`.
+        // `down_payment_amount` también se saca: la reconducción de la matriz
+        // anti-doble-registro (partial con abono==total → immediate SIN abono)
+        // convierte `downPayment` en 0, y si el valor crudo del DTO quedara en
+        // el spread, el conditional `...(downPayment > 0 ? ...)` vacío no lo
+        // sobreescribiría y la orden immediate quedaría con un abono fantasma.
+        //
+        // A.10 — `status` sale del spread. El DTO lo sigue aceptando (el POP web
+        // lo envía en cada creación y quitarlo devolvería 400 a la pantalla
+        // principal de compras) pero el servicio lo IGNORA: una orden nace en
+        // borrador y la aprobación es un acto con permiso propio. Antes el spread
+        // lo derramaba a Prisma tal cual, así que un `POST` con
+        // `"status":"approved"` hacía nacer la orden aprobada saltándose ese
+        // permiso — y `approved_by_user_id`, que también estaba en el DTO,
+        // permitía además nombrar al aprobador de una orden que nadie aprobó.
+        const {
+          expected_date: rawExpectedDate,
+          payment_due_date: rawPaymentDueDate,
+          payment_installments: _installmentsInput,
+          down_payment_amount: _downPaymentInput,
+          status: _clientStatusIgnored,
+          shipping_cost_allocation: _requestedAllocationIgnored,
+          ...orderDataRest
+        } = orderData;
+
+        // Fase 2: `orderType` was resolved at the top of the transaction so the
+        // new-product creation block could inherit ingredient flags.
+        // Fase 2: when the order is `ingredient`, every line MUST carry the
+        // UoM FKs. We do a soft guard here (log + default) instead of a hard
+        // 400 to keep legacy clients working. The receive() flow is the
+        // authoritative validator when the order is actually received.
+        const isIngredient = orderType === 'ingredient';
+        const purchaseOrder = await tx.purchase_orders.create({
+          data: {
+            ...orderDataRest,
+            // A.10 — de oficio, no del cliente. Ver el comentario del destructuring.
+            status: purchase_order_status_enum.draft,
+            approved_by_user_id: null,
+            // C.4 — el modo APLICADO (el solicitado pudo degradar). Se sella acá
+            // y `receive()` lo obedece sin volver a decidir.
+            shipping_cost_allocation: freight.applied,
+            order_type: orderType,
+            expected_date: toDate(rawExpectedDate),
+            // Bug 1: `payment_due_date` viene como `YYYY-MM-DD` (string) del
+            // input HTML; Prisma exige `Date`. Conversión defensiva antes de
+            // persistir para no reventar contra la columna DateTime.
+            payment_due_date: toDate(rawPaymentDueDate),
+            created_by_user_id: user_id,
+            organization_id,
+            order_number,
+            subtotal_amount: subtotal,
+            // QUI-661: `create()` nunca escribía el `tax_amount` de cabecera y lo
+            // dejaba en 0 mientras `total_amount` sí incluía el IVA — cabecera
+            // internamente incoherente. `update()` sí lo escribía. La métrica de
+            // compras lee la LÍNEA (ver QUI-624), pero dejar el header mintiendo
+            // es la trampa que hace caer al próximo lector.
+            tax_amount: round2(lineTax),
+            total_amount: totalAmount,
+            order_date: new Date(),
+            // QUI-647: el plan acordado queda en la orden. `payment_terms` ya
+            // existía como texto libre; `payment_plan` es el modo tipado que el
+            // motor lee, para no tener que interpretar una cadena.
+            ...(paymentPlan ? { payment_plan: paymentPlan } : {}),
+            ...(downPayment > 0 ? { down_payment_amount: downPayment } : {}),
+            // Las cuotas se guardan contra la ORDEN porque la CxP todavía no
+            // existe: nace con la recepción. Se materializan en
+            // `ap_payment_schedules` cuando esa CxP aparece.
+            ...(installments.length > 0
+              ? {
+                  payment_schedules: {
+                    create: installments.map((i) => ({
+                      // Bug 1: convertir scheduled_date string → Date aquí también
+                      scheduled_date:
+                        toDate(i.scheduled_date) ?? new Date(i.scheduled_date),
+                      amount: i.amount,
+                      status: 'planned',
+                    })),
+                  },
+                }
+              : {}),
+            purchase_order_items: {
+              create: processedItems.map((item, index) => {
+                // F1 IVA lifecycle: derive net/tax from the entered unit_price
+                // and the effective include-tax mode (line override ?? header).
+                // `unit_cost` persists the NET price (single source of truth for
+                // costing); the VAT treatment for inventory cost is decided later
+                // in receive() by fiscal responsibility.
+                //
+                // QUI-661: the SAME prorated header share used for the order
+                // totals is passed here, so the persisted `unit_cost` — the value
+                // the FIFO engine capitalizes at reception — already carries the
+                // commercial discount. This is what closes the old gap where the
+                // CxP was rebated but the inventory was not.
+                const derived = this.resolveLineTaxes(
+                  item,
+                  createPurchaseOrderDto,
+                  headerShares[index],
+                );
+                return {
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id,
+                  quantity_ordered: item.quantity,
+                  unit_cost: derived.unit_price_net,
+                  unit_price_net: derived.unit_price_net,
+                  // QUI-855 — columnas legacy derivadas de la fila IVA (ver
+                  // `resolveLineTaxes`); la verdad por impuesto vive en las filas
+                  // hijas, que existen para TODA línea con impuestos.
+                  tax_rate: derived.legacy_tax_rate,
+                  tax_type: derived.legacy_tax_type,
+                  prices_include_tax: item.prices_include_tax ?? null,
+                  tax_amount: derived.tax_amount,
+                  purchase_order_item_taxes: this.buildItemTaxRows(derived),
+                  // Total discount actually applied (own + prorated header), and
+                  // the percentage the user typed to get there. The amount is the
+                  // source of truth; the percentage is provenance only.
+                  discount_amount: derived.discount_total,
+                  discount_percentage: item.discount_percentage ?? 0,
+                  // C.2 — porción del flete que aterriza en esta línea. Cero en
+                  // modo `expense`. La suma de las líneas es EXACTAMENTE
+                  // `purchase_orders.shipping_cost` (el residuo va a la última),
+                  // y `receive()` lo lee de acá en vez de repartir otra vez.
+                  allocated_shipping_amount: freight.shares[index] ?? 0,
+                  notes: item.notes,
+                  batch_number: item.batch_number,
+                  manufacturing_date: toDate(item.manufacturing_date),
+                  expiration_date: toDate(item.expiration_date),
+                  // Fase 2: UoM FKs. Required when the parent is `ingredient`;
+                  // we pass `null` otherwise to keep the column clean.
+                  purchase_uom_id: isIngredient
+                    ? (item.purchase_uom_id ?? null)
+                    : null,
+                  stock_uom_id: isIngredient
+                    ? (item.stock_uom_id ?? null)
+                    : null,
+                };
+              }),
             },
           },
-        },
-      });
-
-      // QUI-647 Paso 2 — un abono declarado al crear es un PAGO REAL de
-      // anticipo. Se registra DENTRO de esta transacción (Prisma no permite
-      // anidar $transaction, así que el core de registerPayment se ejecuta
-      // contra el `tx` abierto via registerAdvancePaymentInTx); el evento
-      // contable se emite solo después del commit (ver
-      // emitPurchaseOrderPaymentEvent). `downPayment` ya vino reconducido
-      // por la matriz anti-doble-registro: partial con abono==total es
-      // immediate SIN abono, así que aquí solo entran abonos reales < total.
-      if (downPayment > 0) {
-        const advance = await this.registerAdvancePaymentInTx(
-          tx,
-          purchaseOrder.id,
-          downPayment,
-          user_id,
-        );
-        (purchaseOrder as any).payment_status = advance.paymentStatus;
-        advanceToRegister = { paymentId: advance.id, amount: downPayment };
-      }
-
-      // QUI-647 — abono parcial CON fecha de pago del saldo: el saldo queda con
-      // fecha materializado como cuota planeada contra la ORDEN (mismo contrato
-      // que installments: `purchase_order_payment_schedules` con status
-      // 'planned', a la espera de CxP que nace con la recepción). Sin
-      // `payment_due_date` el saldo queda sin fecha y se gestiona desde Cuentas
-      // por Pagar — comportamiento previo. `paymentPlan === 'partial'` ya
-      // excluye la reconducción a immediate (abono == total → no hay saldo).
-      if (paymentPlan === 'partial' && dueDate && downPayment < totalAmount) {
-        await tx.purchase_order_payment_schedules.create({
-          data: {
-            purchase_order_id: purchaseOrder.id,
-            scheduled_date: new Date(dueDate),
-            amount: new Prisma.Decimal(totalAmount).minus(downPayment),
-            status: 'planned',
+          include: {
+            suppliers: true,
+            location: true,
+            purchase_order_items: {
+              include: {
+                products: true,
+                product_variants: true,
+              },
+            },
           },
         });
-      }
 
-      // QUI-855 — el documento escaneado queda ligado a la orden en la MISMA tx.
-      await this.linkScanAttachment(tx, purchaseOrder.id, scanAttachment);
+        // QUI-647 Paso 2 — un abono declarado al crear es un PAGO REAL de
+        // anticipo. Se registra DENTRO de esta transacción (Prisma no permite
+        // anidar $transaction, así que el core de registerPayment se ejecuta
+        // contra el `tx` abierto via registerAdvancePaymentInTx); el evento
+        // contable se emite solo después del commit (ver
+        // emitPurchaseOrderPaymentEvent). `downPayment` ya vino reconducido
+        // por la matriz anti-doble-registro: partial con abono==total es
+        // immediate SIN abono, así que aquí solo entran abonos reales < total.
+        if (downPayment > 0) {
+          const advance = await this.registerAdvancePaymentInTx(
+            tx,
+            purchaseOrder.id,
+            downPayment,
+            user_id,
+          );
+          (purchaseOrder as any).payment_status = advance.paymentStatus;
+          advanceToRegister = { paymentId: advance.id, amount: downPayment };
+        }
 
-      return { order: purchaseOrder, advance: advanceToRegister, freight };
-    },
+        // QUI-647 — abono parcial CON fecha de pago del saldo: el saldo queda con
+        // fecha materializado como cuota planeada contra la ORDEN (mismo contrato
+        // que installments: `purchase_order_payment_schedules` con status
+        // 'planned', a la espera de CxP que nace con la recepción). Sin
+        // `payment_due_date` el saldo queda sin fecha y se gestiona desde Cuentas
+        // por Pagar — comportamiento previo. `paymentPlan === 'partial'` ya
+        // excluye la reconducción a immediate (abono == total → no hay saldo).
+        if (paymentPlan === 'partial' && dueDate && downPayment < totalAmount) {
+          await tx.purchase_order_payment_schedules.create({
+            data: {
+              purchase_order_id: purchaseOrder.id,
+              scheduled_date: new Date(dueDate),
+              amount: new Prisma.Decimal(totalAmount).minus(downPayment),
+              status: 'planned',
+            },
+          });
+        }
+
+        // QUI-855 — el documento escaneado queda ligado a la orden en la MISMA tx.
+        await this.linkScanAttachment(tx, purchaseOrder.id, scanAttachment);
+
+        return { order: purchaseOrder, advance: advanceToRegister, freight };
+      },
       // A.11 — techo EXPLÍCITO de transacción. Prisma impone 5.000 ms por
       // omisión y nadie lo había declarado: una orden de 80 líneas emite del
       // orden de miles de consultas (creación de productos, config de UoM,
@@ -2744,7 +2749,9 @@ export class PurchaseOrdersService {
     try {
       const user_id = RequestContextService.getUserId();
       const auditStoreId =
-        result.location?.store_id ?? RequestContextService.getStoreId() ?? undefined;
+        result.location?.store_id ??
+        RequestContextService.getStoreId() ??
+        undefined;
       const vatOutcome = await this.resolveVatResponsibility(
         result.organization_id ?? undefined,
         auditStoreId,
@@ -2837,10 +2844,21 @@ export class PurchaseOrdersService {
     // Add search filter
     if (query.search) {
       where.OR = [
-        { internal_reference: { contains: query.search } },
-        { supplier_reference: { contains: query.search } },
-        { notes: { contains: query.search } },
-        { suppliers: { name: { contains: query.search } } },
+        // `internal_reference`/`supplier_reference` never existed on the model:
+        // every search threw PrismaClientValidationError.
+        { order_number: { contains: query.search, mode: 'insensitive' } },
+        {
+          supplier_invoice_number: {
+            contains: query.search,
+            mode: 'insensitive',
+          },
+        },
+        { notes: { contains: query.search, mode: 'insensitive' } },
+        {
+          suppliers: {
+            name: { contains: query.search, mode: 'insensitive' },
+          },
+        },
       ];
     }
 
@@ -2921,7 +2939,12 @@ export class PurchaseOrdersService {
    * no listados (el DTO ya bloquea por `@IsEnum`, esto es la red final).
    */
   private resolveOrderBy(
-    sort_by: 'order_date' | 'next_payment_date' | 'supplier_name' | 'total' | 'status',
+    sort_by:
+      | 'order_date'
+      | 'next_payment_date'
+      | 'supplier_name'
+      | 'total'
+      | 'status',
     sort_order: 'asc' | 'desc',
   ): any {
     switch (sort_by) {
@@ -2957,7 +2980,14 @@ export class PurchaseOrdersService {
    */
   private async decorateWithNextPaymentDate<T extends { id: number }>(
     rows: T[],
-  ): Promise<Array<T & { next_payment_date: string | null; next_payment_due_in_days: number | null }>> {
+  ): Promise<
+    Array<
+      T & {
+        next_payment_date: string | null;
+        next_payment_due_in_days: number | null;
+      }
+    >
+  > {
     if (!rows.length) return [];
     const poIds = rows.map((r) => r.id);
     const map = await this.deriveNextPaymentDates(poIds);
@@ -2965,14 +2995,22 @@ export class PurchaseOrdersService {
     return rows.map((row) => {
       const next = map.get(row.id);
       if (!next || !next.date) {
-        return { ...row, next_payment_date: null, next_payment_due_in_days: null };
+        return {
+          ...row,
+          next_payment_date: null,
+          next_payment_due_in_days: null,
+        };
       }
       const days = Math.ceil(
         (new Date(`${next.date}T00:00:00`).getTime() -
           new Date(`${todayLocal}T00:00:00`).getTime()) /
           86_400_000,
       );
-      return { ...row, next_payment_date: next.date, next_payment_due_in_days: days };
+      return {
+        ...row,
+        next_payment_date: next.date,
+        next_payment_due_in_days: days,
+      };
     });
   }
 
@@ -3183,10 +3221,13 @@ export class PurchaseOrdersService {
       // proveedor y una recibida respalda inventario y asientos contables.
       this.assertMutable(order, 'editar');
 
-      const { items, scan_attachment: scanAttachment, ...rest } =
-        updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
-          items?: any[];
-        };
+      const {
+        items,
+        scan_attachment: scanAttachment,
+        ...rest
+      } = updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
+        items?: any[];
+      };
 
       // C.7 — misma regla de flete e impuesto que en la creación. `PartialType`
       // vuelve opcional a `location_id`, y `@IsOptional()` desactiva TODOS los
@@ -3352,10 +3393,12 @@ export class PurchaseOrdersService {
               tax_amount: derived.tax_amount,
               notes: item.notes,
               batch_number: item.batch_number,
-              manufacturing_date:
-                PurchaseOrdersService.toDateOrUndefined(item.manufacturing_date),
-              expiration_date:
-                PurchaseOrdersService.toDateOrUndefined(item.expiration_date),
+              manufacturing_date: PurchaseOrdersService.toDateOrUndefined(
+                item.manufacturing_date,
+              ),
+              expiration_date: PurchaseOrdersService.toDateOrUndefined(
+                item.expiration_date,
+              ),
             });
             // QUI-855 — filas por impuesto: las previas se borraron arriba,
             // así que esto es un reemplazo limpio.
@@ -3852,10 +3895,7 @@ export class PurchaseOrdersService {
     });
 
     // 3. Override del producto: factor + precio/margen con criterio cost-anchor.
-    const packSize = resolvePackSize(
-      tier.units_per_package,
-      unitsPerPackage,
-    );
+    const packSize = resolvePackSize(tier.units_per_package, unitsPerPackage);
     const { override_price, override_profit_margin } =
       resolveTierPricingCostAnchor({
         unitCost: Number(product.cost_price ?? 0),
@@ -4232,531 +4272,473 @@ export class PurchaseOrdersService {
   }
 
   async receive(id: number, dto: ReceivePurchaseOrderDto) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Create reception record
-      const user_id = RequestContextService.getUserId();
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        // Create reception record
+        const user_id = RequestContextService.getUserId();
 
-      // La orden se resuelve ANTES que las líneas: al revés, recibir contra una
-      // orden inexistente respondía "La línea N no pertenece a esta orden de
-      // compra", que describe un problema que no es el que ocurrió.
-      const orderHeader = await this.loadOrderOrFail(tx, id);
-      // Solo `approved` y `partial` admiten mercancía. Recibir sobre un borrador
-      // saltaría la aprobación, y sobre `cancelled` o `received` ingresaría
-      // stock que ningún compromiso vigente respalda. El destino se afina más
-      // abajo (partial vs received) según lo que quede pendiente; aquí basta
-      // con validar que el estado actual admita recibir algo.
-      this.assertTransition(orderHeader, purchase_order_status_enum.partial);
+        // La orden se resuelve ANTES que las líneas: al revés, recibir contra una
+        // orden inexistente respondía "La línea N no pertenece a esta orden de
+        // compra", que describe un problema que no es el que ocurrió.
+        const orderHeader = await this.loadOrderOrFail(tx, id);
+        // Solo `approved` y `partial` admiten mercancía. Recibir sobre un borrador
+        // saltaría la aprobación, y sobre `cancelled` o `received` ingresaría
+        // stock que ningún compromiso vigente respalda. El destino se afina más
+        // abajo (partial vs received) según lo que quede pendiente; aquí basta
+        // con validar que el estado actual admita recibir algo.
+        this.assertTransition(orderHeader, purchase_order_status_enum.partial);
 
-      // Guard: every incoming line must belong to THIS purchase order and must
-      // not exceed its pending quantity (ordered − already received). Without
-      // this, receive() blindly increments quantity_received, so an over-receipt
-      // (e.g. 99 against 1 ordered) is accepted and inflates stock, and a line
-      // id from another order could be received against this one. A throw here
-      // rolls back the whole transaction (no partial reception is persisted).
-      const poLines = await tx.purchase_order_items.findMany({
-        where: { purchase_order_id: id },
-        select: {
-          id: true,
-          quantity_ordered: true,
-          quantity_received: true,
-          // QUI-486: necesarios para el guard de línea base con variantes.
-          // Se piden en esta misma consulta para no añadir un round-trip.
-          product_id: true,
-          product_variant_id: true,
-        },
-      });
-      const poLineById = new Map<
-        number,
-        {
-          id: number;
-          quantity_ordered: number;
-          quantity_received: number;
-          product_id: number | null;
-          product_variant_id: number | null;
-        }
-      >(poLines.map((l) => [l.id, l]));
-      // El pendiente se descuenta A MEDIDA que se recorre el payload: el mapa se
-      // construye una sola vez, así que dos entradas con el MISMO `id` medían
-      // ambas contra el pendiente original y burlaban el tope
-      // (`[{id:5,qty:10},{id:5,qty:10}]` sobre 10 pendientes recibía 20). El
-      // bucle de escritura de más abajo sí usa `{ increment }` por ítem, o sea
-      // que la sobre-recepción se persistía completa.
-      const claimedByLine = new Map<number, number>();
-      for (const item of dto.items) {
-        if (item.quantity_received <= 0) continue;
-        const poLine = poLineById.get(item.id);
-        if (!poLine) {
-          throw new BadRequestException(
-            `La línea ${item.id} no pertenece a esta orden de compra`,
-          );
-        }
-        const alreadyClaimed = claimedByLine.get(item.id) ?? 0;
-        const pending =
-          poLine.quantity_ordered - poLine.quantity_received - alreadyClaimed;
-        if (item.quantity_received > pending) {
-          throw new BadRequestException(
-            `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${Math.max(0, pending)} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
-          );
-        }
-        claimedByLine.set(item.id, alreadyClaimed + item.quantity_received);
-      }
-
-      // QUI-486 — red de seguridad para las OCs legacy que ya se crearon con
-      // línea base antes de que `create()` tuviera el guard. Se valida ANTES
-      // de crear la recepción para que el throw revierta la transacción sin
-      // dejar recepciones parciales, igual que el guard de sobre-recepción.
-      await this.assertNoBaseLineOnVariantProduct(
-        tx,
-        dto.items
-          .filter((item) => item.quantity_received > 0)
-          .map((item) => poLineById.get(item.id))
-          .filter((line): line is NonNullable<typeof line> => !!line),
-        { stage: 'receive', orderId: id },
-      );
-
-      const reception = await tx.purchase_order_receptions.create({
-        data: {
-          purchase_order_id: id,
-          received_by_user_id: user_id,
-          notes: dto.notes,
-        },
-      });
-
-      // Process each item
-      for (const item of dto.items) {
-        if (item.quantity_received <= 0) continue;
-
-        // Create reception item record (QUI-855: per-line motive).
-        await tx.purchase_order_reception_items.create({
-          data: {
-            reception_id: reception.id,
-            purchase_order_item_id: item.id,
-            quantity_received: item.quantity_received,
-            note: item.note ?? null,
+        // Guard: every incoming line must belong to THIS purchase order and must
+        // not exceed its pending quantity (ordered − already received). Without
+        // this, receive() blindly increments quantity_received, so an over-receipt
+        // (e.g. 99 against 1 ordered) is accepted and inflates stock, and a line
+        // id from another order could be received against this one. A throw here
+        // rolls back the whole transaction (no partial reception is persisted).
+        const poLines = await tx.purchase_order_items.findMany({
+          where: { purchase_order_id: id },
+          select: {
+            id: true,
+            quantity_ordered: true,
+            quantity_received: true,
+            // QUI-486: necesarios para el guard de línea base con variantes.
+            // Se piden en esta misma consulta para no añadir un round-trip.
+            product_id: true,
+            product_variant_id: true,
           },
         });
-
-        // Increment quantity_received on purchase_order_items
-        await tx.purchase_order_items.update({
-          where: { id: item.id },
-          data: {
-            quantity_received: { increment: item.quantity_received },
-          },
-        });
-      }
-
-      // Fetch the updated order to check status and process movements
-      const purchaseOrder = await tx.purchase_orders.findUnique({
-        where: { id },
-        include: {
-          // QUI-855 — per-tax rows drive the add_to_cost split below. Absent
-          // rows ⇒ legacy single-tax path (byte-identical numbers).
-          purchase_order_items: {
-            include: { purchase_order_item_taxes: true },
-          },
-          location: true,
-        },
-      });
-
-      if (!purchaseOrder) {
-        throw new NotFoundException('Purchase order not found');
-      }
-
-      // Resolve costing method via the org/store precedence resolver.
-      const organizationId = RequestContextService.getOrganizationId();
-      const storeId =
-        purchaseOrder.location?.store_id ?? RequestContextService.getStoreId();
-      const costingMethod = await this.costingMethodResolver.resolveCostingMethod(
-        organizationId!,
-        storeId ?? undefined,
-      );
-
-      // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
-      // this receipt. O-48 (responsible) excludes IVA from inventory cost;
-      // O-49 (non-responsible) capitalizes it.
-      //
-      // B.1 — indeterminado ⇒ NO responsable (fail-closed). Antes el comentario
-      // decía «Indeterminate ⇒ responsible» y era cierto: el wrapper fallaba
-      // abierto. Ya no.
-      const vatOutcome = await this.resolveVatResponsibility(
-        organizationId ?? undefined,
-        storeId ?? undefined,
-      );
-      const vatResponsible = vatOutcome.responsible;
-
-      // C.2 — flete capitalizado al costo. `allocated_shipping_amount` se selló
-      // por línea al crear/editar la orden (ver `resolveFreightAllocation`), así
-      // que la recepción NO vuelve a repartir: reparte quien conoce el lote
-      // completo, y recibir parcialmente no debe cambiar el reparto pactado.
-      // Solo se capitaliza cuando la cabecera dice `prorate`; con `expense` la
-      // columna vale 0 y el flete no toca el costo del inventario.
-      const freightProrated =
-        (purchaseOrder as { shipping_cost_allocation?: string | null })
-          .shipping_cost_allocation === 'prorate';
-
-      // D2: accumulate the purchase-unit subtotal received in THIS specific
-      // reception batch (quantity_received_now × unit_cost, in purchase-order
-      // currency, matching the same basis used for `subtotal` at PO creation
-      // — see the `subtotal = sum(quantity * unit_price)` calc above in
-      // create()). Used below to prorate the accounting entry amount.
-      let receivedBatchSubtotal = 0;
-      // QUI-855 — impuesto capitalizado sellado por ESTE lote (delta de
-      // capitalized_tax_amount), sin reescalar por received/ordered.
-      let receivedBatchCapitalized = 0;
-
-      // Create inventory movements, update stock, and calculate cost for received items
-      for (const item of dto.items) {
-        if (item.quantity_received <= 0) continue;
-
-        const orderItem = purchaseOrder.purchase_order_items.find(
-          (i) => i.id === item.id,
-        );
-        const productId = orderItem?.product_id;
-        const productVariantId = orderItem?.product_variant_id;
-
-        if (productId) {
-          // F1: `unit_cost` now persists the NET price (see create/resolveLineTaxes).
-          const netUnitCost = Number(orderItem?.unit_cost || 0);
-          // AP proration basis stays on the NET subtotal (matches orderSubtotal
-          // below, which reads unit_cost), so the accounting ratio is unchanged.
-          receivedBatchSubtotal += item.quantity_received * netUnitCost;
-
-          // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
-          // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
-          // with a recompute fallback for legacy lines that predate F1.
-          // QUI-855: when per-tax rows exist, the `add_to_cost` rows
-          // (IBUA/ICUI style) split out of the deductible family and capitalize
-          // into cost REGARDLESS of responsibility. No rows ⇒ legacy path,
-          // byte-identical to before (all tax in the deductible family).
-          const qtyOrdered = orderItem?.quantity_ordered ?? 0;
-          const lineTaxAmount =
-            orderItem?.tax_amount != null ? Number(orderItem.tax_amount) : null;
-          const ivaPerUnit =
-            lineTaxAmount != null && qtyOrdered > 0
-              ? lineTaxAmount / qtyOrdered
-              : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
-          const taxRows =
-            (orderItem as unknown as {
-              purchase_order_item_taxes?: Array<{
-                tax_amount: unknown;
-                add_to_cost: boolean | null;
-              }>;
-            } | undefined)?.purchase_order_item_taxes ?? [];
-          let capitalizedPerUnit = 0;
-          let totalPerUnit = ivaPerUnit;
-          if (taxRows.length > 0 && qtyOrdered > 0) {
-            const capTotal = taxRows
-              .filter((r) => r.add_to_cost)
-              .reduce((sum, r) => sum + Number(r.tax_amount ?? 0), 0);
-            const allTotal = taxRows.reduce(
-              (sum, r) => sum + Number(r.tax_amount ?? 0),
-              0,
-            );
-            capitalizedPerUnit = capTotal / qtyOrdered;
-            totalPerUnit = allTotal / qtyOrdered;
-          } else if (
-            qtyOrdered > 0 &&
-            (orderItem?.tax_type ?? tax_type_enum.iva) !== tax_type_enum.iva
-          ) {
-            // QUI-855 — línea legacy SIN filas hijas con tributo distinto de
-            // IVA (INC): nunca es descontable, todo su impuesto se capitaliza.
-            capitalizedPerUnit = totalPerUnit;
+        const poLineById = new Map<
+          number,
+          {
+            id: number;
+            quantity_ordered: number;
+            quantity_received: number;
+            product_id: number | null;
+            product_variant_id: number | null;
           }
-          const deductiblePerUnit = totalPerUnit - capitalizedPerUnit;
+        >(poLines.map((l) => [l.id, l]));
+        // El pendiente se descuenta A MEDIDA que se recorre el payload: el mapa se
+        // construye una sola vez, así que dos entradas con el MISMO `id` medían
+        // ambas contra el pendiente original y burlaban el tope
+        // (`[{id:5,qty:10},{id:5,qty:10}]` sobre 10 pendientes recibía 20). El
+        // bucle de escritura de más abajo sí usa `{ increment }` por ítem, o sea
+        // que la sobre-recepción se persistía completa.
+        const claimedByLine = new Map<number, number>();
+        for (const item of dto.items) {
+          if (item.quantity_received <= 0) continue;
+          const poLine = poLineById.get(item.id);
+          if (!poLine) {
+            throw new BadRequestException(
+              `La línea ${item.id} no pertenece a esta orden de compra`,
+            );
+          }
+          const alreadyClaimed = claimedByLine.get(item.id) ?? 0;
+          const pending =
+            poLine.quantity_ordered - poLine.quantity_received - alreadyClaimed;
+          if (item.quantity_received > pending) {
+            throw new BadRequestException(
+              `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${Math.max(0, pending)} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
+            );
+          }
+          claimedByLine.set(item.id, alreadyClaimed + item.quantity_received);
+        }
 
-          // C.2 — porción del flete que aterrizó en ESTA línea, llevada a
-          // unidad de compra. Se divide por `quantity_ordered` (no por lo
-          // recibido en este lote) porque el reparto se pactó sobre la orden
-          // completa: si se dividiera por lo recibido, una recepción parcial
-          // cargaría a esas unidades todo el flete de la línea.
-          const freightPerUnit =
-            freightProrated && qtyOrdered > 0
-              ? Number(
-                  (orderItem as { allocated_shipping_amount?: unknown })
-                    ?.allocated_shipping_amount ?? 0,
-                ) / qtyOrdered
-              : 0;
+        // QUI-486 — red de seguridad para las OCs legacy que ya se crearon con
+        // línea base antes de que `create()` tuviera el guard. Se valida ANTES
+        // de crear la recepción para que el throw revierta la transacción sin
+        // dejar recepciones parciales, igual que el guard de sobre-recepción.
+        await this.assertNoBaseLineOnVariantProduct(
+          tx,
+          dto.items
+            .filter((item) => item.quantity_received > 0)
+            .map((item) => poLineById.get(item.id))
+            .filter((line): line is NonNullable<typeof line> => !!line),
+          { stage: 'receive', orderId: id },
+        );
 
-          // O-48 responsible → cost EXCLUDES IVA (net). O-49 non-responsible →
-          // CAPITALIZE IVA into cost. Capitalization is on the PURCHASE unit,
-          // BEFORE resolveUoMConversion (so the per-stock-unit cost the FIFO
-          // engine sees already carries the capitalized IVA when applicable).
-          //
-          // C.2 — el flete entra AQUÍ, en unidad de COMPRA, por la misma razón:
-          // sumarlo después de `resolveUoMConversion` lo desviaría exactamente
-          // por `purchase_to_stock_factor`. En una compra por cajas de 12 el
-          // error es de un orden de magnitud y queda sellado en la capa FIFO,
-          // irreversible sin un ajuste manual.
-          const costUnit =
-            (vatResponsible
-              ? netUnitCost + capitalizedPerUnit
-              : netUnitCost + totalPerUnit) + freightPerUnit;
+        const reception = await tx.purchase_order_receptions.create({
+          data: {
+            purchase_order_id: id,
+            received_by_user_id: user_id,
+            notes: dto.notes,
+          },
+        });
 
-          // Seal the VAT attributable to the units received in THIS batch,
-          // proportional to quantity_received (purchase units), accumulating
-          // across partial receptions. O-48 → deductible (descontable);
-          // O-49 → capitalized into inventory cost. QUI-855: the add_to_cost
-          // portion ALWAYS seals as capitalized, even for a responsible buyer.
-          const sealedCapNow =
-            capitalizedPerUnit * item.quantity_received;
-          const sealedDedNow = vatResponsible
-            ? deductiblePerUnit * item.quantity_received
-            : (totalPerUnit - capitalizedPerUnit) * item.quantity_received;
-          const prevDed = Number(orderItem?.deductible_tax_amount ?? 0);
-          const prevCap = Number(orderItem?.capitalized_tax_amount ?? 0);
-          const newDed =
-            Math.round((prevDed + (vatResponsible ? sealedDedNow : 0)) * 100) /
-            100;
-          const newCap =
-            Math.round(
-              (prevCap + sealedCapNow + (vatResponsible ? 0 : sealedDedNow)) *
-                100,
-            ) / 100;
-          receivedBatchCapitalized += newCap - prevCap;
-          await tx.purchase_order_items.update({
-            where: { id: item.id },
+        // Process each item
+        for (const item of dto.items) {
+          if (item.quantity_received <= 0) continue;
+
+          // Create reception item record (QUI-855: per-line motive).
+          await tx.purchase_order_reception_items.create({
             data: {
-              deductible_tax_amount: newDed,
-              capitalized_tax_amount: newCap,
+              reception_id: reception.id,
+              purchase_order_item_id: item.id,
+              quantity_received: item.quantity_received,
+              note: item.note ?? null,
             },
           });
 
-          // F2 — sellar la config de UoM del producto ANTES de convertir.
-          //
-          // `resolveUoMConversion` lee `purchase_to_stock_factor` del PRODUCTO,
-          // no de la línea. Cuando esta función corría después, la primera
-          // recepción convertía con el factor viejo (1 si el producto aún no lo
-          // tenía) y la segunda ya con el factor real: 10 L de aceite en dos
-          // recepciones parciales entraban como 5 ml + 5.000 ml, con dos capas
-          // FIFO a costos que difieren en tres órdenes de magnitud. Y el hueco
-          // era alcanzable porque `persistIngredientConfigToProduct` tiene reja
-          // de industria (`storeIndustriesSupportIngredients`) que esta función
-          // no tiene: una tienda no-restaurante con `order_type='ingredient'`
-          // no recibía config al crear y sí al recibir.
-          //
-          // Es idempotente y nunca sobrescribe con null/vacío, así que adelantarla
-          // no cambia nada en el caso donde el producto ya traía su config.
-          await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
+          // Increment quantity_received on purchase_order_items
+          await tx.purchase_order_items.update({
+            where: { id: item.id },
+            data: {
+              quantity_received: { increment: item.quantity_received },
+            },
+          });
+        }
 
-          // ===== UoM conversion (purchase unit → minimum stock unit) =====
-          // The frontend sends `item.quantity_received` in the purchase unit
-          // (e.g. 10 bottles). The stock tables store everything in the
-          // minimum stock unit (e.g. ml). resolveUoMConversion is the ONLY
-          // place that multiplies by `purchase_to_stock_factor`, so the cost
-          // engine and the stock increment see the same numbers and the
-          // `stock_unit_cost` we record per movement is internally
-          // consistent with `quantity_on_hand`.
-          const {
-            stockQuantity: stockQtyReceived,
-            stockUnitCost: receiptUnitCost,
-            purchaseFactor,
-          } = await this.resolveUoMConversion(
-            productId,
-            item.quantity_received,
-            costUnit,
-            tx,
+        // Fetch the updated order to check status and process movements
+        const purchaseOrder = await tx.purchase_orders.findUnique({
+          where: { id },
+          include: {
+            // QUI-855 — per-tax rows drive the add_to_cost split below. Absent
+            // rows ⇒ legacy single-tax path (byte-identical numbers).
+            purchase_order_items: {
+              include: { purchase_order_item_taxes: true },
+            },
+            location: true,
+          },
+        });
+
+        if (!purchaseOrder) {
+          throw new NotFoundException('Purchase order not found');
+        }
+
+        // Resolve costing method via the org/store precedence resolver.
+        const organizationId = RequestContextService.getOrganizationId();
+        const storeId =
+          purchaseOrder.location?.store_id ??
+          RequestContextService.getStoreId();
+        const costingMethod =
+          await this.costingMethodResolver.resolveCostingMethod(
+            organizationId!,
+            storeId ?? undefined,
           );
 
-          if (purchaseFactor > 1) {
-            this.logger.log(
-              `[UoM] PO #${id} item #${item.id}: ${item.quantity_received} × ${purchaseFactor} = ${stockQtyReceived} stock units @ ${receiptUnitCost}/unit`,
-            );
-          }
+        // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
+        // this receipt. O-48 (responsible) excludes IVA from inventory cost;
+        // O-49 (non-responsible) capitalizes it.
+        //
+        // B.1 — indeterminado ⇒ NO responsable (fail-closed). Antes el comentario
+        // decía «Indeterminate ⇒ responsible» y era cierto: el wrapper fallaba
+        // abierto. Ya no.
+        const vatOutcome = await this.resolveVatResponsibility(
+          organizationId ?? undefined,
+          storeId ?? undefined,
+        );
+        const vatResponsible = vatOutcome.responsible;
 
-          // Cost FIRST: weighted-average needs pre-receipt stock reads.
-          let costResult: CostCalculationResult | null = null;
-          try {
-            costResult = await this.costingService.calculateCostOnReceipt(
+        // C.2 — flete capitalizado al costo. `allocated_shipping_amount` se selló
+        // por línea al crear/editar la orden (ver `resolveFreightAllocation`), así
+        // que la recepción NO vuelve a repartir: reparte quien conoce el lote
+        // completo, y recibir parcialmente no debe cambiar el reparto pactado.
+        // Solo se capitaliza cuando la cabecera dice `prorate`; con `expense` la
+        // columna vale 0 y el flete no toca el costo del inventario.
+        const freightProrated =
+          (purchaseOrder as { shipping_cost_allocation?: string | null })
+            .shipping_cost_allocation === 'prorate';
+
+        // D2: accumulate the purchase-unit subtotal received in THIS specific
+        // reception batch (quantity_received_now × unit_cost, in purchase-order
+        // currency, matching the same basis used for `subtotal` at PO creation
+        // — see the `subtotal = sum(quantity * unit_price)` calc above in
+        // create()). Used below to prorate the accounting entry amount.
+        let receivedBatchSubtotal = 0;
+        // QUI-855 — impuesto capitalizado sellado por ESTE lote (delta de
+        // capitalized_tax_amount), sin reescalar por received/ordered.
+        let receivedBatchCapitalized = 0;
+
+        // Create inventory movements, update stock, and calculate cost for received items
+        for (const item of dto.items) {
+          if (item.quantity_received <= 0) continue;
+
+          const orderItem = purchaseOrder.purchase_order_items.find(
+            (i) => i.id === item.id,
+          );
+          const productId = orderItem?.product_id;
+          const productVariantId = orderItem?.product_variant_id;
+
+          if (productId) {
+            // F1: `unit_cost` now persists the NET price (see create/resolveLineTaxes).
+            const netUnitCost = Number(orderItem?.unit_cost || 0);
+            // AP proration basis stays on the NET subtotal (matches orderSubtotal
+            // below, which reads unit_cost), so the accounting ratio is unchanged.
+            receivedBatchSubtotal += item.quantity_received * netUnitCost;
+
+            // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
+            // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
+            // with a recompute fallback for legacy lines that predate F1.
+            // QUI-855: when per-tax rows exist, the `add_to_cost` rows
+            // (IBUA/ICUI style) split out of the deductible family and capitalize
+            // into cost REGARDLESS of responsibility. No rows ⇒ legacy path,
+            // byte-identical to before (all tax in the deductible family).
+            const qtyOrdered = orderItem?.quantity_ordered ?? 0;
+            const lineTaxAmount =
+              orderItem?.tax_amount != null
+                ? Number(orderItem.tax_amount)
+                : null;
+            const ivaPerUnit =
+              lineTaxAmount != null && qtyOrdered > 0
+                ? lineTaxAmount / qtyOrdered
+                : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
+            const taxRows =
+              (
+                orderItem as unknown as
+                  | {
+                      purchase_order_item_taxes?: Array<{
+                        tax_amount: unknown;
+                        add_to_cost: boolean | null;
+                      }>;
+                    }
+                  | undefined
+              )?.purchase_order_item_taxes ?? [];
+            let capitalizedPerUnit = 0;
+            let totalPerUnit = ivaPerUnit;
+            if (taxRows.length > 0 && qtyOrdered > 0) {
+              const capTotal = taxRows
+                .filter((r) => r.add_to_cost)
+                .reduce((sum, r) => sum + Number(r.tax_amount ?? 0), 0);
+              const allTotal = taxRows.reduce(
+                (sum, r) => sum + Number(r.tax_amount ?? 0),
+                0,
+              );
+              capitalizedPerUnit = capTotal / qtyOrdered;
+              totalPerUnit = allTotal / qtyOrdered;
+            } else if (
+              qtyOrdered > 0 &&
+              (orderItem?.tax_type ?? tax_type_enum.iva) !== tax_type_enum.iva
+            ) {
+              // QUI-855 — línea legacy SIN filas hijas con tributo distinto de
+              // IVA (INC): nunca es descontable, todo su impuesto se capitaliza.
+              capitalizedPerUnit = totalPerUnit;
+            }
+            const deductiblePerUnit = totalPerUnit - capitalizedPerUnit;
+
+            // C.2 — porción del flete que aterrizó en ESTA línea, llevada a
+            // unidad de compra. Se divide por `quantity_ordered` (no por lo
+            // recibido en este lote) porque el reparto se pactó sobre la orden
+            // completa: si se dividiera por lo recibido, una recepción parcial
+            // cargaría a esas unidades todo el flete de la línea.
+            const freightPerUnit =
+              freightProrated && qtyOrdered > 0
+                ? Number(
+                    (orderItem as { allocated_shipping_amount?: unknown })
+                      ?.allocated_shipping_amount ?? 0,
+                  ) / qtyOrdered
+                : 0;
+
+            // O-48 responsible → cost EXCLUDES IVA (net). O-49 non-responsible →
+            // CAPITALIZE IVA into cost. Capitalization is on the PURCHASE unit,
+            // BEFORE resolveUoMConversion (so the per-stock-unit cost the FIFO
+            // engine sees already carries the capitalized IVA when applicable).
+            //
+            // C.2 — el flete entra AQUÍ, en unidad de COMPRA, por la misma razón:
+            // sumarlo después de `resolveUoMConversion` lo desviaría exactamente
+            // por `purchase_to_stock_factor`. En una compra por cajas de 12 el
+            // error es de un orden de magnitud y queda sellado en la capa FIFO,
+            // irreversible sin un ajuste manual.
+            const costUnit =
+              (vatResponsible
+                ? netUnitCost + capitalizedPerUnit
+                : netUnitCost + totalPerUnit) + freightPerUnit;
+
+            // Seal the VAT attributable to the units received in THIS batch,
+            // proportional to quantity_received (purchase units), accumulating
+            // across partial receptions. O-48 → deductible (descontable);
+            // O-49 → capitalized into inventory cost. QUI-855: the add_to_cost
+            // portion ALWAYS seals as capitalized, even for a responsible buyer.
+            const sealedCapNow = capitalizedPerUnit * item.quantity_received;
+            const sealedDedNow = vatResponsible
+              ? deductiblePerUnit * item.quantity_received
+              : (totalPerUnit - capitalizedPerUnit) * item.quantity_received;
+            const prevDed = Number(orderItem?.deductible_tax_amount ?? 0);
+            const prevCap = Number(orderItem?.capitalized_tax_amount ?? 0);
+            const newDed =
+              Math.round(
+                (prevDed + (vatResponsible ? sealedDedNow : 0)) * 100,
+              ) / 100;
+            const newCap =
+              Math.round(
+                (prevCap + sealedCapNow + (vatResponsible ? 0 : sealedDedNow)) *
+                  100,
+              ) / 100;
+            receivedBatchCapitalized += newCap - prevCap;
+            await tx.purchase_order_items.update({
+              where: { id: item.id },
+              data: {
+                deductible_tax_amount: newDed,
+                capitalized_tax_amount: newCap,
+              },
+            });
+
+            // F2 — sellar la config de UoM del producto ANTES de convertir.
+            //
+            // `resolveUoMConversion` lee `purchase_to_stock_factor` del PRODUCTO,
+            // no de la línea. Cuando esta función corría después, la primera
+            // recepción convertía con el factor viejo (1 si el producto aún no lo
+            // tenía) y la segunda ya con el factor real: 10 L de aceite en dos
+            // recepciones parciales entraban como 5 ml + 5.000 ml, con dos capas
+            // FIFO a costos que difieren en tres órdenes de magnitud. Y el hueco
+            // era alcanzable porque `persistIngredientConfigToProduct` tiene reja
+            // de industria (`storeIndustriesSupportIngredients`) que esta función
+            // no tiene: una tienda no-restaurante con `order_type='ingredient'`
+            // no recibía config al crear y sí al recibir.
+            //
+            // Es idempotente y nunca sobrescribe con null/vacío, así que adelantarla
+            // no cambia nada en el caso donde el producto ya traía su config.
+            await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
+
+            // ===== UoM conversion (purchase unit → minimum stock unit) =====
+            // The frontend sends `item.quantity_received` in the purchase unit
+            // (e.g. 10 bottles). The stock tables store everything in the
+            // minimum stock unit (e.g. ml). resolveUoMConversion is the ONLY
+            // place that multiplies by `purchase_to_stock_factor`, so the cost
+            // engine and the stock increment see the same numbers and the
+            // `stock_unit_cost` we record per movement is internally
+            // consistent with `quantity_on_hand`.
+            const {
+              stockQuantity: stockQtyReceived,
+              stockUnitCost: receiptUnitCost,
+              purchaseFactor,
+            } = await this.resolveUoMConversion(
+              productId,
+              item.quantity_received,
+              costUnit,
+              tx,
+            );
+
+            if (purchaseFactor > 1) {
+              this.logger.log(
+                `[UoM] PO #${id} item #${item.id}: ${item.quantity_received} × ${purchaseFactor} = ${stockQtyReceived} stock units @ ${receiptUnitCost}/unit`,
+              );
+            }
+
+            // Cost FIRST: weighted-average needs pre-receipt stock reads.
+            let costResult: CostCalculationResult | null = null;
+            try {
+              costResult = await this.costingService.calculateCostOnReceipt(
+                {
+                  product_id: productId,
+                  variant_id: productVariantId || undefined,
+                  location_id: purchaseOrder.location_id!,
+                  quantity_received: stockQtyReceived,
+                  unit_cost: receiptUnitCost,
+                  costing_method: costingMethod,
+                  purchase_order_id: id,
+                  batch_number: orderItem?.batch_number || undefined,
+                  manufacturing_date:
+                    orderItem?.manufacturing_date || undefined,
+                  expiration_date: orderItem?.expiration_date || undefined,
+                },
+                tx,
+              );
+            } catch (error) {
+              this.logger.error(
+                `Failed to calculate cost for PO item #${item.id}: ${error.message}`,
+                error.stack,
+              );
+              // Do not block receipt — fall back to the receipt unit cost below.
+            }
+
+            // Then update stock levels using StockLevelManager.
+            await this.stockLevelManager.updateStock(
               {
                 product_id: productId,
                 variant_id: productVariantId || undefined,
                 location_id: purchaseOrder.location_id!,
-                quantity_received: stockQtyReceived,
-                unit_cost: receiptUnitCost,
-                costing_method: costingMethod,
-                purchase_order_id: id,
-                batch_number: orderItem?.batch_number || undefined,
-                manufacturing_date: orderItem?.manufacturing_date || undefined,
-                expiration_date: orderItem?.expiration_date || undefined,
+                quantity_change: stockQtyReceived,
+                movement_type: 'stock_in',
+                reason: 'Purchase order receipt',
+                create_movement: true,
+                source_module: 'pop_purchase',
+                unit_cost: costResult?.new_cost_per_unit ?? receiptUnitCost,
+                movement_unit_cost: receiptUnitCost,
               },
               tx,
             );
-          } catch (error) {
-            this.logger.error(
-              `Failed to calculate cost for PO item #${item.id}: ${error.message}`,
-              error.stack,
-            );
-            // Do not block receipt — fall back to the receipt unit cost below.
-          }
 
-          // Then update stock levels using StockLevelManager.
-          await this.stockLevelManager.updateStock(
-            {
-              product_id: productId,
-              variant_id: productVariantId || undefined,
-              location_id: purchaseOrder.location_id!,
-              quantity_change: stockQtyReceived,
-              movement_type: 'stock_in',
-              reason: 'Purchase order receipt',
-              create_movement: true,
-              source_module: 'pop_purchase',
-              unit_cost: costResult?.new_cost_per_unit ?? receiptUnitCost,
-              movement_unit_cost: receiptUnitCost,
-            },
-            tx,
-          );
+            // ===== QUI-431: serial pool population (same tx) =====
+            // For serialized products, every received unit must exist as a real
+            // `in_stock` pool row at this location. We populate exactly
+            // `stockQtyReceived` rows (the minimum-stock-unit count that
+            // updateStock added to quantity_on_hand) using the provided serials,
+            // auto-generating unique placeholders for any shortfall so the pool
+            // stays in strict parity with stock-on-hand. No-op for products that
+            // do not require serial numbers.
+            if (await this.serialEnforcement.isSerialized(productId, tx)) {
+              // Resolve the optional inventory_batches.id from the PO line's
+              // batch_number (batch_id on serials is nullable; we only link
+              // when an existing batch row matches product + batch_number).
+              let serialBatchId: number | undefined;
+              if (orderItem?.batch_number) {
+                const batch = await tx.inventory_batches.findFirst({
+                  where: {
+                    product_id: productId,
+                    batch_number: orderItem.batch_number,
+                  },
+                  select: { id: true },
+                });
+                serialBatchId = batch?.id;
+              }
 
-          // ===== QUI-431: serial pool population (same tx) =====
-          // For serialized products, every received unit must exist as a real
-          // `in_stock` pool row at this location. We populate exactly
-          // `stockQtyReceived` rows (the minimum-stock-unit count that
-          // updateStock added to quantity_on_hand) using the provided serials,
-          // auto-generating unique placeholders for any shortfall so the pool
-          // stays in strict parity with stock-on-hand. No-op for products that
-          // do not require serial numbers.
-          if (await this.serialEnforcement.isSerialized(productId, tx)) {
-            // Resolve the optional inventory_batches.id from the PO line's
-            // batch_number (batch_id on serials is nullable; we only link
-            // when an existing batch row matches product + batch_number).
-            let serialBatchId: number | undefined;
-            if (orderItem?.batch_number) {
-              const batch = await tx.inventory_batches.findFirst({
-                where: {
-                  product_id: productId,
-                  batch_number: orderItem.batch_number,
-                },
-                select: { id: true },
-              });
-              serialBatchId = batch?.id;
+              await this.serialNumbersService.populatePoolOnReceipt(
+                productId,
+                productVariantId || undefined,
+                purchaseOrder.location_id!,
+                serialBatchId,
+                item.serial_numbers,
+                receiptUnitCost,
+                stockQtyReceived,
+                tx,
+              );
+
+              // Validate parity at item close (count in_stock serials vs on-hand).
+              await this.serialEnforcement.assertParityForLocation(
+                productId,
+                productVariantId || undefined,
+                purchaseOrder.location_id!,
+                tx,
+              );
             }
 
-            await this.serialNumbersService.populatePoolOnReceipt(
-              productId,
-              productVariantId || undefined,
-              purchaseOrder.location_id!,
-              serialBatchId,
-              item.serial_numbers,
-              receiptUnitCost,
-              stockQtyReceived,
-              tx,
-            );
+            // ===== QUI-425 (D2): apply optional pricing overrides =====
+            // When the confirmation modal sends new_base_price or
+            // new_profit_margin, persist them to the product (and variant when
+            // applicable). When neither override is provided we still re-anchor
+            // the existing base_price against the *new* cost_price so the
+            // stored margin reflects reality — this is the cost-anchor rule
+            // and matches what the modal displays in `resulting_margin`.
+            // QUI-648 — escala de publicación del precio del producto. Se lee UNA
+            // vez y alimenta los cuatro call-sites de
+            // `resolvePricingAfterReceipt` (producto/variante × con/sin override):
+            // el costo que entra ahí está en unidad MÍNIMA de stock y
+            // `base_price`/`price_override` cubren `price_unit_quantity` de esas
+            // unidades. Sin esto, recibir un cable vendido por metro reescribía su
+            // precio con el costo del milímetro. La variante hereda la escala del
+            // producto: `price_unit_quantity` no existe en `product_variants`.
+            const pricingScaleProduct = await tx.products.findUnique({
+              where: { id: productId },
+              select: { price_unit_quantity: true },
+            });
+            const priceUnitQuantity =
+              pricingScaleProduct?.price_unit_quantity ?? null;
 
-            // Validate parity at item close (count in_stock serials vs on-hand).
-            await this.serialEnforcement.assertParityForLocation(
-              productId,
-              productVariantId || undefined,
-              purchaseOrder.location_id!,
-              tx,
-            );
-          }
+            if (
+              item.new_base_price !== undefined ||
+              item.new_profit_margin !== undefined
+            ) {
+              const dtoItem = item;
+              // QUI-425: recompute margin against the SCOPED cost (the value
+              // persisted to cost_price), not the receiving-location-only cost,
+              // so base_price = cost_price·(1+margin/100) stays consistent and
+              // matches the cost preview's resulting_margin.
+              const costForPricing =
+                costResult?.new_scoped_cost_per_unit ??
+                costResult?.new_cost_per_unit ??
+                receiptUnitCost;
 
-          // ===== QUI-425 (D2): apply optional pricing overrides =====
-          // When the confirmation modal sends new_base_price or
-          // new_profit_margin, persist them to the product (and variant when
-          // applicable). When neither override is provided we still re-anchor
-          // the existing base_price against the *new* cost_price so the
-          // stored margin reflects reality — this is the cost-anchor rule
-          // and matches what the modal displays in `resulting_margin`.
-          // QUI-648 — escala de publicación del precio del producto. Se lee UNA
-          // vez y alimenta los cuatro call-sites de
-          // `resolvePricingAfterReceipt` (producto/variante × con/sin override):
-          // el costo que entra ahí está en unidad MÍNIMA de stock y
-          // `base_price`/`price_override` cubren `price_unit_quantity` de esas
-          // unidades. Sin esto, recibir un cable vendido por metro reescribía su
-          // precio con el costo del milímetro. La variante hereda la escala del
-          // producto: `price_unit_quantity` no existe en `product_variants`.
-          const pricingScaleProduct = await tx.products.findUnique({
-            where: { id: productId },
-            select: { price_unit_quantity: true },
-          });
-          const priceUnitQuantity =
-            pricingScaleProduct?.price_unit_quantity ?? null;
-
-          if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
-            const dtoItem = item;
-            // QUI-425: recompute margin against the SCOPED cost (the value
-            // persisted to cost_price), not the receiving-location-only cost,
-            // so base_price = cost_price·(1+margin/100) stays consistent and
-            // matches the cost preview's resulting_margin.
-            const costForPricing =
-              costResult?.new_scoped_cost_per_unit ??
-              costResult?.new_cost_per_unit ??
-              receiptUnitCost;
-
-            // Persist on the variant first (if present), then on the product
-            // for variant-less items. Variants use price_override (NOT
-            // base_price) per the product-pricing skill.
-            if (productVariantId) {
-              const existingVariant = await tx.product_variants.findUnique({
-                where: { id: productVariantId },
-                select: {
-                  price_override: true,
-                  profit_margin: true,
-                  products: { select: { base_price: true } },
-                },
-              });
-              // Acá el operador pinneó precio o margen, así que escribir
-              // `price_override` es correcto: es un precio propio deliberado.
-              // La referencia sigue siendo el precio EFECTIVO (heredado si la
-              // variante no tenía override) y no 0 — con ambos overrides
-              // ausentes esta rama caería al cost-anchor y un 0 daría un margen
-              // de -100%, el mismo defecto de la rama sin override.
-              const referencePrice =
-                existingVariant?.price_override == null
-                  ? Number(existingVariant?.products?.base_price ?? 0)
-                  : Number(existingVariant.price_override);
-              const resolved = PurchaseOrdersService.resolvePricingAfterReceipt(
-                {
-                  costPrice: Number(costForPricing),
-                  existingBasePrice: referencePrice,
-                  newBasePrice: dtoItem.new_base_price,
-                  newProfitMargin: dtoItem.new_profit_margin,
-                  priceUnitQuantity,
-                },
-              );
-              await tx.product_variants.update({
-                where: { id: productVariantId },
-                data: {
-                  price_override: resolved.basePrice,
-                  profit_margin: resolved.profitMargin,
-                },
-              });
-            } else {
-              const existingProduct = await tx.products.findUnique({
-                where: { id: productId },
-                select: { base_price: true, profit_margin: true },
-              });
-              const resolved = PurchaseOrdersService.resolvePricingAfterReceipt(
-                {
-                  costPrice: Number(costForPricing),
-                  existingBasePrice: Number(existingProduct?.base_price ?? 0),
-                  newBasePrice: dtoItem.new_base_price,
-                  newProfitMargin: dtoItem.new_profit_margin,
-                  priceUnitQuantity,
-                },
-              );
-              await tx.products.update({
-                where: { id: productId },
-                data: {
-                  base_price: resolved.basePrice,
-                  profit_margin: resolved.profitMargin,
-                },
-              });
-            }
-          } else {
-            // No override — apply the cost-anchor rule so the persisted
-            // margin tracks the new cost. Without this, the displayed
-            // resulting_margin in the preview would diverge from the stored
-            // margin on the product.
-            // QUI-425: recompute margin against the SCOPED cost (the value
-            // persisted to cost_price), not the receiving-location-only cost,
-            // so base_price = cost_price·(1+margin/100) stays consistent and
-            // matches the cost preview's resulting_margin.
-            const costForPricing =
-              costResult?.new_scoped_cost_per_unit ??
-              costResult?.new_cost_per_unit ??
-              receiptUnitCost;
-            if (costForPricing > 0) {
+              // Persist on the variant first (if present), then on the product
+              // for variant-less items. Variants use price_override (NOT
+              // base_price) per the product-pricing skill.
               if (productVariantId) {
                 const existingVariant = await tx.product_variants.findUnique({
                   where: { id: productVariantId },
@@ -4766,33 +4748,28 @@ export class PurchaseOrdersService {
                     products: { select: { base_price: true } },
                   },
                 });
-                // `price_override = null` significa HEREDA del producto, y esa
-                // semántica no se puede aplastar con `?? 0`: el 0 resultante se
-                // persistía como precio propio de la variante y dejaba
-                // `profit_margin = -100`. Peor, `referencePrice = override ??
-                // base_price` en `ProductVariantService` volvía imposible todo
-                // PATCH posterior sobre una variante en oferta —`sale_price >= 0`
-                // siempre— con `PROD_VAR_SALE_PRICE_001` permanente. Y el propio
-                // invariante del dominio (`PROD_VAR_PRICE_001`) rechaza un
-                // `price_override <= 0`: la recepción era el único escritor que
-                // se lo saltaba. Referencia correcta = el precio efectivo hoy;
-                // el override solo se escribe si la variante ya tenía uno.
-                const inheritsPrice = existingVariant?.price_override == null;
-                const referencePrice = inheritsPrice
-                  ? Number(existingVariant?.products?.base_price ?? 0)
-                  : Number(existingVariant?.price_override);
+                // Acá el operador pinneó precio o margen, así que escribir
+                // `price_override` es correcto: es un precio propio deliberado.
+                // La referencia sigue siendo el precio EFECTIVO (heredado si la
+                // variante no tenía override) y no 0 — con ambos overrides
+                // ausentes esta rama caería al cost-anchor y un 0 daría un margen
+                // de -100%, el mismo defecto de la rama sin override.
+                const referencePrice =
+                  existingVariant?.price_override == null
+                    ? Number(existingVariant?.products?.base_price ?? 0)
+                    : Number(existingVariant.price_override);
                 const resolved =
                   PurchaseOrdersService.resolvePricingAfterReceipt({
                     costPrice: Number(costForPricing),
                     existingBasePrice: referencePrice,
+                    newBasePrice: dtoItem.new_base_price,
+                    newProfitMargin: dtoItem.new_profit_margin,
                     priceUnitQuantity,
                   });
                 await tx.product_variants.update({
                   where: { id: productVariantId },
                   data: {
-                    ...(inheritsPrice
-                      ? {}
-                      : { price_override: resolved.basePrice }),
+                    price_override: resolved.basePrice,
                     profit_margin: resolved.profitMargin,
                   },
                 });
@@ -4805,6 +4782,8 @@ export class PurchaseOrdersService {
                   PurchaseOrdersService.resolvePricingAfterReceipt({
                     costPrice: Number(costForPricing),
                     existingBasePrice: Number(existingProduct?.base_price ?? 0),
+                    newBasePrice: dtoItem.new_base_price,
+                    newProfitMargin: dtoItem.new_profit_margin,
                     priceUnitQuantity,
                   });
                 await tx.products.update({
@@ -4815,97 +4794,172 @@ export class PurchaseOrdersService {
                   },
                 });
               }
+            } else {
+              // No override — apply the cost-anchor rule so the persisted
+              // margin tracks the new cost. Without this, the displayed
+              // resulting_margin in the preview would diverge from the stored
+              // margin on the product.
+              // QUI-425: recompute margin against the SCOPED cost (the value
+              // persisted to cost_price), not the receiving-location-only cost,
+              // so base_price = cost_price·(1+margin/100) stays consistent and
+              // matches the cost preview's resulting_margin.
+              const costForPricing =
+                costResult?.new_scoped_cost_per_unit ??
+                costResult?.new_cost_per_unit ??
+                receiptUnitCost;
+              if (costForPricing > 0) {
+                if (productVariantId) {
+                  const existingVariant = await tx.product_variants.findUnique({
+                    where: { id: productVariantId },
+                    select: {
+                      price_override: true,
+                      profit_margin: true,
+                      products: { select: { base_price: true } },
+                    },
+                  });
+                  // `price_override = null` significa HEREDA del producto, y esa
+                  // semántica no se puede aplastar con `?? 0`: el 0 resultante se
+                  // persistía como precio propio de la variante y dejaba
+                  // `profit_margin = -100`. Peor, `referencePrice = override ??
+                  // base_price` en `ProductVariantService` volvía imposible todo
+                  // PATCH posterior sobre una variante en oferta —`sale_price >= 0`
+                  // siempre— con `PROD_VAR_SALE_PRICE_001` permanente. Y el propio
+                  // invariante del dominio (`PROD_VAR_PRICE_001`) rechaza un
+                  // `price_override <= 0`: la recepción era el único escritor que
+                  // se lo saltaba. Referencia correcta = el precio efectivo hoy;
+                  // el override solo se escribe si la variante ya tenía uno.
+                  const inheritsPrice = existingVariant?.price_override == null;
+                  const referencePrice = inheritsPrice
+                    ? Number(existingVariant?.products?.base_price ?? 0)
+                    : Number(existingVariant?.price_override);
+                  const resolved =
+                    PurchaseOrdersService.resolvePricingAfterReceipt({
+                      costPrice: Number(costForPricing),
+                      existingBasePrice: referencePrice,
+                      priceUnitQuantity,
+                    });
+                  await tx.product_variants.update({
+                    where: { id: productVariantId },
+                    data: {
+                      ...(inheritsPrice
+                        ? {}
+                        : { price_override: resolved.basePrice }),
+                      profit_margin: resolved.profitMargin,
+                    },
+                  });
+                } else {
+                  const existingProduct = await tx.products.findUnique({
+                    where: { id: productId },
+                    select: { base_price: true, profit_margin: true },
+                  });
+                  const resolved =
+                    PurchaseOrdersService.resolvePricingAfterReceipt({
+                      costPrice: Number(costForPricing),
+                      existingBasePrice: Number(
+                        existingProduct?.base_price ?? 0,
+                      ),
+                      priceUnitQuantity,
+                    });
+                  await tx.products.update({
+                    where: { id: productId },
+                    data: {
+                      base_price: resolved.basePrice,
+                      profit_margin: resolved.profitMargin,
+                    },
+                  });
+                }
+              }
             }
+
+            // (F2 se movió al inicio del cuerpo del ítem: la conversión de UoM lee
+            // el factor del producto y necesitaba que ya estuviera sellado.)
           }
-
-          // (F2 se movió al inicio del cuerpo del ítem: la conversión de UoM lee
-          // el factor del producto y necesitaba que ya estuviera sellado.)
         }
-      }
 
-      // Determine new status based on cumulative quantities
-      const all_items_received = purchaseOrder.purchase_order_items.every(
-        (item) => (item.quantity_received || 0) >= item.quantity_ordered,
-      );
+        // Determine new status based on cumulative quantities
+        const all_items_received = purchaseOrder.purchase_order_items.every(
+          (item) => (item.quantity_received || 0) >= item.quantity_ordered,
+        );
 
-      const some_items_received = purchaseOrder.purchase_order_items.some(
-        (item) => (item.quantity_received || 0) > 0,
-      );
+        const some_items_received = purchaseOrder.purchase_order_items.some(
+          (item) => (item.quantity_received || 0) > 0,
+        );
 
-      let newStatus = purchaseOrder.status;
-      if (all_items_received) {
-        newStatus = purchase_order_status_enum.received;
-      } else if (
-        some_items_received &&
-        newStatus !== purchase_order_status_enum.received
-      ) {
-        newStatus = 'partial' as purchase_order_status_enum;
-      }
+        let newStatus = purchaseOrder.status;
+        if (all_items_received) {
+          newStatus = purchase_order_status_enum.received;
+        } else if (
+          some_items_received &&
+          newStatus !== purchase_order_status_enum.received
+        ) {
+          newStatus = 'partial' as purchase_order_status_enum;
+        }
 
-      // Update purchase order status
-      const updated_po = await tx.purchase_orders.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          received_date: all_items_received ? new Date() : null,
-          // F2 IVA lifecycle: persist the supplier's own invoice reference when
-          // provided at receipt. Used as the fiscal document's invoice_number
-          // and issue_date for the deductible-VAT recognition (240804).
-          ...(dto.supplier_invoice_number != null && {
-            supplier_invoice_number: dto.supplier_invoice_number,
-          }),
-          ...(dto.supplier_invoice_date != null && {
-            supplier_invoice_date: new Date(dto.supplier_invoice_date),
-          }),
-        },
-        include: {
-          suppliers: true,
-          location: true,
-          purchase_order_items: {
-            include: {
-              products: true,
-              product_variants: true,
-              // QUI-855 — base cascada del IVA para `buildPurchaseTaxGroups`.
-              purchase_order_item_taxes: true,
+        // Update purchase order status
+        const updated_po = await tx.purchase_orders.update({
+          where: { id },
+          data: {
+            status: newStatus,
+            received_date: all_items_received ? new Date() : null,
+            // F2 IVA lifecycle: persist the supplier's own invoice reference when
+            // provided at receipt. Used as the fiscal document's invoice_number
+            // and issue_date for the deductible-VAT recognition (240804).
+            ...(dto.supplier_invoice_number != null && {
+              supplier_invoice_number: dto.supplier_invoice_number,
+            }),
+            ...(dto.supplier_invoice_date != null && {
+              supplier_invoice_date: new Date(dto.supplier_invoice_date),
+            }),
+          },
+          include: {
+            suppliers: true,
+            location: true,
+            purchase_order_items: {
+              include: {
+                products: true,
+                product_variants: true,
+                // QUI-855 — base cascada del IVA para `buildPurchaseTaxGroups`.
+                purchase_order_item_taxes: true,
+              },
             },
           },
-        },
-      });
+        });
 
-      // D2: order-wide subtotal at the same basis as `subtotal` in create()
-      // (quantity_ordered × unit_cost across ALL items, not just this batch).
-      // Used to derive the proportional share of `total_amount` (which already
-      // folds in discount/tax/shipping at header level) for THIS reception.
-      const orderSubtotal = updated_po.purchase_order_items.reduce(
-        (sum, i) => sum + i.quantity_ordered * Number(i.unit_cost || 0),
-        0,
-      );
+        // D2: order-wide subtotal at the same basis as `subtotal` in create()
+        // (quantity_ordered × unit_cost across ALL items, not just this batch).
+        // Used to derive the proportional share of `total_amount` (which already
+        // folds in discount/tax/shipping at header level) for THIS reception.
+        const orderSubtotal = updated_po.purchase_order_items.reduce(
+          (sum, i) => sum + i.quantity_ordered * Number(i.unit_cost || 0),
+          0,
+        );
 
-      return {
-        updated_po,
-        all_items_received,
-        reception_id: reception.id,
-        received_batch_subtotal: receivedBatchSubtotal,
-        received_batch_capitalized: receivedBatchCapitalized,
-        order_subtotal: orderSubtotal,
-        // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
-        // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
-        // Surfaced here so the post-tx block can decide whether to recognize
-        // the deductible VAT (only O-48).
-        vat_responsible: vatResponsible,
-        // B.4/C.11 — el resultado de TRES estados y el método de costeo viajan
-        // fuera de la transacción para sellarse en la auditoría. Re-derivarlos
-        // después leería la configuración de DESPUÉS, y entonces nada
-        // distinguiría un cambio de configuración de un defecto.
-        vat_outcome: vatOutcome,
-        costing_method: costingMethod,
-        // C.3 — modo de flete de la orden (sellado al crear) y su monto.
-        freight_allocation: (updated_po as { shipping_cost_allocation?: string | null })
-          .shipping_cost_allocation ?? null,
-        freight_total:
-          Math.round(Number(updated_po.shipping_cost ?? 0) * 100) / 100,
-      };
-    },
+        return {
+          updated_po,
+          all_items_received,
+          reception_id: reception.id,
+          received_batch_subtotal: receivedBatchSubtotal,
+          received_batch_capitalized: receivedBatchCapitalized,
+          order_subtotal: orderSubtotal,
+          // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
+          // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
+          // Surfaced here so the post-tx block can decide whether to recognize
+          // the deductible VAT (only O-48).
+          vat_responsible: vatResponsible,
+          // B.4/C.11 — el resultado de TRES estados y el método de costeo viajan
+          // fuera de la transacción para sellarse en la auditoría. Re-derivarlos
+          // después leería la configuración de DESPUÉS, y entonces nada
+          // distinguiría un cambio de configuración de un defecto.
+          vat_outcome: vatOutcome,
+          costing_method: costingMethod,
+          // C.3 — modo de flete de la orden (sellado al crear) y su monto.
+          freight_allocation:
+            (updated_po as { shipping_cost_allocation?: string | null })
+              .shipping_cost_allocation ?? null,
+          freight_total:
+            Math.round(Number(updated_po.shipping_cost ?? 0) * 100) / 100,
+        };
+      },
       // A.11 — techo EXPLÍCITO de transacción, igual que en `create()`. Una
       // recepción de 80 líneas encadena costeo FIFO, movimientos, niveles de
       // stock, series y precios: del orden de 3.000 consultas. Con el techo
@@ -5277,14 +5331,13 @@ export class PurchaseOrdersService {
 
         let advanceDebits = 0;
         if (paymentIds.length > 0) {
-          const advanceEntries =
-            await this.prisma.accounting_entries.findMany({
-              where: {
-                source_type: 'purchase_order.advance_payment',
-                source_id: { in: paymentIds },
-              },
-              select: { total_debit: true },
-            });
+          const advanceEntries = await this.prisma.accounting_entries.findMany({
+            where: {
+              source_type: 'purchase_order.advance_payment',
+              source_id: { in: paymentIds },
+            },
+            select: { total_debit: true },
+          });
           advanceDebits = advanceEntries.reduce(
             (sum, e) => sum + Number(e.total_debit || 0),
             0,
@@ -5302,14 +5355,13 @@ export class PurchaseOrdersService {
 
         let alreadyReclassified = 0;
         if (receptionIds.length > 0) {
-          const reclassEntries =
-            await this.prisma.accounting_entries.findMany({
-              where: {
-                source_type: 'purchase_order.advance_reclass',
-                source_id: { in: receptionIds },
-              },
-              select: { total_credit: true },
-            });
+          const reclassEntries = await this.prisma.accounting_entries.findMany({
+            where: {
+              source_type: 'purchase_order.advance_reclass',
+              source_id: { in: receptionIds },
+            },
+            select: { total_credit: true },
+          });
           alreadyReclassified = reclassEntries.reduce(
             (sum, e) => sum + Number(e.total_credit || 0),
             0,
@@ -5350,7 +5402,11 @@ export class PurchaseOrdersService {
     // It is not fiscal declaration authority: declaration eligibility and
     // effects are determined by the received-tax fiscal authority.
     try {
-      if (result.vat_responsible && result.all_items_received && store_id != null) {
+      if (
+        result.vat_responsible &&
+        result.all_items_received &&
+        store_id != null
+      ) {
         // F-214 — el desglose por tarifa sale del catálogo de cada línea
         // (`purchase_order_items.tax_rate`), nunca de un cociente entre
         // agregados de cabecera. Ver `buildPurchaseTaxGroups`.
@@ -5365,26 +5421,34 @@ export class PurchaseOrdersService {
 
         if (iva_amount > 0 && accounting_entity_id != null) {
           if (!result.updated_po.suppliers?.id || store_id == null) {
-            throw new Error('F2: supplier and store are required to reserve deductible VAT');
+            throw new Error(
+              'F2: supplier and store are required to reserve deductible VAT',
+            );
           }
-          const contribution = await this.purchaseVatContributionService.reserve({
-            organization_id: result.updated_po.organization_id,
-            accounting_entity_id,
-            store_id,
-            purchase_order_id: result.updated_po.id,
-            reception_id: result.reception_id,
-            supplier_id: result.updated_po.suppliers.id,
-            supplier_tax_id_snapshot: result.updated_po.suppliers.tax_id ?? null,
-            invoice_number_snapshot: result.updated_po.supplier_invoice_number ?? null,
-            invoice_issue_date_snapshot: result.updated_po.supplier_invoice_date ?? null,
-            currency: 'COP',
-            // Preserve the exact cent precision of the recognized contribution.
-            net_amount: Math.round(net_amount * 100) / 100,
-            iva_amount,
-            tax_groups,
-          });
+          const contribution =
+            await this.purchaseVatContributionService.reserve({
+              organization_id: result.updated_po.organization_id,
+              accounting_entity_id,
+              store_id,
+              purchase_order_id: result.updated_po.id,
+              reception_id: result.reception_id,
+              supplier_id: result.updated_po.suppliers.id,
+              supplier_tax_id_snapshot:
+                result.updated_po.suppliers.tax_id ?? null,
+              invoice_number_snapshot:
+                result.updated_po.supplier_invoice_number ?? null,
+              invoice_issue_date_snapshot:
+                result.updated_po.supplier_invoice_date ?? null,
+              currency: 'COP',
+              // Preserve the exact cent precision of the recognized contribution.
+              net_amount: Math.round(net_amount * 100) / 100,
+              iva_amount,
+              tax_groups,
+            });
           if (!contribution?.id) {
-            throw new Error('F2: VAT contribution reservation did not return an id');
+            throw new Error(
+              'F2: VAT contribution reservation did not return an id',
+            );
           }
           this.eventEmitter.emit('purchase.vat_recognized', {
             purchase_order_id: result.updated_po.id,
@@ -5761,10 +5825,7 @@ export class PurchaseOrdersService {
   ): Promise<void> {
     if (!scan) return;
     const prefix = await this.getScanStoragePrefix();
-    if (
-      !isSafeS3Key(scan.key) ||
-      !scan.key.startsWith(`${prefix}/`)
-    ) {
+    if (!isSafeS3Key(scan.key) || !scan.key.startsWith(`${prefix}/`)) {
       throw new BadRequestException(
         'El documento escaneado no pertenece a esta tienda.',
       );
@@ -5985,8 +6046,13 @@ export class PurchaseOrdersService {
     userId?: number;
   }) {
     try {
-      const { purchaseOrder: po, paymentId, amount, paymentMethod, userId } =
-        params;
+      const {
+        purchaseOrder: po,
+        paymentId,
+        amount,
+        paymentMethod,
+        userId,
+      } = params;
       const receptionsCount = await this.prisma.purchase_order_receptions.count(
         {
           where: { purchase_order_id: po.id },
@@ -6134,7 +6200,12 @@ export class PurchaseOrdersService {
           // applyPoPaymentToApBalance para no armar dos $transactions).
           const apRow = await tx.accounts_payable.findUnique({
             where: { id: ap.id },
-            select: { original_amount: true, paid_amount: true, balance: true, status: true },
+            select: {
+              original_amount: true,
+              paid_amount: true,
+              balance: true,
+              status: true,
+            },
           });
           if (apRow) {
             const newPaid = Number(apRow.paid_amount) + Number(dto.amount);
@@ -6160,10 +6231,7 @@ export class PurchaseOrdersService {
           void mirror; // referenced; carries ap_payment_id if needed
         }
 
-        const status = await this.recalculatePaymentStatus(
-          purchaseOrderId,
-          tx,
-        );
+        const status = await this.recalculatePaymentStatus(purchaseOrderId, tx);
         await tx.purchase_orders.update({
           where: { id: purchaseOrderId },
           data: { payment_status: status as any },
@@ -6830,7 +6898,8 @@ export class PurchaseOrdersService {
       const rawResultingMargin =
         costInPriceScale > 0
           ? Math.round(
-              ((currentBasePrice - costInPriceScale) / costInPriceScale) * 10000,
+              ((currentBasePrice - costInPriceScale) / costInPriceScale) *
+                10000,
             ) / 100
           : null;
       const resultingMargin =
@@ -6887,7 +6956,8 @@ export class PurchaseOrdersService {
           ? Math.round(derivedTax.capitalized_total * 100) / 100
           : lineTaxTotal,
         discount_amount: Math.round(derivedTax.discount_total * 100) / 100,
-        header_discount_share: Math.round((headerShares[index] ?? 0) * 100) / 100,
+        header_discount_share:
+          Math.round((headerShares[index] ?? 0) * 100) / 100,
         allocated_shipping_amount: freight.shares[index] ?? 0,
         shipping_per_unit: Math.round(freightPerUnit * 100) / 100,
         is_reactivation: isReactivation,
@@ -7034,10 +7104,12 @@ export class PurchaseOrdersService {
       );
     }
 
-    const existingPayments = await this.prisma.purchase_order_payments.findMany({
-      where: { purchase_order_id: id },
-      select: { id: true },
-    });
+    const existingPayments = await this.prisma.purchase_order_payments.findMany(
+      {
+        where: { purchase_order_id: id },
+        select: { id: true },
+      },
+    );
     if (existingPayments.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.PO_PAYMENT_006,

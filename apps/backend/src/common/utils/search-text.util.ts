@@ -150,7 +150,8 @@ export function normalizeSearchText(input: unknown): string {
       .replace(/ñ/g, ENE_PLACEHOLDER)
       .normalize('NFD')
       .replace(/[̀-ͯ]/g, '')
-      .split(ENE_PLACEHOLDER).join('ñ')
+      .split(ENE_PLACEHOLDER)
+      .join('ñ')
       .replace(/[^\p{L}\p{N}]+/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -203,6 +204,102 @@ export function tokenizeInternal(input: unknown): string[] {
 /** Tokenizer público (D.3 catálogo sin auth): tope 4, frontera validada. */
 export function tokenizePublic(input: unknown): string[] {
   return tokenizeSearch(input, SEARCH_TOKEN_PUBLIC_MAX);
+}
+
+/**
+ * Tope de la búsqueda de intención (catálogo de herramientas del agente).
+ * Es OR, no el AND×OR de productos: más tokens amplían el recall, no lo
+ * estrechan, así que no aplica el techo de 8 del AND.
+ */
+export const SEARCH_TOKEN_INTENT_MAX = 12;
+
+/**
+ * Muletillas de chat que no discriminan una intención de negocio («oe me
+ * ayudas a…», «parce dame…»). En forma normalizada; las palabras de dominio
+ * (caja, cierre, stock, factura) nunca entran.
+ */
+export const STOPWORDS_ES_CONVERSATIONAL: ReadonlySet<string> = new Set([
+  'oe',
+  'oye',
+  'hola',
+  'parce',
+  'porfa',
+  'favor',
+  'gracias',
+  'me',
+  'mi',
+  'mis',
+  'yo',
+  'ayudas',
+  'ayuda',
+  'ayudame',
+  'puedes',
+  'podrias',
+  'quiero',
+  'necesito',
+  'dame',
+  'deme',
+  'dime',
+  'quisiera',
+  'tengo',
+  'tiene',
+  'hay',
+  'esta',
+  'este',
+  'estos',
+  'estas',
+  'eso',
+  'esa',
+  'ese',
+  'ahi',
+  'aqui',
+  'ya',
+  'pues',
+  'bueno',
+  'eh',
+  'ehh',
+  'mmm',
+  'vale',
+  'listo',
+  'cual',
+  'cuales',
+  'cuanto',
+  'cuanta',
+  'cuantos',
+  'cuantas',
+  'como',
+  'donde',
+  'algo',
+  'todo',
+  'todos',
+  'hacer',
+  'ver',
+]);
+
+/**
+ * Tokens de una petición en lenguaje natural para buscar herramientas:
+ * normaliza, quita stopwords de producto y muletillas conversacionales,
+ * dedupea y corta a {@link SEARCH_TOKEN_INTENT_MAX}. Never-throw.
+ */
+export function tokenizeIntent(input: unknown): string[] {
+  try {
+    const normalized = normalizeSearchText(input);
+    if (!normalized) return [];
+    const seen = new Set<string>();
+    const tokens: string[] = [];
+    for (const raw of normalized.split(' ')) {
+      if (raw.length < SEARCH_TOKEN_MIN_LENGTH) continue;
+      if (STOPWORDS_ES_SEARCH.has(raw) || STOPWORDS_ES_CONVERSATIONAL.has(raw))
+        continue;
+      if (seen.has(raw)) continue;
+      seen.add(raw);
+      tokens.push(raw);
+      if (tokens.length >= SEARCH_TOKEN_INTENT_MAX) break;
+    }
+    return tokens;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -373,8 +470,7 @@ export function buildTokenAndFieldOr(
     const orSize =
       scalarFields.length +
       relationEntries.reduce(
-        (sum, [, fields]) =>
-          sum + fields.filter(isNonEmptyString).length,
+        (sum, [, fields]) => sum + fields.filter(isNonEmptyString).length,
         0,
       );
     if (orSize === 0) return {};
@@ -389,13 +485,11 @@ export function buildTokenAndFieldOr(
           ),
           ...relationEntries.flatMap(
             ([relation, fields]): SearchTextFieldCondition[] =>
-              fields
-                .filter(isNonEmptyString)
-                .map((field) => ({
-                  [relation]: {
-                    some: { [field]: { contains: token, mode: 'insensitive' } },
-                  },
-                })),
+              fields.filter(isNonEmptyString).map((field) => ({
+                [relation]: {
+                  some: { [field]: { contains: token, mode: 'insensitive' } },
+                },
+              })),
           ),
         ],
       }),

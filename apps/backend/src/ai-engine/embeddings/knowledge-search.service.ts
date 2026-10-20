@@ -6,8 +6,9 @@ import { normalizeSearchText } from '../../common/utils/search-text.util';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import {
   catalogHash,
+  intentTerms,
   localToolRanking,
-  reciprocalRankFusion,
+  localToolScores,
   ToolDocument,
 } from '../tools/tool-catalog';
 import {
@@ -19,6 +20,9 @@ interface CachedRanking {
   expires: number;
   names: string[];
   degraded: string[];
+  scores: Record<string, number>;
+  coverage: number;
+  source: KnowledgeRetrievalSource;
 }
 interface ReadyDocument {
   id: number;
@@ -28,9 +32,41 @@ interface ReadyDocument {
   embedding_fingerprint: string | null;
 }
 export interface KnowledgeRanking {
+  /** Evidence-bearing names first (fused rank), then the rest of the catalog. */
   names: string[];
   degraded: string[];
   cacheHit: boolean;
+  /** Fused relevance for names WITH lexical/vector evidence only (relative thresholds). */
+  scores?: Record<string, number>;
+  /** ready+current indexed documents / requested documents (0..1). Below 0.9 the router falls back. */
+  coverage?: number;
+  /** Strongest retrieval layer that produced evidence for this query. */
+  source?: KnowledgeRetrievalSource;
+}
+export type KnowledgeRetrievalSource =
+  | 'vector'
+  | 'lexical_sql'
+  | 'lexical_local'
+  | 'none';
+
+/** `to_tsquery` OR of prefix terms over normalized tokens + business synonyms. */
+export function intentTsQuery(query: string): string {
+  return intentTerms(query)
+    .map(({ token }) => token)
+    .filter((token) => /^[a-z0-9ñ]+$/.test(token))
+    .map((token) => `${token}:*`)
+    .join(' | ');
+}
+
+/** RRF k=60 that keeps the fused score (for relative thresholds). */
+function fuse(rankings: string[][]): Array<[string, number]> {
+  const scores = new Map<string, number>();
+  rankings.forEach((ranking) =>
+    ranking.forEach((name, i) =>
+      scores.set(name, (scores.get(name) ?? 0) + 1 / (60 + i + 1)),
+    ),
+  );
+  return [...scores].sort((a, b) => b[1] - a[1]);
 }
 
 /** This API only retrieves platform documentation, NEVER business embeddings. */
@@ -57,8 +93,19 @@ export class KnowledgeSearchService {
     );
     const boundedQuery = query.slice(0, 500);
     const local = localToolRanking(boundedQuery, documents, domain);
+    const localScores = localToolScores(boundedQuery, documents, domain);
+    // Only evidence-bearing names enter the fusion: a zero-score document must
+    // never look relevant through its rank position alone.
+    const localEvidence = local.filter((n) => (localScores.get(n) ?? 0) > 0);
     if (!documents.length)
-      return { names: local, degraded: ['index_disabled'], cacheHit: false };
+      return {
+        names: local,
+        degraded: ['index_disabled'],
+        cacheHit: false,
+        scores: {},
+        coverage: 0,
+        source: 'none',
+      };
     const normalizedQuery = normalizeSearchText(boundedQuery);
     if (
       documents.some((d) =>
@@ -67,7 +114,14 @@ export class KnowledgeSearchService {
         ),
       )
     ) {
-      return { names: local, degraded: [], cacheHit: false }; // exact-name fast path: zero provider calls
+      return {
+        names: local,
+        degraded: [],
+        cacheHit: false,
+        scores: Object.fromEntries(fuse([localEvidence])),
+        coverage: 1,
+        source: 'lexical_local',
+      }; // exact-name fast path: zero provider calls
     }
     let fingerprint = 'unavailable';
     try {
@@ -90,9 +144,20 @@ export class KnowledgeSearchService {
         names: cached.names.filter((name) => authorized.has(name)),
         degraded: cached.degraded,
         cacheHit: true,
+        scores: Object.fromEntries(
+          Object.entries(cached.scores).filter(([name]) =>
+            authorized.has(name),
+          ),
+        ),
+        coverage: cached.coverage,
+        source: cached.source,
       };
     const degraded: string[] = [];
-    const rankings = [local];
+    const rankings = [localEvidence];
+    let coverage = 0;
+    let source: KnowledgeRetrievalSource = localEvidence.length
+      ? 'lexical_local'
+      : 'none';
     try {
       const ready = await this.readyDocuments(documents, type);
       const byKey = new Map(documents.map((d) => [d.key, d]));
@@ -106,20 +171,28 @@ export class KnowledgeSearchService {
         valid.map((d) => [d.id, byKey.get(d.document_key)!.name]),
       );
       const ids = [...namesById.keys()];
+      coverage = ids.length / documents.length;
+      const tsQuery = intentTsQuery(boundedQuery);
       if (!ids.length) degraded.push('index_not_ready');
       else {
-        const lexical = await this.queryIds(
-          `
+        // OR of prefix terms (+ business synonyms): a conversational question
+        // («oe me ayudas con un cierre que no me dio») matches on ANY term
+        // instead of requiring all of them like plainto_tsquery did.
+        const lexical = tsQuery
+          ? await this.queryIds(
+              `
           SELECT id FROM ai_knowledge_documents WHERE knowledge_scope = 'global'
             AND store_id IS NULL AND organization_id IS NULL AND entity_type = $3
             AND active = true AND status = 'ready' AND id = ANY($1::int[])
-            AND search_vector @@ plainto_tsquery('spanish', $2)
-          ORDER BY ts_rank_cd(search_vector, plainto_tsquery('spanish', $2)) DESC, id LIMIT 100`,
-          ids,
-          normalizedQuery,
-          type,
-        );
+            AND search_vector @@ to_tsquery('spanish', $2)
+          ORDER BY ts_rank_cd(search_vector, to_tsquery('spanish', $2)) DESC, id LIMIT 100`,
+              ids,
+              tsQuery,
+              type,
+            )
+          : [];
         rankings.push(lexical.map((id) => namesById.get(id)!).filter(Boolean));
+        if (lexical.length) source = 'lexical_sql';
         const vectorIds = valid
           .filter((d) => d.embedding_fingerprint === fingerprint)
           .map((d) => d.id);
@@ -148,6 +221,7 @@ export class KnowledgeSearchService {
             rankings.push(
               vector.map((id) => namesById.get(id)!).filter(Boolean),
             );
+            if (vector.length) source = 'vector';
           } catch {
             degraded.push('vector_unavailable');
           }
@@ -163,14 +237,23 @@ export class KnowledgeSearchService {
         (value) => normalizeSearchText(value) === normalizedQuery,
       );
     });
+    const fused = fuse(rankings).filter(([name]) => authorized.has(name));
+    const scores = Object.fromEntries(fused);
     const names = [
-      ...new Set([...exact, ...reciprocalRankFusion(rankings)]),
+      ...new Set([...exact, ...fused.map(([name]) => name), ...local]),
     ].filter((name) => authorized.has(name));
     if (this.cache.size >= 256)
       this.cache.delete(this.cache.keys().next().value!);
     // Cache degradations too: one intention embedding per material query, NOT per round.
-    this.cache.set(key, { names, degraded, expires: Date.now() + 300000 });
-    return { names, degraded, cacheHit: false };
+    this.cache.set(key, {
+      names,
+      degraded,
+      scores,
+      coverage,
+      source,
+      expires: Date.now() + 300000,
+    });
+    return { names, degraded, cacheHit: false, scores, coverage, source };
   }
 
   /** Private procedural namespace: explicit owner/org/store; never semantic_search or global sentinel. */

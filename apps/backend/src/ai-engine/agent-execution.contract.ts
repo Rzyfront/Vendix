@@ -73,6 +73,18 @@ const NOT_EXECUTED = new Set([TOOL_STAGED_CODE, 'BATCH_NOT_DISPATCHED']);
 export const TOOL_NOT_ALLOWED_CODE = 'AI_AGENT_TOOL_NOT_ALLOWED';
 export const TOOL_NOT_AVAILABLE_NEXT_STEP =
   'Esa herramienta no existe para este asistente. Usa solo las herramientas de tu catálogo actual; si ninguna sirve, responde con lo que sí sabes sin mencionar herramientas.';
+/**
+ * Model-facing guidance for a non-existent/unauthorized name with the real
+ * authorized alternatives the router already loaded (D4). The user-facing
+ * summary stays {@link TOOL_NOT_AVAILABLE_NEXT_STEP}.
+ */
+export function toolNotAvailableWithAlternatives(
+  alternatives: readonly string[],
+): string {
+  return alternatives.length
+    ? `Ese paso no está disponible con ese nombre. Herramientas reales que ya quedaron cargadas para lo mismo: ${alternatives.join(', ')}. Llama la adecuada en tu siguiente respuesta; si ninguna sirve, responde con lo que sí sabes sin mencionar herramientas.`
+    : TOOL_NOT_AVAILABLE_NEXT_STEP;
+}
 const notExecuted = (r: ToolExecutionReceipt) =>
   NOT_EXECUTED.has(r.error_code ?? '');
 
@@ -397,12 +409,7 @@ export async function* withExecutionContract(
     // A write applied in THIS turn has no server verifier at this layer: the
     // model's text stays and a short human line is appended. The durable
     // session removes it again if its verifier confirms the effect.
-    else if (
-      !critical &&
-      result.success &&
-      !result.exhausted &&
-      wroteApplied
-    )
+    else if (!critical && result.success && !result.exhausted && wroteApplied)
       content = appendNotice(content, USER_NOTICES.write_pending_verification);
     if (
       (outcome === 'pending_confirmation' &&

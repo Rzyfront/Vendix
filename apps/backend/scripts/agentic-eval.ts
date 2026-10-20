@@ -18,7 +18,11 @@ const HELP = `Usage: npm run eval:agentic -- [--mode replay|shadow|live] [--spli
   [--repeats 3] [--records /path/synthetic-receipts.jsonl] [--output /tmp/report.json]
   [--max-cost-usd 0 (alias --budget-usd)] [--max-case-cost-usd 0] [--compare /path/baseline.json]
   [--allow-treatment flags,catalog] (explicit comparison treatment; never model/prompt/config/cache)
-No application, provider or DB is imported. Shadow/live adapters are intentionally absent.
+Live golden conversations: --mode live --suite test/agentic/golden-conversations.es.jsonl
+  --label <baseline|dynamic> --out <dir> --db-url-file <file> [--or-key-file <file>]
+  [--base http://localhost:3100/api] [--cases g01,g05] [--min-credit-usd 0.4] [--psql psql]
+  (local backend + cloned e2e DB only; spends real provider money; see live-http.adapter.ts).
+Otherwise no application, provider or DB is imported.
 Replay reads existing synthetic receipts only (no spending); absent records produce not_run.
 Budgets authorize no execution by themselves. Never point recordings at real customer data.`;
 
@@ -153,6 +157,14 @@ export function parseCli(argv: string[]): CliOptions {
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+  // Live golden conversations (F6): real local backend + cloned DB, real spend.
+  if (argv.includes('--suite')) {
+    const mode = argv[argv.indexOf('--mode') + 1];
+    if (mode !== 'live') throw new Error('--suite requires --mode live');
+    const { runLiveFromArgv } =
+      await import('../test/agentic/live-http.adapter');
+    return runLiveFromArgv(argv);
+  }
   const options = parseCli(argv);
   if (options.help) {
     process.stdout.write(`${HELP}\n`);

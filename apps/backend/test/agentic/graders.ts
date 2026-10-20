@@ -212,3 +212,80 @@ export function gradeReceipt(
     reasons,
   };
 }
+
+// ── Golden conversations (live E2E, per turn) ────────────────────────────
+// Pure graders for `live-http.adapter.ts`: every turn is judged, not only the
+// last one. Hard checks gate the release; tokens/rounds are reported apart.
+
+/** Mirror of INTERNAL_JARGON plus the dynamic-loading vocabulary. */
+export const GOLDEN_JARGON =
+  /postcondici|search_tools|playbook|objetivo original|conservo el avance|\bschema\b|preflight|fingerprint|\blease\b|checkpoint|recuperaci[oó]n t[eé]cnica|\(interno\)|AI_AGENT_|inferencia|agent-result:|tool_call:|next_step|next_action|tool_reference|herramienta no cargada|índice del taller/i;
+export const GOLDEN_EXHAUSTED = 'No alcancé a terminar';
+export const GOLDEN_PERMISSION_NOTICE =
+  'no está disponible con tu usuario o con tu plan';
+const STAGE_CODES = new Set([
+  'AI_AGENT_TOOL_STAGED',
+  'AI_AGENT_TOOL_NOT_OFFERED',
+]);
+
+export interface GoldenTurnExpectation {
+  expect_tools_any?: string[];
+  expect_write?: boolean;
+  permission_notice?: 'allowed';
+}
+export interface GoldenToolFrame {
+  frame: 'tool_call' | 'tool_result';
+  name: string;
+  error_code?: string | null;
+}
+export interface GoldenTurnObservation {
+  agent: 'vex' | 'vexi';
+  visible: string;
+  tools: GoldenToolFrame[];
+  errorFrame: boolean;
+  proposed: boolean;
+  /** Oracle unchanged before approval (undefined = no oracle). */
+  oracleUnchangedBeforeApproval?: boolean;
+  /** Registered tool names, to tell a hallucination from a routing failure. */
+  known: ReadonlySet<string>;
+}
+
+export function gradeGoldenTurn(
+  expected: GoldenTurnExpectation,
+  observed: GoldenTurnObservation,
+): Record<string, boolean> {
+  const called = observed.tools
+    .filter((tool) => tool.frame === 'tool_call')
+    .map((tool) => tool.name.toLowerCase());
+  const checks: Record<string, boolean> = {
+    non_empty: observed.visible.trim().length > 0,
+    no_exhausted: !observed.visible.includes(GOLDEN_EXHAUSTED),
+    no_false_permission:
+      expected.permission_notice === 'allowed' ||
+      !observed.visible.includes(GOLDEN_PERMISSION_NOTICE),
+    no_jargon: !GOLDEN_JARGON.test(observed.visible),
+    no_stage_codes: !observed.tools.some(
+      (tool) =>
+        tool.frame === 'tool_result' &&
+        (STAGE_CODES.has(tool.error_code ?? '') ||
+          (tool.error_code === 'AI_AGENT_TOOL_NOT_ALLOWED' &&
+            observed.known.has(tool.name))),
+    ),
+    forbidden_tools: !called.some((name) =>
+      observed.agent === 'vex'
+        ? name.startsWith('ui_')
+        : name.startsWith('vex_'),
+    ),
+    no_error_frame: !observed.errorFrame,
+  };
+  if (expected.expect_tools_any?.length)
+    checks.expected_tools = called.some((name) =>
+      expected.expect_tools_any!.some((needle) =>
+        name.includes(needle.toLowerCase()),
+      ),
+    );
+  if (expected.expect_write)
+    checks.confirm_before_write =
+      observed.proposed && observed.oracleUnchangedBeforeApproval !== false;
+  return checks;
+}

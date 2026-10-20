@@ -71,6 +71,75 @@ function classify(code: string, status?: number): ToolExecutionStatus {
   return 'recoverable_error';
 }
 
+/**
+ * Recognise error envelopes only at protocol boundaries. A domain record's
+ * arbitrary `error` column does not make its successful read an API failure.
+ */
+function isProtocolFailure(item: Record<string, unknown> | null): boolean {
+  return (
+    !!item &&
+    (item.success === false ||
+      item.ok === false ||
+      item.applied === false ||
+      (typeof item.statusCode === 'number' && item.statusCode >= 400) ||
+      (typeof item.error === 'string' &&
+        (typeof item.next_step === 'string' ||
+          typeof item.error_code === 'string' ||
+          Object.keys(item).every((k) =>
+            ['error', 'message', 'detail', 'note', 'tool', 'version'].includes(
+              k,
+            ),
+          ))) ||
+      [
+        'error',
+        'failed',
+        'not_found',
+        'blocked',
+        'forbidden',
+        'redirected',
+        'no_refresh_available',
+      ].includes(String(item.status)))
+  );
+}
+
+/**
+ * Explicit application evidence for a confirmed IN-PROCESS write: the handler
+ * awaited its domain service and returned a structured result that is not a
+ * protocol failure, so the change is committed. Stamped by the registry — the
+ * only place that knows the handler ran in this process — and never inferred
+ * from prose (plain text stays as it came) nor applied to a transport boundary
+ * (`effectTransport: 'http'`), where HTTP 200/`success` proves nothing.
+ *
+ * Without it every typed write approved on the card ended `unknown_effect` and
+ * the next message of the chat answered with the 409 «No pude confirmar si el
+ * último cambio se aplicó», although the record existed.
+ */
+export function markInProcessWriteApplied(raw: unknown): unknown {
+  let value = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  const record = object(value);
+  if (
+    !record ||
+    'applied' in record ||
+    record.schema_version !== undefined ||
+    isProtocolFailure(record) ||
+    record.result_unknown === true ||
+    record.requires_confirmation === true ||
+    record.pending_confirmation === true ||
+    record.needs_user_input === true ||
+    ['pending_confirmation', 'needs_user_input'].includes(String(record.status))
+  )
+    return raw;
+  const stamped = { ...record, applied: true };
+  return typeof raw === 'string' ? JSON.stringify(stamped) : stamped;
+}
+
 export function normalizeToolResult(
   raw: unknown,
   context: ToolResultContext = {},
@@ -101,34 +170,9 @@ export function normalizeToolResult(
     'needs_user_input',
     'unknown_effect',
   ];
-  // Recognise error envelopes only at protocol boundaries. A domain record's
-  // arbitrary `error` column does not make its successful read an API failure.
-  const protocolError = (item: Record<string, unknown> | null): boolean =>
-    !!item &&
-    (item.success === false ||
-      item.ok === false ||
-      item.applied === false ||
-      (typeof item.statusCode === 'number' && item.statusCode >= 400) ||
-      (typeof item.error === 'string' &&
-        (typeof item.next_step === 'string' ||
-          typeof item.error_code === 'string' ||
-          Object.keys(item).every((k) =>
-            ['error', 'message', 'detail', 'note', 'tool', 'version'].includes(
-              k,
-            ),
-          ))) ||
-      [
-        'error',
-        'failed',
-        'not_found',
-        'blocked',
-        'forbidden',
-        'redirected',
-        'no_refresh_available',
-      ].includes(String(item.status)));
-  const failure = protocolError(outer)
+  const failure = isProtocolFailure(outer)
     ? outer
-    : protocolError(body)
+    : isProtocolFailure(body)
       ? body
       : null;
   let status: ToolExecutionStatus =
@@ -180,7 +224,7 @@ export function normalizeToolResult(
         /* Not an envelope. */
       }
     }
-    if (protocolError(object(responseBody))) status = 'unknown_effect';
+    if (isProtocolFailure(object(responseBody))) status = 'unknown_effect';
   }
   const normalized = result(status, typed ? outer!.data : data, context, code);
   const next = candidate?.next_action ?? candidate?.next_step;

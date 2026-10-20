@@ -36,7 +36,11 @@ import {
 } from './vexi-plan-state.service';
 import type { ToolPreview } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { describeVoiceAction } from './voice-action';
-import { VexiVoiceConsentService } from './vexi-voice-consent.service';
+import {
+  VexiVoiceConsentService,
+  VoiceConsentSession,
+  VoiceConsentTool,
+} from './vexi-voice-consent.service';
 import {
   VoiceAuthority,
   VexiVoiceAuthorityService,
@@ -182,6 +186,8 @@ export class VexiRealtimeService {
       routing = this.router!.createSession(
         dto.intent?.trim() || authority.goal,
         this.routingSignature(authority, authorized),
+        [],
+        authority.agent_key,
       );
       offered = (
         await this.router!.select(routing, authorized, true, !!authority.plan)
@@ -327,13 +333,93 @@ export class VexiRealtimeService {
   ): Promise<RealtimeToolCallResult> {
     this.requireVoiceServices();
     if (!sessionId) throw new NotFoundException('Voice session not found');
-    const session = await this.consent!.validateSession(sessionId);
+    let session = await this.consent!.validateSession(sessionId);
     if (session.channel !== 'realtime')
       throw new NotFoundException('Voice session not found');
     const name = this.toolRegistry.canonicalName(requestedName);
-    const offered = session.tools.find((tool) => tool.name === name);
-    if (!offered)
-      throw new NotFoundException('Tool is not offered by this voice session');
+    let offered = session.tools.find((tool) => tool.name === name);
+    // Hard rule («el mecánico»): an AUTHORIZED tool the model calls without it
+    // being loaded is loaded into this session and runs in the same turn, under
+    // the same preview-only/consent gates. Relevance never grants authority.
+    let loadedTools: RealtimeToolDefinition[] | undefined;
+    if (!offered) {
+      loadedTools = await this.loadUnofferedTool(session, name);
+      session = await this.consent!.validateSession(sessionId);
+      offered = session.tools.find((tool) => tool.name === name);
+      if (!offered)
+        throw new NotFoundException(
+          'Tool is not offered by this voice session',
+        );
+    }
+    const result = await this.runSessionToolCall(
+      session,
+      sessionId,
+      name,
+      offered,
+      suppliedArgs,
+      _callId,
+    );
+    return loadedTools && !result.tools
+      ? { ...result, tools: loadedTools }
+      : result;
+  }
+
+  /**
+   * Loads an authorized-but-unloaded tool into the voice session (catalog CAS
+   * on the session revision) and returns the new catalog for `session.update`.
+   * Not authorized in the current voice scope → the same 404 as before.
+   */
+  private async loadUnofferedTool(
+    session: VoiceConsentSession,
+    name: string,
+  ): Promise<RealtimeToolDefinition[]> {
+    const authority = await this.authority!.resolveAuthority(
+      session.conversationId,
+      session.agentKey,
+    );
+    return this.authority!.runAuthorized(authority, async (authority) => {
+      const authorized = this.voiceDefinitions(authority);
+      if (!authorized.some((definition) => definition.function.name === name))
+        throw new NotFoundException(
+          'Tool is not offered by this voice session',
+        );
+      const signature = this.routingSignature(authority, authorized);
+      const routing = session.routing
+        ? (JSON.parse(JSON.stringify(session.routing)) as ToolRoutingSession)
+        : this.router!.createSession(
+            authority.goal,
+            signature,
+            [],
+            authority.agent_key,
+          );
+      routing.signature = signature;
+      this.router!.markUsed(routing, name, authorized);
+      routing.unloadedAuthorizedCalls =
+        (routing.unloadedAuthorizedCalls ?? 0) + 1;
+      const selection = await this.router!.select(
+        routing,
+        authorized,
+        true,
+        !!authority.plan,
+      );
+      await this.consent!.updateSessionCatalog(
+        session.sessionId,
+        this.versionedTools(selection.definitions),
+        routing,
+        session.revision,
+      );
+      return this.realtimeDefinitions(selection.definitions);
+    });
+  }
+
+  private async runSessionToolCall(
+    session: VoiceConsentSession,
+    sessionId: string,
+    name: string,
+    offered: VoiceConsentTool,
+    suppliedArgs: Record<string, unknown>,
+    _callId?: string,
+  ): Promise<RealtimeToolCallResult> {
     const tool = this.toolRegistry.get(name);
     if (!tool || (tool.version ?? '1') !== offered.version)
       throw new ConflictException(
@@ -455,6 +541,8 @@ export class VexiRealtimeService {
               : this.router!.createSession(
                   fresh.goal,
                   this.routingSignature(fresh, definitions),
+                  [],
+                  fresh.agent_key,
                 );
             routing.signature = this.routingSignature(fresh, definitions);
             const selection = await this.router!.select(

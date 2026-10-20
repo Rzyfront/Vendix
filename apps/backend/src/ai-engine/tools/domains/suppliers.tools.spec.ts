@@ -1,7 +1,4 @@
-import {
-  createSupplierTools,
-  SupplierToolDeps,
-} from './suppliers.tools';
+import { createSupplierTools, SupplierToolDeps } from './suppliers.tools';
 import { RegisteredTool } from '../interfaces/tool.interface';
 
 /**
@@ -166,16 +163,26 @@ describe('suppliers.tools · O-38 find_supplier / O-41 get_supplier_summary', ()
       expect(answer.nota).toMatch(/archived/);
     });
 
-    it('sad: query vacío no llama al servicio', async () => {
-      const findAll = jest.fn();
+    it('happy: sin query lista los proveedores paginados', async () => {
+      const findAll = jest.fn().mockResolvedValue({
+        data: [{ id: 121, name: 'Test Plan Supplier', state: 'active' }],
+        meta: { total: 25, page: 2, limit: 20, totalPages: 2 },
+      });
       const tools = buildTools({ findAll });
       const tool = getTool(tools, 'find_supplier');
       const answer = JSON.parse(
-        await tool.handler!({ query: '   ' }, CONTEXT),
+        await tool.handler!({ query: '   ', page: 2 }, CONTEXT),
       );
 
-      expect(answer.error).toMatch(/vacío/);
-      expect(findAll).not.toHaveBeenCalled();
+      expect(findAll).toHaveBeenCalledWith({ page: 2, limit: 20 });
+      expect(answer).toMatchObject({
+        listado: true,
+        pagina: 2,
+        total: 25,
+        hay_mas: false,
+      });
+      expect(answer.proveedores[0]).toMatchObject({ supplier_id: 121 });
+      expect(tool.parameters.required).toEqual([]);
     });
 
     it('sad: state inválido no llama al servicio', async () => {
@@ -379,9 +386,7 @@ describe('suppliers.tools · O-38 find_supplier / O-41 get_supplier_summary', ()
           state: 'active',
           payment_terms: 'NET30',
           products_count: 1,
-          productos: [
-            { product_id: 9, name: 'Café 500g', sku: 'CAFE-500' },
-          ],
+          productos: [{ product_id: 9, name: 'Café 500g', sku: 'CAFE-500' }],
         }),
       );
     });

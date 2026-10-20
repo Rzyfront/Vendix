@@ -8,6 +8,14 @@ import { AgentTraceService } from '../observability/agent-trace.service';
 import { AIEngineService } from '../ai-engine.service';
 import { catalogHash, KNOWLEDGE_DIMENSION } from '../tools/tool-catalog';
 
+/** Owner decision 2026-10-19: in-code default, prod maps no extra env var. */
+export const AI_KNOWLEDGE_DAILY_TOKEN_BUDGET_DEFAULT = 2_000_000;
+
+/** `openai/text-embedding-3-small` (OpenRouter) ≡ `text-embedding-3-small`. */
+export function embeddingModelName(model: string | null | undefined): string {
+  return (model ?? '').trim().split('/').pop() ?? '';
+}
+
 export function assertKnowledgeVector(vector: number[]): void {
   if (
     !Array.isArray(vector) ||
@@ -59,7 +67,7 @@ export class KnowledgeEmbeddingService {
       !app.is_active ||
       app.ai_feature_category !== 'rag_embeddings' ||
       !app.config?.id ||
-      app.config.model_id !== model ||
+      embeddingModelName(app.config.model_id) !== embeddingModelName(model) ||
       app.model_type !== 'embedding'
     ) {
       throw new Error('KNOWLEDGE_APP_INCOMPATIBLE');
@@ -85,7 +93,8 @@ export class KnowledgeEmbeddingService {
     if (expectedFingerprint && expectedFingerprint !== config.fingerprint)
       throw new Error('KNOWLEDGE_FINGERPRINT_CHANGED');
     const budget = Number(
-      this.setting('AI_KNOWLEDGE_DAILY_TOKEN_BUDGET') ?? '0',
+      this.setting('AI_KNOWLEDGE_DAILY_TOKEN_BUDGET')?.trim() ||
+        AI_KNOWLEDGE_DAILY_TOKEN_BUDGET_DEFAULT,
     );
     if (!Number.isSafeInteger(budget) || budget <= 0)
       throw new Error('KNOWLEDGE_BUDGET_UNAVAILABLE');
@@ -129,7 +138,7 @@ export class KnowledgeEmbeddingService {
       if (
         !response.success ||
         !response.embedding ||
-        response.model !== config.model
+        embeddingModelName(response.model) !== embeddingModelName(config.model)
       )
         throw new Error('KNOWLEDGE_EMBEDDING_FAILED');
       assertKnowledgeVector(response.embedding);

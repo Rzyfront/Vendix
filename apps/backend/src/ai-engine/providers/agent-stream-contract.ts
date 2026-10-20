@@ -39,13 +39,9 @@ export function canonicalAgentTools(
       throw new Error('Duplicate or missing offered tool name');
     names.add(tool.function.name);
   }
-  return [...tools].sort((a, b) =>
-    a.function.name < b.function.name
-      ? -1
-      : a.function.name > b.function.name
-        ? 1
-        : 0,
-  );
+  // Order is the caller's contract: [sorted core] + [loaded in load order].
+  // Re-sorting here would move the core prefix and break prompt caching.
+  return [...tools];
 }
 
 /** Validate the entire batch before exposing even its first executable call. */

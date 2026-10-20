@@ -9,6 +9,8 @@ import {
   tokenizeInternal,
   tokenizePublic,
   tokenizeSearch,
+  tokenizeIntent,
+  SEARCH_TOKEN_INTENT_MAX,
 } from './search-text.util';
 
 describe('search-text.util (CP-pos-smart-search A.1)', () => {
@@ -278,20 +280,45 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
       expect(Array.isArray(tokens)).toBe(true);
     });
 
-    it.each(adversarial)('%s: predicado y builder definidos', (_name, input) => {
-      expect(() => isSmartSearchActive(input, true)).not.toThrow();
-      expect(() => isSmartSearchActive(input, false)).not.toThrow();
-      expect(() =>
-        buildTokenAndFieldOr(tokenizeInternal(input), {
-          scalar: ['name'],
-        }),
-      ).not.toThrow();
-    });
+    it.each(adversarial)(
+      '%s: predicado y builder definidos',
+      (_name, input) => {
+        expect(() => isSmartSearchActive(input, true)).not.toThrow();
+        expect(() => isSmartSearchActive(input, false)).not.toThrow();
+        expect(() =>
+          buildTokenAndFieldOr(tokenizeInternal(input), {
+            scalar: ['name'],
+          }),
+        ).not.toThrow();
+      },
+    );
 
     it('salidas degeneradas documentadas: emoji/run → [] o tokens sanos', () => {
       expect(tokenizeSearch('☕🔥🎉', 6)).toEqual([]);
       expect(tokenizeSearch('cafe\ud800leche', 6)).toEqual(['cafe', 'leche']);
       expect(tokenizeSearch('ca\0fe', 6)).toEqual(['ca', 'fe']);
+    });
+  });
+
+  describe('tokenizeIntent (catálogo del agente)', () => {
+    it('quita muletillas conversacionales y conserva las palabras de dominio', () => {
+      expect(
+        tokenizeIntent(
+          'Oe me ayudas a analizar un cierre de caja que no me dio?',
+        ),
+      ).toEqual(['analizar', 'cierre', 'caja', 'no', 'dio']);
+    });
+    it('admite hasta 12 tokens (OR, no AND) y nunca lanza', () => {
+      const many = Array.from({ length: 20 }, (_, i) => `palabra${i}`).join(
+        ' ',
+      );
+      expect(tokenizeIntent(many)).toHaveLength(SEARCH_TOKEN_INTENT_MAX);
+      expect(tokenizeIntent(undefined)).toEqual([]);
+      expect(tokenizeIntent('kuanto stok tengo de cocacola')).toEqual([
+        'kuanto',
+        'stok',
+        'cocacola',
+      ]);
     });
   });
 });

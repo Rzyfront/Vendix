@@ -1,5 +1,6 @@
 import {
   countsAsToolSuccess,
+  markInProcessWriteApplied,
   normalizeToolException,
   normalizeToolResult,
 } from './tool-result.normalizer';
@@ -152,6 +153,39 @@ describe('D0 tool execution normalization', () => {
         { ...context, write: true },
       ),
     ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+  });
+  describe('markInProcessWriteApplied (confirmed in-process write)', () => {
+    const write = { ...context, write: true };
+    it('a structured result without failure becomes applied evidence', () => {
+      const raw = JSON.stringify({
+        summary: 'Cliente creado.',
+        data: { customer_id: 9 },
+      });
+      expect(
+        normalizeToolResult(markInProcessWriteApplied(raw), write),
+      ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+    });
+    it.each([
+      ['protocol error', { error: 'No existe', next_step: 'busca' }],
+      ['explicit not applied', { applied: false, error: 'network failure' }],
+      ['pending proposal', { requires_confirmation: true }],
+      ['missing datum', { status: 'needs_user_input' }],
+      ['typed envelope', { schema_version: '1', status: 'unknown_effect' }],
+    ])('never stamps a %s', (_label, value) => {
+      const raw = JSON.stringify(value);
+      expect(markInProcessWriteApplied(raw)).toBe(raw);
+    });
+    it('never infers application from prose', () => {
+      expect(markInProcessWriteApplied('Producto creado')).toBe(
+        'Producto creado',
+      );
+    });
+    it('keeps the object shape when the handler returned an object', () => {
+      expect(markInProcessWriteApplied({ id: 3 })).toEqual({
+        id: 3,
+        applied: true,
+      });
+    });
   });
   it('bridge network failures and contradictory HTTP200 application claims are uncertain', () => {
     expect(

@@ -2,7 +2,10 @@ import { AIAgentService } from './ai-agent.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { ToolRouterService } from './tools/tool-router.service';
 import { createDiscoveryTools } from './tools/domains/discovery.tools';
-import { localToolRanking } from './tools/tool-catalog';
+import { ForbiddenException } from '@nestjs/common';
+import { localToolRanking, localToolScores } from './tools/tool-catalog';
+import { INTERNAL_JARGON } from './agent-execution.contract';
+import { redactTraceAttributes } from './observability/agent-trace.service';
 import { emptyObjectiveBudget } from './tasks/interfaces/agent-objective.interface';
 import { RequestContextService } from '../common/context/request-context.service';
 
@@ -17,7 +20,7 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       delete process.env.AI_AGENT_MAX_CATALOG_EXPANSIONS;
     else process.env.AI_AGENT_MAX_CATALOG_EXPANSIONS = previousLimit;
   });
-  function fixture(initialExpansions = 0) {
+  function fixture(initialExpansions = 0, dynamic = false) {
     const registry = new AIToolRegistry({} as any);
     registry.registerMany(createDiscoveryTools());
     const handler = jest.fn(async () => '{}');
@@ -34,6 +37,14 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       rank: async (q, docs, _scope, domain) => ({
         names: localToolRanking(q, docs, domain),
         degraded: [],
+        // F3: a ready index (scores + full coverage) turns on the working set.
+        ...(dynamic && {
+          scores: Object.fromEntries(
+            [...localToolScores(q, docs, domain)].filter(([, v]) => v > 0),
+          ),
+          coverage: 1,
+          source: 'lexical_local',
+        }),
       }),
     } as any);
     const search = jest.spyOn(router, 'search');
@@ -66,11 +77,12 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       close: jest.fn(),
     };
     const chat = jest.fn();
+    const emit = jest.fn();
     const service = new AIAgentService(
       { chat } as any,
       {} as any,
       registry,
-      { emit: jest.fn() } as any,
+      { emit } as any,
       {} as any,
       {
         canUseAIFeature: async () => ({ allowed: true }),
@@ -101,7 +113,7 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
             ...extra,
           }),
       );
-    return { chat, run, search, durable, objective, handler, registry };
+    return { chat, run, search, durable, objective, handler, registry, emit };
   }
   const response = (tool_calls: any[] = []) => ({
     success: true,
@@ -126,9 +138,7 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     function: { name, arguments: JSON.stringify(args) },
   });
   const toolMessages = (messages: any[]) =>
-    messages
-      .filter((m) => m.role === 'tool')
-      .map((m) => JSON.parse(m.content));
+    messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
 
   // Fix router 2026-10 (prod): Vex/Vexi answered «No alcancé a terminar» +
   // «no está disponible con tu usuario o plan» because an authorized tool
@@ -138,9 +148,9 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     f.chat
       .mockImplementationOnce(async (_messages, options) => {
         // 60 operations + discovery scaffold: nothing excluded by relevance.
-        expect(
-          options.tools.map((t: any) => t.function.name),
-        ).toContain('operation_59');
+        expect(options.tools.map((t: any) => t.function.name)).toContain(
+          'operation_59',
+        );
         return response([toolCall('c1', 'operation_59')]);
       })
       .mockImplementationOnce(async (messages) => {
@@ -250,5 +260,161 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     });
     const result = await f.run();
     expect(result.exhausted).toBe(true);
+  });
+  describe('F3 carga dinámica: el mecánico en el loop real', () => {
+    const offered = (options: any): string[] =>
+      options.tools.map((t: any) => t.function.name);
+    const supplierTool = (f: ReturnType<typeof fixture>) =>
+      f.registry.register({
+        name: 'find_supplier',
+        domain: 'suppliers',
+        description: 'Buscar proveedores por nombre o NIT',
+        parameters: { type: 'object', properties: {} },
+        readOnly: true,
+        handler: f.handler,
+      });
+
+    it('una tool autorizada NO cargada se carga y ejecuta en la ronda 1, sin bloqueo ni aviso', async () => {
+      const f = fixture(0, true);
+      f.chat
+        .mockImplementationOnce(async (_messages, options) => {
+          expect(offered(options)).toContain('search_tools');
+          expect(offered(options)).not.toContain('operation_59');
+          expect(offered(options).length).toBeLessThan(40);
+          return response([toolCall('c1', 'operation_59')]);
+        })
+        .mockImplementationOnce(async (messages, options) => {
+          expect(toolMessages(messages)[0].status).toBe('ok');
+          expect(offered(options)).toContain('operation_59');
+          return response();
+        });
+      const result = await f.run();
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(f.chat).toHaveBeenCalledTimes(2);
+      expect(result.execution?.outcome).not.toBe('blocked');
+      expect(result.content).not.toMatch(/usuario o con tu plan/);
+      expect(result.content).not.toMatch(INTERNAL_JARGON);
+    });
+
+    it('F7: el loop pasa el catálogo autorizado como deferredTools (superconjunto de lo ofrecido)', async () => {
+      const f = fixture(0, true);
+      f.chat.mockImplementationOnce(async (_messages, options: any) => {
+        const deferred = options.deferredTools.map((t: any) => t.function.name);
+        expect(deferred).toContain('operation_59');
+        expect(deferred.length).toBeGreaterThan(offered(options).length);
+        for (const name of offered(options)) expect(deferred).toContain(name);
+        return response();
+      });
+      await f.run();
+      expect(f.chat).toHaveBeenCalledTimes(1);
+    });
+
+    it('3 rondas de búsqueda no gastan max_iterations; la 4.ª sí cuenta', async () => {
+      const f = fixture(0, true);
+      // max_iterations 2 + 3 free rounds: 3 searches, then the real call, then the answer.
+      f.chat
+        .mockResolvedValueOnce(
+          response([call('s1', { query: 'operation_59' })]),
+        )
+        .mockResolvedValueOnce(
+          response([call('s2', { query: 'operation_58' })]),
+        )
+        .mockResolvedValueOnce(
+          response([call('s3', { query: 'operation_57' })]),
+        )
+        .mockResolvedValueOnce(response([toolCall('c1', 'operation_59')]))
+        .mockResolvedValueOnce(response());
+      const result = await f.run({ max_iterations: 2 });
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(result.content).toBe('Revisión preparada.');
+      expect(result.exhausted).not.toBe(true);
+
+      // A 4th search is no longer free: 2 + 3 = 5 tool rounds, then closing.
+      const g = fixture(0, true);
+      let rounds = 0;
+      g.chat.mockImplementation(async (_messages, options) => {
+        if (!options?.tools) return response();
+        rounds++;
+        return response([call(`s${rounds}`, { query: `operation_${rounds}` })]);
+      });
+      await g.run({ max_iterations: 2 });
+      expect(rounds).toBe(5);
+      expect(g.chat.mock.calls.at(-1)![1]?.tools).toBeUndefined();
+    });
+
+    it('nombre alucinado list_suppliers → alternativa real find_supplier, cargada para la ronda siguiente', async () => {
+      const f = fixture(0, true);
+      supplierTool(f);
+      f.chat
+        .mockResolvedValueOnce(
+          response([
+            toolCall('c1', 'list_suppliers', { query: 'proveedores' }),
+          ]),
+        )
+        .mockImplementationOnce(async (messages, options) => {
+          const [rejected] = toolMessages(messages);
+          expect(rejected.error_code).toBe('AI_AGENT_TOOL_NOT_ALLOWED');
+          expect(rejected.status).toBe('recoverable_error');
+          expect(rejected.data.next_step).toContain('find_supplier');
+          expect(rejected.data.next_step).not.toMatch(INTERNAL_JARGON);
+          expect(offered(options)).toContain('find_supplier');
+          return response([toolCall('c2', 'find_supplier')]);
+        })
+        .mockResolvedValueOnce(response());
+      const result = await f.run({ goal: 'buscar mis proveedores' });
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(result.execution?.outcome).not.toBe('blocked');
+      expect(result.content).not.toMatch(/usuario o con tu plan/);
+    });
+
+    it('F5: cada inferencia publica las métricas del conjunto de trabajo y el trace las conserva', async () => {
+      const f = fixture(0, true);
+      f.chat
+        .mockResolvedValueOnce(
+          response([call('s1', { query: 'operation_40' })]),
+        )
+        .mockResolvedValueOnce(response([toolCall('c1', 'operation_59')]))
+        .mockResolvedValueOnce(response());
+      await f.run();
+      const events = f.emit.mock.calls
+        .filter(([name]) => name === 'ai.agent.router')
+        .map(([, payload]) => payload);
+      expect(events).toHaveLength(3);
+      for (const event of events) {
+        expect(event.retrieval_source).toBe('lexical_local');
+        expect(event.core_count).toBeGreaterThan(0);
+        expect(event.prefetch_hits).toBeGreaterThan(0);
+      }
+      expect(events[0].loaded_count).toBeLessThan(events[1].loaded_count);
+      expect(events[1].free_discovery_rounds).toBe(1);
+      expect(events[2].unloaded_authorized_calls).toBe(1);
+      const kept = redactTraceAttributes({
+        ...events[2],
+        user_text: 'no debe pasar',
+      });
+      expect(kept).toMatchObject({
+        core_count: events[2].core_count,
+        loaded_count: events[2].loaded_count,
+        retrieval_source: 'lexical_local',
+        prefetch_hits: events[2].prefetch_hits,
+        unloaded_authorized_calls: 1,
+        free_discovery_rounds: 1,
+      });
+      expect(kept).not.toHaveProperty('user_text');
+    });
+
+    it('un 403 real del handler sí es bloqueo de permisos (la carga no lo enmascara)', async () => {
+      const f = fixture(0, true);
+      f.handler.mockRejectedValueOnce(new ForbiddenException('sin permiso'));
+      f.chat
+        .mockResolvedValueOnce(response([toolCall('c1', 'operation_59')]))
+        .mockImplementationOnce(async (messages) => {
+          expect(toolMessages(messages)[0].status).toBe('blocked');
+          return response();
+        });
+      const result = await f.run();
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(result.execution?.outcome).toBe('blocked');
+    });
   });
 });

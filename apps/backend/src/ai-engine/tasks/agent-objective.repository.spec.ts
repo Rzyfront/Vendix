@@ -555,6 +555,24 @@ describe('AgentObjectiveRepository D1', () => {
       'user_rejected',
     );
   });
+  it('a proposal withdrawn by a new message records why, not a user rejection', async () => {
+    const waiting = row({
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    });
+    tx.$queryRaw
+      .mockResolvedValueOnce([waiting])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { ...waiting, semantic_status: 'active', version: 4 },
+      ]);
+    await scoped(() =>
+      repository.rejectProposal(ID, 3, 'superseded_by_message'),
+    );
+    const values = tx.$executeRaw.mock.calls[0][0].values.join(' ');
+    expect(values).toContain('superseded_by_message');
+    expect(values).not.toContain('user_rejected');
+  });
   it('only meaningful valid plan writes refresh idle24h; leases/budget do not', async () => {
     tx.$queryRaw
       .mockResolvedValueOnce([row()])
@@ -1041,21 +1059,19 @@ describe('requires_revalidation lifecycle (deterministic SQL transport)', () => 
         created_at: new Date(),
         updated_at: new Date(),
       } as unknown as AgentEffect);
-    const leased = await repository.acquireLease(
-      created.id,
-      created.version,
-      60000,
-    ).catch(() => {
-      // An uncertain effect blocks acquisition; model a live executor directly.
-      const row = {
-        ...db.objectives.get(created.id)!,
-        version: created.version + 1,
-        lease_generation: created.lease_generation + 1,
-        lease_until: new Date(Date.now() + 60000),
-      };
-      db.objectives.set(created.id, row);
-      return row;
-    });
+    const leased = await repository
+      .acquireLease(created.id, created.version, 60000)
+      .catch(() => {
+        // An uncertain effect blocks acquisition; model a live executor directly.
+        const row = {
+          ...db.objectives.get(created.id)!,
+          version: created.version + 1,
+          lease_generation: created.lease_generation + 1,
+          lease_until: new Date(Date.now() + 60000),
+        };
+        db.objectives.set(created.id, row);
+        return row;
+      });
     return { ...ctxRepo, leased };
   }
   const append = (

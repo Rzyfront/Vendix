@@ -499,6 +499,29 @@ export class AgentDurableSessionService {
       return false;
     return !(await this.repo.hasPendingEffects(row.id));
   }
+  /**
+   * A person who writes instead of answering the card has moved on: the
+   * proposal is withdrawn WITHOUT being applied (its effects end `failed` with
+   * `superseded_by_message`) and the message runs. Answering the card stays
+   * the only way to apply; typing «no, cancela» or asking for something else
+   * no longer traps the chat behind a 409. An applied receipt is recovered
+   * first, and a dispatch in flight or an uncertain effect still blocks
+   * (`rejectProposal` refuses it), so nothing that may have landed is dropped.
+   */
+  private async withdrawProposal(row: AgentObjective): Promise<AgentObjective> {
+    const current = await this.repo.recoverAppliedReceipt(row.id, row.version);
+    if (current.semantic_status !== 'awaiting_approval') return current;
+    try {
+      return await this.repo.rejectProposal(
+        current.id,
+        current.version,
+        'superseded_by_message',
+      );
+    } catch (error) {
+      if (error instanceof ConflictException) return current;
+      throw error;
+    }
+  }
   async canContinue(conversationId: number): Promise<boolean> {
     let row = await this.repo.getForConversation(conversationId);
     if (row?.semantic_status === 'awaiting_approval')
@@ -552,6 +575,8 @@ export class AgentDurableSessionService {
       });
       createdNow = true;
     }
+    if (freshGoal && !createdNow && row.semantic_status === 'awaiting_approval')
+      row = await this.withdrawProposal(row);
     if (row.semantic_status === 'completed_verified') {
       // A human may start another goal in this chat; automatic/explicit resumes
       // must retain the completed objective and cannot reset its budget.

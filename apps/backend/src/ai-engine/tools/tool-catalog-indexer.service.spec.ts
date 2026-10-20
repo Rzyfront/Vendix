@@ -44,7 +44,7 @@ describe('ToolCatalogIndexerService B', () => {
         }),
       },
     };
-    queue = { add: jest.fn() };
+    queue = { add: jest.fn(), getJob: jest.fn().mockResolvedValue(undefined) };
     embeddings = { storeGlobalKnowledgeEmbedding: jest.fn() };
     knowledge = {
       configuration: jest.fn().mockResolvedValue({ fingerprint: 'model-v1' }),
@@ -77,6 +77,27 @@ describe('ToolCatalogIndexerService B', () => {
     expect(
       prisma.ai_knowledge_documents.updateMany.mock.calls[0][0].where,
     ).toMatchObject({ knowledge_scope: 'global', entity_type: 'tool' });
+  });
+  it('re-enqueues a batch whose deterministic jobId is stuck as failed, keeps live ones', async () => {
+    registry.register(tool('list_orders'));
+    const failed = {
+      isFailed: jest.fn().mockResolvedValue(true),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    queue.getJob.mockResolvedValueOnce(failed);
+    await service.onApplicationBootstrap();
+    expect(failed.remove).toHaveBeenCalledTimes(1);
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    const live = {
+      isFailed: jest.fn().mockResolvedValue(false),
+      remove: jest.fn(),
+    };
+    queue.getJob.mockResolvedValueOnce(live);
+    await service.enqueueSnapshot();
+    expect(live.remove).not.toHaveBeenCalled();
+    expect(queue.getJob.mock.calls[0][0]).toBe(
+      queue.add.mock.calls[0][2].jobId,
+    );
   });
   it('is idempotent by stable document key/hash and model fingerprint', async () => {
     registry.register(tool('list_orders'));
@@ -364,7 +385,7 @@ it('indexes lexical documents automatically when the embedding app is unavailabl
     {
       configuration: jest.fn().mockRejectedValue(new Error('absent app')),
     } as any,
-    { add: jest.fn() } as any,
+    { add: jest.fn(), getJob: jest.fn().mockResolvedValue(undefined) } as any,
   );
   await service.onApplicationBootstrap();
   const manifest = service.getReleaseManifest();

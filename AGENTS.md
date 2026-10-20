@@ -186,6 +186,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Commitear o empujar en un árbol de trabajo compartido con otras sesiones | `vendix-known-errors` |
+| Comparing agent prompt tokens or pass rate between a baseline and a candidate backend | `vendix-agent-golden-conversations` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
 | Computing revenue, COGS, gross/net profit, margin or break-even | `vendix-analytics-metrics` |
@@ -440,6 +441,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
 | Running or changing agentic evaluation datasets and graders | `vendix-agent-evals-observability` |
+| Running or extending the Vex/Vexi golden-conversations E2E suite | `vendix-agent-golden-conversations` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |

@@ -11,6 +11,7 @@ import {
 } from './interfaces/tool.interface';
 import {
   normalizeToolException,
+  markInProcessWriteApplied,
   normalizeToolResult,
 } from './tool-result.normalizer';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
@@ -572,7 +573,11 @@ export class AIToolRegistry {
       agentDeadlineContext.getStore()?.assertCanStart();
       onHandlerStart?.();
       const result = await tool.handler(args, context);
-      return result;
+      // Only reached after the confirmation token was redeemed: a confirmed
+      // in-process write that returned without failure IS applied.
+      return tool.requiresConfirmation && tool.effectTransport !== 'http'
+        ? (markInProcessWriteApplied(result) as string)
+        : result;
     } catch (error: any) {
       if (onHandlerStart) throw error;
       if (error instanceof VendixHttpException) throw error;

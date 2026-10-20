@@ -1,10 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import {
-  supplier_category_enum,
-  supplier_state_enum,
-} from '@prisma/client';
+import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
 import { VendixHttpException } from '../../../common/errors';
 import { SuppliersService } from '../../../domains/store/inventory/suppliers/suppliers.service';
@@ -20,15 +17,12 @@ const SUPPLIER_STATES = Object.values(supplier_state_enum);
 
 // `archived` no viaja en create/update/set_state: archivar va por DELETE
 // (`remove`), que bloquea con documentos abiertos.
-const MUTABLE_SUPPLIER_STATES: supplier_state_enum[] =
-  SUPPLIER_STATES.filter((state) => state !== supplier_state_enum.archived);
+const MUTABLE_SUPPLIER_STATES: supplier_state_enum[] = SUPPLIER_STATES.filter(
+  (state) => state !== supplier_state_enum.archived,
+);
 const SUPPLIER_CATEGORIES = Object.values(supplier_category_enum);
 
-function toolError(
-  message: string,
-  nextStep?: string,
-  code?: string,
-): string {
+function toolError(message: string, nextStep?: string, code?: string): string {
   return JSON.stringify({
     error: message,
     ...(nextStep ? { next_step: nextStep } : {}),
@@ -127,8 +121,7 @@ function pickSupplierScalars(
   for (const field of SUPPLIER_SCALAR_FIELDS) {
     const value = args[field];
     if (value === undefined || value === null) continue;
-    picked[field] =
-      field === 'lead_time_days' ? Number(value) : String(value);
+    picked[field] = field === 'lead_time_days' ? Number(value) : String(value);
   }
   return picked;
 }
@@ -169,14 +162,18 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
       domain: 'suppliers',
       readOnly: true,
       description:
-        'Localiza proveedores por nombre, código, contacto, correo, teléfono o NIT. Es el PRIMER paso de cualquier flujo sobre un proveedor concreto: devuelve el supplier_id que get_supplier_summary necesita. Si vuelve más de un candidato, muéstrale las opciones al usuario en vez de adivinar.',
+        'Lista o localiza proveedores. Sin `query` devuelve el listado de proveedores de la tienda (paginado con `page`); con `query` busca por nombre, código, contacto, correo, teléfono o NIT. Es el PRIMER paso de cualquier flujo sobre un proveedor concreto: devuelve el supplier_id que get_supplier_summary necesita. Si vuelve más de un candidato para una búsqueda, muéstrale las opciones al usuario en vez de adivinar.',
       parameters: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
             description:
-              'Nombre, fragmento del nombre, código, contacto, correo, teléfono o NIT del proveedor.',
+              'Nombre, fragmento del nombre, código, contacto, correo, teléfono o NIT del proveedor. Omítelo para listar todos.',
+          },
+          page: {
+            type: 'number',
+            description: 'Página del listado, desde 1. Por defecto 1.',
           },
           state: {
             type: 'string',
@@ -186,10 +183,11 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
           },
           limit: {
             type: 'number',
-            description: 'Máximo de candidatos. Por defecto 5, máximo 20.',
+            description:
+              'Máximo de resultados. Por defecto 5 al buscar y 20 al listar; máximo 20.',
           },
         },
-        required: ['query'],
+        required: [],
       },
       requiredPermissions: ['store:inventory:suppliers:read'],
       handler: async (args, context) => {
@@ -201,33 +199,42 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
         }
 
         const search = String(args.query ?? '').trim();
-        if (!search) {
-          return JSON.stringify({
-            error:
-              'query vacío. Pásale el nombre, el código o el NIT del proveedor.',
-          });
-        }
 
-        if (
-          args.state !== undefined &&
-          !SUPPLIER_STATES.includes(args.state)
-        ) {
+        if (args.state !== undefined && !SUPPLIER_STATES.includes(args.state)) {
           return JSON.stringify({
             error: `state "${args.state}" inválido. Valores válidos: ${SUPPLIER_STATES.join(', ')}.`,
           });
         }
 
-        const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 20);
+        const limit = Math.min(
+          Math.max(Number(args.limit) || (search ? 5 : 20), 1),
+          20,
+        );
+        const page = toPositiveInt(args.page) ?? 1;
 
         try {
           const query: SupplierQueryDto = {
-            page: 1,
+            page: search ? 1 : page,
             limit,
-            search,
+            ...(search ? { search } : {}),
             ...(args.state ? { state: args.state } : {}),
           };
           const result = await suppliersService.findAll(query);
           const candidatos = (result.data ?? []).map(compactSupplier);
+
+          if (!search) {
+            const total = result.meta?.total ?? candidatos.length;
+            return JSON.stringify({
+              listado: true,
+              pagina: page,
+              total,
+              hay_mas: page * limit < total,
+              proveedores: candidatos,
+              ...(total === 0 && {
+                nota: 'La tienda no tiene proveedores (fuera de los archivados). Para ver archivados repite con state "archived".',
+              }),
+            });
+          }
 
           if (!candidatos.length) {
             return JSON.stringify({
@@ -412,8 +419,7 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
               currency: (supplier as any).currency ?? null,
               lead_time_days: (supplier as any).lead_time_days ?? null,
               notes: (supplier as any).notes ?? null,
-              supplier_category:
-                (supplier as any).supplier_category ?? null,
+              supplier_category: (supplier as any).supplier_category ?? null,
               direcciones: (supplier as any).addresses ?? [],
               ...(products ? { productos: products } : {}),
             },
@@ -576,8 +582,7 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
                 `El proveedor ya está en estado «${state}»: nada que cambiar.`,
               );
             }
-            const unarchiving =
-              supplier.state === supplier_state_enum.archived;
+            const unarchiving = supplier.state === supplier_state_enum.archived;
             return {
               status: unarchiving ? 'warning' : 'ok',
               target: label,
@@ -641,7 +646,8 @@ export function createSupplierTools(deps: SupplierToolDeps): RegisteredTool[] {
           const scalars = pickSupplierScalars(args);
           const changedEntries = Object.entries(scalars).filter(
             ([field, value]) =>
-              value !== undefined && String(supplier[field] ?? '') !== String(value),
+              value !== undefined &&
+              String(supplier[field] ?? '') !== String(value),
           );
           if (!changedEntries.length) {
             return previewError(

@@ -1,8 +1,44 @@
 import {
   BadRequestException,
+  HttpException,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+
+const INTERRUPTED =
+  'La respuesta se interrumpió. Consulta el objetivo o la conversación antes de reintentar.';
+
+/**
+ * The frame a failed producer leaves behind. An objective refusal (an
+ * `HttpException` with an `AI_OBJECTIVE_*` code and a human `message`, e.g. the
+ * 409 `AI_OBJECTIVE_REQUIRES_RESUME`) travels as is: the browser recognises it
+ * (`parseVexiObjectiveConflict`) and shows that specific notice. Anything else is a fault — logged here, where it
+ * used to vanish, and shown as the generic interruption.
+ */
+export function replayFailureFrame(
+  error: unknown,
+  logger: Pick<Logger, 'error'>,
+): { type: 'error'; error: string; error_code?: string } {
+  const response =
+    error instanceof HttpException ? error.getResponse() : undefined;
+  const body =
+    response && typeof response === 'object'
+      ? (response as Record<string, unknown>)
+      : null;
+  if (
+    body &&
+    typeof body.error_code === 'string' &&
+    body.error_code.startsWith('AI_OBJECTIVE_') &&
+    typeof body.message === 'string' &&
+    body.message.trim()
+  )
+    return { type: 'error', error: body.message, error_code: body.error_code };
+  logger.error(
+    `Chat stream producer failed: ${error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error'}`,
+  );
+  return { type: 'error', error: INTERRUPTED };
+}
 
 export interface ChatReplayCursor {
   stream_id: string;
@@ -38,6 +74,7 @@ type Session<T extends Frame> = {
  * A worker restart/window miss fails closed and requires reading D1/transcript state.
  */
 export class ChatStreamReplay<T extends Frame> {
+  private readonly logger = new Logger('ChatStreamReplay');
   private readonly sessions = new Map<string, Session<T>>();
   constructor(
     private readonly limits = {
@@ -115,12 +152,12 @@ export class ChatStreamReplay<T extends Frame> {
             created.checkpoint = read;
           }))
             this.append(streamId, created, frame);
-        } catch {
-          this.append(streamId, created, {
-            type: 'error',
-            error:
-              'La respuesta se interrumpió. Consulta el objetivo o la conversación antes de reintentar.',
-          } as unknown as T);
+        } catch (error) {
+          this.append(
+            streamId,
+            created,
+            replayFailureFrame(error, this.logger) as unknown as T,
+          );
         } finally {
           created.finished = true;
           created.touched = this.now();

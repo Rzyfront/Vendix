@@ -29,6 +29,7 @@ import type {
   AgentPlanApprovalHook,
 } from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
+import { recentStoredToolNames } from '../../../ai-engine/tools/tool-working-set';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
@@ -72,6 +73,7 @@ import {
   ChatReplayRequest,
   ChatReplayCursor,
 } from './chat-stream-replay';
+import { resumeReferenceBlock } from './resume-reference';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -111,7 +113,8 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
     `Propusiste: ${operation}.`,
     'La tarjeta con «Aprobar» y «Rechazar» ya está en pantalla, encima de este mensaje.',
     'Si la persona confirma en palabras («sí», «dale», «hazlo», «apruebo»), NO vuelvas a llamar `write_endpoint`: eso solo genera otra tarjeta idéntica y se ve como si le pidieras permiso en círculos. Contéstale en una frase que toque «Aprobar» en la tarjeta que ya tiene.',
-    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos.',
+    'Si la rechaza o la cancela en palabras («no», «cancela», «déjalo»), no llames ninguna herramienta de escritura: confírmale en una frase que no se aplicó nada.',
+    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos. Si pide otra cosa, atiéndela: la tarjeta sigue en pantalla por si la quiere aprobar después.',
   ].join(' ');
 
 /**
@@ -1008,8 +1011,7 @@ export class AIChatService {
         // is left staring at an empty bubble with no idea whether Vexi is
         // still thinking. Whatever the agent returned goes out as text, and if
         // even that is empty the silence is named rather than shipped.
-        fullContent =
-          result.content?.trim() || USER_NOTICES.no_answer;
+        fullContent = result.content?.trim() || USER_NOTICES.no_answer;
         yield { type: 'text', content: fullContent };
         // Spoken too, fallback included. A turn that only ran tools already got
         // its human filler at the top; leaving the failure text unspoken as well
@@ -1590,6 +1592,10 @@ export class AIChatService {
           isContinuation: !!options.continuation,
         },
       );
+      if (!active && !options.continuation) {
+        const resume = resumeReferenceBlock(conversation.messages, goal);
+        if (resume) messages.push({ role: 'system', content: resume });
+      }
       // Durable structured facts take precedence; transcript is a bounded secondary window.
       if (session.context)
         messages.unshift({ role: 'system', content: session.context });
@@ -1601,6 +1607,11 @@ export class AIChatService {
         conversation_id: conversation.id,
         plan: hook,
         messages,
+        // `messages` viaja como `{ role, content }`: el agente no puede sacar de
+        // ahí qué tools se usaron, y el seguimiento («y con tarjeta») perdía la
+        // del turno anterior (E2E g18). Se calculan de las filas persistidas,
+        // con la misma ventana de turnos que usa el agente.
+        recent_tool_names: recentStoredToolNames(conversation.messages),
         ...(approval
           ? {
               plan_approval: {
