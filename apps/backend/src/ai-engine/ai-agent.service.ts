@@ -1955,6 +1955,81 @@ export class AIAgentService {
       await this.enforceVexTurnCaps(context?.store_id);
     }
 
+    // One tool-free inference that turns what the loop already gathered into
+    // words for the person. Shared by the two ways a turn can reach its end
+    // without prose: the budget ran out, or the model answered `stop` with an
+    // empty body after its tools. Never throws: '' means «no closing».
+    const inferClosing = async (instruction: string): Promise<string> => {
+      // A halt mid-batch leaves calls of the last assistant message without
+      // a tool result; providers reject such a history, so answer them as
+      // not executed before asking for the closing.
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m.role === 'assistant');
+      const answeredIds = new Set(
+        messages.filter((m) => m.role === 'tool').map((m) => m.tool_call_id),
+      );
+      for (const call of lastAssistant?.tool_calls ?? [])
+        if (!answeredIds.has(call.id))
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: JSON.stringify({
+              error: 'Llamada omitida, sin ejecución.',
+              error_code: 'BATCH_NOT_DISPATCHED',
+            }),
+          });
+      messages.push({ role: 'user', content: instruction });
+      const closingOptions = deadline
+        ? { signal: deadline.signal, deadlineMs: deadline.deadlineMs }
+        : {};
+      const dispatchClosing = () =>
+        params.app_key
+          ? this.aiEngine.run(
+              params.app_key,
+              params.variables,
+              messages,
+              closingOptions,
+            )
+          : params.config_id
+            ? this.aiEngine.chatWith(params.config_id, messages, closingOptions)
+            : this.aiEngine.chat(messages, closingOptions);
+      const closingSpan = activeTrace?.startSpan('closing_inference', {
+        round: iteration,
+        call_reason: 'closing',
+      });
+      const callClosing = () =>
+        withinDeadline(() =>
+          params.durable
+            ? params.durable.runProvider(dispatchClosing)
+            : dispatchClosing(),
+        );
+      try {
+        const lastCall = activeTrace
+          ? await activeTrace.run(closingSpan, callClosing)
+          : await callClosing();
+        activeTrace?.endSpan(closingSpan, {
+          status: lastCall?.success === false ? 'error' : 'ok',
+        });
+        totalTokens += lastCall?.usage?.totalTokens ?? 0;
+        const text = (lastCall?.content ?? '').trim();
+        return lastCall?.success !== false &&
+          text &&
+          !detectDegenerateRepetition(text).degenerate
+          ? text
+          : '';
+      } catch (closingError: any) {
+        activeTrace?.endSpan(closingSpan, {
+          status: 'error',
+          error_code: 'AI_CLOSING_FAILED',
+        });
+        this.logger.warn(
+          `Agent closing turn failed: ${closingError?.code ?? closingError?.message ?? 'unknown'}`,
+        );
+        return '';
+      }
+    };
+
     try {
       while (iteration < maxIterations) {
         // Another turn replaced this one: stop without a word.
@@ -2299,9 +2374,33 @@ export class AIAgentService {
           // not. The prompt forbids it and the model does it anyway, so the
           // sentence is composed from the server's own preview instead. Tone
           // loses a little; a false report about the business would cost more.
-          const narration = pendingConfirmation
+          let narration = pendingConfirmation
             ? this.describePendingWrite(pendingConfirmation)
-            : response.content;
+            : response.content?.trim();
+
+          // `stop` with an empty body. Seen in production after a round of
+          // tools (the model «thinks» the results are the answer) and from
+          // providers that close a stream with zero text — the empty-completion
+          // retry above only covers the buffered path with no usage at all.
+          // Ending here hands the chat an empty turn and the person a canned
+          // apology, with every result already in `messages`. One tool-free
+          // closing inference doubles as the retry: it answers from what was
+          // gathered or, with no tools run, simply answers the question. An
+          // unknown write effect is never narrated over (the contract owns it).
+          if (
+            !narration &&
+            !uncertainEffect &&
+            Date.now() - startTime - waitedMs < timeoutMs
+          ) {
+            this.logger.warn(
+              `Empty final answer at iteration ${iteration}; closing inference`,
+            );
+            narration = await inferClosing(
+              toolsUsed.length
+                ? 'Tu respuesta anterior llegó vacía. Sin usar herramientas, respóndele ahora a la persona con lo que encontraste o hiciste en este turno, con los datos concretos. Si algo no se pudo, dilo con naturalidad y sugiere el siguiente paso. No menciones herramientas, rutas, reintentos ni límites internos.'
+                : 'Tu respuesta anterior llegó vacía. Respóndele ahora a la persona su último mensaje, en lenguaje natural. No menciones herramientas, rutas, reintentos ni límites internos.',
+            );
+          }
 
           if (narration) {
             yield { type: 'text', content: narration };
@@ -4134,84 +4233,10 @@ export class AIAgentService {
       // used its rounds (or stopped on a handled receipt) ended in the canned
       // «No alcancé a terminar», even with all the data already gathered.
       let closing = '';
-      if (!timedOut && !uncertainEffect) {
-        // A halt mid-batch leaves calls of the last assistant message without
-        // a tool result; providers reject such a history, so answer them as
-        // not executed before asking for the closing.
-        const lastAssistant = [...messages]
-          .reverse()
-          .find((m) => m.role === 'assistant');
-        const answeredIds = new Set(
-          messages.filter((m) => m.role === 'tool').map((m) => m.tool_call_id),
+      if (!timedOut && !uncertainEffect)
+        closing = await inferClosing(
+          'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo con los datos concretos; si no, dile con naturalidad qué te faltó y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
         );
-        for (const call of lastAssistant?.tool_calls ?? [])
-          if (!answeredIds.has(call.id))
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: JSON.stringify({
-                error: 'Llamada omitida, sin ejecución.',
-                error_code: 'BATCH_NOT_DISPATCHED',
-              }),
-            });
-        messages.push({
-          role: 'user',
-          content:
-            'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo con los datos concretos; si no, dile con naturalidad qué te faltó y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
-        });
-        const closingOptions = deadline
-          ? { signal: deadline.signal, deadlineMs: deadline.deadlineMs }
-          : {};
-        const dispatchClosing = () =>
-          params.app_key
-            ? this.aiEngine.run(
-                params.app_key,
-                params.variables,
-                messages,
-                closingOptions,
-              )
-            : params.config_id
-              ? this.aiEngine.chatWith(
-                  params.config_id,
-                  messages,
-                  closingOptions,
-                )
-              : this.aiEngine.chat(messages, closingOptions);
-        const closingSpan = activeTrace?.startSpan('closing_inference', {
-          round: iteration,
-          call_reason: 'closing',
-        });
-        const callClosing = () =>
-          withinDeadline(() =>
-            params.durable
-              ? params.durable.runProvider(dispatchClosing)
-              : dispatchClosing(),
-          );
-        try {
-          const lastCall = activeTrace
-            ? await activeTrace.run(closingSpan, callClosing)
-            : await callClosing();
-          activeTrace?.endSpan(closingSpan, {
-            status: lastCall?.success === false ? 'error' : 'ok',
-          });
-          totalTokens += lastCall?.usage?.totalTokens ?? 0;
-          const text = (lastCall?.content ?? '').trim();
-          if (
-            lastCall?.success !== false &&
-            text &&
-            !detectDegenerateRepetition(text).degenerate
-          )
-            closing = text;
-        } catch (closingError: any) {
-          activeTrace?.endSpan(closingSpan, {
-            status: 'error',
-            error_code: 'AI_CLOSING_FAILED',
-          });
-          this.logger.warn(
-            `Agent closing turn failed: ${closingError?.code ?? closingError?.message ?? 'unknown'}`,
-          );
-        }
-      }
 
       if (closing) {
         this.eventEmitter.emit('ai.agent.completed', {
