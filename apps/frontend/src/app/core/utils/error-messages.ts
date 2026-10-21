@@ -522,6 +522,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_CREATE_001: 'Error al crear el formulario.',
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
+  DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',
