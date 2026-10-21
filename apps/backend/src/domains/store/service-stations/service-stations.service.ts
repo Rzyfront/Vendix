@@ -65,7 +65,7 @@ export class ServiceStationsService {
       services.length
         ? this.prisma.products.findMany({
             where: { store_id: this.storeId, id: { in: services.map((item) => item.product_id) } },
-            select: { id: true, name: true, base_price: true, service_duration_minutes: true, service_intake_fields: true },
+            select: { id: true, name: true, base_price: true, service_duration_minutes: true },
           })
         : [],
       assignments.length

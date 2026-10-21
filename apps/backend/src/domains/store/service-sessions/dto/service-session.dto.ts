@@ -1,5 +1,8 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsEmail,
   IsIn,
@@ -12,6 +15,8 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  ValidationOptions,
+  registerDecorator,
 } from 'class-validator';
 
 export class ServiceSubjectDto {
@@ -27,6 +32,22 @@ export class ServiceSubjectDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Respuesta a un campo de la plantilla de Recolección de datos vinculada al servicio.
+ * `field_id` es `entity_metadata_fields.id` (item.metadata_field.id de la plantilla).
+ */
+export class ServiceIntakeValueDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  field_id: number;
+
+  /** string | number | boolean | null; se mapea a value_text/number/date/bool según field_type. */
+  @IsOptional()
+  @IsIntakeScalar()
+  value: string | number | boolean | null;
 }
 
 export class OpenServiceSessionDto {
@@ -75,6 +96,27 @@ export class OpenServiceSessionDto {
   @ValidateNested()
   @Type(() => ServiceSubjectDto)
   subject?: ServiceSubjectDto;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => ServiceIntakeValueDto)
+  intake_values?: ServiceIntakeValueDto[];
+}
+
+export class ServiceIntakeQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  product_id: number;
+}
+
+export class ServiceIntakePrefillQueryDto extends ServiceIntakeQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  customer_id: number;
 }
 
 export class ServiceSessionTransitionDto {
@@ -130,3 +172,31 @@ export class AddSessionItemDto {
   description?: string;
 }
 
+
+export class AddSessionItemsBulkDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => AddSessionItemDto)
+  items: AddSessionItemDto[];
+}
+
+function IsIntakeScalar(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isIntakeScalar',
+      target: object.constructor,
+      propertyName,
+      options: { message: 'value debe ser texto (máx. 2000), número, booleano o null', ...validationOptions },
+      validator: {
+        validate(value: unknown) {
+          if (value === null || value === undefined) return true;
+          if (typeof value === 'string') return value.length <= 2000;
+          if (typeof value === 'number') return Number.isFinite(value);
+          return typeof value === 'boolean';
+        },
+      },
+    });
+  };
+}

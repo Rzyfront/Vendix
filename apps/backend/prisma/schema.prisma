@@ -2008,7 +2008,6 @@ model products {
   is_recurring                   Boolean                          @default(false)
   recurrence_interval_days       Int?
   service_instructions           String?                          @db.Text
-  service_intake_fields           Json?
   preparation_time_minutes       Int?
   is_consultation                Boolean                          @default(false)
   send_preconsultation           Boolean                          @default(false)
@@ -8690,6 +8689,7 @@ enum entity_type_enum {
   customer
   booking
   order
+  service_session
 }
 
 enum template_status_enum {

@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { entity_type_enum, order_items, Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -11,11 +11,29 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { ServiceSessionAccessService } from '../../ecommerce/service-sessions/service-session-access.service';
 import { EmailService } from '../../../email/email.service';
 import { SettingsService } from '../settings/settings.service';
-import { AddSessionItemDto, OpenServiceSessionDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
+import { AddSessionItemDto, OpenServiceSessionDto, ServiceIntakeValueDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
+import { TemplatesService } from '../data-collection/templates.service';
+import { buildEntityQueries, EntityContext, resolveEntityId } from '../data-collection/utils/entity-resolver.util';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 
 const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
+const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
+
+type IntakeField = {
+  id: number;
+  store_id: number;
+  entity_type: string;
+  field_type: string;
+  label: string;
+  is_active: boolean;
+};
+type IntakeItem = { metadata_field_id: number; is_required: boolean; sort_order: number; metadata_field: IntakeField };
+type IntakeTemplate = { id: number; name: string; sections?: IntakeSection[]; tabs?: Array<{ sections?: IntakeSection[] }> };
+type IntakeSection = { items?: IntakeItem[]; child_sections?: IntakeSection[] };
+type IntakeValueColumns = { value_text: string | null; value_number: number | null; value_date: Date | null; value_bool: boolean | null };
+type PreparedIntake = { templateId: number; entries: Array<{ field: IntakeField; columns: IntakeValueColumns }> } | null;
+type StoredMetadataValue = { field_id: number; entity_type: string; value_text: string | null; value_number: Prisma.Decimal | null; value_date: Date | null; value_bool: boolean | null; value_json: Prisma.JsonValue | null };
 
 @Injectable()
 export class ServiceSessionsService {
@@ -30,6 +48,7 @@ export class ServiceSessionsService {
     private readonly sessionAccess: ServiceSessionAccessService,
     private readonly email: EmailService,
     private readonly allocationCoordinator: ServiceAllocationCoordinator,
+    private readonly templates: TemplatesService,
   ) {}
 
   async open(dto: OpenServiceSessionDto) {
@@ -75,17 +94,15 @@ export class ServiceSessionsService {
       bookingAllocation
         ? this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } })
         : Promise.resolve(null),
-      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true, service_intake_fields: true } }),
+      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
     ]);
     if (!station || (bookingAllocation && !stationService) || product?.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.STATION_001);
     }
-    if (dto.station_id) {
-      this.validateServiceIntakeValues(
-        product.service_intake_fields,
-        dto.subject?.metadata?.['service_intake_fields'],
-      );
-    }
+    const customerId = booking?.customer_id ?? dto.customer_id ?? null;
+    // Required intake items are enforced on walk-in reception (the reservation flow may
+    // have collected them earlier through a data-collection submission).
+    const intake = await this.prepareIntake(productId, dto.intake_values, { enforceRequired: Boolean(dto.station_id), customerId, bookingId: booking?.id ?? null });
     if (providerId) {
       if (bookingAllocation) {
         const [stationProvider, providerService, provider] = await Promise.all([
@@ -158,7 +175,7 @@ export class ServiceSessionsService {
           data: {
             store_id: storeId,
             created_by_user_id: userId ?? null,
-            customer_id: booking?.customer_id ?? dto.customer_id ?? null,
+            customer_id: customerId,
             order_number: orderNumber,
             state: 'draft',
             channel: booking?.channel ?? 'pos',
@@ -233,6 +250,7 @@ export class ServiceSessionsService {
       if (dto.subject) {
         await tx.service_subjects.create({ data: { store_id: storeId, session_id: session.id, subject_type: dto.subject.subject_type, label: dto.subject.label, metadata: dto.subject.metadata as Prisma.InputJsonValue | undefined } });
       }
+        await this.persistIntake(tx, storeId, intake, { service_session_id: session.id, customer_id: customerId, booking_id: booking?.id ?? null, order_id: orderId });
         await this.writeProgress(tx, storeId, session.id, 'opened', userId ?? null, 'Atención iniciada');
         const access = await this.sessionAccess.createAccessToken(tx, storeId, session.id, new Date(Math.max(plannedEnd.getTime() + 24 * 60 * 60 * 1000, Date.now() + 24 * 60 * 60 * 1000)));
         if (contactEmail) {
@@ -255,35 +273,193 @@ export class ServiceSessionsService {
     return result;
   }
 
-  private validateServiceIntakeValues(configValue: Prisma.JsonValue | null, submittedValue: unknown): void {
-    const fields = Array.isArray(configValue) ? configValue : [];
-    const values = submittedValue && typeof submittedValue === 'object' && !Array.isArray(submittedValue)
-      ? submittedValue as Record<string, unknown>
-      : {};
-    const configuredKeys = new Set(fields.map((field) =>
-      field && typeof field === 'object' && 'key' in field ? String(field.key) : '',
-    ));
-    if (Object.keys(values).some((key) => !configuredKeys.has(key))) {
-      throw new BadRequestException('La atención incluye campos que no están configurados para el servicio.');
+  /** Plantilla de Recolección de datos vinculada explícitamente al servicio (sin fallback a la default). */
+  async getIntakeTemplate(productId: number) {
+    this.requireContext();
+    return { template: await this.templates.getLinkedTemplateForProduct(productId) };
+  }
+
+  /** Valores actuales del perfil del cliente para los campos `customer` de la plantilla del servicio. */
+  async getIntakePrefill(productId: number, customerId: number) {
+    const { storeId } = this.requireContext();
+    const template = await this.templates.getLinkedTemplateForProduct(productId) as IntakeTemplate | null;
+    if (!template) return { values: [] };
+    const customerFields = this.collectIntakeItems(template)
+      .map((item) => item.metadata_field)
+      .filter((field) => field.entity_type === 'customer' && field.store_id === storeId);
+    if (!customerFields.length) return { values: [] };
+    const fieldById = new Map(customerFields.map((field) => [field.id, field]));
+    const rows = await this.prisma.entity_metadata_values.findMany({
+      where: { store_id: storeId, entity_type: 'customer', entity_id: customerId, field_id: { in: [...fieldById.keys()] } },
+      select: { field_id: true, entity_type: true, value_text: true, value_number: true, value_date: true, value_bool: true, value_json: true },
+    });
+    return {
+      values: rows.map((row) => ({ field_id: row.field_id, value: this.readStoredValue(fieldById.get(row.field_id)!.field_type, row) })),
+    };
+  }
+
+  private collectIntakeItems(template: IntakeTemplate): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const walk = (sections?: IntakeSection[]) => {
+      for (const section of sections ?? []) {
+        items.push(...(section.items ?? []));
+        walk(section.child_sections);
+      }
+    };
+    for (const tab of template.tabs ?? []) walk(tab.sections);
+    walk(template.sections);
+    return items;
+  }
+
+  /**
+   * Valida `intake_values` contra la plantilla vinculada y los convierte a columnas de
+   * entity_metadata_values con el mismo mapeo por field_type del formulario de recolección
+   * (number→value_number, checkbox→value_bool, date→value_date, resto→value_text).
+   */
+  private async prepareIntake(
+    productId: number,
+    values: ServiceIntakeValueDto[] | undefined,
+    options: { enforceRequired: boolean; customerId: number | null; bookingId: number | null },
+  ): Promise<PreparedIntake> {
+    const { storeId } = this.requireContext();
+    const submitted = values ?? [];
+    const template = await this.templates.getLinkedTemplateForProduct(productId) as IntakeTemplate | null;
+    if (!template) {
+      if (submitted.length) {
+        throw new VendixHttpException(ErrorCodes.STATION_013, 'Este servicio no tiene campos de recepción configurados.');
+      }
+      return null;
     }
-    for (const field of fields) {
-      if (!field || typeof field !== 'object' || !('key' in field)) continue;
-      const key = String(field.key);
-      const value = values[key];
-      const required = 'required' in field && field.required === true;
-      if (required && (value === undefined || value === null || value === '' || (typeof value === 'string' && !value.trim()) || value === false)) {
-        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" es obligatorio para este servicio.`);
+    const items = this.collectIntakeItems(template).filter((item) => item.metadata_field?.is_active !== false && item.metadata_field?.store_id === storeId);
+    const itemByField = new Map(items.map((item) => [item.metadata_field_id, item]));
+    const valueByField = new Map<number, ServiceIntakeValueDto['value']>();
+    for (const entry of submitted) {
+      if (!itemByField.has(entry.field_id)) {
+        throw new VendixHttpException(ErrorCodes.STATION_013, 'La atención incluye campos que no están configurados para el servicio.');
       }
-      if (typeof value === 'string' && value.length > 2000) {
-        throw new BadRequestException(`El campo "${key}" supera el máximo de 2000 caracteres.`);
+      if (valueByField.has(entry.field_id)) {
+        throw new VendixHttpException(ErrorCodes.STATION_013, `El campo "${itemByField.get(entry.field_id)!.metadata_field.label}" está repetido.`);
       }
-      if ('type' in field && field.type === 'number' && value !== undefined && value !== null && value !== '' && !Number.isFinite(Number(value))) {
-        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" debe ser numérico.`);
-      }
-      if ('type' in field && field.type === 'checkbox' && value !== undefined && typeof value !== 'boolean') {
-        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" debe ser verdadero o falso.`);
+      valueByField.set(entry.field_id, entry.value ?? null);
+    }
+
+    const entries: Array<{ field: IntakeField; columns: IntakeValueColumns }> = [];
+    const missingRequired: IntakeItem[] = [];
+    for (const item of items) {
+      const field = item.metadata_field;
+      const columns = this.toValueColumns(field, valueByField.get(field.id));
+      if (columns) entries.push({ field, columns });
+      // Una casilla obligatoria sin marcar se trata como no respondida.
+      const answered = columns !== null && columns.value_bool !== false;
+      if (!answered && item.is_required && options.enforceRequired) missingRequired.push(item);
+    }
+
+    if (missingRequired.length) {
+      // Un campo de cliente/reserva obligatorio ya guardado en el perfil cuenta como respondido.
+      const storedRows = await this.findStoredValues(storeId, missingRequired.map((item) => item.metadata_field), {
+        customer_id: options.customerId,
+        booking_id: options.bookingId,
+      });
+      const answered = new Set(storedRows.filter((row) => ![null, false].includes(this.readStoredValue(itemByField.get(row.field_id)!.metadata_field.field_type, row) as null | false)).map((row) => row.field_id));
+      const firstMissing = missingRequired.find((item) => !answered.has(item.metadata_field_id));
+      if (firstMissing) {
+        throw new VendixHttpException(ErrorCodes.STATION_007, `El campo "${firstMissing.metadata_field.label}" es obligatorio para este servicio.`);
       }
     }
+    return { templateId: template.id, entries };
+  }
+
+  private toValueColumns(field: IntakeField, raw: ServiceIntakeValueDto['value'] | undefined): IntakeValueColumns | null {
+    const empty: IntakeValueColumns = { value_text: null, value_number: null, value_date: null, value_bool: null };
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === 'string' && !raw.trim()) return null;
+    switch (field.field_type) {
+      case 'number': {
+        const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim());
+        if (typeof raw === 'boolean' || !Number.isFinite(parsed)) {
+          throw new VendixHttpException(ErrorCodes.STATION_013, `El campo "${field.label}" debe ser numérico.`);
+        }
+        return { ...empty, value_number: parsed };
+      }
+      case 'checkbox': {
+        if (raw === true || raw === 'true') return { ...empty, value_bool: true };
+        if (raw === false || raw === 'false') return { ...empty, value_bool: false };
+        throw new VendixHttpException(ErrorCodes.STATION_013, `El campo "${field.label}" debe ser verdadero o falso.`);
+      }
+      case 'date': {
+        const date = typeof raw === 'string' ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw.trim()) ? `${raw.trim()}T00:00:00.000Z` : raw.trim()) : null;
+        if (!date || Number.isNaN(date.getTime())) {
+          throw new VendixHttpException(ErrorCodes.STATION_013, `El campo "${field.label}" debe ser una fecha válida.`);
+        }
+        return { ...empty, value_date: date };
+      }
+      default:
+        return { ...empty, value_text: String(raw).trim() };
+    }
+  }
+
+  private async persistIntake(tx: Prisma.TransactionClient, storeId: number, intake: PreparedIntake, ctx: EntityContext) {
+    if (!intake) return;
+    const now = new Date();
+    for (const { field, columns } of intake.entries) {
+      const entityId = resolveEntityId(field.entity_type, ctx);
+      if (!entityId) {
+        this.logger.warn(`Intake field ${field.id} (${field.entity_type}) skipped: no entity in session ${ctx.service_session_id}`);
+        continue;
+      }
+      const entityType = field.entity_type as entity_type_enum;
+      // tx no aplica scope: el campo ya se validó contra la plantilla de esta tienda y
+      // store_id se fija explícitamente al crear.
+      await tx.entity_metadata_values.upsert({
+        where: { field_id_entity_type_entity_id: { field_id: field.id, entity_type: entityType, entity_id: entityId } },
+        create: { store_id: storeId, field_id: field.id, entity_type: entityType, entity_id: entityId, ...columns },
+        update: { ...columns, updated_at: now },
+      });
+    }
+  }
+
+  private async findStoredValues(storeId: number, fields: IntakeField[], ctx: EntityContext): Promise<StoredMetadataValue[]> {
+    const queries = buildEntityQueries(ctx);
+    if (!queries.length || !fields.length) return [];
+    return this.prisma.entity_metadata_values.findMany({
+      where: {
+        store_id: storeId,
+        field_id: { in: fields.map((field) => field.id) },
+        OR: queries.map((q) => ({ entity_type: q.entityType as entity_type_enum, entity_id: q.entityId })),
+      },
+      select: { field_id: true, entity_type: true, value_text: true, value_number: true, value_date: true, value_bool: true, value_json: true },
+    });
+  }
+
+  private readStoredValue(fieldType: string, row: StoredMetadataValue): unknown {
+    switch (fieldType) {
+      case 'number':
+        return row.value_number !== null ? Number(row.value_number) : null;
+      case 'checkbox':
+        return row.value_bool;
+      case 'date':
+        return row.value_date ? row.value_date.toISOString().slice(0, 10) : null;
+      default:
+        return row.value_text ?? (row.value_json as unknown) ?? null;
+    }
+  }
+
+  private async buildIntakeSummary(session: { id: number; product_id: number; booking_id: number | null; order_id: number | null }, customerId: number | null) {
+    const { storeId } = this.requireContext();
+    const template = await this.templates.getLinkedTemplateForProduct(session.product_id) as IntakeTemplate | null;
+    if (!template) return null;
+    const fields = this.collectIntakeItems(template).map((item) => item.metadata_field).filter((field) => field.store_id === storeId);
+    const ctx: EntityContext = { service_session_id: session.id, customer_id: customerId, booking_id: session.booking_id, order_id: session.order_id };
+    const rows = await this.findStoredValues(storeId, fields, ctx);
+    return {
+      template_id: template.id,
+      template_name: template.name,
+      answers: fields.map((field) => {
+        const entityId = resolveEntityId(field.entity_type, ctx);
+        const row = entityId ? rows.find((r) => r.field_id === field.id && r.entity_type === field.entity_type) : undefined;
+        return { field_id: field.id, label: field.label, field_type: field.field_type, entity_type: field.entity_type, value: row ? this.readStoredValue(field.field_type, row) : null };
+      }),
+    };
   }
 
   private async buildAccessUrl(storeId: number, token: string): Promise<string | null> {
@@ -581,7 +757,8 @@ export class ServiceSessionsService {
             : null,
         }))(order)
       : null;
-    return { ...session, subjects, allocations, progress_events: progressEvents, events_have_older: eventsHaveOlder, order: normalizedOrder };
+    const intake = await this.buildIntakeSummary(session, order?.customer_id ?? null);
+    return { ...session, subjects, allocations, progress_events: progressEvents, events_have_older: eventsHaveOlder, order: normalizedOrder, intake };
   }
 
   async listActive(cursor?: number) {
@@ -613,7 +790,7 @@ export class ServiceSessionsService {
     ]);
     const stationById = new Map(stations.map((row) => [row.id, row.name]));
     const productById = new Map(products.map((row) => [row.id, row.name]));
-    const orderBySessionId = new Map(orders.map((o) => [o.service_session_id, o]));
+    const orderBySessionId = new Map<number | null, (typeof orders)[number]>(orders.map((o) => [o.service_session_id, o]));
     const items = sessions.map((session) => {
       const ord = orderBySessionId.get(session.id);
       return {
@@ -637,102 +814,33 @@ export class ServiceSessionsService {
   }
 
   async addItem(sessionId: number, dto: AddSessionItemDto) {
+    const result = await this.addItems(sessionId, [dto]);
+    return { item: result.items[0], order_id: result.order_id, grand_total: result.grand_total };
+  }
+
+  /** Carga varias líneas a la cuenta de la atención en UNA transacción (botón "Cargar a estación" del POS). */
+  async addItemsBulk(sessionId: number, items: AddSessionItemDto[]) {
+    return this.addItems(sessionId, items);
+  }
+
+  private async addItems(sessionId: number, dtos: AddSessionItemDto[]) {
     const { storeId, userId } = this.requireContext();
-    const session = await this.prisma.service_sessions.findFirst({
+    const found = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
+      select: { id: true, status: true, order_id: true },
     });
-    if (!session || !['open', 'in_progress', 'paused'].includes(session.status)) {
+    if (!found || !ITEM_SESSION_STATUSES.includes(found.status)) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
     }
-    const product = await this.prisma.products.findFirst({
-      where: { id: dto.product_id, store_id: storeId },
-    });
-    if (!product) {
-      throw new VendixHttpException(ErrorCodes.PRODUCT_001, 'Producto no encontrado.');
-    }
-    const qty = Math.max(1, Number(dto.quantity || 1));
-    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : Number(product.base_price || 0);
-    const totalPrice = unitPrice * qty;
+    const session = { id: found.id, order_id: found.order_id };
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
-      let orderId = session.order_id;
-      if (!orderId) {
-        const orderNumber = `SVC-${session.id}`;
-        const newOrder = await tx.orders.create({
-          data: {
-            store_id: storeId,
-            created_by_user_id: userId ?? null,
-            order_number: orderNumber,
-            state: 'draft',
-            channel: 'pos',
-            delivery_type: 'direct_delivery',
-            currency: 'COP',
-            subtotal_amount: 0,
-            tax_amount: 0,
-            shipping_cost: 0,
-            discount_amount: 0,
-            grand_total: 0,
-            total_paid: 0,
-            remaining_balance: 0,
-            service_session_id: session.id,
-            updated_at: now,
-          },
-          select: { id: true },
-        });
-        orderId = newOrder.id;
-        await tx.service_sessions.update({ where: { id: session.id }, data: { order_id: orderId } });
+      const items: order_items[] = [];
+      for (const dto of dtos) {
+        items.push(await this.addItemTx(tx, storeId, userId ?? null, session, dto, now));
       }
-
-      if (product.track_inventory && product.product_type === 'physical') {
-        const stockLevel = await tx.stock_levels.findFirst({
-          where: { product_id: product.id },
-          orderBy: { quantity_available: 'desc' },
-        });
-        if (stockLevel && stockLevel.quantity_available < qty) {
-          throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${product.name}`);
-        }
-        if (stockLevel) {
-          const store = await tx.stores.findUnique({ where: { id: storeId }, select: { organization_id: true } });
-          if (store?.organization_id) {
-            await tx.stock_reservations.create({
-              data: {
-                organization_id: store.organization_id,
-                product_id: product.id,
-                location_id: stockLevel.location_id,
-                quantity: qty,
-                reserved_for_type: 'order',
-                reserved_for_id: orderId,
-                status: 'active',
-              },
-            });
-            await tx.stock_levels.update({
-              where: { id: stockLevel.id },
-              data: {
-                quantity_reserved: { increment: qty },
-                quantity_available: { decrement: qty },
-                updated_at: now,
-              },
-            });
-          }
-        }
-      }
-
-      const item = await tx.order_items.create({
-        data: {
-          order_id: orderId,
-          service_session_id: session.id,
-          product_id: product.id,
-          product_name: product.name,
-          description: dto.description || null,
-          quantity: qty,
-          unit_price: unitPrice,
-          total_price: totalPrice,
-          item_type: product.product_type === 'physical' ? 'physical' : 'service',
-          updated_at: now,
-        },
-      });
-
+      const orderId = session.order_id!;
       const allItems = await tx.order_items.findMany({
         where: { order_id: orderId },
         select: { total_price: true },
@@ -747,13 +855,113 @@ export class ServiceSessionsService {
           updated_at: now,
         },
       });
-
-      await this.writeProgress(tx, storeId, session.id, 'item_added', userId ?? null, `Se agregó ${qty}x ${product.name} a la cuenta`);
-      return { item, order_id: orderId, grand_total: newSubtotal };
+      return { order_id: orderId, grand_total: newSubtotal, items };
     });
 
-    this.emit(storeId, sessionId, 'item_added', { order_id: result.order_id, grand_total: result.grand_total });
+    this.emit(storeId, sessionId, 'item_added', { order_id: result.order_id, grand_total: result.grand_total, items_count: result.items.length });
     return result;
+  }
+
+  /**
+   * Agrega una línea dentro de una transacción abierta. Crea la orden SVC-{id} si la
+   * atención aún no tiene una (muta `session.order_id`). No recalcula totales: lo hace el llamador.
+   */
+  private async addItemTx(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    userId: number | null,
+    session: { id: number; order_id: number | null },
+    dto: AddSessionItemDto,
+    now: Date,
+  ) {
+    const product = await tx.products.findFirst({
+      where: { id: dto.product_id, store_id: storeId },
+    });
+    if (!product) {
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001, 'Producto no encontrado.');
+    }
+    const qty = Math.max(1, Number(dto.quantity || 1));
+    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : Number(product.base_price || 0);
+    const totalPrice = unitPrice * qty;
+
+    if (!session.order_id) {
+      const newOrder = await tx.orders.create({
+        data: {
+          store_id: storeId,
+          created_by_user_id: userId,
+          order_number: `SVC-${session.id}`,
+          state: 'draft',
+          channel: 'pos',
+          delivery_type: 'direct_delivery',
+          currency: 'COP',
+          subtotal_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          discount_amount: 0,
+          grand_total: 0,
+          total_paid: 0,
+          remaining_balance: 0,
+          service_session_id: session.id,
+          updated_at: now,
+        },
+        select: { id: true },
+      });
+      session.order_id = newOrder.id;
+      await tx.service_sessions.updateMany({ where: { id: session.id, store_id: storeId }, data: { order_id: newOrder.id } });
+    }
+    const orderId = session.order_id;
+
+    if (product.track_inventory && product.product_type === 'physical') {
+      const stockLevel = await tx.stock_levels.findFirst({
+        where: { product_id: product.id },
+        orderBy: { quantity_available: 'desc' },
+      });
+      if (stockLevel && stockLevel.quantity_available < qty) {
+        throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${product.name}`);
+      }
+      if (stockLevel) {
+        const store = await tx.stores.findUnique({ where: { id: storeId }, select: { organization_id: true } });
+        if (store?.organization_id) {
+          await tx.stock_reservations.create({
+            data: {
+              organization_id: store.organization_id,
+              product_id: product.id,
+              location_id: stockLevel.location_id,
+              quantity: qty,
+              reserved_for_type: 'order',
+              reserved_for_id: orderId,
+              status: 'active',
+            },
+          });
+          await tx.stock_levels.update({
+            where: { id: stockLevel.id },
+            data: {
+              quantity_reserved: { increment: qty },
+              quantity_available: { decrement: qty },
+              updated_at: now,
+            },
+          });
+        }
+      }
+    }
+
+    const item = await tx.order_items.create({
+      data: {
+        order_id: orderId,
+        service_session_id: session.id,
+        product_id: product.id,
+        product_name: product.name,
+        description: dto.description || null,
+        quantity: qty,
+        unit_price: unitPrice,
+        total_price: totalPrice,
+        item_type: product.product_type === 'physical' ? 'physical' : 'service',
+        updated_at: now,
+      },
+    });
+
+    await this.writeProgress(tx, storeId, session.id, 'item_added', userId, `Se agregó ${qty}x ${product.name} a la cuenta`);
+    return item;
   }
 
   async removeItem(sessionId: number, itemId: number) {
@@ -768,7 +976,7 @@ export class ServiceSessionsService {
       where: { id: itemId, order_id: session.order_id },
     });
     if (!item) {
-      throw new VendixHttpException(ErrorCodes.ORDER_004, 'Ítem no encontrado en la orden.');
+      throw new VendixHttpException(ErrorCodes.ORD_ITEM_NOTES_NOT_FOUND_001, 'Ítem no encontrado en la orden.');
     }
     const now = new Date();
 

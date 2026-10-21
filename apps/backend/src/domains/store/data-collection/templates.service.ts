@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateTemplateDto,
   CreateTemplateSectionDto,
@@ -206,6 +207,72 @@ export class TemplatesService {
       });
 
     return defaultTemplate;
+  }
+
+  /**
+   * Plantilla vinculada EXPLÍCITAMENTE a un producto (data_collection_template_products),
+   * solo si está activa. A diferencia de getTemplateForProduct, NO cae a la plantilla
+   * `is_default`: la recepción de una atención solo pide campos que el servicio configuró.
+   */
+  async getLinkedTemplateForProduct(productId: number) {
+    const link = await this.prisma.data_collection_template_products.findFirst({
+      where: { product_id: productId, template: { status: 'active' } },
+      orderBy: { id: 'asc' },
+      include: { template: { include: this.TEMPLATE_INCLUDE } },
+    });
+    return link?.template ?? null;
+  }
+
+  async getProductTemplateLink(productId: number) {
+    await this.assertServiceProduct(productId);
+    const link = await this.prisma.data_collection_template_products.findFirst({
+      where: { product_id: productId },
+      orderBy: { id: 'asc' },
+      select: { template_id: true },
+    });
+    return { template_id: link?.template_id ?? null };
+  }
+
+  /** Reemplaza solo los vínculos de ESTE producto; no toca los de otros productos. */
+  async setProductTemplateLink(productId: number, templateId: number | null) {
+    const { storeId } = this.requireStore();
+    await this.assertServiceProduct(productId);
+    if (templateId !== null) {
+      const template = await this.prisma.data_collection_templates.findFirst({
+        where: { id: templateId, store_id: storeId, status: { not: 'archived' } },
+        select: { id: true },
+      });
+      if (!template) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      // tx no aplica scope: se filtra por la tienda a través de la plantilla.
+      await tx.data_collection_template_products.deleteMany({
+        where: { product_id: productId, template: { store_id: storeId } },
+      });
+      if (templateId !== null) {
+        await tx.data_collection_template_products.create({
+          data: { template_id: templateId, product_id: productId },
+        });
+      }
+    });
+    return { template_id: templateId };
+  }
+
+  private async assertServiceProduct(productId: number) {
+    const { storeId } = this.requireStore();
+    const product = await this.prisma.products.findFirst({
+      where: { id: productId, store_id: storeId },
+      select: { id: true, product_type: true },
+    });
+    if (!product || product.product_type !== 'service') {
+      throw new VendixHttpException(ErrorCodes.DCOL_PRODUCT_001, 'El producto no existe o no es un servicio.');
+    }
+  }
+
+  private requireStore() {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    return { storeId: context.store_id };
   }
 
   async duplicateTemplate(templateId: number) {

@@ -4996,6 +4996,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Cannot delete template with existing submissions',
   },
+  DCOL_PRODUCT_001: {
+    code: 'DCOL_PRODUCT_001',
+    httpStatus: 400,
+    devMessage: 'Product not found in this store or is not a service',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -5069,6 +5074,11 @@ export const ErrorCodes = {
     code: 'STATION_012',
     httpStatus: 400,
     devMessage: 'A station is required for this service',
+  },
+  STATION_013: {
+    code: 'STATION_013',
+    httpStatus: 400,
+    devMessage: 'Service session intake values include fields outside the linked data collection template',
   },
   SERVICE_BOOKING_001: {
     code: 'SERVICE_BOOKING_001',

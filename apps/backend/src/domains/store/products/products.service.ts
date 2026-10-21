@@ -927,20 +927,6 @@ export class ProductsService {
     dto.requires_batch_tracking = undefined;
   }
 
-  private validateServiceIntakeFields(
-    fields: CreateProductDto['service_intake_fields'] | undefined,
-    productType: ProductType | undefined,
-  ): void {
-    if (!fields?.length) return;
-    if (productType !== ProductType.SERVICE) {
-      throw new BadRequestException('Los campos de recepción solo se configuran en servicios.');
-    }
-    const keys = fields.map((field) => field.key);
-    if (new Set(keys).size !== keys.length) {
-      throw new BadRequestException('Cada campo de recepción debe tener un nombre único.');
-    }
-  }
-
   /**
    * Enforce store-level uniqueness of a barcode across BOTH products and
    * product variants. Source of truth in application logic because variants
@@ -1053,7 +1039,6 @@ export class ProductsService {
     try {
       // Validate service-specific constraints
       this.validateByProductType(sanitizedDto);
-      this.validateServiceIntakeFields(sanitizedDto.service_intake_fields, sanitizedDto.product_type);
 
       // Obtener store_id del DTO o del contexto del token
       // Obtener store_id del contexto
@@ -3937,7 +3922,6 @@ export class ProductsService {
 
       const effectiveProductType =
         sanitizedDto.product_type ?? existingProduct.product_type;
-      this.validateServiceIntakeFields(sanitizedDto.service_intake_fields, effectiveProductType);
       const effectiveRequiresStation =
         sanitizedDto.requires_station ?? existingProduct.requires_station;
       if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {

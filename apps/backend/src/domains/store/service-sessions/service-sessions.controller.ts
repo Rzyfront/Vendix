@@ -21,9 +21,12 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import {
   AddSessionItemDto,
+  AddSessionItemsBulkDto,
   ExtendServiceSessionDto,
   ListActiveServiceSessionsDto,
   OpenServiceSessionDto,
+  ServiceIntakePrefillQueryDto,
+  ServiceIntakeQueryDto,
   ServiceSessionTransitionDto,
 } from './dto/service-session.dto';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
@@ -47,6 +50,19 @@ export class ServiceSessionsController {
   @Permissions('store:reservations:read')
   async listActive(@Query() query: ListActiveServiceSessionsDto) {
     return this.response.success(await this.sessions.listActive(query.cursor));
+  }
+
+  // Static routes MUST be declared before the `:id` routes.
+  @Get('intake-template')
+  @Permissions('store:reservations:read')
+  async intakeTemplate(@Query() query: ServiceIntakeQueryDto) {
+    return this.response.success(await this.sessions.getIntakeTemplate(query.product_id));
+  }
+
+  @Get('intake-prefill')
+  @Permissions('store:reservations:read')
+  async intakePrefill(@Query() query: ServiceIntakePrefillQueryDto) {
+    return this.response.success(await this.sessions.getIntakePrefill(query.product_id, query.customer_id));
   }
 
   @Patch(':id')
@@ -89,6 +105,15 @@ export class ServiceSessionsController {
     @Body() dto: AddSessionItemDto,
   ) {
     return this.response.created(await this.sessions.addItem(id, dto), 'Producto o servicio agregado a la cuenta');
+  }
+
+  @Post(':id/items/bulk')
+  @Permissions('store:reservations:update')
+  async addItemsBulk(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddSessionItemsBulkDto,
+  ) {
+    return this.response.created(await this.sessions.addItemsBulk(id, dto.items), 'Productos cargados a la cuenta de la estación');
   }
 
   @Delete(':id/items/:itemId')
