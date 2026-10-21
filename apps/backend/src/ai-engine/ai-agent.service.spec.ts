@@ -1609,6 +1609,12 @@ describe('AIAgentService.runAgentStream', () => {
     it('no_answer speaks like the store, never of evidence or records', () => {
       expect(USER_NOTICES.no_answer).not.toMatch(/evidencia|registro/i);
     });
+    // Owner's rule: the failure is ours, never how the person asked.
+    it('no_answer never asks the person to rephrase', () => {
+      expect(USER_NOTICES.no_answer).not.toMatch(
+        /reformul|otras palabras|otra forma|de otra manera/i,
+      );
+    });
     it('unknown write halts the batch and plan continuation, without retry or successful tool quota', async () => {
       configureStorePlan(['create_expense', 'list_things']);
       registry.executeToolResult.mockResolvedValue(

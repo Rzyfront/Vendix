@@ -1563,3 +1563,93 @@ describe('G consent STT observed logprob capability', () => {
     ).toBeNull();
   });
 });
+
+// Prod (Vexi, 2026-10-21): DeepSeek V4 Flash with `thinking: false` spent all
+// 1200 completion tokens in `reasoning` because the flag never reached the
+// request; `content` was empty and the chat showed `no_answer`.
+describe('OpenAI-compatible reasoning control (settings.thinking)', () => {
+  const provider = (
+    settings: Record<string, any>,
+    baseUrl = 'https://openrouter.ai/api/v1',
+  ) =>
+    new OpenAICompatibleProvider({
+      provider: 'Custom',
+      sdkType: 'openai_compatible',
+      apiKey: 'not-real',
+      modelId: 'deepseek/deepseek-v4-flash-0731',
+      baseUrl,
+      settings,
+    });
+  const ok = {
+    model: 'deepseek/deepseek-v4-flash-0731',
+    choices: [{ message: { content: 'Respuesta' }, finish_reason: 'stop' }],
+  };
+  const mandatory = Object.assign(
+    new Error(
+      '400 Reasoning is mandatory for this endpoint and cannot be disabled.',
+    ),
+    { status: 400 },
+  );
+
+  it('sends reasoning.enabled=false on OpenRouter when thinking is false (buffered and stream)', async () => {
+    const instance = provider({ thinking: false });
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce(ok)
+      .mockResolvedValueOnce(
+        (async function* () {
+          yield {
+            choices: [{ delta: { content: 'Hola' }, finish_reason: 'stop' }],
+          };
+        })(),
+      );
+    (instance as any).client.chat.completions.create = create;
+    await instance.chat([{ role: 'user', content: '¿Qué es la retención?' }]);
+    for await (const _ of instance.chatStream([
+      { role: 'user', content: '¿Qué es la retención?' },
+    ]));
+    expect(create.mock.calls[0][0].reasoning).toEqual({ enabled: false });
+    expect(create.mock.calls[1][0].reasoning).toEqual({ enabled: false });
+  });
+
+  it.each([
+    ['thinking unset', {}, 'https://openrouter.ai/api/v1'],
+    ['thinking true', { thinking: true }, 'https://openrouter.ai/api/v1'],
+    ['non-OpenRouter host', { thinking: false }, 'https://api.openai.com/v1'],
+  ])('leaves the request untouched with %s', async (_l, settings, url) => {
+    const instance = provider(settings, url);
+    const create = jest.fn().mockResolvedValue(ok);
+    (instance as any).client.chat.completions.create = create;
+    await instance.chat([{ role: 'user', content: 'hola' }]);
+    expect(create.mock.calls[0][0]).not.toHaveProperty('reasoning');
+  });
+
+  it('an endpoint with mandatory reasoning is resent once without the parameter and remembered', async () => {
+    const instance = provider({ thinking: false });
+    const create = jest
+      .fn()
+      .mockRejectedValueOnce(mandatory)
+      .mockResolvedValue(ok);
+    (instance as any).client.chat.completions.create = create;
+    const first = await instance.chat([{ role: 'user', content: 'hola' }]);
+    await instance.chat([{ role: 'user', content: 'hola' }]);
+    expect(first).toMatchObject({ success: true, content: 'Respuesta' });
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[0][0].reasoning).toEqual({ enabled: false });
+    expect(create.mock.calls[1][0]).not.toHaveProperty('reasoning');
+    expect(create.mock.calls[2][0]).not.toHaveProperty('reasoning');
+  });
+
+  it('any other provider error is not retried', async () => {
+    const instance = provider({ thinking: false });
+    const create = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('429 rate limited'), { status: 429 }),
+      );
+    (instance as any).client.chat.completions.create = create;
+    const result = await instance.chat([{ role: 'user', content: 'hola' }]);
+    expect(result.success).toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});

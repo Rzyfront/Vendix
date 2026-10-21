@@ -230,6 +230,7 @@ export const GOLDEN_EXHAUSTED = 'No alcancé a terminar';
 export const GOLDEN_NO_ANSWER = [
   USER_NOTICES.no_answer,
   'No tengo evidencia de que la solicitud esté terminada',
+  'Esta vez no logré armar la respuesta',
 ];
 export const GOLDEN_PERMISSION_NOTICE =
   'no está disponible con tu usuario o con tu plan';
@@ -252,7 +253,10 @@ export const GOLDEN_NEEDLESS_GUIDANCE =
   /motivo de la diferencia|a qu[eé] se debe (la|el) (diferencia|faltante|sobrante)|\bfaltan\s+\$|\bsobran\s+\$/i;
 
 const fold = (text: string): string =>
-  text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 export interface GoldenTurnExpectation {
   expect_tools_any?: string[];
