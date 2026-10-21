@@ -1,3 +1,5 @@
+import type { DiscrepancySignal } from '../discrepancy-signal';
+
 /**
  * Versión de contrato que el registry asigna a todo tool que no declare una.
  * T2: las 70 tools existentes nacen en `'1'` sin cambio de comportamiento; todo
@@ -197,6 +199,12 @@ export interface ToolPreview {
    * refresh once it is applied.
    */
   domain?: string;
+  /**
+   * Pre-verificación guiada: el valor real difiere del esperado por encima de
+   * la tolerancia. Solo viaja en previews `error`; el modelo guía a la persona
+   * antes de reintentar con `discrepancy_reviewed=true`.
+   */
+  discrepancy?: DiscrepancySignal;
 }
 
 export interface ToolRegistrationFn {

@@ -85,6 +85,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a column to an XLSX/CSV bulk import template or its header map | `vendix-bulk-operations` |
 | Adding a document or photo flow that Vexi processes from the chat | `vendix-vexi-agent` |
 | Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
+| Adding a guided discrepancy pre-check before a close, reconciliation or adjustment write | `vendix-agent-playbooks` |
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |

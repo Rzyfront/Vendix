@@ -11,7 +11,7 @@ const documents = readdirSync(directory)
     parsePlaybookMarkdown(readFileSync(join(directory, file), 'utf8'), file),
   );
 
-describe('20 executable pure process verifiers, synthetic domain happy/sad', () => {
+describe('22 executable pure process verifiers, synthetic domain happy/sad', () => {
   it('binds exactly one versioned verifier to each approved process', () => {
     expect(Object.keys(PLAYBOOK_VERIFIERS).sort()).toEqual(
       documents.map((d) => `${d.id}:v1`).sort(),
@@ -208,6 +208,69 @@ describe('20 executable pure process verifiers, synthetic domain happy/sad', () 
       verifyPlaybook('cerrar-caja', example.input, example.observations)
         .reasons,
     ).toContain('payload_identity_mismatch');
+  });
+  it('ajustar-inventario-conteo: rechaza la relectura de otra bodega y filas de variantes indistinguibles', () => {
+    const happy = () =>
+      structuredClone(
+        documents
+          .find((d) => d.id === 'ajustar-inventario-conteo')!
+          .contract.examples.find((e) => e.kind === 'happy')!,
+      );
+    const otherLocation = happy();
+    otherLocation.observations.find(
+      (o) => o.step_id === 'verify',
+    )!.arguments!.location_id = 999999;
+    expect(
+      verifyPlaybook(
+        'ajustar-inventario-conteo',
+        otherLocation.input,
+        otherLocation.observations,
+      ).reasons,
+    ).toContain('read_arguments_mismatch:location_id');
+    const variants = happy();
+    const final = variants.observations.find((o) => o.step_id === 'verify')!;
+    (final.data as { data: unknown[] }).data.push({
+      product_id: variants.input.product_id,
+      on_hand: 3,
+      reserved: 0,
+      available: 3,
+    });
+    expect(
+      verifyPlaybook(
+        'ajustar-inventario-conteo',
+        variants.input,
+        variants.observations,
+      ).reasons,
+    ).toContain('variant_rows_not_distinguishable');
+  });
+  it('conciliar-banco: exige la conciliacion pedida, de la misma cuenta y con diferencia = extracto - conciliado', () => {
+    const happy = () =>
+      structuredClone(
+        documents
+          .find((d) => d.id === 'conciliar-banco')!
+          .contract.examples.find((e) => e.kind === 'happy')!,
+      );
+    const missing = happy();
+    (
+      missing.observations.find((o) => o.step_id === 'verify')!
+        .data as Array<{ id: number }>
+    )[0].id = 999999;
+    expect(
+      verifyPlaybook('conciliar-banco', missing.input, missing.observations)
+        .verified,
+    ).toBe(false);
+    const inconsistent = happy();
+    (
+      inconsistent.observations.find((o) => o.step_id === 'verify')!
+        .data as Array<{ difference: string }>
+    )[0].difference = '0.00';
+    expect(
+      verifyPlaybook(
+        'conciliar-banco',
+        inconsistent.input,
+        inconsistent.observations,
+      ).reasons,
+    ).toContain('domain_postcondition_not_met');
   });
   it('does not mistake a final report page for the complete sales dataset', () => {
     const example = structuredClone(

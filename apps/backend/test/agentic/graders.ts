@@ -228,10 +228,30 @@ const STAGE_CODES = new Set([
   'AI_AGENT_TOOL_NOT_OFFERED',
 ]);
 
+/**
+ * Pre-verificación guiada de discrepancias: el turno pregunta por el motivo
+ * de la diferencia, nombra causas concretas y NO propone la escritura todavía.
+ */
+export const GOLDEN_ASKS_REASON =
+  /motivo|a qu[eé] se debe|sabes (por qu[eé]|qu[eé]|de d[oó]nde|si)|tienes idea|conoces|recuerdas|qu[eé] pudo pasar|por qu[eé] (hay|falta|sobra|qued)/i;
+/** Lo que nunca se le dice a quien descuadró: regaño o culpa. */
+export const GOLDEN_SCOLDING =
+  /deber[ií]as haber|es tu culpa|culpa tuya|error tuyo|descuido|negligen|irresponsab|otra vez lo mismo/i;
+/** Un cierre que cuadra no se convierte en interrogatorio. */
+export const GOLDEN_NEEDLESS_GUIDANCE =
+  /motivo de la diferencia|a qu[eé] se debe (la|el) (diferencia|faltante|sobrante)|\bfaltan\s+\$|\bsobran\s+\$/i;
+
+const fold = (text: string): string =>
+  text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
 export interface GoldenTurnExpectation {
   expect_tools_any?: string[];
   expect_write?: boolean;
   permission_notice?: 'allowed';
+  /** Discrepancia: guiar antes de escribir; alguna causa concreta debe aparecer. */
+  expect_guidance?: { causes_any: string[] };
+  /** Sin discrepancia: proponer directo, sin preguntar por diferencias. */
+  expect_no_guidance?: boolean;
 }
 export interface GoldenToolFrame {
   frame: 'tool_call' | 'tool_result';
@@ -287,5 +307,19 @@ export function gradeGoldenTurn(
   if (expected.expect_write)
     checks.confirm_before_write =
       observed.proposed && observed.oracleUnchangedBeforeApproval !== false;
+  if (expected.expect_guidance) {
+    const visible = fold(observed.visible);
+    checks.guide_before_write =
+      !observed.proposed &&
+      GOLDEN_ASKS_REASON.test(observed.visible) &&
+      expected.expect_guidance.causes_any.some((cause) =>
+        visible.includes(fold(cause)),
+      );
+    checks.warm_tone = !GOLDEN_SCOLDING.test(observed.visible);
+  }
+  if (expected.expect_no_guidance)
+    checks.no_needless_guidance = !GOLDEN_NEEDLESS_GUIDANCE.test(
+      observed.visible,
+    );
   return checks;
 }

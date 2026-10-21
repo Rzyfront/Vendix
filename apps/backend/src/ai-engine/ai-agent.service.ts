@@ -80,6 +80,7 @@ import { SubscriptionAccessService } from '../domains/store/subscriptions/servic
 import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
+import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
   AgentPlan,
@@ -1764,6 +1765,10 @@ export class AIAgentService {
           .join('\n\n'),
       });
     }
+
+    // Pre-verificación guiada de discrepancias: bloque estático y cacheable.
+    if (hasOperationalTools)
+      messages.push({ role: 'system', content: DISCREPANCY_GUIDANCE_BLOCK });
 
     // Procedural/playbook instructions name only the tools this turn offers
     // (routed: authority ∩ session-backed core; otherwise the offered list).

@@ -10,6 +10,13 @@ import {
 } from '@common/constants/document-types';
 import { VendixHttpException } from '../../../common/errors';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
+import {
+  buildDiscrepancySignal,
+  DISCREPANCY_ACK_PARAMETERS,
+  discrepancyPreviewMessage,
+  DiscrepancySignal,
+  readDiscrepancyAck,
+} from '../discrepancy-signal';
 import { InventoryAdjustmentsService } from '../../../domains/store/inventory/adjustments/inventory-adjustments.service';
 import {
   AdjustmentType,
@@ -319,6 +326,76 @@ interface StockTarget {
   label: string;
 }
 
+/**
+ * Tipos de ajuste que son un CONTEO que no cuadra: la persona aún no sabe por
+ * qué. Avería, pérdida, robo o vencimiento ya traen el motivo y no se guían.
+ */
+const COUNT_ADJUSTMENT_TYPES: readonly AdjustmentType[] = [
+  'count_variance',
+  'manual_correction',
+];
+
+const STOCK_SHORTAGE_CAUSES = [
+  'Ventas o despachos que no se registraron en el sistema.',
+  'Mercancía trasladada a otra bodega sin registrar el traslado.',
+  'Devoluciones a proveedor sin registrar.',
+  'Producto contado en otra variante, presentación o bodega.',
+  'Averías, pérdidas o consumo interno que no se reportaron.',
+  'Unidades apartadas para pedidos que no se contaron.',
+];
+
+const STOCK_SURPLUS_CAUSES = [
+  'Compras o recepciones de mercancía que no se registraron.',
+  'Devoluciones de clientes que no se registraron.',
+  'Traslados recibidos de otra bodega sin registrar.',
+  'Producto de otra variante o bodega contado aquí.',
+];
+
+const STOCK_SHORTAGE_QUESTIONS = [
+  '¿Sabes a qué se debe la diferencia?',
+  '¿Se vendió o despachó algo de este producto que no quedó registrado?',
+  '¿Se movió mercancía a otra bodega o se devolvió a un proveedor?',
+  '¿Pudo contarse junto con otra variante o presentación?',
+];
+
+const STOCK_SURPLUS_QUESTIONS = [
+  '¿Sabes a qué se debe la diferencia?',
+  '¿Llegó mercancía de una compra que todavía no se registró?',
+  '¿Algún cliente devolvió producto o llegó un traslado de otra bodega?',
+  '¿Pudo contarse aquí producto de otra variante o bodega?',
+];
+
+const STOCK_MISSING_REASON =
+  'Falta el motivo de la diferencia: pregúntale a la persona, con sus palabras, a qué se debe (o si decidió continuar sin saberlo) y pásalo en discrepancy_reason. No lo inventes.';
+
+/** Techo de `CreateAdjustmentDto.description` (@MaxLength(500)). */
+const ADJUSTMENT_DESCRIPTION_MAX = 500;
+
+/** Señal de conteo que no cuadra; null si el ajuste no es un conteo. */
+function stockDiscrepancy(target: StockTarget): DiscrepancySignal | null {
+  if (!COUNT_ADJUSTMENT_TYPES.includes(target.adjustmentType)) return null;
+  if (target.delta === 0) return null;
+  const shortage = target.delta < 0;
+  return buildDiscrepancySignal({
+    process: 'inventory_count',
+    unit: 'unidades',
+    expected: target.quantityBefore,
+    actual: target.quantityAfter,
+    tolerance: 0,
+    subject: `${target.label} en ${target.locationName}`,
+    causes_to_check: shortage ? STOCK_SHORTAGE_CAUSES : STOCK_SURPLUS_CAUSES,
+    reads_to_run: [
+      'get_stock_movements',
+      'get_stock_levels',
+      'list_purchase_orders',
+      'list_orders',
+    ],
+    guide_questions: shortage
+      ? STOCK_SHORTAGE_QUESTIONS
+      : STOCK_SURPLUS_QUESTIONS,
+  });
+}
+
 export function createInventoryWriteTools(
   deps: InventoryWriteToolDeps,
 ): RegisteredTool[] {
@@ -530,7 +607,7 @@ export function createInventoryWriteTools(
       domain: 'inventory',
       requiresConfirmation: true,
       description:
-        'Corrige las existencias físicas de un producto en una bodega: conteo que no cuadra, mercancía averiada, perdida, robada o vencida. Se le pasa la cantidad FINAL que quedó en la bodega, no la diferencia. Deja traza de auditoría, recalcula el costo del inventario y genera el asiento contable, así que es la única forma correcta de cuadrar stock — nunca edites el producto para "corregir" existencias. Requiere product_id: obtenlo con find_product. Si el producto maneja variantes hay que indicar la variante, y si tiene existencias en varias bodegas hay que indicar la bodega (get_inventory_locations las lista). Para la primera entrada de mercancía nueva NO sirve: eso es una compra o una recepción.',
+        'Corrige las existencias físicas de un producto en una bodega: conteo que no cuadra, mercancía averiada, perdida, robada o vencida. Se le pasa la cantidad FINAL que quedó en la bodega, no la diferencia. Deja traza de auditoría, recalcula el costo del inventario y genera el asiento contable, así que es la única forma correcta de cuadrar stock — nunca edites el producto para "corregir" existencias. Requiere product_id: obtenlo con find_product. Si el producto maneja variantes hay que indicar la variante, y si tiene existencias en varias bodegas hay que indicar la bodega (get_inventory_locations las lista). Para la primera entrada de mercancía nueva NO sirve: eso es una compra o una recepción. Si es un conteo que no cuadra (count_variance o manual_correction), el ajuste no se propone hasta guiar a la persona a revisar la diferencia; después se reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason.',
       parameters: {
         type: 'object',
         properties: {
@@ -564,6 +641,7 @@ export function createInventoryWriteTools(
             description:
               'Descripción libre para la traza de auditoría. Recomendado: quién contó, cuándo, qué pasó.',
           },
+          ...DISCREPANCY_ACK_PARAMETERS,
         },
         required: ['product_id', 'quantity_after'],
       },
@@ -579,6 +657,24 @@ export function createInventoryWriteTools(
         }
 
         const target = resolved.value;
+        const discrepancy = stockDiscrepancy(target);
+        const ack = readDiscrepancyAck(args);
+        if (discrepancy && !ack.reviewed) {
+          return {
+            ...previewError(
+              target.label,
+              discrepancyPreviewMessage(discrepancy),
+              'inventory',
+            ),
+            discrepancy,
+          };
+        }
+        if (discrepancy && !ack.reason) {
+          return {
+            ...previewError(target.label, STOCK_MISSING_REASON, 'inventory'),
+            discrepancy,
+          };
+        }
         const signo = target.delta > 0 ? '+' : '';
         const warnings: string[] = [];
 
@@ -603,6 +699,16 @@ export function createInventoryWriteTools(
               from: target.quantityBefore,
               to: target.quantityAfter,
             },
+            ...(discrepancy && ack.reason
+              ? [
+                  {
+                    field: 'discrepancy_reason',
+                    label: 'Motivo de la diferencia',
+                    from: null,
+                    to: ack.reason,
+                  },
+                ]
+              : []),
           ],
           message: [
             `Ajuste de tipo "${target.adjustmentType}" en ${target.locationName}: ${signo}${target.delta} unidades.`,
@@ -629,6 +735,33 @@ export function createInventoryWriteTools(
           }
           const target = resolved.value;
 
+          // Misma compuerta que el preview: el mundo pudo moverse entre ambos.
+          const discrepancy = stockDiscrepancy(target);
+          const ack = readDiscrepancyAck(args);
+          if (discrepancy && !ack.reviewed) {
+            return JSON.stringify({
+              error: discrepancyPreviewMessage(discrepancy),
+              discrepancy,
+              next_step:
+                'Acompaña a la persona a revisar la diferencia y reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason.',
+            });
+          }
+          if (discrepancy && !ack.reason) {
+            return JSON.stringify({
+              error: STOCK_MISSING_REASON,
+              discrepancy,
+              next_step:
+                'Reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason.',
+            });
+          }
+          const baseReason = cleanString(args.reason);
+          const description =
+            discrepancy && ack.reason
+              ? baseReason
+                ? `${baseReason} — Motivo de la diferencia: ${ack.reason}`
+                : ack.reason
+              : (baseReason ?? 'Ajuste registrado por el asistente IA');
+
           // `organization_id` y `created_by_user_id` los resuelve el servicio del
           // contexto de la petición; ya no se aceptan en el DTO.
           const dto: CreateAdjustmentDto = {
@@ -639,8 +772,7 @@ export function createInventoryWriteTools(
             location_id: target.locationId,
             type: target.adjustmentType,
             quantity_after: target.quantityAfter,
-            description:
-              cleanString(args.reason) ?? 'Ajuste registrado por el asistente IA',
+            description: description.slice(0, ADJUSTMENT_DESCRIPTION_MAX),
           };
 
           const checked = toValidatedDto(
