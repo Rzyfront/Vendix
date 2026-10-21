@@ -266,6 +266,12 @@ export interface GoldenTurnExpectation {
   expect_guidance?: { causes_any: string[] };
   /** Sin discrepancia: proponer directo, sin preguntar por diferencias. */
   expect_no_guidance?: boolean;
+  /**
+   * Pregunta de conocimiento: se responde en prosa, con sustancia (mínimo de
+   * caracteres) y nombrando al menos un concepto de la pregunta. Sin tools
+   * obligatorias y sin proponer escrituras.
+   */
+  expect_answer?: { min_chars: number; mentions_any: string[] };
 }
 export interface GoldenToolFrame {
   frame: 'tool_call' | 'tool_result';
@@ -333,6 +339,15 @@ export function gradeGoldenTurn(
         visible.includes(fold(cause)),
       );
     checks.warm_tone = !GOLDEN_SCOLDING.test(observed.visible);
+  }
+  if (expected.expect_answer) {
+    const visible = fold(observed.visible);
+    checks.useful_answer =
+      !observed.proposed &&
+      observed.visible.trim().length >= expected.expect_answer.min_chars &&
+      expected.expect_answer.mentions_any.some((term) =>
+        visible.includes(fold(term)),
+      );
   }
   if (expected.expect_no_guidance)
     checks.no_needless_guidance = !GOLDEN_NEEDLESS_GUIDANCE.test(
