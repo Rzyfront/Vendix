@@ -123,7 +123,7 @@ export class CreateTemplateDto {
   status?: string;
 
   @IsOptional()
-  @IsIn(['customer', 'booking', 'order'])
+  @IsIn(['customer', 'booking', 'order', 'service_session'])
   entity_type?: string;
 
   @IsOptional()

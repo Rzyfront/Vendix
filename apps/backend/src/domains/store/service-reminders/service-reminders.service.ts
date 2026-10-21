@@ -402,7 +402,7 @@ export class ServiceRemindersService {
         const subjectText = row.subject?.display ? ` (${row.subject.display})` : '';
         await this.notifications.createAndBroadcast(
           storeId,
-          'service_reminder_due' as any,
+          'service_reminder_due',
           'Recordatorio de servicio recurrente',
           `Es momento de contactar a ${row.customer.name} para repetir ${row.service.name}${subjectText}.`,
           {

@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 import { SetMetadataValueDto } from './set-metadata-value.dto';
 
 export class BulkSetMetadataDto {
-  @IsIn(['customer', 'booking', 'order'])
+  @IsIn(['customer', 'booking', 'order', 'service_session'])
   entity_type: string;
 
   @IsInt()
