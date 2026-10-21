@@ -94,7 +94,7 @@
     }
   </header>
 
-  <main class="w-full">
+  <div class="w-full">
     <!-- SECTION 1: HERO SECTION -->
     <section class="relative w-full px-4 sm:px-6 lg:px-8 pt-11 pb-16 sm:pt-[4.2rem] sm:pb-24 overflow-hidden">
       <div class="max-w-[75rem] mx-auto flex flex-col items-center text-center">
@@ -234,8 +234,17 @@
             </div>
 
             <!-- Dashboard Body: replica viva del Panel Principal (datos fake).
-                 En pantalla completa es la zona que crece y hace scroll. -->
-            <app-hero-live-dashboard class="hero-window__body block"></app-hero-live-dashboard>
+                 En pantalla completa es la zona que crece y hace scroll.
+                 @defer: el panel trae ECharts (~650 KB). Diferido, el chunk de la
+                 landing ya no lo espera y el H1 se pinta antes (LCP). Arranca al
+                 acercarse al viewport y se precarga en reposo. El placeholder
+                 reserva el alto medido del panel (móvil 1464 px, lg 828 px) para
+                 no desplazar el contenido al montarse (CLS). -->
+            @defer (on viewport; prefetch on idle) {
+              <app-hero-live-dashboard class="hero-window__body block"></app-hero-live-dashboard>
+            } @placeholder {
+              <div class="hero-window__body block min-h-[1464px] lg:min-h-[828px] bg-[#f4f7fb]" aria-hidden="true"></div>
+            }
           </div>
 
           <!-- Escritorio: sustituye a la ventana cerrada o minimizada. El punto
@@ -1111,7 +1120,7 @@
              visible no tiene ítems devuelve null y se pinta la tabla estática
              de respaldo, en vez de una comparativa a medias. -->
         @if (comparison(); as c) {
-          <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+          <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto" tabindex="0" role="region" aria-label="Comparativa de planes">
             <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
               <thead>
                 <tr class="bg-slate-50 border-b border-slate-200">
@@ -1151,7 +1160,7 @@
             </table>
           </div>
         } @else {
-        <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+        <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto" tabindex="0" role="region" aria-label="Comparativa de planes">
           <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-200">
@@ -1563,7 +1572,7 @@
     @if (sectorGuidesEnabled) {
       <app-sector-guides></app-sector-guides>
     }
-  </main>
+  </div>
 
   <!-- CONSOLIDATED FOOTER -->
   <footer class="w-full bg-[#00170d] text-white border-t border-emerald-950">

@@ -15,14 +15,15 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
-import {
-  ModalComponent,
-  ButtonComponent,
-  IconComponent,
-  InputComponent,
-  ToastService,
-  CameraComponent,
-} from '../index';
+// Rutas directas, no el barrel '../index': este modal lo carga el shell de la
+// app (global-user-modals → profile-modal) y el barrel arrastra al arranque
+// ECharts, marked y decenas de componentes del panel.
+import { ModalComponent } from '../modal/modal.component';
+import { ButtonComponent } from '../button/button.component';
+import { IconComponent } from '../icon/icon.component';
+import { InputComponent } from '../input/input.component';
+import { ToastService } from '../toast/toast.service';
+import { CameraComponent } from '../camera/camera.component';
 import { ImageUploadService } from '../../services/image-upload.service';
 
 type Stage = 'select' | 'url' | 'camera' | 'crop' | 'loading';
