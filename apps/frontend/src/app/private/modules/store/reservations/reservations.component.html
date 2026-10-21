@@ -79,6 +79,10 @@
           </a>
         </app-tooltip>
 
+        <a routerLink="/admin/reservations/reminders" class="flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm border border-[var(--color-border)] bg-surface hover:bg-[var(--color-background)]" style="color: var(--color-text-primary);">
+          <app-icon name="bell" [size]="14"></app-icon><span class="hidden sm:inline">Recordatorios</span>
+        </a>
+
         <!-- Appointment redesign phase 2 — solicitudes de reagenda.
              Badge con el count de pending. Click → navega a la página
              dedicada /admin/reservations/reschedule-requests. -->

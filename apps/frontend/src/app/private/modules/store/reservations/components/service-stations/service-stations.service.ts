@@ -20,7 +20,7 @@ export interface ServiceStation {
   status: 'active' | 'inactive';
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
-  services: Array<{ product_id: number; product: { id: number; name: string; service_duration_minutes: number | null } | null }>;
+  services: Array<{ product_id: number; product: { id: number; name: string; base_price?: number | string; service_duration_minutes: number | null; service_intake_fields?: ServiceIntakeField[] | null } | null }>;
   providers: Array<{ provider_id: number; provider: { id: number; display_name: string; is_active: boolean } | null }>;
 }
 
@@ -42,7 +42,17 @@ export interface StationException {
 export interface StationServiceOption {
   id: number;
   name: string;
+  base_price?: number | string | null;
   service_duration_minutes?: number | null;
+  service_intake_fields?: ServiceIntakeField[] | null;
+}
+
+export interface ServiceIntakeField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'textarea' | 'checkbox';
+  required?: boolean;
+  placeholder?: string;
 }
 
 export interface StationProviderOption {
@@ -65,6 +75,12 @@ export class ServiceStationsService {
   list(page: number, limit: number): Observable<PaginatedApiResponse<ServiceStation>> {
     const params = new HttpParams().set('page', String(page)).set('limit', String(limit));
     return this.http.get<PaginatedApiResponse<ServiceStation>>(this.base, { params });
+  }
+
+  getPublicUrl(id: number): Observable<string> {
+    return this.http.get<{ data?: { public_url: string } }>(`${this.base}/${id}/public-url`).pipe(
+      map((response) => this.unwrap(response).public_url),
+    );
   }
 
   getAvailability(
@@ -150,6 +166,23 @@ export class ServiceStationsService {
         return [];
       }),
     );
+  }
+
+  getSellableProducts(): Observable<any[]> {
+    return this.http
+      .get<{ data?: unknown } | unknown>(
+        `${environment.apiUrl}/store/products?limit=150&is_sellable=true&is_ingredient=false`,
+      )
+      .pipe(
+        map((r) => {
+          const unwrapped = this.unwrap<unknown>(r);
+          if (Array.isArray(unwrapped)) return unwrapped;
+          if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped && Array.isArray((unwrapped as { data: unknown }).data)) {
+            return (unwrapped as { data: any[] }).data;
+          }
+          return [];
+        }),
+      );
   }
 
   getSession(id: number): Observable<any> {

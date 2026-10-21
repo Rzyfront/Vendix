@@ -225,6 +225,30 @@ export class ProductImageDto {
   sort_order?: number;
 }
 
+export class ServiceIntakeFieldDto {
+  @IsString()
+  @Matches(/^[a-z][a-z0-9_]{0,49}$/)
+  key: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  label: string;
+
+  @IsIn(['text', 'number', 'textarea', 'checkbox'])
+  type: 'text' | 'number' | 'textarea' | 'checkbox';
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  required?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  placeholder?: string;
+}
+
 export class CreateProductDto {
   /**
    * Subcuenta PUC de ingreso propia del producto. `null`/ausente ⇒ el asiento
@@ -616,9 +640,27 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_recurring?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number;
+
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  @ApiPropertyOptional({ description: 'Campos dinámicos que se recogen para cada atención de este servicio.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ServiceIntakeFieldDto)
+  service_intake_fields?: ServiceIntakeFieldDto[];
 
   @ApiPropertyOptional({
     description:
@@ -1116,9 +1158,27 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   is_recurring?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number;
+
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  @ApiPropertyOptional({ description: 'Campos dinámicos que se recogen para cada atención de este servicio.' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ServiceIntakeFieldDto)
+  service_intake_fields?: ServiceIntakeFieldDto[];
 
   @ApiPropertyOptional({
     description:
@@ -1916,6 +1976,16 @@ export class UpdateProductWithVariantsDto {
   @Type(() => Boolean)
   is_recurring?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number;
+
   @IsOptional()
   @IsString()
   service_instructions?: string;
@@ -2230,6 +2300,16 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   is_recurring?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number;
 
   @IsOptional()
   @IsString()

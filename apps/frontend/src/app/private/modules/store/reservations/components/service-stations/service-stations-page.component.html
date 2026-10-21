@@ -679,13 +679,13 @@
         </div>
       </div>
 
-      <!-- Servicio y Especialista -->
+      <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <app-selector
           label="Servicio Requerido Inicial"
           [options]="serviceSelectorOptions()"
           [ngModel]="checkinProductId()"
-          (ngModelChange)="checkinProductId.set($event)"
+          (ngModelChange)="onCheckinServiceChange($event)"
         />
         <app-input
           label="Tiempo Estimado (Minutos)"
@@ -693,6 +693,32 @@
           [ngModel]="checkinDurationMinutes()"
           (ngModelChange)="checkinDurationMinutes.set($event)"
         />
+      </div>
+
+      @if (checkinServiceIntakeFields().length) {
+        <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-3">
+          <div>
+            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Datos de este servicio</h4>
+            <p class="text-xs text-[var(--color-text-secondary)]">La información se guardará en esta atención.</p>
+          </div>
+          @for (field of checkinServiceIntakeFields(); track field.key) {
+            @if (field.type === 'checkbox') {
+              <label class="flex items-center gap-2 text-sm text-[var(--color-text-primary)]">
+                <input type="checkbox" [checked]="checkinServiceIntakeValues()[field.key] === true" (change)="setServiceIntakeValue(field.key, $event, field.type)" />
+                {{ field.label }} @if (field.required) { <span class="text-red-500">*</span> }
+              </label>
+            } @else if (field.type === 'textarea') {
+              <app-textarea [label]="field.label + (field.required ? ' *' : '')" [ngModel]="checkinServiceIntakeValues()[field.key] ?? ''" [ngModelOptions]="{standalone: true}" (ngModelChange)="setServiceIntakeControlValue(field.key, $event)" [placeholder]="field.placeholder || ''" [rows]="2" />
+            } @else {
+              <app-input [label]="field.label + (field.required ? ' *' : '')" [type]="field.type" [ngModel]="checkinServiceIntakeValues()[field.key] ?? ''" [ngModelOptions]="{standalone: true}" (ngModelChange)="setServiceIntakeControlValue(field.key, $event)" [placeholder]="field.placeholder || ''" />
+            }
+          }
+        </div>
+      }
+
+      <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm flex flex-wrap items-center justify-between gap-2">
+        <span class="text-[var(--color-text-secondary)]">Total inicial estimado (servicio + producto inicial)</span>
+        <strong class="font-mono text-emerald-700 dark:text-emerald-300">${{ checkinEstimatedTotal() | number }} COP</strong>
       </div>
 
       <app-selector
@@ -794,16 +820,16 @@
           <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
             <span class="text-xs font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
               <app-icon name="plus-circle" [size]="14" class="text-[var(--color-primary)]" />
-              Agregar Producto, Insumo o Servicio Adicional
+              Agregar Producto o Servicio Adicional
             </span>
             <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
               <div class="sm:col-span-6">
                 <app-selector
-                  label="Producto / Insumo del Catálogo"
-                  [options]="catalogProductSelectorOptions()"
+                  label="Producto / Servicio del Catálogo"
+                  [options]="sessionCatalogProductSelectorOptions()"
                   [ngModel]="selectedAddProductId()"
                   (ngModelChange)="onAddProductSelect($event)"
-                  placeholder="-- Seleccionar del inventario --"
+                  placeholder="-- Seleccionar producto o servicio --"
                 />
               </div>
 
@@ -839,6 +865,9 @@
                 </app-button>
               </div>
             </div>
+            <div class="flex justify-end text-xs text-[var(--color-text-secondary)]">
+              Total estimado al agregar: <strong class="ml-1 font-mono text-emerald-600">${{ addItemEstimatedTotal() | number }} COP</strong>
+            </div>
           </div>
 
           <!-- Lista de Ítems en la Cuenta -->
@@ -853,7 +882,7 @@
                   <div class="p-3 bg-[var(--color-surface)] flex items-center justify-between gap-3 text-xs">
                     <div class="flex items-center gap-2.5 min-w-0">
                       <span class="px-2 py-0.5 rounded-md text-[10px] font-bold" [ngClass]="item.item_type === 'physical' ? 'bg-blue-500/15 text-blue-600' : 'bg-purple-500/15 text-purple-600'">
-                        {{ item.item_type === 'physical' ? 'Insumo' : 'Servicio' }}
+                        {{ item.item_type === 'physical' ? 'Producto' : 'Servicio' }}
                       </span>
                       <div class="min-w-0">
                         <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
@@ -876,7 +905,7 @@
               </div>
             } @else {
               <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-center text-xs text-[var(--color-text-secondary)] italic">
-                La cuenta de esta estación está abierta con el servicio inicial. Puedes agregar aceites, filtros o servicios adicionales con el botón de arriba.
+                La cuenta de esta estación está abierta con el servicio inicial. Puedes agregar productos, consumibles o servicios adicionales con el botón de arriba.
               </div>
             }
           </div>

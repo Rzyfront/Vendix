@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
@@ -75,10 +75,16 @@ export class ServiceSessionsService {
       bookingAllocation
         ? this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } })
         : Promise.resolve(null),
-      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
+      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true, service_intake_fields: true } }),
     ]);
     if (!station || (bookingAllocation && !stationService) || product?.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.STATION_001);
+    }
+    if (dto.station_id) {
+      this.validateServiceIntakeValues(
+        product.service_intake_fields,
+        dto.subject?.metadata?.['service_intake_fields'],
+      );
     }
     if (providerId) {
       if (bookingAllocation) {
@@ -247,6 +253,37 @@ export class ServiceSessionsService {
     this.emit(storeId, result.id, 'opened', { status: 'open' });
     delete (result as Partial<typeof result>).access_token_id;
     return result;
+  }
+
+  private validateServiceIntakeValues(configValue: Prisma.JsonValue | null, submittedValue: unknown): void {
+    const fields = Array.isArray(configValue) ? configValue : [];
+    const values = submittedValue && typeof submittedValue === 'object' && !Array.isArray(submittedValue)
+      ? submittedValue as Record<string, unknown>
+      : {};
+    const configuredKeys = new Set(fields.map((field) =>
+      field && typeof field === 'object' && 'key' in field ? String(field.key) : '',
+    ));
+    if (Object.keys(values).some((key) => !configuredKeys.has(key))) {
+      throw new BadRequestException('La atención incluye campos que no están configurados para el servicio.');
+    }
+    for (const field of fields) {
+      if (!field || typeof field !== 'object' || !('key' in field)) continue;
+      const key = String(field.key);
+      const value = values[key];
+      const required = 'required' in field && field.required === true;
+      if (required && (value === undefined || value === null || value === '' || (typeof value === 'string' && !value.trim()) || value === false)) {
+        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" es obligatorio para este servicio.`);
+      }
+      if (typeof value === 'string' && value.length > 2000) {
+        throw new BadRequestException(`El campo "${key}" supera el máximo de 2000 caracteres.`);
+      }
+      if ('type' in field && field.type === 'number' && value !== undefined && value !== null && value !== '' && !Number.isFinite(Number(value))) {
+        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" debe ser numérico.`);
+      }
+      if ('type' in field && field.type === 'checkbox' && value !== undefined && typeof value !== 'boolean') {
+        throw new BadRequestException(`El campo "${'label' in field ? String(field.label) : key}" debe ser verdadero o falso.`);
+      }
+    }
   }
 
   private async buildAccessUrl(storeId: number, token: string): Promise<string | null> {

@@ -1751,6 +1751,44 @@
               >
               </app-setting-toggle>
             </div>
+            @if (productForm.get('is_recurring')?.value) {
+              <div class="max-w-sm">
+                <app-input label="Repetir cada cuántos días" type="number" min="1" formControlName="recurrence_interval_days" />
+                <div class="mt-2 flex flex-wrap gap-2" aria-label="Intervalos sugeridos">
+                  @for (days of [3, 7, 15, 30]; track days) {
+                    <app-button variant="outline" size="sm" (clicked)="productForm.patchValue({ recurrence_interval_days: days })">{{ days }} días</app-button>
+                  }
+                </div>
+                <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Elige un intervalo sugerido o escribe cualquier número de días.</p>
+              </div>
+            }
+
+            <section class="rounded-xl border border-[var(--color-border)] p-4 space-y-3">
+              <div>
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Datos que se piden en cada atención</h3>
+                <p class="text-xs text-[var(--color-text-secondary)]">Estos campos se guardan con cada servicio realizado, no en el perfil permanente del cliente.</p>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                <app-input label="Nombre del campo" [ngModel]="newServiceIntakeLabel()" [ngModelOptions]="{standalone: true}" (ngModelChange)="newServiceIntakeLabel.set($event)" placeholder="Ej. Nivel de aceite" />
+                <app-selector label="Tipo de respuesta" [options]="[{value:'text',label:'Texto corto'},{value:'textarea',label:'Texto largo'},{value:'number',label:'Número'},{value:'checkbox',label:'Sí / No'}]" [ngModel]="newServiceIntakeType()" [ngModelOptions]="{standalone: true}" (ngModelChange)="newServiceIntakeType.set($event)" />
+                <app-button variant="secondary" [disabled]="serviceIntakeFields().length >= 30" (clicked)="addServiceIntakeField()"><app-icon name="plus" [size]="14" slot="icon" /> Agregar campo</app-button>
+              </div>
+              @if (serviceIntakeFields().length) {
+                <div class="divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
+                  @for (field of serviceIntakeFields(); track field.key; let i = $index) {
+                    <div class="flex items-center justify-between gap-3 p-3 text-sm">
+                      <div><strong>{{ field.label }}</strong><span class="ml-2 text-xs text-[var(--color-text-secondary)]">{{ field.type }}</span></div>
+                      <div class="flex items-center gap-2">
+                        <app-button variant="ghost" size="sm" (clicked)="toggleServiceIntakeRequired(i)">{{ field.required ? 'Obligatorio' : 'Opcional' }}</app-button>
+                        <app-button variant="ghost" size="sm" ariaLabel="Eliminar campo" (clicked)="removeServiceIntakeField(i)"><app-icon name="trash-2" [size]="14" /></app-button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p class="text-xs text-[var(--color-text-secondary)]">Sin campos extra. Los datos estándar dependen del tipo de estación.</p>
+              }
+            </section>
 
             @if (productForm.get("requires_booking")?.value) {
               <app-selector
@@ -1793,14 +1831,47 @@
                     background: var(--color-surface-secondary);
                   "
                 >
+                  @if (templateSelectorOptions().length === 0) {
+                    <div class="p-3.5 rounded-xl border border-amber-300/80 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div class="flex items-start gap-2.5">
+                        <app-icon name="info" [size]="18" class="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"></app-icon>
+                        <div>
+                          <p class="font-bold text-xs">No hay plantillas de consulta registradas</p>
+                          <p class="text-[11px] text-amber-700 dark:text-amber-300/90 mt-0.5">
+                            Crea una plantilla base automáticamente o diseña una personalizada con tus propios campos.
+                          </p>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <app-button
+                          variant="primary"
+                          size="sm"
+                          [loading]="creatingDefaultTemplate()"
+                          (clicked)="createDefaultConsultationTemplates()"
+                        >
+                          <app-icon name="sparkles" [size]="14" slot="icon"></app-icon>
+                          Crear plantilla base
+                        </app-button>
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          (clicked)="openTemplateManager()"
+                        >
+                          <app-icon name="external-link" [size]="14" slot="icon"></app-icon>
+                          Diseñar
+                        </app-button>
+                      </div>
+                    </div>
+                  }
+
                   <!-- Consultation Template (required - provider fills during consultation) -->
                   <div class="flex items-start gap-2">
                     <app-selector
                       class="flex-1"
                       label="Plantilla de Consulta"
                       formControlName="consultation_template_id"
-                      [options]="templateSelectorOptions"
-                      placeholder="Seleccionar plantilla"
+                      [options]="templateSelectorOptions()"
+                      [placeholder]="templateSelectorOptions().length ? 'Seleccionar plantilla' : 'Crea una plantilla arriba para seleccionar'"
                       [required]="true"
                       helpText="Formulario que el profesional llenará durante la consulta"
                     ></app-selector>
@@ -1831,8 +1902,8 @@
                         class="flex-1"
                         label="Plantilla de Preconsulta"
                         formControlName="preconsultation_template_id"
-                        [options]="templateSelectorOptions"
-                        placeholder="Seleccionar plantilla"
+                        [options]="templateSelectorOptions()"
+                        [placeholder]="templateSelectorOptions().length ? 'Seleccionar plantilla' : 'Crea una plantilla arriba para seleccionar'"
                         [required]="true"
                         helpText="Formulario que el paciente llenará antes de la cita"
                       ></app-selector>
@@ -1851,6 +1922,7 @@
                     </div>
                   }
                 </div>
+
               }
             }
 

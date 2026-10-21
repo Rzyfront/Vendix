@@ -927,6 +927,20 @@ export class ProductsService {
     dto.requires_batch_tracking = undefined;
   }
 
+  private validateServiceIntakeFields(
+    fields: CreateProductDto['service_intake_fields'] | undefined,
+    productType: ProductType | undefined,
+  ): void {
+    if (!fields?.length) return;
+    if (productType !== ProductType.SERVICE) {
+      throw new BadRequestException('Los campos de recepción solo se configuran en servicios.');
+    }
+    const keys = fields.map((field) => field.key);
+    if (new Set(keys).size !== keys.length) {
+      throw new BadRequestException('Cada campo de recepción debe tener un nombre único.');
+    }
+  }
+
   /**
    * Enforce store-level uniqueness of a barcode across BOTH products and
    * product variants. Source of truth in application logic because variants
@@ -1039,6 +1053,7 @@ export class ProductsService {
     try {
       // Validate service-specific constraints
       this.validateByProductType(sanitizedDto);
+      this.validateServiceIntakeFields(sanitizedDto.service_intake_fields, sanitizedDto.product_type);
 
       // Obtener store_id del DTO o del contexto del token
       // Obtener store_id del contexto
@@ -1201,6 +1216,11 @@ export class ProductsService {
         enabled_price_tier_ids,
         ...productData
       } = createProductDto;
+
+      if (!productData.is_recurring) {
+        productData.recurrence_interval_days = null;
+      }
+
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         store_id,
         slug,
@@ -3176,6 +3196,7 @@ export class ProductsService {
             booking_mode: product.booking_mode,
             buffer_minutes: product.buffer_minutes,
             is_recurring: product.is_recurring,
+            recurrence_interval_days: product.recurrence_interval_days,
             service_duration_minutes: product.service_duration_minutes,
             service_modality: product.service_modality,
             service_pricing_type: product.service_pricing_type,
@@ -3383,6 +3404,7 @@ export class ProductsService {
           booking_mode: product.booking_mode,
           buffer_minutes: product.buffer_minutes,
           is_recurring: product.is_recurring,
+          recurrence_interval_days: product.recurrence_interval_days,
           service_duration_minutes: product.service_duration_minutes,
           service_modality: product.service_modality,
           service_pricing_type: product.service_pricing_type,
@@ -3689,6 +3711,7 @@ export class ProductsService {
       service_pricing_type: product.service_pricing_type,
       requires_booking: product.requires_booking,
       is_recurring: product.is_recurring,
+      recurrence_interval_days: product.recurrence_interval_days,
       service_instructions: product.service_instructions,
       booking_mode: product.booking_mode,
       buffer_minutes: product.buffer_minutes,
@@ -3914,6 +3937,7 @@ export class ProductsService {
 
       const effectiveProductType =
         sanitizedDto.product_type ?? existingProduct.product_type;
+      this.validateServiceIntakeFields(sanitizedDto.service_intake_fields, effectiveProductType);
       const effectiveRequiresStation =
         sanitizedDto.requires_station ?? existingProduct.requires_station;
       if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {
@@ -4168,6 +4192,10 @@ export class ProductsService {
         price, // Exclude as it's not in DB
         ...productData
       } = sanitizedDto as UpdateProductDto & { price?: number };
+
+      if (productData.is_recurring === false) {
+        productData.recurrence_interval_days = null;
+      }
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         existingProduct.store_id,
         sanitizedDto.slug || existingProduct.slug,

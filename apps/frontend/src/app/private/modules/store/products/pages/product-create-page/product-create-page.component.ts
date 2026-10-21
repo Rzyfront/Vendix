@@ -13,7 +13,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { KdsStationsService } from '../../../restaurant-ops/kds/services';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
-import { map, startWith, switchMap } from 'rxjs/operators';
+import { map, startWith, switchMap, finalize } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -57,6 +57,7 @@ import {
   Product,
   ProductState,
   TaxCategory,
+  ServiceIntakeField,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
 import { CategoriesService } from '../../services/categories.service';
@@ -924,18 +925,20 @@ export class ProductCreatePageComponent {
   }
 
   // Data Collection Templates (for consultation configuration)
-  dataCollectionTemplates: {
+  dataCollectionTemplates = signal<{
     id: number;
     name: string;
     productIds: number[];
-  }[] = [];
+  }[]>([]);
 
-  get templateSelectorOptions(): SelectorOption[] {
-    return this.dataCollectionTemplates.map((t) => ({
+  readonly templateSelectorOptions = computed<SelectorOption[]>(() =>
+    this.dataCollectionTemplates().map((t) => ({
       value: t.id,
       label: t.name,
-    }));
-  }
+    })),
+  );
+
+  creatingDefaultTemplate = signal(false);
 
   // Provider assignment (for services with requires_booking)
   assignedProviders = signal<ServiceProvider[]>([]);
@@ -1005,6 +1008,9 @@ export class ProductCreatePageComponent {
   readonly isVariantAccountingOpen = signal(false);
 
   isSubmitting = signal(false);
+  readonly serviceIntakeFields = signal<ServiceIntakeField[]>([]);
+  readonly newServiceIntakeLabel = signal('');
+  readonly newServiceIntakeType = signal<ServiceIntakeField['type']>('text');
   // Modal de "requisitos para guardar": consolida en un solo lugar todo lo que
   // impide guardar (errores de form + reglas de variantes + reservas), en vez
   // de disparar toasts sueltos y bloquear el botón.
@@ -1717,9 +1723,9 @@ export class ProductCreatePageComponent {
 
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+    this.loadDataCollectionTemplates();
     afterNextRender(() => {
       this.loadCategoriesAndBrands();
-      this.loadDataCollectionTemplates();
     });
 
     // Verificar draft del modal de creación rápida
@@ -1977,22 +1983,101 @@ export class ProductCreatePageComponent {
     }
   }
 
-  private loadDataCollectionTemplates(): void {
+  loadDataCollectionTemplates(): void {
     this.http
       .get<any>(`${environment.apiUrl}/store/data-collection/templates`)
       .pipe(map((r: any) => r.data || []))
       .subscribe({
         next: (templates: any[]) => {
-          this.dataCollectionTemplates = templates.map((t: any) => ({
-            id: t.id,
-            name: t.name,
-            productIds: (t.products || []).map(
-              (p: any) => p.product_id || p.product?.id,
-            ),
-          }));
+          this.dataCollectionTemplates.set(
+            templates.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              productIds: (t.products || []).map(
+                (p: any) => p.product_id || p.product?.id,
+              ),
+            })),
+          );
         },
         error: () => {}, // Silently fail — not critical
       });
+  }
+
+  createDefaultConsultationTemplates(): void {
+    this.creatingDefaultTemplate.set(true);
+    const body = {
+      name: 'Plantilla General de Consulta',
+      description: 'Formulario estándar para registro de atenciones, diagnóstico y notas clínicas del paciente/cliente.',
+      entity_type: 'booking',
+      status: 'active',
+      icon: 'clipboard-list',
+    };
+
+    this.http
+      .post<any>(`${environment.apiUrl}/store/data-collection/templates`, body)
+      .pipe(
+        finalize(() => this.creatingDefaultTemplate.set(false)),
+      )
+      .subscribe({
+        next: (res: any) => {
+          const created = res?.data || res;
+          this.toastService.success('Plantilla de consulta creada exitosamente');
+          this.loadDataCollectionTemplates();
+          if (created?.id) {
+            this.productForm.get('consultation_template_id')?.setValue(created.id);
+            this.productForm.get('preconsultation_template_id')?.setValue(created.id);
+          }
+        },
+        error: () => {
+          this.toastService.error('Error al crear plantilla de consulta');
+        },
+      });
+  }
+
+  openTemplateManager(): void {
+    window.open('/admin/data-collection/templates', '_blank');
+  }
+
+
+  addServiceIntakeField(): void {
+    if (this.serviceIntakeFields().length >= 30) {
+      this.toastService.error('Cada servicio puede tener máximo 30 campos dinámicos.');
+      return;
+    }
+    const label = this.newServiceIntakeLabel().trim();
+    if (!label) return;
+    const baseKey = label
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^[^a-z]+/, '')
+      .slice(0, 50);
+    if (!baseKey) {
+      this.toastService.error('Escribe un nombre que incluya letras para el campo.');
+      return;
+    }
+    if (this.serviceIntakeFields().some((field) => field.key === baseKey)) {
+      this.toastService.error('Ya existe un campo con un nombre similar en este servicio.');
+      return;
+    }
+    this.serviceIntakeFields.update((fields) => [
+      ...fields,
+      { key: baseKey, label, type: this.newServiceIntakeType(), required: false },
+    ]);
+    this.newServiceIntakeLabel.set('');
+  }
+
+  toggleServiceIntakeRequired(index: number): void {
+    this.serviceIntakeFields.update((fields) =>
+      fields.map((field, fieldIndex) =>
+        fieldIndex === index ? { ...field, required: !field.required } : field,
+      ),
+    );
+  }
+
+  removeServiceIntakeField(index: number): void {
+    this.serviceIntakeFields.update((fields) => fields.filter((_, fieldIndex) => fieldIndex !== index));
   }
 
   private createForm(): FormGroup {
@@ -2053,6 +2138,7 @@ export class ProductCreatePageComponent {
         requires_station: [false],
         booking_mode: [null],
         is_recurring: [false],
+        recurrence_interval_days: [30, [Validators.required, Validators.min(1)]],
         service_instructions: [''],
         is_consultation: [false],
         send_preconsultation: [false],
@@ -2309,6 +2395,7 @@ export class ProductCreatePageComponent {
   }
 
   private patchForm(product: Product): void {
+    this.serviceIntakeFields.set(product.service_intake_fields ?? []);
     // Extract category IDs from categories (API returns categories directly)
     const categoryIds = (product.categories || [])
       .map((c: ProductCategory) => c.id)
@@ -2376,6 +2463,7 @@ export class ProductCreatePageComponent {
       requires_station: product.requires_station || false,
       booking_mode: product.booking_mode || null,
       is_recurring: product.is_recurring || false,
+      recurrence_interval_days: product.recurrence_interval_days || 30,
       service_instructions: product.service_instructions || '',
       is_consultation: product.is_consultation || false,
       send_preconsultation: product.send_preconsultation || false,
@@ -4378,7 +4466,9 @@ export class ProductCreatePageComponent {
         requires_station: !!formValue.requires_station,
         booking_mode: formValue.booking_mode || undefined,
         is_recurring: !!formValue.is_recurring,
+        recurrence_interval_days: formValue.is_recurring ? Number(formValue.recurrence_interval_days || 30) : undefined,
         service_instructions: formValue.service_instructions || undefined,
+        service_intake_fields: this.serviceIntakeFields(),
         is_consultation: !!formValue.is_consultation,
         send_preconsultation: !!formValue.send_preconsultation,
         consultation_template_id: formValue.consultation_template_id || null,

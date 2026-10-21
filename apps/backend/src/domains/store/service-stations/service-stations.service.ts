@@ -65,7 +65,7 @@ export class ServiceStationsService {
       services.length
         ? this.prisma.products.findMany({
             where: { store_id: this.storeId, id: { in: services.map((item) => item.product_id) } },
-            select: { id: true, name: true, service_duration_minutes: true },
+            select: { id: true, name: true, base_price: true, service_duration_minutes: true, service_intake_fields: true },
           })
         : [],
       assignments.length
@@ -102,6 +102,20 @@ export class ServiceStationsService {
     // public_id only identifies the physical station. Never include session or
     // session-token data in this administrative/QR-identifier response.
     return this.withCapabilities(station);
+  }
+
+  async getPublicUrl(id: number): Promise<string> {
+    await this.findOne(id);
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: { store_id: this.storeId, domain_type: 'ecommerce', status: 'active', is_primary: true },
+      orderBy: { updated_at: 'desc' },
+      select: { hostname: true },
+    });
+    if (!domain?.hostname) throw new BadRequestException('Configura un dominio ecommerce principal para usar el QR público.');
+    const base = /^https?:\/\//i.test(domain.hostname) ? domain.hostname : `https://${domain.hostname}`;
+    const station = await this.prisma.service_stations.findFirst({ where: { id, store_id: this.storeId }, select: { public_id: true } });
+    if (!station?.public_id) throw new NotFoundException('Estación no encontrada');
+    return `${base}/estacion/${station.public_id}`;
   }
 
   async create(dto: CreateServiceStationDto) {

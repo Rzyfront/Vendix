@@ -115,6 +115,12 @@ export class ServiceStationsController {
     return this.response.success(await this.service.findOne(id));
   }
 
+  @Get(':id/public-url')
+  @Permissions('store:reservations:read')
+  async getPublicUrl(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success({ public_url: await this.service.getPublicUrl(id) });
+  }
+
   @Patch(':id')
   @Permissions('store:reservations:update')
   async update(

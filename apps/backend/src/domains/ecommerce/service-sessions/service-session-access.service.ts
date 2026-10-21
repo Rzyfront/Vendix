@@ -7,7 +7,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import type Redis from 'ioredis';
 import { defer, EMPTY, from, merge, Observable, of, throwError, timer } from 'rxjs';
-import { catchError, filter, finalize, map, mergeMap, takeWhile } from 'rxjs/operators';
+import { catchError, filter, finalize, map, mergeAll, mergeMap, takeWhile } from 'rxjs/operators';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService, RequestContext } from '../../../common/context/request-context.service';
 import { REDIS_CLIENT } from '../../../common/redis/redis.module';
@@ -15,6 +15,7 @@ import { NotificationsSseService } from '../../store/notifications/notifications
 
 const PUBLIC_EVENT_TYPES = new Set([
   'opened', 'paused', 'resumed', 'extended', 'closed', 'cancelled', 'no_show', 'provider_changed',
+  'item_added', 'item_removed',
   'work_started', 'work_updated', 'proposal_submitted', 'proposal_approved', 'proposal_rejected',
 ]);
 const TOKEN_GONE = { code: 'SERVICE_QR_001', status: 410, message: 'Access link unavailable' };
@@ -67,6 +68,39 @@ export class ServiceSessionAccessService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
+  /** Public physical-station view. The station UUID is an identifier, never a session credential. */
+  async getPublicStation(publicId: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId || !/^[0-9a-f-]{36}$/i.test(publicId)) throw new HttpException(TOKEN_GONE, 410);
+    const station = await this.prisma.service_stations.findFirst({
+      where: { store_id: storeId, public_id: publicId },
+      select: { id: true, name: true, status: true },
+    });
+    if (!station || station.status !== 'active') throw new HttpException(TOKEN_GONE, 410);
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { store_id: storeId, station_id: station.id, status: { in: ['open', 'paused'] } },
+      orderBy: { opened_at: 'desc' },
+      select: { id: true, status: true, product_id: true, order_id: true, opened_at: true },
+    });
+    if (!session) return { station: station.name, state: 'available', service: null, items: [], total: '0' };
+    const [service, order] = await Promise.all([
+      this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { name: true } }),
+      session.order_id ? this.prisma.orders.findFirst({
+        where: { id: session.order_id, store_id: storeId },
+        select: { currency: true, grand_total: true, order_items: { orderBy: { id: 'asc' }, take: 100, select: { product_name: true, quantity: true, total_price: true } } },
+      }) : Promise.resolve(null),
+    ]);
+    return {
+      station: station.name,
+      state: session.status === 'paused' ? 'paused' : 'occupied',
+      service: service?.name ?? 'Servicio en curso',
+      opened_at: session.opened_at,
+      currency: order?.currency ?? 'COP',
+      items: (order?.order_items ?? []).map((item) => ({ name: item.product_name, quantity: Number(item.quantity), total: String(item.total_price) })),
+      total: String(order?.grand_total ?? 0),
+    };
+  }
+
   /** Internal hook for session-open/email orchestration. Plaintext is returned once and never logged. */
   async issueAccessToken(sessionId: number, expiresAt: Date): Promise<IssuedServiceSessionAccess> {
     const storeId = RequestContextService.getStoreId();
@@ -105,7 +139,7 @@ export class ServiceSessionAccessService {
 
   async getPublicProgress(token: string) {
     const binding = await this.resolveToken(token);
-    const [events, budget, proposal] = await Promise.all([
+    const [events, budget, proposal, order] = await Promise.all([
       this.prisma.service_progress_events.findMany({
         where: { store_id: binding.store_id, session_id: binding.session_id, public_text: { not: null } },
         select: { event_type: true, public_text: true, created_at: true },
@@ -126,6 +160,27 @@ export class ServiceSessionAccessService {
           status: true, expires_at: true,
         },
       }),
+      binding.order_id
+        ? this.prisma.orders.findFirst({
+            where: { id: binding.order_id, store_id: binding.store_id },
+            select: {
+              currency: true,
+              grand_total: true,
+              order_items: {
+                orderBy: { id: 'asc' },
+                take: 100,
+                select: {
+                  product_name: true,
+                  description: true,
+                  quantity: true,
+                  unit_price: true,
+                  total_price: true,
+                  item_type: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve(null),
     ]);
     const verifiedSnapshot = proposal ? this.verifyProposalSnapshot(proposal) : false;
     const currentOrder = proposal && binding.order_id
@@ -150,7 +205,10 @@ export class ServiceSessionAccessService {
           expires_at: proposal.expires_at,
         }
       : null;
+    const budgetAmount = budget ? Number(budget.amount) : null;
+    const accountTotal = order ? Number(order.grand_total) : 0;
     return {
+      store_id: binding.store_id,
       status: binding.status,
       budget: budget ? {
         amount: String(budget.amount),
@@ -158,6 +216,21 @@ export class ServiceSessionAccessService {
         version: budget.version,
         approved_at: budget.approved_at,
       } : null,
+      account: {
+        currency: order?.currency ?? budget?.currency ?? 'COP',
+        items: (order?.order_items ?? []).map((item) => ({
+          name: item.product_name,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unit_price: String(item.unit_price),
+          total: String(item.total_price),
+          item_type: item.item_type,
+        })),
+        total: String(accountTotal),
+        budget_spent: String(accountTotal),
+        budget_amount: budgetAmount === null ? null : String(budgetAmount),
+        budget_remaining: budgetAmount === null ? null : String(budgetAmount - accountTotal),
+      },
       proposal: publicProposal,
       events: events.slice(0, 100).reverse().filter((e) => PUBLIC_EVENT_TYPES.has(e.event_type)).map((e) => ({
         type: e.event_type,
@@ -245,6 +318,12 @@ export class ServiceSessionAccessService {
           mergeMap((message: any) => from(RequestContextService.run(context, async () => {
             await this.resolveToken(token);
             if (!PUBLIC_EVENT_TYPES.has(message.data.event_type)) return null;
+            if (message.data.event_type === 'item_added' || message.data.event_type === 'item_removed') {
+              return {
+                type: 'snapshot',
+                data: await this.getPublicProgress(token),
+              };
+            }
             const event = await this.prisma.service_progress_events.findFirst({
               where: {
                 store_id: binding.store_id,
@@ -286,6 +365,7 @@ export class ServiceSessionAccessService {
           finalize(release),
         );
       }),
+      mergeAll(),
       catchError((error: unknown) =>
         error instanceof HttpException && error.getStatus() === 410
           ? EMPTY

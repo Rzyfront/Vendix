@@ -90,6 +90,7 @@ export class StorePrismaService extends BasePrismaService {
     'service_progress_events',
     'service_session_tokens',
     'service_subjects',
+    'service_reminder_logs',
     // Tiene columna `store_id` propia. Sin este registro el getter
     // `booking_reschedule_requests` devolvía un delegate SIN scoping, y
     // `cancelRescheduleRequest` hacía `update({ where: { id } })` antes de
@@ -1546,6 +1547,7 @@ export class StorePrismaService extends BasePrismaService {
   get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
   get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }
   get service_session_email_deliveries() { return this.scoped_client.service_session_email_deliveries; }
+  get service_reminder_logs() { return this.scoped_client.service_reminder_logs; }
 
   // Reviews models
   get reviews() {

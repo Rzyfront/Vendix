@@ -2006,7 +2006,9 @@ model products {
   booking_mode                   booking_mode_enum                @default(provider_required)
   buffer_minutes                 Int?                             @default(0)
   is_recurring                   Boolean                          @default(false)
+  recurrence_interval_days       Int?
   service_instructions           String?                          @db.Text
+  service_intake_fields           Json?
   preparation_time_minutes       Int?
   is_consultation                Boolean                          @default(false)
   send_preconsultation           Boolean                          @default(false)
@@ -12589,6 +12591,7 @@ model service_stations {
   id         Int      @id @default(autoincrement())
   store_id   Int
   name       String   @db.VarChar(120)
+  station_type String @default("carro") @db.VarChar(32)
   status     String   @default("active") @db.VarChar(20)
   capacity   Int      @default(1)
   public_id  String   @unique @default(uuid()) @db.Uuid
@@ -12818,4 +12821,22 @@ model service_contact_attempts {
   completed_at      DateTime? @db.Timestamptz(6)
   @@index([proposal_id, attempted_at])
   @@map("service_contact_attempts")
+}
+
+model service_reminder_logs {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  customer_id     Int
+  product_id      Int
+  source_order_id Int
+  due_date        DateTime  @db.Date
+  channel         String    @default("notification") @db.VarChar(20)
+  status          String    @default("pending") @db.VarChar(20)
+  sent_at         DateTime? @db.Timestamptz(6)
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@unique([store_id, customer_id, product_id, source_order_id])
+  @@index([store_id, status])
+  @@map("service_reminder_logs")
 }

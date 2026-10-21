@@ -665,4 +665,29 @@ export class ReservationsService {
       }),
     );
   }
+
+  // Provider station assignments
+  getProviderStations(providerId: number): Observable<number[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/${providerId}/stations`).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  setProviderStations(providerId: number, stationIds: number[]): Observable<number[]> {
+    return this.http.put<any>(`${this.apiUrl}/providers/${providerId}/stations`, { station_ids: stationIds }).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  assignStationToProvider(providerId: number, stationId: number): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/providers/${providerId}/stations/${stationId}`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  removeStationFromProvider(providerId: number, stationId: number): Observable<any> {
+    return this.http.delete<any>(`${this.apiUrl}/providers/${providerId}/stations/${stationId}`).pipe(
+      map((response) => response.data || response),
+    );
+  }
 }

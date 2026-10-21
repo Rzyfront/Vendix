@@ -74,6 +74,7 @@ import { PrintFormatsModule } from './print-formats/print-formats.module';
 import { CrmModule } from './crm/crm.module';
 import { ServiceStationsModule } from './service-stations/service-stations.module';
 import { ServiceSessionsModule } from './service-sessions/service-sessions.module';
+import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
 
 @Module({
@@ -152,6 +153,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     CrmModule,
     ServiceStationsModule,
     ServiceSessionsModule,
+    ServiceRemindersModule,
     ServiceBudgetsModule,
   ],
   exports: [PrintFormatsModule],

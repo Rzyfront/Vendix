@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -27,6 +28,7 @@ import {
   ServiceStationsService,
   StationProviderOption,
   StationServiceOption,
+  ServiceIntakeField,
   StationType,
 } from './service-stations.service';
 import { environment } from '../../../../../../../environments/environment';
@@ -249,6 +251,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   // QR Modal State
   readonly qrStation = signal<ServiceStation | null>(null);
   readonly qrDataUrl = signal<string | null>(null);
+  readonly qrPublicUrl = signal<string | null>(null);
   readonly qrLoading = signal(false);
 
   // Create station form
@@ -268,6 +271,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinAccessories = signal('');
   readonly checkinStylePreference = signal('');
   readonly checkinAllergies = signal('');
+  readonly checkinServiceIntakeValues = signal<Record<string, string | number | boolean>>({});
   readonly checkinCustomerName = signal('');
   readonly checkinCustomerDoc = signal('');
   readonly checkinCustomerPhone = signal('');
@@ -341,18 +345,59 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     });
   });
 
+  readonly checkinLinkedServiceIds = computed<number[]>(() => {
+    return this.selectedCheckinStation()?.services?.map((s) => s.product_id) ?? [];
+  });
+
   readonly serviceSelectorOptions = computed<SelectorOption[]>(() => {
-    const opts: SelectorOption[] = [
-      { value: 0, label: 'Sin servicio predefinido', description: 'Abrir cuenta con ítems a demanda' },
-    ];
-    for (const s of this.services()) {
+    const opts: SelectorOption[] = [];
+    const linked = this.checkinLinkedServiceIds();
+    const list = linked.length
+      ? this.services().filter((s) => linked.includes(s.id))
+      : this.services();
+    const effective = linked.length && !list.length
+      ? this.selectedCheckinStation()?.services?.map((s) => ({
+          id: s.product_id,
+          name: s.product?.name ?? `Servicio #${s.product_id}`,
+          base_price: s.product?.base_price,
+          service_duration_minutes: s.product?.service_duration_minutes ?? null,
+        })) ?? []
+      : list;
+    for (const s of effective) {
       opts.push({
         value: s.id,
-        label: s.name,
-        description: s.service_duration_minutes ? `${s.service_duration_minutes} min` : undefined,
+        label: `${s.name} · $${Number(s.base_price || 0).toLocaleString('es-CO')} COP`,
+        description: s.service_duration_minutes ? `${s.service_duration_minutes} min estimados` : 'Precio cargado a la cuenta al iniciar',
       });
     }
     return opts;
+  });
+
+  readonly checkinServicePrice = computed(() => {
+    const productId = Number(this.checkinProductId() || 0);
+    return Number(this.services().find((service) => service.id === productId)?.base_price || 0);
+  });
+
+  readonly checkinServiceIntakeFields = computed<ServiceIntakeField[]>(() => {
+    const productId = Number(this.checkinProductId() || 0);
+    const fromCatalog = this.services().find((service) => service.id === productId)?.service_intake_fields;
+    if (fromCatalog?.length) return fromCatalog;
+    return this.selectedCheckinStation()?.services.find((service) => service.product_id === productId)?.product?.service_intake_fields ?? [];
+  });
+
+  readonly checkinInitialLineTotal = computed(() => {
+    if (!this.checkinInitialProductId()) return 0;
+    return Math.max(0, Number(this.checkinInitialProductQty() || 1)) *
+      Math.max(0, Number(this.checkinInitialProductPrice() ?? 0));
+  });
+
+  readonly checkinEstimatedTotal = computed(() => this.checkinServicePrice() + this.checkinInitialLineTotal());
+
+  readonly addItemEstimatedTotal = computed(() => {
+    const current = Number(this.sessionOrder()?.grand_total ?? this.selectedSession()?.order?.grand_total ?? 0);
+    const quantity = Math.max(1, Number(this.addQuantity() || 1));
+    const unitPrice = Number(this.addUnitPrice() ?? 0);
+    return current + quantity * Math.max(0, unitPrice);
   });
 
   readonly providerSelectorOptions = computed<SelectorOption[]>(() => {
@@ -377,6 +422,36 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }));
   });
 
+  readonly selectedSessionStation = computed<ServiceStation | null>(() => {
+    const session = this.selectedSession();
+    if (!session) return null;
+    return this.stations().find((s) => s.id === session.station_id) ?? null;
+  });
+
+  readonly sessionLinkedServiceIds = computed<number[]>(() => {
+    return this.selectedSessionStation()?.services?.map((s) => s.product_id) ?? [];
+  });
+
+  readonly sessionCatalogProductSelectorOptions = computed<SelectorOption[]>(() => {
+    const linked = this.sessionLinkedServiceIds();
+    return this.sellableCatalogProducts()
+      .filter((prod) => {
+        if (prod.is_ingredient === true || prod.is_sellable === false) return false;
+        if (prod.product_type === 'service' && linked.length) return linked.includes(prod.id);
+        return true;
+      })
+      .map((prod) => ({
+        value: prod.id,
+        label: `${prod.name} ($${Number(prod.base_price || 0).toLocaleString('es-CO')})`,
+        description:
+          prod.product_type === 'service'
+            ? linked.length
+              ? 'Servicio vinculado a esta estación'
+              : 'Servicio / Mano de obra'
+            : 'Producto / Consumible',
+      }));
+  });
+
   // Manage session / Cuenta state (estilo mesas / cuenta abierta)
   readonly selectedSession = signal<ServiceSessionRow | null>(null);
   readonly sessionOrder = signal<any | null>(null);
@@ -387,6 +462,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Agregar ítems / productos a la cuenta
   readonly allCatalogProducts = signal<any[]>([]);
+  readonly sellableCatalogProducts = signal<any[]>([]);
   readonly selectedAddProductId = signal<number | null>(null);
   readonly addQuantity = signal<number>(1);
   readonly addUnitPrice = signal<number | null>(null);
@@ -642,13 +718,14 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   async openQrModal(station: ServiceStation): Promise<void> {
     this.qrStation.set(station);
     this.qrDataUrl.set(null);
+    this.qrPublicUrl.set(null);
     this.qrLoading.set(true);
     this.showQrModal.set(true);
 
     try {
       const QRCode = await import('qrcode');
-      const publicId = station.public_id || `station-${station.id}`;
-      const stationUrl = `${window.location.origin}/?estacion=${publicId}`;
+      const stationUrl = await firstValueFrom(this.stationsApi.getPublicUrl(station.id));
+      this.qrPublicUrl.set(stationUrl);
       const dataUrl = await QRCode.toDataURL(stationUrl, {
         width: 480,
         margin: 2,
@@ -665,11 +742,14 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  copyQrLink(): void {
+  async copyQrLink(): Promise<void> {
     const st = this.qrStation();
     if (!st) return;
-    const publicId = st.public_id || `station-${st.id}`;
-    const url = `${window.location.origin}/?estacion=${publicId}`;
+    let url = this.qrPublicUrl();
+    if (!url) {
+      try { url = await firstValueFrom(this.stationsApi.getPublicUrl(st.id)); this.qrPublicUrl.set(url); }
+      catch { this.toastService.error('No se pudo resolver el dominio público de la tienda.'); return; }
+    }
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(() => {
         this.toastService.success('Enlace de la estación copiado al portapapeles.');
@@ -872,13 +952,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Modal 2: Check-in / Nuevo Ingreso
   openCheckinModal(station?: ServiceStation): void {
-    if (station) {
-      this.checkinStationId.set(station.id);
-    } else {
+    let target: ServiceStation | null = station ?? null;
+    if (!target) {
       const freeStation = this.stations().find((s) => s.status === 'active' && !this.stationSession(s.id));
-      const target = freeStation || this.stations()[0] || null;
-      this.checkinStationId.set(target ? target.id : null);
+      target = freeStation || this.stations()[0] || null;
     }
+    this.checkinStationId.set(target ? target.id : null);
     this.checkinVehicleName.set('');
     this.checkinPlate.set('');
     this.checkinMileage.set('');
@@ -889,11 +968,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinAccessories.set('');
     this.checkinStylePreference.set('');
     this.checkinAllergies.set('');
+    this.checkinServiceIntakeValues.set({});
     this.checkinCustomerName.set('');
     this.checkinCustomerDoc.set('');
     this.checkinCustomerPhone.set('');
     this.checkinCustomerEmail.set('');
-    this.checkinProductId.set(this.services()[0]?.id ?? 0);
+    this.checkinProductId.set(this.defaultCheckinServiceId(target));
     this.checkinProviderId.set(0);
     this.checkinDurationMinutes.set(45);
     this.checkinNotes.set('');
@@ -917,6 +997,37 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
+    this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
+    this.checkinServiceIntakeValues.set({});
+  }
+
+  onCheckinServiceChange(productId: number | string): void {
+    this.checkinProductId.set(Number(productId));
+    this.checkinServiceIntakeValues.set({});
+  }
+
+  setServiceIntakeValue(key: string, event: Event, type: ServiceIntakeField['type']): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    const value = type === 'checkbox'
+      ? (target as HTMLInputElement).checked
+      : type === 'number' && target.value !== ''
+        ? Number(target.value)
+        : target.value;
+    this.checkinServiceIntakeValues.update((values) => ({ ...values, [key]: value }));
+  }
+
+  setServiceIntakeControlValue(key: string, value: string | number): void {
+    this.checkinServiceIntakeValues.update((values) => ({ ...values, [key]: value }));
+  }
+
+  private defaultCheckinServiceId(station: ServiceStation | null): number {
+    const linked = station?.services?.map((s) => s.product_id) ?? [];
+    if (linked.length) {
+      const known = linked.find((id) => this.services().some((s) => s.id === id));
+      return known ?? linked[0] ?? 0;
+    }
+    return this.services()[0]?.id ?? 0;
   }
 
   onCheckinInitialProductSelect(productId: number | null): void {
@@ -987,6 +1098,21 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       }
     }
 
+    const selectedServiceId = Number(this.checkinProductId() || 0) || station?.services[0]?.product_id || this.services()[0]?.id;
+    if (!selectedServiceId) {
+      this.toastService.error('Agrega al menos un servicio al catálogo y asígnalo a esta estación antes de iniciar la atención.');
+      return;
+    }
+    const serviceIntakeValues = this.checkinServiceIntakeValues();
+    const missingRequiredServiceField = this.checkinServiceIntakeFields().find((field) => {
+      const value = serviceIntakeValues[field.key];
+      return field.required && (value === undefined || value === null || value === '' || (typeof value === 'string' && !value.trim()) || value === false);
+    });
+    if (missingRequiredServiceField) {
+      this.toastService.error(`Completa el campo obligatorio "${missingRequiredServiceField.label}".`);
+      return;
+    }
+
     this.saving.set(true);
     const duration = this.checkinDurationMinutes() || 45;
     const plannedEnd = new Date(Date.now() + duration * 60000).toISOString();
@@ -1018,6 +1144,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       ...(email ? { customer_email: email } : {}),
       station_type: stationType,
       ...(notes ? { notes } : {}),
+      ...(this.checkinServiceIntakeFields().length ? { service_intake_fields: serviceIntakeValues } : {}),
     };
 
     if (requiresVehicle) {
@@ -1036,10 +1163,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }
 
     // Fallback de servicio para que nunca falle la apertura walk-in
-    let productId = this.checkinProductId() ? Number(this.checkinProductId()) : undefined;
-    if (!productId) {
-      productId = station?.services[0]?.product_id || this.services()[0]?.id || undefined;
-    }
+    const productId = selectedServiceId;
 
     const payload: any = {
       station_id: Number(stationId),
@@ -1153,10 +1277,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       error: () => this.sessionOrderLoading.set(false),
     });
 
-    // Load product catalog for adding to the account
-    if (!this.allCatalogProducts().length) {
-      this.stationsApi.getAllProducts().subscribe({
-        next: (prods) => this.allCatalogProducts.set(prods || []),
+    // Load sellable catalog for adding to the account (products + services, no insumos)
+    if (!this.sellableCatalogProducts().length) {
+      this.stationsApi.getSellableProducts().subscribe({
+        next: (prods) => this.sellableCatalogProducts.set(prods || []),
         error: () => {},
       });
     }
@@ -1216,7 +1340,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.addUnitPrice.set(null);
       return;
     }
-    const found = this.allCatalogProducts().find((p) => p.id === productId);
+    const found =
+      this.sellableCatalogProducts().find((p) => p.id === productId) ??
+      this.allCatalogProducts().find((p) => p.id === productId);
     if (found) {
       this.addUnitPrice.set(Number(found.base_price || 0));
     }

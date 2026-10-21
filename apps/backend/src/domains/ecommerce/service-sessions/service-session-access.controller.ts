@@ -31,6 +31,13 @@ export class ServiceSessionAccessController {
     }
   }
 
+  @Get('station/:publicId')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Header('Cache-Control', 'no-store')
+  async station(@Param('publicId') publicId: string) {
+    return this.access.getPublicStation(publicId);
+  }
+
   @Sse(':token/stream')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Header('Cache-Control', 'no-store')
