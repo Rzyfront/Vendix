@@ -74,6 +74,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-trust-proxy-chain` |
 | -- | `vendix-vexi-agent` |
 | -- | `vendix-zoneless-signals` |
+| ANY development task or plan in Vendix (mandatory; trivial 1-3 line changes excepted) | `sopus` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
 | Activating distance_pricing_enabled on a shipping method | `vendix-shipping-distance-pricing` |
 | Adaptar una plantilla de mensaje comercial a un cliente | `vendix-contactar-clientes` |
@@ -483,7 +484,6 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande) | `how-to-critical-plan` |
 | User explicitly asks for a plan with checklists that tracks execution progress for handoff | `how-to-critical-plan` |
 | User explicitly asks for parallel multi-perspective auditing of a plan or its implementation | `how-to-critical-plan` |
-| User explicitly invokes sopus (big model orchestrates, small model codes) | `sopus` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User explicitly says the work cannot fail (esto no puede fallar, cero margen de error) | `how-to-critical-plan` |
 | User names or links the how-to-critical-plan skill | `how-to-critical-plan` |
