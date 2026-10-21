@@ -650,8 +650,7 @@ export class VendixLandingComponent implements OnInit {
       .filter((p) => p.billing_cycle === 'monthly')
       .map((p) => Number(p.base_price))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const min = prices.length > 0 ? Math.min(...prices) : null;
-    const json = JSON.stringify(buildVendixStructuredData(min));
+    const json = JSON.stringify(buildVendixStructuredData(prices));
 
     let script = this.document.getElementById('vendix-jsonld');
     if (!script) {
