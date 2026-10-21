@@ -1,6 +1,8 @@
 import {
+  Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -12,7 +14,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
-import { ListServiceRemindersDto } from './dto';
+import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto } from './dto';
 import { ServiceRemindersService } from './service-reminders.service';
 
 @ApiTags('Store Service Reminders')
@@ -32,6 +34,56 @@ export class ServiceRemindersController {
     const result = await this.serviceReminders.list(query);
     return this.response.success(result, 'Recordatorios obtenidos exitosamente');
   }
+
+  // --- Registro de servicios y estaciones -----------------------------------
+  // Declarado ANTES de las rutas `:id/...` para que `registry/email` no caiga
+  // en `:id/email` (ParseIntPipe rechazaría "registry").
+
+  @Get('registry')
+  @Permissions('store:reservations:read')
+  @ApiOperation({ summary: 'Registro de servicios realizados (estaciones + órdenes recurrentes) con próxima fecha' })
+  @ApiResponse({ status: 200, description: 'Registro paginado; meta.stats = { total, recurring, due_soon, overdue }' })
+  async registry(@Query() query: ListServiceRegistryDto) {
+    const result = await this.serviceReminders.registry(query);
+    return this.response.paginated(
+      result.items,
+      result.total,
+      result.page,
+      result.limit,
+      'Registro de servicios obtenido exitosamente',
+      undefined,
+      { stats: result.stats },
+    );
+  }
+
+  @Post('registry/email')
+  @HttpCode(200)
+  @Permissions('store:reservations:update')
+  @ApiOperation({ summary: 'Enviar por correo el mensaje de una fila del registro (crea el recordatorio si no existe)' })
+  async registryEmail(@Body() dto: ServiceRegistryActionDto) {
+    const result = await this.serviceReminders.registryEmail(dto);
+    return this.response.success(result, 'Correo enviado exitosamente');
+  }
+
+  @Post('registry/whatsapp')
+  @HttpCode(200)
+  @Permissions('store:reservations:update')
+  @ApiOperation({ summary: 'Generar enlace de WhatsApp para una fila del registro (crea el recordatorio si no existe)' })
+  async registryWhatsapp(@Body() dto: ServiceRegistryActionDto) {
+    const result = await this.serviceReminders.registryWhatsapp(dto);
+    return this.response.success(result, 'Enlace de WhatsApp generado exitosamente');
+  }
+
+  @Post('registry/dismiss')
+  @HttpCode(200)
+  @Permissions('store:reservations:update')
+  @ApiOperation({ summary: 'Descartar el recordatorio de una fila del registro (crea el recordatorio si no existe)' })
+  async registryDismiss(@Body() dto: ServiceRegistryActionDto) {
+    const result = await this.serviceReminders.registryDismiss(dto);
+    return this.response.updated(result, 'Recordatorio descartado exitosamente');
+  }
+
+  // --- Recordatorios por id de log (compatibilidad) --------------------------
 
   @Post(':id/email')
   @Permissions('store:reservations:update')
