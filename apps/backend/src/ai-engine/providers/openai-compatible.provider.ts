@@ -43,6 +43,54 @@ export class OpenAICompatibleProvider implements AIProvider {
     return this.config.settings?.stream_usage_supported === true;
   }
 
+  /**
+   * A request that must spend its whole budget on visible text. Hybrid models
+   * behind OpenRouter (DeepSeek V4 Flash, in production for Vex/Vexi) reason
+   * by default and bill it as completion: with `max_tokens: 1200` a knowledge
+   * question spent all 1200 in `reasoning`, `content` came back empty with
+   * `finish_reason: length`, and the closing inference did exactly the same —
+   * the chat showed `no_answer`. The agent's closing inference therefore asks
+   * per request (`thinking: false`) and the flag goes on the wire.
+   *
+   * Deliberately per request and not from `settings.thinking`: every config
+   * already says `false` and the live suite showed write turns degrade
+   * without reasoning (the model asks «¿lo confirmo?» in prose instead of
+   * proposing).
+   *
+   * Some endpoints refuse to switch reasoning off (`openai/gpt-oss-20b`: 400
+   * «Reasoning is mandatory»). That refusal is remembered for this provider
+   * and the request is resent once without the parameter.
+   */
+  private reasoningOffRejected = false;
+
+  private reasoningControl(
+    options?: AIRequestOptions,
+  ): Record<string, unknown> {
+    return options?.thinking === false &&
+      this.isOpenRouterConfig() &&
+      !this.reasoningOffRejected
+      ? { reasoning: { enabled: false } }
+      : {};
+  }
+
+  private async withReasoningFallback<T>(
+    options: AIRequestOptions | undefined,
+    send: () => Promise<T>,
+  ): Promise<T> {
+    const sentReasoningOff = 'reasoning' in this.reasoningControl(options);
+    try {
+      return await send();
+    } catch (error: any) {
+      if (
+        !sentReasoningOff ||
+        !/reasoning is mandatory/i.test(String(error?.message ?? ''))
+      )
+        throw error;
+      this.reasoningOffRejected = true;
+      return send();
+    }
+  }
+
   constructor(private config: AIProviderConfig) {
     const baseUrl = this.cleanBaseUrl(config.baseUrl);
     const clientBaseUrl = this.toOpenAIClientBaseUrl(baseUrl);
@@ -93,12 +141,15 @@ export class OpenAICompatibleProvider implements AIProvider {
             ...(options?.tool_choice && {
               tool_choice: options.tool_choice as any,
             }),
+            ...this.reasoningControl(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
             : ([] as const)),
         );
-      const response = deadline ? await deadline.run(request) : await request();
+      const response = await this.withReasoningFallback(options, () =>
+        deadline ? deadline.run(request) : request(),
+      );
 
       this.config.observeUsage?.(
         response.usage
@@ -1058,12 +1109,15 @@ export class OpenAICompatibleProvider implements AIProvider {
             ...(options?.tool_choice && {
               tool_choice: options.tool_choice as any,
             }),
+            ...this.reasoningControl(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
             : ([] as const)),
         );
-      const stream = deadline ? await deadline.run(request) : await request();
+      const stream = await this.withReasoningFallback(options, () =>
+        deadline ? deadline.run(request) : request(),
+      );
 
       let model: string | undefined;
       let finishReason: AIResponse['finish_reason'];

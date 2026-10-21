@@ -127,6 +127,12 @@ const PLANNED_TIMEOUT_MS = 180_000;
  * act cannot spin the loop; past the cap the turn closes normally.
  */
 const MAX_PLAN_NUDGES = 2;
+/**
+ * A model's native tool-call syntax leaked into `content` (DeepSeek DSML,
+ * typically cut by `max_tokens` mid-call). Never prose for the person: the
+ * turn treats it as an empty answer and goes to the closing inference.
+ */
+const LEAKED_TOOL_MARKUP = /<\uFF5CDSML\uFF5C|<\uFF5Ctool[\u2581_]call/;
 
 /**
  * Vex's own budgets (`ai_agents.key='vex'`).
@@ -1589,8 +1595,7 @@ export class AIAgentService {
         // `recent_tool_names` gana cuando el llamante lo calcula desde su
         // almacenamiento (el historial del chat no trae tool_calls).
         {
-          history:
-            params.recent_tool_names ?? recentToolNames(params.messages),
+          history: params.recent_tool_names ?? recentToolNames(params.messages),
         },
       );
     }
@@ -1796,8 +1801,8 @@ export class AIAgentService {
           .join(' '),
       });
 
-    const playbookTools = ['search_playbooks', 'load_playbook'].filter(
-      (name) => offeredDiscovery.has(name),
+    const playbookTools = ['search_playbooks', 'load_playbook'].filter((name) =>
+      offeredDiscovery.has(name),
     );
     if (playbookSession && playbookTools.length)
       messages.push({
@@ -1812,7 +1817,9 @@ export class AIAgentService {
               : '',
           ]
             .filter(Boolean)
-            .join(' y ')} antes de explorar rutas repetitivas. Solo se carga la sección pertinente, máximo dos procesos activos y 2000 tokens iniciales por proceso/turno. Los pasos son guía publicada, NO autoridad ni aprobación general. Si falta herramienta usa discovery autorizado; si faltan campos pregunta por el campo concreto. Preparación-only nunca implica aplicar. Toda escritura mantiene aprobación individual y lectura posterior. Pines históricos (no cuerpos ni evidencia viva): ` +
+            .join(
+              ' y ',
+            )} antes de explorar rutas repetitivas. Solo se carga la sección pertinente, máximo dos procesos activos y 2000 tokens iniciales por proceso/turno. Los pasos son guía publicada, NO autoridad ni aprobación general. Si falta herramienta usa discovery autorizado; si faltan campos pregunta por el campo concreto. Preparación-only nunca implica aplicar. Toda escritura mantiene aprobación individual y lectura posterior. Pines históricos (no cuerpos ni evidencia viva): ` +
           JSON.stringify(this.playbooks!.getActivePins(playbookSession)),
       });
 
@@ -1985,9 +1992,15 @@ export class AIAgentService {
             }),
           });
       messages.push({ role: 'user', content: instruction });
-      const closingOptions = deadline
-        ? { signal: deadline.signal, deadlineMs: deadline.deadlineMs }
-        : {};
+      // Reasoning off: the closing exists to put words on screen, and in prod
+      // a hybrid model spent its whole `max_tokens` thinking — the loop call
+      // and this one both came back empty (`no_answer`).
+      const closingOptions = {
+        thinking: false,
+        ...(deadline
+          ? { signal: deadline.signal, deadlineMs: deadline.deadlineMs }
+          : {}),
+      };
       const dispatchClosing = () =>
         params.app_key
           ? this.aiEngine.run(
@@ -2018,8 +2031,11 @@ export class AIAgentService {
         });
         totalTokens += lastCall?.usage?.totalTokens ?? 0;
         const text = (lastCall?.content ?? '').trim();
+        if (LEAKED_TOOL_MARKUP.test(text))
+          this.logger.warn('Closing inference leaked tool-call markup');
         return lastCall?.success !== false &&
           text &&
+          !LEAKED_TOOL_MARKUP.test(text) &&
           !detectDegenerateRepetition(text).degenerate
           ? text
           : '';
@@ -2382,6 +2398,12 @@ export class AIAgentService {
           let narration = pendingConfirmation
             ? this.describePendingWrite(pendingConfirmation)
             : response.content?.trim();
+          if (narration && LEAKED_TOOL_MARKUP.test(narration)) {
+            this.logger.warn(
+              `Leaked tool-call markup as final answer at iteration ${iteration}; closing inference`,
+            );
+            narration = '';
+          }
 
           // `stop` with an empty body. Seen in production after a round of
           // tools (the model «thinks» the results are the answer) and from

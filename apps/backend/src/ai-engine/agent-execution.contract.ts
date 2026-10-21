@@ -43,9 +43,11 @@ export const USER_NOTICES = {
   stopped:
     'La respuesta se detuvo. El avance se conserva; verifica los cambios en curso antes de volver a intentarlos.',
   // Último recurso: el modelo no produjo texto ni tras la inferencia de cierre.
-  // Habla como la tienda, no como un auditor («evidencia», «registro»).
+  // Habla como la tienda, no como un auditor («evidencia», «registro»), y
+  // nunca le pide a la persona que reformule: la falla es nuestra, no de cómo
+  // preguntó (decisión del dueño).
   no_answer:
-    'Esta vez no logré armar la respuesta. ¿Me lo pides de nuevo? Si quieres, dímelo con otras palabras y lo intento otra vez.',
+    'Perdón, esta vez no me salió la respuesta. Si quieres, lo intento de nuevo ahora mismo.',
 } as const;
 
 /** Detalle de un paso del rastro: catálogo cerrado, nunca la nota del recibo. */
