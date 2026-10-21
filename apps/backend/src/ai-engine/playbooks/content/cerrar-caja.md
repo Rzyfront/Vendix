@@ -3,7 +3,7 @@
   "name": "cerrar-caja",
   "description": "Cerrar la sesión indicada con efectivo contado por la persona, revisar pendientes y demostrar cierre y diferencia.",
   "metadata": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "owner": "vendix-domain-maintainers",
     "industry": [
       "all"
@@ -12,6 +12,10 @@
     "tool_contracts": [
       {
         "name": "get_active_cash_session",
+        "version": "1"
+      },
+      {
+        "name": "get_cash_session_close_report",
         "version": "1"
       },
       {
@@ -63,6 +67,12 @@
       {
         "key": "override_reason",
         "description": "Motivo confirmado para override.",
+        "source": "user",
+        "required": false
+      },
+      {
+        "key": "discrepancy_reason",
+        "description": "Motivo de la diferencia de arqueo en palabras de la persona; nunca inventarlo.",
         "source": "user",
         "required": false
       }
@@ -129,10 +139,23 @@
         }
       },
       {
+        "id": "discrepancy",
+        "section": "discrepancy-preflight",
+        "tool": "get_cash_session_close_report",
+        "instruction": "Si no cuadra: leer el arqueo para hallar la causa antes del cierre.",
+        "depends_on": [
+          "summary"
+        ],
+        "approval": "none",
+        "arguments": {
+          "session_id": "${inputs.session_id}"
+        }
+      },
+      {
         "id": "close",
         "section": "close",
         "tool": "close_cash_session",
-        "instruction": "Preparar diff contra lectura actual y esperar aprobación irreversible; no elegir override.",
+        "instruction": "Preparar diff contra lectura actual y esperar aprobación irreversible; no elegir override. Con diferencia revisada enviar el motivo de la persona.",
         "depends_on": [
           "pending"
         ],
@@ -272,6 +295,7 @@ Guía, no aprobación ni autoridad. Usar solo para este objetivo explícito.
 - `currency` — obligatorio, confirmado por persona: Moneda y unidad de arqueo confirmadas.
 - `pending_decision` — opcional/condicional, confirmado por persona: Solo decisión explícita resolved/override si hay pendientes.
 - `override_reason` — opcional/condicional, confirmado por persona: Motivo confirmado para override.
+- `discrepancy_reason` — opcional/condicional, confirmado por persona: Motivo de la diferencia de arqueo; nunca inventarlo.
 Si falta un campo obligatorio pedir exactamente ese campo. Los IDs simbólicos del contrato se sustituyen solo con lecturas/recibos del alcance autenticado; los fixtures numéricos son sintéticos y nunca argumentos por defecto.
 
 ## setup
@@ -279,7 +303,7 @@ Resolver permisos actuales y tools/versiones del metadata, app/industria, scope 
 El campo real de tool es session_id y el conteo es actual_closing_amount. Diferencia = contado - esperado; una diferencia legítima no se corrige inventando movimientos. Revalidar si cambian sesión, pendientes o esperado.
 
 ## steps
-Identificar la sesión indicada. Pedir efectivo contado y moneda; no estimar. Luego cargar movements y cash-preflight.
+Identificar la sesión indicada. Pedir efectivo contado y moneda; no estimar. Luego cargar movements y cash-preflight. Si contado ≠ esperado fuera de tolerancia, cargar discrepancy-preflight antes de close.
 
 ## approvals
 Cada escritura exige preview de dominio actual y tarjeta individual del circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido ni un pago por un segundo seam.
@@ -302,4 +326,12 @@ Contrastar movimientos de la misma sesión.
 Leer efectivo esperado sin reemplazar el conteo humano. Consultar pendientes/fingerprint actual; la persona decide resolver o excepción.
 
 ## close
-Preparar diff contra lectura actual y esperar aprobación irreversible; no elegir override.
+Preparar diff contra lectura actual y esperar aprobación irreversible; no elegir override. Con diferencia revisada enviar el motivo de la persona.
+
+## discrepancy-preflight
+Diferencia = contado − esperado. Tolerancia: 0,1 % del esperado, mínimo 1. Si cuadra, no molestar.
+Si no cuadra o el cierre avisa diferencia, antes de proponerlo: explicar cifras sin regañar, preguntar si conoce el motivo, revisar arqueo, movimientos y órdenes del turno (`list_orders`) y mostrar candidatos. Luego cargar discrepancy-causes.
+
+## discrepancy-causes
+Causas típicas de caja: órdenes canceladas o sin registrar, reembolsos olvidados, entradas o salidas de efectivo sin registrar, pago con otro método mal clasificado, ventas fuera del sistema, error de conteo (recontar).
+Guiar a registrar lo faltante, cada uno con su aprobación, y releer el esperado. Luego proponer el cierre con `discrepancy_reviewed`=true y `discrepancy_reason` en palabras de la persona. Si insiste en cerrar ya, respetarlo y registrar su motivo o que siguió sin conocerlo. Nunca inventar motivo ni movimientos para cuadrar.

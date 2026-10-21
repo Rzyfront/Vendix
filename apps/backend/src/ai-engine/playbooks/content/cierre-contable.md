@@ -3,7 +3,7 @@
   "name": "cierre-contable",
   "description": "Cerrar un período fiscal de la entidad correcta tras comprobar balance/ledger y verificar estado, sin inventar asientos.",
   "metadata": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "owner": "vendix-domain-maintainers",
     "industry": [
       "all"
@@ -256,6 +256,7 @@ Si falta un campo obligatorio pedir exactamente ese campo. Los IDs simbólicos d
 ## setup
 Resolver permisos actuales y tools/versiones del metadata, app/industria, scope operativo/fiscal relevante y estado actual. Nunca almacenar usuarios, tiendas, tokens ni IDs comerciales en este documento. Confirmar datos ambiguos y paginar hasta cobertura suficiente; datos truncados/históricos no son evidencia viva.
 La entidad fiscal pertenece al NIT resuelto por dominio; no fabricar asiento automático/manual para cuadrar. Cierre fiscal mensual y close_fiscal_period no son intercambiables.
+Si el balance no cuadra o hay pendientes, cargar discrepancy-preflight antes de close.
 
 ## steps
 - `period` (inicio) → `list_fiscal_periods` v1: Identificar período y accounting_entity fiscal, no confundir scope operativo.
@@ -279,3 +280,12 @@ No cerrar objetivo como completado desde Markdown, una tarjeta pendiente, job co
 
 ## alternative
 Si tool, permiso, contrato, preview o verificador falta, presentar restricción concreta y el módulo del dominio correspondiente. No ampliar autoridad ni crear wrappers de negocio para cumplir el guion. Mantener IDs ya resueltos y pedir la decisión mínima necesaria para continuar.
+
+## discrepancy-preflight
+Antes de proponer el cierre revisar: balance de prueba descuadrado (débitos ≠ créditos), asientos automáticos fallidos pendientes en `list_entry_failures`, y saldos de caja o bancos en libros que no coinciden con el arqueo o el extracto.
+Si algo no cuadra:
+1. Explicar con cifras y sin jerga qué no coincide y por cuánto.
+2. Preguntar si conoce el motivo.
+3. Mostrar candidatos concretos: ventas, pagos o recepciones cuyo asiento falló, conciliaciones bancarias abiertas, cierres de caja con diferencia, movimientos con fecha fuera del periodo.
+4. Guiar a resolverlos en su propio flujo con su aprobación; luego releer el balance.
+5. Nunca crear asientos de cuadre ni forzar el cierre: con descuadre real el cierre queda bloqueado y se remite a contabilidad. Si todo cuadra, no molestar.

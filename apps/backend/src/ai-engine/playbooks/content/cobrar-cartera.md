@@ -3,7 +3,7 @@
   "name": "cobrar-cartera",
   "description": "Aplicar un abono de cartera con medio explícito y demostrar un único recibo y saldo actualizado.",
   "metadata": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "owner": "vendix-domain-maintainers",
     "industry": [
       "all"
@@ -60,6 +60,12 @@
         "description": "Saldo observado menos abono confirmado.",
         "source": "lookup",
         "required": true
+      },
+      {
+        "key": "discrepancy_reason",
+        "description": "Motivo de la diferencia entre pago y saldo en palabras de la persona; nunca inventarlo.",
+        "source": "user",
+        "required": false
       }
     ],
     "steps": [
@@ -221,11 +227,13 @@ Usar solo por intención explícita del usuario en este proceso. No usar para sa
 - `payment_method` — obligatorio, confirmado por persona: Forma de pago explícita.
 - `payment_id` — obligatorio, resuelto desde lectura/recibo de dominio: Recibo devuelto por dominio.
 - `expected_balance` — obligatorio, resuelto desde lectura/recibo de dominio: Saldo observado menos abono confirmado.
+- `discrepancy_reason` — opcional/condicional, confirmado por persona: Motivo de la diferencia entre pago y saldo; nunca inventarlo.
 Si falta un campo obligatorio pedir exactamente ese campo. Los IDs simbólicos del contrato se sustituyen solo con lecturas/recibos del alcance autenticado; los fixtures numéricos son sintéticos y nunca argumentos por defecto.
 
 ## setup
 Resolver permisos actuales y tools/versiones del metadata, app/industria, scope operativo/fiscal relevante y estado actual. Nunca almacenar usuarios, tiendas, tokens ni IDs comerciales en este documento. Confirmar datos ambiguos y paginar hasta cobertura suficiente; datos truncados/históricos no son evidencia viva.
 Abono no es nueva venta ni nuevo impuesto. Retenciones las resuelve el contrato fiscal del dominio; no inventar tasas ni asientos.
+Si el pago recibido no coincide con el saldo, cargar discrepancy-preflight antes de collect.
 
 ## steps
 - `receivable` (inicio) → `get_receivable` v1: Leer saldo, estado, abonos y retenciones existentes.
@@ -247,3 +255,10 @@ No cerrar objetivo como completado desde Markdown, una tarjeta pendiente, job co
 
 ## alternative
 Si tool, permiso, contrato, preview o verificador falta, presentar restricción concreta y el módulo del dominio correspondiente. No ampliar autoridad ni crear wrappers de negocio para cumplir el guion. Mantener IDs ya resueltos y pedir la decisión mínima necesaria para continuar.
+
+## discrepancy-preflight
+Si lo que pagó el cliente no coincide con el saldo leído, antes de proponer el abono:
+1. Decir las cifras sin regañar: el saldo es X, llegaron Y, la diferencia es Z.
+2. Preguntar qué fue: abono parcial, descuento pactado, retención que practicó el cliente, pago de otra cuenta o error de digitación.
+3. Abono parcial: seguir con el monto real recibido. Retención o descuento: no registrarlos como abono; remitir al flujo fiscal o de nota crédito del dominio, sin inventar tasas. Pago mayor al saldo: no aplicar el excedente; preguntar a qué cuenta corresponde.
+4. Dejar el motivo en palabras de la persona en las notas del abono. Si insiste en aplicar ya, respetarlo y anotar su motivo. Si coincide, no molestar.
