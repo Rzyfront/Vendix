@@ -51,6 +51,29 @@ capacidad faltante (listar proveedores, editar dirección de cliente) o del defe
 Gate «30/30 + pass^2» no cumplido: el saldo de OpenRouter cayó bajo el piso antes de
 recorrer los casos corregidos. Con índice vacío (g30) la cascada vuelve a ~87,5k, como se espera.
 
+> Actualización (merge de #936): las corridas full-2 y full-3 sobre `4fdd0fd76` dieron
+> **30/30 con pass^2**; el baseline `a0b2daec3` da 23/30 sobre los mismos casos.
+> Precisión del fallback: índice vacío o cobertura < 0,9 → catálogo autorizado completo;
+> si fallan **solo los embeddings**, el turno sigue en ranking léxico (no hay cascada).
+
+### Hotfix pendientes #936 (2026-10-20)
+
+Rama `hotfix/vex-vexi-dinamico-pendientes` (desde `develop` 7b724d337). Cierra lo que la
+re-revisión v2 (79/100) dejó abierto:
+
+- **M1:** `search_playbooks`/`load_playbook` y `search_recipes`/`load_recipe` entran al núcleo
+  dinámico solo si el turno tiene sesión de playbook/receta, siempre ∩ autoridad.
+- **L1–L3:** firma de la tool ante INVALID_ARGS de la regla dura, contador
+  `unloaded_authorized_calls` sin discovery, sesiones de voz de #934 normalizadas (`loaded`/`used`). _TODO orquestador: confirmar alcance final._
+- **N2/N3 (F7):** un 4xx nativo de Anthropic desactiva el modo nativo y reintenta una vez con
+  carga propia; probe con prueba negativa, fuera del turno y con huella de credencial en la clave.
+- **N4:** `markInProcessWriteApplied` fail-closed (`{error, code}` cuenta como fallo).
+- **N6:** `\set ON_ERROR_STOP on` en el fixture E2E. **Golden:** g31–g33 (playbooks y recetas
+  en modo dinámico).
+- **N5:** el reformateo de `purchase-orders.service.ts` (`41dfe794d`) no tiene cambios
+  funcionales fuera del `where.OR` de `findAll` (sin espacios: 205+/133−; ver cuerpo del PR).
+- Regla de dominio compartida guard/puente documentada en la skill `vendix-ai-tool-routing` 2.1.
+
 ## Contrato entregado
 
 - Catálogo por `tool:<nombre canónico>:<versión>` y documento entero estable. Hash incluye

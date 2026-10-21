@@ -75,6 +75,17 @@ export function agentToolCore(agent: string | undefined): readonly string[] {
 }
 const MIN_PLAN = new Set(['propose_plan', 'ask_user']);
 /**
+ * Discovery backed by a per-turn subsystem session (M1): offered in the core
+ * ONLY when the turn created that session (playbooks need a playbookSession,
+ * recipes a recipeSession), and always ∩ the turn's authority. Without the
+ * session the handler answers *_SESSION_REQUIRED, so offering it would be a
+ * dead end; with it, the system prompt orders the model to call them.
+ */
+export const SESSION_DISCOVERY = {
+  playbooks: ['search_playbooks', 'load_playbook'],
+  recipes: ['search_recipes', 'load_recipe'],
+} as const;
+/**
  * Per-turn routing state. Plain JSON on purpose: the voice surface clones it
  * with JSON.stringify and persists it with the consent session.
  */
@@ -89,6 +100,11 @@ export interface ToolRoutingSession {
   loaded: string[];
   /** agent_key of the turn; selects the fixed core. Undefined = Vexi. */
   agent?: string;
+  /**
+   * Session-backed discovery enabled for this turn (SESSION_DISCOVERY names),
+   * part of the core while the turn is dynamic. Loading only, never a grant.
+   */
+  sessionDiscovery?: string[];
   /** D1 prefetch already ran for this turn. */
   prefetched?: boolean;
   /** Reason the turn serves the full authorized catalog (cascade floor). */
@@ -158,6 +174,41 @@ export class ToolRouterService {
     };
   }
 
+  /**
+   * Normalizes a session read back from storage (L3): a voice session
+   * persisted by #934 has no `loaded`/`used`, and a missing array must never
+   * become a TypeError mid-call. Idempotent; mutates and returns the session.
+   */
+  restore(session: ToolRoutingSession): ToolRoutingSession {
+    const s = session as Partial<ToolRoutingSession>;
+    if (!Array.isArray(s.loaded)) s.loaded = [];
+    if (!Array.isArray(s.used)) s.used = [];
+    if (!Array.isArray(s.dependencies)) s.dependencies = [];
+    if (s.sessionDiscovery != null && !Array.isArray(s.sessionDiscovery))
+      s.sessionDiscovery = undefined;
+    if (!Number.isFinite(s.unloadedAuthorizedCalls))
+      s.unloadedAuthorizedCalls = 0;
+    return session;
+  }
+
+  /**
+   * M1: enables the session-backed discovery of this turn. Only names from
+   * SESSION_DISCOVERY are accepted; authority is still applied on select.
+   */
+  enableSessionDiscovery(
+    session: ToolRoutingSession,
+    sessions: { playbooks?: boolean; recipes?: boolean },
+  ): void {
+    this.restore(session);
+    const names = [
+      ...(sessions.playbooks ? SESSION_DISCOVERY.playbooks : []),
+      ...(sessions.recipes ? SESSION_DISCOVERY.recipes : []),
+    ];
+    session.sessionDiscovery = [
+      ...new Set([...(session.sessionDiscovery ?? []), ...names]),
+    ];
+  }
+
   private documents(definitions: AIToolDefinition[]): {
     docs: ToolDocument[];
     hash: string;
@@ -192,10 +243,27 @@ export class ToolRouterService {
     return out;
   }
 
-  private coreNames(agent: string | undefined): string[] {
-    return [...CORE_DISCOVERY, ...agentToolCore(agent)].map((n) =>
-      this.registry.canonicalName(n),
-    );
+  /**
+   * Session-backed discovery enabled for this turn (restricted to
+   * SESSION_DISCOVERY). Empty with `fullCatalog`: they stay in the scaffold
+   * tail, so the full-catalog order and loads are the pre-M1 ones.
+   */
+  private sessionDiscoveryNames(session: ToolRoutingSession): string[] {
+    if (session.fullCatalog) return [];
+    const allowed = new Set<string>([
+      ...SESSION_DISCOVERY.playbooks,
+      ...SESSION_DISCOVERY.recipes,
+    ]);
+    return (session.sessionDiscovery ?? []).filter((n) => allowed.has(n));
+  }
+
+  /** Fixed core of the turn: discovery (+ session-backed) and agent core. */
+  private coreNames(session: ToolRoutingSession): string[] {
+    return [
+      ...CORE_DISCOVERY,
+      ...this.sessionDiscoveryNames(session),
+      ...agentToolCore(session.agent),
+    ].map((n) => this.registry.canonicalName(n));
   }
 
   /**
@@ -209,12 +277,13 @@ export class ToolRouterService {
     session: ToolRoutingSession,
     authorizedDefinitions: AIToolDefinition[],
   ): Promise<void> {
+    this.restore(session);
     if (session.prefetched) return;
     session.prefetched = true;
     const { docs } = this.documents(authorizedDefinitions);
     const operational = this.operational(docs);
     const authorized = new Set(operational.map((d) => d.name));
-    const core = new Set(this.coreNames(session.agent));
+    const core = new Set(this.coreNames(session));
     if (!operational.length) {
       session.retrieval = {
         source: 'none',
@@ -287,7 +356,7 @@ export class ToolRouterService {
     const operational = this.operational(
       this.documents(authorizedDefinitions).docs,
     );
-    const core = new Set(this.coreNames(session.agent));
+    const core = new Set(this.coreNames(session));
     try {
       const result = await withTimeout(
         this.knowledge.rank(query, operational, session.signature),
@@ -316,28 +385,52 @@ export class ToolRouterService {
     cap: number | null = TOOL_WORKING_SET.maxLoaded +
       TOOL_WORKING_SET.searchMax,
   ): string[] {
+    this.restore(session);
+    // Session-backed discovery of this turn is loadable like any operational
+    // tool (M1); the rest of DISCOVERY and plan tools never are.
+    const sessionDiscovery = new Set(this.sessionDiscoveryNames(session));
     const authorized = new Set(
       authorizedDefinitions
         .map((d) => this.registry.canonicalName(d.function.name))
-        .filter((n) => !DISCOVERY.has(n) && !isAgentPlanTool(n)),
+        .filter(
+          (n) =>
+            (!DISCOVERY.has(n) || sessionDiscovery.has(n)) &&
+            !isAgentPlanTool(n),
+        ),
     );
     return appendLoaded(
       session.loaded,
       this.withDependencies(names.map((n) => this.registry.canonicalName(n))),
       authorized,
-      new Set(this.coreNames(session.agent)),
+      new Set(this.coreNames(session)),
       cap,
     );
   }
 
   /** Whether `name` is in this turn's working set (core, loaded or full catalog). */
   isLoaded(session: ToolRoutingSession, name: string): boolean {
+    this.restore(session);
     const canonical = this.registry.canonicalName(name);
     return (
       !!session.fullCatalog ||
       isAgentPlanTool(canonical) ||
-      this.coreNames(session.agent).includes(canonical) ||
+      this.coreNames(session).includes(canonical) ||
       session.loaded.includes(canonical)
+    );
+  }
+
+  /**
+   * D3 hard-rule hit: an authorized OPERATIONAL tool called outside the
+   * working set. Discovery off the core (list_endpoints, a playbook tool
+   * without its session…) is never loadable, so it is neither loaded nor
+   * counted in `unloaded_authorized_calls` (L2).
+   */
+  isUnloadedOperational(session: ToolRoutingSession, name: string): boolean {
+    const canonical = this.registry.canonicalName(name);
+    if (this.isLoaded(session, canonical)) return false;
+    return (
+      !DISCOVERY.has(canonical) ||
+      this.sessionDiscoveryNames(session).includes(canonical)
     );
   }
 
@@ -354,6 +447,7 @@ export class ToolRouterService {
     hasPlan: boolean,
     activePlan: boolean,
   ): Promise<ToolRouterSelection> {
+    this.restore(session);
     await this.prefetch(session, authorizedDefinitions);
     const { hash } = this.documents(authorizedDefinitions);
     const allowed = new Map(
@@ -374,7 +468,7 @@ export class ToolRouterService {
       )
       .sort((a, b) => a.localeCompare(b));
     const { core, loaded } = composeWorkingSet(
-      this.coreNames(session.agent),
+      this.coreNames(session),
       session.loaded,
       authorized,
     );
@@ -519,6 +613,7 @@ export class ToolRouterService {
     const names = [...new Set([exact, ...ranked, ...local])]
       .filter((name) => opNames.has(name))
       .slice(0, limit);
+    this.restore(session);
     session.lastSearch = { query, names };
     this.load(session, names, authorized);
     const byName = new Map(
@@ -563,11 +658,13 @@ export class ToolRouterService {
     session: ToolRoutingSession,
     name: string,
     authorizedDefinitions?: AIToolDefinition[],
-  ): void {
+  ): string[] {
+    this.restore(session);
     const canonical = this.registry.canonicalName(name);
     if (!session.used.includes(canonical)) session.used.push(canonical);
-    if (authorizedDefinitions)
-      this.load(session, [canonical], authorizedDefinitions, null);
+    return authorizedDefinitions
+      ? this.load(session, [canonical], authorizedDefinitions, null)
+      : [];
   }
 
   /** Permission/plan/caller identities belong in the signature, never prompt text. */

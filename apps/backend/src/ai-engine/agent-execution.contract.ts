@@ -42,8 +42,10 @@ export const USER_NOTICES = {
   verified: 'Verifiqué en el sistema que los cambios quedaron registrados.',
   stopped:
     'La respuesta se detuvo. El avance se conserva; verifica los cambios en curso antes de volver a intentarlos.',
+  // Último recurso: el modelo no produjo texto ni tras la inferencia de cierre.
+  // Habla como la tienda, no como un auditor («evidencia», «registro»).
   no_answer:
-    'No tengo evidencia de que la solicitud esté terminada. Puedo verificar el registro y continuar desde el paso pendiente.',
+    'Esta vez no logré armar la respuesta. ¿Me lo pides de nuevo? Si quieres, dímelo con otras palabras y lo intento otra vez.',
 } as const;
 
 /** Detalle de un paso del rastro: catálogo cerrado, nunca la nota del recibo. */

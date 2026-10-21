@@ -175,6 +175,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
 | Changing runtime procedural recipes or recipe mining | `vendix-agent-procedural-memory` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
+| Changing the domain-scope rule shared by DomainScopeGuard and the agent API bridge | `vendix-ai-tool-routing` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |
 | Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |

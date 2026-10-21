@@ -2,6 +2,8 @@ import { AIAgentService } from './ai-agent.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { ToolRouterService } from './tools/tool-router.service';
 import { createDiscoveryTools } from './tools/domains/discovery.tools';
+import { createPlaybookTools } from './tools/domains/playbook.tools';
+import { createProceduralRecipeTools } from './tools/domains/recipe.tools';
 import { ForbiddenException } from '@nestjs/common';
 import { localToolRanking, localToolScores } from './tools/tool-catalog';
 import { INTERNAL_JARGON } from './agent-execution.contract';
@@ -20,7 +22,11 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       delete process.env.AI_AGENT_MAX_CATALOG_EXPANSIONS;
     else process.env.AI_AGENT_MAX_CATALOG_EXPANSIONS = previousLimit;
   });
-  function fixture(initialExpansions = 0, dynamic = false) {
+  function fixture(
+    initialExpansions = 0,
+    dynamic = false,
+    extras: { playbooks?: any; recipes?: any } = {},
+  ) {
     const registry = new AIToolRegistry({} as any);
     registry.registerMany(createDiscoveryTools());
     const handler = jest.fn(async () => '{}');
@@ -93,6 +99,8 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       } as any,
       undefined,
       router,
+      extras.playbooks,
+      extras.recipes,
     );
     const run = (extra: Record<string, unknown> = {}) =>
       RequestContextService.runIsolated(
@@ -113,7 +121,17 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
             ...extra,
           }),
       );
-    return { chat, run, search, durable, objective, handler, registry, emit };
+    return {
+      chat,
+      run,
+      search,
+      durable,
+      objective,
+      handler,
+      registry,
+      emit,
+      router,
+    };
   }
   const response = (tool_calls: any[] = []) => ({
     success: true,
@@ -401,6 +419,190 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
         free_discovery_rounds: 1,
       });
       expect(kept).not.toHaveProperty('user_text');
+    });
+
+    const routerEvents = (f: ReturnType<typeof fixture>) =>
+      f.emit.mock.calls
+        .filter(([name]) => name === 'ai.agent.router')
+        .map(([, payload]) => payload);
+    const systemText = (messages: any[]) =>
+      messages
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join('\n');
+    const fakePlaybooks = () => ({
+      createSession: jest.fn(() => ({ handle: 'pb' })),
+      getActiveToolDependencies: jest.fn(() => []),
+      getActivePins: jest.fn(() => []),
+      refreshAuthorization: jest.fn(),
+      searchHybrid: jest.fn(async () => ({ results: [] })),
+      load: jest.fn(() => ({ loaded: false })),
+    });
+    const fakeRecipes = () => ({
+      createSession: jest.fn(() => ({ handle: 'rc' })),
+      refreshAuthorization: jest.fn(),
+      search: jest.fn(async () => ({ results: [] })),
+      load: jest.fn(async () => ({ loaded: false })),
+    });
+
+    it('M1: con sesión de playbooks y recetas se ofrecen, el prompt las nombra y se ejecutan sin contar como no cargadas', async () => {
+      const playbooks = fakePlaybooks();
+      const recipes = fakeRecipes();
+      const f = fixture(0, true, { playbooks, recipes });
+      f.registry.registerMany(createPlaybookTools());
+      f.registry.registerMany(createProceduralRecipeTools());
+      f.chat
+        .mockImplementationOnce(async (messages, options) => {
+          expect(offered(options)).toEqual(
+            expect.arrayContaining([
+              'search_playbooks',
+              'load_playbook',
+              'search_recipes',
+              'load_recipe',
+            ]),
+          );
+          expect(systemText(messages)).toContain('search_playbooks(query)');
+          expect(systemText(messages)).toContain('search_recipes');
+          return response([
+            toolCall('p1', 'search_playbooks', { query: 'cierre de caja' }),
+          ]);
+        })
+        .mockImplementationOnce(async (_messages, options) => {
+          expect(offered(options)).toContain('search_playbooks');
+          return response([
+            toolCall('r1', 'search_recipes', { query: 'cierre de caja' }),
+          ]);
+        })
+        .mockResolvedValueOnce(response());
+      await f.run();
+      expect(playbooks.searchHybrid).toHaveBeenCalledTimes(1);
+      expect(recipes.search).toHaveBeenCalledTimes(1);
+      for (const event of routerEvents(f))
+        expect(event.unloaded_authorized_calls).toBe(0);
+    });
+
+    it('M1: sin sesión (o sin autoridad) no se ofrecen ni se nombran en el prompt', async () => {
+      const f = fixture(0, true);
+      f.registry.registerMany(createPlaybookTools());
+      f.registry.registerMany(createProceduralRecipeTools());
+      f.chat.mockImplementationOnce(async (messages, options) => {
+        for (const name of [
+          'search_playbooks',
+          'load_playbook',
+          'search_recipes',
+          'load_recipe',
+        ])
+          expect(offered(options)).not.toContain(name);
+        expect(systemText(messages)).not.toContain('search_playbooks(query)');
+        expect(systemText(messages)).not.toContain('search_recipes');
+        return response();
+      });
+      await f.run();
+
+      // Servicio presente pero tools sin autoridad: tampoco hay sesión ni oferta.
+      const playbooks = fakePlaybooks();
+      const g = fixture(0, true, { playbooks });
+      g.chat.mockImplementationOnce(async (messages, options) => {
+        expect(offered(options)).not.toContain('search_playbooks');
+        expect(systemText(messages)).not.toContain('search_playbooks(query)');
+        return response();
+      });
+      await g.run();
+      expect(playbooks.createSession).not.toHaveBeenCalled();
+    });
+
+    it('M1: con sólo load_playbook autorizado el prompt no ordena search_playbooks', async () => {
+      const playbooks = fakePlaybooks();
+      const f = fixture(0, true, { playbooks });
+      f.registry.registerMany(
+        createPlaybookTools().filter((t) => t.name === 'load_playbook'),
+      );
+      f.chat.mockImplementationOnce(async (messages, options) => {
+        expect(offered(options)).toContain('load_playbook');
+        expect(offered(options)).not.toContain('search_playbooks');
+        expect(systemText(messages)).toContain('load_playbook(id,version,section)');
+        expect(systemText(messages)).not.toContain('search_playbooks');
+        return response();
+      });
+      await f.run();
+    });
+
+    it('L1: argumentos no-objeto sobre una tool cargada por la regla dura → firma y ronda libre', async () => {
+      const f = fixture(0, true);
+      f.chat
+        .mockResolvedValueOnce(
+          response([
+            {
+              id: 'c1',
+              type: 'function',
+              function: { name: 'operation_59', arguments: '[1]' },
+            },
+          ]),
+        )
+        .mockImplementationOnce(async (messages, options) => {
+          const [invalid] = toolMessages(messages);
+          expect(invalid.error_code).toBe('INVALID_ARGS');
+          expect(invalid.data.next_step).toContain('No necesita campos.');
+          expect(invalid.data.next_step).toContain('Ya quedó cargada');
+          expect(offered(options)).toContain('operation_59');
+          return response([toolCall('c2', 'operation_59')]);
+        })
+        .mockResolvedValueOnce(response());
+      const result = await f.run({ max_iterations: 1 });
+      // La ronda inválida fue libre: con max_iterations 1 la llamada corregida corre.
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(result.content).toBe('Revisión preparada.');
+      const events = routerEvents(f);
+      expect(events[1].free_discovery_rounds).toBe(1);
+      // Contada una sola vez (pre-validación robusta), no dos.
+      expect(events.at(-1).unloaded_authorized_calls).toBe(1);
+    });
+
+    it('L1: esquema inválido sobre una tool cargada por la regla dura → firma y ronda libre', async () => {
+      const f = fixture(0, true);
+      f.registry.register({
+        name: 'find_invoice',
+        domain: 'billing',
+        description: 'Busca una factura por número',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { number: { type: 'string' } },
+          required: ['number'],
+        },
+        readOnly: true,
+        handler: f.handler,
+      });
+      f.chat
+        .mockImplementationOnce(async (_messages, options) => {
+          expect(offered(options)).not.toContain('find_invoice');
+          return response([toolCall('c1', 'find_invoice', { numero: 7 })]);
+        })
+        .mockImplementationOnce(async (messages) => {
+          const [invalid] = toolMessages(messages);
+          expect(invalid.error_code).toBe('INVALID_ARGS');
+          expect(invalid.data.next_step).toContain('number (string, obligatorio)');
+          return response([
+            toolCall('c2', 'find_invoice', { number: 'FV-1' }),
+          ]);
+        })
+        .mockResolvedValueOnce(response());
+      await f.run({ max_iterations: 1 });
+      expect(f.handler).toHaveBeenCalledTimes(1);
+      expect(routerEvents(f)[1].free_discovery_rounds).toBe(1);
+    });
+
+    it('L2: una discovery fuera del núcleo (list_endpoints) no infla unloaded_authorized_calls', async () => {
+      const f = fixture(0, true);
+      f.chat
+        .mockImplementationOnce(async (_messages, options) => {
+          expect(offered(options)).not.toContain('list_endpoints');
+          return response([toolCall('c1', 'list_endpoints', {})]);
+        })
+        .mockResolvedValueOnce(response());
+      await f.run();
+      for (const event of routerEvents(f))
+        expect(event.unloaded_authorized_calls).toBe(0);
     });
 
     it('un 403 real del handler sí es bloqueo de permisos (la carga no lo enmascara)', async () => {

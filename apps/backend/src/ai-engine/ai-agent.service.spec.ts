@@ -1562,6 +1562,53 @@ describe('AIAgentService.runAgentStream', () => {
       expect(result.exhausted).not.toBe(true);
       expect(result.execution?.next_action).toBeTruthy();
     });
+    // Prod (Vexi): the model answers `stop` with an empty body right after its
+    // tools, with usage > 0 — the empty-completion retry never fires and the
+    // chat fell back to the canned `no_answer`.
+    it('a turn that ends in tools with no prose gets ONE tool-free closing that summarizes', async () => {
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: '' }))
+        .mockResolvedValueOnce(ok({ content: 'Tienes 3 cosas registradas.' }));
+      const { chunks, result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(3);
+      expect(chat.mock.calls[2][1]?.tools).toBeUndefined();
+      expect(chat.mock.calls[2][0].at(-1)).toEqual(
+        expect.objectContaining({
+          role: 'user',
+          content: expect.stringContaining('encontraste o hiciste'),
+        }),
+      );
+      expect(result.content).toBe('Tienes 3 cosas registradas.');
+      expect(result.success).toBe(true);
+      const text = chunks
+        .filter((c) => c.type === 'text')
+        .map((c) => c.content)
+        .join('');
+      expect(text).toBe('Tienes 3 cosas registradas.');
+      expect(text).not.toContain(USER_NOTICES.no_answer);
+    });
+    it('an empty answer without tools is retried once as a plain closing', async () => {
+      chat
+        .mockResolvedValueOnce(ok({ content: '   ' }))
+        .mockResolvedValueOnce(ok({ content: 'Hola, ¿en qué te ayudo?' }));
+      const { result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(chat.mock.calls[1][1]?.tools).toBeUndefined();
+      expect(result.content).toBe('Hola, ¿en qué te ayudo?');
+    });
+    it('a closing that is empty too is not retried again (the chat owns the last notice)', async () => {
+      chat
+        .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
+        .mockResolvedValueOnce(ok({ content: '' }))
+        .mockResolvedValueOnce(ok({ content: '' }));
+      const { result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(3);
+      expect(result.content ?? '').toBe('');
+    });
+    it('no_answer speaks like the store, never of evidence or records', () => {
+      expect(USER_NOTICES.no_answer).not.toMatch(/evidencia|registro/i);
+    });
     it('unknown write halts the batch and plan continuation, without retry or successful tool quota', async () => {
       configureStorePlan(['create_expense', 'list_things']);
       registry.executeToolResult.mockResolvedValue(
