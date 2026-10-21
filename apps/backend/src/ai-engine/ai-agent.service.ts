@@ -2031,6 +2031,8 @@ export class AIAgentService {
         });
         totalTokens += lastCall?.usage?.totalTokens ?? 0;
         const text = (lastCall?.content ?? '').trim();
+        if (LEAKED_TOOL_MARKUP.test(text))
+          this.logger.warn('Closing inference leaked tool-call markup');
         return lastCall?.success !== false &&
           text &&
           !LEAKED_TOOL_MARKUP.test(text) &&
@@ -2396,7 +2398,12 @@ export class AIAgentService {
           let narration = pendingConfirmation
             ? this.describePendingWrite(pendingConfirmation)
             : response.content?.trim();
-          if (narration && LEAKED_TOOL_MARKUP.test(narration)) narration = '';
+          if (narration && LEAKED_TOOL_MARKUP.test(narration)) {
+            this.logger.warn(
+              `Leaked tool-call markup as final answer at iteration ${iteration}; closing inference`,
+            );
+            narration = '';
+          }
 
           // `stop` with an empty body. Seen in production after a round of
           // tools (the model «thinks» the results are the answer) and from
