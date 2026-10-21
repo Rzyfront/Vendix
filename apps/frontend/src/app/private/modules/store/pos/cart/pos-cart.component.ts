@@ -996,6 +996,25 @@ import {
                 </button>
               </div>
 
+              <!--
+                Estaciones de servicio — "Cargar a estación": suma el carrito a
+                la cuenta abierta de una estación ocupada (gemelo de mesas).
+                Solo visible cuando la tienda usa estaciones; no aplica a una
+                orden adoptada en edición.
+              -->
+              @if (showChargeToStation() && !isEditMode()) {
+                <button
+                  type="button"
+                  class="cart-btn save-btn w-full"
+                  (click)="chargeToStation.emit()"
+                  [disabled]="isEmpty()"
+                  title="Cargar el carrito a la cuenta de una estación ocupada"
+                >
+                  <app-icon name="warehouse" [size]="16"></app-icon>
+                  <span>Cargar a estación</span>
+                </button>
+              }
+
 
               <!--
                 CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
@@ -1674,6 +1693,9 @@ private cartService = inject(PosCartService);
   readonly charge = output<void>();
   /** El cajero pidió cobrar las cuentas de una orden dividida. */
   readonly chargeAccounts = output<void>();
+  /** Muestra "Cargar a estación" (tienda con estaciones de servicio). */
+  readonly showChargeToStation = input<boolean>(false);
+  readonly chargeToStation = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
   readonly customerSelected = output<any>();

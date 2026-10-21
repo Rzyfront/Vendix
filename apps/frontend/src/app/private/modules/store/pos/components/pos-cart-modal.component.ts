@@ -683,6 +683,18 @@ import {
               </button>
             </div>
 
+            @if (showChargeToStation() && !isEditMode()) {
+              <button
+                type="button"
+                class="action-btn save-btn w-full"
+                (click)="chargeToStation.emit()"
+                [disabled]="!cartState()?.items?.length"
+              >
+                <app-icon name="warehouse" [size]="16"></app-icon>
+                <span>Cargar a estación</span>
+              </button>
+            }
+
             <button
               type="button"
               class="action-btn checkout-btn checkout-charge"
@@ -1853,6 +1865,9 @@ export class PosCartModalComponent {
   readonly isLayawayMode = input<boolean>(false);
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
+  /** Muestra "Cargar a estación" (tienda con estaciones de servicio). */
+  readonly showChargeToStation = input<boolean>(false);
+  readonly chargeToStation = output<void>();
 
   /**
    * Retención (preview) y total neto a cobrar.
