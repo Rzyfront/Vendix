@@ -44,13 +44,18 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   /**
-   * `settings.thinking: false` has to reach the wire. Hybrid models behind
-   * OpenRouter (DeepSeek V4 Flash, in production for Vex/Vexi) reason by
-   * default and bill those tokens as completion: with `max_tokens: 1200` a
-   * knowledge question spent all 1200 in `reasoning`, `content` came back
-   * empty with `finish_reason: length`, and the closing inference did exactly
-   * the same — the chat showed `no_answer`. The flag used to be read only to
-   * strip `<think>` tags from text that never existed.
+   * A request that must spend its whole budget on visible text. Hybrid models
+   * behind OpenRouter (DeepSeek V4 Flash, in production for Vex/Vexi) reason
+   * by default and bill it as completion: with `max_tokens: 1200` a knowledge
+   * question spent all 1200 in `reasoning`, `content` came back empty with
+   * `finish_reason: length`, and the closing inference did exactly the same —
+   * the chat showed `no_answer`. The agent's closing inference therefore asks
+   * per request (`thinking: false`) and the flag goes on the wire.
+   *
+   * Deliberately per request and not from `settings.thinking`: every config
+   * already says `false` and the live suite showed write turns degrade
+   * without reasoning (the model asks «¿lo confirmo?» in prose instead of
+   * proposing).
    *
    * Some endpoints refuse to switch reasoning off (`openai/gpt-oss-20b`: 400
    * «Reasoning is mandatory»). That refusal is remembered for this provider
@@ -58,16 +63,21 @@ export class OpenAICompatibleProvider implements AIProvider {
    */
   private reasoningOffRejected = false;
 
-  private reasoningControl(): Record<string, unknown> {
-    return this.config.settings?.thinking === false &&
+  private reasoningControl(
+    options?: AIRequestOptions,
+  ): Record<string, unknown> {
+    return options?.thinking === false &&
       this.isOpenRouterConfig() &&
       !this.reasoningOffRejected
       ? { reasoning: { enabled: false } }
       : {};
   }
 
-  private async withReasoningFallback<T>(send: () => Promise<T>): Promise<T> {
-    const sentReasoningOff = 'reasoning' in this.reasoningControl();
+  private async withReasoningFallback<T>(
+    options: AIRequestOptions | undefined,
+    send: () => Promise<T>,
+  ): Promise<T> {
+    const sentReasoningOff = 'reasoning' in this.reasoningControl(options);
     try {
       return await send();
     } catch (error: any) {
@@ -131,13 +141,13 @@ export class OpenAICompatibleProvider implements AIProvider {
             ...(options?.tool_choice && {
               tool_choice: options.tool_choice as any,
             }),
-            ...this.reasoningControl(),
+            ...this.reasoningControl(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
             : ([] as const)),
         );
-      const response = await this.withReasoningFallback(() =>
+      const response = await this.withReasoningFallback(options, () =>
         deadline ? deadline.run(request) : request(),
       );
 
@@ -1099,13 +1109,13 @@ export class OpenAICompatibleProvider implements AIProvider {
             ...(options?.tool_choice && {
               tool_choice: options.tool_choice as any,
             }),
-            ...this.reasoningControl(),
+            ...this.reasoningControl(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
             : ([] as const)),
         );
-      const stream = await this.withReasoningFallback(() =>
+      const stream = await this.withReasoningFallback(options, () =>
         deadline ? deadline.run(request) : request(),
       );
 

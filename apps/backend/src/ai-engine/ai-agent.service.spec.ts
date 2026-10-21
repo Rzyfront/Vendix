@@ -1597,6 +1597,42 @@ describe('AIAgentService.runAgentStream', () => {
       expect(chat.mock.calls[1][1]?.tools).toBeUndefined();
       expect(result.content).toBe('Hola, ¿en qué te ayudo?');
     });
+    // Prod (Vexi): a knowledge question spent the whole `max_tokens` in
+    // reasoning (`length`, empty content) in the loop AND in the closing.
+    it('the closing inference asks for reasoning off; the loop call does not', async () => {
+      chat
+        .mockResolvedValueOnce(ok({ content: '', finish_reason: 'length' }))
+        .mockResolvedValueOnce(ok({ content: 'La retención es un anticipo.' }));
+      const { result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(chat.mock.calls[0][1]?.thinking).toBeUndefined();
+      expect(chat.mock.calls[1][1]).toEqual(
+        expect.objectContaining({ thinking: false }),
+      );
+      expect(result.content).toBe('La retención es un anticipo.');
+    });
+    // Live suite (g43): a call cut by max_tokens mid tool-call showed raw
+    // DeepSeek DSML markup as the answer.
+    it('leaked native tool-call markup is never prose: the closing answers instead', async () => {
+      chat
+        .mockResolvedValueOnce(
+          ok({
+            content: '<\uFF5CDSML\uFF5Cinvoke name="search_tools">',
+            finish_reason: 'length',
+          }),
+        )
+        .mockResolvedValueOnce(
+          ok({ content: 'El margen es precio menos costo.' }),
+        );
+      const { chunks, result } = await drain({});
+      expect(chat).toHaveBeenCalledTimes(2);
+      const text = chunks
+        .filter((c) => c.type === 'text')
+        .map((c) => c.content)
+        .join('');
+      expect(text).toBe('El margen es precio menos costo.');
+      expect(result.content).toBe('El margen es precio menos costo.');
+    });
     it('a closing that is empty too is not retried again (the chat owns the last notice)', async () => {
       chat
         .mockResolvedValueOnce(ok({ tool_calls: [call('t1', 'list_things')] }))
