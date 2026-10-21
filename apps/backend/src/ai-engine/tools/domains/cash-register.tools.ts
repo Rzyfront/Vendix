@@ -6,6 +6,15 @@ import {
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../domains/store/cash-registers/movements/movements.service';
 import { CloseSessionDto } from '../../../domains/store/cash-registers/dto/close-session.dto';
+import {
+  buildDiscrepancySignal,
+  DISCREPANCY_ACK_PARAMETERS,
+  discrepancyPreviewMessage,
+  DiscrepancySignal,
+  exceedsTolerance,
+  moneyTolerance,
+  readDiscrepancyAck,
+} from '../discrepancy-signal';
 
 /**
  * Familia cash-register de Vex (paso 8 del plan vex-agent).
@@ -125,6 +134,59 @@ function sessionLabel(s: Record<string, any>): string {
   return `sesión #${s.id}${register}`;
 }
 
+/** Moneda de las cifras de caja: las sesiones no guardan moneda propia. */
+const CASH_CURRENCY = 'COP';
+
+const CASH_SHORTAGE_CAUSES = [
+  'Órdenes canceladas o anuladas que no se registraron en la caja.',
+  'Reembolsos o devoluciones en efectivo que no se registraron.',
+  'Salidas de efectivo sin registrar: pagos a proveedores o domiciliarios, retiros o gastos menores.',
+  'Pagos cobrados con tarjeta o transferencia que quedaron como efectivo, o al revés.',
+  'Ventas hechas por fuera del sistema o sin registrar.',
+  'Error de conteo: billetes, monedas o la base inicial.',
+];
+
+const CASH_SURPLUS_CAUSES = [
+  'Ventas en efectivo que no se registraron en el sistema.',
+  'Entradas de efectivo sin registrar (abonos, cambio que se trajo, préstamos).',
+  'Pagos en efectivo que quedaron registrados como tarjeta o transferencia.',
+  'Base inicial mal contada al abrir la caja.',
+  'Cambio que no se le entregó a algún cliente.',
+];
+
+const CASH_SHORTAGE_QUESTIONS = [
+  '¿Sabes a qué se debe la diferencia?',
+  '¿Se pagó algo en efectivo desde la caja (proveedor, domiciliario, un gasto) sin registrarlo?',
+  '¿Hubo alguna venta anulada, devolución o reembolso en efectivo durante el turno?',
+  '¿Algún pago con tarjeta o transferencia pudo quedar como efectivo?',
+];
+
+const CASH_SURPLUS_QUESTIONS = [
+  '¿Sabes a qué se debe la diferencia?',
+  '¿Hubo alguna venta en efectivo que no se alcanzó a registrar?',
+  '¿Entró dinero a la caja sin registrarlo, por ejemplo un abono o cambio?',
+  '¿Algún pago en efectivo pudo quedar registrado como tarjeta o transferencia?',
+];
+
+const DISCREPANCY_MISSING_REASON =
+  'Falta el motivo de la diferencia: pregúntale a la persona, con sus palabras, a qué se debe (o si decidió continuar sin saberlo) y pásalo en discrepancy_reason. No lo inventes.';
+
+function formatCashAmount(value: number): string {
+  return `$${(Math.round(Math.abs(value) * 100) / 100).toLocaleString('es-CO', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/** Línea que queda en las notas del cierre cuando hubo diferencia revisada. */
+function discrepancyClosingLine(
+  signal: DiscrepancySignal,
+  reason: string,
+): string {
+  const kind = signal.direction === 'shortage' ? 'faltante' : 'sobrante';
+  return `Diferencia de arqueo (${kind} de ${formatCashAmount(signal.difference)}): ${reason}`;
+}
+
 export function createCashRegisterTools(
   deps: CashRegisterToolDeps,
 ): RegisteredTool[] {
@@ -135,6 +197,44 @@ export function createCashRegisterTools(
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Pre-verificación guiada del arqueo. Fail-open: si el esperado no se puede
+   * leer, el cierre sigue como siempre — la compuerta acompaña, no protege.
+   */
+  async function loadCashDiscrepancy(
+    id: number,
+    actual: number,
+  ): Promise<DiscrepancySignal | null> {
+    let expected: number;
+    try {
+      const summary = await deps.sessionsService.getCashSummary(id);
+      expected = Number(summary?.expected_cash_total);
+    } catch {
+      return null;
+    }
+    if (!Number.isFinite(expected)) return null;
+    const tolerance = moneyTolerance(expected);
+    if (!exceedsTolerance(actual - expected, tolerance)) return null;
+    const shortage = actual < expected;
+    return buildDiscrepancySignal({
+      process: 'cash_close',
+      unit: CASH_CURRENCY,
+      expected,
+      actual,
+      tolerance,
+      subject: 'Arqueo de la caja',
+      causes_to_check: shortage ? CASH_SHORTAGE_CAUSES : CASH_SURPLUS_CAUSES,
+      reads_to_run: [
+        'get_cash_session_close_report',
+        'list_cash_session_movements',
+        'list_orders',
+      ],
+      guide_questions: shortage
+        ? CASH_SHORTAGE_QUESTIONS
+        : CASH_SURPLUS_QUESTIONS,
+    });
   }
 
   async function loadPendingOrdersBlock(sessionId: number) {
@@ -518,7 +618,7 @@ export function createCashRegisterTools(
       version: '1',
       domain: 'cash-register',
       description:
-        'Cierra una sesión de caja abierta con el arqueo (actual_closing_amount + closing_notes opcionales). IRREVERSIBLE: la sesión cerrada no se reabre y el descuadre queda registrado. Cadena: get_active_cash_session para confirmar cuál está abierta.',
+        'Cierra una sesión de caja abierta con el arqueo (actual_closing_amount + closing_notes opcionales). IRREVERSIBLE: la sesión cerrada no se reabre y el descuadre queda registrado. Si el efectivo contado no coincide con lo esperado, el cierre no se propone hasta guiar a la persona a revisar la diferencia; después se reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason. Cadena: get_active_cash_session para confirmar cuál está abierta.',
       parameters: {
         type: 'object',
         properties: {
@@ -550,6 +650,7 @@ export function createCashRegisterTools(
             description:
               'Motivo escrito o confirmado por el usuario, requerido para pending_decision="override". No inventes el motivo.',
           },
+          ...DISCREPANCY_ACK_PARAMETERS,
         },
         required: ['session_id', 'actual_closing_amount'],
       },
@@ -598,6 +699,43 @@ export function createCashRegisterTools(
             );
           }
         }
+        const discrepancy = await loadCashDiscrepancy(id, actual);
+        const ack = readDiscrepancyAck(args);
+        if (discrepancy && !ack.reviewed) {
+          return {
+            ...previewError(
+              sessionLabel(session),
+              discrepancyPreviewMessage(discrepancy),
+            ),
+            discrepancy,
+          };
+        }
+        if (discrepancy && !ack.reason) {
+          return {
+            ...previewError(sessionLabel(session), DISCREPANCY_MISSING_REASON),
+            discrepancy,
+          };
+        }
+        const discrepancyChanges =
+          discrepancy && ack.reason
+            ? [
+                {
+                  field: 'difference',
+                  label:
+                    discrepancy.direction === 'shortage'
+                      ? 'Faltante'
+                      : 'Sobrante',
+                  from: discrepancy.expected,
+                  to: discrepancy.actual,
+                },
+                {
+                  field: 'discrepancy_reason',
+                  label: 'Motivo de la diferencia',
+                  from: null,
+                  to: ack.reason,
+                },
+              ]
+            : [];
         const decisionChanges = [
           ...(args?.pending_decision !== undefined
             ? [
@@ -632,6 +770,7 @@ export function createCashRegisterTools(
               to: actual,
             },
             ...decisionChanges,
+            ...discrepancyChanges,
           ],
           message:
             'Irreversible: la sesión cerrada no se reabre y el descuadre queda registrado.',
@@ -690,12 +829,38 @@ export function createCashRegisterTools(
             };
           }
         }
+        const discrepancy = await loadCashDiscrepancy(id, actual);
+        const ack = readDiscrepancyAck(args);
+        if (discrepancy && !ack.reviewed) {
+          return {
+            error: discrepancyPreviewMessage(discrepancy),
+            discrepancy,
+            next_step:
+              'Acompaña a la persona a revisar la diferencia y reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason.',
+          };
+        }
+        if (discrepancy && !ack.reason) {
+          return {
+            error: DISCREPANCY_MISSING_REASON,
+            discrepancy,
+            next_step:
+              'Reintenta con discrepancy_reviewed=true y el motivo en discrepancy_reason.',
+          };
+        }
         const dto: CloseSessionDto = { actual_closing_amount: actual };
-        if (
-          typeof args?.closing_notes === 'string' &&
-          args.closing_notes.trim()
-        ) {
-          dto.closing_notes = args.closing_notes.trim();
+        const notes =
+          typeof args?.closing_notes === 'string' && args.closing_notes.trim()
+            ? args.closing_notes.trim()
+            : null;
+        const discrepancyLine =
+          discrepancy && ack.reason
+            ? discrepancyClosingLine(discrepancy, ack.reason)
+            : null;
+        const closingNotes = [notes, discrepancyLine]
+          .filter(Boolean)
+          .join('\n');
+        if (closingNotes) {
+          dto.closing_notes = closingNotes;
         }
         if (args.pending_decision !== undefined) {
           dto.pending_decision = args.pending_decision;

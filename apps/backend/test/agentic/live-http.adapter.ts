@@ -41,6 +41,13 @@ export interface GoldenCase {
   channel?: 'text' | 'dictation' | 'realtime';
   topic_change?: boolean;
   setup?: 'empty_index';
+  /**
+   * Fixture SQL del caso, solo sobre el clon `e2e` (el adaptador rechaza otra
+   * DB). Corre antes de crear la conversación; `teardown_sql` corre siempre al
+   * final para dejar el clon listo para el siguiente caso.
+   */
+  setup_sql?: string[];
+  teardown_sql?: string[];
   expect_retrieval?: string;
   seed_history?: { user: string };
   turns: GoldenTurn[];
@@ -474,6 +481,7 @@ async function runCase(
     );
   const turns: any[] = [];
   let conversationId = 0;
+  for (const statement of testCase.setup_sql ?? []) db.query(statement);
   try {
     const created = await api.raw(
       'POST',
@@ -594,6 +602,7 @@ async function runCase(
       });
     }
   } finally {
+    for (const statement of testCase.teardown_sql ?? []) db.query(statement);
     if (disabledIds)
       db.query(
         `update ai_knowledge_documents set active=true where id in (${disabledIds
