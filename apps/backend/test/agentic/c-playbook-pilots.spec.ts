@@ -710,7 +710,12 @@ describe('C three playbook pilots: offline real-factory integration', () => {
 
   it('a proposed cash close does not mutate and binds its individual approval to exact arguments and actor', () =>
     scoped(async () => {
-      const args = { session_id: 900020, actual_closing_amount: 105 };
+      const args = {
+        session_id: 900020,
+        actual_closing_amount: 105,
+        discrepancy_reviewed: true,
+        discrepancy_reason: 'La persona revisó y confirma el conteo.',
+      };
       const proposal = await h.propose('close_cash_session', args);
       expect(data(proposal.preview)).toMatchObject({
         status: 'warning',
@@ -770,7 +775,12 @@ describe('C three playbook pilots: offline real-factory integration', () => {
 
   it('detects a changed cash session after preview instead of forcing the approved close', () =>
     scoped(async () => {
-      const args = { session_id: 900020, actual_closing_amount: 105 };
+      const args = {
+        session_id: 900020,
+        actual_closing_amount: 105,
+        discrepancy_reviewed: true,
+        discrepancy_reason: 'La persona revisó y confirma el conteo.',
+      };
       const proposal = await h.propose('close_cash_session', args);
       h.state.cash.status = 'closed'; // Another operator changed the DOMAIN fixture.
       const output = JSON.parse(
@@ -811,12 +821,25 @@ describe('C three playbook pilots: offline real-factory integration', () => {
         await h.readStep('cerrar-caja', 'movements', input);
         await h.readStep('cerrar-caja', 'summary', input);
         await h.readStep('cerrar-caja', 'pending', input);
-        const proposal = await h.proposeStep('cerrar-caja', 'close', input);
+        // Con diferencia, la ruta del playbook guía antes de proponer: sin
+        // revisión ni motivo no hay token, solo la señal de discrepancia.
+        const refusal = await h.proposeStep('cerrar-caja', 'close', input);
+        expect(refusal.confirmation_token).toBeUndefined();
+        expect(data(refusal.preview).discrepancy).toMatchObject({
+          signal: 'discrepancy_detected',
+          difference: counted - 100,
+        });
+        const reviewed = {
+          ...args,
+          discrepancy_reviewed: true,
+          discrepancy_reason: 'La persona revisó y confirma el conteo.',
+        };
+        const proposal = await h.propose('close_cash_session', reviewed);
         expect(h.state.cash.status).toBe('open');
-        const close = await h.applyStep(
-          'cerrar-caja',
+        const close = await h.apply(
           'close',
-          input,
+          'close_cash_session',
+          reviewed,
           String(proposal.confirmation_token),
         );
         expect(verifyPlaybook('cerrar-caja', input, [close]).verified).toBe(
@@ -849,10 +872,15 @@ describe('C three playbook pilots: offline real-factory integration', () => {
         expect(h.cash.sessionsService.closeSession).toHaveBeenCalledTimes(1);
         expect(h.cash.sessionsService.closeSession).toHaveBeenCalledWith(
           900020,
-          { actual_closing_amount: counted },
+          {
+            actual_closing_amount: counted,
+            closing_notes: expect.stringContaining(
+              'La persona revisó y confirma el conteo.',
+            ),
+          },
         );
         await expect(
-          h.registry.executeToolResult('close_cash_session', args, {
+          h.registry.executeToolResult('close_cash_session', reviewed, {
             confirmationToken: String(proposal.confirmation_token),
           }),
         ).rejects.toMatchObject({ errorCode: 'AI_AGENT_005' });
