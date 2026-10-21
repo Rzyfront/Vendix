@@ -4,8 +4,8 @@ import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { Meta } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { environment } from '../../../environments/environment';
-import { IconComponent } from '../../../shared/components/icon/icon.component';
+import { environment } from '../../../../../environments/environment';
+import { IconComponent } from '../../../../shared/components/icon/icon.component';
 
 interface StationStatus { station: string; state: 'available' | 'occupied' | 'paused'; service: string | null; opened_at?: string; currency?: string; items: Array<{ name: string; quantity: number; total: string }>; total: string; }
 @Component({
