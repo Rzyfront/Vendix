@@ -1,85 +1,343 @@
-import { CommonModule, DatePipe } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import {
+  Component,
+  DestroyRef,
+  TemplateRef,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { environment } from '../../../../../../../environments/environment';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import {
+  CardComponent,
+  DropdownAction,
+  EmptyStateComponent,
+  FilterConfig,
+  FilterValues,
+  InputsearchComponent,
+  ItemListCardConfig,
+  OptionsDropdownComponent,
+  PaginationComponent,
+  ResponsiveDataViewComponent,
+  StatsComponent,
+  StickyHeaderComponent,
+  TableAction,
+  TableColumn,
+  ToastService,
+} from '../../../../../../shared/components/index';
+import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
+import {
+  DaysRemainingBadgeComponent,
+  describeDaysRemaining,
+} from './components/days-remaining-badge/days-remaining-badge.component';
+import { ServiceRegistryService } from './service-registry.service';
+import {
+  ServiceRegistryFilter,
+  ServiceRegistryRow,
+  ServiceRegistryStats,
+} from './service-registry.interfaces';
 
-interface Reminder {
-  id: number;
-  customer: { name: string; email: string | null; phone: string | null };
-  product: { name: string };
-  days_since: number;
-  due_date: string;
-  status: 'pending' | 'sent' | 'dismissed';
+/** Fila + campos derivados para la tabla / cards (calculados una vez por carga). */
+interface RegistryViewRow extends ServiceRegistryRow {
+  customer_name: string;
+  service_name: string;
+  station_name: string;
+  subject_display: string;
+  service_date_label: string;
+  next_due_label: string;
+  countdown_text: string;
+  countdown_variant: BadgeVariant;
+  reminder_label: string;
+}
+
+const VARIANT_COLORS: Record<BadgeVariant, string> = {
+  success: '#16a34a',
+  warning: '#d97706',
+  error: '#dc2626',
+  neutral: '#6b7280',
+  primary: '#2563eb',
+  info: '#2563eb',
+  service: '#7c3aed',
+};
+
+/** Fecha date-only (YYYY-MM-DD) → "3 oct 2026" sin corrimiento de zona horaria. */
+function formatDateOnly(value: string | null): string {
+  if (!value) return '—';
+  return new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString('es-CO', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function reminderLabel(row: ServiceRegistryRow): string {
+  const r = row.reminder;
+  if (!r) return 'Sin contactar';
+  if (r.status === 'dismissed') return 'Descartado';
+  if (r.status === 'sent') {
+    const via = r.channel === 'whatsapp' ? 'WhatsApp' : r.channel === 'email' ? 'correo' : r.channel;
+    return `Contactado por ${via}`;
+  }
+  return 'Pendiente';
 }
 
 @Component({
   selector: 'app-service-reminders-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, RouterLink, ButtonComponent, CardComponent, IconComponent],
-  template: `
-    <main class="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
-      <a routerLink="/admin/reservations" class="text-sm text-[var(--color-primary)]">← Reservas</a>
-      <header class="flex flex-wrap items-end justify-between gap-3">
-        <div><h1 class="text-2xl font-bold">Recordatorios de servicios</h1><p class="text-sm text-[var(--color-text-secondary)]">Clientes a quienes ya les corresponde repetir un servicio recurrente.</p></div>
-        <select class="rounded-lg border bg-surface px-3 py-2" [value]="filter()" (change)="setFilter($any($event.target).value)">
-          <option value="pending">Pendientes</option><option value="sent">Enviados</option><option value="dismissed">Descartados</option><option value="all">Todos</option>
-        </select>
-      </header>
-      @if (loading()) { <p class="py-8 text-center">Cargando recordatorios…</p> }
-      @else if (!items().length) { <app-card><div class="p-8 text-center"><app-icon name="bell" [size]="28"/><p class="mt-3 font-semibold">No hay recordatorios en esta vista</p><p class="text-sm text-[var(--color-text-secondary)]">Al completar un servicio recurrente, aparecerá aquí cuando llegue su fecha.</p></div></app-card> }
-      @else { <section class="grid gap-3">@for (item of items(); track item.id) {
-        <app-card><article class="flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center">
-          <div><h2 class="font-semibold">{{ item.customer.name }}</h2><p class="text-sm">{{ item.product.name }} · {{ item.days_since }} días desde el último servicio</p><p class="text-xs text-[var(--color-text-secondary)]">Corresponde desde {{ item.due_date | date:'mediumDate' }}</p></div>
-          @if (item.status === 'pending') { <div class="flex flex-wrap gap-2">
-            <app-button size="sm" variant="outline" [disabled]="!item.customer.phone" (clicked)="whatsapp(item)">WhatsApp</app-button>
-            <app-button size="sm" variant="outline" [disabled]="!item.customer.email" (clicked)="email(item)">Correo</app-button>
-            <app-button size="sm" variant="ghost" (clicked)="dismiss(item)">Descartar</app-button>
-          </div> } @else { <span class="rounded-full bg-[var(--color-background)] px-3 py-1 text-xs">{{ item.status === 'sent' ? 'Contactado' : 'Descartado' }}</span> }
-        </article></app-card>
-      }</section> }
-    </main>
-  `,
+  imports: [
+    FormsModule,
+    StickyHeaderComponent,
+    StatsComponent,
+    CardComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    PaginationComponent,
+    EmptyStateComponent,
+    DaysRemainingBadgeComponent,
+  ],
+  templateUrl: './service-reminders-page.component.html',
 })
 export class ServiceRemindersPageComponent {
-  private readonly http = inject(HttpClient);
+  private readonly registry = inject(ServiceRegistryService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly endpoint = `${environment.apiUrl}/store/service-reminders`;
-  readonly items = signal<Reminder[]>([]);
-  readonly loading = signal(false);
-  readonly filter = signal('pending');
 
-  constructor() { this.load(); }
-  setFilter(value: string): void { this.filter.set(value); this.load(); }
+  readonly rows = signal<RegistryViewRow[]>([]);
+  readonly stats = signal<ServiceRegistryStats>({ total: 0, recurring: 0, due_soon: 0, overdue: 0 });
+  readonly loading = signal(false);
+  readonly busyKey = signal<string | null>(null);
+
+  readonly filter = signal<ServiceRegistryFilter>('all');
+  readonly searchTerm = signal('');
+  readonly pageState = signal({ page: 1, limit: 20 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.pageState().limit) || 1);
+  readonly filterValues = computed<FilterValues>(() => ({ filter: this.filter() }));
+  readonly hasFilters = computed(() => this.filter() !== 'all' || this.searchTerm().length > 0);
+
+  private readonly countdownTpl = viewChild<TemplateRef<unknown>>('countdownTpl');
+
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'filter',
+      label: 'Mostrar',
+      type: 'select',
+      options: [
+        { value: 'all', label: 'Todos los servicios' },
+        { value: 'recurring', label: 'Recurrentes vigentes' },
+        { value: 'due_soon', label: 'Vencen pronto (≤ 3 días)' },
+        { value: 'overdue', label: 'Vencidos' },
+      ],
+    },
+  ];
+
+  readonly dropdownActions: DropdownAction[] = [{ label: 'Actualizar', icon: 'refresh-cw', action: 'refresh' }];
+
+  readonly columns = computed<TableColumn[]>(() => [
+    { key: 'customer_name', label: 'Cliente', priority: 1 },
+    { key: 'service_name', label: 'Servicio', priority: 1 },
+    { key: 'station_name', label: 'Estación', priority: 2 },
+    { key: 'subject_display', label: 'Vehículo / sujeto', priority: 2 },
+    { key: 'service_date_label', label: 'Fecha del servicio', priority: 1 },
+    { key: 'next_due_label', label: 'Próxima vez', priority: 2 },
+    { key: 'countdown_text', label: 'Estado', priority: 1, template: this.countdownTpl() },
+    { key: 'reminder_label', label: 'Recordatorio', priority: 3 },
+  ]);
+
+  readonly actions: TableAction[] = [
+    {
+      label: 'Correo',
+      icon: 'mail',
+      variant: 'info',
+      action: (row: RegistryViewRow) => this.sendEmail(row),
+      disabled: (row: RegistryViewRow) => !row.customer.email || this.busyKey() === row.row_key,
+      tooltip: (row: RegistryViewRow) =>
+        row.customer.email ? `Enviar mensaje a ${row.customer.email}` : 'El cliente no tiene correo registrado',
+    },
+    {
+      label: 'WhatsApp',
+      icon: 'message-circle',
+      variant: 'success',
+      action: (row: RegistryViewRow) => this.openWhatsapp(row),
+      disabled: (row: RegistryViewRow) => !row.customer.phone || this.busyKey() === row.row_key,
+      tooltip: (row: RegistryViewRow) =>
+        row.customer.phone ? `Abrir WhatsApp con ${row.customer.phone}` : 'El cliente no tiene teléfono registrado',
+    },
+    {
+      label: 'Descartar',
+      icon: 'x-circle',
+      variant: 'muted',
+      action: (row: RegistryViewRow) => this.dismiss(row),
+      show: (row: RegistryViewRow) => row.service.is_recurring && row.recurrence_status !== 'superseded',
+      disabled: (row: RegistryViewRow) => !row.can_dismiss || this.busyKey() === row.row_key,
+      tooltip: (row: RegistryViewRow) =>
+        !row.customer.registered
+          ? 'Solo se pueden descartar recordatorios de clientes registrados'
+          : row.reminder?.status === 'dismissed'
+            ? 'Ya fue descartado'
+            : 'Descartar este recordatorio',
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'customer_name',
+    subtitleTransform: (row: RegistryViewRow) =>
+      [row.service_name, row.subject_display !== '—' ? row.subject_display : null].filter(Boolean).join(' · '),
+    avatarFallbackIcon: 'clipboard-list',
+    avatarShape: 'square',
+    badgeKey: 'countdown_text',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorFn: (_value: unknown, row?: RegistryViewRow) => (row ? VARIANT_COLORS[row.countdown_variant] : null),
+    },
+    detailKeys: [
+      { key: 'station_name', label: 'Estación', icon: 'warehouse' },
+      { key: 'service_date_label', label: 'Servicio', icon: 'calendar' },
+      { key: 'next_due_label', label: 'Próxima vez', icon: 'calendar-clock' },
+      { key: 'reminder_label', label: 'Recordatorio', icon: 'bell' },
+    ],
+  };
+
+  constructor() {
+    this.load();
+  }
+
   load(): void {
     this.loading.set(true);
-    this.http.get<any>(this.endpoint, { params: { status: this.filter(), limit: '100' } }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => { const result = response?.data ?? response; this.items.set(result?.items ?? []); this.loading.set(false); },
-      error: () => { this.loading.set(false); this.toast.error('No se pudieron cargar los recordatorios'); },
-    });
+    const { page, limit } = this.pageState();
+    this.registry
+      .list({ filter: this.filter(), search: this.searchTerm() || undefined, page, limit })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const data = res?.data ?? [];
+          this.rows.set(data.map((row) => this.toView(row)));
+          this.totalItems.set(res?.meta?.total ?? data.length);
+          if (res?.meta?.stats) this.stats.set(res.meta.stats);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+          this.toast.error('No se pudo cargar el registro de servicios');
+        },
+      });
   }
-  whatsapp(item: Reminder): void {
-    this.http.post<any>(`${this.endpoint}/${item.id}/whatsapp`, {}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => { const url = (response?.data ?? response)?.url; if (url) window.open(url, '_blank', 'noopener'); this.load(); },
-      error: (error: any) => this.toast.error(error?.error?.message || 'No se pudo preparar WhatsApp'),
-    });
+
+  private toView(row: ServiceRegistryRow): RegistryViewRow {
+    const countdown = describeDaysRemaining(row.recurrence_status, row.days_remaining, row.reminder?.status);
+    return {
+      ...row,
+      customer_name: row.customer.name,
+      service_name: row.service.name,
+      station_name: row.station?.name ?? (row.source === 'order' ? 'Venta directa' : '—'),
+      subject_display: row.subject?.display || '—',
+      service_date_label: formatDateOnly(row.service_local_date),
+      next_due_label: row.next_due_date ? formatDateOnly(row.next_due_date) : '—',
+      countdown_text: countdown.text,
+      countdown_variant: countdown.variant,
+      reminder_label: reminderLabel(row),
+    };
   }
-  email(item: Reminder): void {
-    this.http.post(`${this.endpoint}/${item.id}/email`, {}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => { this.toast.success('Recordatorio enviado por correo'); this.load(); },
-      error: (error: any) => this.toast.error(error?.error?.message || 'No se pudo enviar el correo'),
-    });
+
+  setFilter(filter: ServiceRegistryFilter): void {
+    this.filter.set(filter);
+    this.pageState.update((s) => ({ ...s, page: 1 }));
+    this.load();
   }
-  dismiss(item: Reminder): void {
-    this.http.patch(`${this.endpoint}/${item.id}/dismiss`, {}).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => { this.toast.success('Recordatorio descartado'); this.load(); },
-      error: () => this.toast.error('No se pudo descartar el recordatorio'),
-    });
+
+  onFilterChange(values: FilterValues): void {
+    const value = (values['filter'] as ServiceRegistryFilter | undefined) || 'all';
+    this.setFilter(value);
+  }
+
+  onSearch(term: string): void {
+    this.searchTerm.set((term ?? '').trim());
+    this.pageState.update((s) => ({ ...s, page: 1 }));
+    this.load();
+  }
+
+  clearFilters(): void {
+    this.searchTerm.set('');
+    this.setFilter('all');
+  }
+
+  onPageChange(page: number): void {
+    this.pageState.update((s) => ({ ...s, page }));
+    this.load();
+  }
+
+  onDropdownAction(action: string): void {
+    if (action === 'refresh') this.load();
+  }
+
+  private sendEmail(row: RegistryViewRow): void {
+    this.busyKey.set(row.row_key);
+    this.registry
+      .sendEmail(row)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.busyKey.set(null);
+          this.toast.success(`Mensaje enviado a ${row.customer.email}`);
+          this.load();
+        },
+        error: (error: { error?: { message?: string } }) => {
+          this.busyKey.set(null);
+          this.toast.error(error?.error?.message || 'No se pudo enviar el correo');
+        },
+      });
+  }
+
+  private openWhatsapp(row: RegistryViewRow): void {
+    // Se abre la pestaña de forma síncrona (gesto del usuario) para que el
+    // navegador no la bloquee como popup; luego se le asigna la URL.
+    const tab = window.open('', '_blank');
+    this.busyKey.set(row.row_key);
+    this.registry
+      .whatsapp(row)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.busyKey.set(null);
+          if (res?.url) {
+            if (tab) {
+              tab.opener = null;
+              tab.location.href = res.url;
+            } else {
+              window.open(res.url, '_blank', 'noopener');
+            }
+          } else {
+            tab?.close();
+          }
+          this.load();
+        },
+        error: (error: { error?: { message?: string } }) => {
+          tab?.close();
+          this.busyKey.set(null);
+          this.toast.error(error?.error?.message || 'No se pudo preparar el mensaje de WhatsApp');
+        },
+      });
+  }
+
+  private dismiss(row: RegistryViewRow): void {
+    this.busyKey.set(row.row_key);
+    this.registry
+      .dismiss(row)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.busyKey.set(null);
+          this.toast.success('Recordatorio descartado');
+          this.load();
+        },
+        error: (error: { error?: { message?: string } }) => {
+          this.busyKey.set(null);
+          this.toast.error(error?.error?.message || 'No se pudo descartar el recordatorio');
+        },
+      });
   }
 }
