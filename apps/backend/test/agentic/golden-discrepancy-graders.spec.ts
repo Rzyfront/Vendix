@@ -1,6 +1,10 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { GoldenTurnObservation, gradeGoldenTurn } from './graders';
+import {
+  GOLDEN_NO_ANSWER,
+  GoldenTurnObservation,
+  gradeGoldenTurn,
+} from './graders';
 
 /**
  * Graders de la pre-verificación guiada de discrepancias: con diferencia el
@@ -106,5 +110,20 @@ describe('gradeGoldenTurn — guía de discrepancias', () => {
         ...(testCase.teardown_sql ?? []),
       ])
         expect(statement).not.toMatch(/\b(delete|truncate|drop)\b/i);
+  });
+});
+
+describe('gradeGoldenTurn — turno sin texto del modelo', () => {
+  it('reprueba el aviso enlatado del chat, el actual y el de producción', () => {
+    for (const notice of GOLDEN_NO_ANSWER)
+      expect(gradeGoldenTurn({}, observe(notice)).no_canned_answer).toBe(false);
+  });
+
+  it('aprueba el resumen que escribió el modelo tras sus herramientas', () => {
+    const checks = gradeGoldenTurn(
+      {},
+      observe('Tienes 3 productos con poco stock: Café, Azúcar y Leche.'),
+    );
+    expect(checks.no_canned_answer).toBe(true);
   });
 });

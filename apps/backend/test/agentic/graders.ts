@@ -6,6 +6,7 @@ import {
   ProviderAttempt,
 } from './contracts';
 import { fixtureFingerprint, stableJson } from './fixtures';
+import { USER_NOTICES } from '../../src/ai-engine/agent-execution.contract';
 
 export const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -221,6 +222,15 @@ export function gradeReceipt(
 export const GOLDEN_JARGON =
   /postcondici|search_tools|playbook|objetivo original|conservo el avance|\bschema\b|preflight|fingerprint|\blease\b|checkpoint|recuperaci[oó]n t[eé]cnica|\(interno\)|AI_AGENT_|inferencia|agent-result:|tool_call:|next_step|next_action|tool_reference|herramienta no cargada|índice del taller/i;
 export const GOLDEN_EXHAUSTED = 'No alcancé a terminar';
+/**
+ * The chat's last-resort notice for a turn that ended without prose, plus the
+ * wording it had in production. Either one means the closing inference did not
+ * rescue the turn.
+ */
+export const GOLDEN_NO_ANSWER = [
+  USER_NOTICES.no_answer,
+  'No tengo evidencia de que la solicitud esté terminada',
+];
 export const GOLDEN_PERMISSION_NOTICE =
   'no está disponible con tu usuario o con tu plan';
 const STAGE_CODES = new Set([
@@ -280,6 +290,9 @@ export function gradeGoldenTurn(
   const checks: Record<string, boolean> = {
     non_empty: observed.visible.trim().length > 0,
     no_exhausted: !observed.visible.includes(GOLDEN_EXHAUSTED),
+    no_canned_answer: !GOLDEN_NO_ANSWER.some((notice) =>
+      observed.visible.includes(notice),
+    ),
     no_false_permission:
       expected.permission_notice === 'allowed' ||
       !observed.visible.includes(GOLDEN_PERMISSION_NOTICE),
