@@ -4,19 +4,23 @@ description: >
   Modo de trabajo "big + small" (Sonnet + Opus = sopus): un modelo GRANDE planifica, orquesta,
   delega, audita y decide; un modelo SMALL rápido desarrolla con subagentes todo lo que el grande le
   delega. Agnóstico de proveedor (Opus/Sonnet, GPT Sol/GPT Luna, etc.).
-  Trigger: NOT auto-invoked by context. Load ONLY when the user explicitly invokes `sopus` or asks
-  that a big model orchestrate while a small/fast model writes the code.
+  Trigger: MANDATORY in this project. Load BEFORE acting on ANY development task (feature, fix,
+  refactor, migration, tests) and on ANY plan (how-to-plan / how-to-critical-plan). Only exception:
+  trivial changes (1-3 lines, typo, minimal config), done directly.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
-    - "User explicitly invokes sopus (big model orchestrates, small model codes)"
+    - "ANY development task or plan in Vendix (mandatory; trivial 1-3 line changes excepted)"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Agent
 ---
 
 # Sopus — el grande piensa, el pequeño construye
+
+> **Obligatoria en Vendix.** Se carga antes de actuar en toda tarea de desarrollo y en todo plan.
+> Única excepción: cambio trivial (1–3 líneas, typo, config mínima), que se hace directo.
 
 ## Purpose
 

@@ -230,6 +230,7 @@ export const GOLDEN_EXHAUSTED = 'No alcancé a terminar';
 export const GOLDEN_NO_ANSWER = [
   USER_NOTICES.no_answer,
   'No tengo evidencia de que la solicitud esté terminada',
+  'Esta vez no logré armar la respuesta',
 ];
 export const GOLDEN_PERMISSION_NOTICE =
   'no está disponible con tu usuario o con tu plan';
@@ -252,7 +253,10 @@ export const GOLDEN_NEEDLESS_GUIDANCE =
   /motivo de la diferencia|a qu[eé] se debe (la|el) (diferencia|faltante|sobrante)|\bfaltan\s+\$|\bsobran\s+\$/i;
 
 const fold = (text: string): string =>
-  text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 export interface GoldenTurnExpectation {
   expect_tools_any?: string[];
@@ -262,6 +266,12 @@ export interface GoldenTurnExpectation {
   expect_guidance?: { causes_any: string[] };
   /** Sin discrepancia: proponer directo, sin preguntar por diferencias. */
   expect_no_guidance?: boolean;
+  /**
+   * Pregunta de conocimiento: se responde en prosa, con sustancia (mínimo de
+   * caracteres) y nombrando al menos un concepto de la pregunta. Sin tools
+   * obligatorias y sin proponer escrituras.
+   */
+  expect_answer?: { min_chars: number; mentions_any: string[] };
 }
 export interface GoldenToolFrame {
   frame: 'tool_call' | 'tool_result';
@@ -329,6 +339,15 @@ export function gradeGoldenTurn(
         visible.includes(fold(cause)),
       );
     checks.warm_tone = !GOLDEN_SCOLDING.test(observed.visible);
+  }
+  if (expected.expect_answer) {
+    const visible = fold(observed.visible);
+    checks.useful_answer =
+      !observed.proposed &&
+      observed.visible.trim().length >= expected.expect_answer.min_chars &&
+      expected.expect_answer.mentions_any.some((term) =>
+        visible.includes(fold(term)),
+      );
   }
   if (expected.expect_no_guidance)
     checks.no_needless_guidance = !GOLDEN_NEEDLESS_GUIDANCE.test(
