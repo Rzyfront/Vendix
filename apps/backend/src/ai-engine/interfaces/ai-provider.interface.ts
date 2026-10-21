@@ -52,6 +52,19 @@ export interface AIRequestOptions {
   systemPrompt?: string;
   thinking?: boolean;
   tools?: AIToolDefinition[];
+  /**
+   * Leading tools that form the byte-stable prefix (agent working-set core).
+   * Prompt-caching providers put their tool breakpoint on the last of them;
+   * absent, the breakpoint goes on the last tool.
+   */
+  toolCachePrefix?: number;
+  /**
+   * Full server-authorized catalog the offered `tools` were selected from.
+   * Only providers with a verified native deferred-loading protocol (Anthropic
+   * `defer_loading` + `tool_reference`) use it; every other provider ignores
+   * it. It never widens authority: the loop still validates every call.
+   */
+  deferredTools?: AIToolDefinition[];
   tool_choice?:
     | 'auto'
     | 'none'
@@ -416,6 +429,13 @@ export interface AIToolDefinition {
  */
 export type AIProviderFetch = typeof globalThis.fetch;
 
+export interface AIBackgroundUsageRecord {
+  purpose: 'tool_search_probe';
+  model: string;
+  usage: Partial<NonNullable<AIResponse['usage']>> | undefined;
+  latencyMs: number;
+}
+
 export interface AIProviderConfig {
   provider: string;
   sdkType: SdkType;
@@ -426,6 +446,13 @@ export interface AIProviderConfig {
   observeUsage?: (
     usage: Partial<NonNullable<AIResponse['usage']>> | undefined,
   ) => void;
+  /**
+   * Usage of provider calls made OUTSIDE any request dispatch (e.g. the native
+   * tool-search capability probe). `observeUsage` is dispatch-scoped and drops
+   * these, so this is the only path that puts their tokens in ai_engine_logs.
+   * Numeric usage only: no prompts, headers or credentials cross this seam.
+   */
+  recordBackgroundUsage?: (record: AIBackgroundUsageRecord) => void;
   modelId: string;
   baseUrl?: string;
   /**

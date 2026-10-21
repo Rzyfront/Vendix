@@ -7,11 +7,12 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Adding or changing runtime agent playbooks"
     - "Changing playbook loading, contracts, packaging or verifiers"
+    - "Adding a guided discrepancy pre-check before a close, reconciliation or adjustment write"
 ---
 
 # Runtime Agent Playbooks
@@ -88,6 +89,38 @@ metadata:
 - Historical playbook bodies are omitted from durable context and paired tool
   history even during rollback. Reload from the exact current release; artifacts
   remain data, not instructions or fresh stock/price/balance evidence.
+
+## Pre-verificación guiada de discrepancias
+
+When a process closes, consolidates, reconciles or adjusts something and the
+real value differs from the expected one, the agent guides BEFORE proposing:
+explain the gap with figures → ask the reason → read typical causes and show
+concrete candidates → guide registering what is missing → only then propose,
+recording the reason. Balanced within tolerance = propose directly.
+
+- **Engine signal** (`ai-engine/tools/discrepancy-signal.ts`): the write's
+  `preview` returns `status:'error'` + `discrepancy` (`signal:'discrepancy_detected'`,
+  expected/actual/difference/direction/tolerance, `plain_summary`,
+  `causes_to_check`, `reads_to_run`, `guide_questions`). No token is minted, so
+  nothing reaches an approval card. The handler applies the same gate (plan
+  approvals skip the preview). Retry with `discrepancy_reviewed:true` +
+  `discrepancy_reason` (user's words or `DISCREPANCY_UNKNOWN_REASON`); the reason
+  is persisted (closing notes / adjustment reason). Gate fails open if the
+  expected value cannot be read: it is guidance, not security.
+- **Tolerances:** cash `moneyTolerance` = 0.1 % of expected, floor 1 unit;
+  stock = 0 units, only for `count_variance`/`manual_correction` (damage, loss,
+  theft, expiration already carry the reason).
+- **Prompt:** `DISCREPANCY_GUIDANCE_BLOCK` (static, cacheable) is pushed by the
+  loop whenever operational tools exist; it overrides "propose directly" only
+  when there is a gap. If the user insists, respect it and record the reason.
+- **Playbooks:** add a small `discrepancy-preflight` section: detector, reads,
+  guide questions, typical causes, tolerance, and how to continue. Never expose
+  tool names, `discrepancy_detected` or "preflight" to the user.
+- **Golden cases:** `expect_guidance.causes_any` (grader `guide_before_write` +
+  `warm_tone`) and `expect_no_guidance` (`no_needless_guidance`); fixtures via
+  `setup_sql`/`teardown_sql` on the `e2e` clone only (no DELETE/TRUNCATE/DROP).
+- New gated write: reuse the helpers, add `DISCREPANCY_ACK_PARAMETERS`, test
+  shortage/surplus/within-tolerance/ack-without-reason/fail-open.
 
 ## Packaging and rollout
 

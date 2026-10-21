@@ -726,7 +726,14 @@ describe('PlaybookLoaderService C: packaged release bootstrap', () => {
     const copy = loader.getPlaybooks();
     copy[0].hash = 'mutated';
     expect(loader.getPlaybooks()[0].hash).not.toBe('mutated');
-    expect(api.listFor).toHaveBeenCalledWith(['inventory:read']);
+    // Catálogo completo de la release: sin la frontera de dominio del llamante.
+    expect(api.listFor).toHaveBeenCalledWith(
+      ['inventory:read'],
+      undefined,
+      undefined,
+      undefined,
+      { ignoreDomainScope: true },
+    );
   });
   it('enforces boot barrier and waits for synchronous API/decentralized registration hooks', async () => {
     assets();

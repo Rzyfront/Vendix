@@ -133,7 +133,7 @@ it.each([
   expect(s.repo.createOrReplace).not.toHaveBeenCalled();
   expect(s.repo.acquireLease).not.toHaveBeenCalled();
 });
-it.each(['unknown_effect', 'awaiting_approval'])(
+it.each(['unknown_effect'])(
   'a new human message never replaces an objective in %s with a pending effect',
   async (status) => {
     const s = setup();
@@ -148,6 +148,77 @@ it.each(['unknown_effect', 'awaiting_approval'])(
     expect(s.repo.acquireLease).not.toHaveBeenCalled();
   },
 );
+describe('a new human message while a card waits for approval', () => {
+  it('withdraws the proposal without applying it and runs the message', async () => {
+    const s = setup();
+    s.state = {
+      ...s.state,
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    };
+    s.repo.rejectProposal = jest.fn(async () => {
+      s.state = {
+        ...s.state,
+        semantic_status: 'active',
+        version: s.state.version + 1,
+      };
+      return s.state;
+    });
+    const session = await RequestContextService.runIsolated(ctx, () =>
+      s.service.open(7, 'vexi', 'no, cancela'),
+    );
+    expect(s.repo.recoverAppliedReceipt).toHaveBeenCalled();
+    expect(s.repo.rejectProposal).toHaveBeenCalledWith(
+      s.state.id,
+      1,
+      'superseded_by_message',
+    );
+    expect(s.repo.createOrReplace).toHaveBeenCalledWith(
+      7,
+      null,
+      'vexi',
+      expect.objectContaining({ goal: 'no, cancela' }),
+    );
+    expect(session).not.toBeNull();
+  });
+  it('keeps the 409 when the proposal cannot be withdrawn (dispatch in flight)', async () => {
+    const { ConflictException } = await import('@nestjs/common');
+    const s = setup();
+    s.state = {
+      ...s.state,
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    };
+    s.repo.rejectProposal = jest.fn(async () => {
+      throw new ConflictException(
+        'An uncertain effect requires reconciliation before continuing',
+      );
+    });
+    s.repo.hasPendingEffects.mockResolvedValue(true);
+    const error = await RequestContextService.runIsolated(ctx, () =>
+      s.service.open(7, 'vexi', 'otra cosa'),
+    ).catch((e) => e);
+    expect(error.getStatus()).toBe(409);
+    expect(error.getResponse()).toMatchObject({
+      error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+    });
+    expect(s.repo.createOrReplace).not.toHaveBeenCalled();
+    expect(s.repo.acquireLease).not.toHaveBeenCalled();
+  });
+  it('a continuation never withdraws the card', async () => {
+    const s = setup();
+    s.state = {
+      ...s.state,
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    };
+    s.repo.rejectProposal = jest.fn();
+    await RequestContextService.runIsolated(ctx, () =>
+      s.service.open(7, 'vexi', 'x', { continuation: true }),
+    ).catch(() => undefined);
+    expect(s.repo.rejectProposal).not.toHaveBeenCalled();
+  });
+});
 it('requests clearing requires_revalidation only for an observed successful read', async () => {
   const s = setup();
   await s.session.checkpointTool(
@@ -159,10 +230,15 @@ it('requests clearing requires_revalidation only for an observed successful read
   expect(
     s.repo.appendToolResult.mock.calls[0][2].checkpoint.requires_revalidation,
   ).toBe(false);
-  await s.session.checkpointTool('write', 'update_product', {}, {
-    ...normalizeToolResult(JSON.stringify({ id: 1 })),
-    effect_status: 'applied',
-  });
+  await s.session.checkpointTool(
+    'write',
+    'update_product',
+    {},
+    {
+      ...normalizeToolResult(JSON.stringify({ id: 1 })),
+      effect_status: 'applied',
+    },
+  );
   expect(
     s.repo.appendToolResult.mock.calls[1][2].checkpoint,
   ).not.toHaveProperty('requires_revalidation');
@@ -346,9 +422,9 @@ describe('clean objective per human question', () => {
       expect(second.objective.budget.tools).toBe(0);
       expect(second.objective.budget.expansions).toBe(0);
       expect(second.objective.requires_revalidation).toBe(false);
-      expect(
-        db.objectives.get(first!.objective_id)?.semantic_status,
-      ).toBe('superseded');
+      expect(db.objectives.get(first!.objective_id)?.semantic_status).toBe(
+        'superseded',
+      );
       expect((await repository.getForConversation(7))?.id).toBe(
         second.objective_id,
       );
@@ -387,11 +463,16 @@ describe('clean objective per human question', () => {
     RequestContextService.runIsolated(ctx, async () => {
       const { service } = await harness();
       const first = await service.open(7, 'vexi', 'lee algo prohibido');
-      await first!.checkpointTool('c1', 'get_secret', {}, {
-        ...normalizeToolResult(JSON.stringify({})),
-        status: 'blocked',
-        error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
-      });
+      await first!.checkpointTool(
+        'c1',
+        'get_secret',
+        {},
+        {
+          ...normalizeToolResult(JSON.stringify({})),
+          status: 'blocked',
+          error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
+        },
+      );
       expect(first!.objective.semantic_status).toBe('blocked');
       await first!.close();
       const next = await ask(service, 'otra pregunta');

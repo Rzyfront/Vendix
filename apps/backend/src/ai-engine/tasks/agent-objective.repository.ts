@@ -830,6 +830,7 @@ export class AgentObjectiveRepository {
   async rejectProposal(
     id: string,
     expectedVersion: number,
+    reason: 'user_rejected' | 'superseded_by_message' = 'user_rejected',
   ): Promise<AgentObjective> {
     const scope = this.scope();
     return this.transaction(async (tx) => {
@@ -842,7 +843,7 @@ export class AgentObjectiveRepository {
         throw new ConflictException('Objective proposal cannot be rejected');
       await this.assertNoUnresolvedEffect(tx, scope, id);
       await tx.$executeRaw(
-        Prisma.sql`UPDATE ai_agent_effects SET status='failed',history=history||${json([{ status: 'failed', reason: 'user_rejected', at: new Date().toISOString() }])},updated_at=CURRENT_TIMESTAMP WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND status IN ('proposed','approved')`,
+        Prisma.sql`UPDATE ai_agent_effects SET status='failed',history=history||${json([{ status: 'failed', reason, at: new Date().toISOString() }])},updated_at=CURRENT_TIMESTAMP WHERE objective_id=${id}::uuid AND ${scopeSql(scope)} AND status IN ('proposed','approved')`,
       );
       const rows = await tx.$queryRaw<AgentObjective[]>(
         Prisma.sql`UPDATE ai_agent_objectives SET semantic_status='active',requires_revalidation=true,version=version+1,lease_generation=lease_generation+1,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=${id}::uuid AND ${scopeSql(scope)} AND version=${row.version} AND lease_generation=${row.lease_generation} RETURNING *`,

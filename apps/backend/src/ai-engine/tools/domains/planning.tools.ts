@@ -21,22 +21,62 @@ const NO_CONVERSATION = JSON.stringify({
  * persisten nada.
  */
 export function createPlanningTools(): RegisteredTool[] {
+  // Published exactly as the plan hook (VexiPlanStateService.propose) enforces
+  // it: a field the hook demands but the schema calls optional made the model
+  // send plans that were refused over and over.
   const verification = {
     type: 'object',
+    description:
+      'Cómo comprueba el servidor este entregable. Solo existe para procesos con verificador (por ejemplo compra-proveedor, reponer-inventario, recibir-compra, pagar-proveedor); si el trabajo no es uno de ellos, no uses propose_plan.',
     properties: {
-      workflow_key: { type: 'string' },
-      step_id: { type: 'string' },
-      inputs: { type: 'object' },
+      workflow_key: {
+        type: 'string',
+        description:
+          'Nombre del proceso del servidor, tal como lo devuelve search_tools (por ejemplo "compra-proveedor").',
+      },
+      step_id: {
+        type: 'string',
+        description:
+          'Identificador corto y único del entregable dentro del plan ("orden", "pago").',
+      },
+      inputs: {
+        type: 'object',
+        description:
+          'Datos que el verificador contrasta, con los ids reales (por ejemplo {"supplier_id": 126}).',
+      },
     },
     required: ['workflow_key', 'step_id', 'inputs'],
   };
   const dag = {
-    depends_on: { type: 'array', items: { type: 'integer' } },
-    expected_input: { type: 'string' },
-    expected_output: { type: 'string' },
-    candidate_tools: { type: 'array', items: { type: 'string' } },
-    approval: { type: 'string', enum: ['none', 'individual'] },
-    verifier: { type: 'string' },
+    depends_on: {
+      type: 'array',
+      items: { type: 'integer' },
+      description:
+        'Números de pasos ANTERIORES de los que depende; [] para el primero.',
+    },
+    expected_input: {
+      type: 'string',
+      description: 'Qué necesita el paso para empezar.',
+    },
+    expected_output: {
+      type: 'string',
+      description: 'Qué deja el paso al terminar.',
+    },
+    candidate_tools: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Herramientas con las que se hará el paso (al menos una).',
+    },
+    approval: {
+      type: 'string',
+      enum: ['none', 'individual'],
+      description:
+        '"individual" si el paso es un cambio; "none" si solo consulta.',
+    },
+    verifier: {
+      type: 'string',
+      description: 'Cómo compruebas que el paso quedó hecho (qué lees).',
+    },
   };
   const stepItem = {
     type: 'object',
@@ -58,7 +98,17 @@ export function createPlanningTools(): RegisteredTool[] {
           'Criterio verificable que deja el paso terminado (un dato real del sistema).',
       },
     },
-    required: ['title', 'kind', 'done_when'],
+    required: [
+      'title',
+      'kind',
+      'done_when',
+      'depends_on',
+      'expected_input',
+      'expected_output',
+      'candidate_tools',
+      'approval',
+      'verifier',
+    ],
   };
 
   const tools: RegisteredTool[] = [
@@ -68,7 +118,7 @@ export function createPlanningTools(): RegisteredTool[] {
       domain: 'planning',
       readOnly: true,
       description:
-        'Úsala ante peticiones con varios movimientos (por ejemplo "crea el proveedor y regístrale la factura"). Llámala ANTES del primer cambio. Es una lista de tareas INTERNA: nunca la menciones ni la resumas a la persona. Define entregables verificables (lo que debe existir al final) y un done_when por paso. No la uses para una sola operación.',
+        'Úsala ante peticiones con varios movimientos (por ejemplo "crea el proveedor y regístrale la factura") que correspondan a un proceso del servidor con verificador. Llámala ANTES del primer cambio. Es una lista de tareas INTERNA: nunca la menciones ni la resumas a la persona. Define de 3 a 7 pasos y entregables verificables (lo que debe existir al final, con su verification). No la uses para una sola operación: si el trabajo termina en un único cambio, haz las consultas y propón ese cambio directamente.',
       parameters: {
         type: 'object',
         properties: {
@@ -84,9 +134,9 @@ export function createPlanningTools(): RegisteredTool[] {
               type: 'object',
               properties: {
                 description: { type: 'string' },
-                ...{ verification },
+                verification,
               },
-              required: ['description'],
+              required: ['description', 'verification'],
             },
           },
           steps: {

@@ -3,6 +3,77 @@
 Fecha: 2026-10-17. Implementación offline sobre A+D0, **no promoción medida**.
 No cambios de proveedor/modelo activo, prompts/DB existentes, móvil o infraestructura.
 
+## Carga dinámica — «el mecánico» (2026-10-19)
+
+> Reemplaza el «catálogo autorizado completo siempre» del fix 2026-10 y las ampliaciones
+> K12/K24/K40 descritas más abajo. Lo demás de este documento (autoridad, índice,
+> aislamiento) sigue vigente. Skill: `vendix-ai-tool-routing`.
+
+- **Problema:** cada llamada al modelo llevaba ~220 tools (~80k tokens de prompt en
+  DeepSeek vía OpenRouter, sin caché). Con top-K excluyente (antes del fix) aparecían avisos
+  falsos de «sin permisos» y rondas gastadas.
+- **Diseño:** núcleo fijo pequeño (`CORE_DISCOVERY` ∪ `AGENT_TOOL_CORE[agent]`, ~13) +
+  herramientas cargadas por petición: prefetch semántico top-8 por mensaje (D1),
+  `search_tools` carga 5 (máx. 10) (D2), regla dura (D3) y alternativas/precarga del paso
+  del plan (D4). Reconstrucción por turno desde los últimos 3 turnos del historial. Tope 30.
+  Orden estable `[núcleo] + [plan] + [cargadas]` para caché de prompt.
+- **Regla dura:** una tool AUTORIZADA llamada sin estar cargada se carga y se ejecuta en la
+  MISMA ronda, sin aviso de permisos ni ronda gastada. También en voz realtime
+  (`loadUnofferedTool` + `session.update`).
+- **Cascada:** cobertura < 0,9, índice vacío, error o timeout de 3 s →
+  `full_catalog_fallback` (catálogo autorizado completo).
+- **Rondas gratis:** hasta 3 rondas solo de descubrimiento por turno no consumen presupuesto.
+- **Índice:** migración `20261020100000_agent_knowledge_embeddings_app` (INSERT idempotente
+  de una fila, `-- DATA IMPACT:`), reencolado del job `index-knowledge` fallido y
+  `AI_KNOWLEDGE_DAILY_TOKEN_BUDGET` = 2.000.000 por defecto en código.
+- **Métricas:** span `router` con `core_count`, `loaded_count`, `retrieval_source`,
+  `prefetch_hits`, `unloaded_authorized_calls`, `free_discovery_rounds` (SQL en la skill).
+- **Sin feature flags.** Rollback = revertir el commit; el índice vacío ya degrada al
+  catálogo completo por diseño.
+- **Validación E2E:** suite `test/agentic/golden-conversations.es.jsonl` (skill
+  `vendix-agent-golden-conversations`). Resultados en «Resultados E2E» abajo.
+
+### Resultados E2E
+
+Corrida 2026-10-19, local, `deepseek/deepseek-v4.1-flash`; baseline `a0b2daec3` con misma DB y modelo.
+
+| Métrica | Baseline (catálogo completo) | Carga dinámica |
+| --- | --- | --- |
+| Prompt por llamada, mediana (9 casos pareados) | 85.674 | 14.989 (−82,5 %) |
+| Tools ofrecidas por inferencia (p50) | 286–304 | 22–31 |
+| Tokens de definiciones (p50) | ~68k | ~6–8k |
+| Casos pareados que pasan | 3/9 | 4/9 |
+| Suite completa | — | 24/30 |
+
+Ningún caso pasa en baseline y falla en dinámico. Los 6 fallos dinámicos son de fixture, de
+capacidad faltante (listar proveedores, editar dirección de cliente) o del defecto preexistente
+«`PROVIDER_ERROR` en el turno que sigue a una propuesta de escritura» (también en baseline).
+Gate «30/30 + pass^2» no cumplido: el saldo de OpenRouter cayó bajo el piso antes de
+recorrer los casos corregidos. Con índice vacío (g30) la cascada vuelve a ~87,5k, como se espera.
+
+> Actualización (merge de #936): las corridas full-2 y full-3 sobre `4fdd0fd76` dieron
+> **30/30 con pass^2**; el baseline `a0b2daec3` da 23/30 sobre los mismos casos.
+> Precisión del fallback: índice vacío o cobertura < 0,9 → catálogo autorizado completo;
+> si fallan **solo los embeddings**, el turno sigue en ranking léxico (no hay cascada).
+
+### Hotfix pendientes #936 (2026-10-20)
+
+Rama `hotfix/vex-vexi-dinamico-pendientes` (desde `develop` 7b724d337). Cierra lo que la
+re-revisión v2 (79/100) dejó abierto:
+
+- **M1:** `search_playbooks`/`load_playbook` y `search_recipes`/`load_recipe` entran al núcleo
+  dinámico solo si el turno tiene sesión de playbook/receta, siempre ∩ autoridad.
+- **L1–L3:** firma de la tool ante INVALID_ARGS de la regla dura, contador
+  `unloaded_authorized_calls` sin discovery, sesiones de voz de #934 normalizadas (`loaded`/`used`). _TODO orquestador: confirmar alcance final._
+- **N2/N3 (F7):** un 4xx nativo de Anthropic desactiva el modo nativo y reintenta una vez con
+  carga propia; probe con prueba negativa, fuera del turno y con huella de credencial en la clave.
+- **N4:** `markInProcessWriteApplied` fail-closed (`{error, code}` cuenta como fallo).
+- **N6:** `\set ON_ERROR_STOP on` en el fixture E2E. **Golden:** g31–g33 (playbooks y recetas
+  en modo dinámico).
+- **N5:** el reformateo de `purchase-orders.service.ts` (`41dfe794d`) no tiene cambios
+  funcionales fuera del `where.OR` de `findAll` (sin espacios: 205+/133−; ver cuerpo del PR).
+- Regla de dominio compartida guard/puente documentada en la skill `vendix-ai-tool-routing` 2.1.
+
 ## Contrato entregado
 
 - Catálogo por `tool:<nombre canónico>:<versión>` y documento entero estable. Hash incluye
@@ -163,5 +234,6 @@ Fuentes de diseño: [pgvector hybrid search](https://github.com/pgvector/pgvecto
 
 `AI_KNOWLEDGE_EMBEDDING_APP_KEY=agent_knowledge_embeddings`,
 `AI_KNOWLEDGE_EMBEDDING_MODEL=text-embedding-3-small` (1536 dimensiones).
-`AI_KNOWLEDGE_DAILY_TOKEN_BUDGET=0` evita gasto sin aprobación, sin impedir
-indexación léxica ni chat. No hay fallback a la app de productos o SDK directo.
+`AI_KNOWLEDGE_DAILY_TOKEN_BUDGET` = 2.000.000 por defecto en código (decisión del dueño
+2026-10-19; prod mapea variables una a una, no se agrega al deploy). Con 0 explícito no hay
+gasto, sin impedir indexación léxica ni chat. No hay fallback a la app de productos o SDK directo.

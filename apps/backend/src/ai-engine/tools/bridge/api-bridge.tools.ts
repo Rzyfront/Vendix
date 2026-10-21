@@ -15,6 +15,7 @@ import { VexiAttachmentsService } from '../../../domains/store/vexi/vexi-attachm
 import { isAgentAbort } from '../../tasks/agent-deadline';
 import {
   buildMultipartBody,
+  callerDomainScope,
   internalApiBase,
   internalAuthHeaders,
   internalApiText,
@@ -93,6 +94,31 @@ function callerScopes(): string[] {
   const context = internalRequestContext();
   const granted = context?.permissions;
   return granted?.length ? granted : (context?.roles ?? []);
+}
+
+/**
+ * Rechazo recuperable para una ruta fuera del dominio del token, o `null`.
+ *
+ * Sin `statusCode` y con `error_code` propio a propósito: el normalizador
+ * clasifica 401/403 como `blocked` (permiso o plan de la persona), y esto es
+ * una ruta mal elegida por el modelo — `recoverable_error` con un next_step
+ * que le dice dónde buscar la alternativa.
+ */
+function domainScopeRefusal(
+  path: string,
+): { error: string; error_code: string; next_step: string } | null {
+  const decision = callerDomainScope(path);
+  if (decision.allowed) return null;
+  const orgFromStore = decision.reason === 'store_admin_org_path';
+  return {
+    error: orgFromStore
+      ? `La ruta "${path}" es de la organización y no está disponible desde la tienda.`
+      : `La ruta "${path}" no está disponible desde la sesión actual.`,
+    error_code: 'API_BRIDGE_DOMAIN_SCOPE',
+    next_step: orgFromStore
+      ? 'Usa las rutas store/… equivalentes (búscalas con list_endpoints o list_capabilities) o una herramienta propia con search_tools; no reintentes rutas organization/….'
+      : 'Usa solo rutas que aparezcan en list_endpoints o list_capabilities para esta sesión; no reintentes esta ruta.',
+  };
 }
 
 /** The irreversibility sentence for a path, when its domain carries one. */
@@ -663,6 +689,14 @@ export function createApiBridgeTools({
           });
         }
 
+        // Antes de despachar: una ruta de otro dominio (p. ej. `organization/*`
+        // con token de tienda) siempre vuelve 403 del DomainScopeGuard, y ese
+        // 403 se clasifica `blocked` → turno agotado + aviso falso de permisos
+        // (E2E g09). Es un error de ruta que el modelo corrige, no un permiso
+        // que le falte a la persona.
+        const outOfScope = domainScopeRefusal(entry.path);
+        if (outOfScope) return JSON.stringify(outOfScope);
+
         // Second, redundant permission check. The real enforcement happens in
         // the guards of the internal request below; this one only exists to
         // give the model an explanatory answer instead of a bare 403.
@@ -724,6 +758,8 @@ export function createApiBridgeTools({
       name: 'write_endpoint',
       version: '1',
       domain: 'api-bridge',
+      // The effect crosses HTTP: the handler states `applied` itself.
+      effectTransport: 'http',
       // NOT readOnly, and confirmation is mandatory: this is the only tool that
       // can mutate an arbitrary part of the system, so the user approves every
       // single call. The registry turns the rejection into the proposal, so no
@@ -789,6 +825,17 @@ export function createApiBridgeTools({
             message: others.length
               ? `Esa operación no existe sobre "${path}", pero sí ${others.join(', ')}.`
               : `No encontré esa operación en el sistema. Revisa el mapa con list_endpoints.`,
+          };
+        }
+
+        // Misma frontera de dominio que call_endpoint, antes de acuñar token:
+        // aprobar un cambio que el guard va a rechazar con 403 es pedir un sí
+        // en vano.
+        const outOfScope = domainScopeRefusal(entry.path);
+        if (outOfScope) {
+          return {
+            status: 'error' as const,
+            message: `${outOfScope.error} ${outOfScope.next_step}`,
           };
         }
 

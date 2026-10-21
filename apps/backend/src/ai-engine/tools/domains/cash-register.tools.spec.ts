@@ -481,4 +481,152 @@ describe('cash-register.tools · caja', () => {
       return buildTools().byName.close_cash_session.domain;
     }
   });
+  describe('close_cash_session · pre-verificación guiada del arqueo', () => {
+    function withExpected(expected: number | (() => never)) {
+      const built = buildTools();
+      built.deps.sessionsService.getCashSummary =
+        typeof expected === 'function'
+          ? jest.fn().mockRejectedValue(new Error('boom'))
+          : jest.fn().mockResolvedValue({ expected_cash_total: expected });
+      return built;
+    }
+
+    it('faltante sin revisar: preview en error con la señal estructurada', async () => {
+      const { deps, byName } = withExpected(350000);
+      const prev = await preview(byName.close_cash_session, {
+        session_id: 5,
+        actual_closing_amount: 320000,
+      });
+      expect(deps.sessionsService.getCashSummary).toHaveBeenCalledWith(5);
+      expect(prev.status).toBe('error');
+      expect(prev.discrepancy).toEqual(
+        expect.objectContaining({
+          signal: 'discrepancy_detected',
+          process: 'cash_close',
+          unit: 'COP',
+          expected: 350000,
+          actual: 320000,
+          difference: -30000,
+          direction: 'shortage',
+          tolerance: 350,
+        }),
+      );
+      expect(prev.discrepancy!.causes_to_check.length).toBeGreaterThan(0);
+      expect(prev.discrepancy!.reads_to_run).toContain(
+        'get_cash_session_close_report',
+      );
+      expect(prev.discrepancy!.plain_summary).toContain('faltan');
+      expect(prev.message).toContain('discrepancy_reviewed=true');
+    });
+
+    it('sobrante sin revisar: dirección surplus', async () => {
+      const { byName } = withExpected(350000);
+      const prev = await preview(byName.close_cash_session, {
+        session_id: 5,
+        actual_closing_amount: 360000,
+      });
+      expect(prev.status).toBe('error');
+      expect(prev.discrepancy!.direction).toBe('surplus');
+      expect(prev.discrepancy!.difference).toBe(10000);
+      expect(prev.discrepancy!.plain_summary).toContain('sobran');
+    });
+
+    it('dentro de la tolerancia: preview warning normal y sin señal', async () => {
+      const { deps, byName } = withExpected(350000);
+      const args = { session_id: 5, actual_closing_amount: 349800 };
+      const prev = await preview(byName.close_cash_session, args);
+      expect(prev.status).toBe('warning');
+      expect(prev.discrepancy).toBeUndefined();
+      expect(prev.changes.map((c) => c.field)).not.toContain('difference');
+      await run(byName.close_cash_session, args);
+      expect(deps.sessionsService.closeSession).toHaveBeenCalledWith(5, {
+        actual_closing_amount: 349800,
+      });
+    });
+
+    it('revisada sin motivo: preview y handler piden el motivo', async () => {
+      const { deps, byName } = withExpected(350000);
+      const args = {
+        session_id: 5,
+        actual_closing_amount: 320000,
+        discrepancy_reviewed: true,
+      };
+      const prev = await preview(byName.close_cash_session, args);
+      expect(prev.status).toBe('error');
+      expect(prev.message).toContain('discrepancy_reason');
+      const out = await run(byName.close_cash_session, args);
+      expect(out.error).toContain('discrepancy_reason');
+      expect(deps.sessionsService.closeSession).not.toHaveBeenCalled();
+    });
+
+    it('revisada con motivo: warning con la diferencia y notas con el motivo', async () => {
+      const { deps, byName } = withExpected(350000);
+      const args = {
+        session_id: 5,
+        actual_closing_amount: 320000,
+        closing_notes: 'Turno de la tarde',
+        discrepancy_reviewed: true,
+        discrepancy_reason: 'Se pagó al domiciliario desde el cajón',
+      };
+      const prev = await preview(byName.close_cash_session, args);
+      expect(prev.status).toBe('warning');
+      expect(prev.changes).toEqual(
+        expect.arrayContaining([
+          {
+            field: 'difference',
+            label: 'Faltante',
+            from: 350000,
+            to: 320000,
+          },
+          {
+            field: 'discrepancy_reason',
+            label: 'Motivo de la diferencia',
+            from: null,
+            to: 'Se pagó al domiciliario desde el cajón',
+          },
+        ]),
+      );
+      await run(byName.close_cash_session, args);
+      const dto = deps.sessionsService.closeSession.mock.calls[0][1];
+      expect(dto.actual_closing_amount).toBe(320000);
+      expect(dto.closing_notes).toBe(
+        'Turno de la tarde\nDiferencia de arqueo (faltante de $30.000): Se pagó al domiciliario desde el cajón',
+      );
+    });
+
+    it('handler sin revisar con diferencia no cierra y devuelve la señal', async () => {
+      const { deps, byName } = withExpected(350000);
+      const out = await run(byName.close_cash_session, {
+        session_id: 5,
+        actual_closing_amount: 320000,
+      });
+      expect(out.error).toContain('faltan');
+      expect(out.discrepancy.direction).toBe('shortage');
+      expect(out.next_step).toContain('discrepancy_reviewed=true');
+      expect(deps.sessionsService.closeSession).not.toHaveBeenCalled();
+    });
+
+    it('si el esperado no se puede leer, el cierre sigue igual (fail-open)', async () => {
+      const { deps, byName } = withExpected(() => {
+        throw new Error('unused');
+      });
+      const args = { session_id: 5, actual_closing_amount: 1 };
+      const prev = await preview(byName.close_cash_session, args);
+      expect(prev.status).toBe('warning');
+      expect(prev.discrepancy).toBeUndefined();
+      await run(byName.close_cash_session, args);
+      expect(deps.sessionsService.closeSession).toHaveBeenCalled();
+    });
+
+    it('expone los parámetros de reconocimiento de la diferencia', () => {
+      const { byName } = buildTools();
+      const properties = byName.close_cash_session.parameters.properties;
+      expect(properties.discrepancy_reviewed.type).toBe('boolean');
+      expect(properties.discrepancy_reason.type).toBe('string');
+      expect(byName.close_cash_session.parameters.required).toEqual([
+        'session_id',
+        'actual_closing_amount',
+      ]);
+    });
+  });
 });

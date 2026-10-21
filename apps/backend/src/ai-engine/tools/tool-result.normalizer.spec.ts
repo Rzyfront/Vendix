@@ -1,5 +1,6 @@
 import {
   countsAsToolSuccess,
+  markInProcessWriteApplied,
   normalizeToolException,
   normalizeToolResult,
 } from './tool-result.normalizer';
@@ -152,6 +153,108 @@ describe('D0 tool execution normalization', () => {
         { ...context, write: true },
       ),
     ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+  });
+  describe('markInProcessWriteApplied (confirmed in-process write)', () => {
+    const write = { ...context, write: true };
+    it('a structured result without failure becomes applied evidence', () => {
+      const raw = JSON.stringify({
+        summary: 'Cliente creado.',
+        data: { customer_id: 9 },
+      });
+      expect(
+        normalizeToolResult(markInProcessWriteApplied(raw), write),
+      ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+    });
+    it.each([
+      ['protocol error', { error: 'No existe', next_step: 'busca' }],
+      ['explicit not applied', { applied: false, error: 'network failure' }],
+      ['pending proposal', { requires_confirmation: true }],
+      ['missing datum', { status: 'needs_user_input' }],
+      ['typed envelope', { schema_version: '1', status: 'unknown_effect' }],
+    ])('never stamps a %s', (_label, value) => {
+      const raw = JSON.stringify(value);
+      expect(markInProcessWriteApplied(raw)).toBe(raw);
+    });
+    it.each([
+      ['toolError {error, code}', { error: 'Stock insuficiente', code: 'X_1' }],
+      ['object error', { error: { reason: 'boom' }, id: 4 }],
+      ['error next to data', { error: 'falló', id: 4, name: 'Pan' }],
+      ['errors list', { errors: ['campo inválido'], id: 4 }],
+      ['numeric error status', { status: 500, id: 4 }],
+      ['string error statusCode', { statusCode: '409', id: 4 }],
+      ['failure status', { status: 'FAILURE', id: 4 }],
+      ['nested protocol failure', { data: { success: false, id: 4 } }],
+    ])('fail-closed: never stamps a %s', (_label, value) => {
+      const raw = JSON.stringify(value);
+      expect(markInProcessWriteApplied(raw)).toBe(raw);
+      expect(
+        normalizeToolResult(markInProcessWriteApplied(raw), write)
+          .effect_status,
+      ).not.toBe('applied');
+    });
+    it('an unrecognised error shape stays unknown_effect, never applied', () => {
+      const raw = JSON.stringify({ error: { reason: 'boom' }, id: 4 });
+      expect(
+        normalizeToolResult(markInProcessWriteApplied(raw), write),
+      ).toMatchObject({
+        status: 'unknown_effect',
+        effect_status: 'unknown',
+        retryable: false,
+      });
+    });
+    it('{error, code} is a classified failure carrying its code', () => {
+      const raw = JSON.stringify({
+        error: 'Stock insuficiente',
+        code: 'INV_STOCK_002',
+      });
+      expect(
+        normalizeToolResult(markInProcessWriteApplied(raw), write),
+      ).toMatchObject({
+        status: 'recoverable_error',
+        error_code: 'INV_STOCK_002',
+        effect_status: 'not_applied',
+      });
+      expect(
+        normalizeToolResult(
+          { error: 'Sin permiso', code: 'PERMISSION_DENIED' },
+          write,
+        ).status,
+      ).toBe('blocked');
+    });
+    it('a known error_code keeps its classification', () => {
+      const raw = JSON.stringify({
+        error: 'No existe',
+        error_code: 'NOT_FOUND',
+      });
+      expect(markInProcessWriteApplied(raw)).toBe(raw);
+      expect(normalizeToolResult(raw, write)).toMatchObject({
+        status: 'recoverable_error',
+        error_code: 'NOT_FOUND',
+      });
+    });
+    it.each([
+      ['null error column', { id: 5, error: null }],
+      ['domain status', { id: 5, status: 'rejected' }],
+      ['success flag', { success: true, id: 5 }],
+    ])('a real success is still applied: %s', (_label, value) => {
+      expect(
+        normalizeToolResult(
+          markInProcessWriteApplied(JSON.stringify(value)),
+          write,
+        ),
+      ).toMatchObject({ status: 'ok', effect_status: 'applied' });
+    });
+    it('never infers application from prose', () => {
+      expect(markInProcessWriteApplied('Producto creado')).toBe(
+        'Producto creado',
+      );
+    });
+    it('keeps the object shape when the handler returned an object', () => {
+      expect(markInProcessWriteApplied({ id: 3 })).toEqual({
+        id: 3,
+        applied: true,
+      });
+    });
   });
   it('bridge network failures and contradictory HTTP200 application claims are uncertain', () => {
     expect(

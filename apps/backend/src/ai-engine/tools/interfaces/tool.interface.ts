@@ -1,3 +1,5 @@
+import type { DiscrepancySignal } from '../discrepancy-signal';
+
 /**
  * Versión de contrato que el registry asigna a todo tool que no declare una.
  * T2: las 70 tools existentes nacen en `'1'` sin cambio de comportamiento; todo
@@ -117,6 +119,15 @@ export interface RegisteredTool {
    */
   irreversible?: boolean;
   /**
+   * Where a confirmed write lands. Default (absent): IN PROCESS — the handler
+   * awaits a domain service, so returning a structured result without a
+   * protocol failure is definitive evidence that the change was applied and the
+   * registry stamps `applied: true` on it. `'http'` marks a transport boundary
+   * (the generic `write_endpoint` bridge) where an HTTP 200 or `success` proves
+   * nothing: that handler must report `applied` itself.
+   */
+  effectTransport?: 'http';
+  /**
    * Marks the tool as free of side effects. Surfaces that cannot show a
    * confirmation step before executing — realtime voice, where the model acts
    * on a transcription the user never reviews — expose ONLY tools with this
@@ -188,6 +199,12 @@ export interface ToolPreview {
    * refresh once it is applied.
    */
   domain?: string;
+  /**
+   * Pre-verificación guiada: el valor real difiere del esperado por encima de
+   * la tolerancia. Solo viaja en previews `error`; el modelo guía a la persona
+   * antes de reintentar con `discrepancy_reviewed=true`.
+   */
+  discrepancy?: DiscrepancySignal;
 }
 
 export interface ToolRegistrationFn {

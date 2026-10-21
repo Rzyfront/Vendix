@@ -85,6 +85,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a column to an XLSX/CSV bulk import template or its header map | `vendix-bulk-operations` |
 | Adding a document or photo flow that Vexi processes from the chat | `vendix-vexi-agent` |
 | Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
+| Adding a guided discrepancy pre-check before a close, reconciliation or adjustment write | `vendix-agent-playbooks` |
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
@@ -169,6 +170,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
 | Changing runtime procedural recipes or recipe mining | `vendix-agent-procedural-memory` |
 | Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
+| Changing the domain-scope rule shared by DomainScopeGuard and the agent API bridge | `vendix-ai-tool-routing` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |
 | Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |
@@ -186,6 +188,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Commitear o empujar en un árbol de trabajo compartido con otras sesiones | `vendix-known-errors` |
+| Comparing agent prompt tokens or pass rate between a baseline and a candidate backend | `vendix-agent-golden-conversations` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
 | Computing revenue, COGS, gross/net profit, margin or break-even | `vendix-analytics-metrics` |
@@ -440,6 +443,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
 | Running or changing agentic evaluation datasets and graders | `vendix-agent-evals-observability` |
+| Running or extending the Vex/Vexi golden-conversations E2E suite | `vendix-agent-golden-conversations` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |

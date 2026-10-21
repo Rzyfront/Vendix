@@ -3,6 +3,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 import { VexiController } from './vexi.controller';
+import { VexiObjectiveResultsController } from './vexi-objective-results.controller';
 import { ResumeAgentObjectiveDto } from './dto/resume-agent-objective.dto';
 import { USER_NOTICES } from '../../../ai-engine/agent-execution.contract';
 
@@ -49,7 +50,11 @@ function fixture() {
     {} as any,
     planState,
   );
-  return { controller, repo, registry, planState, activity, row };
+  const results = new VexiObjectiveResultsController(
+    { success: (data: unknown) => data } as any,
+    planState,
+  );
+  return { controller, results, repo, registry, planState, activity, row };
 }
 
 describe('Vexi durable objective endpoints', () => {
@@ -105,7 +110,7 @@ describe('Vexi durable objective endpoints', () => {
   });
 
   it('artifact handles are paginated without serializing every full result into the list', async () => {
-    const { controller, repo } = fixture();
+    const { results: controller, repo } = fixture();
     repo.listResults.mockResolvedValue({
       items: [{ id: 'r1', tool_call_id: 'c1', data: ['large'] }],
       next_cursor: 'r1',
@@ -142,7 +147,7 @@ describe('Vexi durable objective endpoints', () => {
   });
 
   it('pages nested row envelopes as whole records and does not call a last page a complete dataset', async () => {
-    const { controller, repo } = fixture();
+    const { results: controller, repo } = fixture();
     repo.getResult.mockResolvedValue({
       id: 'r1',
       data: { data: { rows: [{ id: 1 }, { id: 2 }, { id: 3 }], total: 3 } },

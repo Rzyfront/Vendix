@@ -167,3 +167,61 @@ describe('H SSE replay is bounded transport, never an execution authority', () =
     expect(execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('a failed producer leaves a frame the browser can act on', () => {
+  const failing = (error: unknown) =>
+    // eslint-disable-next-line require-yield
+    jest.fn(async function* (): AsyncGenerator<Frame> {
+      throw error;
+    });
+
+  it('forwards an objective refusal with its code and human message', async () => {
+    const { ConflictException } = await import('@nestjs/common');
+    const replay = new ChatStreamReplay<Frame>();
+    const frames = await collect(
+      replay.open(
+        'refused',
+        scope,
+        {},
+        failing(
+          new ConflictException({
+            error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+            message:
+              'No pude confirmar si el último cambio se aplicó. Revisa ese registro antes de pedir otro cambio, o inicia una conversación nueva.',
+          }),
+        ),
+      ),
+    );
+    expect(frames.at(-1)).toMatchObject({
+      type: 'error',
+      error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+      error: expect.stringContaining('No pude confirmar'),
+    });
+  });
+
+  it('shows the generic interruption for any other fault and logs it', async () => {
+    const { Logger } = await import('@nestjs/common');
+    const log = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const replay = new ChatStreamReplay<Frame>();
+    const frames = await collect(
+      replay.open(
+        'fault',
+        scope,
+        {},
+        failing(new Error('connect ECONNREFUSED 10.0.0.1:5432')),
+      ),
+    );
+    const last = frames.at(-1) as Frame & {
+      error?: string;
+      error_code?: string;
+    };
+    expect(last.type).toBe('error');
+    expect(last.error).toContain('La respuesta se interrumpió');
+    expect(last.error).not.toContain('ECONNREFUSED');
+    expect(last.error_code).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('ECONNREFUSED'));
+    log.mockRestore();
+  });
+});

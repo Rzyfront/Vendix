@@ -661,10 +661,69 @@ describe('VexiRealtimeService G session authority', () => {
     expect(result.tools.map((tool) => tool.name)).not.toContain('ui_navigate');
   });
 
-  it.each(['read_product', 'change_product', 'ui_navigate'])(
-    'rejects unoffered %s before preview/UI/read',
-    async (name) => {
+  // Hard rule («el mecánico»): an AUTHORIZED tool the model calls without it
+  // being loaded is loaded into the session (CAS + session.update catalog) and
+  // runs in the same turn under the same gates; unauthorized stays a 404.
+  it('loads and runs an authorized unoffered read in the same turn, returning the new catalog', async () => {
+    session.tools = session.tools.filter(
+      (tool: any) => tool.name !== 'read_product',
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(consent.updateSessionCatalog).toHaveBeenCalledTimes(1);
+    expect(result.tools?.map((tool) => tool.name)).toContain('read_product');
+    expect(session.tools.map((tool: any) => tool.name)).toContain(
+      'read_product',
+    );
+    expect(session.routing.unloadedAuthorizedCalls).toBe(1);
+  });
+
+  it('L3: a routing session persisted by #934 (no loaded/used) loads the unoffered tool without a TypeError', async () => {
+    session.tools = session.tools.filter(
+      (tool: any) => tool.name !== 'read_product',
+    );
+    session.routing = {
+      query: authority.goal,
+      signature: 'legacy',
+      dependencies: [],
+      unloadedAuthorizedCalls: 0,
+    };
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.tools?.map((tool) => tool.name)).toContain('read_product');
+    expect(session.routing.loaded).toContain('read_product');
+    expect(session.routing.used).toContain('read_product');
+    expect(session.routing.unloadedAuthorizedCalls).toBe(1);
+  });
+
+  it('an authorized unoffered write only becomes a proposal (consent still required)', async () => {
+    session.tools = [];
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'Otro',
+      }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(result.proposal).toMatchObject({ proposal_id: 'public-proposal' });
+    expect(JSON.parse(result.output)).toMatchObject({ applied: false });
+    expect(result.tools?.map((tool) => tool.name)).toContain('change_product');
+  });
+
+  it.each([
+    ['vex', 'ui_navigate'],
+    ['vexi', 'ghost_tool'],
+  ])(
+    'still rejects an unoffered tool outside the %s voice scope (%s)',
+    async (agentKey, name) => {
       session.tools = [];
+      session.agentKey = agentKey;
+      authority.agent_key = agentKey;
       await expect(
         run(() =>
           service.executeSessionToolCall(sessionId, name, {
@@ -673,11 +732,38 @@ describe('VexiRealtimeService G session authority', () => {
           }),
         ),
       ).rejects.toThrow('not offered');
+      expect(consent.updateSessionCatalog).not.toHaveBeenCalled();
       expect(preview).not.toHaveBeenCalled();
       expect(read).not.toHaveBeenCalled();
       expect(handler).not.toHaveBeenCalled();
     },
   );
+
+  it('voice routing uses the real agent_key (Vex by voice gets the Vex core)', async () => {
+    authority.agent_key = 'vex';
+    const create = jest.spyOn(router, 'createSession');
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+      },
+      instructions: null,
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test' }),
+    } as Response);
+    await run(() =>
+      service.createSession({ conversation_id: 9, agent_key: 'vex' }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      [],
+      'vex',
+    );
+  });
 
   it.each([{ user_id: 999 }, { organization_id: 999 }, { store_id: 999 }])(
     'rejects another principal binding %j',
@@ -1039,6 +1125,9 @@ describe('VexiRealtimeService G session authority', () => {
         (d: any) => d.function.name === 'read_product',
       ),
       operationalCount: 1,
+      coreCount: 0,
+      loadedCount: 1,
+      retrievalSource: 'lexical',
       degraded: [],
       catalogHash: 'hash',
     });

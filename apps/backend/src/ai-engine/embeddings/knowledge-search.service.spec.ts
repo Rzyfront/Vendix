@@ -1,6 +1,8 @@
-import { normalizeSearchText } from '../../common/utils/search-text.util';
-import { KnowledgeSearchService } from './knowledge-search.service';
-import { buildToolDocument } from '../tools/tool-catalog';
+import {
+  intentTsQuery,
+  KnowledgeSearchService,
+} from './knowledge-search.service';
+import { buildToolDocument, localToolRanking } from '../tools/tool-catalog';
 const doc = (name: string, description: string) =>
   buildToolDocument({
     name,
@@ -52,8 +54,9 @@ describe('KnowledgeSearchService B', () => {
     expect(raw).toHaveBeenCalledTimes(3);
     const [lexicalSql, ids, lexicalQuery] = raw.mock.calls[1];
     expect(lexicalSql).not.toContain(query);
-    expect(lexicalQuery).toBe(normalizeSearchText(query));
-    expect(lexicalSql).toContain("plainto_tsquery('spanish', $2)");
+    expect(lexicalQuery).toBe(intentTsQuery(query));
+    expect(lexicalQuery).toBe('cafe:* | select:* | secreto:*');
+    expect(lexicalSql).toContain("to_tsquery('spanish', $2)");
     expect(lexicalSql).toContain("knowledge_scope = 'global'");
     expect(ids).toEqual([1]);
     const [vectorSql, vectorIds] = raw.mock.calls[2];
@@ -175,5 +178,127 @@ describe('KnowledgeSearchService B', () => {
       expect(raw.mock.calls[2][0]).toContain('e.entity_type = d.entity_type');
     } finally {
     }
+  });
+});
+
+/**
+ * Recall de la recuperación LÉXICA (el piso en prod sin vectores) sobre el
+ * catálogo real (snapshot de 316 tools, `test/agentic/fixtures`), con las
+ * consultas sintéticas versionadas. Meta del plan: ≥27/30 en top-8.
+ * Regenerar el snapshot: volcar `AIToolRegistry.getAll()` del backend vivo.
+ */
+describe('Recall léxico sobre el catálogo real (top-8)', () => {
+  const snapshot: Array<
+    Record<string, any>
+  > = require('../../../test/agentic/fixtures/tool-catalog.snapshot.json');
+  const SCAFFOLD = new Set([
+    'discovery',
+    'planning',
+    'playbooks',
+    'procedural_memory',
+    'capabilities',
+    'api-bridge',
+    'sandbox',
+    'tasks',
+  ]);
+  const docs = snapshot
+    .filter((t) => !SCAFFOLD.has(t.domain))
+    .map((t) =>
+      buildToolDocument({
+        name: t.name,
+        description: t.description,
+        domain: t.domain,
+        parameters: t.parameters,
+        readOnly: t.readOnly,
+        requiresConfirmation: t.requiresConfirmation,
+        clientSide: t.clientSide,
+        discovery: t.synonyms?.length ? { synonyms: t.synonyms } : undefined,
+      } as any),
+    );
+  const CASES: Array<[string, string[]]> = [
+    [
+      'Oe me ayudas a analizar un cierre de caja que no me dio?',
+      [
+        'list_cash_sessions',
+        'get_cash_session_close_report',
+        'get_cash_session_status',
+      ],
+    ],
+    [
+      'kuanto stok tengo de cocacola',
+      ['get_stock_levels', 'find_product', 'check_stock_availability'],
+    ],
+    [
+      'facturas rechazadas por la DIAN',
+      ['list_invoices', 'get_invoice_status', 'send_invoice_dian'],
+    ],
+    [
+      '¿Cuánto hay en caja?',
+      ['get_active_cash_session', 'get_cash_session_status'],
+    ],
+    ['¿qué productos tienen poco stock?', ['get_low_stock_alerts']],
+    ['muéstrame las últimas facturas', ['list_invoices']],
+    ['Crea el cliente Juan Pérez', ['upsert_customer']],
+    ['cámbiale la dirección a Cra 10 #20-30', ['upsert_customer']],
+    ['¿cuánto me cuesta enviarle?', ['quote_shipping']],
+    ['¿Cuánto vendí hoy?', ['get_sales_report']],
+    ['Crea un producto Prueba E2E a 5000', ['create_product']],
+    [
+      'Ajusta el stock de Coca-Cola a 0',
+      ['adjust_stock', 'create_stock_adjustment'],
+    ],
+    ['Llévame a las órdenes pendientes', ['ui_navigate', 'list_orders']],
+    ['¿Cuántos empleados tengo en nómina?', ['list_employees']],
+    [
+      '¿cuándo es la próxima liquidación de nómina?',
+      ['list_payroll_runs', 'calculate_payroll', 'get_payroll_run'],
+    ],
+    ['Muéstrame el estado de resultados del mes', ['get_income_statement']],
+    ['¿y el balance general?', ['get_balance_sheet']],
+    ['reenvía la factura a la DIAN', ['send_invoice_dian']],
+    ['¿Qué mesas están abiertas?', ['list_tables']],
+    [
+      'manda la orden de la mesa 3 a cocina',
+      ['fire_kitchen_order', 'preview_kitchen_fire'],
+    ],
+    ['crea un gasto de 20.000 de aseo', ['create_expense']],
+    ['Analiza mis gastos del mes', ['list_expenses']],
+    [
+      'Prepara una orden de compra para reponer stock bajo',
+      ['manage_purchase_orders', 'get_sourcing_suggestion'],
+    ],
+    ['muéstrame el inventario valorizado', ['get_stock_levels', 'get_report']],
+    ['¿qué clientes me deben? cartera vencida', ['list_receivables']],
+    ['Lista mis proveedores', ['find_supplier', 'manage_suppliers']],
+    [
+      '¿Cuánto me cuesta la nómina este mes con parafiscales?',
+      ['calculate_payroll', 'get_payroll_run', 'list_payroll_runs'],
+    ],
+    ['muéstrame el top de productos más vendidos', ['get_top_products']],
+    [
+      '¿quién es mi mejor cliente?',
+      ['get_customer_stats', 'get_customer_segments', 'analyze_report'],
+    ],
+    ['abre la caja con 100 mil de base', ['open_cash_session']],
+  ];
+  it('≥27/30 consultas reales con su herramienta esperada en el top-8 solo con léxico', () => {
+    const misses: string[] = [];
+    for (const [query, expected] of CASES) {
+      const top8 = localToolRanking(query, docs).slice(0, 8);
+      if (!expected.some((name) => top8.includes(name)))
+        misses.push(`${query} → ${top8.join(',')}`);
+    }
+    // eslint-disable-next-line no-console
+    if (misses.length) console.log(misses.join('\n'));
+    expect(CASES).toHaveLength(30);
+    expect(CASES.length - misses.length).toBeGreaterThanOrEqual(27);
+  });
+  it('el tsquery es un OR de prefijos con sinónimos de negocio y nunca interpola símbolos', () => {
+    const q = intentTsQuery(`Oe me ayudas con el arqueo'); DROP --`);
+    expect(q).toContain('arqueo:*');
+    expect(q).toContain('caja:*');
+    expect(q).toContain(' | ');
+    expect(q).not.toMatch(/[;'()-]/);
+    expect(q).not.toContain('oe:*');
   });
 });

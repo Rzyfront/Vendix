@@ -15,6 +15,7 @@ import { VexiVoiceService } from './vexi-voice.service';
 import { VexiSpeechService } from './vexi-speech.service';
 import { VexiSpeechCache } from './vexi-speech.cache';
 import { VexiController } from './vexi.controller';
+import { VexiObjectiveResultsController } from './vexi-objective-results.controller';
 import { VexiContextService } from './vexi-context.service';
 import { VexiStreamIntentService } from './vexi-stream-intent.service';
 import { VexiTaskService } from './vexi-task.service';
@@ -49,7 +50,14 @@ import { VexiVoiceConfirmationService } from './vexi-voice-confirmation.service'
     // A background task's only way to reach the person after they walked away.
     NotificationsModule,
   ],
-  controllers: [VexiRealtimeController, VexiVoiceController, VexiController],
+  controllers: [
+    VexiRealtimeController,
+    VexiVoiceController,
+    VexiController,
+    // Lectores de artefactos propios sin candado de rol: el chat Vexi lo usa
+    // cualquier usuario de la tienda (ver el controller).
+    VexiObjectiveResultsController,
+  ],
   providers: [
     VexiRealtimeService,
     VexiSurfaceEnabledGuard,

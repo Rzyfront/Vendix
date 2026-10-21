@@ -288,7 +288,7 @@ describe('C shared loop wiring: Vex/Vexi, D1 pins and B discovery', () => {
 });
 
 describe('C asset packaging contract exercised by the existing CI gate (not a local build)', () => {
-  it('finds all20 runtime MD beside dist/src loader and detects one missing bundled file', () => {
+  it('finds all22 runtime MD beside dist/src loader and detects one missing bundled file', () => {
     const backend = resolve(__dirname, '../..');
     const config = JSON.parse(
       readFileSync(join(backend, 'nest-cli.json'), 'utf8'),
@@ -301,7 +301,7 @@ describe('C asset packaging contract exercised by the existing CI gate (not a lo
     const files = readdirSync(join(backend, 'src', relative)).filter((f) =>
       f.endsWith('.md'),
     );
-    expect(files).toHaveLength(20);
+    expect(files).toHaveLength(22);
     const tmp = mkdtempSync(join(tmpdir(), 'vendix-c-assets-'));
     writeFileSync(
       join(tmp, 'nest-cli.json'),
@@ -334,6 +334,6 @@ describe('C asset packaging contract exercised by the existing CI gate (not a lo
       encoding: 'utf8',
     });
     expect(success.status).toBe(0);
-    expect(success.stdout).toContain('20 assets OK');
+    expect(success.stdout).toContain('22 assets OK');
   });
 });

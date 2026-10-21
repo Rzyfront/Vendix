@@ -526,6 +526,54 @@ const RULES: Record<string, Rule> = {
       positive(d.employee_count) &&
       array(d.items).length === d.employee_count,
   },
+  // Conteo físico: la relectura de ESA bodega debe mostrar exactamente lo
+  // contado. Con varias filas (variantes en la misma bodega) la lectura no
+  // distingue cuál se ajustó: no se verifica, se informa parcial.
+  'ajustar-inventario-conteo': {
+    tool: 'get_stock_levels',
+    id: 'product_id',
+    identity: (d) => record(array(d.data)[0]).product_id,
+    boundArguments: ['product_id', 'location_id'],
+    required: ['product_id', 'location_id', 'quantity_after'],
+    effects: [['adjust', 'adjust_stock']],
+    predicate: (d, i) =>
+      nonnegative(i.quantity_after) &&
+      array(d.data).length === 1 &&
+      stockRowsValid(d) &&
+      same(record(array(d.data)[0]).product_id, i.product_id) &&
+      equalMoney(record(array(d.data)[0]).on_hand, i.quantity_after),
+    failureReason: (d) =>
+      array(d.data).length > 1
+        ? 'variant_rows_not_distinguishable'
+        : 'domain_postcondition_not_met',
+  },
+  // list_reconciliations devuelve un arreglo plano: se lee la observación
+  // cruda de `verify` (ya validada como confiable por `run`).
+  'conciliar-banco': {
+    tool: 'list_reconciliations',
+    id: 'reconciliation_id',
+    boundArguments: ['bank_account_id'],
+    required: ['bank_account_id', 'reconciliation_id'],
+    effects: [['match', 'auto_match_bank']],
+    predicate: (_d, i, obs) => {
+      const rows = array(
+        obs.find(
+          (o) => o.step_id === 'verify' && o.tool === 'list_reconciliations',
+        )?.data,
+      ).filter((row) => same(record(row).id, i.reconciliation_id));
+      const row = record(rows[0]);
+      return (
+        rows.length === 1 &&
+        same(row.bank_account_id, i.bank_account_id) &&
+        number(row.statement_balance) !== null &&
+        number(row.reconciled_balance) !== null &&
+        equalMoney(
+          row.difference,
+          Number(row.statement_balance) - Number(row.reconciled_balance),
+        )
+      );
+    },
+  },
   'reporte-ventas-margen': {
     tool: 'analyze_report',
     required: ['date_from', 'date_to', 'report_id'],

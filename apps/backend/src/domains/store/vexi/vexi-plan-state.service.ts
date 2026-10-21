@@ -1038,7 +1038,7 @@ export class VexiPlanStateService {
 
     if (rawSteps.length < 3 || rawSteps.length > 7)
       return reject(
-        'El bloque multietapa debe tener de 3 a 7 pasos. Una consulta simple no necesita plan.',
+        'El bloque multietapa debe tener de 3 a 7 pasos. Una consulta simple no necesita plan, y un único cambio se propone directamente sin plan.',
       );
     if (previous && str(args.goal) !== previous.goal)
       return reject(
@@ -1058,7 +1058,7 @@ export class VexiPlanStateService {
       )
     )
       return reject(
-        'unsupported_capability: cada entregable requiere un workflow de servidor, step_id e inputs explícitos.',
+        'unsupported_capability: cada entregable requiere verification con workflow_key (proceso del servidor), step_id e inputs explícitos. Si este trabajo no es un proceso del servidor con verificador, no uses propose_plan: haz las consultas y propón el cambio directamente.',
       );
     const steps: AgentPlanStep[] = [];
     for (const [i, raw] of rawSteps.slice(0, MAX_PLAN_STEPS).entries()) {
@@ -1069,21 +1069,25 @@ export class VexiPlanStateService {
           `el paso ${i + 1} es un cambio y necesita done_when (criterio verificable)`,
         );
       }
-      if (
-        !str(raw.expected_input) ||
-        !str(raw.expected_output) ||
-        !Array.isArray(raw.candidate_tools) ||
-        !raw.candidate_tools.length ||
-        raw.candidate_tools.some((name) => typeof name !== 'string') ||
-        !str(raw.verifier) ||
-        !Array.isArray(raw.depends_on) ||
-        raw.depends_on.some(
-          (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
-        ) ||
-        raw.approval !== (kind === 'cambio' ? 'individual' : 'none')
-      )
+      const missing = [
+        !str(raw.expected_input) && 'expected_input',
+        !str(raw.expected_output) && 'expected_output',
+        (!Array.isArray(raw.candidate_tools) ||
+          !raw.candidate_tools.length ||
+          raw.candidate_tools.some((name) => typeof name !== 'string')) &&
+          'candidate_tools (lista de nombres)',
+        !str(raw.verifier) && 'verifier',
+        (!Array.isArray(raw.depends_on) ||
+          raw.depends_on.some(
+            (order) => !Number.isSafeInteger(order) || order < 1 || order > i,
+          )) &&
+          `depends_on (pasos anteriores a ${i + 1}; [] si no depende de ninguno)`,
+        raw.approval !== (kind === 'cambio' ? 'individual' : 'none') &&
+          `approval "${kind === 'cambio' ? 'individual' : 'none'}"`,
+      ].filter(Boolean);
+      if (missing.length)
         return reject(
-          `El paso ${i + 1} requiere entrada/salida, tools candidatas, aprobación individual, verifier y dependencias previas.`,
+          `El paso ${i + 1} requiere entrada/salida, tools candidatas, aprobación individual, verifier y dependencias previas. Falta o es inválido: ${missing.join(', ')}.`,
         );
       steps.push({
         ...{

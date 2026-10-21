@@ -96,6 +96,13 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       const documents = manifest.documents
         .slice(offset, offset + 50)
         .map((d) => ({ key: d.key, hash: d.hash }));
+      const jobId = `knowledge-${catalogHash([manifest.hash, offset])}`;
+      // The jobId is deterministic per release: a FAILED job kept by
+      // removeOnFail turns every later add() into a silent no-op, so the
+      // batch never runs again (prod 2026-10: 20 batches failed on an old
+      // blue/green worker, index stayed empty). Drop it and enqueue fresh.
+      const previous = await this.queue.getJob(jobId);
+      if (previous && (await previous.isFailed())) await previous.remove();
       await this.queue.add(
         'index-knowledge',
         {
@@ -103,7 +110,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
           documents,
         } satisfies AIKnowledgeIndexJob,
         {
-          jobId: `knowledge-${catalogHash([manifest.hash, offset])}`,
+          jobId,
           attempts: 2,
           backoff: { type: 'exponential', delay: 3000 },
           removeOnComplete: true,
@@ -111,6 +118,40 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         },
       );
     }
+  }
+
+  /**
+   * Index coverage: global tool documents ready (lexical) and with a vector,
+   * against the tools registered in this release. Router falls back to the
+   * full authorized catalog while coverage is incomplete.
+   */
+  async coverage(): Promise<{
+    registered: number;
+    indexed: number;
+    vectors: number;
+    ratio: number;
+  }> {
+    const registered = buildToolManifest(this.registry).documents.length;
+    const where = {
+      knowledge_scope: 'global',
+      entity_type: 'tool',
+      store_id: null,
+      organization_id: null,
+      active: true,
+      status: 'ready',
+    };
+    const [indexed, vectors] = await Promise.all([
+      this.prisma.ai_knowledge_documents.count({ where }),
+      this.prisma.ai_knowledge_documents.count({
+        where: { ...where, embedding_fingerprint: { not: null } },
+      }),
+    ]);
+    return {
+      registered,
+      indexed,
+      vectors,
+      ratio: registered ? Math.min(1, indexed / registered) : 0,
+    };
   }
 
   /** F publications have a separate approved-row manifest. Static B snapshots must NOT retire runtime recipes. */
@@ -343,6 +384,14 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
         });
         // Preserve the authorized lexical catalog if a provider/budget is unavailable.
       }
+    }
+    try {
+      const c = await this.coverage();
+      this.logger.log(
+        `Tool knowledge coverage ${c.indexed}/${c.registered} indexed, ${c.vectors} with vector`,
+      );
+    } catch {
+      // Observability only; never fail an indexed batch.
     }
   }
 }

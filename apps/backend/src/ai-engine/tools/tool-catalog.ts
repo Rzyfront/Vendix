@@ -2,10 +2,11 @@ import { createHash } from 'crypto';
 import Ajv, { ValidateFunction } from 'ajv';
 import {
   normalizeSearchText,
-  tokenizeInternal,
+  tokenizeIntent,
 } from '../../common/utils/search-text.util';
 import { RegisteredTool } from './interfaces/tool.interface';
 import { validateToolArgs } from './tool-args.validator';
+import { TOOL_DISCOVERY_QUERIES_ES } from './tool-discovery-queries.es';
 
 export const KNOWLEDGE_DIMENSION = 1536;
 export const KNOWLEDGE_TYPES = ['tool', 'skill', 'process', 'recipe'] as const;
@@ -110,6 +111,20 @@ function validatesExample(
   return validate(args) === true;
 }
 
+/** Parameter names (snake_case split) and descriptions, one level deep. */
+function parameterText(parameters: Record<string, any> | undefined): string[] {
+  const properties = parameters?.properties;
+  if (!properties || typeof properties !== 'object') return [];
+  return Object.entries(properties as Record<string, any>).flatMap(
+    ([key, schema]) => [
+      key.replace(/_/g, ' '),
+      typeof schema?.description === 'string'
+        ? schema.description.slice(0, 300)
+        : '',
+    ],
+  );
+}
+
 export function buildToolDocument(
   tool: RegisteredTool,
   aliases: string[] = [],
@@ -158,16 +173,21 @@ export function buildToolDocument(
     synonyms: tool.discovery?.synonyms ?? [],
     examples: validated,
     dependencies: [...(tool.discovery?.dependencies ?? [])].sort(),
+    // How a merchant asks for it: versioned in code, part of the hash (an edit reindexes).
+    queries: [...(TOOL_DISCOVERY_QUERIES_ES[tool.name] ?? [])],
   };
   const content = stableJson(metadata);
   // Normalizer is intentionally bounded; normalize each field chunk, not just the first 500 chars.
   const lexicalText = [
     tool.name,
+    tool.name.replace(/_/g, ' '),
     ...aliases,
     tool.domain,
     tool.description,
+    ...parameterText(tool.parameters),
     ...(tool.discovery?.synonyms ?? []),
     ...validated.map((e) => e.intent),
+    ...metadata.queries,
   ]
     .map(
       (s) =>
@@ -212,9 +232,158 @@ export function buildToolManifest(registry: {
 }
 
 /**
+ * Business vocabulary groups (normalized). A query token from a group also
+ * matches the rest of the group at half weight: «arqueo» finds the cash
+ * session tools, «stok» the inventory ones, «FE» the invoicing ones.
+ */
+export const BUSINESS_SYNONYM_GROUPS: readonly (readonly string[])[] = [
+  [
+    'caja',
+    'cajas',
+    'arqueo',
+    'cierre',
+    'cierres',
+    'cuadre',
+    'descuadre',
+    'turno',
+    'cajon',
+    'sesion',
+  ],
+  [
+    'stock',
+    'stok',
+    'existencias',
+    'existencia',
+    'inventario',
+    'inventarios',
+    'bodega',
+    'agotado',
+    'agotados',
+    'agotarse',
+    'reorden',
+    'reponer',
+    'reposicion',
+  ],
+  [
+    'factura',
+    'facturas',
+    'facturacion',
+    'fe',
+    'dian',
+    'electronica',
+    'electronicas',
+    'comprobante',
+    'rechazadas',
+    'rechazada',
+  ],
+  [
+    'ventas',
+    'venta',
+    'vendi',
+    'vendido',
+    'vendimos',
+    'vender',
+    'ingresos',
+    'facturado',
+  ],
+  ['cliente', 'clientes', 'comprador', 'compradores', 'tercero'],
+  ['proveedor', 'proveedores', 'suplidor', 'distribuidor', 'supplier'],
+  ['gasto', 'gastos', 'egreso', 'egresos', 'expense'],
+  [
+    'nomina',
+    'empleados',
+    'empleado',
+    'liquidacion',
+    'sueldo',
+    'sueldos',
+    'salario',
+    'salarios',
+    'parafiscales',
+    'prestaciones',
+    'payroll',
+  ],
+  [
+    'cartera',
+    'cobrar',
+    'deudas',
+    'deuda',
+    'vencida',
+    'vencidas',
+    'debe',
+    'deben',
+    'receivables',
+  ],
+  [
+    'contabilidad',
+    'balance',
+    'resultados',
+    'pyg',
+    'utilidad',
+    'perdida',
+    'asientos',
+    'contable',
+  ],
+  [
+    'envio',
+    'envios',
+    'domicilio',
+    'domicilios',
+    'despacho',
+    'despachos',
+    'entrega',
+    'remision',
+    'shipping',
+  ],
+  ['mesa', 'mesas', 'comanda', 'cocina', 'kds', 'kitchen'],
+  [
+    'producto',
+    'productos',
+    'articulo',
+    'articulos',
+    'referencia',
+    'referencias',
+    'item',
+  ],
+  ['orden', 'ordenes', 'pedido', 'pedidos', 'order', 'orders'],
+  ['compra', 'compras', 'purchase', 'oc'],
+  ['precio', 'precios', 'pricing', 'tarifa', 'tarifas'],
+];
+const SYNONYMS = new Map<string, string[]>();
+for (const group of BUSINESS_SYNONYM_GROUPS)
+  for (const term of group)
+    SYNONYMS.set(term, [
+      ...(SYNONYMS.get(term) ?? []),
+      ...group.filter((other) => other !== term),
+    ]);
+
+/**
+ * Query tokens for tool retrieval: intent tokens (up to 12, conversational
+ * stopwords removed) plus their business synonyms, flagged as secondary.
+ */
+export function intentTerms(
+  query: string,
+): Array<{ token: string; weight: number }> {
+  const primary = tokenizeIntent(query);
+  const terms = new Map<string, number>(primary.map((t) => [t, 1]));
+  for (const token of primary)
+    for (const synonym of SYNONYMS.get(token) ?? [])
+      if (!terms.has(synonym)) terms.set(synonym, 0.5);
+  return [...terms].map(([token, weight]) => ({ token, weight }));
+}
+
+const documentWords = new WeakMap<ToolDocument, Set<string>>();
+function wordsOf(doc: ToolDocument): Set<string> {
+  let words = documentWords.get(doc);
+  if (!words) {
+    words = new Set(doc.lexicalText.split(' '));
+    documentWords.set(doc, words);
+  }
+  return words;
+}
+
+/**
  * Local lexical score per document. ts_rank is not BM25. Local branch shares
- * Spanish accent/ñ normalization. Score 0 means "no lexical evidence at all":
- * the document only appears in the ranking through the alphabetical tie-break.
+ * Spanish accent/ñ normalization. Score 0 means "no lexical evidence at all".
  */
 export function localToolScores(
   query: string,
@@ -222,27 +391,33 @@ export function localToolScores(
   domain?: string,
 ): Map<string, number> {
   const normalized = normalizeSearchText(query);
-  const tokens = tokenizeInternal(query);
+  const terms = intentTerms(query);
   return new Map(
     docs.map((doc) => {
       const exact = [doc.name, ...doc.aliases].some(
         (name) => normalizeSearchText(name) === normalized,
       );
-      const name = normalizeSearchText([doc.name, ...doc.aliases].join(' '));
+      const name = new Set(
+        normalizeSearchText(
+          [doc.name, ...doc.aliases].join(' ').replace(/_/g, ' '),
+        ).split(' '),
+      );
+      const words = wordsOf(doc);
       const score =
         (exact ? 10000 : 0) +
         (domain === doc.domain || normalized === normalizeSearchText(doc.domain)
           ? 500
           : 0) +
-        tokens.reduce(
-          (n, token) =>
+        terms.reduce(
+          (n, { token, weight }) =>
             n +
-            (name.split(' ').includes(token) ? 30 : 0) +
-            (doc.lexicalText.split(' ').includes(token)
-              ? 5
-              : doc.lexicalText.includes(token)
-                ? 1
-                : 0),
+            weight *
+              ((name.has(token) ? 30 : 0) +
+                (words.has(token)
+                  ? 5
+                  : token.length >= 4 && doc.lexicalText.includes(token)
+                    ? 2
+                    : 0)),
           0,
         );
       return [doc.name, score] as const;
@@ -250,31 +425,36 @@ export function localToolScores(
   );
 }
 
+/**
+ * Score ties break by domain strength (the summed evidence of the tool's
+ * domain for this query) and only then by name, so «cierre de caja» keeps
+ * the cash-register family together instead of an alphabetical neighbor.
+ */
 export function localToolRanking(
   query: string,
   docs: ToolDocument[],
   domain?: string,
 ): string[] {
   const scores = localToolScores(query, docs, domain);
+  const domainScore = new Map<string, number>();
+  for (const doc of docs)
+    domainScore.set(
+      doc.domain,
+      (domainScore.get(doc.domain) ?? 0) + (scores.get(doc.name) ?? 0),
+    );
   return docs
-    .map((doc) => ({ name: doc.name, score: scores.get(doc.name) ?? 0 }))
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .map((doc) => ({
+      name: doc.name,
+      score: scores.get(doc.name) ?? 0,
+      domain: domainScore.get(doc.domain) ?? 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.domain - a.domain ||
+        a.name.localeCompare(b.name),
+    )
     .map((d) => d.name);
-}
-
-/**
- * Fail-closed, like the voice surface: only a tool that opted into
- * `readOnly: true` may fill the working set without lexical evidence. Writes
- * (`requiresConfirmation`), irreversible tools, UI commands (`clientSide`) and
- * any tool that forgot the flag need a score > 0 to be offered by relevance.
- */
-export function mayFillWithoutEvidence(doc: ToolDocument): boolean {
-  return (
-    doc.metadata.read_only === true &&
-    doc.metadata.requires_confirmation !== true &&
-    doc.metadata.irreversible !== true &&
-    doc.metadata.client_side !== true
-  );
 }
 
 export function reciprocalRankFusion(rankings: string[][]): string[] {
