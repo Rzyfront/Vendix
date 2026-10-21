@@ -376,7 +376,7 @@
               <ul class="space-y-4 text-xs sm:text-sm text-slate-800">
                 <li class="flex items-start gap-3">
                   <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
-                  <span><strong>POS multidispositivo en la nube:</strong> Abre caja desde tu celular, tablet o computador. Sigue facturando incluso si se corta la luz o internet gracias al modo offline.</span>
+                  <span><strong>POS multidispositivo en la nube:</strong> Abre caja desde tu celular, tablet o computador. Ventas, caja e inventario quedan sincronizados al instante en la nube.</span>
                 </li>
                 <li class="flex items-start gap-3">
                   <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
@@ -1244,7 +1244,7 @@
 
             <div class="text-xs text-slate-500 flex items-center gap-1.5">
               <app-icon name="info" [size]="14"></app-icon>
-              <span>Cálculo estimado basado en costo promedio de folios DIAN ($280 COP/folio) + POS tradicional ($180.000/mes).</span>
+              <span>Estimación con supuestos: POS tradicional ${{ roiAssumptions.legacyPosMonthlyPerStore | number:'1.0-0' }}/mes por tienda, folios DIAN a ${{ roiAssumptions.dianFolioCost | number:'1.0-0' }} c/u y plugin web ${{ roiAssumptions.webPluginMonthly | number:'1.0-0' }}/mes@if (roiVendixAnnualPrice(); as vendixPrice) {, frente a Empresarial Pro anual (${{ vendixPrice | number:'1.0-0' }}, según los planes vigentes)}. No es un ahorro garantizado.</span>
             </div>
           </div>
 
@@ -1253,7 +1253,13 @@
             <div>
               <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Ahorro anual estimado directo</span>
               <div class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 mt-2 tracking-tight">
-                $ {{ annualSavings() | number:'1.0-0' }} COP
+                @if (annualSavings(); as savings) {
+                  $ {{ savings | number:'1.0-0' }} COP
+                } @else if (annualSavings() === 0) {
+                  $ 0 COP
+                } @else {
+                  <span class="text-base text-slate-500 font-semibold">Cargando planes…</span>
+                }
               </div>
               <p class="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
                 Dinero que dejas de regalar a proveedores de software desconectados, además de ganar <strong>~90 horas de tiempo libre al mes</strong>.
