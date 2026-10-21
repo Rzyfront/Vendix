@@ -57,9 +57,9 @@ import {
   Product,
   ProductState,
   TaxCategory,
-  ServiceIntakeField,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
+import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
 import { CategoriesService } from '../../services/categories.service';
 import { BrandsService } from '../../services/brands.service';
 import { TaxesService } from '../../services/taxes.service';
@@ -550,6 +550,7 @@ export class ProductCreatePageComponent {
   private priceTiersService = inject(PriceTiersService);
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
+  private dataCollectionTemplatesService = inject(DataCollectionTemplatesService);
   private destroyRef = inject(DestroyRef);
   /** QUI-651 — estaciones de KDS para el selector del plato preparado. */
   private readonly kdsStationsService = inject(KdsStationsService);
@@ -1008,9 +1009,17 @@ export class ProductCreatePageComponent {
   readonly isVariantAccountingOpen = signal(false);
 
   isSubmitting = signal(false);
-  readonly serviceIntakeFields = signal<ServiceIntakeField[]>([]);
-  readonly newServiceIntakeLabel = signal('');
-  readonly newServiceIntakeType = signal<ServiceIntakeField['type']>('text');
+  /**
+   * Formulario de recepción (plantilla de Recolección de datos) vinculado al
+   * servicio. 0 = "Sin formulario". El vínculo se guarda aparte del producto
+   * (PUT /store/data-collection/templates/product/:id) y solo si cambió.
+   */
+  readonly intakeTemplateId = signal<number>(0);
+  private readonly originalIntakeTemplateId = signal<number>(0);
+  readonly intakeTemplateSelectorOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Sin formulario' },
+    ...this.templateSelectorOptions(),
+  ]);
   // Modal de "requisitos para guardar": consolida en un solo lugar todo lo que
   // impide guardar (errores de form + reglas de variantes + reservas), en vez
   // de disparar toasts sueltos y bloquear el botón.
@@ -1740,6 +1749,7 @@ export class ProductCreatePageComponent {
         this.productId = +params['id'];
         this.isEditMode.set(true);
         this.loadProduct(this.productId);
+        this.loadIntakeTemplateLink(this.productId);
         this.loadPromotionOptions();
         this.loadProductPromotions(this.productId);
       }
@@ -2039,45 +2049,49 @@ export class ProductCreatePageComponent {
   }
 
 
-  addServiceIntakeField(): void {
-    if (this.serviceIntakeFields().length >= 30) {
-      this.toastService.error('Cada servicio puede tener máximo 30 campos dinámicos.');
-      return;
-    }
-    const label = this.newServiceIntakeLabel().trim();
-    if (!label) return;
-    const baseKey = label
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^[^a-z]+/, '')
-      .slice(0, 50);
-    if (!baseKey) {
-      this.toastService.error('Escribe un nombre que incluya letras para el campo.');
-      return;
-    }
-    if (this.serviceIntakeFields().some((field) => field.key === baseKey)) {
-      this.toastService.error('Ya existe un campo con un nombre similar en este servicio.');
-      return;
-    }
-    this.serviceIntakeFields.update((fields) => [
-      ...fields,
-      { key: baseKey, label, type: this.newServiceIntakeType(), required: false },
-    ]);
-    this.newServiceIntakeLabel.set('');
+  onIntakeTemplateChange(value: number | string | null): void {
+    this.intakeTemplateId.set(Number(value) || 0);
   }
 
-  toggleServiceIntakeRequired(index: number): void {
-    this.serviceIntakeFields.update((fields) =>
-      fields.map((field, fieldIndex) =>
-        fieldIndex === index ? { ...field, required: !field.required } : field,
-      ),
-    );
+  private loadIntakeTemplateLink(productId: number): void {
+    this.dataCollectionTemplatesService
+      .getProductTemplate(productId)
+      .subscribe({
+        next: (templateId) => {
+          const id = Number(templateId) || 0;
+          this.intakeTemplateId.set(id);
+          this.originalIntakeTemplateId.set(id);
+        },
+        error: () => {}, // No crítico: el selector queda en "Sin formulario"
+      });
   }
 
-  removeServiceIntakeField(index: number): void {
-    this.serviceIntakeFields.update((fields) => fields.filter((_, fieldIndex) => fieldIndex !== index));
+  /**
+   * Persiste el vínculo producto → formulario de recepción solo si cambió.
+   * Nunca rechaza: un fallo se avisa con un warning y el guardado del producto
+   * sigue su curso.
+   */
+  private syncIntakeTemplateLink(productId: number | undefined, isService: boolean): Promise<void> {
+    const next = isService ? this.intakeTemplateId() : 0;
+    if (!productId || next === this.originalIntakeTemplateId()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.dataCollectionTemplatesService
+        .setProductTemplate(productId, next || null)
+        .subscribe({
+          next: () => {
+            this.originalIntakeTemplateId.set(next);
+            resolve();
+          },
+          error: () => {
+            this.toastService.warning(
+              'Producto guardado, pero no se pudo vincular el formulario de recepción.',
+            );
+            resolve();
+          },
+        });
+    });
   }
 
   private createForm(): FormGroup {
@@ -2395,7 +2409,6 @@ export class ProductCreatePageComponent {
   }
 
   private patchForm(product: Product): void {
-    this.serviceIntakeFields.set(product.service_intake_fields ?? []);
     // Extract category IDs from categories (API returns categories directly)
     const categoryIds = (product.categories || [])
       .map((c: ProductCategory) => c.id)
@@ -4468,7 +4481,6 @@ export class ProductCreatePageComponent {
         is_recurring: !!formValue.is_recurring,
         recurrence_interval_days: formValue.is_recurring ? Number(formValue.recurrence_interval_days || 30) : undefined,
         service_instructions: formValue.service_instructions || undefined,
-        service_intake_fields: this.serviceIntakeFields(),
         is_consultation: !!formValue.is_consultation,
         send_preconsultation: !!formValue.send_preconsultation,
         consultation_template_id: formValue.consultation_template_id || null,
@@ -4624,8 +4636,10 @@ export class ProductCreatePageComponent {
 
         const navigateAfterSave = () => {
           const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-          this.router.navigate(['/admin/products'], {
-            queryParams: { page: returnPage },
+          this.syncIntakeTemplateLink(savedProduct?.id, isServiceType).then(() => {
+            this.router.navigate(['/admin/products'], {
+              queryParams: { page: returnPage },
+            });
           });
         };
 

@@ -1755,7 +1755,7 @@
               <div class="max-w-sm">
                 <app-input label="Repetir cada cuántos días" type="number" min="1" formControlName="recurrence_interval_days" />
                 <div class="mt-2 flex flex-wrap gap-2" aria-label="Intervalos sugeridos">
-                  @for (days of [3, 7, 15, 30]; track days) {
+                  @for (days of [1, 2, 7, 15, 30]; track days) {
                     <app-button variant="outline" size="sm" (clicked)="productForm.patchValue({ recurrence_interval_days: days })">{{ days }} días</app-button>
                   }
                 </div>
@@ -1764,30 +1764,25 @@
             }
 
             <section class="rounded-xl border border-[var(--color-border)] p-4 space-y-3">
-              <div>
-                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Datos que se piden en cada atención</h3>
-                <p class="text-xs text-[var(--color-text-secondary)]">Estos campos se guardan con cada servicio realizado, no en el perfil permanente del cliente.</p>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-                <app-input label="Nombre del campo" [ngModel]="newServiceIntakeLabel()" [ngModelOptions]="{standalone: true}" (ngModelChange)="newServiceIntakeLabel.set($event)" placeholder="Ej. Nivel de aceite" />
-                <app-selector label="Tipo de respuesta" [options]="[{value:'text',label:'Texto corto'},{value:'textarea',label:'Texto largo'},{value:'number',label:'Número'},{value:'checkbox',label:'Sí / No'}]" [ngModel]="newServiceIntakeType()" [ngModelOptions]="{standalone: true}" (ngModelChange)="newServiceIntakeType.set($event)" />
-                <app-button variant="secondary" [disabled]="serviceIntakeFields().length >= 30" (clicked)="addServiceIntakeField()"><app-icon name="plus" [size]="14" slot="icon" /> Agregar campo</app-button>
-              </div>
-              @if (serviceIntakeFields().length) {
-                <div class="divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]">
-                  @for (field of serviceIntakeFields(); track field.key; let i = $index) {
-                    <div class="flex items-center justify-between gap-3 p-3 text-sm">
-                      <div><strong>{{ field.label }}</strong><span class="ml-2 text-xs text-[var(--color-text-secondary)]">{{ field.type }}</span></div>
-                      <div class="flex items-center gap-2">
-                        <app-button variant="ghost" size="sm" (clicked)="toggleServiceIntakeRequired(i)">{{ field.required ? 'Obligatorio' : 'Opcional' }}</app-button>
-                        <app-button variant="ghost" size="sm" ariaLabel="Eliminar campo" (clicked)="removeServiceIntakeField(i)"><app-icon name="trash-2" [size]="14" /></app-button>
-                      </div>
-                    </div>
-                  }
+              <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                <div class="flex-1 min-w-0">
+                  <app-selector
+                    label="Formulario de recepción"
+                    [options]="intakeTemplateSelectorOptions()"
+                    [ngModel]="intakeTemplateId()"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="onIntakeTemplateChange($event)"
+                    placeholder="Sin formulario"
+                  />
                 </div>
-              } @else {
-                <p class="text-xs text-[var(--color-text-secondary)]">Sin campos extra. Los datos estándar dependen del tipo de estación.</p>
-              }
+                <app-button variant="outline" size="sm" (clicked)="openTemplateManager()">
+                  <app-icon name="pencil" [size]="14" slot="icon" />
+                  Diseñar
+                </app-button>
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Campos que se llenan en cada atención en estación. Los campos de tipo Cliente se guardan en el perfil del cliente.
+              </p>
             </section>
 
             @if (productForm.get("requires_booking")?.value) {

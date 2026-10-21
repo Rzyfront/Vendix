@@ -1,5 +1,12 @@
 export type FieldType = 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'textarea' | 'file' | 'email' | 'phone' | 'url';
-export type EntityType = 'customer' | 'booking' | 'order';
+export type EntityType = 'customer' | 'booking' | 'order' | 'service_session';
+
+export const ENTITY_TYPE_LABELS: Record<EntityType, string> = {
+  customer: 'Cliente',
+  booking: 'Reserva',
+  order: 'Orden',
+  service_session: 'Atención de servicio',
+};
 export type DisplayMode = 'summary' | 'detail';
 
 export interface MetadataField {

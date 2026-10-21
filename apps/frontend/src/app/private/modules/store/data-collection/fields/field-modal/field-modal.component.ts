@@ -99,6 +99,7 @@ export class FieldModalComponent implements OnInit {
     { value: 'customer', label: 'Cliente' },
     { value: 'booking', label: 'Reserva' },
     { value: 'order', label: 'Orden' },
+    { value: 'service_session', label: 'Atención de servicio' },
   ];
 
   fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: t }));

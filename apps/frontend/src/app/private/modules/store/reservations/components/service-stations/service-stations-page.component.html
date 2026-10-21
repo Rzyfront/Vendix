@@ -596,6 +596,13 @@
           <app-icon name="user" [size]="14" class="text-[var(--color-primary)]" />
           <span>Datos del Cliente</span>
         </span>
+        <app-customer-select
+          label="Cliente registrado (opcional)"
+          helpText="Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente."
+          [selected]="checkinCustomer()"
+          (selectedChange)="onCheckinCustomerChange($event)"
+          [createInitialValues]="checkinCustomerInitialValues()"
+        />
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <app-input
             label="Nombre Completo del Cliente"
@@ -695,25 +702,57 @@
         />
       </div>
 
-      @if (checkinServiceIntakeFields().length) {
-        <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-3">
-          <div>
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Datos de este servicio</h4>
-            <p class="text-xs text-[var(--color-text-secondary)]">La información se guardará en esta atención.</p>
-          </div>
-          @for (field of checkinServiceIntakeFields(); track field.key) {
-            @if (field.type === 'checkbox') {
-              <label class="flex items-center gap-2 text-sm text-[var(--color-text-primary)]">
-                <input type="checkbox" [checked]="checkinServiceIntakeValues()[field.key] === true" (change)="setServiceIntakeValue(field.key, $event, field.type)" />
-                {{ field.label }} @if (field.required) { <span class="text-red-500">*</span> }
-              </label>
-            } @else if (field.type === 'textarea') {
-              <app-textarea [label]="field.label + (field.required ? ' *' : '')" [ngModel]="checkinServiceIntakeValues()[field.key] ?? ''" [ngModelOptions]="{standalone: true}" (ngModelChange)="setServiceIntakeControlValue(field.key, $event)" [placeholder]="field.placeholder || ''" [rows]="2" />
-            } @else {
-              <app-input [label]="field.label + (field.required ? ' *' : '')" [type]="field.type" [ngModel]="checkinServiceIntakeValues()[field.key] ?? ''" [ngModelOptions]="{standalone: true}" (ngModelChange)="setServiceIntakeControlValue(field.key, $event)" [placeholder]="field.placeholder || ''" />
-            }
-          }
+      @if (checkinIntakeLoading()) {
+        <div class="rounded-xl border border-[var(--color-border)] p-4 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+          <app-spinner size="sm" /> Cargando formulario de recepción...
         </div>
+      } @else if (checkinIntakeTemplate(); as intakeTemplate) {
+        @if (checkinIntakeSections().length) {
+          <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-4">
+            <div>
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5">
+                <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
+                {{ intakeTemplate.name || 'Formulario de recepción' }}
+              </h4>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Se guarda con esta atención. Los campos de tipo Cliente actualizan el perfil del cliente.
+              </p>
+            </div>
+            @for (section of checkinIntakeSections(); track section.key) {
+              <div class="space-y-2">
+                @if (checkinIntakeSections().length > 1 || section.description) {
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{{ section.title }}</p>
+                    @if (section.description) {
+                      <p class="text-xs text-[var(--color-text-secondary)]">{{ section.description }}</p>
+                    }
+                  </div>
+                }
+                <div class="flex flex-wrap gap-3">
+                  @for (item of section.items; track item.id) {
+                    <div [class]="getItemWidthClass(item.width)">
+                      @if (item.metadata_field.field_type === 'file') {
+                        <p class="text-xs text-[var(--color-text-secondary)]">
+                          {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
+                        </p>
+                      } @else {
+                        <app-dynamic-field
+                          [field]="item.metadata_field"
+                          [value]="intakeValue(item.metadata_field.id)"
+                          [required]="!!(item.is_required ?? item.metadata_field.is_required)"
+                          [placeholder]="item.placeholder || ''"
+                          [helpText]="item.help_text || ''"
+                          [icon]="item.icon || ''"
+                          (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
+                        />
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        }
       }
 
       <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm flex flex-wrap items-center justify-between gap-2">
@@ -791,6 +830,30 @@
             </span>
           </div>
         </div>
+
+        @if (session.intake; as intake) {
+          @if (intake.answers.length) {
+            <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+                  <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
+                  Datos de la atención
+                </span>
+                @if (intake.template_name) {
+                  <span class="text-xs text-[var(--color-text-secondary)] truncate">{{ intake.template_name }}</span>
+                }
+              </div>
+              <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                @for (answer of intake.answers; track answer.field_id) {
+                  <div class="flex gap-1.5 min-w-0">
+                    <dt class="text-[var(--color-text-secondary)] shrink-0">{{ answer.label }}:</dt>
+                    <dd class="font-medium text-[var(--color-text-primary)] break-words min-w-0">{{ formatIntakeAnswer(answer.field_type, answer.value) }}</dd>
+                  </div>
+                }
+              </dl>
+            </div>
+          }
+        }
 
         <!-- Sección: Consumo / Cuenta Abierta (Estilo restaurante mesa) -->
         <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-emerald-500/30 shadow-sm space-y-4">

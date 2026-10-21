@@ -434,6 +434,7 @@ export class TemplateModalComponent implements OnInit {
     { value: 'customer', label: 'Cliente' },
     { value: 'booking', label: 'Reserva' },
     { value: 'order', label: 'Orden' },
+    { value: 'service_session', label: 'Atención de servicio' },
   ];
 
   statusOptions = [

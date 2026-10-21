@@ -8,6 +8,8 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
+  CustomerSelectComponent,
+  CustomerSelectOption,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -28,9 +30,23 @@ import {
   ServiceStationsService,
   StationProviderOption,
   StationServiceOption,
-  ServiceIntakeField,
+  IntakeTemplate,
+  IntakeTemplateItem,
+  IntakeTemplateSection,
+  IntakeValue,
+  SessionIntake,
   StationType,
 } from './service-stations.service';
+import { DynamicFieldComponent } from '../../../../ecommerce/pages/data-collection-form/components/dynamic-field/dynamic-field.component';
+import { getItemWidthClass } from '../../../data-collection/utils/item-width.util';
+
+/** Sección plana del formulario de recepción (tabs y subsecciones aplanadas en orden). */
+export interface CheckinIntakeSection {
+  key: string;
+  title: string;
+  description?: string | null;
+  items: IntakeTemplateItem[];
+}
 import { environment } from '../../../../../../../environments/environment';
 
 export interface ServiceSessionRow {
@@ -46,6 +62,7 @@ export interface ServiceSessionRow {
   allocation?: { provider_id?: number; provider_name?: string } | null;
   budget_amount?: number | null;
   access_url?: string | null;
+  intake?: SessionIntake | null;
   order?: {
     id: number;
     order_number: string;
@@ -178,6 +195,8 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    DynamicFieldComponent,
+    CustomerSelectComponent,
   ],
   templateUrl: './service-stations-page.component.html',
   styleUrl: './service-stations-page.component.scss',
@@ -271,7 +290,25 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinAccessories = signal('');
   readonly checkinStylePreference = signal('');
   readonly checkinAllergies = signal('');
-  readonly checkinServiceIntakeValues = signal<Record<string, string | number | boolean>>({});
+  // Formulario de recepción (Recolección de datos) del servicio seleccionado
+  readonly checkinIntakeTemplate = signal<IntakeTemplate | null>(null);
+  readonly checkinIntakeLoading = signal(false);
+  readonly checkinIntakeValues = signal<Record<number, unknown>>({});
+  private intakeRequestSeq = 0;
+  private prefillRequestSeq = 0;
+
+  /** Prellenado del alta de cliente con lo ya digitado en el check-in. */
+  readonly checkinCustomerInitialValues = computed(() => {
+    const [first, ...rest] = this.checkinCustomerName().trim().split(/\s+/).filter(Boolean);
+    return {
+      ...(first ? { first_name: first } : {}),
+      ...(rest.length ? { last_name: rest.join(' ') } : {}),
+      ...(this.checkinCustomerDoc().trim() ? { document_number: this.checkinCustomerDoc().trim() } : {}),
+      ...(this.checkinCustomerPhone().trim() ? { phone: this.checkinCustomerPhone().trim() } : {}),
+      ...(this.checkinCustomerEmail().trim() ? { email: this.checkinCustomerEmail().trim() } : {}),
+    };
+  });
+  readonly checkinCustomer = signal<CustomerSelectOption | null>(null);
   readonly checkinCustomerName = signal('');
   readonly checkinCustomerDoc = signal('');
   readonly checkinCustomerPhone = signal('');
@@ -378,12 +415,41 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return Number(this.services().find((service) => service.id === productId)?.base_price || 0);
   });
 
-  readonly checkinServiceIntakeFields = computed<ServiceIntakeField[]>(() => {
-    const productId = Number(this.checkinProductId() || 0);
-    const fromCatalog = this.services().find((service) => service.id === productId)?.service_intake_fields;
-    if (fromCatalog?.length) return fromCatalog;
-    return this.selectedCheckinStation()?.services.find((service) => service.product_id === productId)?.product?.service_intake_fields ?? [];
+  /** Secciones del formulario de recepción, aplanadas en orden (tabs → secciones → subsecciones). */
+  readonly checkinIntakeSections = computed<CheckinIntakeSection[]>(() => {
+    const template = this.checkinIntakeTemplate();
+    if (!template) return [];
+    const bySort = <T extends { sort_order?: number }>(list: T[] | undefined): T[] =>
+      [...(list ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const roots: IntakeTemplateSection[] = template.tabs?.length
+      ? bySort(template.tabs).flatMap((tab) => bySort(tab.sections))
+      : bySort(template.sections);
+    const out: CheckinIntakeSection[] = [];
+    const push = (section: IntakeTemplateSection) => {
+      const items = bySort(section.items).filter((item) => !!item.metadata_field);
+      if (items.length) {
+        out.push({ key: `s${section.id}`, title: section.title, description: section.description, items });
+      }
+      for (const child of bySort(section.child_sections)) push(child);
+    };
+    for (const root of roots) push(root);
+    return out;
   });
+
+  readonly checkinIntakeItems = computed<IntakeTemplateItem[]>(() => {
+    const seen = new Set<number>();
+    const items: IntakeTemplateItem[] = [];
+    for (const section of this.checkinIntakeSections()) {
+      for (const item of section.items) {
+        if (seen.has(item.metadata_field.id)) continue;
+        seen.add(item.metadata_field.id);
+        items.push(item);
+      }
+    }
+    return items;
+  });
+
+  readonly getItemWidthClass = getItemWidthClass;
 
   readonly checkinInitialLineTotal = computed(() => {
     if (!this.checkinInitialProductId()) return 0;
@@ -968,12 +1034,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinAccessories.set('');
     this.checkinStylePreference.set('');
     this.checkinAllergies.set('');
-    this.checkinServiceIntakeValues.set({});
+    this.checkinCustomer.set(null);
     this.checkinCustomerName.set('');
     this.checkinCustomerDoc.set('');
     this.checkinCustomerPhone.set('');
     this.checkinCustomerEmail.set('');
     this.checkinProductId.set(this.defaultCheckinServiceId(target));
+    this.loadCheckinIntake();
     this.checkinProviderId.set(0);
     this.checkinDurationMinutes.set(45);
     this.checkinNotes.set('');
@@ -998,27 +1065,129 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
-    this.checkinServiceIntakeValues.set({});
+    this.loadCheckinIntake();
   }
 
   onCheckinServiceChange(productId: number | string): void {
-    this.checkinProductId.set(Number(productId));
-    this.checkinServiceIntakeValues.set({});
+    const next = Number(productId) || 0;
+    const changed = next !== Number(this.checkinProductId() || 0);
+    this.checkinProductId.set(next);
+    if (changed) this.loadCheckinIntake();
   }
 
-  setServiceIntakeValue(key: string, event: Event, type: ServiceIntakeField['type']): void {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-    const value = type === 'checkbox'
-      ? (target as HTMLInputElement).checked
-      : type === 'number' && target.value !== ''
-        ? Number(target.value)
-        : target.value;
-    this.checkinServiceIntakeValues.update((values) => ({ ...values, [key]: value }));
+  /**
+   * Cliente registrado (opcional) elegido o creado en el selector. Completa los
+   * datos de contacto del check-in (siguen editables) y prellena los campos de
+   * tipo Cliente del formulario de recepción desde su perfil.
+   */
+  onCheckinCustomerChange(customer: CustomerSelectOption | null): void {
+    this.checkinCustomer.set(customer);
+    if (!customer) return;
+    const fullName = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim() || customer.name;
+    this.checkinCustomerName.set(fullName);
+    if (customer.document_number) this.checkinCustomerDoc.set(customer.document_number);
+    if (customer.phone) this.checkinCustomerPhone.set(customer.phone);
+    if (customer.email) this.checkinCustomerEmail.set(customer.email);
+    this.loadCheckinIntakePrefill();
   }
 
-  setServiceIntakeControlValue(key: string, value: string | number): void {
-    this.checkinServiceIntakeValues.update((values) => ({ ...values, [key]: value }));
+  /** Prellena (sin pisar lo ya digitado) los campos de perfil del cliente seleccionado. */
+  private loadCheckinIntakePrefill(): void {
+    const customerId = this.checkinCustomer()?.id;
+    const productId = Number(this.checkinProductId() || 0);
+    if (!customerId || !productId || !this.checkinIntakeTemplate()) return;
+    const seq = ++this.prefillRequestSeq;
+    this.stationsApi.getIntakePrefill(productId, customerId).subscribe({
+      next: (entries) => {
+        if (seq !== this.prefillRequestSeq) return;
+        if (this.checkinCustomer()?.id !== customerId || Number(this.checkinProductId() || 0) !== productId) return;
+        const known = new Set(this.checkinIntakeItems().map((item) => item.metadata_field.id));
+        this.checkinIntakeValues.update((values) => {
+          const next = { ...values };
+          for (const entry of entries) {
+            if (!known.has(entry.field_id)) continue;
+            const current = next[entry.field_id];
+            if (current !== undefined && current !== null && current !== '') continue;
+            if (entry.value === undefined || entry.value === null) continue;
+            next[entry.field_id] = entry.value;
+          }
+          return next;
+        });
+      },
+      error: () => {}, // No crítico: el formulario queda vacío
+    });
+  }
+
+  /** Carga el formulario de recepción vinculado al servicio seleccionado. */
+  private loadCheckinIntake(): void {
+    const productId = Number(this.checkinProductId() || 0);
+    const seq = ++this.intakeRequestSeq;
+    this.checkinIntakeTemplate.set(null);
+    this.checkinIntakeValues.set({});
+    if (!productId) {
+      this.checkinIntakeLoading.set(false);
+      return;
+    }
+    this.checkinIntakeLoading.set(true);
+    this.stationsApi.getIntakeTemplate(productId).subscribe({
+      next: (template) => {
+        if (seq !== this.intakeRequestSeq) return;
+        this.checkinIntakeTemplate.set(template);
+        this.checkinIntakeLoading.set(false);
+        if (template) this.loadCheckinIntakePrefill();
+      },
+      error: () => {
+        if (seq !== this.intakeRequestSeq) return;
+        this.checkinIntakeLoading.set(false);
+      },
+    });
+  }
+
+  intakeValue(fieldId: number): unknown {
+    return this.checkinIntakeValues()[fieldId] ?? '';
+  }
+
+  setIntakeValue(fieldId: number, value: unknown): void {
+    this.checkinIntakeValues.update((values) => ({ ...values, [fieldId]: value }));
+  }
+
+  private isIntakeItemRequired(item: IntakeTemplateItem): boolean {
+    return !!(item.is_required ?? item.metadata_field.is_required);
+  }
+
+  private normalizeIntakeValue(fieldType: string, raw: unknown): IntakeValue | undefined {
+    if (fieldType === 'checkbox') return raw === true || raw === 'true';
+    if (raw === undefined || raw === null) return undefined;
+    if (fieldType === 'number') {
+      if (raw === '') return undefined;
+      const num = Number(raw);
+      return Number.isFinite(num) ? num : undefined;
+    }
+    const text = String(raw).trim();
+    return text ? text : undefined;
+  }
+
+  /** Valores del formulario de recepción listos para `intake_values` (omite vacíos). */
+  private buildIntakeValues(): Array<{ field_id: number; value: IntakeValue }> {
+    const values = this.checkinIntakeValues();
+    const out: Array<{ field_id: number; value: IntakeValue }> = [];
+    for (const item of this.checkinIntakeItems()) {
+      const field = item.metadata_field;
+      const value = this.normalizeIntakeValue(field.field_type, values[field.id]);
+      if (value === undefined) continue;
+      out.push({ field_id: field.id, value });
+    }
+    return out;
+  }
+
+  formatIntakeAnswer(fieldType: string, value: unknown): string {
+    if (value === null || value === undefined || value === '') return '—';
+    if (fieldType === 'checkbox' || typeof value === 'boolean') {
+      return value === true || value === 'true' ? 'Sí' : 'No';
+    }
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
   }
 
   private defaultCheckinServiceId(station: ServiceStation | null): number {
@@ -1103,13 +1272,20 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.toastService.error('Agrega al menos un servicio al catálogo y asígnalo a esta estación antes de iniciar la atención.');
       return;
     }
-    const serviceIntakeValues = this.checkinServiceIntakeValues();
-    const missingRequiredServiceField = this.checkinServiceIntakeFields().find((field) => {
-      const value = serviceIntakeValues[field.key];
-      return field.required && (value === undefined || value === null || value === '' || (typeof value === 'string' && !value.trim()) || value === false);
-    });
-    if (missingRequiredServiceField) {
-      this.toastService.error(`Completa el campo obligatorio "${missingRequiredServiceField.label}".`);
+    if (this.checkinIntakeLoading()) {
+      this.toastService.error('Espera a que cargue el formulario de recepción del servicio.');
+      return;
+    }
+    const intakeValues = this.buildIntakeValues();
+    const answered = new Set(intakeValues.map((entry) => entry.field_id));
+    const missingIntakeItem = this.checkinIntakeItems().find(
+      (item) =>
+        this.isIntakeItemRequired(item) &&
+        item.metadata_field.field_type !== 'checkbox' &&
+        !answered.has(item.metadata_field.id),
+    );
+    if (missingIntakeItem) {
+      this.toastService.error(`Completa el campo obligatorio "${missingIntakeItem.metadata_field.label}".`);
       return;
     }
 
@@ -1144,7 +1320,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       ...(email ? { customer_email: email } : {}),
       station_type: stationType,
       ...(notes ? { notes } : {}),
-      ...(this.checkinServiceIntakeFields().length ? { service_intake_fields: serviceIntakeValues } : {}),
     };
 
     if (requiresVehicle) {
@@ -1171,6 +1346,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       provider_id: this.checkinProviderId() ? Number(this.checkinProviderId()) : undefined,
       planned_end_at: plannedEnd,
       contact_email: email || undefined,
+      ...(this.checkinCustomer()?.id ? { customer_id: this.checkinCustomer()!.id } : {}),
+      ...(intakeValues.length ? { intake_values: intakeValues } : {}),
       subject: {
         subject_type: subjectType,
         label,

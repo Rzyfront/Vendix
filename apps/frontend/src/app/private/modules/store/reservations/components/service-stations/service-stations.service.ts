@@ -20,7 +20,7 @@ export interface ServiceStation {
   status: 'active' | 'inactive';
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
-  services: Array<{ product_id: number; product: { id: number; name: string; base_price?: number | string; service_duration_minutes: number | null; service_intake_fields?: ServiceIntakeField[] | null } | null }>;
+  services: Array<{ product_id: number; product: { id: number; name: string; base_price?: number | string; service_duration_minutes: number | null } | null }>;
   providers: Array<{ provider_id: number; provider: { id: number; display_name: string; is_active: boolean } | null }>;
 }
 
@@ -44,15 +44,63 @@ export interface StationServiceOption {
   name: string;
   base_price?: number | string | null;
   service_duration_minutes?: number | null;
-  service_intake_fields?: ServiceIntakeField[] | null;
 }
 
-export interface ServiceIntakeField {
-  key: string;
+/** Campo de Recolección de datos tal como viene en un item de plantilla. */
+export interface IntakeMetadataField {
+  id: number;
+  field_key: string;
+  field_type: string;
   label: string;
-  type: 'text' | 'number' | 'textarea' | 'checkbox';
-  required?: boolean;
-  placeholder?: string;
+  entity_type: string;
+  description?: string | null;
+  options?: unknown;
+  is_required?: boolean;
+}
+
+export interface IntakeTemplateItem {
+  id: number;
+  sort_order?: number;
+  is_required?: boolean;
+  placeholder?: string | null;
+  help_text?: string | null;
+  icon?: string | null;
+  width?: string;
+  metadata_field: IntakeMetadataField;
+}
+
+export interface IntakeTemplateSection {
+  id: number;
+  title: string;
+  description?: string | null;
+  sort_order?: number;
+  items?: IntakeTemplateItem[];
+  child_sections?: IntakeTemplateSection[];
+}
+
+/** Plantilla de recepción (misma forma que GET /store/data-collection/templates/:id). */
+export interface IntakeTemplate {
+  id: number;
+  name: string;
+  description?: string | null;
+  tabs?: Array<{ id: number; title: string; sort_order?: number; sections?: IntakeTemplateSection[] }>;
+  sections?: IntakeTemplateSection[];
+}
+
+export type IntakeValue = string | number | boolean | null;
+
+export interface SessionIntakeAnswer {
+  field_id: number;
+  label: string;
+  field_type: string;
+  entity_type: string;
+  value: unknown;
+}
+
+export interface SessionIntake {
+  template_id: number;
+  template_name: string;
+  answers: SessionIntakeAnswer[];
 }
 
 export interface StationProviderOption {
@@ -183,6 +231,26 @@ export class ServiceStationsService {
           return [];
         }),
       );
+  }
+
+  getIntakeTemplate(productId: number): Observable<IntakeTemplate | null> {
+    const params = new HttpParams().set('product_id', String(productId));
+    return this.http
+      .get<{ data?: { template: IntakeTemplate | null } } | { template: IntakeTemplate | null }>(
+        `${environment.apiUrl}/store/service-sessions/intake-template`,
+        { params },
+      )
+      .pipe(map((r) => this.unwrap<{ template: IntakeTemplate | null }>(r)?.template ?? null));
+  }
+
+  getIntakePrefill(productId: number, customerId: number): Observable<Array<{ field_id: number; value: unknown }>> {
+    const params = new HttpParams().set('product_id', String(productId)).set('customer_id', String(customerId));
+    return this.http
+      .get<{ data?: { values: Array<{ field_id: number; value: unknown }> } } | { values: Array<{ field_id: number; value: unknown }> }>(
+        `${environment.apiUrl}/store/service-sessions/intake-prefill`,
+        { params },
+      )
+      .pipe(map((r) => this.unwrap<{ values: Array<{ field_id: number; value: unknown }> }>(r)?.values ?? []));
   }
 
   getSession(id: number): Observable<any> {

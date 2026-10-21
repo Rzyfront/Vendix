@@ -75,7 +75,6 @@ export interface Product {
   is_recurring?: boolean;
   recurrence_interval_days?: number | null;
   service_instructions?: string;
-  service_intake_fields?: ServiceIntakeField[];
   is_consultation?: boolean;
   send_preconsultation?: boolean;
   consultation_template_id?: number;
@@ -182,14 +181,6 @@ export interface StockLevel {
     name: string;
     type: string;
   };
-}
-
-export interface ServiceIntakeField {
-  key: string;
-  label: string;
-  type: 'text' | 'number' | 'textarea' | 'checkbox';
-  required?: boolean;
-  placeholder?: string;
 }
 
 export interface InventoryBatch {
@@ -402,7 +393,6 @@ export interface CreateProductDto {
   is_recurring?: boolean;
   recurrence_interval_days?: number | null;
   service_instructions?: string;
-  service_intake_fields?: ServiceIntakeField[];
   is_consultation?: boolean;
   send_preconsultation?: boolean;
   consultation_template_id?: number | null;
@@ -505,7 +495,6 @@ export interface UpdateProductDto {
   is_recurring?: boolean;
   recurrence_interval_days?: number | null;
   service_instructions?: string;
-  service_intake_fields?: ServiceIntakeField[];
   is_consultation?: boolean;
   send_preconsultation?: boolean;
   consultation_template_id?: number | null;

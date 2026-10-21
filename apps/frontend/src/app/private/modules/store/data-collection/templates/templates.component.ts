@@ -6,7 +6,7 @@ import { Router } from '@angular/router';
 import { map } from 'rxjs/operators';
 import { DataCollectionTemplatesService } from '../services/data-collection-templates.service';
 import { DataCollectionTemplate } from '../interfaces/data-collection-template.interface';
-import { MetadataField } from '../interfaces/metadata-field.interface';
+import { ENTITY_TYPE_LABELS, MetadataField } from '../interfaces/metadata-field.interface';
 import { MetadataFieldsService } from '../services/metadata-fields.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -94,7 +94,7 @@ import { environment } from '../../../../../../environments/environment';
                 </span>
                 <span class="flex items-center gap-1">
                   <app-icon name="tag" [size]="12"></app-icon>
-                  {{ template.entity_type }}
+                  {{ entityTypeLabel(template.entity_type) }}
                 </span>
                 @if (template.is_default) {
                   <span
@@ -151,6 +151,10 @@ import { environment } from '../../../../../../environments/environment';
   `,
 })
 export class TemplatesComponent implements OnInit {
+  entityTypeLabel(type: string): string {
+    return (ENTITY_TYPE_LABELS as Record<string, string>)[type] ?? type;
+  }
+
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private templatesService = inject(DataCollectionTemplatesService);
