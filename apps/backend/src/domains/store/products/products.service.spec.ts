@@ -3643,6 +3643,46 @@ describe('ProductsService', () => {
       expect(mockPrismaService.products.count).not.toHaveBeenCalled();
     });
 
+    it('findIds trigram con without_brand/without_category: el SQL incluye los predicados (T8-H1)', async () => {
+      const { calls } = primeTx([{ id: 11 }], 1);
+      await RequestContextService.run(CTX_1, () =>
+        service.findIds({
+          search: 'cafe',
+          without_brand: true,
+          without_category: true,
+        } as any),
+      );
+      const rank = calls.filter((c) => c.method === 'query');
+      expect(rank.length).toBeGreaterThan(0);
+      for (const c of rank) {
+        expect(c.sql).toContain('p.brand_id IS NULL');
+        expect(c.sql).toContain('NOT EXISTS (SELECT 1 FROM public.product_categories');
+      }
+    });
+
+    it('findIds trigram sin los filtros: el SQL no los incluye', async () => {
+      const { calls } = primeTx([{ id: 11 }], 1);
+      await RequestContextService.run(CTX_1, () =>
+        service.findIds({ search: 'cafe' } as any),
+      );
+      for (const c of calls.filter((x) => x.method === 'query')) {
+        expect(c.sql).not.toContain('p.brand_id IS NULL');
+        expect(c.sql).not.toContain('NOT EXISTS (SELECT 1 FROM public.product_categories');
+      }
+    });
+
+    it('clave de caché L2 difiere con/sin without_* y sin filtros no cambia', () => {
+      const key = (q: any) =>
+        (service as any).buildSmartSearchCacheKey(1, 'cafe', q);
+      const base = key({ search: 'cafe' });
+      expect(key({ search: 'cafe', without_brand: true })).not.toBe(base);
+      expect(key({ search: 'cafe', without_category: true })).not.toBe(base);
+      expect(key({ search: 'cafe', without_brand: true })).not.toBe(
+        key({ search: 'cafe', without_category: true }),
+      );
+      expect(key({ search: 'cafe', without_brand: false })).toBe(base);
+    });
+
     it('findIds: throw operativo del raw → fail-open a legacy', async () => {
       (mockPrismaService as any).withoutScope = jest.fn(() => ({
         $transaction: jest.fn(async () => {

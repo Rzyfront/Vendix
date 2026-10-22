@@ -2218,9 +2218,13 @@ export class ProductsService {
       query.pos_optimized ?? '',
       Array.isArray(query.ids) ? [...query.ids].sort((a, b) => a - b).join(',') : '',
     ].join('|');
+    // Solo se anexa si están activos: sin estos filtros la clave queda idéntica.
+    const unassigned =
+      (query.without_category === true ? '|wc' : '') +
+      (query.without_brand === true ? '|wb' : '');
     let fhash = 'nofilter';
     try {
-      fhash = createHash('sha256').update(filter).digest('hex').slice(0, 12);
+      fhash = createHash('sha256').update(filter + unassigned).digest('hex').slice(0, 12);
     } catch {
       fhash = 'unhashable';
     }
@@ -2422,6 +2426,8 @@ export class ProductsService {
       posOptimized: query.pos_optimized ?? null,
       brandId: query.brand_id ?? null,
       categoryId: query.category_id ?? null,
+      withoutBrand: query.without_brand === true ? true : null,
+      withoutCategory: query.without_category === true ? true : null,
       trackInventory: query.track_inventory ?? null,
       productType: query.product_type ?? null,
       requiresBooking: query.requires_booking ?? null,

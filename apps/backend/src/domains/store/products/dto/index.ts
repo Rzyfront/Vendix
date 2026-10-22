@@ -1229,6 +1229,18 @@ export class UpdateProductDto {
   tax_inclusive_map?: Record<string, boolean>;
 }
 
+/**
+ * Transform estricto para booleanos de query: lee el valor crudo (`obj[key]`)
+ * porque con `enableImplicitConversion`, `Boolean('false')` sería `true`.
+ */
+const strictBooleanQuery = ({ obj, key }: { obj: any; key: string }) => {
+  const raw = obj?.[key];
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return raw;
+};
+
 export class ProductQueryDto {
   // B.1 (F-039, ADR-09): `@Min(1)` paridad catálogo — `?page=0` era skip
   // negativo (5xx). Sin `@Max`: bulk pagina con limit grande vía `/ids`.
@@ -1324,25 +1336,13 @@ export class ProductQueryDto {
    * `enableImplicitConversion`, `Boolean('false')` sería `true`.
    */
   @IsOptional()
-  @Transform(({ obj, key }) => {
-    const raw = obj?.[key];
-    if (raw === undefined || raw === null || raw === '') return undefined;
-    if (raw === true || raw === 'true') return true;
-    if (raw === false || raw === 'false') return false;
-    return raw;
-  })
+  @Transform(strictBooleanQuery)
   @IsBoolean()
   without_category?: boolean;
 
   /** Filtra a productos sin marca (`brand_id` nulo). Mismo contrato que `without_category`. */
   @IsOptional()
-  @Transform(({ obj, key }) => {
-    const raw = obj?.[key];
-    if (raw === undefined || raw === null || raw === '') return undefined;
-    if (raw === true || raw === 'true') return true;
-    if (raw === false || raw === 'false') return false;
-    return raw;
-  })
+  @Transform(strictBooleanQuery)
   @IsBoolean()
   without_brand?: boolean;
 
