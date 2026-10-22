@@ -1075,7 +1075,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       { id: 3, type: 'sale', amount: 40000, payment_method: 'bank_transfer', order_id: 3, session_id: SESSION_ID, created_at: T(15) },
       { id: 4, type: 'refund', amount: 5000, payment_method: 'cash', reference: 'refund:9', order_id: 1, notes: null, created_at: T(16), user: { first_name: 'Ana', last_name: 'Paz' } },
       { id: 5, type: 'refund', amount: 60000, payment_method: 'card', reference: 'payment_cancelled', order_id: 2, created_at: T(17) },
-      { id: 6, type: 'cash_out', amount: 7000, payment_method: 'cash', reference: 'Cancelación orden #X', order_id: 3, created_at: T(18) },
+      { id: 6, type: 'cash_out', amount: 7000, payment_method: 'cash', reference: 'Cancelación orden #X', notes: 'Devolución de efectivo por cancelación de la orden #X', order_id: 3, created_at: T(18) },
       { id: 7, type: 'cash_out', amount: 3000, payment_method: 'cash', reference: null, notes: 'Compra hielo', created_at: T(19) },
       { id: 8, type: 'cash_in', amount: 2000, payment_method: 'cash', created_at: T(20) },
       { id: 9, type: 'opening_balance', amount: OPENING_AMOUNT, payment_method: 'cash' },
@@ -1152,6 +1152,20 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(w).toMatchObject({ kind: 'withdrawal', reference: 'Taxi', notes: 'Mensajero', reason: ' Mensajero ' });
     });
 
+    it('cash_out manual con referencia "Cancelación orden…" es retiro visible', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 12, type: 'cash_out', amount: 4000, payment_method: 'cash', reference: 'Cancelación orden de proveedor', notes: 'Anticipo devuelto', created_at: T(21) },
+      ]);
+      const report = await service.getCloseReport(SESSION_ID);
+      expect(report.outflows.find((o) => o.id === 12)).toMatchObject({
+        kind: 'withdrawal', reference: 'Cancelación orden de proveedor', notes: 'Anticipo devuelto',
+      });
+      expect(report.outflows.find((o) => o.id === 6)!.kind).toBe('cancellation');
+      expect(report.cash_breakdown).toMatchObject({ cancellations: 7000, withdrawals: 7000 });
+    });
+
     it('referencias internas no se exponen como reference', async () => {
       wire(base, [ord(1, 100000)]);
       prismaMock.cash_register_movements.findMany.mockResolvedValue([
@@ -1163,6 +1177,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(outflows.find((o) => o.id === 5)!.reference).toBeNull(); // payment_cancelled
       expect(outflows.find((o) => o.id === 11)!.reference).toBeNull(); // order_cancelled
       expect(outflows.find((o) => o.id === 7)!.reference).toBeNull(); // sin reference
+      expect(outflows.find((o) => o.id === 6)!.reference).toBeNull(); // cash_out legado
       expect(humanCashReference('dispatch_route:1:stop:2')).toBeNull();
       expect(humanCashReference('   ')).toBeNull();
     });

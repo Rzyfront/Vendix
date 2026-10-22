@@ -62,12 +62,31 @@ export function humanCashReference(ref: unknown): string | null {
     t.startsWith('refund:') ||
     t === 'payment_cancelled' ||
     t === ORDER_CANCELLED_MOVEMENT_REFERENCE ||
-    t.startsWith('dispatch_route:') ||
-    t.startsWith('Cancelación orden') // cash_out legado de cancelaciones
+    t.startsWith('dispatch_route:')
   )
     return null;
   return t;
 }
+
+/**
+ * `cash_out` legado de cancelación de orden (antes de que se registraran como
+ * `refund` + `order_cancelled`). Se exige también la nota que escribía el
+ * sistema: la referencia sola la puede teclear un cajero en un retiro manual
+ * ("Cancelación orden de proveedor") y esas filas no guardan `order_id`.
+ */
+function isLegacyOrderCancellationCashOut(m: any): boolean {
+  return (
+    m?.type === 'cash_out' &&
+    String(m.reference ?? '').startsWith('Cancelación orden') &&
+    String(m.notes ?? '').startsWith(
+      'Devolución de efectivo por cancelación de la orden',
+    )
+  );
+}
+
+/** Referencia visible de un movimiento (oculta las internas y la legada). */
+const movementReference = (m: any): string | null =>
+  isLegacyOrderCancellationCashOut(m) ? null : humanCashReference(m.reference);
 
 const movementUserName = (m: any): string | null =>
   m?.user
@@ -84,7 +103,7 @@ type MovementKind =
 /**
  * Convención de movimientos de caja → categoría del consolidado.
  * `refund` con `payment_cancelled`/`order_cancelled` y `cash_out` legado
- * 'Cancelación orden…' son cancelaciones; refund restante = reembolso;
+ * (isLegacyOrderCancellationCashOut) son cancelaciones; refund restante = reembolso;
  * cash_out restante = retiro (efectivo). `payment_method` null en `sale` y
  * `refund` → `unknown`: el esperado (computeCashSummary) solo cuenta como
  * efectivo lo que dice `cash`, y el consolidado debe dar la misma cifra.
@@ -105,7 +124,7 @@ function classifyMovement(
         : { kind: 'refund', method };
     }
     case 'cash_out':
-      return String(m.reference ?? '').startsWith('Cancelación orden')
+      return isLegacyOrderCancellationCashOut(m)
         ? { kind: 'cancellation', method: 'cash' }
         : { kind: 'withdrawal', method: 'cash' };
     default:
@@ -1048,7 +1067,7 @@ export class SessionsService {
             o.reference !== undefined
               ? o.reference
               : m
-                ? humanCashReference(m.reference)
+                ? movementReference(m)
                 : null,
           notes:
             o.notes !== undefined
@@ -1976,7 +1995,7 @@ export class SessionsService {
           payment_method: c.method,
           amount: fromCents(toCents(m.amount)),
           reason: m.notes || refund_reason || null,
-          reference: humanCashReference(m.reference),
+          reference: movementReference(m),
           notes: m.notes?.trim() || null,
           user_name: movementUserName(m),
         } as CashOutflow;
@@ -1996,7 +2015,7 @@ export class SessionsService {
               ? new Date(m.created_at).toISOString()
               : new Date(session.opened_at ?? 0).toISOString(),
             amount: fromCents(toCents(m.amount)),
-            reference: humanCashReference(m.reference),
+            reference: movementReference(m),
             notes: m.notes?.trim() || null,
             user_name: movementUserName(m),
             payment_method: 'cash',
