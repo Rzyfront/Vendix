@@ -56,4 +56,21 @@ describe('DIAN configuration reception entry UI source guards', () => {
     expect(component).not.toContain('AiPaywallModalComponent');
     expect(component).toContain("fiscalScope() !== 'ORGANIZATION' && canReadReception()");
   });
+
+  it('redirects the sales-invoice axis to the activation wizard only in store context', () => {
+    expect(component).toContain("const SALES_INVOICE_AXIS: DianConfigurationType = 'invoicing'");
+    expect(component).toContain("this.router.navigate(['/admin/invoicing/activation'])");
+    expect(component).toMatch(/this\.hasAxisDetailRoute && axis\.configuration_type === SALES_INVOICE_AXIS/);
+    expect(component).toContain("this.route.snapshot.data['axisDetailRoute'] === true");
+    // canWrite() se evalúa antes de redirigir.
+    expect(component.indexOf('if (!this.canWrite())')).toBeLessThan(component.indexOf('this.goToActivation();'));
+    expect(component).toContain('[redirectSalesInvoice]="hasAxisDetailRoute"');
+  });
+
+  it('offers the activation CTA only when sales invoice is not enabled in production', () => {
+    expect(component).toContain('@if (showActivationCta())');
+    expect(component).toContain('Activar facturación electrónica');
+    expect(component).toContain("sales?.environment === 'production' && sales?.enablement_status === 'enabled'");
+    expect(component).toContain('!this.hasAxisDetailRoute || !this.canWrite()');
+  });
 });

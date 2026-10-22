@@ -428,6 +428,14 @@ export class OrganizationAdminLayoutComponent {
           requiredFiscalScope: 'ORGANIZATION',
         },
         {
+          label: 'Activar facturación electrónica',
+          icon: 'zap',
+          route: '/admin/invoicing/activation',
+          alwaysVisible: true,
+          requiredFiscalScope: 'ORGANIZATION',
+          hiddenWhenFiscalAreaActive: 'invoicing',
+        },
+        {
           label: 'Facturación',
           icon: 'receipt',
           route: '/admin/invoicing',

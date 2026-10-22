@@ -924,6 +924,15 @@ export class StoreAdminLayoutComponent {
           requiredFiscalScope: 'STORE',
         },
         {
+          label: 'Activar facturación electrónica',
+          icon: 'zap',
+          route: '/admin/invoicing/activation',
+          // Same panel_ui key as "Facturación" (explicit key, not label-joined).
+          panelUiKey: 'invoicing',
+          requiredFiscalScope: 'STORE',
+          hiddenWhenFiscalAreaActive: 'invoicing',
+        },
+        {
           label: 'Facturación',
           icon: 'file-text',
           route: '/admin/invoicing',

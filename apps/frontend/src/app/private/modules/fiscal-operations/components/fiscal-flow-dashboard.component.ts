@@ -965,7 +965,8 @@ export class FiscalFlowDashboardComponent {
     }
     const map: Record<string, string | null> = {
       'settings/fiscal': '/admin/fiscal/wizard',
-      'fiscal/dian': '/admin/invoicing/dian-config',
+      // Asistente lineal único de activación (tienda y organización).
+      'fiscal/dian': '/admin/invoicing/activation',
       'accounting/chart-of-accounts': '/admin/accounting/chart-of-accounts',
       'accounting/periods': '/admin/accounting/fiscal-periods',
       taxes: '/admin/accounting/taxes',

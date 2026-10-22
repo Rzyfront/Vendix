@@ -163,4 +163,13 @@ describe('DIAN wizard contextual help source guards', () => {
     expect((source.match(/<app-(?:input|selector) size="lg"/g))?.length).toBe(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');
   });
+
+  it('redirects the sales-invoice creation to the activation wizard when asked by the host', () => {
+    expect(source).toContain('readonly redirectSalesInvoice = input<boolean>(false)');
+    expect(source).toContain('readonly salesInvoiceRedirected = computed(');
+    expect(source).toContain('@if (salesInvoiceRedirected())');
+    expect(source).toContain('Ir al asistente de activación');
+    expect(source).toContain("this.router.navigate(['/admin/invoicing/activation'])");
+    expect(source).toContain('credentialsForm.invalid || savingCredentials() || salesInvoiceRedirected()');
+  });
 });

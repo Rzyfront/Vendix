@@ -107,6 +107,13 @@ import {
             </h2>
 
             <div class="flex w-full items-center gap-2 md:w-auto">
+              <app-button
+                size="sm"
+                customClasses="min-h-11"
+                (clicked)="goToActivation()"
+              >
+                Activar facturación electrónica
+              </app-button>
               <app-inputsearch
                 class="flex-1 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:w-72 md:shadow-none"
                 size="sm"
@@ -201,6 +208,10 @@ export class OrgDianConfigComponent {
 
   readonly loading = signal(false);
   readonly readOnly = input(false);
+
+  goToActivation(): void {
+    void this.router.navigate(['/admin/invoicing/activation']);
+  }
   readonly errorMessage = signal<string | null>(null);
   readonly selectedStoreId = signal<number | null>(null);
   readonly searchTerm = signal('');
