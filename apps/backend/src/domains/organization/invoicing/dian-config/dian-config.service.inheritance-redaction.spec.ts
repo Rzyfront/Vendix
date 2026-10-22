@@ -7,6 +7,9 @@ describe('OrgDianConfigService — SEC-3: no expone la fila fuente de la herenci
     store_id: null,
     software_pin_encrypted: 'enc:pin',
     certificate_password_encrypted: null,
+    certificate_s3_key: 'dian/certs/10/firma.p12',
+    certificate_kms_key_id: 'arn:aws:kms:us-east-1:123456789012:key/abc',
+    last_test_result: { success: true, note_phase: { deferred: [{ xml: '<x/>' }] } },
     enablement_inherited_from_id: 99,
     enablement_evidence: {
       success: true,
@@ -45,6 +48,12 @@ describe('OrgDianConfigService — SEC-3: no expone la fila fuente de la herenci
       'production',
     );
     expect(JSON.stringify(out)).not.toContain('99');
+    // SEC-L2: ni la ubicación del .p12, ni el ARN de KMS, ni note_phase.
+    expect(out).not.toHaveProperty('certificate_s3_key');
+    expect(out).not.toHaveProperty('certificate_kms_key_id');
+    expect(out.certificate_present).toBe(true);
+    expect(out.certificate_uses_kms).toBe(true);
+    expect(out.last_test_result).toEqual({ success: true });
   };
 
   it('getConfigById', async () => {

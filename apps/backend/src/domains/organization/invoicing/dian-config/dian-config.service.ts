@@ -9,6 +9,7 @@ import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/up
 import { CertificateValidationResult } from '../../../store/invoicing/dian-config/certificates/certificate-issuer.interface';
 import { certificateNitMatches } from '../../../store/invoicing/dian-config/certificates/nit-match.util';
 import { findInheritableCertificate } from '../../../store/invoicing/dian-config/certificates/inheritance.util';
+import { redactDianConfigForHttp } from '../../../store/invoicing/dian-config/dian-config-redaction.util';
 
 /**
  * Organization-level twin of the store DIAN config service.
@@ -47,31 +48,7 @@ export class OrgDianConfigService {
    * se elimina. La columna y la auditoría no se tocan.
    */
   private maskSensitiveFields(config: any) {
-    const { enablement_inherited_from_id, ...rest } = config;
-    const evidence = rest.enablement_evidence;
-    const inheritance = evidence?.inheritance;
-    const public_evidence =
-      inheritance && typeof inheritance === 'object'
-        ? (() => {
-            const { from_dian_configuration_id: _from, ...inheritance_rest } =
-              inheritance;
-            return { ...evidence, inheritance: inheritance_rest };
-          })()
-        : evidence;
-
-    return {
-      ...rest,
-      ...(rest.enablement_evidence !== undefined && {
-        enablement_evidence: public_evidence,
-      }),
-      enablement_inherited:
-        enablement_inherited_from_id !== null &&
-        enablement_inherited_from_id !== undefined,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
-    };
+    return redactDianConfigForHttp(config);
   }
 
   private onlyDigits(value?: string | null): string {

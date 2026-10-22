@@ -3,6 +3,10 @@ import {
   derivePlatformInvoiceState,
   normalizeDueDate,
 } from './platform-invoice-payments.service';
+import {
+  redactDianConfigForHttp,
+  stripNotePhase,
+} from '../../../store/invoicing/dian-config/dian-config-redaction.util';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -1337,14 +1341,7 @@ export class SubscriptionFiscalService {
    * El recuento y la razón viajan aparte, vía `buildNotePhaseView`.
    */
   private stripNotePhase(last_test_result: unknown): unknown {
-    if (!last_test_result || typeof last_test_result !== 'object') {
-      return last_test_result;
-    }
-    const { note_phase: _omitted, ...rest } = last_test_result as Record<
-      string,
-      any
-    >;
-    return rest;
+    return stripNotePhase(last_test_result);
   }
 
   private async runInPlatformContext<T>(
@@ -5473,13 +5470,15 @@ export class SubscriptionFiscalService {
     });
   }
 
+  /**
+   * Mismo saneo que tienda y organización (SEC-L1): sin `certificate_s3_key`,
+   * ARN de KMS ni id de la fila fuente de la herencia, y sin `note_phase` en
+   * `last_test_result` / `enablement_evidence`. `has_certificate` es lo que
+   * lee el panel de plataforma.
+   */
   private maskConfig(config: any) {
     return {
-      ...config,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
+      ...redactDianConfigForHttp(config),
       has_certificate: !!config.certificate_s3_key,
     };
   }

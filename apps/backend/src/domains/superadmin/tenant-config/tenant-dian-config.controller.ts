@@ -185,6 +185,8 @@ export class TenantDianConfigController {
         this.toPositiveInt(page, 1),
         Math.min(this.toPositiveInt(limit, 20), 100),
         config_id ? this.toPositiveInt(config_id, 0) || undefined : undefined,
+        // La consola de superadmin (tenant-dian-audit) pinta los XML.
+        { include_xml: true },
       ),
     );
     return this.response.paginated(

@@ -347,3 +347,47 @@ describe('DianConfigService — SEC-3: la respuesta HTTP no expone la fila fuent
     expect(out.enablement_evidence).toBeNull();
   });
 });
+
+describe('DianConfigService — SEC-L2: getAuditLogs no devuelve los XML firmados', () => {
+  function build() {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const scoped: any = {
+      dian_audit_logs: { findMany, count: jest.fn().mockResolvedValue(0) },
+      withoutScope: () => ({}),
+    };
+    const fiscalScope = { requireFiscalScope: jest.fn().mockResolvedValue('STORE') } as any;
+    const service = new DianConfigService(
+      scoped,
+      {} as any,
+      fiscalScope,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+    );
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ organization_id: 1, store_id: 1 } as any);
+    return { service, findMany };
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('por defecto el select explícito no incluye request_xml ni response_xml', async () => {
+    const { service, findMany } = build();
+    await service.getAuditLogs(1, 20, 5);
+    const { select } = findMany.mock.calls[0][0];
+    expect(select).toBeDefined();
+    expect(select).not.toHaveProperty('request_xml');
+    expect(select).not.toHaveProperty('response_xml');
+    expect(select).toMatchObject({ id: true, action: true, status: true });
+  });
+
+  it('la bitácora de superadmin los pide con include_xml', async () => {
+    const { service, findMany } = build();
+    await service.getAuditLogs(1, 20, 5, { include_xml: true });
+    expect(findMany.mock.calls[0][0].select).toMatchObject({
+      request_xml: true,
+      response_xml: true,
+    });
+  });
+});
