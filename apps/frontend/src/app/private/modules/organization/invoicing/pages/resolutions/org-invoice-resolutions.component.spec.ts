@@ -67,4 +67,47 @@ describe('OrgInvoiceResolutionsComponent edicion y cambio de tipo', () => {
     cmp.resolutionForm.controls.resolution_number.setValue('');
     expect(cmp.resolutionForm.controls.resolution_number.valid).toBeTrue();
   });
+
+  describe('ClTec en edicion', () => {
+    const row = {
+      id: 3,
+      document_type: 'sales_invoice',
+      resolution_number: '18764000001234',
+      prefix: 'FE',
+      range_from: 1,
+      range_to: 1000,
+      current_number: 0,
+      valid_from: '2026-01-01T00:00:00.000Z',
+      valid_to: '2027-01-01T00:00:00.000Z',
+      resolution_date: '2026-01-01T00:00:00.000Z',
+      is_active: true,
+    } as unknown as OrgResolutionRow;
+
+    function setup() {
+      configure();
+      const cmp = TestBed.runInInjectionContext(() => new OrgInvoiceResolutionsComponent());
+      const service = TestBed.inject(OrgInvoicingService) as jasmine.SpyObj<OrgInvoicingService>;
+      return { cmp, service };
+    }
+
+    it('con la ClTec vacia no la envia (el backend conserva la guardada)', () => {
+      const { cmp, service } = setup();
+      cmp.openEditModal(row);
+      expect(cmp.resolutionForm.valid).toBeTrue();
+      cmp.resolutionForm.controls.range_to.setValue(2000);
+      cmp.submitResolution();
+      const [id, payload] = service.updateResolution.calls.mostRecent().args as [number, any];
+      expect(id).toBe(3);
+      expect('technical_key' in payload).toBeFalse();
+    });
+
+    it('si el usuario teclea una ClTec nueva, la envia', () => {
+      const { cmp, service } = setup();
+      cmp.openEditModal(row);
+      cmp.resolutionForm.controls.technical_key.setValue(' abc123 ');
+      cmp.submitResolution();
+      const payload = service.updateResolution.calls.mostRecent().args[1] as any;
+      expect(payload.technical_key).toBe('abc123');
+    });
+  });
 });
