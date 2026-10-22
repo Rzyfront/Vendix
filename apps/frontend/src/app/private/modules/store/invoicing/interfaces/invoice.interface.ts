@@ -1260,14 +1260,15 @@ export interface DianConfig {
   configuration_type?: string | null;
   software_id: string;
   software_pin_encrypted: string; // Always '****' from API
-  certificate_s3_key: string | null;
+  /** Ya no viaja en las respuestas HTTP (SEC-L2): usar `certificate_present`. */
+  certificate_s3_key?: string | null;
   /**
-   * Sustituye a `certificate_s3_key` en la consola de tenants del super admin,
-   * que redacta la clave del objeto: nombra dónde vive el material
-   * criptográfico de un tercero y quien mira ahí no es el dueño del NIT.
-   * Ausente en el panel del comerciante, donde la clave sí viaja.
+   * Sustituye a `certificate_s3_key`: la ubicación del `.p12` no sale del
+   * backend, solo si existe.
    */
   certificate_present?: boolean;
+  /** Sustituye al ARN de KMS (`certificate_kms_key_id`): ¿la firma la custodia KMS? */
+  certificate_uses_kms?: boolean;
   certificate_password_encrypted: string | null; // Always '****' from API
   certificate_expiry: string | null;
   environment: 'test' | 'production';

@@ -227,4 +227,8 @@ export interface DianCertificateState {
   certificate_kms_key_id?: string | null;
   /** Presencia del `.p12` en S3. Algunas superficies sólo exponen esto. */
   certificate_s3_key?: string | null;
+  /** Presencia del `.p12`: las respuestas ya no traen `certificate_s3_key`. */
+  certificate_present?: boolean;
+  /** ¿La firma la custodia KMS? Sustituye al ARN, que no sale del backend. */
+  certificate_uses_kms?: boolean;
 }
