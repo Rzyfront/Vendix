@@ -206,6 +206,15 @@ describe('fiscal-document-requirements', () => {
       );
     });
 
+    it('las series internas NUEVAS abren con el prefijo VS de cada tipo', () => {
+      expect(internalSeriesPrefixFor('credit_note')).toBe('NCVS');
+      expect(internalSeriesPrefixFor('debit_note')).toBe('NDVS');
+      expect(internalSeriesPrefixFor('support_adjustment_note')).toBe('NASVS');
+      expect(internalSeriesPrefixFor('equivalent_adjustment_note')).toBe(
+        'NAEVS',
+      );
+    });
+
     it('dos documentos no comparten prefijo de serie interna', () => {
       const prefixes = FISCAL_DOCUMENT_TYPES.map((document_type) =>
         internalSeriesPrefixFor(document_type),

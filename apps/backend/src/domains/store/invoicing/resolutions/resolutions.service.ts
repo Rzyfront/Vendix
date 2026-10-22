@@ -19,6 +19,7 @@ import {
   type FiscalRequirementViolation,
 } from '../fiscal-document-requirements';
 import { assertTechnicalKeyShape } from '../utils/technical-key.util';
+import { internalSeriesResolutionNumber } from '../utils/invoice-number-generator';
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -462,7 +463,7 @@ export class ResolutionsService {
     prefix: string,
   ): string {
     const declarado = resolution_number?.trim();
-    return declarado ? declarado : `INTERNA-${prefix}`;
+    return declarado ? declarado : internalSeriesResolutionNumber(prefix);
   }
 
   /**

@@ -1,4 +1,9 @@
-import { InvoiceNumberGenerator } from './invoice-number-generator';
+import {
+  InvoiceNumberGenerator,
+  INTERNAL_SERIES_BLOCK,
+  INTERNAL_SERIES_INITIAL_RANGE,
+  INTERNAL_SERIES_VALIDITY_YEARS,
+} from './invoice-number-generator';
 
 /**
  * ClTec de 40 hexadecimales, la forma que emite la DIAN. Es load-bearing en los
@@ -341,10 +346,10 @@ describe('InvoiceNumberGenerator', () => {
       const create = jest.fn().mockResolvedValue(
         created ?? {
           id: 31,
-          prefix: 'NC',
+          prefix: 'NCVS',
           current_number: 0,
           range_from: 1,
-          range_to: 1000,
+          range_to: INTERNAL_SERIES_INITIAL_RANGE,
           technical_key: null,
         },
       );
@@ -356,7 +361,7 @@ describe('InvoiceNumberGenerator', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           findUnique: jest
             .fn()
-            .mockResolvedValue({ id: 31, prefix: 'NC', current_number: 1 }),
+            .mockResolvedValue({ id: 31, prefix: 'NCVS', current_number: 1 }),
         },
       };
     };
@@ -371,15 +376,16 @@ describe('InvoiceNumberGenerator', () => {
           accounting_entity_id: 77,
           document_type: 'credit_note',
         }),
-      ).resolves.toEqual({ invoice_number: 'NC1', resolution_id: 31 });
+      ).resolves.toEqual({ invoice_number: 'NCVS1', resolution_id: 31 });
 
       expect(tx.invoice_resolutions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           accounting_entity_id: 77,
           document_type: 'credit_note',
-          prefix: 'NC',
-          resolution_number: 'INTERNA-NC',
+          prefix: 'NCVS',
+          resolution_number: 'INTERNA-NCVS',
           range_from: 1,
+          range_to: 10_000_000,
           current_number: 0,
           // Sin ClTec: el CUDE de una nota se firma con el Software-PIN, y una
           // clave aquí haría que `invoice-flow` inyectara la equivocada.
@@ -389,6 +395,97 @@ describe('InvoiceNumberGenerator', () => {
           store_id: null,
         }),
       });
+    });
+
+    it.each([
+      ['credit_note', 'NCVS'],
+      ['debit_note', 'NDVS'],
+      ['support_adjustment_note', 'NASVS'],
+      ['equivalent_adjustment_note', 'NAEVS'],
+    ])(
+      'abre la serie de %s con el prefijo %s y rotulo INTERNA-<prefijo>',
+      async (document_type, prefix) => {
+        const { service, tx } = createService(withoutRow());
+
+        await service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: document_type as any,
+        });
+
+        expect(tx.invoice_resolutions.create).toHaveBeenCalledTimes(1);
+        expect(tx.invoice_resolutions.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            document_type,
+            prefix,
+            resolution_number: `INTERNA-${prefix}`,
+          }),
+        });
+      },
+    );
+
+    it('abre la serie con rango 1-10.000.000, cursor en 0 y vigencia de 1000 años', async () => {
+      const { service, tx } = createService(withoutRow());
+      const before = Date.now();
+
+      await service.generateNextNumber({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        document_type: 'credit_note',
+      });
+
+      const { data } = tx.invoice_resolutions.create.mock.calls[0][0];
+      expect(INTERNAL_SERIES_INITIAL_RANGE).toBe(10_000_000);
+      expect(data.range_from).toBe(1);
+      expect(data.range_to).toBe(10_000_000);
+      expect(data.current_number).toBe(0);
+      const expected_year =
+        new Date(before).getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS;
+      expect(INTERNAL_SERIES_VALIDITY_YEARS).toBe(1000);
+      expect(data.valid_to.getFullYear()).toBe(expected_year);
+      expect(data.valid_to.getTime()).toBeGreaterThan(data.valid_from.getTime());
+    });
+
+    it('reactiva una serie NC inactiva sin crear otra ni tocar prefijo, rango ni cursor', async () => {
+      const dormant = {
+        id: 31,
+        prefix: 'NC',
+        current_number: 7,
+        range_from: 1,
+        range_to: 1000,
+        technical_key: null,
+        is_active: false,
+      };
+      const invoice_resolutions = {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(dormant),
+        create: jest.fn(),
+        update: jest.fn().mockResolvedValue({ ...dormant, is_active: true }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ ...dormant, is_active: true, current_number: 8 }),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual({ invoice_number: 'NC8', resolution_id: 31 });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.update).toHaveBeenCalledTimes(1);
+      const { data, where } = tx.invoice_resolutions.update.mock.calls[0][0];
+      expect(where).toEqual({ id: 31 });
+      expect(Object.keys(data).sort()).toEqual(
+        ['is_active', 'valid_from', 'valid_to'].sort(),
+      );
+      expect(data.is_active).toBe(true);
     });
 
     /** CONTRAPRUEBA del auto-alta. */
@@ -506,7 +603,7 @@ describe('InvoiceNumberGenerator', () => {
 
       expect(tx.invoice_resolutions.update).toHaveBeenCalledWith({
         where: { id: 31 },
-        data: { range_to: 2000 },
+        data: { range_to: 1000 + INTERNAL_SERIES_BLOCK },
       });
       // El segundo intento mide contra el techo NUEVO. Repetir el viejo dejaría
       // la fila ampliada y el documento sin numerar igualmente.

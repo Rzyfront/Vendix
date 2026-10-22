@@ -36,22 +36,61 @@ type GenerateNextNumberOptions =
     };
 
 /**
- * Cuántos consecutivos se dan de alta —y se añaden al ampliar— en una serie
- * interna. No hay tope legal que respetar: el bloque existe solo para que el
- * `range_to` sea un número legible en pantalla y para que ampliar sea un evento
- * ocasional en el log, no uno por documento.
+ * `range_to` con el que se ABRE una serie interna. Es deliberadamente holgado:
+ * la autoampliación (`INTERNAL_SERIES_BLOCK`) queda como red de seguridad que
+ * casi nunca debería dispararse, y el comerciante jamás ve su numeración
+ * bloqueada ni un `range_to` que crezca de a poco. Sigue muy por debajo de
+ * `RANGE_BOUND`, así que no choca con el tope que valida el resto del sistema.
+ */
+export const INTERNAL_SERIES_INITIAL_RANGE = 10_000_000;
+
+/**
+ * Paso de la autoampliación de una serie interna: cuántos consecutivos se
+ * añaden al `range_to` cuando se agota. NO es el tamaño de apertura (ver
+ * {@link INTERNAL_SERIES_INITIAL_RANGE}); no hay tope legal que respetar, el
+ * bloque solo evita que ampliar sea un evento por documento.
  */
 export const INTERNAL_SERIES_BLOCK = 1000;
 
 /**
- * Vigencia que se le pone a una serie interna, en años.
+ * Años que se suman a `valid_from` para llenar `valid_to`.
  *
- * `valid_from`/`valid_to` existen porque una Autorización de Numeración DIAN
- * caduca. Una serie interna no caduca: ponerle un año haría que el consecutivo
- * de las notas se bloqueara solo el día del aniversario, que es exactamente el
- * bloqueo que este código existe para quitar.
+ * Una serie interna NO caduca: `valid_from`/`valid_to` existen porque una
+ * Autorización de Numeración DIAN sí lo hace, y ponerle un año real haría que el
+ * consecutivo de las notas se bloqueara solo el día del aniversario, que es
+ * exactamente el bloqueo que este código existe para quitar. `valid_to` es una
+ * columna NOT NULL, así que este valor solo la llena con una fecha que en la
+ * práctica nunca llega.
  */
-export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
+export const INTERNAL_SERIES_VALIDITY_YEARS = 1000;
+
+/** Rótulo interno (no una autorización DIAN) de la serie con ese prefijo. */
+export const internalSeriesResolutionNumber = (prefix: string): string =>
+  `INTERNA-${prefix}`;
+
+/** `valid_to` de una serie interna abierta o reactivada en `now`. */
+export const internalSeriesValidTo = (now: Date): Date => {
+  const valid_to = new Date(now);
+  valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+  return valid_to;
+};
+
+/**
+ * Valores con los que se abre una serie interna NUEVA. Fuente única de verdad:
+ * la usan tanto `provisionInternalSeries` (emisión) como la vista previa de
+ * `InvoicingService.peekInternalSeries`, para que no puedan divergir.
+ */
+export const buildInternalSeriesDefaults = (prefix: string, now: Date) => ({
+  resolution_number: internalSeriesResolutionNumber(prefix),
+  prefix,
+  range_from: 1,
+  range_to: INTERNAL_SERIES_INITIAL_RANGE,
+  current_number: 0,
+  valid_from: now,
+  valid_to: internalSeriesValidTo(now),
+  is_active: true,
+  technical_key: null as string | null,
+});
 
 @Injectable()
 export class InvoiceNumberGenerator {
@@ -381,8 +420,7 @@ export class InvoiceNumberGenerator {
     if (!prefix) return null;
 
     const now = new Date();
-    const valid_to = new Date(now);
-    valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+    const defaults = buildInternalSeriesDefaults(prefix, now);
 
     const dormant = await tx.invoice_resolutions.findFirst({
       where: { accounting_entity_id, document_type },
@@ -397,7 +435,11 @@ export class InvoiceNumberGenerator {
 
       return tx.invoice_resolutions.update({
         where: { id: dormant.id },
-        data: { is_active: true, valid_from: now, valid_to },
+        data: {
+          is_active: true,
+          valid_from: now,
+          valid_to: defaults.valid_to,
+        },
       });
     }
 
@@ -410,24 +452,24 @@ export class InvoiceNumberGenerator {
         // Rótulo interno, no una autorización. Misma convención que
         // `ResolutionsService.resolveResolutionNumber`, que la eligió por lo
         // mismo: la columna es NOT NULL y no hay número DIAN que poner.
-        resolution_number: `INTERNA-${prefix}`,
+        resolution_number: defaults.resolution_number,
         resolution_date: now,
-        prefix,
-        range_from: 1,
-        range_to: INTERNAL_SERIES_BLOCK,
-        current_number: 0,
-        valid_from: now,
-        valid_to,
-        is_active: true,
+        prefix: defaults.prefix,
+        range_from: defaults.range_from,
+        range_to: defaults.range_to,
+        current_number: defaults.current_number,
+        valid_from: defaults.valid_from,
+        valid_to: defaults.valid_to,
+        is_active: defaults.is_active,
         // Sin ClTec: `accepts_technical_key: false`. Escribirle una haría que
         // `invoice-flow.service.ts` la inyectara y el CUDE se firmara con la
         // clave equivocada en vez de con el Software-PIN.
-        technical_key: null,
+        technical_key: defaults.technical_key,
       },
     });
 
     this.logger.log(
-      `Opened internal series ${prefix}1-${INTERNAL_SERIES_BLOCK} for ${document_type} ` +
+      `Opened internal series ${prefix}1-${INTERNAL_SERIES_INITIAL_RANGE} for ${document_type} ` +
         `(resolution #${created.id}, accounting entity ${accounting_entity_id})`,
     );
 
