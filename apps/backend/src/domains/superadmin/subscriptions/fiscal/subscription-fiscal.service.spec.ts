@@ -695,6 +695,34 @@ describe('SubscriptionFiscalService · resoluciones · revisión F3/F5/F6', () =
     }
   });
 
+  it('F3-FU1: getStatus no expone la ClTec ni su cifrado en resolution', async () => {
+    const fila = {
+      ...buildResolutionRow(),
+      id: 77,
+      organization_id: 1,
+      archived_at: null,
+      _count: { invoices: 0 },
+      ...SECRET,
+    };
+    const service = buildService({
+      findUnique: jest.fn().mockResolvedValue(fila),
+    });
+    jest
+      .spyOn(service as any, 'getSettings')
+      .mockResolvedValue({ environment: 'test', invoice_resolution_id: 77 } as never);
+    jest.spyOn(service as any, 'countTransmissions').mockResolvedValue(0 as never);
+    jest.spyOn(service as any, 'buildSuggestedConfig').mockResolvedValue({} as never);
+    jest.spyOn(service as any, 'buildHabilitationReadiness').mockReturnValue({} as never);
+
+    const status: any = await service.getStatus();
+
+    expectNoSecrets(status.resolution);
+    expect(status.resolution).toMatchObject({
+      technical_key_set: true,
+      technical_key_length: 40,
+    });
+  });
+
   it('F3-H2: listResolutions filtra is_active=false', async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const service = buildService({ findMany });

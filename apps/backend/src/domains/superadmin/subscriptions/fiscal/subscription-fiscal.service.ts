@@ -623,7 +623,7 @@ export class SubscriptionFiscalService {
     return {
       settings,
       dian_config: config ? this.maskConfig(config) : null,
-      resolution,
+      resolution: resolution ? toPublicResolution(resolution) : null,
       stats: { accepted, errors, pending },
       suggested: await this.buildSuggestedConfig(),
       // Bounded reading of the habilitación batch, so the page shows the current
