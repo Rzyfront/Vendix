@@ -488,6 +488,57 @@ describe('InvoiceNumberGenerator', () => {
       expect(data.is_active).toBe(true);
     });
 
+    it('serie activa y vigente del usuario (NCX): numera con ella sin crear ni reactivar nada', async () => {
+      const user_series = {
+        id: 44,
+        prefix: 'NCX',
+        current_number: 4,
+        range_from: 1,
+        range_to: 500,
+        technical_key: null,
+        is_active: true,
+      };
+      const invoice_resolutions = {
+        findFirst: jest.fn().mockResolvedValue(user_series),
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ ...user_series, current_number: 5 }),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual({ invoice_number: 'NCX5', resolution_id: 44 });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.update).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.findFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it('la búsqueda de la dormida prefiere la serie activa: orderBy is_active desc, created_at desc', async () => {
+      const { service, tx } = createService(withoutRow());
+
+      await service.generateNextNumber({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        document_type: 'credit_note',
+      });
+
+      const calls = tx.invoice_resolutions.findFirst.mock.calls;
+      // 1ª = activa, 2ª = dormida.
+      expect(calls[1][0].orderBy).toEqual([
+        { is_active: 'desc' },
+        { created_at: 'desc' },
+      ]);
+    });
+
     it('la búsqueda de la dormida excluye las series archivadas (no se reactivan)', async () => {
       const overrides = withoutRow();
       const { service, tx } = createService(overrides);

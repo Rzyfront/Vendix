@@ -5,6 +5,7 @@ import {
   findActiveResolution,
   findDormantInternalSeries,
   dormantInternalSeriesWhere,
+  DORMANT_SERIES_ORDER_BY,
   isSingleActiveDocumentType,
   lockResolutionSeries,
 } from './resolution-selection.util';
@@ -40,7 +41,16 @@ const createTable = (initial: any[]) => {
   const table = {
     findFirst: jest.fn(async ({ where, orderBy }: any) => {
       const found = rows.filter((r) => matches(r, where));
-      if (orderBy?.created_at === 'desc') {
+      if (Array.isArray(orderBy)) {
+        found.sort((a, b) => {
+          for (const clause of orderBy) {
+            const [key] = Object.keys(clause);
+            const diff = Number(b[key] ?? 0) - Number(a[key] ?? 0);
+            if (diff !== 0) return clause[key] === 'desc' ? diff : -diff;
+          }
+          return 0;
+        });
+      } else if (orderBy?.created_at === 'desc') {
         found.sort((a, b) => b.created_at - a.created_at);
       }
       return found[0] ?? null;
@@ -114,6 +124,36 @@ describe('resolution-selection.util', () => {
         document_type: 'credit_note',
         archived_at: null,
       });
+    });
+
+    it('findDormantInternalSeries ordena primero por is_active desc y luego created_at desc', async () => {
+      expect(DORMANT_SERIES_ORDER_BY).toEqual([
+        { is_active: 'desc' },
+        { created_at: 'desc' },
+      ]);
+      expect(ACTIVE_RESOLUTION_ORDER_BY).toEqual({ created_at: 'desc' });
+      const { table } = createTable([]);
+      await findDormantInternalSeries(
+        { invoice_resolutions: table },
+        { accounting_entity_id: 5, document_type: 'credit_note' },
+      );
+      expect(table.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ is_active: 'desc' }, { created_at: 'desc' }],
+        }),
+      );
+    });
+
+    it('findDormantInternalSeries prefiere la serie activa (vencida) sobre una inactiva más reciente', async () => {
+      const { table } = createTable([
+        { id: 1, accounting_entity_id: 5, document_type: 'credit_note', archived_at: null, is_active: true, created_at: 100 },
+        { id: 2, accounting_entity_id: 5, document_type: 'credit_note', archived_at: null, is_active: false, created_at: 200 },
+      ]);
+      const found = await findDormantInternalSeries(
+        { invoice_resolutions: table },
+        { accounting_entity_id: 5, document_type: 'credit_note' },
+      );
+      expect(found.id).toBe(1);
     });
 
     it('ambos where excluyen las series archivadas', () => {

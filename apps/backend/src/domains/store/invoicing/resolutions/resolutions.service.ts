@@ -444,6 +444,18 @@ export class ResolutionsService {
         this.technicalKeyVault.sealForWrite(patched_technical_key)),
     };
 
+    // Una fila sin consumo lleva `current_number = range_from - 1` por
+    // construcción. Si el piso se mueve hay que re-sembrar el cursor: si se queda
+    // en el piso viejo, el siguiente documento sale con un número que el rango
+    // nuevo ya no cubre.
+    if (
+      !consumed &&
+      dto.range_from !== undefined &&
+      dto.range_from !== current.range_from
+    ) {
+      update_data.current_number = dto.range_from - 1;
+    }
+
     // Sin `$transaction` en el cliente scopeado: `findOneInternal` ya validó que
     // `id` pertenece al tenant, y la cascada filtra por su misma entidad.
     const { updated, deactivated_resolution_ids } = await this.prisma

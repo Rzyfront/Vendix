@@ -589,5 +589,67 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
       expect(prisma.__unscoped.invoice_resolutions.updateMany).toHaveBeenCalledTimes(1);
       expect(result.deactivated_resolution_ids).toEqual([8]);
     });
+
+    it('crear una serie credit_note activa cuando no existe otra: OK y no desactiva nada', async () => {
+      const { service, prisma } = createService({ others: [] });
+
+      const result: any = await service.create({
+        ...facturaVentaValida(),
+        document_type: 'credit_note',
+        prefix: 'NCX',
+        resolution_number: undefined,
+        technical_key: undefined,
+        is_active: true,
+      } as any);
+
+      expect(prisma.__unscoped.invoice_resolutions.create).toHaveBeenCalledTimes(1);
+      expect(result.deactivated_resolution_ids).toEqual([]);
+    });
+  });
+
+  describe('edición de una serie de nota (re-sembrado del cursor)', () => {
+    const serieNota = (current_number: number) => ({
+      id: 61,
+      document_type: 'credit_note',
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      prefix: 'NCVS',
+      resolution_number: 'INTERNA-NCVS',
+      range_from: 1,
+      range_to: 1000,
+      current_number,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active: true,
+      technical_key: null,
+    });
+
+    it('serie SIN uso: edita prefijo, rango y vigencia y re-siembra current_number en range_from - 1', async () => {
+      const { service, prisma } = createService({ resolution: serieNota(0) });
+
+      await service.update(61, {
+        prefix: 'NCX',
+        range_from: 500,
+        range_to: 900,
+        valid_to: '2030-01-15',
+      } as any);
+
+      const { data } = prisma.__unscoped.invoice_resolutions.update.mock
+        .calls[0][0];
+      expect(data.prefix).toBe('NCX');
+      expect(data.range_from).toBe(500);
+      expect(data.range_to).toBe(900);
+      expect(data.current_number).toBe(499);
+    });
+
+    it('serie USADA: cambiar el prefijo o range_from se rechaza con INVOICING_RESOLUTION_005 sin escribir', async () => {
+      for (const dto of [{ prefix: 'NCX' }, { range_from: 5 }]) {
+        const { service, prisma } = createService({ resolution: serieNota(3) });
+
+        const error = await capturarError(() => service.update(61, dto as any));
+
+        expect(error.errorCode).toBe('INVOICING_RESOLUTION_005');
+        expect(prisma.__unscoped.invoice_resolutions.update).not.toHaveBeenCalled();
+      }
+    });
   });
 });

@@ -19,6 +19,15 @@ import {
 
 export const ACTIVE_RESOLUTION_ORDER_BY = { created_at: 'desc' } as const;
 
+/**
+ * Orden de la búsqueda de la serie interna "dormida": primero la que el usuario
+ * dejó activa (aunque esté fuera de vigencia) y, entre iguales, la más reciente.
+ */
+export const DORMANT_SERIES_ORDER_BY = [
+  { is_active: 'desc' },
+  { created_at: 'desc' },
+] as const;
+
 export interface ActiveResolutionWhereParams {
   accounting_entity_id: number;
   document_type: FiscalDocumentType | string;
@@ -50,6 +59,8 @@ export interface DormantInternalSeriesWhereParams {
  * `is_active` ni de vigencia, porque busca justo la que quedó inactiva/vencida.
  * Sí filtra `archived_at: null`: una serie ARCHIVADA no se reactiva nunca (su
  * prefijo sigue ocupado, así que tampoco se abre otra con el mismo).
+ * Prefiere la serie que el usuario dejó activa (aunque esté vencida); solo si
+ * no hay ninguna activa toma la inactiva más reciente.
  */
 export function dormantInternalSeriesWhere(
   params: DormantInternalSeriesWhereParams,
@@ -78,7 +89,7 @@ export function findDormantInternalSeries(
 ): Promise<any | null> {
   return client.invoice_resolutions.findFirst({
     where: dormantInternalSeriesWhere(params),
-    orderBy: ACTIVE_RESOLUTION_ORDER_BY,
+    orderBy: [...DORMANT_SERIES_ORDER_BY],
   });
 }
 
