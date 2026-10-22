@@ -14,6 +14,7 @@ import {
   AssignProductToCategoryDto,
   AssignProductsDto,
   AssignCategoryProductsResult,
+  CategoryAssignPreviewResult,
   CategoryProductIdsResult,
 } from './dto';
 import slugify from 'slugify';
@@ -260,29 +261,7 @@ export class CategoriesService {
     const ids = [...new Set(dto.product_ids)];
 
     return this.prisma.$transaction(async (tx: any) => {
-      const category = await tx.categories.findFirst({
-        where: { id: categoryId, store_id, state: { not: 'archived' } },
-        select: { id: true },
-      });
-      if (!category) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
-
-      const products = await tx.products.findMany({
-        where: { id: { in: ids }, store_id },
-        select: { id: true, brand_id: true, state: true },
-      });
-      const valid = new Set<number>(
-        products
-          .filter((p: any) => dto.action === 'remove' || p.state !== 'archived')
-          .map((p: any) => p.id),
-      );
-      const invalid = ids.filter((id) => !valid.has(id));
-      if (invalid.length > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_FIND_001,
-          'Algunos productos no existen en la tienda o están archivados',
-          { invalid_product_ids: invalid },
-        );
-      }
+      await this.loadAssignContext(tx, store_id, categoryId, ids, dto.action);
 
       const current = await tx.product_categories.findMany({
         where: { category_id: categoryId, product_id: { in: ids } },
@@ -327,6 +306,61 @@ export class CategoriesService {
 
       return { added, removed, unchanged: ids.length - added - removed };
     });
+  }
+
+  /** Valida categoría activa/inactiva (no archivada) y productos de la tienda. */
+  private async loadAssignContext(
+    client: any,
+    store_id: number,
+    categoryId: number,
+    ids: number[],
+    action: 'add' | 'remove',
+  ) {
+    const category = await client.categories.findFirst({
+      where: { id: categoryId, store_id, state: { not: 'archived' } },
+      select: { id: true },
+    });
+    if (!category) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
+
+    const products: Array<{ id: number; state: string }> =
+      await client.products.findMany({
+        where: { id: { in: ids }, store_id },
+        select: { id: true, state: true },
+      });
+    const valid = new Set<number>(
+      products
+        .filter((p) => action === 'remove' || p.state !== 'archived')
+        .map((p) => p.id),
+    );
+    const invalid = ids.filter((id) => !valid.has(id));
+    if (invalid.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_FIND_001,
+        'Algunos productos no existen en la tienda o están archivados',
+        { invalid_product_ids: invalid },
+      );
+    }
+    return { category, products };
+  }
+
+  /**
+   * Vista previa de `assignProducts`: solo lectura. Valida categoría y
+   * productos igual que la escritura y cuenta cuántos ya están en la categoría.
+   */
+  async previewAssignProducts(
+    categoryId: number,
+    dto: AssignProductsDto,
+  ): Promise<CategoryAssignPreviewResult> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const ids = [...new Set(dto.product_ids)];
+    await this.loadAssignContext(this.prisma, store_id, categoryId, ids, dto.action);
+    const current = await this.prisma.product_categories.findMany({
+      where: { category_id: categoryId, product_id: { in: ids } },
+      select: { product_id: true },
+    });
+    const already_in_category = current.length;
+    return { already_in_category, to_add: ids.length - already_in_category };
   }
 
   /** IDs de los productos no archivados que pertenecen a la categoría. */

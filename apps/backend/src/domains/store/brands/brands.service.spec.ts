@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 // The brands domain throws typed VendixHttpException (BRAND_*), not raw Nest
 // exceptions — the HTTP status now travels in the error code, not the class.
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
@@ -8,7 +10,13 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { S3Service } from '@common/services/s3.service';
 import { BrandsService } from './brands.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
+import {
+  CreateBrandDto,
+  UpdateBrandDto,
+  BrandQueryDto,
+  AssignProductsDto,
+  PreviewAssignProductsDto,
+} from './dto';
 import { brand_state_enum } from '@prisma/client';
 
 describe('BrandsService', () => {
@@ -1138,6 +1146,23 @@ describe('BrandsService', () => {
         service.previewAssignProducts(10, { product_ids: [1] }),
       ).rejects.toBeInstanceOf(VendixHttpException);
       expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tope de ids por request', () => {
+    const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+    it.each([
+      ['AssignProductsDto', AssignProductsDto, { action: 'add' }],
+      ['PreviewAssignProductsDto', PreviewAssignProductsDto, {}],
+    ])('%s acepta 100 ids y rechaza 101', (_name, cls, extra) => {
+      const ok = validateSync(
+        plainToInstance(cls as any, { ...extra, product_ids: range(100) }) as object,
+      );
+      expect(ok).toHaveLength(0);
+      const bad = validateSync(
+        plainToInstance(cls as any, { ...extra, product_ids: range(101) }) as object,
+      );
+      expect(bad[0].constraints).toHaveProperty('arrayMaxSize');
     });
   });
 });

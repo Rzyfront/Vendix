@@ -1,4 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { AssignProductsDto } from './dto';
 // The categories domain throws typed VendixHttpException (CAT_*): the HTTP
 // status now travels in the error code, not in the exception class.
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
@@ -853,6 +856,86 @@ describe('CategoriesService', () => {
         }),
       );
       expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('previewAssignProducts', () => {
+    beforeEach(() => {
+      mockPrismaService.categories.findFirst.mockResolvedValue({ id: 5 });
+      mockPrismaService.product_categories.findMany.mockReset();
+      mockPrismaService.product_categories.createMany.mockReset();
+      mockPrismaService.product_categories.deleteMany.mockReset();
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.updateMany.mockReset();
+    });
+
+    it('rechaza productos de otra tienda sin escribir', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, state: 'active' },
+      ]);
+      await expect(
+        service.previewAssignProducts(5, {
+          action: 'add',
+          product_ids: [1, 99],
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'PROD_FIND_001',
+          details: { invalid_product_ids: [99] },
+        }),
+      });
+      expect(
+        mockPrismaService.product_categories.createMany,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockPrismaService.product_categories.deleteMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('devuelve cuántos ya están y cuántos se agregarían', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, state: 'active' },
+        { id: 2, state: 'active' },
+        { id: 3, state: 'active' },
+      ]);
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 2 },
+      ]);
+      await expect(
+        service.previewAssignProducts(5, {
+          action: 'add',
+          product_ids: [1, 2, 3],
+        }),
+      ).resolves.toEqual({ already_in_category: 1, to_add: 2 });
+    });
+
+    it('lanza CAT_FIND_001 si la categoría no existe', async () => {
+      mockPrismaService.categories.findFirst.mockResolvedValue(null);
+      await expect(
+        service.previewAssignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'CAT_FIND_001' }),
+      });
+    });
+  });
+
+  describe('AssignProductsDto', () => {
+    const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+    it('acepta 100 ids y rechaza 101 (arrayMaxSize)', () => {
+      const ok = validateSync(
+        plainToInstance(AssignProductsDto, {
+          action: 'add',
+          product_ids: range(100),
+        }),
+      );
+      expect(ok).toHaveLength(0);
+      const bad = validateSync(
+        plainToInstance(AssignProductsDto, {
+          action: 'add',
+          product_ids: range(101),
+        }),
+      );
+      expect(bad[0].constraints).toHaveProperty('arrayMaxSize');
     });
   });
 

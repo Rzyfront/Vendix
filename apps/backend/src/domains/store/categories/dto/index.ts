@@ -200,7 +200,10 @@ export class CategoryResponseDto {
   is_featured: boolean;
 }
 
-// Asignación en bloque de productos (máx. 500 por solicitud)
+/** Tope de ids por request en la asignación masiva (vendix-bulk-operations). */
+export const MAX_ASSIGN_PRODUCT_IDS = 100;
+
+// Asignación en bloque de productos (máx. 100 por solicitud)
 export class AssignProductsDto {
   @ApiProperty({
     example: 'add',
@@ -212,11 +215,11 @@ export class AssignProductsDto {
 
   @ApiProperty({
     example: [1, 2, 3],
-    description: 'IDs de los productos (máximo 500)',
+    description: 'IDs de los productos (máximo 100)',
   })
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(MAX_ASSIGN_PRODUCT_IDS)
   @IsInt({ each: true })
   @Min(1, { each: true })
   product_ids: number[];
@@ -226,6 +229,11 @@ export interface AssignCategoryProductsResult {
   added: number;
   removed: number;
   unchanged: number;
+}
+
+export interface CategoryAssignPreviewResult {
+  already_in_category: number;
+  to_add: number;
 }
 
 export interface CategoryProductIdsResult {

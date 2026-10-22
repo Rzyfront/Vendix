@@ -34,6 +34,17 @@ describe('catalog-taxonomy.tools · categorías', () => {
       assignProducts: jest
         .fn()
         .mockResolvedValue({ added: 1, removed: 0, unchanged: 1 }),
+      previewAssignProducts: jest
+        .fn()
+        .mockImplementation(async (_id: number, dto: { product_ids: number[] }) => {
+          const already = dto.product_ids.filter((id) =>
+            [10, 11, 12].includes(id),
+          ).length;
+          return {
+            already_in_category: already,
+            to_add: dto.product_ids.length - already,
+          };
+        }),
       ...overrides,
     };
     const tools = createCategoryTools({ categoriesService: service as any });
@@ -153,6 +164,26 @@ describe('catalog-taxonomy.tools · categorías', () => {
     expect(preview.message).toContain('1 ya estaba');
   });
 
+  it('preview add con un id de otra tienda devuelve status error y nombra el id', async () => {
+    const { service, tools } = build({
+      previewAssignProducts: jest.fn().mockRejectedValue(
+        new VendixHttpException(ErrorCodes.PROD_FIND_001, undefined, {
+          invalid_product_ids: [999],
+        }),
+      ),
+    });
+    const preview = await byName(tools, 'assign_products_to_category').preview!(
+      { category_id: 1, mode: 'add', product_ids: [10, 999] },
+      CTX,
+    );
+    expect(service.previewAssignProducts).toHaveBeenCalledWith(1, {
+      action: 'add',
+      product_ids: [10, 999],
+    });
+    expect(preview.status).toBe('error');
+    expect(preview.message).toContain('999');
+  });
+
   it('preview remove cuenta los que se quitarán', async () => {
     const { tools } = build();
     const preview = await byName(tools, 'assign_products_to_category').preview!(
@@ -198,19 +229,19 @@ describe('catalog-taxonomy.tools · categorías', () => {
     expect(out.error).toBeUndefined();
   });
 
-  it('handler rechaza más de 500 productos sin llamar al servicio', async () => {
+  it('handler rechaza más de 100 productos sin llamar al servicio', async () => {
     const { service, tools } = build();
     const out = json(
       await byName(tools, 'assign_products_to_category').handler!(
         {
           category_id: 1,
           mode: 'add',
-          product_ids: Array.from({ length: 501 }, (_, i) => i + 1),
+          product_ids: Array.from({ length: 101 }, (_, i) => i + 1),
         },
         CTX,
       ),
     );
-    expect(out.error).toContain('máximo 500');
+    expect(out.error).toContain('el máximo es 100');
     expect(out.next_step).toBeDefined();
     expect(service.assignProducts).not.toHaveBeenCalled();
   });
