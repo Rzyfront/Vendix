@@ -814,7 +814,8 @@ export class DianNumberingRangeService {
         normalizeText(range.resolution_number);
 
     const samePrefix = (range: DianNumberingRange, row: StoredResolution) =>
-      !!range.prefix && normalizeText(row.prefix) === normalizeText(range.prefix);
+      !!range.prefix &&
+      normalizeText(row.prefix) === normalizeText(range.prefix);
 
     claim((range, row) => sameNumber(range, row) && samePrefix(range, row));
     claim(sameNumber);
@@ -843,7 +844,8 @@ export class DianNumberingRangeService {
         normalizeText(range.resolution_number);
 
     const same_prefix = (row: StoredResolution) =>
-      !!range.prefix && normalizeText(row.prefix) === normalizeText(range.prefix);
+      !!range.prefix &&
+      normalizeText(row.prefix) === normalizeText(range.prefix);
 
     return (
       available.find((row) => same_number(row) && same_prefix(row)) ??
@@ -935,7 +937,10 @@ export class DianNumberingRangeService {
     ) {
       differences.push('resolution_number');
     }
-    if (range.prefix && normalizeText(range.prefix) !== normalizeText(local.prefix)) {
+    if (
+      range.prefix &&
+      normalizeText(range.prefix) !== normalizeText(local.prefix)
+    ) {
       differences.push('prefix');
     }
     if (range.range_from !== null && range.range_from !== local.range_from) {
@@ -1026,44 +1031,54 @@ export class DianNumberingRangeService {
       prefix: range.prefix,
     });
 
-    // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
-    await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
-      accounting_entity_id,
-      document_type: 'sales_invoice',
-      prefix: range.prefix,
-      range_from: range.range_from,
-      range_to: range.range_to,
-    });
+    // Guarda entre cuentas + alta en la MISMA transacción con advisory lock
+    // (mismo que el carril tienda): dos altas simultáneas no pasan las dos.
+    const range_prefix: string = range.prefix;
+    const range_resolution_number: string = range.resolution_number;
+    const range_from: number = range.range_from;
+    const range_to: number = range.range_to;
+    const created = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          lock_in_transaction: true,
+          accounting_entity_id,
+          document_type: 'sales_invoice',
+          prefix: range_prefix,
+          range_from: range_from,
+          range_to: range_to,
+        });
 
-    const created = await this.prisma.invoice_resolutions.create({
-      data: {
-        organization_id: config.organization_id,
-        store_id: config.store_id,
-        accounting_entity_id,
-        // La DIAN no reporta el tipo de documento en `GetNumberingRange`: un
-        // rango autorizado por resolución es de factura de venta. Los tipos que
-        // no numeran contra resolución no llegan por esta vía.
-        document_type: 'sales_invoice',
-        resolution_number: range.resolution_number,
-        resolution_date: this.toFiscalDate(
-          'fecha de resolución',
-          range.resolution_date,
-        ),
-        prefix: range.prefix,
-        range_from: range.range_from,
-        range_to: range.range_to,
-        // Un número por debajo del inicio del rango: nada consumido todavía. Es
-        // la misma convención de `ResolutionsService.create`.
-        current_number: range.range_from - 1,
-        valid_from: this.toFiscalDate('válida desde', range.valid_from),
-        valid_to: this.toFiscalDate('válida hasta', range.valid_to),
-        is_active: true,
-        // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
-        // huella. Escribir sólo una deja la fila apuntando a dos claves a la vez
-        // y la que manda al recomputar el CUFE es la vieja.
-        ...this.technicalKeyVault.sealForWrite(technical_key),
-      },
-    });
+        return tx.invoice_resolutions.create({
+          data: {
+            organization_id: config.organization_id,
+            store_id: config.store_id,
+            accounting_entity_id,
+            // La DIAN no reporta el tipo de documento en `GetNumberingRange`: un
+            // rango autorizado por resolución es de factura de venta. Los tipos que
+            // no numeran contra resolución no llegan por esta vía.
+            document_type: 'sales_invoice',
+            resolution_number: range_resolution_number,
+            resolution_date: this.toFiscalDate(
+              'fecha de resolución',
+              range.resolution_date,
+            ),
+            prefix: range_prefix,
+            range_from: range_from,
+            range_to: range_to,
+            // Un número por debajo del inicio del rango: nada consumido todavía. Es
+            // la misma convención de `ResolutionsService.create`.
+            current_number: range_from - 1,
+            valid_from: this.toFiscalDate('válida desde', range.valid_from),
+            valid_to: this.toFiscalDate('válida hasta', range.valid_to),
+            is_active: true,
+            // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
+            // huella. Escribir sólo una deja la fila apuntando a dos claves a la vez
+            // y la que manda al recomputar el CUFE es la vieja.
+            ...this.technicalKeyVault.sealForWrite(technical_key),
+          },
+        });
+      });
 
     // SIMETRÍA ESCRITURA/LECTURA: la fila nace con la entidad fiscal de la
     // configuración; si el alcance del llamador resuelve otra, quedaría
@@ -1201,27 +1216,36 @@ export class DianNumberingRangeService {
       data.range_from !== undefined ||
       data.range_to !== undefined
     ) {
-      const row = await this.prisma.withoutScope().invoice_resolutions.findFirst({
-        where: { id: local.id },
-        select: { accounting_entity_id: true },
-      });
-      if (row) {
-        await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
-          accounting_entity_id: row.accounting_entity_id,
-          document_type: local.document_type,
-          prefix: data.prefix ?? local.prefix,
-          range_from: data.range_from ?? local.range_from,
-          range_to: data.range_to ?? local.range_to,
-          exclude_resolution_id: local.id,
+      await this.prisma.withoutScope().$transaction(async (tx: any) => {
+        const row = await tx.invoice_resolutions.findFirst({
+          where: { id: local.id },
+          select: { accounting_entity_id: true },
         });
-      }
-    }
-
-    if (Object.keys(data).length > 0) {
+        if (row) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            lock_in_transaction: true,
+            accounting_entity_id: row.accounting_entity_id,
+            document_type: local.document_type,
+            prefix: data.prefix ?? local.prefix,
+            range_from: data.range_from ?? local.range_from,
+            range_to: data.range_to ?? local.range_to,
+            exclude_resolution_id: local.id,
+          });
+        }
+        if (Object.keys(data).length > 0) {
+          await tx.invoice_resolutions.update({
+            where: { id: local.id },
+            data,
+          });
+        }
+      });
+    } else if (Object.keys(data).length > 0) {
       await this.prisma.invoice_resolutions.update({
         where: { id: local.id },
         data,
       });
+    }
+    if (Object.keys(data).length > 0) {
       this.logger.log(
         `Resolución ${local.id} alineada con GetNumberingRange (config ${config_id}): ${applied_fields.join(', ')}`,
       );
