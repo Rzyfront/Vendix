@@ -1465,7 +1465,9 @@ export interface DianProductionReadiness {
     current_number: number;
     valid_from: string;
     valid_to: string;
-    technical_key: string | null;
+    /** La ClTec no viaja: solo si está cargada (y su longitud, cuando el backend la envía). */
+    technical_key_set: boolean;
+    technical_key_length?: number;
     is_habilitacion_range: boolean;
     is_expired: boolean;
     is_exhausted: boolean;
