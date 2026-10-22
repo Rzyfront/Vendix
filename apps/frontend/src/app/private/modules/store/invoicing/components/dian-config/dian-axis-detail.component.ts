@@ -39,6 +39,9 @@ import {
   DianNumberingRangePanelComponent,
   DianResolutionFormComponent,
   DianTestSetPanelComponent,
+  findNoteSeriesConflicts,
+  isNoteSeriesType,
+  noteSeriesActivationMessage,
   requirementsFor,
   resolutionDocumentTypesFor,
   summarizeReadiness,
@@ -492,6 +495,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
       <vendix-resolution-create
         [(isOpen)]="isResolutionModalOpen"
         [resolution]="selectedResolution()"
+        [siblingResolutions]="resolutions()"
         [configurationType]="configurationType() ?? 'invoicing'"
       ></vendix-resolution-create>
 
@@ -762,7 +766,17 @@ export class DianAxisDetailComponent {
   toggleMessage(resolution: FiscalReadinessResolution): string {
     const identity = `${resolution.prefix ?? ''}${resolution.range_from}–${resolution.range_to}`;
     if (!resolution.is_active) {
-      return `${identity} volverá a numerar ${documentLabelOf(resolution)} desde el consecutivo ${resolution.current_number + 1}. Sólo debe haber una resolución activa por tipo de documento.`;
+      const conflicts = findNoteSeriesConflicts(this.resolutions(), {
+        id: resolution.id,
+        document_type: resolution.document_type,
+      });
+      if (conflicts.length > 0) {
+        return noteSeriesActivationMessage(resolution.prefix, conflicts);
+      }
+      const base = `${identity} volverá a numerar ${documentLabelOf(resolution)} desde el consecutivo ${resolution.current_number + 1}.`;
+      return isNoteSeriesType(resolution.document_type)
+        ? base
+        : `${base} Si hay varias activas del mismo tipo, el sistema usa la más reciente (ver «Numeración vigente»).`;
     }
     return `${identity} dejará de numerar ${documentLabelOf(resolution)}. Los documentos ya emitidos con ella no cambian. Es la única forma de retirarla: una resolución que ya consumió numeración ante la DIAN no se puede borrar.`;
   }

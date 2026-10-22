@@ -43,6 +43,10 @@ import {
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
+import {
+  ResolutionsInUseCardComponent,
+  isResolutionInUse,
+} from '../../../../../../../shared/components/dian';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   ENVIRONMENT_OPTIONS,
@@ -83,6 +87,7 @@ interface ResolutionFormControls {
     ResponsiveDataViewComponent,
     SelectorComponent,
     StatsComponent,
+    ResolutionsInUseCardComponent,
   ],
   templateUrl: './platform-resolutions.component.html',
 })
@@ -160,6 +165,15 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       ).length,
   );
 
+  /** Filas decoradas con `in_use` (la que toma el generador) para tabla y cards. */
+  readonly rows = computed(() => {
+    const inUse = this.store.inUse();
+    return this.store.resolutions().map((r) => ({
+      ...r,
+      in_use: isResolutionInUse(r, inUse),
+    }));
+  });
+
   readonly columns: TableColumn[] = [
     { key: 'prefix', label: 'Prefijo' },
     {
@@ -189,6 +203,16 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       },
     },
     {
+      key: 'in_use',
+      label: 'Numeración',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { 'En uso': '#2563eb', '—': '#cbd5e1' },
+      },
+      transform: (v) => (v ? 'En uso' : '—'),
+    },
+    {
       key: 'is_active',
       label: 'Estado',
       badgeConfig: {
@@ -216,6 +240,14 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       },
     },
     badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
+    detailKeys: [
+      {
+        key: 'in_use',
+        label: 'Numeración',
+        icon: 'hash',
+        transform: (v) => (v ? 'En uso' : '-'),
+      },
+    ],
     footerKey: 'current_number',
     footerLabel: 'Consecutivo actual',
     footerTransform: (v, item: PlatformResolution) =>
@@ -281,6 +313,7 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   constructor() {
     this.store.loadResolutions();
+    this.store.loadInUse();
     this.store.loadStatus();
 
     this.form.statusChanges

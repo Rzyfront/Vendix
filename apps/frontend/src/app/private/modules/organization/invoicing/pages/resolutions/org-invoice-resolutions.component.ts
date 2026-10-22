@@ -19,11 +19,19 @@ import {
   StatsComponent,
   TableAction,
   TableColumn,
+  ToastService,
 } from '../../../../../../shared/components/index';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import {
+  ResolutionsInUseCardComponent,
+  deactivatedResolutionsToast,
+  extractDeactivatedResolutionIds,
+  isResolutionInUse,
+  type ResolutionsInUseResponse,
+} from '../../../../../../shared/components/dian';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
 import {
   OrgInvoicingService,
@@ -47,6 +55,7 @@ import {
     SaveRequirementsModalComponent,
     StatsComponent,
     OrgFiscalScopeSelectorComponent,
+    ResolutionsInUseCardComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -100,6 +109,13 @@ import {
           {{ msg }}
         </app-alert-banner>
       }
+
+      <div class="mb-3">
+        <app-resolutions-in-use-card
+          [data]="inUse()"
+          [loading]="inUseLoading()"
+        />
+      </div>
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
@@ -259,6 +275,7 @@ export class OrgInvoiceResolutionsComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
+  private readonly toast = inject(ToastService);
 
   readonly loading = signal(false);
   readonly savingResolution = signal(false);
@@ -269,6 +286,8 @@ export class OrgInvoiceResolutionsComponent {
   readonly searchTerm = signal('');
   readonly filterValues = signal<FilterValues>({});
   readonly rows = signal<OrgResolutionRow[]>([]);
+  readonly inUse = signal<ResolutionsInUseResponse | null>(null);
+  readonly inUseLoading = signal(false);
 
   readonly requiresStoreSelector = computed(() => this.auth.fiscalScope() === 'STORE');
   readonly activeCount = computed(() => this.rows().filter((row) => row.is_active).length);
@@ -289,7 +308,14 @@ export class OrgInvoiceResolutionsComponent {
   readonly filteredRows = computed(() => {
     const search = this.searchTerm().trim().toLowerCase();
     const state = this.filterValues()['state'] as string | undefined;
-    return this.rows().filter((row) => {
+    const inUse = this.inUse();
+    // La tabla puede mezclar entidades: `isResolutionInUse` solo marca las de
+    // la `accounting_entity_id` devuelta cuando la fila la trae.
+    const decorated = this.rows().map((row) => ({
+      ...row,
+      in_use: isResolutionInUse(row, inUse),
+    }));
+    return decorated.filter((row) => {
       if (state === 'active' && !row.is_active) return false;
       if (state === 'inactive' && row.is_active) return false;
       if (!search) return true;
@@ -368,6 +394,18 @@ export class OrgInvoiceResolutionsComponent {
       transform: (value) => this.formatDate(value),
     },
     {
+      key: 'in_use',
+      label: 'Numeración',
+      align: 'center',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { 'En uso': '#2563eb', '—': '#cbd5e1' },
+      },
+      transform: (value) => (value ? 'En uso' : '—'),
+    },
+    {
       key: 'is_active',
       label: 'Estado',
       align: 'center',
@@ -393,6 +431,7 @@ export class OrgInvoiceResolutionsComponent {
     },
     badgeTransform: (value) => (value ? 'Activa' : 'Inactiva'),
     detailKeys: [
+      { key: 'in_use', label: 'Numeración', icon: 'hash', transform: (value) => (value ? 'En uso' : '-') },
       { key: 'current_number', label: 'Consecutivo', icon: 'hash', transform: (value, item) => `${value || 0} / ${item?.range_to || 0}` },
       { key: 'valid_to', label: 'Vigente hasta', icon: 'calendar', transform: (value) => this.formatDate(value) },
       { key: '_count.invoices', label: 'Facturas', icon: 'receipt', transform: (value) => String(value || 0) },
@@ -511,8 +550,12 @@ export class OrgInvoiceResolutionsComponent {
 
     this.savingResolution.set(true);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
+      next: (response) => {
         this.closeResolutionModal();
+        const deactivated = extractDeactivatedResolutionIds(response);
+        if (deactivated.length > 0) {
+          this.toast.info(deactivatedResolutionsToast(deactivated.length));
+        }
         this.loadData();
       },
       error: (err) => {
@@ -566,9 +609,12 @@ export class OrgInvoiceResolutionsComponent {
   private loadData(): void {
     if (this.requiresStoreSelector() && !this.selectedStoreId()) {
       this.rows.set([]);
+      this.inUse.set(null);
       this.loading.set(false);
       return;
     }
+
+    this.loadInUse();
 
     this.loading.set(true);
     this.errorMessage.set(null);
@@ -587,6 +633,23 @@ export class OrgInvoiceResolutionsComponent {
           );
           this.rows.set([]);
           this.loading.set(false);
+        },
+      });
+  }
+
+  private loadInUse(): void {
+    this.inUseLoading.set(true);
+    this.service
+      .getResolutionsInUse(this.selectedStoreId())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.inUse.set(res.data ?? null);
+          this.inUseLoading.set(false);
+        },
+        error: () => {
+          this.inUse.set(null);
+          this.inUseLoading.set(false);
         },
       });
   }

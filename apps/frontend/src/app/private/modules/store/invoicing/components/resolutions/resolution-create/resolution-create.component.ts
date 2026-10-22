@@ -9,7 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { AbstractControl } from '@angular/forms';
@@ -28,11 +28,16 @@ import {
   updateResolutionFailure,
   updateResolutionSuccess,
 } from '../../../state/actions/invoicing.actions';
+import { selectResolutions } from '../../../state/selectors/invoicing.selectors';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { ConfirmationModalComponent } from '../../../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import {
   DianResolutionFormComponent,
   configurationTypeFor,
+  findNoteSeriesConflicts,
   isFiscalDocumentType,
+  noteSeriesActivationMessage,
+  type NoteSeriesRow,
   type DianConfigurationType,
   type DianResolutionFormValue,
   type FiscalDocumentType,
@@ -73,7 +78,7 @@ export type EditableResolution = InvoiceResolution | FiscalReadinessResolution;
 @Component({
   selector: 'vendix-resolution-create',
   standalone: true,
-  imports: [ModalComponent, DianResolutionFormComponent],
+  imports: [ModalComponent, DianResolutionFormComponent, ConfirmationModalComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -102,6 +107,21 @@ export type EditableResolution = InvoiceResolution | FiscalReadinessResolution;
         }
       </div>
     </app-modal>
+
+    <!-- Activar una serie de notas desactiva la otra del mismo tipo: se pide
+         confirmación explícita. Cancelar no envía nada. -->
+    @if (pendingConfirm(); as pending) {
+      <app-confirmation-modal
+        [isOpen]="true"
+        title="Activar serie de notas"
+        [message]="pending.message"
+        confirmText="Activar"
+        cancelText="Cancelar"
+        confirmVariant="primary"
+        (confirm)="confirmSave()"
+        (cancel)="pendingConfirm.set(null)"
+      ></app-confirmation-modal>
+    }
   `,
 })
 export class ResolutionCreateComponent {
@@ -117,6 +137,13 @@ export class ResolutionCreateComponent {
     alias: 'configurationType',
   });
 
+  /**
+   * Resoluciones conocidas por el host para detectar el conflicto de serie de
+   * notas. Si es `null` se usa la lista del store NgRx; un host que no la
+   * tenga cargada (p. ej. el detalle de un eje DIAN) pasa la suya.
+   */
+  readonly siblingResolutions = input<readonly NoteSeriesRow[] | null>(null);
+
   /** Preselección del documento dentro del eje, para el alta. */
   readonly documentType = input<FiscalDocumentType | null>(null);
 
@@ -129,6 +156,15 @@ export class ResolutionCreateComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly submitting = signal(false);
+  /** Guardado en espera de confirmación por conflicto de serie de notas. */
+  readonly pendingConfirm = signal<{
+    value: DianResolutionFormValue;
+    message: string;
+  } | null>(null);
+  private readonly storeResolutions = toSignal(
+    this.store.select(selectResolutions),
+    { initialValue: [] as InvoiceResolution[] },
+  );
   /** Error del backend, ya redactado. Se muestra crudo dentro del formulario. */
   readonly errorText = signal<string | null>(null);
 
@@ -277,6 +313,31 @@ export class ResolutionCreateComponent {
    * nadie lo pidiera.
    */
   onSave(value: DianResolutionFormValue): void {
+    if (value.is_active) {
+      const conflicts = findNoteSeriesConflicts(this.siblingResolutions() ?? this.storeResolutions(), {
+        id: this.resolution()?.id ?? null,
+        document_type: value.document_type,
+        accounting_entity_id: (this.resolution() as Partial<InvoiceResolution> | null)
+          ?.accounting_entity_id,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          value,
+          message: noteSeriesActivationMessage(value.prefix, conflicts),
+        });
+        return;
+      }
+    }
+    this.persist(value);
+  }
+
+  confirmSave(): void {
+    const pending = this.pendingConfirm();
+    this.pendingConfirm.set(null);
+    if (pending) this.persist(pending.value);
+  }
+
+  private persist(value: DianResolutionFormValue): void {
     this.submitting.set(true);
     this.errorText.set(null);
     // Los errores del intento anterior se van con el intento anterior: si no,

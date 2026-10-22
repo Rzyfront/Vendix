@@ -385,7 +385,7 @@ export const createResolution = createAction(
 );
 export const createResolutionSuccess = createAction(
   '[Invoicing] Create Resolution Success',
-  props<{ resolution: InvoiceResolution }>(),
+  props<{ resolution: InvoiceResolution; deactivatedResolutionIds?: number[] }>(),
 );
 /**
  * Lleva `MutationFailure` (no sólo `error`) porque el modal de resolución pinta
@@ -404,7 +404,7 @@ export const updateResolution = createAction(
 );
 export const updateResolutionSuccess = createAction(
   '[Invoicing] Update Resolution Success',
-  props<{ resolution: InvoiceResolution }>(),
+  props<{ resolution: InvoiceResolution; deactivatedResolutionIds?: number[] }>(),
 );
 /** Mismo motivo que `createResolutionFailure`: el modal reparte por campo. */
 export const updateResolutionFailure = createAction(

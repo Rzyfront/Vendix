@@ -31,6 +31,11 @@
     ></app-stats>
   </div>
 
+  <app-resolutions-in-use-card
+    [data]="store.inUse()"
+    [loading]="store.loadingInUse()"
+  ></app-resolutions-in-use-card>
+
   <!-- Main Card with Table -->
   <app-card [responsive]="true" [padding]="false">
     <!--
@@ -47,7 +52,7 @@
     <div class="p-2 md:p-4">
       <app-responsive-data-view
         [columns]="columns"
-        [data]="store.resolutions()"
+        [data]="rows()"
         [cardConfig]="cardConfig"
         [actions]="tableActions"
         [loading]="store.loadingResolutions()"

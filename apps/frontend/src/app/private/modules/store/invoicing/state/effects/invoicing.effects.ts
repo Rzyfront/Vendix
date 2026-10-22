@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
 import { Observable, of } from 'rxjs';
-import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/operators';
+import { map, switchMap, exhaustMap, catchError, withLatestFrom, filter } from 'rxjs/operators';
 import { InvoicingService } from '../../services/invoicing.service';
 import * as InvoicingActions from '../actions/invoicing.actions';
 import { selectInvoicingState } from '../selectors/invoicing.selectors';
@@ -16,6 +16,10 @@ import {
   formatReason,
   readDianRejection,
 } from '../../utils/invoicing-errors.util';
+import {
+  deactivatedResolutionsToast,
+  extractDeactivatedResolutionIds,
+} from '../../../../../../shared/components/dian/resolutions-in-use.util';
 import { dianEventLabel } from '../../utils/dian-events.util';
 import { DianDocumentEvent } from '../../interfaces/invoice.interface';
 
@@ -752,7 +756,12 @@ export class InvoicingEffects {
         this.invoicingService.createResolution(resolution).pipe(
           map((response) => {
             this.toastService.success('Resolución creada');
-            return InvoicingActions.createResolutionSuccess({ resolution: response.data });
+            const deactivatedResolutionIds = extractDeactivatedResolutionIds(response);
+            this.notifyDeactivated(deactivatedResolutionIds);
+            return InvoicingActions.createResolutionSuccess({
+              resolution: response.data,
+              deactivatedResolutionIds,
+            });
           }),
           catchError((error) =>
             // `errorCode` + `details` viajan porque el modal los reparte sobre
@@ -777,7 +786,12 @@ export class InvoicingEffects {
         this.invoicingService.updateResolution(id, resolution).pipe(
           map((response) => {
             this.toastService.success('Resolución actualizada');
-            return InvoicingActions.updateResolutionSuccess({ resolution: response.data });
+            const deactivatedResolutionIds = extractDeactivatedResolutionIds(response);
+            this.notifyDeactivated(deactivatedResolutionIds);
+            return InvoicingActions.updateResolutionSuccess({
+              resolution: response.data,
+              deactivatedResolutionIds,
+            });
           }),
           catchError((error) =>
             this.fail(error, (f) =>
@@ -792,6 +806,28 @@ export class InvoicingEffects {
       )
     )
   );
+
+  /**
+   * Activar una serie de notas hace que el backend desactive las demás del
+   * mismo tipo: el reducer solo conoce la fila editada, así que se recarga la
+   * lista para no dejar filas activas que ya no lo están.
+   */
+  reloadAfterDeactivation$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(
+        InvoicingActions.createResolutionSuccess,
+        InvoicingActions.updateResolutionSuccess,
+      ),
+      filter(({ deactivatedResolutionIds }) => (deactivatedResolutionIds?.length ?? 0) > 0),
+      map(() => InvoicingActions.loadResolutions()),
+    ),
+  );
+
+  private notifyDeactivated(ids: number[]): void {
+    if (ids.length > 0) {
+      this.toastService.info(deactivatedResolutionsToast(ids.length));
+    }
+  }
 
   // Delete resolution
   //

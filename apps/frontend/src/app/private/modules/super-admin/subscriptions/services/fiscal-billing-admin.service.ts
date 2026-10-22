@@ -7,6 +7,7 @@ import { AsyncJobStatus } from '../../../../../core/utils/async-job-poll.util';
 // El reporte de readiness es EL MISMO que el del riel de tiendas: el backend
 // delega en su implementación bajo contexto de plataforma. Reusar el tipo evita
 // que una copia se desvíe de la otra.
+import type { ResolutionsInUseResponse } from '../../../../../shared/components/dian/resolutions-in-use.util';
 import { DianProductionReadiness } from '../../../store/invoicing/interfaces/invoice.interface';
 import {
   ApiEnvelope,
@@ -291,6 +292,15 @@ export class FiscalBillingAdminService {
       .patch<ApiEnvelope<PlatformResolution>>(
         `${this.base}/resolutions/${id}`,
         dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Numeración que toma hoy el generador por tipo de documento. */
+  getResolutionsInUse(): Observable<ResolutionsInUseResponse> {
+    return this.http
+      .get<ApiEnvelope<ResolutionsInUseResponse>>(
+        `${this.base}/resolutions/in-use`,
       )
       .pipe(map((res) => res.data));
   }

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import type { ResolutionsInUseResponse } from '../../../../../shared/components/dian/resolutions-in-use.util';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -63,6 +64,8 @@ export interface OrgResolutionRow {
   valid_to: string;
   is_active: boolean;
   technical_key?: string | null;
+  document_type?: string | null;
+  accounting_entity_id?: number | null;
   store_id?: number | null;
   store?: { id: number; name: string; slug: string } | null;
   _count?: { invoices: number };
@@ -125,6 +128,14 @@ export class OrgInvoicingService {
     return this.http.get<ApiResponse<OrgResolutionRow[]>>(
       `${this.apiUrl}/organization/invoicing/resolutions`,
       { params: this.toParams(query) },
+    );
+  }
+
+  /** Numeración que toma hoy el generador; respeta el filtro de tienda (`store_id`). */
+  getResolutionsInUse(storeId?: number | null): Observable<ApiResponse<ResolutionsInUseResponse>> {
+    return this.http.get<ApiResponse<ResolutionsInUseResponse>>(
+      `${this.apiUrl}/organization/invoicing/resolutions/in-use`,
+      { params: this.toParams(storeId ? { store_id: storeId } : undefined) },
     );
   }
 

@@ -24,8 +24,15 @@ import {
 import {
   DianResolutionFormComponent,
   requirementsFor,
+  deactivatedResolutionsToast,
+  extractDeactivatedResolutionIds,
+  findNoteSeriesConflicts,
+  isResolutionInUse,
+  noteSeriesActivationMessage,
+  ResolutionsInUseCardComponent,
   type DianResolutionFormValue,
   type FiscalReadinessResolution,
+  type ResolutionsInUseResponse,
 } from '../../../../../../../shared/components/dian';
 import { DianConfigApiService } from '../../../../../../../shared/services/dian';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
@@ -43,6 +50,7 @@ interface NumberingRow extends FiscalReadinessResolution {
   readonly consumed_label: string;
   readonly state_label: string;
   readonly key_label: string;
+  readonly in_use_label: string;
 }
 
 /**
@@ -91,6 +99,7 @@ interface NumberingRow extends FiscalReadinessResolution {
     ResponsiveDataViewComponent,
     DianResolutionFormComponent,
     TenantDianAxisPickerComponent,
+    ResolutionsInUseCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -98,6 +107,13 @@ interface NumberingRow extends FiscalReadinessResolution {
       <app-card [responsive]="true">
         <app-tenant-dian-axis-picker></app-tenant-dian-axis-picker>
       </app-card>
+
+      @if (showInUse()) {
+        <app-resolutions-in-use-card
+          [data]="inUse()"
+          [loading]="inUseLoading()"
+        ></app-resolutions-in-use-card>
+      }
 
       <app-card [responsive]="true" [padding]="false">
         <div
@@ -184,6 +200,21 @@ interface NumberingRow extends FiscalReadinessResolution {
       }
     </app-modal>
 
+    <!-- Activar una serie de notas: desactiva la otra del mismo tipo --------- -->
+    @if (pendingNoteActivation(); as pending) {
+      <app-confirmation-modal
+        [isOpen]="true"
+        title="Activar serie de notas"
+        [message]="pending.message"
+        confirmText="Activar"
+        cancelText="Cancelar"
+        confirmVariant="primary"
+        size="md"
+        (confirm)="confirmNoteActivation()"
+        (cancel)="pendingNoteActivation.set(null)"
+      ></app-confirmation-modal>
+    }
+
     <!-- Desactivación ------------------------------------------------------- -->
     @if (pendingDeactivation(); as row) {
       <app-confirmation-modal
@@ -241,6 +272,59 @@ export class TenantDianNumberingComponent {
   protected readonly saving = signal(false);
   protected readonly formError = signal<string | null>(null);
   protected readonly pendingDeactivation = signal<NumberingRow | null>(null);
+  protected readonly pendingNoteActivation = signal<{
+    message: string;
+    run: () => void;
+  } | null>(null);
+
+  // ── Numeración vigente (qué serie toma el generador) ─────────────────
+  protected readonly inUse = signal<ResolutionsInUseResponse | null>(null);
+  protected readonly inUseLoading = signal(false);
+  /** `in-use` es del tenant (entidad contable) y los tipos de factura/nota viven en el eje de facturación. */
+  protected readonly showInUse = computed(
+    () => this.store.selectedAxisType() === 'invoicing',
+  );
+
+  constructor() {
+    this.loadInUse();
+  }
+
+  private loadInUse(): void {
+    this.inUseLoading.set(true);
+    this.api
+      .getResolutionsInUse()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.inUse.set(res.data ?? null);
+          this.inUseLoading.set(false);
+        },
+        error: () => this.inUseLoading.set(false),
+      });
+  }
+
+  private reloadAll(response?: unknown): void {
+    const deactivated = extractDeactivatedResolutionIds(response);
+    if (deactivated.length > 0) {
+      this.toast.info(deactivatedResolutionsToast(deactivated.length));
+    }
+    this.store.reload();
+    this.loadInUse();
+  }
+
+  /** Series de nota activas que el backend desactivaría al activar `candidate`. */
+  private noteConflicts(candidate: {
+    id: number | null;
+    document_type: string;
+  }) {
+    return findNoteSeriesConflicts(this.rows(), candidate);
+  }
+
+  protected confirmNoteActivation(): void {
+    const pending = this.pendingNoteActivation();
+    this.pendingNoteActivation.set(null);
+    pending?.run();
+  }
 
   protected readonly formTitle = computed(() =>
     this.editing() ? 'Editar resolución' : 'Nueva resolución',
@@ -256,6 +340,16 @@ export class TenantDianNumberingComponent {
     { key: 'identity', label: 'Prefijo / resolución', priority: 0 },
     { key: 'range_label', label: 'Rango', priority: 1 },
     { key: 'consumed_label', label: 'Consumo', priority: 1 },
+    {
+      key: 'in_use_label',
+      label: 'Numeración',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { 'En uso': '#2563eb', '—': '#cbd5e1' },
+      },
+    },
     { key: 'validity_label', label: 'Vigencia', priority: 2 },
     {
       key: 'key_label',
@@ -292,6 +386,7 @@ export class TenantDianNumberingComponent {
       colorMap: { Activa: '#16a34a', Inactiva: '#64748b' },
     },
     detailKeys: [
+      { key: 'in_use_label', label: 'Numeración' },
       { key: 'range_label', label: 'Rango' },
       { key: 'consumed_label', label: 'Consumo' },
       { key: 'validity_label', label: 'Vigencia' },
@@ -348,6 +443,25 @@ export class TenantDianNumberingComponent {
   protected onSave(value: DianResolutionFormValue): void {
     if (!this.canWrite() || this.saving()) return;
 
+    if (value.is_active) {
+      const conflicts = this.noteConflicts({
+        id: this.editing()?.id ?? null,
+        document_type: value.document_type,
+      });
+      if (conflicts.length > 0) {
+        this.pendingNoteActivation.set({
+          message: noteSeriesActivationMessage(value.prefix, conflicts),
+          run: () => this.persist(value),
+        });
+        return;
+      }
+    }
+    this.persist(value);
+  }
+
+  private persist(value: DianResolutionFormValue): void {
+    if (!this.canWrite() || this.saving()) return;
+
     const existing = this.editing();
     this.saving.set(true);
     this.formError.set(null);
@@ -360,14 +474,14 @@ export class TenantDianNumberingComponent {
       : this.api.createResolution(value as unknown as Record<string, unknown>);
 
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
+      next: (response) => {
         this.saving.set(false);
         this.formOpen.set(false);
         this.editing.set(null);
         this.toast.success(
           existing ? 'Resolución actualizada' : 'Resolución creada',
         );
-        this.store.reload();
+        this.reloadAll(response);
       },
       error: (err: unknown) => {
         this.saving.set(false);
@@ -386,6 +500,17 @@ export class TenantDianNumberingComponent {
     // Activar no destraba nada que estuviera funcionando; desactivar sí retira
     // la fuente de consecutivos con la que el comerciante está numerando.
     if (!row.is_active) {
+      const conflicts = this.noteConflicts({
+        id: row.id,
+        document_type: row.document_type,
+      });
+      if (conflicts.length > 0) {
+        this.pendingNoteActivation.set({
+          message: noteSeriesActivationMessage(row.prefix, conflicts),
+          run: () => this.toggleActive(row),
+        });
+        return;
+      }
       this.toggleActive(row);
       return;
     }
@@ -415,12 +540,12 @@ export class TenantDianNumberingComponent {
       .updateResolution(row.id, { is_active: !row.is_active })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (response) => {
           this.saving.set(false);
           this.toast.success(
             row.is_active ? 'Resolución desactivada' : 'Resolución activada',
           );
-          this.store.reload();
+          this.reloadAll(response);
         },
         error: (err: unknown) => {
           this.saving.set(false);
@@ -464,6 +589,7 @@ export class TenantDianNumberingComponent {
       consumed_label: `Va en ${row.current_number} (${percent}%)`,
       validity_label: `${this.day(row.valid_from)} → ${this.day(row.valid_to)}`,
       state_label: row.is_active ? 'Activa' : 'Inactiva',
+      in_use_label: isResolutionInUse(row, this.inUse()) ? 'En uso' : '—',
       key_label: !requirements.accepts_technical_key
         ? 'No aplica'
         : row.technical_key_set

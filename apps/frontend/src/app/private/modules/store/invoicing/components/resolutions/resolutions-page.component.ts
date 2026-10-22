@@ -1,6 +1,7 @@
-import { Component, inject, computed, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Component, DestroyRef, inject, computed, signal } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 
 import { InvoiceResolution } from '../../interfaces/invoice.interface';
 import {
@@ -9,6 +10,7 @@ import {
 } from '../../state/selectors/invoicing.selectors';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import { ResolutionCreateComponent } from './resolution-create/resolution-create.component';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 
 import {
   CardComponent,
@@ -25,7 +27,13 @@ import {
 import {
   isFiscalDocumentType,
   requirementsFor,
+  findNoteSeriesConflicts,
+  isNoteSeriesType,
+  isResolutionInUse,
+  noteSeriesActivationMessage,
+  ResolutionsInUseCardComponent,
   type FiscalDocumentType,
+  type ResolutionsInUseResponse,
 } from '../../../../../../shared/components/dian';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
@@ -62,6 +70,7 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
     OptionsDropdownComponent,
     InputsearchComponent,
     ResolutionCreateComponent,
+    ResolutionsInUseCardComponent,
   ],
   template: `
     <div class="w-full">
@@ -107,6 +116,14 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
             [clickable]="false"
           ></app-stats>
         }
+      </div>
+
+      <!-- Numeración vigente: qué serie toma hoy el generador por documento -->
+      <div class="mb-3">
+        <app-resolutions-in-use-card
+          [data]="in_use()"
+          [loading]="in_use_loading()"
+        ></app-resolutions-in-use-card>
       </div>
 
       <!-- Unified Container: Header + Data -->
@@ -197,6 +214,9 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
 })
 export class ResolutionsPageComponent {
   private store = inject(Store);
+  private actions$ = inject(Actions);
+  private destroyRef = inject(DestroyRef);
+  private dianApi = inject(DianConfigApiService);
 
   // State via toSignal (con initialValue obligatorio)
   readonly resolutions = toSignal(this.store.select(selectResolutions), {
@@ -212,11 +232,18 @@ export class ResolutionsPageComponent {
   readonly selected_resolution = signal<InvoiceResolution | null>(null);
   readonly pending_delete = signal<InvoiceResolution | null>(null);
   readonly pending_toggle = signal<InvoiceResolution | null>(null);
+  readonly in_use = signal<ResolutionsInUseResponse | null>(null);
+  readonly in_use_loading = signal(false);
 
   // Derivados
   readonly filteredResolutions = computed(() => {
     const term = this.search_term().trim().toLowerCase();
-    const list = this.resolutions();
+    const inUse = this.in_use();
+    // Se decora con `in_use` para que la tabla y las cards pinten el badge.
+    const list = this.resolutions().map((r) => ({
+      ...r,
+      in_use: isResolutionInUse(r, inUse),
+    }));
     if (!term) return list;
     return list.filter(
       (r) =>
@@ -264,6 +291,35 @@ export class ResolutionsPageComponent {
     if (this.resolutions().length === 0 && !this.loading()) {
       this.store.dispatch(InvoicingActions.loadResolutions());
     }
+
+    this.loadInUse();
+
+    // Tras crear, actualizar (incluye activar/desactivar) o borrar, la lista la
+    // refresca el store; aquí se refresca `in-use`, que depende de lo mismo.
+    this.actions$
+      .pipe(
+        ofType(
+          InvoicingActions.createResolutionSuccess,
+          InvoicingActions.updateResolutionSuccess,
+          InvoicingActions.deleteResolutionSuccess,
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.loadInUse());
+  }
+
+  private loadInUse(): void {
+    this.in_use_loading.set(true);
+    this.dianApi
+      .getResolutionsInUse()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.in_use.set(res.data ?? null);
+          this.in_use_loading.set(false);
+        },
+        error: () => this.in_use_loading.set(false),
+      });
   }
 
   dropdown_actions: DropdownAction[] = [
@@ -318,6 +374,19 @@ export class ResolutionsPageComponent {
       priority: 2,
       transform: (_val: any, item?: InvoiceResolution) =>
         this.getUsageLabel(item),
+    },
+    {
+      // La que toma el generador de consecutivos para su tipo de documento.
+      key: 'in_use',
+      label: 'Numeración',
+      align: 'center',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { 'En uso': '#2563eb', '—': '#cbd5e1' },
+      },
+      transform: (value: unknown) => (value ? 'En uso' : '—'),
     },
     {
       key: 'is_active',
@@ -388,6 +457,12 @@ export class ResolutionsPageComponent {
     },
     badgeTransform: (_val: any) => '',
     detailKeys: [
+      {
+        key: 'in_use',
+        label: 'Numeración',
+        icon: 'hash',
+        transform: (val: unknown) => (val ? 'En uso' : '-'),
+      },
       {
         key: 'valid_from',
         label: 'Desde',
@@ -470,7 +545,18 @@ export class ResolutionsPageComponent {
   toggleMessage(row: InvoiceResolution): string {
     const identity = `${row.prefix} · ${row.resolution_number} (${this.documentLabel(row)})`;
     if (!row.is_active) {
-      return `${identity} volverá a numerar documentos desde el consecutivo ${row.current_number + 1}. Solo debe haber una resolución activa por tipo de documento: si hay otra, desactívala antes.`;
+      const conflicts = findNoteSeriesConflicts(this.resolutions(), {
+        id: row.id,
+        document_type: row.document_type,
+        accounting_entity_id: row.accounting_entity_id,
+      });
+      if (conflicts.length > 0) {
+        return noteSeriesActivationMessage(row.prefix, conflicts);
+      }
+      const base = `${identity} volverá a numerar documentos desde el consecutivo ${row.current_number + 1}.`;
+      return isNoteSeriesType(row.document_type)
+        ? base
+        : `${base} Si hay varias activas del mismo tipo, el sistema usa la más reciente (ver «Numeración vigente»).`;
     }
     const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
     const base = `${identity} dejará de numerar documentos nuevos. Los ya emitidos con ella no cambian.`;

@@ -859,6 +859,8 @@ export interface InvoiceResolution {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /** Entidad contable dueña de la resolución, cuando el backend la incluye. */
+  accounting_entity_id?: number | null;
   /**
    * Qué documento numera esta fila.
    *

@@ -8,6 +8,7 @@ import {
   DianEmissionStatus,
   InvoiceResolution,
 } from '../../../private/modules/store/invoicing/interfaces/invoice.interface';
+import type { ResolutionsInUseResponse } from '../../components/dian/resolutions-in-use.util';
 
 /**
  * Qué puede escribir el host que monta el wizard de habilitación.
@@ -285,6 +286,17 @@ export class DianConfigApiService {
   }
 
   // ── Resolutions ───────────────────────────────────────────
+
+  /**
+   * Qué numeración toma hoy el generador, por tipo de documento. Va por
+   * `{rail}/resolutions/in-use`, así que sirve igual a la tienda y a la
+   * consola de tenants (el rail lo resuelve `DIAN_API_CONTEXT`).
+   */
+  getResolutionsInUse(): Observable<ApiResponse<ResolutionsInUseResponse>> {
+    return this.http.get<ApiResponse<ResolutionsInUseResponse>>(
+      this.getApiUrl('resolutions/in-use'),
+    );
+  }
 
   getResolutions(): Observable<ApiResponse<InvoiceResolution[]>> {
     return this.http.get<ApiResponse<InvoiceResolution[]>>(

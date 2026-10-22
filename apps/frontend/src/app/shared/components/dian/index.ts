@@ -75,3 +75,20 @@ export { DianTestSetPanelComponent } from './dian-test-set-panel/dian-test-set-p
 export { DianNumberingRangePanelComponent } from './dian-numbering-range-panel/dian-numbering-range-panel.component';
 export { DianResolutionFormComponent } from './dian-resolution-form/dian-resolution-form.component';
 export type { DianResolutionFormValue } from './dian-resolution-form/dian-resolution-form.component';
+
+// Numeración vigente (qué serie toma el generador) y regla de serie única de notas
+export {
+  NOTE_SERIES_DOCUMENT_TYPES,
+  isNoteSeriesType,
+  findNoteSeriesConflicts,
+  noteSeriesActivationMessage,
+  isResolutionInUse,
+  extractDeactivatedResolutionIds,
+  deactivatedResolutionsToast,
+} from './resolutions-in-use.util';
+export type {
+  ResolutionInUse,
+  ResolutionsInUseResponse,
+  NoteSeriesRow,
+} from './resolutions-in-use.util';
+export { ResolutionsInUseCardComponent } from './resolutions-in-use-card/resolutions-in-use-card.component';
