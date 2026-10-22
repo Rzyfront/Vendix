@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -33,8 +34,10 @@ import type {
   ResolutionScannerScope,
 } from '../../dian-resolution-scanner/interfaces/resolution-scan-result.interface';
 import { DIAN_API_CONTEXT } from '../../../services/dian';
-import { toUTCDateString } from '../../../utils/date.util';
+import { toLocalDateString, toUTCDateString } from '../../../utils/date.util';
 import {
+  INTERNAL_SERIES_FORM_VALIDITY_YEARS,
+  INTERNAL_SERIES_INITIAL_RANGE,
   defaultDocumentTypeFor,
   isFiscalDocumentType,
   requirementsFor,
@@ -205,14 +208,25 @@ interface ResolutionFormControls {
           <span>{{ requirementNote() }}</span>
         </div>
 
+        @if (isInternalSeries()) {
+          <p
+            class="text-xs font-medium text-[var(--color-text-secondary)] flex items-center gap-1.5"
+          >
+            <app-icon name="info" [size]="13" class="shrink-0"></app-icon>
+            <span>Serie interna: no se valida ante la DIAN</span>
+          </p>
+        }
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <app-input
-            [label]="resolutionNumberLabel()"
-            [placeholder]="resolutionNumberPlaceholder()"
-            [required]="resolutionNumberRequired()"
-            [helperText]="resolutionNumberHelp()"
-            formControlName="resolution_number"
-          ></app-input>
+          @if (!isInternalSeries()) {
+            <app-input
+              [label]="resolutionNumberLabel()"
+              [placeholder]="resolutionNumberPlaceholder()"
+              [required]="resolutionNumberRequired()"
+              [helperText]="resolutionNumberHelp()"
+              formControlName="resolution_number"
+            ></app-input>
+          }
 
           <app-input
             type="date"
@@ -506,6 +520,11 @@ export class DianResolutionFormComponent {
     requirementsFor(this.selectedDocumentType()),
   );
 
+  /** Serie interna: el backend la abre solo, sin resolución DIAN. */
+  readonly isInternalSeries = computed(
+    () => this.requirements().internal_series_prefix !== null,
+  );
+
   readonly acceptsTechnicalKey = computed(
     () => this.requirements().accepts_technical_key,
   );
@@ -638,6 +657,20 @@ export class DianResolutionFormComponent {
    */
   private lastSeedKey: string | null = null;
 
+  /**
+   * Valores que la siembra de serie interna puso en el formulario. Permite
+   * distinguir «lo puso el código» de «lo tecleó el usuario / lo trajo el
+   * escáner» (`setValue` no marca `dirty`): sólo se sobrescribe o se limpia lo
+   * que sigue valiendo exactamente lo sembrado, o está vacío.
+   */
+  private internalSeriesSeed: {
+    prefix: string;
+    range_from: number;
+    range_to: number;
+    valid_from: string;
+    valid_to: string;
+  } | null = null;
+
   constructor() {
     // El tipo de documento gobierna qué se exige. Los validators se recalculan
     // AQUÍ y no en el template: un campo que se deja de renderizar pero conserva
@@ -662,6 +695,15 @@ export class DianResolutionFormComponent {
         const technicalKey = this.form.controls.technical_key;
         if (technicalKey.value) technicalKey.setValue('', { emitEvent: true });
       }
+    });
+
+    // Series internas: pre-llena prefijo, rango y vigencia al elegir el tipo.
+    // Sólo en alta; en edición nunca se toca una resolución existente. Depende
+    // únicamente de `isEdit` y del tipo; el formulario se lee/escribe sin rastrear.
+    effect(() => {
+      const isEdit = this.isEdit();
+      const prefix = this.requirements().internal_series_prefix;
+      untracked(() => this.syncInternalSeries(isEdit, prefix));
     });
 
     // Sin permiso de escritura el formulario se ve, pero no se toca. Se
@@ -720,6 +762,73 @@ export class DianResolutionFormComponent {
             ) ?? allowed[0]);
       this.form.controls.document_type.setValue(initial);
     });
+  }
+
+  private syncInternalSeries(isEdit: boolean, prefix: string | null): void {
+    if (isEdit) {
+      this.internalSeriesSeed = null;
+      return;
+    }
+    const controls = this.form.controls;
+    const previous = this.internalSeriesSeed;
+
+    // Un campo se pisa sólo si está vacío o conserva el valor sembrado antes.
+    const isUntouched = <T>(current: T | null, seeded: T | undefined): boolean =>
+      current === null ||
+      current === '' ||
+      (seeded !== undefined && current === seeded);
+
+    if (prefix === null) {
+      // Salida de una serie interna: limpiar lo sembrado que nadie tocó.
+      if (!previous) return;
+      if (controls.prefix.value === previous.prefix) controls.prefix.setValue('');
+      if (controls.range_from.value === previous.range_from) {
+        controls.range_from.setValue(null);
+      }
+      if (controls.range_to.value === previous.range_to) {
+        controls.range_to.setValue(null);
+      }
+      if (controls.valid_from.value === previous.valid_from) {
+        controls.valid_from.setValue('');
+      }
+      if (controls.valid_to.value === previous.valid_to) {
+        controls.valid_to.setValue('');
+      }
+      this.internalSeriesSeed = null;
+      return;
+    }
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(now.getFullYear() + INTERNAL_SERIES_FORM_VALIDITY_YEARS);
+    const seed = {
+      prefix,
+      range_from: 1,
+      range_to: INTERNAL_SERIES_INITIAL_RANGE,
+      valid_from: toLocalDateString(now),
+      valid_to: toLocalDateString(end),
+    };
+
+    if (isUntouched(controls.prefix.value, previous?.prefix)) {
+      controls.prefix.setValue(seed.prefix);
+    }
+    if (isUntouched(controls.range_from.value, previous?.range_from)) {
+      controls.range_from.setValue(seed.range_from);
+    }
+    if (isUntouched(controls.range_to.value, previous?.range_to)) {
+      controls.range_to.setValue(seed.range_to);
+    }
+    if (isUntouched(controls.valid_from.value, previous?.valid_from)) {
+      controls.valid_from.setValue(seed.valid_from);
+    }
+    if (isUntouched(controls.valid_to.value, previous?.valid_to)) {
+      controls.valid_to.setValue(seed.valid_to);
+    }
+    // El número de resolución no existe para estos tipos: que nada oculto viaje.
+    if (controls.resolution_number.value) {
+      controls.resolution_number.setValue('');
+    }
+    this.internalSeriesSeed = seed;
   }
 
   /**
@@ -802,7 +911,10 @@ export class DianResolutionFormComponent {
 
     const payload: DianResolutionFormValue = {
       document_type: documentType,
-      resolution_number: raw.resolution_number.trim(),
+      // Serie interna: el campo está oculto; el backend genera el rótulo.
+      resolution_number: this.isInternalSeries()
+        ? ''
+        : raw.resolution_number.trim(),
       resolution_date: raw.resolution_date,
       prefix: raw.prefix.trim(),
       range_from: Number(raw.range_from),
