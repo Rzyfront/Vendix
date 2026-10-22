@@ -259,7 +259,10 @@ export class TenantResolutionsController {
    * Misma decisión que `TenantDirectoryService.readResolutions`.
    */
   private sinClaveTecnica(row: Record<string, any>) {
-    const { technical_key, ...resto } = row ?? {};
-    return { ...resto, technical_key_set: Boolean(technical_key) };
+    const { technical_key, technical_key_set, ...resto } = row ?? {};
+    return {
+      ...resto,
+      technical_key_set: Boolean(technical_key_set ?? technical_key),
+    };
   }
 }

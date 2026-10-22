@@ -35,7 +35,7 @@ describe('DianConfigService — SEC-1: production-readiness no devuelve la ClTec
       },
     };
     const readiness: any = {
-      findResolutionsSharingTechnicalKey: jest.fn().mockResolvedValue([]),
+      findResolutionsSharingTechnicalKey: jest.fn().mockResolvedValue(null),
       findDuplicateTechnicalKeys: jest.fn().mockResolvedValue([]),
       evaluateProductionReadiness: jest.fn().mockReturnValue({ checks: [] }),
       buildResolutionRangeWarning: jest.fn().mockReturnValue(null),
