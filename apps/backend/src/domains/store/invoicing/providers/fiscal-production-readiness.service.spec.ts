@@ -208,12 +208,19 @@ describe('FiscalProductionReadinessService', () => {
     // como mínimo dos de las tres calculan un CUFE que la DIAN recomputa distinto.
     const CLTEC = 'f7cc345ca297aa11bb22cc33dd44ee55ff66aa77';
 
+    // `own` puede ser una fila, un arreglo de filas o null. La primera llamada a
+    // `findMany` es la consulta propia; las siguientes, la de ajenas (una por
+    // fila propia revisada).
     function withResolutions(own: any, others: any[]) {
+      const own_rows = own == null ? [] : Array.isArray(own) ? own : [own];
       const client = {
         dian_configurations: { findFirst: jest.fn() },
         invoice_resolutions: {
-          findFirst: jest.fn().mockResolvedValue(own),
-          findMany: jest.fn().mockResolvedValue(others),
+          findFirst: jest.fn(),
+          findMany: jest
+            .fn()
+            .mockResolvedValueOnce(own_rows)
+            .mockResolvedValue(others),
         },
       };
       return new FiscalProductionReadinessService(
@@ -328,7 +335,7 @@ describe('FiscalProductionReadinessService', () => {
       ).resolves.toBeNull();
     });
 
-    it('ignora las resoluciones SETP de otros NIT al contar', async () => {
+    it('cuenta las SETP de otros NIT: una FE propia con la ClTec de habilitación está mal', async () => {
       const service = withResolutions(
         {
           id: 10,
@@ -337,6 +344,55 @@ describe('FiscalProductionReadinessService', () => {
           accounting_entity: { tax_id: '902056589' },
         },
         [{ id: 8, prefix: 'SETP', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toEqual({ resolution_id: 10, foreign_count: 1 });
+    });
+
+    it.each([
+      ['SETP primero', 0],
+      ['SETP después', 1],
+    ])(
+      'con una SETP y una FE propias revisa la FE (%s)',
+      async (_label, setp_index) => {
+        const setp = {
+          id: 3,
+          prefix: 'SETP',
+          technical_key: CLTEC,
+          technical_key_fingerprint: 'fp-setp',
+          accounting_entity: { tax_id: '902056589' },
+        };
+        const fe = {
+          id: 10,
+          prefix: 'FE',
+          technical_key: null,
+          technical_key_fingerprint: 'fp-fe',
+          accounting_entity: { tax_id: '902056589' },
+        };
+        const own = setp_index === 0 ? [setp, fe] : [fe, setp];
+        const service = withResolutions(own, [
+          { id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } },
+        ]);
+
+        await expect(
+          service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+        ).resolves.toEqual({ resolution_id: 10, foreign_count: 1 });
+      },
+    );
+
+    it('solo SETP propia (aunque haya ajenas) no reporta nada', async () => {
+      const service = withResolutions(
+        [
+          {
+            id: 3,
+            prefix: 'SETP',
+            technical_key: CLTEC,
+            accounting_entity: { tax_id: '902056589' },
+          },
+        ],
+        [{ id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } }],
       );
 
       await expect(

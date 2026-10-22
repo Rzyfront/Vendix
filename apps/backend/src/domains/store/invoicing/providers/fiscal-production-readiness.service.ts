@@ -1186,6 +1186,13 @@ export class FiscalProductionReadinessService {
    * formato, y afirmar un largo deducido es el error que ya costó una habilitación
    * con la composición del set de pruebas. Lo que sí está publicado, y es lo que
    * se comprueba, es que la clave pertenece a un único par (NIT, rango).
+   *
+   * Se revisan TODAS las resoluciones activas propias, salvo las de habilitación
+   * (prefijo SETP), que comparten la ClTec fija por diseño de la DIAN. Esa
+   * exclusión rige SOLO en el lado propio: las SETP ajenas SÍ se cuentan, porque
+   * una FE propia con la clave de habilitación está mal en producción y contarlas
+   * solo expone un número. Devuelve la primera fila propia (id desc) con
+   * coincidencia ajena y cuántas resoluciones ajenas coinciden con ella.
    */
   async findResolutionsSharingTechnicalKey(
     params: ResolveConfigParams,
@@ -1207,9 +1214,9 @@ export class FiscalProductionReadinessService {
 
     const document_type =
       params.document_type ?? this.defaultDocumentType(params.configuration_type);
-    const own = await this.prisma
+    const own_rows = await this.prisma
       .withoutScope()
-      .invoice_resolutions.findFirst({
+      .invoice_resolutions.findMany({
         where: {
           organization_id: params.organization_id,
           accounting_entity_id: params.accounting_entity_id,
@@ -1223,6 +1230,7 @@ export class FiscalProductionReadinessService {
           technical_key_fingerprint: true,
           accounting_entity: { select: { tax_id: true } },
         },
+        orderBy: { id: 'desc' },
       });
 
     // HUELLA PRIMERO, TEXTO PLANO DESPUÉS — y el orden es el que decide si este
@@ -1241,40 +1249,49 @@ export class FiscalProductionReadinessService {
     // el detector funcionando el día que se anule la columna en claro — que es
     // un paso de DATOS pendiente de aprobación, no algo que este servicio pueda
     // dar por hecho.
-    if (!own) return null;
-
     // El rango de habilitación (SETP) comparte la ClTec fija por diseño de la
-    // DIAN: no es hallazgo, y listarlo enumeraría a las demás cuentas.
-    if (isHabilitacionResolution(own.prefix ?? null)) return null;
+    // DIAN: no es hallazgo. Se excluye por prefijo en el lado PROPIO, en JS y no
+    // con un `NOT` de Prisma (excluiría las filas con `prefix` NULL). Se revisan
+    // TODAS las filas propias restantes: mirar una sola dejaba el control ciego
+    // si esa fila era la SETP.
+    const own = own_rows.filter(
+      (r) => !isHabilitacionResolution(r.prefix ?? null),
+    );
+    if (!own.length) return null;
 
-    const own_fingerprint = (own.technical_key_fingerprint ?? '').trim();
-    const own_plain = (own.technical_key ?? '').trim();
-    if (!own_fingerprint && !own_plain) return null;
+    // Las SETP AJENAS sí cuentan: una FE propia con la ClTec fija de
+    // habilitación está mal en producción, y contarlas solo agrega un número.
+    // Se consulta por fila propia (id desc) para atribuir el conteo a la fila
+    // que coincide; la clave ajena no se lee, solo se compara en la consulta.
+    const own_ids = own_rows.map((r) => r.id);
+    for (const row of own) {
+      const fingerprint = (row.technical_key_fingerprint ?? '').trim();
+      const plain = (row.technical_key ?? '').trim();
+      if (!fingerprint && !plain) continue;
 
-    const match_clauses: Array<Record<string, string>> = [];
-    if (own_fingerprint)
-      match_clauses.push({ technical_key_fingerprint: own_fingerprint });
-    if (own_plain) match_clauses.push({ technical_key: own_plain });
+      const match_clauses: Array<Record<string, string>> = [];
+      if (fingerprint)
+        match_clauses.push({ technical_key_fingerprint: fingerprint });
+      if (plain) match_clauses.push({ technical_key: plain });
 
-    const others = await this.prisma
-      .withoutScope()
-      .invoice_resolutions.findMany({
-        where: { OR: match_clauses, id: { not: own.id } },
-        select: {
-          id: true,
-          prefix: true,
-          accounting_entity: { select: { tax_id: true } },
-        },
-      });
+      const others = await this.prisma
+        .withoutScope()
+        .invoice_resolutions.findMany({
+          where: { OR: match_clauses, id: { notIn: own_ids } },
+          select: {
+            id: true,
+            prefix: true,
+            accounting_entity: { select: { tax_id: true } },
+          },
+        });
 
-    const own_nit = this.onlyDigits(own.accounting_entity?.tax_id);
-    const foreign_count = others.filter(
-      (o) =>
-        !isHabilitacionResolution(o.prefix ?? null) &&
-        this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
-    ).length;
-
-    return foreign_count ? { resolution_id: own.id, foreign_count } : null;
+      const own_nit = this.onlyDigits(row.accounting_entity?.tax_id);
+      const foreign_count = others.filter(
+        (o) => this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
+      ).length;
+      if (foreign_count) return { resolution_id: row.id, foreign_count };
+    }
+    return null;
   }
 
   /**
