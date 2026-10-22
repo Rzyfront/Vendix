@@ -1,6 +1,20 @@
 import { Routes } from '@angular/router';
 
+import { provideOrgDianApi } from './services/org-dian-context.factory';
+
 export const orgInvoicingRoutes: Routes = [
+  {
+    // Asistente de activación: pinta su propia cabecera, así que va fuera del
+    // wrapper legacy y ANTES de él (la ruta '' capturaría el segmento).
+    // `provideOrgDianApi()` apunta `DianConfigApiService` al rail
+    // `organization/invoicing`; es el MISMO componente que usa la tienda.
+    path: 'activation',
+    providers: [...provideOrgDianApi()],
+    loadComponent: () =>
+      import('../../store/invoicing/components/activation-wizard/activation-wizard.component').then(
+        (m) => m.ActivationWizardComponent,
+      ),
+  },
   {
     // Full-page detail owns its header, so keep it outside the legacy wrapper.
     path: 'received-documents/:id',
