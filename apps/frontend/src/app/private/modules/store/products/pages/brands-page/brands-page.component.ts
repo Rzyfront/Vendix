@@ -36,13 +36,19 @@ import {
 // Child Components
 import { BrandFormModalComponent } from './components/brand-form-modal.component';
 import { BrandListComponent } from './components/brand-list/brand-list.component';
+import { ProductAssignmentModalComponent } from '../../components/product-assignment-modal/product-assignment-modal.component';
 
 type BrandStateFilter = BrandState | 'all';
 
 @Component({
   selector: 'app-brands-page',
   standalone: true,
-  imports: [StatsComponent, BrandFormModalComponent, BrandListComponent],
+  imports: [
+    StatsComponent,
+    BrandFormModalComponent,
+    BrandListComponent,
+    ProductAssignmentModalComponent,
+  ],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile -->
@@ -104,10 +110,21 @@ type BrandStateFilter = BrandState | 'all';
         (edit)="openEdit($event)"
         (toggleState)="onToggleState($event)"
         (toggleFeatured)="onToggleFeatured($event)"
+        (manageProducts)="openProducts($event)"
         (delete)="onDelete($event)"
         (sort)="onSort($event)"
         (pageChange)="onPageChange($event)"
       ></app-brand-list>
+
+      @if (canUpdate()) {
+        <app-product-assignment-modal
+          mode="brand"
+          [(isOpen)]="isProductsModalOpen"
+          [entityId]="productsTarget()?.id ?? null"
+          [entityName]="productsTarget()?.name ?? ''"
+          (saved)="loadBrands()"
+        ></app-product-assignment-modal>
+      }
 
       <!-- Create/Edit Modal (only mounted when the user can mutate) -->
       @if (canMutate()) {
@@ -125,6 +142,8 @@ type BrandStateFilter = BrandState | 'all';
 export class BrandsPageComponent implements OnInit {
   brands = signal<Brand[]>([]);
   selected_brand = signal<Brand | null>(null);
+  isProductsModalOpen = signal(false);
+  productsTarget = signal<Brand | null>(null);
 
   filters = signal<{ page: number; limit: number }>({ page: 1, limit: 10 });
   totalItems = signal(0);
@@ -281,6 +300,12 @@ export class BrandsPageComponent implements OnInit {
     if (!this.canCreate()) return;
     this.selected_brand.set(null);
     this.is_modal_open.set(true);
+  }
+
+  openProducts(brand: Brand): void {
+    if (!this.canUpdate()) return;
+    this.productsTarget.set(brand);
+    this.isProductsModalOpen.set(true);
   }
 
   openEdit(brand: Brand): void {

@@ -48,6 +48,12 @@ import {
   CategoryState,
 } from '../interfaces';
 
+import {
+  AssignProductsResult,
+  ProductAssignmentAction,
+  ProductAssignmentIds,
+} from '../components/product-assignment-modal/product-assignment.types';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -178,6 +184,37 @@ export class CategoriesService {
     return this.http
       .delete<void>(`${this.apiUrl}/store/categories/${id}`, { params })
       .pipe(catchError(this.handleError));
+  }
+
+  /** Ids de los productos que hoy pertenecen a la entidad. */
+  getProductIds(id: number): Observable<ProductAssignmentIds> {
+    return this.http
+      .get<
+        ApiResponse<ProductAssignmentIds>
+      >(`${this.apiUrl}/store/categories/${id}/products/ids`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Agrega o quita productos (máx. 500 ids por llamada). */
+  assignProducts(
+    id: number,
+    action: ProductAssignmentAction,
+    productIds: number[],
+  ): Observable<AssignProductsResult> {
+    return this.http
+      .post<
+        ApiResponse<AssignProductsResult>
+      >(`${this.apiUrl}/store/categories/${id}/products`, {
+        action,
+        product_ids: productIds,
+      })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
   }
 
   private handleError(error: any): Observable<never> {

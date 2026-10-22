@@ -34,11 +34,17 @@ import {
 // Child Components
 import { CategoryFormModalComponent } from './components/category-form-modal.component';
 import { CategoryListComponent } from './components/category-list/category-list.component';
+import { ProductAssignmentModalComponent } from '../../components/product-assignment-modal/product-assignment-modal.component';
 
 @Component({
   selector: 'app-categories-page',
   standalone: true,
-  imports: [StatsComponent, CategoryFormModalComponent, CategoryListComponent],
+  imports: [
+    StatsComponent,
+    CategoryFormModalComponent,
+    CategoryListComponent,
+    ProductAssignmentModalComponent,
+  ],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile -->
@@ -101,9 +107,20 @@ import { CategoryListComponent } from './components/category-list/category-list.
         (delete)="onDelete($event)"
         (toggleState)="onToggleState($event)"
         (toggleFeatured)="onToggleFeatured($event)"
+        (manageProducts)="openProducts($event)"
         (sort)="onSort($event)"
         (pageChange)="onPageChange($event)"
       ></app-category-list>
+
+      @if (canUpdate()) {
+        <app-product-assignment-modal
+          mode="category"
+          [(isOpen)]="isProductsModalOpen"
+          [entityId]="productsTarget()?.id ?? null"
+          [entityName]="productsTarget()?.name ?? ''"
+          (saved)="loadCategories()"
+        ></app-product-assignment-modal>
+      }
 
       <!-- Create/Edit Modal -->
       @if (canMutate()) {
@@ -147,6 +164,8 @@ export class CategoriesPageComponent implements OnInit {
   isLoading = signal(false);
   isModalOpen = signal(false);
   isSubmitting = signal(false);
+  isProductsModalOpen = signal(false);
+  productsTarget = signal<ProductCategory | null>(null);
 
   totalPages = computed(() => {
     const limit = this.filters().limit ?? 10;
@@ -287,6 +306,12 @@ export class CategoriesPageComponent implements OnInit {
     if (!this.canUpdate()) return;
     this.selectedCategory.set(category);
     this.isModalOpen.set(true);
+  }
+
+  openProducts(category: ProductCategory): void {
+    if (!this.canUpdate()) return;
+    this.productsTarget.set(category);
+    this.isProductsModalOpen.set(true);
   }
 
   onModalCancel(): void {

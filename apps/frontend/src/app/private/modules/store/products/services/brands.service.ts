@@ -48,6 +48,14 @@ import {
   BrandState,
 } from '../interfaces';
 
+import {
+  AssignProductsResult,
+  BrandAssignPreview,
+  BrandAssignProductsResult,
+  ProductAssignmentAction,
+  ProductAssignmentIds,
+} from '../components/product-assignment-modal/product-assignment.types';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -160,6 +168,54 @@ export class BrandsService {
     return this.http
       .delete<void>(`${this.apiUrl}/store/brands/${id}`, { params })
       .pipe(catchError(this.handleError));
+  }
+
+  /** Ids de los productos que hoy pertenecen a la entidad. */
+  getProductIds(id: number): Observable<ProductAssignmentIds> {
+    return this.http
+      .get<
+        ApiResponse<ProductAssignmentIds>
+      >(`${this.apiUrl}/store/brands/${id}/products/ids`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Agrega o quita productos (máx. 500 ids por llamada). */
+  assignProducts(
+    id: number,
+    action: ProductAssignmentAction,
+    productIds: number[],
+  ): Observable<BrandAssignProductsResult> {
+    return this.http
+      .post<
+        ApiResponse<BrandAssignProductsResult>
+      >(`${this.apiUrl}/store/brands/${id}/products`, {
+        action,
+        product_ids: productIds,
+      })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Simula la asignación: qué productos dejarían otra marca (máx. 500 ids). */
+  previewAssignProducts(
+    id: number,
+    productIds: number[],
+  ): Observable<BrandAssignPreview> {
+    return this.http
+      .post<
+        ApiResponse<BrandAssignPreview>
+      >(`${this.apiUrl}/store/brands/${id}/products/preview`, {
+        product_ids: productIds,
+      })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
   }
 
   private handleError(error: any): Observable<never> {
