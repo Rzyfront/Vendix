@@ -812,4 +812,28 @@ describe('SubscriptionFiscalService · resoluciones · revisión F3/F5/F6', () =
       technical_key_fingerprint: null,
     });
   });
+  it('SEC-2: resolutions-for-emission conserva cltec_status/emittable y no devuelve technical_key_fingerprint', async () => {
+    const base = { ...buildResolutionRow(), document_type: 'sales_invoice' };
+    const service = buildService({
+      findMany: jest.fn().mockResolvedValue([
+        { ...base, id: 1, technical_key_fingerprint: 'fp-sha256' },
+        { ...base, id: 2, technical_key_fingerprint: null },
+      ]),
+    });
+
+    const out = await service.listResolutionsForEmission({
+      organizationId: 1,
+      accountingEntityId: 5,
+      documentType: 'sales_invoice',
+    });
+
+    const [con, sin] = out.data as any[];
+    expect(con).toMatchObject({ id: 1, cltec_status: 'present', emittable: true });
+    expect(sin).toMatchObject({ id: 2, cltec_status: 'absent', emittable: false });
+    for (const row of out.data) {
+      expect(row).not.toHaveProperty('technical_key_fingerprint');
+    }
+    expect(JSON.stringify(out)).not.toContain('fp-sha256');
+    expect(out.meta).toMatchObject({ total: 2, rejected_for_missing_cltec: 1 });
+  });
 });

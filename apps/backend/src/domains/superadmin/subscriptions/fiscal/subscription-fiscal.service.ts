@@ -4425,14 +4425,14 @@ export class SubscriptionFiscalService {
     //   (ClTec utilizable, validada por `isWellFormedTechnicalKey`).
     // - support_document: NO requiere ClTec; siempre es emitible.
     // Devolvemos el flag `emittable` para que el form muestre advertencia.
-    const techKeyShape: Record<string, unknown> = {};
-    for (const row of rows) {
+    // El fingerprint (SHA-256 de la ClTec) solo se usa aquí para decidir; NO
+    // viaja en la respuesta: correlaciona resoluciones que comparten clave.
+    const data = rows.map(({ technical_key_fingerprint, ...row }) => {
       let emittable = true;
       let cltecStatus: 'present' | 'absent' | 'invalid' = 'absent';
 
       if (args.documentType === 'sales_invoice') {
-        const fingerprint = row.technical_key_fingerprint;
-        if (!fingerprint) {
+        if (!technical_key_fingerprint) {
           emittable = false;
           cltecStatus = 'absent';
         } else {
@@ -4446,20 +4446,18 @@ export class SubscriptionFiscalService {
         cltecStatus = 'absent'; // support_document: irrelevante
       }
 
-      techKeyShape[row.id] = { emittable, cltecStatus, fingerprint: row.technical_key_fingerprint ?? null };
-      // Adjuntamos `emittable` y `cltec_status` al row sin mutar la select.
-      (row as any).emittable = emittable;
-      (row as any).cltec_status = cltecStatus;
-    }
+      return { ...row, emittable, cltec_status: cltecStatus };
+    });
 
     return {
-      data: rows,
+      data,
       meta: {
         document_type: args.documentType,
-        total: rows.length,
+        total: data.length,
         // El caller puede ordenar/filtrar en cliente.
-        rejected_for_missing_cltec: rows.filter(
-          (r) => (r as any).cltec_status === 'absent' && args.documentType === 'sales_invoice',
+        rejected_for_missing_cltec: data.filter(
+          (r) =>
+            r.cltec_status === 'absent' && args.documentType === 'sales_invoice',
         ).length,
       },
     };
