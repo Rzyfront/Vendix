@@ -130,9 +130,13 @@ function escapeHtml(value: string): string {
             <app-icon name="package" [size]="28" />
             <span class="text-sm">
               {{
-                searchTerm() || onlyUnassigned()
+                searchTerm()
                   ? 'Ningún producto coincide con la búsqueda'
-                  : 'No hay productos disponibles'
+                  : onlyUnassigned()
+                    ? mode() === 'brand'
+                      ? 'No hay productos sin marca'
+                      : 'No hay productos sin categoría'
+                    : 'No hay productos disponibles'
               }}
             </span>
           </div>

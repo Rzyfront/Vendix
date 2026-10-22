@@ -234,6 +234,22 @@ describe('ProductAssignmentModalComponent · tandas de asignación', () => {
       expect(q.without_category).toBeUndefined();
     });
 
+    it('al reabrir el modal el filtro vuelve a estar desactivado', async () => {
+      const component = build('category');
+      await new Promise((r) => setTimeout(r));
+      component.setOnlyUnassigned(true);
+      expect(component.onlyUnassigned()).toBeTrue();
+
+      component.isOpen.set(false);
+      TestBed.tick();
+      component.isOpen.set(true);
+      TestBed.tick();
+
+      expect(component.onlyUnassigned()).toBeFalse();
+      const q = getProductsPage.calls.mostRecent().args[0];
+      expect(q.without_category).toBeUndefined();
+    });
+
     it('seleccionar todos los resultados respeta el filtro activo', async () => {
       const component = build('category');
       await new Promise((r) => setTimeout(r));
