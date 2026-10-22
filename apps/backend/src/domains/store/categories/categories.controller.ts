@@ -17,7 +17,12 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CategoriesService } from './categories.service';
-import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto';
+import {
+  CreateCategoryDto,
+  UpdateCategoryDto,
+  CategoryQueryDto,
+  AssignProductsDto,
+} from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
@@ -116,6 +121,36 @@ export class CategoriesController {
     );
 
     return this.responseService.created(result, 'Imagen subida exitosamente');
+  }
+
+  @ApiOperation({
+    summary: 'Listar los IDs de productos (no archivados) de una categoría',
+  })
+  @Get(':id/products/ids')
+  @Permissions('store:categories:read')
+  async getProductIds(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.categoriesService.getProductIds(id);
+    return this.responseService.success(
+      result,
+      'Productos de la categoría obtenidos exitosamente',
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Agregar o quitar productos en bloque de una categoría',
+  })
+  @Post(':id/products')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:categories:update')
+  async assignProducts(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignProductsDto,
+  ) {
+    const result = await this.categoriesService.assignProducts(id, dto);
+    return this.responseService.success(
+      result,
+      'Productos de la categoría actualizados exitosamente',
+    );
   }
 
   @ApiOperation({

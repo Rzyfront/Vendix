@@ -37,7 +37,11 @@ describe('BrandsService', () => {
     },
     products: {
       count: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+      groupBy: jest.fn().mockResolvedValue([]),
     },
+    $transaction: jest.fn((fn: any) => fn(mockPrismaService)),
   };
 
   beforeEach(async () => {
@@ -218,7 +222,9 @@ describe('BrandsService', () => {
 
       const result = await service.findAll(query);
 
-      expect(result.data).toEqual(mockBrands);
+      expect(result.data).toEqual(
+        mockBrands.map((b: any) => ({ ...b, product_count: 0 })),
+      );
       expect(result.meta).toEqual({
         total: 2,
         page: 1,
@@ -329,7 +335,9 @@ describe('BrandsService', () => {
 
       const result = await service.findByStore(storeId, query);
 
-      expect(result.data).toEqual(mockBrands);
+      expect(result.data).toEqual(
+        mockBrands.map((b: any) => ({ ...b, product_count: 0 })),
+      );
       expect(result.meta).toEqual({
         total: 1,
         page: 1,
@@ -861,6 +869,275 @@ describe('BrandsService', () => {
       mockPrismaService.brands.findMany.mockRejectedValue(connectionError);
 
       await expect(service.findAll({})).rejects.toThrow(connectionError);
+    });
+  });
+
+  describe('findAll product_count', () => {
+    it('adds non-archived product_count keeping _count', async () => {
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 1, name: 'A', logo_url: null, _count: { products: 5 } },
+        { id: 2, name: 'B', logo_url: null, _count: { products: 1 } },
+      ]);
+      mockPrismaService.brands.count.mockResolvedValue(2);
+      mockPrismaService.products.groupBy.mockResolvedValueOnce([
+        { brand_id: 1, _count: { _all: 3 } },
+      ]);
+
+      const result = await service.findAll({});
+
+      expect(result.data.map((b: any) => b.product_count)).toEqual([3, 0]);
+      expect(result.data[0]._count).toEqual({ products: 5 });
+    });
+  });
+
+  describe('assignProducts', () => {
+    const P = (id: number, brand_id: number | null, state = 'active') => ({
+      id,
+      brand_id,
+      state,
+    });
+
+    beforeEach(() => {
+      mockPrismaService.brands.findFirst.mockReset();
+      mockPrismaService.brands.findMany.mockReset();
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.updateMany.mockReset();
+      mockPrismaService.brands.findFirst.mockResolvedValue({
+        id: 10,
+        name: 'Nike',
+      });
+    });
+
+    it('add sets brand, groups products moved from other brands', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, null),
+        P(2, 10),
+        P(3, 20),
+        P(4, 20),
+        P(5, 30),
+      ]);
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 20, name: 'Adidas' },
+        { id: 30, name: 'Puma' },
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 4 });
+
+      const result = await service.assignProducts(10, {
+        action: 'add',
+        product_ids: [1, 2, 3, 4, 5, 5],
+      });
+
+      expect(result).toEqual({
+        added: 4,
+        removed: 0,
+        unchanged: 1,
+        moved_from_brands: [
+          { brand_id: 20, brand_name: 'Adidas', count: 2 },
+          { brand_id: 30, brand_name: 'Puma', count: 1 },
+        ],
+      });
+      expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [1, 3, 4, 5] }, store_id: 1 },
+        data: { brand_id: 10, updated_at: expect.any(Date) },
+      });
+    });
+
+    it('add with everything already in the brand writes nothing', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, 10)]);
+
+      const result = await service.assignProducts(10, {
+        action: 'add',
+        product_ids: [1],
+      });
+
+      expect(result).toEqual({
+        added: 0,
+        removed: 0,
+        unchanged: 1,
+        moved_from_brands: [],
+      });
+      expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('remove only nulls products that hold this brand', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, 10),
+        P(2, 20),
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.assignProducts(10, {
+        action: 'remove',
+        product_ids: [1, 2],
+      });
+
+      expect(result).toEqual({
+        added: 0,
+        removed: 1,
+        unchanged: 1,
+        moved_from_brands: [],
+      });
+      expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [1, 2] }, store_id: 1, brand_id: 10 },
+        data: { brand_id: null, updated_at: expect.any(Date) },
+      });
+    });
+
+    it('rejects unknown products without writing', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, null)]);
+
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1, 99] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: { invalid_product_ids: [99] },
+        }),
+      });
+      expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects archived products on add', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, null, 'archived'),
+      ]);
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1] }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('throws BRAND_FIND_001 when brand is missing or archived', async () => {
+      mockPrismaService.brands.findFirst.mockResolvedValue(null);
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'BRAND_FIND_001' }),
+      });
+      expect(mockPrismaService.brands.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 10, store_id: 1, state: { not: 'archived' } },
+        }),
+      );
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getProductIds', () => {
+    it('returns non-archived product ids of the brand', async () => {
+      mockPrismaService.brands.findFirst.mockResolvedValue({ id: 10 });
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 4 },
+        { id: 9 },
+      ]);
+
+      await expect(service.getProductIds(10)).resolves.toEqual({
+        product_ids: [4, 9],
+        total: 2,
+      });
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith({
+        where: { brand_id: 10, store_id: 1, state: { not: 'archived' } },
+        select: { id: true },
+      });
+    });
+  });
+
+  describe('previewAssignProducts', () => {
+    it('groups products by current brand without writing', async () => {
+      mockPrismaService.brands.findFirst.mockReset();
+      mockPrismaService.brands.findFirst.mockResolvedValue({
+        id: 10,
+        name: 'Nike',
+      });
+      mockPrismaService.products.updateMany.mockReset();
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, brand_id: 10, state: 'active' },
+        { id: 2, brand_id: null, state: 'active' },
+        { id: 3, brand_id: null, state: 'active' },
+        { id: 4, brand_id: 20, state: 'active' },
+        { id: 5, brand_id: 20, state: 'active' },
+      ]);
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 20, name: 'Adidas' },
+      ]);
+
+      const result = await service.previewAssignProducts(10, {
+        product_ids: [1, 2, 3, 4, 5],
+      });
+
+      expect(result).toEqual({
+        already_in_brand: 1,
+        without_brand: 2,
+        to_move: [
+          { brand_id: 20, brand_name: 'Adidas', count: 2, product_ids: [4, 5] },
+        ],
+      });
+      expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects products outside the store', async () => {
+      mockPrismaService.brands.findFirst.mockReset();
+      mockPrismaService.brands.findFirst.mockResolvedValue({
+        id: 10,
+        name: 'Nike',
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      await expect(
+        service.previewAssignProducts(10, { product_ids: [99] }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+  });
+
+  describe('tenant isolation', () => {
+    it('scopes brand and product lookups with the context store_id', async () => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
+      mockPrismaService.brands.findFirst.mockReset();
+      mockPrismaService.brands.findFirst.mockResolvedValue({ id: 10, name: 'N' });
+      mockPrismaService.brands.findMany.mockReset();
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 20, name: 'Adidas' },
+      ]);
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.updateMany.mockReset();
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, brand_id: 20, state: 'active' },
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.assignProducts(10, { action: 'add', product_ids: [1] });
+
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [1] }, store_id: 7 } }),
+      );
+      expect(mockPrismaService.brands.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 10, store_id: 7, state: { not: 'archived' } },
+        }),
+      );
+      expect(mockPrismaService.brands.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [20] }, store_id: 7 } }),
+      );
+      expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: [1] }, store_id: 7 },
+        }),
+      );
+    });
+
+    it('throws STORE_CONTEXT_001 without a store in context', async () => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined);
+      mockPrismaService.products.findMany.mockReset();
+
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STORE_CONTEXT_001' }),
+      });
+      await expect(service.getProductIds(10)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+      await expect(
+        service.previewAssignProducts(10, { product_ids: [1] }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
     });
   });
 });

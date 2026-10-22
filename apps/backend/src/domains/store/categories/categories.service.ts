@@ -12,6 +12,9 @@ import {
   UpdateCategoryDto,
   CategoryQueryDto,
   AssignProductToCategoryDto,
+  AssignProductsDto,
+  AssignCategoryProductsResult,
+  CategoryProductIdsResult,
 } from './dto';
 import slugify from 'slugify';
 import { S3Service } from '@common/services/s3.service';
@@ -114,14 +117,24 @@ export class CategoriesService {
         skip,
         take: limit,
         orderBy: { [sort_by]: sort_order },
-        include: { stores: true },
+        include: {
+          stores: true,
+          _count: {
+            select: {
+              product_categories: {
+                where: { products: { state: { not: 'archived' } } },
+              },
+            },
+          },
+        },
       }),
       this.prisma.categories.count({ where }),
     ]);
 
     const signedCategories = await Promise.all(
-      categories.map(async (category) => ({
+      categories.map(async ({ _count, ...category }) => ({
         ...category,
+        product_count: _count?.product_categories ?? 0,
         image_url: await this.s3Service.signUrl(category.image_url, true),
       })),
     );
@@ -231,6 +244,110 @@ export class CategoriesService {
         state: 'archived',
       },
     });
+  }
+
+  /**
+   * Agrega o quita en bloque productos de una categoría. Todo o nada: si algún
+   * producto no existe en la tienda (o está archivado al agregar) se rechaza
+   * sin escribir. No toca otras categorías de los productos.
+   */
+  async assignProducts(
+    categoryId: number,
+    dto: AssignProductsDto,
+  ): Promise<AssignCategoryProductsResult> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const ids = [...new Set(dto.product_ids)];
+
+    return this.prisma.$transaction(async (tx: any) => {
+      const category = await tx.categories.findFirst({
+        where: { id: categoryId, store_id, state: { not: 'archived' } },
+        select: { id: true },
+      });
+      if (!category) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
+
+      const products = await tx.products.findMany({
+        where: { id: { in: ids }, store_id },
+        select: { id: true, brand_id: true, state: true },
+      });
+      const valid = new Set<number>(
+        products
+          .filter((p: any) => dto.action === 'remove' || p.state !== 'archived')
+          .map((p: any) => p.id),
+      );
+      const invalid = ids.filter((id) => !valid.has(id));
+      if (invalid.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_FIND_001,
+          'Algunos productos no existen en la tienda o están archivados',
+          { invalid_product_ids: invalid },
+        );
+      }
+
+      const current = await tx.product_categories.findMany({
+        where: { category_id: categoryId, product_id: { in: ids } },
+        select: { product_id: true },
+      });
+      const currentIds = new Set<number>(
+        current.map((r: any) => r.product_id),
+      );
+
+      let added = 0;
+      let removed = 0;
+      let changedIds: number[] = [];
+
+      if (dto.action === 'add') {
+        changedIds = ids.filter((id) => !currentIds.has(id));
+        if (changedIds.length > 0) {
+          const res = await tx.product_categories.createMany({
+            data: changedIds.map((product_id) => ({
+              product_id,
+              category_id: categoryId,
+            })),
+            skipDuplicates: true,
+          });
+          added = res.count;
+        }
+      } else {
+        changedIds = ids.filter((id) => currentIds.has(id));
+        if (changedIds.length > 0) {
+          const res = await tx.product_categories.deleteMany({
+            where: { category_id: categoryId, product_id: { in: changedIds } },
+          });
+          removed = res.count;
+        }
+      }
+
+      if (added + removed > 0) {
+        await tx.products.updateMany({
+          where: { id: { in: changedIds }, store_id },
+          data: { updated_at: new Date() },
+        });
+      }
+
+      return { added, removed, unchanged: ids.length - added - removed };
+    });
+  }
+
+  /** IDs de los productos no archivados que pertenecen a la categoría. */
+  async getProductIds(categoryId: number): Promise<CategoryProductIdsResult> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const category = await this.prisma.categories.findFirst({
+      where: { id: categoryId, store_id, state: { not: 'archived' } },
+      select: { id: true },
+    });
+    if (!category) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
+
+    const rows = await this.prisma.product_categories.findMany({
+      where: {
+        category_id: categoryId,
+        products: { state: { not: 'archived' } },
+      },
+      select: { product_id: true },
+    });
+    const product_ids = rows.map((r) => r.product_id);
+    return { product_ids, total: product_ids.length };
   }
 
   async uploadCategoryImage(file: Buffer, filename: string) {
