@@ -1,4 +1,4 @@
-import { SessionsService } from './sessions.service';
+import { SessionsService, humanCashReference } from './sessions.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { MovementsService } from '../movements/movements.service';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
@@ -1141,6 +1141,67 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(outflows[3].reason).toBe('Compra hielo');
     });
 
+    it('outflow withdrawal expone reference y notes y conserva reason', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 10, type: 'cash_out', amount: 1500, payment_method: 'cash', reference: '  Taxi  ', notes: ' Mensajero ', created_at: T(21) },
+      ]);
+      const { outflows } = await service.getCloseReport(SESSION_ID);
+      const w = outflows.find((o) => o.id === 10)!;
+      expect(w).toMatchObject({ kind: 'withdrawal', reference: 'Taxi', notes: 'Mensajero', reason: ' Mensajero ' });
+    });
+
+    it('referencias internas no se exponen como reference', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 11, type: 'refund', amount: 100, payment_method: 'cash', reference: 'order_cancelled', created_at: T(21) },
+      ]);
+      const { outflows } = await service.getCloseReport(SESSION_ID);
+      expect(outflows.find((o) => o.id === 4)!.reference).toBeNull(); // refund:9
+      expect(outflows.find((o) => o.id === 5)!.reference).toBeNull(); // payment_cancelled
+      expect(outflows.find((o) => o.id === 11)!.reference).toBeNull(); // order_cancelled
+      expect(outflows.find((o) => o.id === 7)!.reference).toBeNull(); // sin reference
+      expect(humanCashReference('dispatch_route:1:stop:2')).toBeNull();
+      expect(humanCashReference('   ')).toBeNull();
+    });
+
+    it('inflows lista los cash_in con reference/notes ordenados', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { id: 21, type: 'cash_in', amount: 500, payment_method: 'cash', reference: 'Cambio', notes: 'Billetes', created_at: T(22), user: { first_name: 'Ana', last_name: 'Paz' } },
+        ...movs,
+        { id: 20, type: 'cash_in', amount: 300.456, payment_method: 'cash', reference: 'refund:3', notes: null, created_at: T(20) },
+      ]);
+      const { inflows } = await service.getCloseReport(SESSION_ID);
+      expect(inflows).toEqual([
+        { id: 8, at: T(20).toISOString(), amount: 2000, reference: null, notes: null, user_name: null, payment_method: 'cash' },
+        { id: 20, at: T(20).toISOString(), amount: 300.46, reference: null, notes: null, user_name: null, payment_method: 'cash' },
+        { id: 21, at: T(22).toISOString(), amount: 500, reference: 'Cambio', notes: 'Billetes', user_name: 'Ana Paz', payment_method: 'cash' },
+      ]);
+    });
+
+    it('sesión cerrada con snapshot viejo: enriquece reference/notes/inflows sin escribir', async () => {
+      const snapshot = {
+        outflows: [
+          { id: 7, at: T(19).toISOString(), kind: 'withdrawal', order_id: null, order_number: null, payment_method: 'cash', amount: 3000, reason: 'Compra hielo', user_name: null },
+          { id: 999, at: T(19).toISOString(), kind: 'withdrawal', order_id: null, order_number: null, payment_method: 'cash', amount: 1, reason: null, user_name: null },
+        ],
+      };
+      wire({ ...base, status: 'closed', closed_at: T(21), actual_closing_amount: 187000, expected_closing_amount: 187000, difference: 0, summary: snapshot }, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue(
+        movs.map((m) => (m.id === 7 ? { ...m, reference: 'Hielo', notes: 'Compra hielo' } : m)),
+      );
+      prismaMock.cash_register_sessions.update = jest.fn();
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.outflows[0]).toMatchObject({ id: 7, reference: 'Hielo', notes: 'Compra hielo', reason: 'Compra hielo' });
+      expect(r.outflows[1]).toMatchObject({ id: 999, reference: null, notes: null });
+      expect(r.inflows.map((i) => i.id)).toEqual([8]);
+      expect(prismaMock.cash_register_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
     it('sales_summary excluye canceladas/reembolsadas y total cobrado sale de movimientos', async () => {
       wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
       const r = await service.getCloseReport(SESSION_ID);
@@ -1194,6 +1255,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(data.summary.consolidated.rows[0]).toMatchObject({ method: 'cash', counted: 187000, difference: 0 });
       expect(data.summary.cash_breakdown.counted).toBe(187000);
       expect(data.summary.outflows).toHaveLength(4);
+      expect(data.summary.inflows).toHaveLength(1);
       expect(data.expected_closing_amount).toBe(187000);
     });
   });
