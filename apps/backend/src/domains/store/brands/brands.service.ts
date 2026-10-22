@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
   CreateBrandDto,
@@ -24,6 +25,7 @@ export class BrandsService {
     private prisma: StorePrismaService,
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   private generateSlug(name: string): string {
@@ -350,7 +352,8 @@ export class BrandsService {
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const ids = [...new Set(dto.product_ids)];
 
-    return this.prisma.$transaction(async (tx: any) => {
+    let affectedIds: number[] = [];
+    const result = await this.prisma.$transaction(async (tx: any) => {
       const { products } = await this.loadAssignContext(
         tx,
         store_id,
@@ -364,6 +367,11 @@ export class BrandsService {
           where: { id: { in: ids }, store_id, brand_id: brandId },
           data: { brand_id: null, updated_at: new Date() },
         });
+        if (res.count > 0) {
+          affectedIds = products
+            .filter((p) => p.brand_id === brandId)
+            .map((p) => p.id);
+        }
         return {
           added: 0,
           removed: res.count,
@@ -381,6 +389,7 @@ export class BrandsService {
           data: { brand_id: brandId, updated_at: new Date() },
         });
         added = res.count;
+        if (added > 0) affectedIds = toChange.map((p) => p.id);
       }
       return {
         added,
@@ -389,6 +398,27 @@ export class BrandsService {
         moved_from_brands: moved.map(({ product_ids, ...rest }) => rest),
       };
     });
+
+    this.emitProductsBulkUpdated(store_id, affectedIds);
+    return result;
+  }
+
+  private emitProductsBulkUpdated(
+    store_id: number,
+    product_ids: number[],
+  ): void {
+    if (product_ids.length === 0) return;
+    try {
+      const organization_id = RequestContextService.getOrganizationId();
+      if (!organization_id) return;
+      this.eventEmitter.emit('products.bulk_updated', {
+        store_id,
+        organization_id,
+        product_ids,
+      });
+    } catch {
+      // Reindexar es enriquecimiento: jamás rompe la respuesta.
+    }
   }
 
   /** IDs de los productos no archivados de la marca en la tienda. */

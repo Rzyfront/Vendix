@@ -1614,6 +1614,20 @@ export class PrintLayoutComposerService {
       `<table class="csr-table">${rows}</table>`;
     const empty = (text: string): string =>
       `<div class="csr-empty">${esc(text)}</div>`;
+    // Mantener alineado con `cashMovementDetail` del frontend
+    // (apps/frontend/.../pos/components/cash-session-report.component.ts).
+    const joinDetail = (parts: Array<unknown>): string => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const p of parts) {
+        const t = String(p ?? '').trim();
+        if (t && !seen.has(t)) {
+          seen.add(t);
+          out.push(t);
+        }
+      }
+      return out.join(' · ');
+    };
     const block = (title: string, inner: string): string =>
       `<div class="csr-title">${esc(title)}</div>${inner}`;
 
@@ -1701,7 +1715,7 @@ export class PrintLayoutComposerService {
           ? outflows
               .map((o) => {
                 const ord = o.order_number ? ` #${o.order_number}` : o.order_id ? ` #${o.order_id}` : '';
-                const detail = [o.reason, o.user_name].filter(Boolean).join(' · ');
+                const detail = joinDetail([o.reason, o.reference, o.notes, o.user_name]);
                 return (
                   table(
                     row(
@@ -1715,10 +1729,27 @@ export class PrintLayoutComposerService {
               .join('')
           : empty('Sin salidas');
 
+      const inflows: any[] = Array.isArray(r.inflows) ? r.inflows : [];
+      const inflowsHtml =
+        inflows.length > 0
+          ? inflows
+              .map((i) => {
+                const detail = joinDetail([i.reference, i.notes, i.user_name]);
+                return (
+                  table(
+                    row(`${i.at_formatted || ''} Entrada`.trim(), fmt(i.amount)),
+                  ) +
+                  `<div class="csr-empty">${esc(method(i.payment_method))}${detail ? ` · ${esc(detail)}` : ''}</div>`
+                );
+              })
+              .join('')
+          : empty('Sin entradas');
+
       top =
         block('Lo que debe haber', consolidated) +
         integrity +
         block('Cómo se llega al efectivo', breakdown) +
+        block('Entradas de la sesión', inflowsHtml) +
         block('Salidas de la sesión', outflowsHtml) +
         block('Ventas', sales);
     } else {

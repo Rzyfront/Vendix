@@ -723,6 +723,39 @@ describe('SubscriptionFiscalService · resoluciones · revisión F3/F5/F6', () =
     });
   });
 
+  it('SEC-L1: maskConfig de plataforma tiene el mismo saneo que tienda y organizacion', () => {
+    const service = buildService({});
+    const out: any = (service as any).maskConfig({
+      id: 1,
+      software_pin_encrypted: 'enc:pin',
+      certificate_password_encrypted: 'enc:pwd',
+      certificate_s3_key: 'dian/certs/1/firma.p12',
+      certificate_kms_key_id: 'arn:aws:kms:us-east-1:123456789012:key/abc',
+      enablement_inherited_from_id: 99,
+      last_test_result: { success: true, note_phase: { deferred: [{ xml: '<x/>' }] } },
+      enablement_evidence: {
+        note_phase: { deferred: [] },
+        inheritance: { from_dian_configuration_id: 99, source_environment: 'production' },
+      },
+    });
+    expect(out).not.toHaveProperty('certificate_s3_key');
+    expect(out).not.toHaveProperty('certificate_kms_key_id');
+    expect(out).not.toHaveProperty('enablement_inherited_from_id');
+    expect(out.enablement_inherited).toBe(true);
+    expect(out.has_certificate).toBe(true);
+    expect(out.certificate_present).toBe(true);
+    expect(out.software_pin_encrypted).toBe('****');
+    expect(out.certificate_password_encrypted).toBe('****');
+    expect(out.last_test_result).toEqual({ success: true });
+    expect(out.enablement_evidence).toEqual({
+      inheritance: { source_environment: 'production' },
+    });
+    const json = JSON.stringify(out);
+    expect(json).not.toContain('firma.p12');
+    expect(json).not.toContain('arn:aws');
+    expect(json).not.toContain('from_dian_configuration_id');
+  });
+
   it('F3-H2: listResolutions filtra is_active=false', async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const service = buildService({ findMany });

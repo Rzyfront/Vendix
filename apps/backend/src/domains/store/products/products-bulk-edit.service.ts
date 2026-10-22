@@ -1,4 +1,5 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductsService } from './products.service';
@@ -179,6 +180,7 @@ export class ProductsBulkEditService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ===========================================================================
@@ -534,7 +536,7 @@ export class ProductsBulkEditService {
         const updated = await this.productsService.update(
           id,
           productPayload,
-          { lean: true },
+          { lean: true, skip_embedding_event: true },
         );
         results.push({
           id,
@@ -553,12 +555,36 @@ export class ProductsBulkEditService {
       }
     }
 
+    // UN evento por lote, tras el commit de cada producto, solo con los ok.
+    this.emitBulkUpdated(
+      results.filter((r) => r.status === 'ok').map((r) => r.id),
+    );
+
     return {
       total: results.length,
       successful: results.filter((result) => result.status === 'ok').length,
       failed: results.filter((result) => result.status === 'error').length,
       results,
     };
+  }
+
+  /** Reindexado semántico del lote; nunca rompe la respuesta. */
+  private emitBulkUpdated(productIds: number[]): void {
+    if (productIds.length === 0) return;
+    try {
+      const store_id = RequestContextService.getStoreId();
+      const organization_id = RequestContextService.getOrganizationId();
+      if (!store_id || !organization_id) return;
+      this.eventEmitter.emit('products.bulk_updated', {
+        store_id,
+        organization_id,
+        product_ids: productIds,
+      });
+    } catch (error: any) {
+      this.logger.warn(
+        `No se pudo emitir products.bulk_updated: ${error?.message}`,
+      );
+    }
   }
 
   // ===========================================================================

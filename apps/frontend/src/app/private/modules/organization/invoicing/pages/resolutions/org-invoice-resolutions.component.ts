@@ -287,7 +287,7 @@ import {
             <app-input
               label="Clave técnica"
               formControlName="technical_key"
-              placeholder="Opcional"
+              [placeholder]="editingResolution() ? 'Vacío = conservar la clave guardada' : 'Opcional'"
             />
           }
         </form>
@@ -791,7 +791,12 @@ export class OrgInvoiceResolutionsComponent {
     };
     if (!internal) {
       payload.resolution_number = value.resolution_number!;
-      payload.technical_key = value.technical_key || null;
+      // En edición la fila ya no trae la ClTec (el backend no la devuelve), así
+      // que el campo llega vacío: vacío = conservar la clave guardada. Solo se
+      // envía si el usuario tecleó una nueva; `null` la borraría.
+      const technicalKey = (value.technical_key ?? '').trim();
+      if (technicalKey) payload.technical_key = technicalKey;
+      else if (!editing) payload.technical_key = null;
     }
     if (!locked) {
       payload.prefix = value.prefix!;

@@ -29,6 +29,7 @@ import {
   cartItemToLineView,
 } from '../../components/order-line-item/order-line-item.component';
 import { cartLineKey } from '../../utils/cart-line-key.util';
+import { sumGrossSubtotal } from '../../utils/gross-subtotal.util';
 import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -4046,8 +4047,8 @@ export class CheckoutComponent implements OnInit {
      * checkout-whatsapp-location-fallback: extends the message with the
      * pending-shipping context when the order was created via
      * `submitWhatsappFallbackOrder()`. Omitted (or `pendingShipping: false`)
-     * on the normal `?channel=whatsapp` flow — the message body is then
-     * byte-identical to before this parameter existed.
+     * on the normal `?channel=whatsapp` flow, where the message lists the gross
+     * lines, then `*Envío:*` / `*Descuento:*` when present, then the Total.
      */
     opts?: {
       pendingShipping: boolean;
@@ -4084,12 +4085,7 @@ export class CheckoutComponent implements OnInit {
       order.subtotal_gross != null
         ? Number(order.subtotal_gross)
         : order.items?.length
-          ? order.items
-              .filter((i) => !i.cancelled_at)
-              .reduce(
-                (sum, i) => sum + Number(i.total_price_gross ?? i.total_price),
-                0,
-              )
+          ? sumGrossSubtotal(order.items)
           : Number(order.subtotal ?? 0) + Number(order.tax_amount ?? 0);
     const shippingCost = Number(order.shipping_cost ?? 0);
     const discountAmount = Number(order.discount_amount ?? 0);
@@ -4125,8 +4121,8 @@ export class CheckoutComponent implements OnInit {
         : `Hola! Acabo de comprar en *${storeName}* 🛒`;
     // checkout-whatsapp-location-fallback: extra block with contact/address/
     // notes/pending-shipping totals, only when the order was created via the
-    // location fallback. Empty string when `opts` is omitted, so the message
-    // below is byte-identical to the pre-existing normal WhatsApp flow.
+    // location fallback. Empty string when `opts` is omitted; the normal flow
+    // then shows gross lines, `*Envío:*`/`*Descuento:*` and the Total.
     const pendingLines = opts?.pendingShipping
       ? [
           opts.contactName ? `*Cliente:* ${opts.contactName}` : '',

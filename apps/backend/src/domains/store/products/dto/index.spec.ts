@@ -66,3 +66,36 @@ describe('ProductQueryDto.is_ingredient (ValidationPipe real)', () => {
     expect(result.limit).toBe(10);
   });
 });
+
+describe('ProductQueryDto.without_category / without_brand (ValidationPipe real)', () => {
+  const pipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+  const transform = (payload: Record<string, unknown>) =>
+    pipe.transform(payload, { type: 'query', metatype: ProductQueryDto });
+
+  it("coacciona 'true' a true", async () => {
+    const r = await transform({ without_category: 'true', without_brand: 'true' });
+    expect(r.without_category).toBe(true);
+    expect(r.without_brand).toBe(true);
+  });
+
+  it("coacciona 'false' a false (no activa el filtro)", async () => {
+    const r = await transform({ without_category: 'false', without_brand: 'false' });
+    expect(r.without_category).toBe(false);
+    expect(r.without_brand).toBe(false);
+  });
+
+  it('ausente o vacío queda undefined', async () => {
+    const r = await transform({ without_brand: '' });
+    expect(r.without_category).toBeUndefined();
+    expect(r.without_brand).toBeUndefined();
+  });
+
+  it('rechaza valores no booleanos', async () => {
+    await expect(transform({ without_category: 'quizas' })).rejects.toBeDefined();
+  });
+});

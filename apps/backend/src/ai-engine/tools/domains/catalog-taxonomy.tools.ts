@@ -4,7 +4,10 @@ import { validateSync } from 'class-validator';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
 import { CategoriesService } from '../../../domains/store/categories/categories.service';
 import { BrandsService } from '../../../domains/store/brands/brands.service';
-import { AssignProductsDto as AssignCategoryProductsDto } from '../../../domains/store/categories/dto';
+import {
+  AssignProductsDto as AssignCategoryProductsDto,
+  MAX_ASSIGN_PRODUCT_IDS,
+} from '../../../domains/store/categories/dto';
 import { AssignProductsDto as AssignBrandProductsDto } from '../../../domains/store/brands/dto';
 
 /**
@@ -23,7 +26,7 @@ export interface BrandToolDeps {
 }
 
 const DOMAIN = 'products';
-const MAX_PRODUCT_IDS = 500;
+const MAX_PRODUCT_IDS = MAX_ASSIGN_PRODUCT_IDS;
 const LIST_DEFAULT_LIMIT = 20;
 const LIST_MAX_LIMIT = 50;
 /** Tope de nombres que se listan al pedir que el usuario elija. */
@@ -294,7 +297,7 @@ async function resolveAssignment(
   if (productIds.length > MAX_PRODUCT_IDS) {
     return failure(
       `Asignar productos a ${kind.noun}`,
-      `Son demasiados productos de una vez (máximo ${MAX_PRODUCT_IDS}).`,
+      `Son demasiados productos de una vez: recibí ${productIds.length} y el máximo es ${MAX_PRODUCT_IDS}.`,
       `Divide la lista en grupos de ${MAX_PRODUCT_IDS} o menos.`,
     );
   }
@@ -426,7 +429,7 @@ export function createCategoryTools(deps: CategoryToolDeps): RegisteredTool[] {
       domain: DOMAIN,
       requiresConfirmation: true,
       description:
-        'Pone varios productos en una categoría, o los saca de ella, en una sola operación (hasta 500). Un producto puede estar en varias categorías: agregar no lo quita de las demás. Antes de escribir, obtén el identificador de la categoría con list_categories y los de los productos con la búsqueda de productos; no inventes identificadores. Solo cambia la pertenencia a la categoría, no edita los productos.',
+        `Pone varios productos en una categoría, o los saca de ella, en una sola operación (hasta ${MAX_PRODUCT_IDS}). Un producto puede estar en varias categorías: agregar no lo quita de las demás. Antes de escribir, obtén el identificador de la categoría con list_categories y los de los productos con la búsqueda de productos; no inventes identificadores. Solo cambia la pertenencia a la categoría, no edita los productos.`,
       parameters: assignSchema('category'),
       requiredPermissions: ['store:categories:update'],
       preview: async (args) => {
@@ -440,9 +443,14 @@ export function createCategoryTools(deps: CategoryToolDeps): RegisteredTool[] {
         const { target, mode, productIds } = resolved.value;
         const label = `Categoría ${target.name}`;
         try {
+          // Mismo contrato que el preview de marcas: valida categoría y
+          // productos (PROD_FIND_001 + invalid_product_ids) antes de proyectar.
+          const projection = await categoriesService.previewAssignProducts(
+            target.id,
+            { action: mode, product_ids: productIds },
+          );
           const current = await categoriesService.getProductIds(target.id);
-          const inCategory = new Set(current.product_ids);
-          const alreadyIn = productIds.filter((id) => inCategory.has(id)).length;
+          const alreadyIn = projection.already_in_category;
           const notIn = productIds.length - alreadyIn;
 
           if (mode === 'add') {
@@ -567,7 +575,7 @@ export function createBrandTools(deps: BrandToolDeps): RegisteredTool[] {
       domain: DOMAIN,
       requiresConfirmation: true,
       description:
-        'Asigna una marca a varios productos, o se la quita, en una sola operación (hasta 500). Un producto tiene una sola marca: si ya tenía otra, pasa a la nueva y la propuesta avisa cuántos productos cambian de marca. Para quitar la marca usa mode remove con la marca que tienen actualmente. Antes de escribir, obtén el identificador de la marca con list_brands y los de los productos con la búsqueda de productos; no inventes identificadores. Solo cambia la marca, no edita los productos.',
+        `Asigna una marca a varios productos, o se la quita, en una sola operación (hasta ${MAX_PRODUCT_IDS}). Un producto tiene una sola marca: si ya tenía otra, pasa a la nueva y la propuesta avisa cuántos productos cambian de marca. Para quitar la marca usa mode remove con la marca que tienen actualmente. Antes de escribir, obtén el identificador de la marca con list_brands y los de los productos con la búsqueda de productos; no inventes identificadores. Solo cambia la marca, no edita los productos.`,
       parameters: assignSchema('brand'),
       requiredPermissions: ['store:brands:update'],
       preview: async (args) => {

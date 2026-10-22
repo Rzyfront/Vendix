@@ -49,6 +49,9 @@ import {
 const toCents = (v: unknown): number => Math.round(Number(v ?? 0) * 100);
 const fromCents = (c: number): number => Math.round(c) / 100;
 
+/** Los movimientos manuales (`cash_in`/`cash_out`) siempre son en efectivo. */
+const CASH_PAYMENT_METHOD = 'cash';
+
 /**
  * Referencia escrita por el cajero. Devuelve null si está vacía o es una
  * referencia interna del sistema (`refund:<id>`, `payment_cancelled`,
@@ -115,7 +118,7 @@ function classifyMovement(
     case 'sale':
       return { kind: 'sale', method: m.payment_method || 'unknown' };
     case 'cash_in':
-      return { kind: 'cash_in', method: 'cash' };
+      return { kind: 'cash_in', method: CASH_PAYMENT_METHOD };
     case 'refund': {
       const method = m.payment_method || 'unknown';
       const ref = m.reference ?? '';
@@ -125,8 +128,8 @@ function classifyMovement(
     }
     case 'cash_out':
       return isLegacyOrderCancellationCashOut(m)
-        ? { kind: 'cancellation', method: 'cash' }
-        : { kind: 'withdrawal', method: 'cash' };
+        ? { kind: 'cancellation', method: CASH_PAYMENT_METHOD }
+        : { kind: 'withdrawal', method: CASH_PAYMENT_METHOD };
     default:
       return null;
   }
@@ -2018,7 +2021,7 @@ export class SessionsService {
             reference: movementReference(m),
             notes: m.notes?.trim() || null,
             user_name: movementUserName(m),
-            payment_method: 'cash',
+            payment_method: CASH_PAYMENT_METHOD,
           }) as CashInflow,
       )
       .sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);

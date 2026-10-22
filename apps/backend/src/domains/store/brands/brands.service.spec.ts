@@ -1,4 +1,7 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 // The brands domain throws typed VendixHttpException (BRAND_*), not raw Nest
 // exceptions — the HTTP status now travels in the error code, not the class.
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
@@ -8,7 +11,13 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { S3Service } from '@common/services/s3.service';
 import { BrandsService } from './brands.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
+import {
+  CreateBrandDto,
+  UpdateBrandDto,
+  BrandQueryDto,
+  AssignProductsDto,
+  PreviewAssignProductsDto,
+} from './dto';
 import { brand_state_enum } from '@prisma/client';
 
 describe('BrandsService', () => {
@@ -44,10 +53,13 @@ describe('BrandsService', () => {
     $transaction: jest.fn((fn: any) => fn(mockPrismaService)),
   };
 
+  const mockEventEmitter = { emit: jest.fn() };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BrandsService,
+        { provide: EventEmitter2, useValue: mockEventEmitter },
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
@@ -983,6 +995,68 @@ describe('BrandsService', () => {
       });
     });
 
+    it('add emite UN products.bulk_updated solo con los productos cambiados', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, null),
+        P(2, 10),
+        P(3, 20),
+      ]);
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 20, name: 'Adidas' },
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.assignProducts(10, {
+        action: 'add',
+        product_ids: [1, 2, 3],
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'products.bulk_updated',
+        { store_id: 1, organization_id: 1, product_ids: [1, 3] },
+      );
+    });
+
+    it('remove emite solo los productos que tenían la marca', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, 10),
+        P(2, 20),
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.assignProducts(10, {
+        action: 'remove',
+        product_ids: [1, 2],
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'products.bulk_updated',
+        { store_id: 1, organization_id: 1, product_ids: [1] },
+      );
+    });
+
+    it('no emite si no cambió nada (0 cambiados)', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, 10)]);
+
+      await service.assignProducts(10, { action: 'add', product_ids: [1] });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('no emite si la transacción falla', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, null)]);
+      mockPrismaService.products.updateMany.mockRejectedValue(
+        new Error('boom'),
+      );
+
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1] }),
+      ).rejects.toThrow('boom');
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
     it('rejects unknown products without writing', async () => {
       mockPrismaService.products.findMany.mockResolvedValue([P(1, null)]);
 
@@ -1138,6 +1212,23 @@ describe('BrandsService', () => {
         service.previewAssignProducts(10, { product_ids: [1] }),
       ).rejects.toBeInstanceOf(VendixHttpException);
       expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tope de ids por request', () => {
+    const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+    it.each([
+      ['AssignProductsDto', AssignProductsDto, { action: 'add' }],
+      ['PreviewAssignProductsDto', PreviewAssignProductsDto, {}],
+    ])('%s acepta 100 ids y rechaza 101', (_name, cls, extra) => {
+      const ok = validateSync(
+        plainToInstance(cls as any, { ...extra, product_ids: range(100) }) as object,
+      );
+      expect(ok).toHaveLength(0);
+      const bad = validateSync(
+        plainToInstance(cls as any, { ...extra, product_ids: range(101) }) as object,
+      );
+      expect(bad[0].constraints).toHaveProperty('arrayMaxSize');
     });
   });
 });

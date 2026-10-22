@@ -23,6 +23,7 @@ import {
   ModalComponent,
   PaginationComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../shared/components/index';
 import { runChunked } from '../../../../../../shared/utils/run-chunked';
 import { extractApiErrorMessage } from '../../../../../../core/utils';
@@ -51,7 +52,7 @@ function escapeHtml(value: string): string {
 /**
  * Modal reutilizable "Productos de <nombre>": asigna o quita productos en bloque
  * de una categoría o una marca. El diff (agregados / quitados) se calcula contra
- * los miembros actuales y se envía en tandas de 500 ids.
+ * los miembros actuales y se envía en tandas de 100 ids.
  */
 @Component({
   selector: 'app-product-assignment-modal',
@@ -64,6 +65,7 @@ function escapeHtml(value: string): string {
     IconComponent,
     InputsearchComponent,
     PaginationComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -83,6 +85,13 @@ function escapeHtml(value: string): string {
           [ngModel]="searchTerm()"
           (ngModelChange)="onSearch($event)"
         ></app-inputsearch>
+
+        <app-toggle
+          [checked]="onlyUnassigned()"
+          [disabled]="isBusy()"
+          [label]="mode() === 'brand' ? 'Sin marca' : 'Sin categoría'"
+          (toggled)="setOnlyUnassigned($event)"
+        ></app-toggle>
 
         <div class="flex flex-wrap items-center gap-2">
           <app-button
@@ -123,7 +132,11 @@ function escapeHtml(value: string): string {
               {{
                 searchTerm()
                   ? 'Ningún producto coincide con la búsqueda'
-                  : 'No hay productos disponibles'
+                  : onlyUnassigned()
+                    ? mode() === 'brand'
+                      ? 'No hay productos sin marca'
+                      : 'No hay productos sin categoría'
+                    : 'No hay productos disponibles'
               }}
             </span>
           </div>
@@ -253,6 +266,8 @@ export class ProductAssignmentModalComponent {
   readonly total = signal(0);
   readonly page = signal(1);
   readonly searchTerm = signal('');
+  /** Filtro "Sin categoría" / "Sin marca" según el modo. */
+  readonly onlyUnassigned = signal(false);
   readonly isLoading = signal(false);
   readonly isSelectingAll = signal(false);
   readonly isSaving = signal(false);
@@ -324,6 +339,12 @@ export class ProductAssignmentModalComponent {
     this.loadPage();
   }
 
+  setOnlyUnassigned(value: boolean): void {
+    this.onlyUnassigned.set(value);
+    this.page.set(1);
+    this.loadPage();
+  }
+
   onPageChange(page: number): void {
     this.page.set(page);
     this.loadPage();
@@ -334,7 +355,10 @@ export class ProductAssignmentModalComponent {
     try {
       const search = this.searchTerm().trim() || undefined;
       const result = await firstValueFrom(
-        this.productsApi.getProductIds({ search }),
+        this.productsApi.getProductIds({
+          search,
+          ...this.unassignedFilter(),
+        }),
       );
       this.selected.update((current) => {
         const next = new Set(current);
@@ -361,11 +385,16 @@ export class ProductAssignmentModalComponent {
 
     this.isSaving.set(true);
     try {
-      if (this.mode() === 'brand' && added.length > 0) {
-        const groups = await this.previewMoves(id, added);
-        if (groups.length > 0 && !(await this.confirmMoves(groups))) {
-          return;
-        }
+      const groups =
+        this.mode() === 'brand' && added.length > 0
+          ? await this.previewMoves(id, added)
+          : [];
+      // Un solo diálogo: quitados de esta entidad y/o movimientos desde otras marcas.
+      if (
+        (removed.length > 0 || groups.length > 0) &&
+        !(await this.confirmChanges(removed.length, groups))
+      ) {
+        return;
       }
 
       let addedCount = 0;
@@ -443,16 +472,35 @@ export class ProductAssignmentModalComponent {
     return [...merged.values()];
   }
 
-  private confirmMoves(groups: BrandMoveGroup[]): Promise<boolean> {
-    const lines = groups
-      .map(
-        (g) =>
-          `${g.count} ${g.count === 1 ? 'producto dejará' : 'productos dejarán'} la marca ${escapeHtml(g.brand_name)}`,
-      )
-      .join('<br>');
+  private confirmChanges(
+    removedCount: number,
+    groups: BrandMoveGroup[],
+  ): Promise<boolean> {
+    const isBrand = this.mode() === 'brand';
+    const lines: string[] = [];
+    if (removedCount > 0) {
+      const name = escapeHtml(this.entityName());
+      const target = isBrand ? `la marca «${name}»` : `la categoría «${name}»`;
+      lines.push(
+        `Se ${removedCount === 1 ? 'quitará 1 producto' : `quitarán ${removedCount} productos`} de ${target}`,
+      );
+    }
+    for (const g of groups) {
+      lines.push(
+        `${g.count} ${g.count === 1 ? 'producto dejará' : 'productos dejarán'} la marca ${escapeHtml(g.brand_name)}`,
+      );
+    }
+    const title =
+      removedCount === 0
+        ? 'Mover productos de otras marcas'
+        : groups.length > 0
+          ? 'Confirmar cambios de productos'
+          : isBrand
+            ? 'Quitar productos de la marca'
+            : 'Quitar productos de la categoría';
     return this.dialog.confirm({
-      title: 'Mover productos de otras marcas',
-      message: `${lines}<br><br>¿Deseas continuar?`,
+      title,
+      message: `${lines.join('<br>')}<br><br>¿Deseas continuar?`,
       confirmText: 'Continuar',
       cancelText: 'Cancelar',
     });
@@ -467,6 +515,7 @@ export class ProductAssignmentModalComponent {
 
   private initialize(id: number): void {
     this.searchTerm.set('');
+    this.onlyUnassigned.set(false);
     this.page.set(1);
     this.products.set([]);
     this.total.set(0);
@@ -493,6 +542,13 @@ export class ProductAssignmentModalComponent {
     }
   }
 
+  private unassignedFilter(): { without_category?: true; without_brand?: true } {
+    if (!this.onlyUnassigned()) return {};
+    return this.mode() === 'brand'
+      ? { without_brand: true }
+      : { without_category: true };
+  }
+
   private loadPage(): void {
     const token = ++this.loadToken;
     this.isLoading.set(true);
@@ -501,6 +557,7 @@ export class ProductAssignmentModalComponent {
         page: this.page(),
         limit: PAGE_SIZE,
         search: this.searchTerm().trim() || undefined,
+        ...this.unassignedFilter(),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

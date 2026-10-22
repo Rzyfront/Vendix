@@ -3,7 +3,7 @@
 export type ProductAssignmentAction = 'add' | 'remove';
 
 /** Máximo de ids por llamada que acepta el backend. */
-export const MAX_ASSIGN_PRODUCT_IDS = 500;
+export const MAX_ASSIGN_PRODUCT_IDS = 100;
 
 export interface ProductAssignmentIds {
   product_ids: number[];

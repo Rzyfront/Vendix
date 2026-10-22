@@ -227,9 +227,10 @@ jobs:
         if: steps.specs.outputs.run == 'true'
         working-directory: apps/backend
         shell: bash
-        # ~1 min de setup + máximo 4 min de Jest. Agotar el presupuesto falla,
+        # ~1 min de setup + máximo 8 min de Jest. Agotar el presupuesto falla,
         # no oculta regresiones con un verde. No usar test:path (runInBand).
-        timeout-minutes: 4
+        # 8 y no 4: con 21 specs (303 tests) Jest tardó 243 s y el paso se cortó.
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           mapfile -d '' -t changed < "$RUNNER_TEMP/backend-pr-regression-specs.paths"

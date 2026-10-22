@@ -52,6 +52,7 @@ export interface TenantDianConfigRow {
   readonly certificate_source?: string | null;
   readonly certificate_uploaded_at?: string | null;
   readonly certificate_kms_key_id?: string | null;
+  readonly certificate_uses_kms?: boolean;
   readonly certificate_password_encrypted?: string | null;
 }
 
@@ -190,6 +191,7 @@ export class TenantDianConsoleStore {
       certificate_source: config.certificate_source ?? null,
       certificate_uploaded_at: config.certificate_uploaded_at ?? null,
       certificate_kms_key_id: config.certificate_kms_key_id ?? null,
+      certificate_uses_kms: config.certificate_uses_kms ?? Boolean(config.certificate_kms_key_id),
       // El rail redacta `certificate_s3_key` y publica su presencia. Leer sólo
       // la clave haría que esta consola dijera «sin certificado» sobre uno que
       // existe, y la reacción natural a eso es volver a subirlo.

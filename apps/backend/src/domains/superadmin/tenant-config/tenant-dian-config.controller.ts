@@ -185,6 +185,8 @@ export class TenantDianConfigController {
         this.toPositiveInt(page, 1),
         Math.min(this.toPositiveInt(limit, 20), 100),
         config_id ? this.toPositiveInt(config_id, 0) || undefined : undefined,
+        // La consola de superadmin (tenant-dian-audit) pinta los XML.
+        { include_xml: true },
       ),
     );
     return this.response.paginated(
@@ -832,19 +834,30 @@ export class TenantDianConfigController {
   }
 
   /**
-   * Los servicios delegados ya enmascaran `software_pin_encrypted` y
-   * `certificate_password_encrypted` con `maskSensitiveFields`, pero NO
-   * `certificate_s3_key`. Una clave de objeto no es la clave privada, pero
-   * nombra dónde vive: en una consola cross-tenant se reporta su presencia, no
-   * su ubicación.
+   * Los servicios delegados ya sanean la fila (`redactDianConfigForHttp`): quitan
+   * `certificate_s3_key` y `certificate_kms_key_id` y entregan ya calculados
+   * `certificate_present` y `certificate_uses_kms`. Aquí solo se respeta ese valor
+   * y, como defensa, se quita la ubicación si algún servicio devolviera la fila
+   * cruda: recalcular desde un campo que ya no llega daría siempre `false`.
+   * Una clave de objeto o un ARN no son la clave privada, pero nombran dónde vive:
+   * en una consola cross-tenant se reporta su presencia, no su ubicación.
    */
   private redact<T>(config: T): T {
     if (!config || typeof config !== 'object') return config;
 
-    const { certificate_s3_key, ...rest } = config as Record<string, any>;
+    const { certificate_s3_key, certificate_kms_key_id, ...rest } =
+      config as Record<string, any>;
     return {
       ...rest,
-      certificate_present: Boolean(certificate_s3_key),
+      certificate_present: Boolean(
+        rest.certificate_present ?? certificate_s3_key,
+      ),
+      ...((rest.certificate_uses_kms !== undefined ||
+        certificate_kms_key_id !== undefined) && {
+        certificate_uses_kms: Boolean(
+          rest.certificate_uses_kms ?? certificate_kms_key_id,
+        ),
+      }),
     } as T;
   }
 

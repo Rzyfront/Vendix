@@ -335,6 +335,10 @@ export class CashSessionCloseDataProvider implements IDocumentDataProvider {
         ...o,
         at_formatted: stamp(o.at),
       })),
+      inflows: (report.inflows ?? []).map((i) => ({
+        ...i,
+        at_formatted: stamp(i.at),
+      })),
       printed_at_formatted: stamp(new Date().toISOString()),
     };
 

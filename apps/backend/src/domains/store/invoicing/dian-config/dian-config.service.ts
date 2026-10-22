@@ -37,6 +37,7 @@ import {
 import { looksLikeVerdict } from './test-set-wait.util';
 import { toPublicResolution } from '../resolutions/resolutions.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
+import { redactDianConfigForHttp } from './dian-config-redaction.util';
 import {
   DIAN_CONFIGURATION_TYPES,
   defaultDocumentTypeFor,
@@ -122,34 +123,13 @@ export class DianConfigService {
    * contraseña, la herencia de habilitación no expone el id de la fila fuente
    * (puede ser de OTRA cuenta): `enablement_inherited_from_id` se sustituye por
    * `enablement_inherited` y `enablement_evidence.inheritance.from_dian_configuration_id`
-   * se elimina. La columna y la auditoría no se tocan.
+   * se elimina. La columna y la auditoría no se tocan. Además (SEC-L2) no sale
+   * la ubicación del `.p12` ni el ARN de KMS (`certificate_present` /
+   * `certificate_uses_kms`) ni el `note_phase` con XML firmados. Ver
+   * `redactDianConfigForHttp`.
    */
   private maskSensitiveFields(config: any) {
-    const { enablement_inherited_from_id, ...rest } = config;
-    const evidence = rest.enablement_evidence;
-    const inheritance = evidence?.inheritance;
-    const public_evidence =
-      inheritance && typeof inheritance === 'object'
-        ? (() => {
-            const { from_dian_configuration_id: _from, ...inheritance_rest } =
-              inheritance;
-            return { ...evidence, inheritance: inheritance_rest };
-          })()
-        : evidence;
-
-    return {
-      ...rest,
-      ...(rest.enablement_evidence !== undefined && {
-        enablement_evidence: public_evidence,
-      }),
-      enablement_inherited:
-        enablement_inherited_from_id !== null &&
-        enablement_inherited_from_id !== undefined,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
-    };
+    return redactDianConfigForHttp(config);
   }
 
   private onlyDigits(value?: string | null): string {
@@ -1669,8 +1649,17 @@ export class DianConfigService {
   /**
    * Gets audit logs for the current store's DIAN configurations.
    * Optionally filtered by config_id.
+   *
+   * SEC-L2: `select` explícito. Por defecto NO devuelve `request_xml` /
+   * `response_xml` (XML firmados, con el X509 público y los hashes del PIN);
+   * solo la bitácora cross-tenant del superadmin los pide con `include_xml`.
    */
-  async getAuditLogs(page = 1, limit = 20, config_id?: number) {
+  async getAuditLogs(
+    page = 1,
+    limit = 20,
+    config_id?: number,
+    options: { include_xml?: boolean } = {},
+  ) {
     const context = this.getContext();
     const organization_id = this.requireOrganizationId(context.organization_id);
     const fiscalScope = await this.fiscalScope.requireFiscalScope(
@@ -1702,6 +1691,19 @@ export class DianConfigService {
     const [data, total] = await Promise.all([
       this.prisma.dian_audit_logs.findMany({
         where: where_clause,
+        select: {
+          id: true,
+          dian_configuration_id: true,
+          action: true,
+          document_type: true,
+          document_number: true,
+          status: true,
+          error_message: true,
+          cufe: true,
+          duration_ms: true,
+          created_at: true,
+          ...(options.include_xml && { request_xml: true, response_xml: true }),
+        },
         orderBy: { created_at: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

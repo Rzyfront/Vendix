@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { DocumentPrintService } from '../../../../shared/services/print';
+import { sumGrossSubtotal } from '../utils/gross-subtotal.util';
 import { parseVariantAttributes } from '../../../../shared/utils/variant-attributes.util';
 
 // ============================================================================
@@ -179,12 +180,7 @@ export class GuestOrderPrintService {
 
     const fmt = (n: number) => this.currencyService.format(Number(n || 0));
     // Subtotal con impuesto incluido: suma de líneas brutas no canceladas.
-    const grossSubtotal = (order.items ?? [])
-      .filter((i) => !i.cancelled_at)
-      .reduce(
-        (sum, i) => sum + Number(i.line_total_gross ?? i.total_price ?? 0),
-        0,
-      );
+    const grossSubtotal = sumGrossSubtotal(order.items);
 
     const orderStateLabels: Record<string, string> = {
       draft: 'Borrador',

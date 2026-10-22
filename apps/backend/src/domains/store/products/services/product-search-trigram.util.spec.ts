@@ -94,6 +94,37 @@ describe('product-search-trigram (C.3)', () => {
     });
   });
 
+  describe('filtros sin marca / sin categoría (T8-H1)', () => {
+    const where = (f: any) =>
+      extractWhereClause(
+        buildTrigramRankedQuery(1, ['cafe'], f, 'cafe', 20, 0).sql,
+      );
+
+    it('withoutBrand/withoutCategory true agregan los predicados', () => {
+      const w = where({ withoutBrand: true, withoutCategory: true });
+      expect(w).toContain('p.brand_id IS NULL');
+      expect(w).toMatch(
+        /NOT EXISTS \(SELECT 1 FROM public\.product_categories pc WHERE pc\.product_id = p\.id\)/,
+      );
+    });
+
+    it('false/null/ausente no cambian el SQL ni los params', () => {
+      const base = buildTrigramRankedQuery(1, ['cafe'], { brandId: 5 }, 'cafe', 20, 0);
+      for (const f of [
+        { brandId: 5, withoutBrand: false, withoutCategory: false },
+        { brandId: 5, withoutBrand: null, withoutCategory: null },
+      ]) {
+        const q = buildTrigramRankedQuery(1, ['cafe'], f, 'cafe', 20, 0);
+        expect(q.sql).toBe(base.sql);
+        expect(q.params).toEqual(base.params);
+      }
+    });
+
+    it('valor no booleano lanza TrigramFilterError', () => {
+      expect(() => where({ withoutBrand: 'true' })).toThrow(TrigramFilterError);
+    });
+  });
+
   describe('LIKE literal + ESCAPE (F-080)', () => {
     it('cada LIKE lleva ESCAPE explícito', () => {
       const { sql } = buildTrigramRankedQuery(1, ['cafe'], null, 'cafe', 20, 0);

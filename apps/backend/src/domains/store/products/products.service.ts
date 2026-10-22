@@ -1709,6 +1709,8 @@ export class ProductsService {
       pos_optimized,
       barcode,
       category_id,
+      without_category,
+      without_brand,
       track_inventory,
       product_type,
       requires_booking,
@@ -1766,10 +1768,18 @@ export class ProductsService {
       ...(search &&
         !barcode &&
         this.buildSearchCondition(search, smartAllowed)),
-      ...(brand_id && { brand_id }),
-      ...(category_id && {
+      // `without_brand` / `without_category` (solo `true` filtra). Si coexisten
+      // con `brand_id` / `category_id` explícitos se combinan en AND (conjunto
+      // vacío), sin reglas extra.
+      ...(brand_id && !without_brand && { brand_id }),
+      ...(without_brand && !brand_id && { brand_id: null }),
+      // brand_id explícito + sin marca: contradicción => conjunto vacío.
+      ...(without_brand &&
+        brand_id && { brand_id: { equals: brand_id, not: brand_id } }),
+      ...((category_id || without_category) && {
         product_categories: {
-          some: { category_id },
+          ...(category_id && { some: { category_id } }),
+          ...(without_category && { none: {} }),
         },
       }),
       ...(track_inventory !== undefined && { track_inventory }),
@@ -2208,9 +2218,13 @@ export class ProductsService {
       query.pos_optimized ?? '',
       Array.isArray(query.ids) ? [...query.ids].sort((a, b) => a - b).join(',') : '',
     ].join('|');
+    // Solo se anexa si están activos: sin estos filtros la clave queda idéntica.
+    const unassigned =
+      (query.without_category === true ? '|wc' : '') +
+      (query.without_brand === true ? '|wb' : '');
     let fhash = 'nofilter';
     try {
-      fhash = createHash('sha256').update(filter).digest('hex').slice(0, 12);
+      fhash = createHash('sha256').update(filter + unassigned).digest('hex').slice(0, 12);
     } catch {
       fhash = 'unhashable';
     }
@@ -2412,6 +2426,8 @@ export class ProductsService {
       posOptimized: query.pos_optimized ?? null,
       brandId: query.brand_id ?? null,
       categoryId: query.category_id ?? null,
+      withoutBrand: query.without_brand === true ? true : null,
+      withoutCategory: query.without_category === true ? true : null,
       trackInventory: query.track_inventory ?? null,
       productType: query.product_type ?? null,
       requiresBooking: query.requires_booking ?? null,
@@ -3892,7 +3908,7 @@ export class ProductsService {
   async update(
     id: number,
     updateProductDto: UpdateProductDto,
-    options?: { lean?: boolean },
+    options?: { lean?: boolean; skip_embedding_event?: boolean },
   ): Promise<any> {
     // Fase 1: pure-ingredient sanitization. Idempotent.
     let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
@@ -4944,6 +4960,12 @@ export class ProductsService {
         { timeout: 30000 },
       );
 
+      // Reindexado semántico: solo tras el commit. El lote (edición masiva)
+      // lo suprime y emite UN `products.bulk_updated` por su cuenta.
+      if (!options?.skip_embedding_event) {
+        await this.emitProductUpdatedEvent(result);
+      }
+
       // Retorno ligero: el consumidor en lote solo reporta identidad, así que
       // se sirve desde la fila ya devuelta por la transacción sin una lectura
       // extra.
@@ -4962,6 +4984,46 @@ export class ProductsService {
         }
       }
       throw error;
+    }
+  }
+
+  /**
+   * Emite `product.updated` para reindexar el embedding. Enriquecimiento, nunca
+   * precondición: cualquier fallo (lectura o emit) se traga y se registra.
+   */
+  private async emitProductUpdatedEvent(product: {
+    id: number;
+    store_id: number;
+    name: string;
+    description?: string | null;
+  }): Promise<void> {
+    try {
+      const row = await this.prisma.products.findFirst({
+        where: { id: product.id },
+        select: {
+          stores: { select: { organization_id: true } },
+          product_categories: {
+            take: 1,
+            orderBy: { category_id: 'asc' },
+            select: { categories: { select: { name: true } } },
+          },
+        },
+      });
+      const organization_id = row?.stores?.organization_id;
+      if (!organization_id) return;
+
+      this.eventEmitter.emit('product.updated', {
+        store_id: product.store_id,
+        organization_id,
+        product_id: product.id,
+        name: product.name,
+        description: product.description ?? undefined,
+        category: row?.product_categories?.[0]?.categories?.name,
+      });
+    } catch (error: any) {
+      this.logger.warn(
+        `No se pudo emitir product.updated (${product.id}): ${error?.message}`,
+      );
     }
   }
 

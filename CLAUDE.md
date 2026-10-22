@@ -146,6 +146,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Analyzing or comparing a web feature/module/flow against the mobile app | `mobile-parity-audit` |
 | Applying @RequireAIFeature decorator + AiAccessGuard to controllers | `vendix-subscription-gate` |
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
+| Archiving, activating or choosing the in-use resolution for a document type | `vendix-dian-enablement` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Auditing web↔mobile feature parity or mobile coverage gaps | `mobile-parity-audit` |
 | Auditing what Vexi changed in a store | `vendix-vexi-agent` |
@@ -237,6 +238,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating lazy-loaded frontend routes | `vendix-frontend-routing` |
 | Creating migrations, editing migration SQL, deploying migrations to production, recovering from P3009, failed migration recovery, ALTER TYPE ADD VALUE, checksum mismatch, modified migration after apply | `vendix-prisma-migrations` |
 | Creating new AI tools | `vendix-ai-agent-tools` |
+| Creating or editing DIAN resolutions or internal note series (NCVS/NDVS/NASVS/NAEVS) | `vendix-dian-enablement` |
 | Creating or editing product variants | `vendix-product-variants` |
 | Creating or editing service variants | `vendix-product-variants` |
 | Creating or modifying guided tours in frontend | `vendix-tour` |
@@ -327,6 +329,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Enabling realtime write proposals or dedicated approval audio capture | `vendix-agent-voice-consent` |
 | Escribir o revisar una migración de base de datos | `vendix-known-errors` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
+| Exposing DIAN configuration or resolution data over HTTP (technical_key, fingerprints, source ids) | `vendix-dian-enablement` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Exposing a job-status poll endpoint that returns job.returnvalue | `vendix-ai-queue` |
 | Exposing a tool to the realtime voice surface | `vendix-ai-agent-tools` |
@@ -468,6 +471,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
 | Tagging a Linear issue Aprobado after merging a PR to develop | `pr-code-review` |
 | Tagging a Linear issue Requiere cambios after requesting changes on a PR | `pr-code-review` |
+| Touching the cross-account numbering guard (INVOICING_RESOLUTION_017) | `vendix-dian-enablement` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Turning Vexi off for a store | `vendix-ai-chat` |
@@ -515,9 +519,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
 | Wiring withholding (retefuente/reteiva/reteica) accounting or declarations | `vendix-tax-typing` |
 | Working across apps or shared libraries | `vendix-core` |
+| Working on DIAN enablement, test set or promotion to production | `vendix-dian-enablement` |
 | Working on backend domains | `vendix-backend-domain` |
+| Working on enablement inheritance between DIAN configurations (PIN + software ID) | `vendix-dian-enablement` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working on notifications dropdown or bell badge UI | `vendix-notifications-system` |
+| Working on the electronic invoicing activation wizard (/admin/invoicing/activation) | `vendix-dian-enablement` |
 | Working under apps/backend/src/domains/store/payroll | `vendix-payroll` |
 | Working under apps/backend/src/domains/store/payroll/pila | `vendix-pila-flatfile` |
 | Working with @defer, @if, @for control flow blocks in templates | `vendix-zoneless-signals` |
@@ -657,6 +664,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | `vendix-saas-billing`    | SaaS platform billing with partner rev-share split      | [skills/vendix-saas-billing/SKILL.md](skills/vendix-saas-billing/SKILL.md)       |
 | `vendix-subscription-gate` | Feature gating by store subscription state (AI + modules) | [skills/vendix-subscription-gate/SKILL.md](skills/vendix-subscription-gate/SKILL.md) |
 | `vendix-redis-quota`     | Periodic quota counter with Redis INCR + EXPIRE         | [skills/vendix-redis-quota/SKILL.md](skills/vendix-redis-quota/SKILL.md)         |
+| `vendix-dian-enablement` | DIAN enablement and numbering rules (note series, archiving, cross-account guard, inheritance) | [skills/vendix-dian-enablement/SKILL.md](skills/vendix-dian-enablement/SKILL.md) |
 
 ## ⚙️ Configuration & Sync
 

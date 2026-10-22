@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductsBulkEditService } from './products-bulk-edit.service';
 import { ProductsService } from './products.service';
@@ -149,6 +150,7 @@ function makeWriteOffPlan(
 describe('ProductsBulkEditService', () => {
   let service: ProductsBulkEditService;
   let prisma: MockPrisma;
+  let eventEmitter: { emit: jest.Mock };
   let productsService: {
     update: jest.Mock;
     remove: jest.Mock;
@@ -157,6 +159,7 @@ describe('ProductsBulkEditService', () => {
 
   beforeEach(async () => {
     prisma = buildMockPrisma();
+    eventEmitter = { emit: jest.fn() };
     productsService = {
       update: jest.fn(),
       remove: jest.fn(),
@@ -171,6 +174,7 @@ describe('ProductsBulkEditService', () => {
         ProductsBulkEditService,
         { provide: StorePrismaService, useValue: prisma },
         { provide: ProductsService, useValue: productsService },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
 
@@ -663,7 +667,7 @@ describe('ProductsBulkEditService', () => {
       expect(productsService.update).toHaveBeenCalledWith(
         2,
         { track_inventory: false },
-        { lean: true },
+        { lean: true, skip_embedding_event: true },
       );
     });
 
@@ -680,7 +684,38 @@ describe('ProductsBulkEditService', () => {
 
       expect(productsService.update).toHaveBeenCalledWith(1, dto.changes, {
         lean: true,
+        skip_embedding_event: true,
       });
+    });
+
+    it('emite UN products.bulk_updated con solo los ids ok', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        { id: 1, name: 'Uno' },
+        { id: 2, name: 'Dos' },
+        { id: 3, name: 'Tres' },
+      ]);
+      productsService.update
+        .mockResolvedValueOnce({ id: 1, name: 'Uno' })
+        .mockRejectedValueOnce(new Error('falla'))
+        .mockResolvedValueOnce({ id: 3, name: 'Tres' });
+
+      await service.apply(makeDto([1, 2, 3], { is_featured: true }));
+
+      expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(eventEmitter.emit).toHaveBeenCalledWith('products.bulk_updated', {
+        store_id: 10,
+        organization_id: 6,
+        product_ids: [1, 3],
+      });
+    });
+
+    it('no emite si todas las filas fallan (0 cambiados)', async () => {
+      prisma.products.findMany.mockResolvedValue([{ id: 1, name: 'Uno' }]);
+      productsService.update.mockRejectedValue(new Error('falla'));
+
+      await service.apply(makeDto([1], { is_featured: true }));
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('no escribe Prisma directamente: toda la escritura es de update()', async () => {

@@ -543,8 +543,8 @@ export class VendixLandingComponent implements OnInit {
     manufacturing: {
       value: 'manufacturing',
       title: 'Manufactura & Producción',
-      tag: 'MANUFACTURA & TALLERES DE PRODUCCIÓN',
-      headline: 'Fórmulas de producción, órdenes de taller y costeo real',
+      tag: 'MANUFACTURA & PRODUCCIÓN',
+      headline: 'Fórmulas, órdenes de producción y costeo real',
       description:
         'Calcula con precisión el costo unitario de fabricación sumando materia prima, mano de obra e insumos. Genera órdenes de producción con descuento automático de inventario por etapa productiva.',
       feature1: {
@@ -597,7 +597,7 @@ export class VendixLandingComponent implements OnInit {
     { value: 'gym', label: 'Gimnasios & Fitness', icon: 'activity' },
     { value: 'beauty', label: 'Servicios & Belleza', icon: 'sparkles' },
     { value: 'service', label: 'Consultoría', icon: 'briefcase' },
-    { value: 'manufacturing', label: 'Manufactura & Taller', icon: 'boxes' },
+    { value: 'manufacturing', label: 'Manufactura & Producción', icon: 'boxes' },
     { value: 'construction', label: 'Contratistas & Obra', icon: 'building-2' },
   ];
 

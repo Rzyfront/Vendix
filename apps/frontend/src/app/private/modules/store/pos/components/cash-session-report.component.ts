@@ -51,7 +51,11 @@ export function cashReportTaxes(r: CashSessionCloseReport) {
   };
 }
 
-/** Une partes de detalle omitiendo vacías y repetidas (trim). */
+/**
+ * Une partes de detalle omitiendo vacías y repetidas (trim).
+ * Mantener alineado con `joinDetail` del backend
+ * (apps/backend/.../print-formats/services/print-layout-composer.service.ts).
+ */
 export function cashMovementDetail(parts: Array<string | null | undefined>): string {
   const seen = new Set<string>();
   const out: string[] = [];

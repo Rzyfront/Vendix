@@ -356,7 +356,10 @@ export class ActivationCertificateStepComponent {
           const data = res?.data ?? (res as unknown as IdentityDocumentsStatus);
           this.status.set(data);
           this.loading.set(false);
-          if (adoptBranch && data.certificate_provisioning_status !== 'not_required' && !this.config()?.certificate_s3_key) {
+          // La respuesta saneada ya no trae `certificate_s3_key`: manda `certificate_present`.
+          const cfg = this.config();
+          const hasCert = cfg?.certificate_present ?? Boolean(cfg?.certificate_s3_key);
+          if (adoptBranch && data.certificate_provisioning_status !== 'not_required' && !hasCert) {
             this.branch.set('without_cert');
           }
         },

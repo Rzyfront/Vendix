@@ -270,6 +270,7 @@ export class DianCertificatePanelComponent {
     if (!certificate) return false;
     return Boolean(
       certificate.certificate_fingerprint ||
+        certificate.certificate_present ||
         certificate.certificate_s3_key ||
         certificate.certificate_uploaded_at ||
         certificate.certificate_expiry,
@@ -413,7 +414,7 @@ export class DianCertificatePanelComponent {
 
   readonly custodyNote = computed(() => {
     const certificate = this.certificate();
-    if (certificate?.certificate_kms_key_id) {
+    if (certificate?.certificate_uses_kms ?? certificate?.certificate_kms_key_id) {
       return (
         'La llave privada la custodia AWS KMS: la firma se produce dentro del ' +
         'servicio y el archivo .p12 nunca se abre en memoria del proceso.'
