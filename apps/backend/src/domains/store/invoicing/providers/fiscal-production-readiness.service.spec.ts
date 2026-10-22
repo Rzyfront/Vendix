@@ -254,9 +254,8 @@ describe('FiscalProductionReadinessService', () => {
       expect(finding!.resolution_id).toBe(10);
       // La 9 es del MISMO NIT (otra entidad contable del mismo obligado): no es
       // un hallazgo. La 8 es de otro NIT: sí lo es.
-      expect(finding!.foreign).toEqual([
-        { resolution_id: 8, tax_id: '902075738' },
-      ]);
+      expect(finding!.foreign_count).toBe(1);
+      expect(JSON.stringify(finding)).not.toContain('902075738');
     });
 
     it('no reporta nada cuando la clave solo la usan entidades del mismo NIT', async () => {
@@ -276,7 +275,7 @@ describe('FiscalProductionReadinessService', () => {
         PARAMS,
         'production',
       );
-      expect(finding?.foreign.map((f) => f.resolution_id)).toEqual([9]);
+      expect(finding?.foreign_count).toBe(1);
     });
 
     it('no reporta nada cuando la resolución no tiene clave técnica', async () => {
@@ -313,6 +312,38 @@ describe('FiscalProductionReadinessService', () => {
       ).resolves.toBeNull();
     });
 
+    it('NO reporta nada si la resolución propia es de habilitación (SETP)', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          prefix: 'SETP',
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
+    it('ignora las resoluciones SETP de otros NIT al contar', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          prefix: 'FE',
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, prefix: 'SETP', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
     it('el checklist marca la comprobación como no satisfecha y explica qué copiar', () => {
       const { service } = createService(readyConfig());
 
@@ -320,13 +351,16 @@ describe('FiscalProductionReadinessService', () => {
         ...readyConfig(),
         shared_technical_key: {
           resolution_id: 10,
-          foreign: [{ resolution_id: 8, tax_id: '902075738' }],
+          foreign_count: 1,
         },
       });
 
       const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
       expect(check?.satisfied).toBe(false);
-      expect(check?.action).toMatch(/902075738/);
+      expect(check?.action).not.toContain('902075738');
+      expect(check?.action).not.toContain('res 8');
+      expect(check?.action).toMatch(/con 1 resolución\(es\)/);
+      expect(JSON.stringify(report)).not.toContain('902075738');
       // El mensaje debe nombrar el siguiente paso real: la resolución de
       // producción en MUISCA. Decir solo «clave compartida» deja al operador
       // buscando una contaminación que en habilitación no existe.

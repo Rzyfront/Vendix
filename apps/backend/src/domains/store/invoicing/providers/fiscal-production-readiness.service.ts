@@ -164,7 +164,12 @@ export interface ProductionReadinessReport {
  */
 export type SharedTechnicalKeyFinding = {
   resolution_id: number;
-  foreign: Array<{ resolution_id: number; tax_id: string | null }>;
+  /**
+   * Solo el CONTEO de resoluciones de otro NIT. A propósito no lleva ids ni NIT
+   * ajenos: este hallazgo viaja en `checks[].action` hacia tiendas y
+   * organizaciones, y nombrar a otra cuenta sería filtrarla.
+   */
+  foreign_count: number;
 };
 
 /**
@@ -869,10 +874,8 @@ export class FiscalProductionReadinessService {
             'peor que no comprobarla.'
           : shared_cltec
           ? `La clave técnica de la resolución ${shared_cltec.resolution_id} está ` +
-            `compartida con ${shared_cltec.foreign.length} resolución(es) de otro NIT ` +
-            `(${shared_cltec.foreign
-              .map((f) => `res ${f.resolution_id} → NIT ${f.tax_id ?? 'sin NIT'}`)
-              .join('; ')}). La DIAN asigna una clave técnica por rango y por NIT, y ` +
+            `compartida con ${shared_cltec.foreign_count} resolución(es) de otro NIT. ` +
+            'La DIAN asigna una clave técnica por rango y por NIT, y ' +
             'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
             'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
             'el consecutivo ya gastado. ' +
@@ -1215,6 +1218,7 @@ export class FiscalProductionReadinessService {
         },
         select: {
           id: true,
+          prefix: true,
           technical_key: true,
           technical_key_fingerprint: true,
           accounting_entity: { select: { tax_id: true } },
@@ -1239,6 +1243,10 @@ export class FiscalProductionReadinessService {
     // dar por hecho.
     if (!own) return null;
 
+    // El rango de habilitación (SETP) comparte la ClTec fija por diseño de la
+    // DIAN: no es hallazgo, y listarlo enumeraría a las demás cuentas.
+    if (isHabilitacionResolution(own.prefix ?? null)) return null;
+
     const own_fingerprint = (own.technical_key_fingerprint ?? '').trim();
     const own_plain = (own.technical_key ?? '').trim();
     if (!own_fingerprint && !own_plain) return null;
@@ -1254,21 +1262,19 @@ export class FiscalProductionReadinessService {
         where: { OR: match_clauses, id: { not: own.id } },
         select: {
           id: true,
+          prefix: true,
           accounting_entity: { select: { tax_id: true } },
         },
       });
 
     const own_nit = this.onlyDigits(own.accounting_entity?.tax_id);
-    const foreign = others
-      .filter(
-        (o) => this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
-      )
-      .map((o) => ({
-        resolution_id: o.id,
-        tax_id: o.accounting_entity?.tax_id ?? null,
-      }));
+    const foreign_count = others.filter(
+      (o) =>
+        !isHabilitacionResolution(o.prefix ?? null) &&
+        this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
+    ).length;
 
-    return foreign.length ? { resolution_id: own.id, foreign } : null;
+    return foreign_count ? { resolution_id: own.id, foreign_count } : null;
   }
 
   /**
