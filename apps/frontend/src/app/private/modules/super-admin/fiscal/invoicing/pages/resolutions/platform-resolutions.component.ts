@@ -47,9 +47,22 @@ import { ModuleShellActionsService } from '../../../../../../../shared/component
 import {
   ResolutionArchiveModalComponent,
   ResolutionsInUseCardComponent,
+  deactivatedResolutionsToast,
+  extractDeactivatedResolutionIds,
+  findNoteSeriesConflicts,
   formatArchivedAt,
   isResolutionInUse,
+  isNoteSeriesType,
+  noteSeriesActivationMessage,
+  requirementsFor,
+  type FiscalDocumentType,
 } from '../../../../../../../shared/components/dian';
+import {
+  INTERNAL_SERIES_FORM_VALIDITY_YEARS,
+  INTERNAL_SERIES_INITIAL_RANGE,
+} from '../../../../../../../shared/components/dian/fiscal-document-requirements';
+import { ConfirmationModalComponent } from '../../../../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   ENVIRONMENT_OPTIONS,
@@ -92,6 +105,7 @@ interface ResolutionFormControls {
     SelectorComponent,
     StatsComponent,
     ResolutionsInUseCardComponent,
+    ConfirmationModalComponent,
   ],
   templateUrl: './platform-resolutions.component.html',
 })
@@ -152,6 +166,20 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
    * formulario recién precargado. Se limpia al cerrar el modal.
    */
   readonly scanUnverified = signal<string[]>([]);
+  /** Tipo de documento del formulario, como signal para que la plantilla reaccione. */
+  readonly selectedDocType = signal<PlatformResolutionDocumentType>('sales_invoice');
+  /** Serie interna de nota: sin N° de resolución, ClTec ni validación DIAN. */
+  readonly isNoteType = computed(() => this.isNoteDocType(this.selectedDocType()));
+  /** Guardado/activación en espera de confirmación por conflicto de serie de notas. */
+  readonly pendingConfirm = signal<{ message: string; proceed: () => void } | null>(null);
+  /** Última siembra de defaults de nota, para no pisar lo que el usuario editó. */
+  private noteSeed: {
+    prefix: string;
+    range_from: number;
+    range_to: number;
+    valid_from: string;
+    valid_to: string;
+  } | null = null;
 
   readonly documentTypeOptions = RESOLUTION_DOCUMENT_TYPE_OPTIONS;
   readonly environmentOptions = ENVIRONMENT_OPTIONS;
@@ -335,6 +363,13 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     );
 
   constructor() {
+    this.form.controls.document_type.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => {
+        this.selectedDocType.set(type);
+        if (!this.editing()) this.applyNoteDefaults(type);
+      });
+
     this.store.loadResolutions();
     this.store.loadInUse();
     this.store.loadStatus();
@@ -360,8 +395,71 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       valid_to: null,
     });
     this.form.enable({ emitEvent: false });
+    this.noteSeed = null;
+    this.selectedDocType.set('sales_invoice');
+    this.setRangoFinalMin(2);
     this.formInvalid.set(this.form.invalid);
     this.modalOpen.set(true);
+  }
+
+  /** Abre el alta con el tipo indicado (CTA «Crear serie» de la tarjeta). */
+  onCreateSeries(type: FiscalDocumentType): void {
+    if (type !== 'credit_note' && type !== 'debit_note') return;
+    this.openModal();
+    this.form.controls.document_type.setValue(type);
+    this.formInvalid.set(this.form.invalid);
+  }
+
+  private isNoteDocType(type: string | null | undefined): boolean {
+    return type === 'credit_note' || type === 'debit_note';
+  }
+
+  private setRangoFinalMin(min: number): void {
+    const ctrl = this.form.controls.rango_final;
+    ctrl.setValidators([Validators.required, Validators.min(min)]);
+    ctrl.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /**
+   * Al elegir una nota en el alta se siembran prefijo, rango y vigencia de la
+   * serie interna. Solo se pisan los campos vacíos o que aún valen la siembra
+   * anterior; al volver a un tipo DIAN se retira lo sembrado.
+   */
+  private applyNoteDefaults(type: PlatformResolutionDocumentType): void {
+    const c = this.form.controls;
+    const prev = this.noteSeed;
+    const untouched = (cur: unknown, was: unknown) =>
+      cur === null || cur === '' || cur === undefined || (prev !== null && cur === was);
+
+    if (!this.isNoteDocType(type)) {
+      if (prev) {
+        if (c.prefix.value === prev.prefix) c.prefix.setValue(null);
+        if (c.rango_inicial.value === prev.range_from) c.rango_inicial.setValue(null);
+        if (c.rango_final.value === prev.range_to) c.rango_final.setValue(null);
+        if (c.valid_from.value === prev.valid_from) c.valid_from.setValue(null);
+        if (c.valid_to.value === prev.valid_to) c.valid_to.setValue(null);
+      }
+      this.noteSeed = null;
+      return;
+    }
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(now.getFullYear() + INTERNAL_SERIES_FORM_VALIDITY_YEARS);
+    const seed = {
+      prefix: requirementsFor(type as FiscalDocumentType).internal_series_prefix ?? '',
+      range_from: 1,
+      range_to: INTERNAL_SERIES_INITIAL_RANGE,
+      valid_from: toLocalDateString(now),
+      valid_to: toLocalDateString(end),
+    };
+    if (untouched(c.prefix.value, prev?.prefix)) c.prefix.setValue(seed.prefix);
+    if (untouched(c.rango_inicial.value, prev?.range_from)) c.rango_inicial.setValue(seed.range_from);
+    if (untouched(c.rango_final.value, prev?.range_to)) c.rango_final.setValue(seed.range_to);
+    if (untouched(c.valid_from.value, prev?.valid_from)) c.valid_from.setValue(seed.valid_from);
+    if (untouched(c.valid_to.value, prev?.valid_to)) c.valid_to.setValue(seed.valid_to);
+    this.noteSeed = seed;
+    this.formInvalid.set(this.form.invalid);
   }
 
   /**
@@ -386,7 +484,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       valid_to: this.dateOnly(row.valid_to),
     });
 
+    this.noteSeed = null;
+    this.selectedDocType.set(row.document_type);
     this.form.enable({ emitEvent: false });
+    this.setRangoFinalMin(this.isLocked(row) ? Math.max(2, row.current_number) : 2);
     if (this.isLocked(row)) {
       this.form.controls.prefix.disable({ emitEvent: false });
       this.form.controls.document_type.disable({ emitEvent: false });
@@ -490,6 +591,7 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   private submitCreate(): void {
     const value = this.form.getRawValue();
+    const isNote = this.isNoteDocType(value.document_type);
     const dto: CreatePlatformResolutionDto = {
       prefix: value.prefix!.trim(),
       document_type: value.document_type,
@@ -497,28 +599,68 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       rango_inicial: Number(value.rango_inicial),
       rango_final: Number(value.rango_final),
     };
-    if (value.technical_key?.trim()) {
-      dto.technical_key = value.technical_key.trim();
+    // Serie interna de nota: no hay N° de resolución, fecha ni ClTec que enviar.
+    if (!isNote) {
+      if (value.technical_key?.trim()) {
+        dto.technical_key = value.technical_key.trim();
+      }
+      if (value.resolution_number?.trim()) {
+        dto.resolution_number = value.resolution_number.trim();
+      }
+      if (value.resolution_date) dto.resolution_date = value.resolution_date;
     }
-    if (value.resolution_number?.trim()) {
-      dto.resolution_number = value.resolution_number.trim();
-    }
-    if (value.resolution_date) dto.resolution_date = value.resolution_date;
     if (value.valid_from) dto.valid_from = value.valid_from;
     if (value.valid_to) dto.valid_to = value.valid_to;
 
+    const send = () => this.sendCreate(dto);
+    if (isNote) {
+      const conflicts = findNoteSeriesConflicts(this.liveRows(), {
+        id: null,
+        document_type: dto.document_type,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          message: noteSeriesActivationMessage(dto.prefix, conflicts),
+          proceed: send,
+        });
+        return;
+      }
+    }
+    send();
+  }
+
+  private liveRows(): PlatformResolution[] {
+    return this.store.resolutions().filter((r) => !r.archived_at);
+  }
+
+  confirmPending(): void {
+    const pending = this.pendingConfirm();
+    this.pendingConfirm.set(null);
+    pending?.proceed();
+  }
+
+  /** Tras guardar: avisa si el backend desactivó otra serie de notas. */
+  private afterWrite(res: unknown, message: string): void {
+    const deactivated = extractDeactivatedResolutionIds(res);
+    this.toast.success(message, 'Plataforma');
+    if (deactivated.length > 0) {
+      this.toast.info(deactivatedResolutionsToast(deactivated.length), 'Plataforma');
+    }
+    // Forzado: las otras pestañas ofrecen estas resoluciones en sus selectores
+    // y quedarían mostrando la lista vieja. También recarga «Numeración vigente».
+    this.store.loadResolutions(true);
+  }
+
+  private sendCreate(dto: CreatePlatformResolutionDto): void {
     this.saving.set(true);
     this.fiscal
       .createResolution(dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.saving.set(false);
           this.closeModal();
-          this.toast.success('Resolución DIAN creada', 'Plataforma');
-          // Forzado: las otras pestañas ofrecen estas resoluciones en sus
-          // selectores y quedarían mostrando la lista vieja.
-          this.store.loadResolutions(true);
+          this.afterWrite(res, 'Resolución DIAN creada');
         },
         error: (err: { error?: { message?: string } }) => {
           this.saving.set(false);
@@ -579,11 +721,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       .updateResolution(editing.id, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.saving.set(false);
           this.closeModal();
-          this.toast.success('Resolución DIAN actualizada', 'Plataforma');
-          this.store.loadResolutions(true);
+          this.afterWrite(res, 'Resolución DIAN actualizada');
         },
         error: (err: { error?: { message?: string } }) => {
           this.saving.set(false);
@@ -602,18 +743,35 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
    */
   toggleActive(row: PlatformResolution): void {
     if (this.togglingId() !== null) return;
+    if (!row.is_active && isNoteSeriesType(row.document_type)) {
+      const conflicts = findNoteSeriesConflicts(this.liveRows(), {
+        id: row.id,
+        document_type: row.document_type,
+        accounting_entity_id: row.accounting_entity_id,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          message: noteSeriesActivationMessage(row.prefix, conflicts),
+          proceed: () => this.sendToggle(row),
+        });
+        return;
+      }
+    }
+    this.sendToggle(row);
+  }
+
+  private sendToggle(row: PlatformResolution): void {
     this.togglingId.set(row.id);
     this.fiscal
       .updateResolution(row.id, { is_active: !row.is_active })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.togglingId.set(null);
-          this.toast.success(
+          this.afterWrite(
+            res,
             row.is_active ? 'Resolución desactivada' : 'Resolución activada',
-            'Plataforma',
           );
-          this.store.loadResolutions(true);
         },
         error: (err: { error?: { message?: string } }) => {
           this.togglingId.set(null);

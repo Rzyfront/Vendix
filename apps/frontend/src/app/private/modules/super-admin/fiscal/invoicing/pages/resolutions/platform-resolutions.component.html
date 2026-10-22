@@ -34,6 +34,8 @@
   <app-resolutions-in-use-card
     [data]="store.inUse()"
     [loading]="store.loadingInUse()"
+    [canCreateSeries]="true"
+    (createSeries)="onCreateSeries($event)"
   ></app-resolutions-in-use-card>
 
   <!-- Main Card with Table -->
@@ -87,11 +89,10 @@
           class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
           role="note"
         >
-          Esta resolución ya consumió numeración ante la DIAN (va en
+          Esta serie ya emitió documentos (va en el consecutivo
           <strong>{{ current.current_number }}</strong
-          >). El prefijo, el tipo de documento y el rango inicial quedan fijos:
-          cambiarlos re-etiquetaría documentos ya reportados. Para cambiarlos,
-          crea una resolución nueva.
+          >): el prefijo, el tipo y el número inicial no se pueden cambiar.
+          Puedes ampliar el número final, cambiar la vigencia o archivarla.
         </div>
       }
     }
@@ -140,12 +141,14 @@
         helperText="El backend usa el ambiente del config DIAN"
       ></app-selector>
 
+      @if (!isNoteType()) {
       <app-input
         label="N° de resolución"
         type="text"
         formControlName="resolution_number"
         [control]="form.get('resolution_number')"
       ></app-input>
+      }
 
       <app-input
         label="Rango inicial"
@@ -163,6 +166,7 @@
         [required]="true"
       ></app-input>
 
+      @if (!isNoteType()) {
       <app-input
         label="Llave técnica"
         type="text"
@@ -176,6 +180,7 @@
         formControlName="resolution_date"
         [control]="form.get('resolution_date')"
       ></app-input>
+      }
 
       <app-input
         label="Válida desde"
@@ -191,6 +196,22 @@
         [control]="form.get('valid_to')"
       ></app-input>
     </div>
+
+    @if (isNoteType()) {
+      <p class="text-xs text-text-secondary">
+        Serie interna: no se valida ante la DIAN
+      </p>
+    }
+
+    @if (editing(); as current) {
+      @if (isLocked(current) && form.controls.rango_final.errors?.['min']) {
+        <p class="text-xs text-error">
+          El rango final no puede ser menor que el consecutivo actual ({{
+            current.current_number
+          }}).
+        </p>
+      }
+    }
 
     @if (form.errors?.['rango_final_invalid']) {
       <p class="text-xs text-error">
@@ -237,4 +258,18 @@
     (confirmed)="confirmArchive(row, $event)"
     (cancelled)="cancelArchive()"
   ></vendix-resolution-archive-modal>
+}
+
+@if (pendingConfirm(); as pending) {
+  <!-- Activar una serie de notas desactiva la otra del mismo tipo. -->
+  <app-confirmation-modal
+    [isOpen]="true"
+    title="Activar serie de notas"
+    [message]="pending.message"
+    confirmText="Activar"
+    cancelText="Cancelar"
+    confirmVariant="primary"
+    (confirm)="confirmPending()"
+    (cancel)="pendingConfirm.set(null)"
+  ></app-confirmation-modal>
 }

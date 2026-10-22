@@ -298,7 +298,9 @@ export interface PaginatedEnvelope<T> {
 
 export type PlatformResolutionDocumentType =
   | 'sales_invoice'
-  | 'support_document';
+  | 'support_document'
+  | 'credit_note'
+  | 'debit_note';
 
 export interface PlatformResolution {
   id: number;
@@ -321,6 +323,11 @@ export interface PlatformResolution {
   accounting_entity_id: number;
   created_at?: string | null;
   updated_at?: string | null;
+  /**
+   * Solo en la respuesta de create/update: series de nota que el backend
+   * desactivó al activar esta (una sola serie activa por tipo de nota).
+   */
+  deactivated_resolution_ids?: number[];
 }
 
 export interface CreatePlatformResolutionDto {
