@@ -84,8 +84,10 @@ export interface FiscalDocumentRequirements {
    * Prefijo de la serie interna que el backend da de alta y amplía SOLO, o
    * `null` cuando el consecutivo de este documento no es nuestro.
    *
-   * La UI no lo pinta: está aquí porque el espejo es campo por campo y porque
-   * explica por qué ciertos tipos NUNCA piden al comerciante que registre una
+   * El formulario de resoluciones lo usa para pre-llenar el prefijo de las
+   * series nuevas de estos tipos (junto con `INTERNAL_SERIES_INITIAL_RANGE` y
+   * `INTERNAL_SERIES_FORM_VALIDITY_YEARS`) y para ocultar el número de
+   * resolución. También explica por qué ciertos tipos NUNCA piden al comerciante que registre una
    * resolución. Fabricar o ampliar numeración de un documento que la DIAN sí
    * autoriza por rango sería emitir fuera de la Autorización de Numeración.
    */
@@ -131,6 +133,27 @@ export const DIAN_CONFIGURATION_TYPES = [
 ] as const satisfies readonly DianConfigurationType[];
 
 /**
+ * Espejo de `INTERNAL_SERIES_INITIAL_RANGE` en
+ * `apps/backend/src/domains/store/invoicing/utils/invoice-number-generator.ts`.
+ * Rango inicial (1..N) de una serie interna nueva. Deben cambiar juntas.
+ */
+export const INTERNAL_SERIES_INITIAL_RANGE = 10_000_000;
+
+/**
+ * Espejo de `INTERNAL_SERIES_VALIDITY_YEARS` en
+ * `apps/backend/src/domains/store/invoicing/utils/invoice-number-generator.ts`.
+ * Vigencia, en años, de una serie interna nueva. Deben cambiar juntas.
+ */
+export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
+
+/**
+ * Vigencia, en años, que el formulario de resoluciones pre-llena para una serie
+ * interna registrada A MANO. El backend acepta para series internas una
+ * vigencia de hasta `INTERNAL_SERIES_VALIDITY_YEARS` años (decisión D2/D10).
+ */
+export const INTERNAL_SERIES_FORM_VALIDITY_YEARS = INTERNAL_SERIES_VALIDITY_YEARS;
+
+/**
  * LA TABLA. `Record<FiscalDocumentType, …>` es deliberado: añadir un valor a la
  * unión sin añadirlo aquí rompe la compilación, que es exactamente el momento
  * en que hay que decidir sus requisitos y no seis pantallas después.
@@ -162,7 +185,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'credit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
-    internal_series_prefix: 'NC',
+    internal_series_prefix: 'NCVS',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota crédito',
@@ -171,7 +194,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'debit_note',
     configuration_type: 'invoicing',
     requires_authorized_range: false,
-    internal_series_prefix: 'ND',
+    internal_series_prefix: 'NDVS',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota débito',
@@ -195,7 +218,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'support_adjustment_note',
     configuration_type: 'support_document',
     requires_authorized_range: false,
-    internal_series_prefix: 'NAS',
+    internal_series_prefix: 'NASVS',
     accepts_technical_key: false,
     key_algorithm: 'CUDS',
     label: 'Nota de ajuste al documento soporte',
@@ -246,7 +269,7 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     document_type: 'equivalent_adjustment_note',
     configuration_type: 'equivalent_document',
     requires_authorized_range: false,
-    internal_series_prefix: 'NAE',
+    internal_series_prefix: 'NAEVS',
     accepts_technical_key: false,
     key_algorithm: 'CUDE',
     label: 'Nota de ajuste al documento equivalente',

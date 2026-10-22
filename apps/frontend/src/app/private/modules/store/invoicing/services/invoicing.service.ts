@@ -6,6 +6,7 @@ import { DianConfigApiService } from '../../../../../shared/services/dian';
 import {
   Invoice,
   InvoiceResolution,
+  ArchiveResolutionResult,
   CreateInvoiceDto,
   UpdateInvoiceDto,
   CreateCreditNoteDto,
@@ -312,8 +313,8 @@ export class InvoicingService {
 
   // ── Resolutions ───────────────────────────────────────────
 
-  getResolutions(): Observable<ApiResponse<InvoiceResolution[]>> {
-    return this.dianApi.getResolutions();
+  getResolutions(includeArchived = false): Observable<ApiResponse<InvoiceResolution[]>> {
+    return this.dianApi.getResolutions(includeArchived);
   }
 
   createResolution(dto: CreateResolutionDto): Observable<ApiResponse<InvoiceResolution>> {
@@ -333,9 +334,14 @@ export class InvoicingService {
     );
   }
 
-  deleteResolution(id: number): Observable<ApiResponse<null>> {
-    return this.http.delete<ApiResponse<null>>(
-      this.getApiUrl(`resolutions/${id}`),
+  /** Las resoluciones no se borran: se archivan (solo lectura, prefijo ocupado). */
+  archiveResolution(
+    id: number,
+    replacementPrefix?: string,
+  ): Observable<ApiResponse<ArchiveResolutionResult>> {
+    return this.http.post<ApiResponse<ArchiveResolutionResult>>(
+      this.getApiUrl(`resolutions/${id}/archive`),
+      replacementPrefix ? { replacement_prefix: replacementPrefix } : {},
     );
   }
 

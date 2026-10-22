@@ -24,6 +24,7 @@ import {
   DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
   REFUND_CASH_MOVEMENT_KEY,
   REFUND_CASH_MOVEMENT_SOURCE,
+  ORDER_CANCELLED_MOVEMENT_REFERENCE,
 } from '../movements/movements.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
@@ -34,6 +35,7 @@ import type {
   CashConsolidatedRow,
   CashBreakdown,
   CashOutflow,
+  CashInflow,
   CashSalesSummary,
   CashIntegrity,
 } from './interfaces/cash-session-close-report.interface';
@@ -47,6 +49,50 @@ import {
 const toCents = (v: unknown): number => Math.round(Number(v ?? 0) * 100);
 const fromCents = (c: number): number => Math.round(c) / 100;
 
+/**
+ * Referencia escrita por el cajero. Devuelve null si está vacía o es una
+ * referencia interna del sistema (`refund:<id>`, `payment_cancelled`,
+ * `order_cancelled`, `dispatch_route:...`).
+ */
+export function humanCashReference(ref: unknown): string | null {
+  if (typeof ref !== 'string') return null;
+  const t = ref.trim();
+  if (!t) return null;
+  if (
+    t.startsWith('refund:') ||
+    t === 'payment_cancelled' ||
+    t === ORDER_CANCELLED_MOVEMENT_REFERENCE ||
+    t.startsWith('dispatch_route:')
+  )
+    return null;
+  return t;
+}
+
+/**
+ * `cash_out` legado de cancelación de orden (antes de que se registraran como
+ * `refund` + `order_cancelled`). Se exige también la nota que escribía el
+ * sistema: la referencia sola la puede teclear un cajero en un retiro manual
+ * ("Cancelación orden de proveedor") y esas filas no guardan `order_id`.
+ */
+function isLegacyOrderCancellationCashOut(m: any): boolean {
+  return (
+    m?.type === 'cash_out' &&
+    String(m.reference ?? '').startsWith('Cancelación orden') &&
+    String(m.notes ?? '').startsWith(
+      'Devolución de efectivo por cancelación de la orden',
+    )
+  );
+}
+
+/** Referencia visible de un movimiento (oculta las internas y la legada). */
+const movementReference = (m: any): string | null =>
+  isLegacyOrderCancellationCashOut(m) ? null : humanCashReference(m.reference);
+
+const movementUserName = (m: any): string | null =>
+  m?.user
+    ? `${m.user.first_name ?? ''} ${m.user.last_name ?? ''}`.trim() || null
+    : null;
+
 type MovementKind =
   | 'sale'
   | 'cash_in'
@@ -57,7 +103,7 @@ type MovementKind =
 /**
  * Convención de movimientos de caja → categoría del consolidado.
  * `refund` con `payment_cancelled`/`order_cancelled` y `cash_out` legado
- * 'Cancelación orden…' son cancelaciones; refund restante = reembolso;
+ * (isLegacyOrderCancellationCashOut) son cancelaciones; refund restante = reembolso;
  * cash_out restante = retiro (efectivo). `payment_method` null en `sale` y
  * `refund` → `unknown`: el esperado (computeCashSummary) solo cuenta como
  * efectivo lo que dice `cash`, y el consolidado debe dar la misma cifra.
@@ -78,7 +124,7 @@ function classifyMovement(
         : { kind: 'refund', method };
     }
     case 'cash_out':
-      return String(m.reference ?? '').startsWith('Cancelación orden')
+      return isLegacyOrderCancellationCashOut(m)
         ? { kind: 'cancellation', method: 'cash' }
         : { kind: 'withdrawal', method: 'cash' };
     default:
@@ -528,6 +574,7 @@ export class SessionsService {
       };
       const consolidated = this.buildConsolidated(closing_view, movements);
       const outflows = await this.buildOutflows(closing_view, movements);
+      const inflows = this.buildInflows(closing_view, movements);
       const prev_summary =
         session.summary && typeof session.summary === 'object'
           ? (session.summary as Record<string, unknown>)
@@ -538,6 +585,7 @@ export class SessionsService {
         consolidated: consolidated.consolidated,
         cash_breakdown: consolidated.cash_breakdown,
         outflows,
+        inflows,
         pending_orders_snapshot: pending_snapshot,
       };
 
@@ -1005,8 +1053,33 @@ export class SessionsService {
       snap.consolidated ?? summary.consolidated;
     const cash_breakdown: CashBreakdown =
       snap.cash_breakdown ?? summary.cash_breakdown;
-    const outflows: CashOutflow[] =
+    let outflows: CashOutflow[] =
       snap.outflows ?? (await this.buildOutflows(session, movements));
+    if (snap.outflows) {
+      // Snapshot anterior a reference/notes: completar en lectura (sin escribir).
+      const by_id = new Map<number, any>(movements.map((m: any) => [m.id, m]));
+      outflows = (outflows as any[]).map((o) => {
+        if (o.reference !== undefined && o.notes !== undefined) return o;
+        const m = by_id.get(o.id);
+        return {
+          ...o,
+          reference:
+            o.reference !== undefined
+              ? o.reference
+              : m
+                ? movementReference(m)
+                : null,
+          notes:
+            o.notes !== undefined
+              ? o.notes
+              : m
+                ? m.notes?.trim() || null
+                : null,
+        } as CashOutflow;
+      });
+    }
+    const inflows: CashInflow[] =
+      snap.inflows ?? this.buildInflows(session, movements);
     const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const fullName = (u: any) =>
       u ? { id: u.id, name: `${u.first_name} ${u.last_name}`.trim() } : null;
@@ -1389,6 +1462,7 @@ export class SessionsService {
       consolidated,
       cash_breakdown,
       outflows,
+      inflows,
       sales_summary: sales_summary_block,
       integrity,
       payment_methods: summary.sales_by_method.map((m) => ({
@@ -1921,12 +1995,32 @@ export class SessionsService {
           payment_method: c.method,
           amount: fromCents(toCents(m.amount)),
           reason: m.notes || refund_reason || null,
-          user_name: m.user
-            ? `${m.user.first_name ?? ''} ${m.user.last_name ?? ''}`.trim() ||
-              null
-            : null,
+          reference: movementReference(m),
+          notes: m.notes?.trim() || null,
+          user_name: movementUserName(m),
         } as CashOutflow;
       })
+      .sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);
+  }
+
+  /** Entradas manuales (`cash_in`) de la sesión, por fecha ascendente. */
+  private buildInflows(session: any, movements: any[]): CashInflow[] {
+    return movements
+      .filter((m) => m.type === 'cash_in')
+      .map(
+        (m) =>
+          ({
+            id: m.id,
+            at: m.created_at
+              ? new Date(m.created_at).toISOString()
+              : new Date(session.opened_at ?? 0).toISOString(),
+            amount: fromCents(toCents(m.amount)),
+            reference: movementReference(m),
+            notes: m.notes?.trim() || null,
+            user_name: movementUserName(m),
+            payment_method: 'cash',
+          }) as CashInflow,
+      )
       .sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);
   }
 

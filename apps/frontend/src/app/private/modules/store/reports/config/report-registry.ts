@@ -1,5 +1,5 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
-import { formatPercentFromFraction } from '../components/report-viewer/report-viewer.component';
+import { formatPercentFromFraction } from './report-formatters';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },

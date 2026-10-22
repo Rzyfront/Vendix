@@ -164,7 +164,12 @@ export interface ProductionReadinessReport {
  */
 export type SharedTechnicalKeyFinding = {
   resolution_id: number;
-  foreign: Array<{ resolution_id: number; tax_id: string | null }>;
+  /**
+   * Solo el CONTEO de resoluciones de otro NIT. A propósito no lleva ids ni NIT
+   * ajenos: este hallazgo viaja en `checks[].action` hacia tiendas y
+   * organizaciones, y nombrar a otra cuenta sería filtrarla.
+   */
+  foreign_count: number;
 };
 
 /**
@@ -278,6 +283,8 @@ type ReadinessConfig = {
   nit?: string | null;
   nit_dv?: string | null;
   accounting_entity_id?: number | null;
+  /** Fila de la que se heredó la habilitación DIAN; sólo cambia el rótulo del check. */
+  enablement_inherited_from_id?: number | null;
 };
 
 interface ResolveConfigParams {
@@ -722,7 +729,10 @@ export class FiscalProductionReadinessService {
       },
       {
         key: 'test_set_evidence',
-        label: 'Set de pruebas aprobado por la DIAN',
+        label:
+          config.enablement_inherited_from_id != null
+            ? 'Set de pruebas aprobado por la DIAN (habilitación heredada del mismo software y NIT)'
+            : 'Set de pruebas aprobado por la DIAN',
         // Sobre la prueba DURABLE, no sobre el último lote: un reenvío posterior
         // sobrescribe `last_test_result` y borraría un hecho ya ocurrido. Ver
         // `resolveTestSetProof`.
@@ -733,7 +743,10 @@ export class FiscalProductionReadinessService {
       },
       {
         key: 'enablement_evidence',
-        label: 'Evidencia de habilitación almacenada',
+        label:
+          config.enablement_inherited_from_id != null
+            ? 'Evidencia de habilitación almacenada (heredada del mismo software y NIT)'
+            : 'Evidencia de habilitación almacenada',
         satisfied: !!config.enablement_evidence,
         action:
           'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
@@ -745,7 +758,7 @@ export class FiscalProductionReadinessService {
         label: 'Habilitación marcada como "enabled"',
         satisfied: config.enablement_status === 'enabled',
         action:
-          'Promueve la configuración a producción una vez la DIAN apruebe el set.',
+          'Promueve la configuración a producción una vez la DIAN apruebe el set, en el paso 6 · Pasar a producción.',
         owner: 'tenant',
         assumed: config.assume_production === true,
       },
@@ -753,7 +766,7 @@ export class FiscalProductionReadinessService {
         key: 'environment',
         label: 'Ambiente en producción',
         satisfied: config.environment === 'production',
-        action: 'Cambia el ambiente a Producción en el paso de Ambiente.',
+        action: 'El ambiente cambia a Producción al promover, en el paso 6 · Pasar a producción.',
         owner: 'tenant',
         assumed: config.assume_production === true,
       },
@@ -761,21 +774,21 @@ export class FiscalProductionReadinessService {
         key: 'software_id',
         label: 'Software ID registrado',
         satisfied: !!config.software_id,
-        action: 'Copia el Software ID del portal DIAN en el paso 1.',
+        action: 'Copia el Software ID del portal DIAN en el paso 2 · Software.',
         owner: 'tenant',
       },
       {
         key: 'software_pin',
         label: 'PIN del software guardado',
         satisfied: !!config.software_pin_encrypted,
-        action: 'Ingresa el PIN del software en el paso 1.',
+        action: 'Ingresa el PIN del software en el paso 2 · Software.',
         owner: 'tenant',
       },
       {
         key: 'test_set_id',
         label: 'Test Set ID registrado',
         satisfied: !!config.test_set_id,
-        action: 'Copia el TestSetId que la DIAN asignó a tu software.',
+        action: 'Copia el TestSetId que la DIAN asignó a tu software en el paso 2 · Software.',
         owner: 'tenant',
       },
       {
@@ -789,7 +802,7 @@ export class FiscalProductionReadinessService {
         key: 'certificate_s3_key',
         label: 'Certificado digital cargado',
         satisfied: !!config.certificate_s3_key,
-        action: 'Sube el archivo .p12 en el paso de Certificado.',
+        action: 'Sube el archivo .p12 en el paso 3 · Certificado.',
         owner: 'tenant',
       },
       {
@@ -861,10 +874,8 @@ export class FiscalProductionReadinessService {
             'peor que no comprobarla.'
           : shared_cltec
           ? `La clave técnica de la resolución ${shared_cltec.resolution_id} está ` +
-            `compartida con ${shared_cltec.foreign.length} resolución(es) de otro NIT ` +
-            `(${shared_cltec.foreign
-              .map((f) => `res ${f.resolution_id} → NIT ${f.tax_id ?? 'sin NIT'}`)
-              .join('; ')}). La DIAN asigna una clave técnica por rango y por NIT, y ` +
+            `compartida con ${shared_cltec.foreign_count} resolución(es) de otro NIT. ` +
+            'La DIAN asigna una clave técnica por rango y por NIT, y ' +
             'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
             'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
             'el consecutivo ya gastado. ' +
@@ -1175,6 +1186,13 @@ export class FiscalProductionReadinessService {
    * formato, y afirmar un largo deducido es el error que ya costó una habilitación
    * con la composición del set de pruebas. Lo que sí está publicado, y es lo que
    * se comprueba, es que la clave pertenece a un único par (NIT, rango).
+   *
+   * Se revisan TODAS las resoluciones activas propias, salvo las de habilitación
+   * (prefijo SETP), que comparten la ClTec fija por diseño de la DIAN. Esa
+   * exclusión rige SOLO en el lado propio: las SETP ajenas SÍ se cuentan, porque
+   * una FE propia con la clave de habilitación está mal en producción y contarlas
+   * solo expone un número. Devuelve la primera fila propia (id desc) con
+   * coincidencia ajena y cuántas resoluciones ajenas coinciden con ella.
    */
   async findResolutionsSharingTechnicalKey(
     params: ResolveConfigParams,
@@ -1196,9 +1214,9 @@ export class FiscalProductionReadinessService {
 
     const document_type =
       params.document_type ?? this.defaultDocumentType(params.configuration_type);
-    const own = await this.prisma
+    const own_rows = await this.prisma
       .withoutScope()
-      .invoice_resolutions.findFirst({
+      .invoice_resolutions.findMany({
         where: {
           organization_id: params.organization_id,
           accounting_entity_id: params.accounting_entity_id,
@@ -1207,10 +1225,12 @@ export class FiscalProductionReadinessService {
         },
         select: {
           id: true,
+          prefix: true,
           technical_key: true,
           technical_key_fingerprint: true,
           accounting_entity: { select: { tax_id: true } },
         },
+        orderBy: { id: 'desc' },
       });
 
     // HUELLA PRIMERO, TEXTO PLANO DESPUÉS — y el orden es el que decide si este
@@ -1229,38 +1249,49 @@ export class FiscalProductionReadinessService {
     // el detector funcionando el día que se anule la columna en claro — que es
     // un paso de DATOS pendiente de aprobación, no algo que este servicio pueda
     // dar por hecho.
-    if (!own) return null;
+    // El rango de habilitación (SETP) comparte la ClTec fija por diseño de la
+    // DIAN: no es hallazgo. Se excluye por prefijo en el lado PROPIO, en JS y no
+    // con un `NOT` de Prisma (excluiría las filas con `prefix` NULL). Se revisan
+    // TODAS las filas propias restantes: mirar una sola dejaba el control ciego
+    // si esa fila era la SETP.
+    const own = own_rows.filter(
+      (r) => !isHabilitacionResolution(r.prefix ?? null),
+    );
+    if (!own.length) return null;
 
-    const own_fingerprint = (own.technical_key_fingerprint ?? '').trim();
-    const own_plain = (own.technical_key ?? '').trim();
-    if (!own_fingerprint && !own_plain) return null;
+    // Las SETP AJENAS sí cuentan: una FE propia con la ClTec fija de
+    // habilitación está mal en producción, y contarlas solo agrega un número.
+    // Se consulta por fila propia (id desc) para atribuir el conteo a la fila
+    // que coincide; la clave ajena no se lee, solo se compara en la consulta.
+    const own_ids = own_rows.map((r) => r.id);
+    for (const row of own) {
+      const fingerprint = (row.technical_key_fingerprint ?? '').trim();
+      const plain = (row.technical_key ?? '').trim();
+      if (!fingerprint && !plain) continue;
 
-    const match_clauses: Array<Record<string, string>> = [];
-    if (own_fingerprint)
-      match_clauses.push({ technical_key_fingerprint: own_fingerprint });
-    if (own_plain) match_clauses.push({ technical_key: own_plain });
+      const match_clauses: Array<Record<string, string>> = [];
+      if (fingerprint)
+        match_clauses.push({ technical_key_fingerprint: fingerprint });
+      if (plain) match_clauses.push({ technical_key: plain });
 
-    const others = await this.prisma
-      .withoutScope()
-      .invoice_resolutions.findMany({
-        where: { OR: match_clauses, id: { not: own.id } },
-        select: {
-          id: true,
-          accounting_entity: { select: { tax_id: true } },
-        },
-      });
+      const others = await this.prisma
+        .withoutScope()
+        .invoice_resolutions.findMany({
+          where: { OR: match_clauses, id: { notIn: own_ids } },
+          select: {
+            id: true,
+            prefix: true,
+            accounting_entity: { select: { tax_id: true } },
+          },
+        });
 
-    const own_nit = this.onlyDigits(own.accounting_entity?.tax_id);
-    const foreign = others
-      .filter(
+      const own_nit = this.onlyDigits(row.accounting_entity?.tax_id);
+      const foreign_count = others.filter(
         (o) => this.onlyDigits(o.accounting_entity?.tax_id) !== own_nit,
-      )
-      .map((o) => ({
-        resolution_id: o.id,
-        tax_id: o.accounting_entity?.tax_id ?? null,
-      }));
-
-    return foreign.length ? { resolution_id: own.id, foreign } : null;
+      ).length;
+      if (foreign_count) return { resolution_id: row.id, foreign_count };
+    }
+    return null;
   }
 
   /**

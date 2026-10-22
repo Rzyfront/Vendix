@@ -716,6 +716,11 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
                             Clave técnica distinta
                           </app-badge>
                         }
+                        @if (isArchived(range)) {
+                          <app-badge variant="neutral" size="xs">
+                            Archivada
+                          </app-badge>
+                        }
                       </div>
                       <p class="text-[11px] text-[var(--color-text-secondary)]">
                         @if (range.resolution_number) {
@@ -807,7 +812,7 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
 
                   @if (canApply() && !isSelectable(range)) {
                     <p class="text-[11px] text-[var(--color-text-secondary)]">
-                      {{ blockedSelectionReason }}
+                      {{ isArchived(range) ? archivedSelectionReason : blockedSelectionReason }}
                     </p>
                   }
                 </div>
@@ -852,6 +857,9 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
                     >
                       {{ row.is_active ? 'Activa' : 'Inactiva' }}
                     </app-badge>
+                    @if (row.archived_at) {
+                      <app-badge variant="neutral" size="xs">Archivada</app-badge>
+                    }
                   </div>
                 }
               </div>
@@ -900,6 +908,9 @@ export class DianNumberingRangePanelComponent {
    * Única razón por la que una fila queda sin casilla teniendo permiso: sin
    * prefijo o sin número de resolución el POST no puede apuntar a nada.
    */
+  readonly archivedSelectionReason =
+    'La resolución guardada está archivada (solo lectura): no se puede sincronizar sobre ella.';
+
   readonly blockedSelectionReason =
     'La DIAN no reporta número de resolución o prefijo para este rango, y son justamente los dos datos con los que se identifica la autorización. Hay que revisarlo en el portal.';
 
@@ -1211,6 +1222,7 @@ export class DianNumberingRangePanelComponent {
     for (const range of ranges) {
       if (!this.hasIdentity(range)) continue;
       if (this.isHabilitation(range)) continue;
+      if (this.isArchived(range)) continue;
       if (range.status !== 'differs' && range.status !== 'missing_local') continue;
       if (keys.size >= DIAN_NUMBERING_RANGE_APPLY_MAX) break;
       keys.add(this.rowKey(range));
@@ -1228,7 +1240,12 @@ export class DianNumberingRangePanelComponent {
    * quiere para asegurarse. Lo que no hace es venir marcada.
    */
   isSelectable(range: DianNumberingRange): boolean {
-    return this.canApply() && this.hasIdentity(range);
+    return this.canApply() && this.hasIdentity(range) && !this.isArchived(range);
+  }
+
+  /** La fila local está archivada: es solo lectura, no se aplica nada sobre ella. */
+  isArchived(range: DianNumberingRange): boolean {
+    return !!range.local?.archived_at;
   }
 
   toggleRow(range: DianNumberingRange): void {

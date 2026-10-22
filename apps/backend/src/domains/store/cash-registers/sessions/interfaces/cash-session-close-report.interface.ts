@@ -44,7 +44,21 @@ export interface CashOutflow {
   payment_method: string;
   amount: number;
   reason: string | null;
+  /** Referencia escrita por el cajero (null si es una referencia interna del sistema). */
+  reference: string | null;
+  notes: string | null;
   user_name: string | null;
+}
+
+/** Entrada manual de efectivo (`cash_in`) de la sesión. */
+export interface CashInflow {
+  id: number;
+  at: string;
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  user_name: string | null;
+  payment_method: string;
 }
 
 export interface CashIntegrity {
@@ -76,7 +90,8 @@ export interface CashSalesSummary {
  * Reporte consolidado de una sesión de caja
  * (`GET store/cash-registers/sessions/:id/close-report`).
  *
- * Todo son agregados: nunca líneas una a una. Los montos viajan como `number`
+ * Casi todo son agregados; las únicas listas línea a línea son `outflows` e
+ * `inflows` (movimientos manuales/salidas). Los montos viajan como `number`
  * redondeado a 2 decimales. El frontend consume este contrato tal cual.
  */
 export interface CashSessionCloseReport {
@@ -105,6 +120,8 @@ export interface CashSessionCloseReport {
   consolidated: CashConsolidated;
   cash_breakdown: CashBreakdown;
   outflows: CashOutflow[];
+  /** Entradas manuales (`cash_in`) una a una, por fecha ascendente. */
+  inflows: CashInflow[];
   sales_summary: CashSalesSummary;
   integrity: CashIntegrity;
   sales: {

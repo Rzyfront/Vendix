@@ -611,6 +611,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
   DIAN_CONFIG_002:
     'Ya existe una configuración DIAN con ese NIT y tipo de documento en este alcance. Edita la existente en lugar de crear otra.',
+  DIAN_CONFIG_003:
+    'Esta configuración no puede heredar la habilitación del software.',
+  DIAN_CONFIG_004:
+    'El PIN guardado no coincide con el del software ya habilitado. Revisa el PIN e inténtalo de nuevo.',
   DIAN_CERT_001: 'El archivo de certificado es invalido.',
   DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
   DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',
@@ -876,6 +880,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
    */
   INVOICING_RESOLUTION_011:
     'La clave técnica (ClTec) debe tener 40 o 64 caracteres hexadecimales, según la emita la DIAN. Cópiala completa del PDF de la autorización de numeración: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
+  // Archivado de resoluciones (las resoluciones DIAN nunca se borran).
+  INVOICING_RESOLUTION_012:
+    'No se puede archivar: la resolución tiene documentos en vuelo (transmisión pendiente o en reintento). Espera a que terminen.',
+  INVOICING_RESOLUTION_013:
+    'No se puede archivar: es la resolución configurada de la plataforma.',
+  INVOICING_RESOLUTION_014:
+    'No se puede archivar: hay un set de pruebas de la DIAN en curso con esta resolución.',
+  INVOICING_RESOLUTION_015:
+    'Es la serie de notas en uso: indica el prefijo de la serie nueva que la reemplazará (mayúsculas y números, máximo 10; no puede estar ya usado).',
+  INVOICING_RESOLUTION_016:
+    'La resolución está archivada: es de solo lectura y no admite cambios.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',

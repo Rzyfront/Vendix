@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   ParseIntPipe,
@@ -24,6 +25,8 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
+import { ArchiveResolutionDto } from './dto/archive-resolution.dto';
+import { ListResolutionsQueryDto } from './dto/list-resolutions-query.dto';
 
 /** Accepted by the scanner; anything else is rejected before touching the AI. */
 const SCAN_ALLOWED_MIME_TYPES = [
@@ -55,8 +58,18 @@ export class ResolutionsController {
 
   @Get()
   @Permissions('invoicing:read')
-  async findAll() {
-    const result = await this.resolutions_service.findAll();
+  async findAll(@Query() query: ListResolutionsQueryDto) {
+    const result = await this.resolutions_service.findAll(
+      query.include_archived === true,
+    );
+    return this.response_service.success(result);
+  }
+
+  /** Declarado ANTES de `:id` para que `ParseIntPipe` no capture `in-use`. */
+  @Get('in-use')
+  @Permissions('invoicing:read')
+  async findInUse() {
+    const result = await this.resolutions_service.findInUse();
     return this.response_service.success(result);
   }
 
@@ -147,14 +160,21 @@ export class ResolutionsController {
     );
   }
 
+  @Post(':id/archive')
+  @Permissions('invoicing:delete')
+  @HttpCode(HttpStatus.OK)
+  async archive(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ArchiveResolutionDto,
+  ) {
+    const result = await this.resolutions_service.archive(id, dto);
+    return this.response_service.success(result, 'Resolution archived');
+  }
+
   @Delete(':id')
   @Permissions('invoicing:delete')
-  @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.resolutions_service.remove(id);
-    return this.response_service.success(
-      null,
-      'Resolution deleted successfully',
-    );
+    const result = await this.resolutions_service.remove(id);
+    return this.response_service.success(result, 'Resolution archived');
   }
 }

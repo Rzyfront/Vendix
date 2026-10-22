@@ -52,6 +52,8 @@ export const TRANSMISSION_STATUS_OPTIONS = [
 export const RESOLUTION_DOCUMENT_TYPE_OPTIONS = [
   { value: 'sales_invoice', label: 'Factura electrónica' },
   { value: 'support_document', label: 'Documento soporte' },
+  { value: 'credit_note', label: 'Nota crédito' },
+  { value: 'debit_note', label: 'Nota débito' },
 ];
 
 // ── Validadores ────────────────────────────────────────────────────────────
@@ -266,6 +268,8 @@ export function formatDateOnly(value?: string | null): string {
 export function resolutionDocTypeLabel(type: string): string {
   if (type === 'sales_invoice') return 'Factura';
   if (type === 'support_document') return 'Doc. soporte';
+  if (type === 'credit_note') return 'Nota crédito';
+  if (type === 'debit_note') return 'Nota débito';
   return type;
 }
 

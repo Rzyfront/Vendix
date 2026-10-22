@@ -39,6 +39,11 @@ import {
   PublicPlan,
 } from '../../pricing/services/public-plans.service';
 import {
+  ROI_ASSUMPTIONS,
+  estimateAnnualSavings,
+  referenceAnnualPrice,
+} from './roi-calculator';
+import {
   StoreIndustry,
   STORE_INDUSTRIES,
   INDUSTRY_METADATA,
@@ -650,8 +655,7 @@ export class VendixLandingComponent implements OnInit {
       .filter((p) => p.billing_cycle === 'monthly')
       .map((p) => Number(p.base_price))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const min = prices.length > 0 ? Math.min(...prices) : null;
-    const json = JSON.stringify(buildVendixStructuredData(min));
+    const json = JSON.stringify(buildVendixStructuredData(prices));
 
     let script = this.document.getElementById('vendix-jsonld');
     if (!script) {
@@ -787,18 +791,19 @@ export class VendixLandingComponent implements OnInit {
     return Math.round(((full - paid) / full) * 100);
   }
 
-  // ROI Savings Calculator Computed
-  readonly annualSavings = computed(() => {
-    const stores = this.storeCount();
-    const invoices = this.invoicesCount();
-    // Legacy competitor costs:
-    // Legacy POS (~$180.000 COP/mo per store) + DIAN folios (~$280 COP/invoice) + web store plugin (~$90.000 COP/mo)
-    const annualLegacy = stores * 180000 * 12 + invoices * 280 * 12 + 90000 * 12;
-    // Vendix Pro annual plan: ~$95.200 COP/mo ($1.142.400/yr) includes up to 3 stores & unlimited DIAN
-    const annualVendix =
-      stores <= 3 ? 1142400 : 1142400 + (stores - 3) * 350000;
-    return Math.max(0, annualLegacy - annualVendix);
-  });
+  // ROI Savings Calculator: compara contra el precio anual real publicado de
+  // Empresarial Pro (GET /api/public/plans). Sin planes no muestra cifra.
+  readonly roiAssumptions = ROI_ASSUMPTIONS;
+  readonly roiVendixAnnualPrice = computed(() =>
+    referenceAnnualPrice(this.sellablePlans()),
+  );
+  readonly annualSavings = computed(() =>
+    estimateAnnualSavings(
+      this.storeCount(),
+      this.invoicesCount(),
+      this.roiVendixAnnualPrice(),
+    ),
+  );
 
   ngOnInit(): void {
     this.initializeCommercialAnalytics();

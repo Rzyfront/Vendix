@@ -262,6 +262,16 @@ export class StoreEcommerceLayoutComponent {
    * diner closes the account panel.
    */
   readonly bill_total_changed_notice = signal(false);
+
+  /** Subtotal con impuesto incluido: suma de líneas brutas de la cuenta. */
+  bill_gross_subtotal(
+    items: ReadonlyArray<{ total: number; line_total_gross?: number }>,
+  ): number {
+    return items.reduce(
+      (sum, i) => sum + Number(i.line_total_gross ?? i.total ?? 0),
+      0,
+    );
+  }
   /** Baseline `grand_total` used to detect the diff above. Reset whenever
    *  the panel is closed so a stale diff never resurfaces on reopen. */
   private last_seen_grand_total: number | null = null;

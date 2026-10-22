@@ -30,18 +30,28 @@ const MIN_FISCAL_YEAR = 2016;
 /** Una resolución no se autoriza a más de una década vista. */
 const MAX_YEARS_AHEAD = 10;
 
+export interface PlausibleFiscalDateOptions {
+  /** Tope de años hacia adelante (default 10). Series internas usan más. */
+  max_years_ahead?: number;
+}
+
 /**
  * Lanza `BadRequestException` si la fecha es inválida o cae fuera de las cotas.
  *
  * @param label Nombre del campo tal como lo ve el usuario, para que el error
  *              nombre el campo culpable en vez de decir «revisa el formulario».
  */
-export function assertPlausibleFiscalDate(label: string, value: Date): void {
+export function assertPlausibleFiscalDate(
+  label: string,
+  value: Date,
+  options?: PlausibleFiscalDateOptions,
+): void {
   if (Number.isNaN(value.getTime())) {
     throw new BadRequestException(`La ${label} no es una fecha válida.`);
   }
   const year = value.getUTCFullYear();
-  const maxYear = new Date().getUTCFullYear() + MAX_YEARS_AHEAD;
+  const maxYear = new Date().getUTCFullYear() +
+    (options?.max_years_ahead ?? MAX_YEARS_AHEAD);
   if (year < MIN_FISCAL_YEAR || year > maxYear) {
     throw new BadRequestException(
       `La ${label} (${value.toISOString().slice(0, 10)}) está fuera de rango: debe estar entre ${MIN_FISCAL_YEAR} y ${maxYear}. Revisa el campo — un año incompleto se guarda como 0001.`,
@@ -53,8 +63,12 @@ export function assertPlausibleFiscalDate(label: string, value: Date): void {
  * Valida y convierte en un paso, para los sitios que hacían `new Date(dto.x)`
  * en línea dentro del objeto `data` de Prisma.
  */
-export function parsePlausibleFiscalDate(label: string, value: string): Date {
+export function parsePlausibleFiscalDate(
+  label: string,
+  value: string,
+  options?: PlausibleFiscalDateOptions,
+): Date {
   const parsed = new Date(value);
-  assertPlausibleFiscalDate(label, parsed);
+  assertPlausibleFiscalDate(label, parsed, options);
   return parsed;
 }

@@ -29,10 +29,9 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import {
   InvoiceNumberGenerator,
-  INTERNAL_SERIES_BLOCK,
-  INTERNAL_SERIES_VALIDITY_YEARS,
 } from './utils/invoice-number-generator';
-import { internalSeriesPrefixFor } from './fiscal-document-requirements';
+import { findActiveResolution } from './utils/resolution-selection.util';
+import { projectInternalSeries } from './utils/resolutions-in-use.util';
 import { RESOLUTION_PUBLIC_SELECT } from './utils/technical-key.util';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import {
@@ -2830,8 +2829,8 @@ export class InvoicingService {
    * NO ESCRIBE la serie interna que el generador daría de alta para una nota
    * sin resolución — pero sí la PROYECTA. La diferencia importa: el generador
    * (`provisionInternalSeries`) abre o reactiva una serie propia para los tipos
-   * cuyo `internal_series_prefix` no es `null` (`NAS` para la nota de ajuste de
-   * documento soporte, `NAE` para la del documento equivalente), porque esos
+   * cuyo `internal_series_prefix` no es `null` (`NASVS` para la nota de ajuste de
+   * documento soporte, `NAEVS` para la del documento equivalente), porque esos
    * consecutivos no los autoriza la DIAN y por tanto no hay nada que pedirle a
    * MUISCA. Si la previsualización se limitara al `findFirst`, la PRIMERA nota
    * de ajuste de una tienda saldría de «Validar» con un `RESOLUTION_MISSING`
@@ -2865,16 +2864,11 @@ export class InvoicingService {
     resolution_secret: StoredTechnicalKey | null;
   }> {
     const now = new Date();
-    const row = await this.prisma.withoutScope().invoice_resolutions.findFirst({
-      where: {
-        accounting_entity_id,
-        document_type: document_type as any,
-        is_active: true,
-        valid_from: { lte: now },
-        valid_to: { gte: now },
-        ...(requested_resolution_id ? { id: requested_resolution_id } : {}),
-      },
-      orderBy: { created_at: 'desc' },
+    const row = await findActiveResolution(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      document_type,
+      now,
+      resolution_id: requested_resolution_id,
     });
 
     const effective = row ?? (await this.peekInternalSeries(
@@ -2951,55 +2945,11 @@ export class InvoicingService {
     // puede emitir contra una fila que el generador va a rechazar.
     if (requested_resolution_id) return null;
 
-    const prefix = internalSeriesPrefixFor(document_type as any);
-    if (!prefix) return null;
-
-    const valid_to = new Date(now);
-    valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
-
-    // MISMA consulta que `provisionInternalSeries`: sin filtro de vigencia ni
-    // de `is_active`, porque lo que busca es precisamente la serie dormida.
-    const dormant = await this.prisma
-      .withoutScope()
-      .invoice_resolutions.findFirst({
-        where: { accounting_entity_id, document_type: document_type as any },
-        orderBy: { created_at: 'desc' },
-      });
-
-    if (dormant) {
-      return {
-        id: dormant.id,
-        resolution_number: dormant.resolution_number,
-        prefix: dormant.prefix,
-        range_from: dormant.range_from,
-        range_to: dormant.range_to,
-        // El cursor SE CONSERVA. El generador reactiva la fila sin tocarlo;
-        // devolverlo en cero acá anunciaría un número ya emitido.
-        current_number: dormant.current_number,
-        valid_from: now,
-        valid_to,
-        is_active: true,
-        technical_key: dormant.technical_key,
-        technical_key_encrypted: dormant.technical_key_encrypted,
-      };
-    }
-
-    return {
-      id: null,
-      resolution_number: `INTERNA-${prefix}`,
-      prefix,
-      range_from: 1,
-      range_to: INTERNAL_SERIES_BLOCK,
-      current_number: 0,
-      valid_from: now,
-      valid_to,
-      is_active: true,
-      // Sin ClTec, igual que la serie que se escribiría: el CUDE de estas notas
-      // se firma con el Software-PIN. Inventarle una haría que el prevalidador
-      // juzgara una clave que la emisión real no va a usar.
-      technical_key: null,
-      technical_key_encrypted: null,
-    };
+    return projectInternalSeries(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      document_type,
+      now,
+    });
   }
 
   /**

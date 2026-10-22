@@ -107,6 +107,38 @@ describe('FiscalProductionReadinessService', () => {
     });
   });
 
+  it('una fila con habilitación heredada pasa el gate de producción y la prueba del set', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DIAN_ENCRYPTION_KEY = 'test-key';
+    const inherited = readyConfig({
+      enablement_inherited_from_id: 99,
+      last_test_result: null,
+      enablement_evidence: {
+        success: true,
+        dian_response: { success: true },
+        inheritance: { from_dian_configuration_id: 99 },
+      },
+    });
+    const { service } = createService(inherited);
+
+    await expect(
+      service.resolveOwnSoftwareConfig({
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        configuration_type: 'invoicing',
+        requireProduction: true,
+      }),
+    ).resolves.toMatchObject({ id: 1 });
+    expect(service.hasPassedTestSetForConfig(inherited)).toBe(true);
+
+    const report = service.evaluateProductionReadiness(inherited);
+    const check = report.checks.find((c) => c.key === 'test_set_evidence');
+    expect(check?.satisfied).toBe(true);
+    expect(check?.label).toContain('heredada');
+    expect(report.missing).not.toContain('test_set_evidence');
+  });
+
   it('blocks production when enablement evidence or secrets are missing', () => {
     const { service } = createService();
     delete process.env.DIAN_ENCRYPTION_KEY;
@@ -176,12 +208,19 @@ describe('FiscalProductionReadinessService', () => {
     // como mínimo dos de las tres calculan un CUFE que la DIAN recomputa distinto.
     const CLTEC = 'f7cc345ca297aa11bb22cc33dd44ee55ff66aa77';
 
+    // `own` puede ser una fila, un arreglo de filas o null. La primera llamada a
+    // `findMany` es la consulta propia; las siguientes, la de ajenas (una por
+    // fila propia revisada).
     function withResolutions(own: any, others: any[]) {
+      const own_rows = own == null ? [] : Array.isArray(own) ? own : [own];
       const client = {
         dian_configurations: { findFirst: jest.fn() },
         invoice_resolutions: {
-          findFirst: jest.fn().mockResolvedValue(own),
-          findMany: jest.fn().mockResolvedValue(others),
+          findFirst: jest.fn(),
+          findMany: jest
+            .fn()
+            .mockResolvedValueOnce(own_rows)
+            .mockResolvedValue(others),
         },
       };
       return new FiscalProductionReadinessService(
@@ -222,9 +261,8 @@ describe('FiscalProductionReadinessService', () => {
       expect(finding!.resolution_id).toBe(10);
       // La 9 es del MISMO NIT (otra entidad contable del mismo obligado): no es
       // un hallazgo. La 8 es de otro NIT: sí lo es.
-      expect(finding!.foreign).toEqual([
-        { resolution_id: 8, tax_id: '902075738' },
-      ]);
+      expect(finding!.foreign_count).toBe(1);
+      expect(JSON.stringify(finding)).not.toContain('902075738');
     });
 
     it('no reporta nada cuando la clave solo la usan entidades del mismo NIT', async () => {
@@ -244,7 +282,7 @@ describe('FiscalProductionReadinessService', () => {
         PARAMS,
         'production',
       );
-      expect(finding?.foreign.map((f) => f.resolution_id)).toEqual([9]);
+      expect(finding?.foreign_count).toBe(1);
     });
 
     it('no reporta nada cuando la resolución no tiene clave técnica', async () => {
@@ -281,6 +319,87 @@ describe('FiscalProductionReadinessService', () => {
       ).resolves.toBeNull();
     });
 
+    it('NO reporta nada si la resolución propia es de habilitación (SETP)', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          prefix: 'SETP',
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
+    it('cuenta las SETP de otros NIT: una FE propia con la ClTec de habilitación está mal', async () => {
+      const service = withResolutions(
+        {
+          id: 10,
+          prefix: 'FE',
+          technical_key: CLTEC,
+          accounting_entity: { tax_id: '902056589' },
+        },
+        [{ id: 8, prefix: 'SETP', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toEqual({ resolution_id: 10, foreign_count: 1 });
+    });
+
+    it.each([
+      ['SETP primero', 0],
+      ['SETP después', 1],
+    ])(
+      'con una SETP y una FE propias revisa la FE (%s)',
+      async (_label, setp_index) => {
+        const setp = {
+          id: 3,
+          prefix: 'SETP',
+          technical_key: CLTEC,
+          technical_key_fingerprint: 'fp-setp',
+          accounting_entity: { tax_id: '902056589' },
+        };
+        const fe = {
+          id: 10,
+          prefix: 'FE',
+          technical_key: null,
+          technical_key_fingerprint: 'fp-fe',
+          accounting_entity: { tax_id: '902056589' },
+        };
+        const own = setp_index === 0 ? [setp, fe] : [fe, setp];
+        const service = withResolutions(own, [
+          { id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } },
+        ]);
+
+        await expect(
+          service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+        ).resolves.toEqual({ resolution_id: 10, foreign_count: 1 });
+      },
+    );
+
+    it('solo SETP propia (aunque haya ajenas) no reporta nada', async () => {
+      const service = withResolutions(
+        [
+          {
+            id: 3,
+            prefix: 'SETP',
+            technical_key: CLTEC,
+            accounting_entity: { tax_id: '902056589' },
+          },
+        ],
+        [{ id: 8, prefix: 'FE', accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      await expect(
+        service.findResolutionsSharingTechnicalKey(PARAMS, 'production'),
+      ).resolves.toBeNull();
+    });
+
     it('el checklist marca la comprobación como no satisfecha y explica qué copiar', () => {
       const { service } = createService(readyConfig());
 
@@ -288,13 +407,16 @@ describe('FiscalProductionReadinessService', () => {
         ...readyConfig(),
         shared_technical_key: {
           resolution_id: 10,
-          foreign: [{ resolution_id: 8, tax_id: '902075738' }],
+          foreign_count: 1,
         },
       });
 
       const check = report.checks.find((c) => c.key === 'technical_key_per_nit');
       expect(check?.satisfied).toBe(false);
-      expect(check?.action).toMatch(/902075738/);
+      expect(check?.action).not.toContain('902075738');
+      expect(check?.action).not.toContain('res 8');
+      expect(check?.action).toMatch(/con 1 resolución\(es\)/);
+      expect(JSON.stringify(report)).not.toContain('902075738');
       // El mensaje debe nombrar el siguiente paso real: la resolución de
       // producción en MUISCA. Decir solo «clave compartida» deja al operador
       // buscando una contaminación que en habilitación no existe.

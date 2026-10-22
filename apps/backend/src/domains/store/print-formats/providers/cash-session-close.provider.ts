@@ -184,9 +184,12 @@ export class CashSessionCloseDataProvider implements IDocumentDataProvider {
           payment_method: 'cash',
           amount: 50000,
           reason: 'Pago a proveedor',
+          reference: null,
+          notes: 'Pago a proveedor',
           user_name: 'Ana Torres',
         },
       ],
+      inflows: [],
       sales_summary: {
         orders_count: 35,
         payments_count: 35,

@@ -399,6 +399,52 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
       );
     });
   });
+
+  describe('getBill — bruto por línea (tax_amount_item es por unidad, ADR-10)', () => {
+    const runBill = async (line: Record<string, unknown>) => {
+      jest.spyOn(service as any, 'resolveActiveSessionByToken').mockResolvedValue({
+        store_id: STORE_ID,
+        table: { id: TABLE_ID, name: 'M5' },
+        session: { id: SESSION_ID, order_id: ORDER_ID },
+      });
+      tableSessionsService.findOne = jest.fn().mockResolvedValue({ order: {} });
+      prismaMock.orders.findFirst.mockResolvedValue({ grand_total: 0, total_paid: 0 });
+      prismaMock.order_items = {
+        findMany: jest.fn().mockResolvedValue([
+          { product_name: 'X', variant_image_url: null, products: null, notes: null, ...line },
+        ]),
+      };
+      const bill = await service.getBill(TOKEN);
+      return bill.items[0];
+    };
+
+    it('neto 100, impuesto 19/u, qty 3 => bruto 119 / 357', async () => {
+      const item = await runBill({
+        quantity: 3,
+        unit_price: 100,
+        total_price: 300,
+        tax_amount_item: 19,
+        final_unit_price: null,
+        price_unit_quantity: null,
+      });
+      expect(item.unit_price_gross).toBe(119);
+      expect(item.line_total_gross).toBe(357);
+      expect(item.tax_amount).toBe(57);
+    });
+
+    it('tax_amount_item null (pre-ADR-08) => bruto = neto', async () => {
+      const item = await runBill({
+        quantity: 3,
+        unit_price: 100,
+        total_price: 300,
+        tax_amount_item: null,
+        final_unit_price: null,
+        price_unit_quantity: null,
+      });
+      expect(item.unit_price_gross).toBe(100);
+      expect(item.line_total_gross).toBe(300);
+    });
+  });
 });
 
 // ====================================================================

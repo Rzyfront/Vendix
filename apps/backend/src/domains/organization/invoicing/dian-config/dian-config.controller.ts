@@ -19,6 +19,10 @@ import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import { memoryStorage } from 'multer';
 import { OrgDianConfigService } from './dian-config.service';
+import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+import { DianNumberingRangeService } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
+import { ApplyNumberingRangesDto } from '../../../store/invoicing/dian-config/dto/apply-numbering-range.dto';
+import { QueryNumberingRangeDto } from '../../../store/invoicing/dian-config/dto/query-numbering-range.dto';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import {
   DianHabilitationScannerService,
@@ -46,6 +50,8 @@ export class OrgDianConfigController {
     private readonly s3_service: S3Service,
     private readonly habilitation_scanner_service: DianHabilitationScannerService,
     private readonly ai_scan_job_service: AiScanJobService,
+    private readonly store_dian_config_service: DianConfigService,
+    private readonly dian_numbering_range_service: DianNumberingRangeService,
   ) {}
 
   @Get()
@@ -54,6 +60,18 @@ export class OrgDianConfigController {
     const result = await this.dian_config_service.getConfigs(
       store_id ? parseInt(store_id, 10) : undefined,
     );
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Estado fiscal agregado por eje. Declarada ANTES de `:id` para que la ruta
+   * paramétrica no se la trague. Solo para `fiscal_scope=ORGANIZATION`.
+   */
+  @Get('fiscal-readiness')
+  @Permissions('organization:invoicing:dian:read')
+  async getFiscalReadiness() {
+    await this.dian_config_service.assertOrganizationFiscalScope();
+    const result = await this.store_dian_config_service.getFiscalReadiness();
     return this.response_service.success(result);
   }
 
@@ -272,7 +290,94 @@ export class OrgDianConfigController {
     @Param('id', ParseIntPipe) id: number,
     @Param('jobId') job_id: string,
   ) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
     const result = await this.dian_test_service.getTestSetJobStatus(job_id, id);
     return this.response_service.success(result);
+  }
+
+  @Get(':id/test-results')
+  @Permissions('organization:invoicing:dian:read')
+  async getTestResults(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.getTestResults(id);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Re-consulta el veredicto del set de pruebas (GetStatusZip) sin reenviar los
+   * documentos. Gemelo del endpoint de tienda: el panel del paso 4 del asistente
+   * corre bajo este namespace en organización.
+   */
+  @Get(':id/test-set-status')
+  @Permissions('organization:invoicing:dian:read')
+  async checkTestSetStatus(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.checkTestSetStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /** Estado documento a documento del lote enviado. Solo lectura. */
+  @Get(':id/test-set-documents')
+  @Permissions('organization:invoicing:dian:read')
+  async getTestSetDocuments(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.getTestSetDocumentStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /** Descarta un lote que la DIAN nunca juzgó para poder enviar otro set. */
+  @Post(':id/abandon-test-set')
+  @Permissions('organization:invoicing:dian:write')
+  async abandonTestSet(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.abandonTestSet(id);
+    return this.response_service.success(result);
+  }
+
+  @Get(':id/numbering-ranges')
+  @Permissions('organization:invoicing:dian:read')
+  async getNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: QueryNumberingRangeDto,
+  ) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_numbering_range_service.queryRanges(
+      id,
+      query.environment,
+    );
+    return this.response_service.success(result);
+  }
+
+  /** 200 aunque algún rango falle: el desenlace viaja por elemento en `results`. */
+  @Post(':id/numbering-ranges/apply')
+  @Permissions('organization:invoicing:dian:write')
+  @HttpCode(HttpStatus.OK)
+  async applyNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApplyNumberingRangesDto,
+  ) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_numbering_range_service.applyRanges(id, dto);
+    return this.response_service.updated(result);
+  }
+
+  @Get(':id/production-readiness')
+  @Permissions('organization:invoicing:dian:read')
+  async getProductionReadiness(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.store_dian_config_service.getProductionReadiness(id);
+    return this.response_service.success(result);
+  }
+
+  @Post(':id/promote-to-production')
+  @Permissions('organization:invoicing:dian:write')
+  @HttpCode(HttpStatus.OK)
+  async promoteToProduction(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.store_dian_config_service.promoteToProduction(id);
+    return this.response_service.success(
+      result,
+      'Configuración DIAN promovida a producción',
+    );
   }
 }

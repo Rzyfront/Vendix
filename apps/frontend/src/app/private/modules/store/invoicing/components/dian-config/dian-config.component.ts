@@ -36,6 +36,12 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { DianConfigWizardComponent } from './dian-config-wizard.component';
 import { ReceivedDocumentsConfigurationComponent } from '../../received-documents/received-documents-configuration.component';
 
+/**
+ * Eje DIAN de la factura de venta. En el contrato de `fiscal-readiness` ese eje
+ * se llama `invoicing` (el tipo de documento es `sales_invoice`).
+ */
+const SALES_INVOICE_AXIS: DianConfigurationType = 'invoicing';
+
 interface AxisStats {
   total: number;
   enabled: number;
@@ -148,6 +154,16 @@ interface AxisStats {
             <p class="text-sm text-[var(--color-error)]">{{ message }}</p>
           </app-card>
         } @else {
+          @if (showActivationCta()) {
+            <div class="mb-4 flex flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-sm text-[var(--color-text-secondary)]">
+                Habilita la factura de venta paso a paso: el asistente te guía y puedes retomarlo donde quedó.
+              </p>
+              <app-button customClasses="min-h-11" (clicked)="goToActivation()">
+                Activar facturación electrónica
+              </app-button>
+            </div>
+          }
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             @for (axis of axes(); track axis.configuration_type) {
               <app-dian-document-type-card
@@ -208,6 +224,7 @@ interface AxisStats {
             [initialConfig]="selectedConfig()"
             [initialStep]="initialStep()"
             [configurationType]="wizardConfigurationType()"
+            [redirectSalesInvoice]="hasAxisDetailRoute"
             [takenConfigurationTypes]="takenConfigurationTypes()"
             (saved)="onWizardSaved($event)"
             (cancelled)="onWizardCancelled()"
@@ -268,7 +285,7 @@ export class DianConfigComponent {
    * donde `dian-config/:configurationType` no existe. Navegar a ciegas allá
    * sacaría al operador de la ficha del tenant hacia una ruta inexistente.
    */
-  private readonly hasAxisDetailRoute =
+  readonly hasAxisDetailRoute =
     this.route.snapshot.data['axisDetailRoute'] === true;
 
   /**
@@ -362,6 +379,21 @@ export class DianConfigComponent {
   // ── Card actions ──────────────────────────────────────────
 
   /**
+   * CTA al asistente lineal de activación: sólo en contexto tienda
+   * (`axisDetailRoute`), con escritura permitida y mientras la factura de venta
+   * no esté en producción habilitada.
+   */
+  readonly showActivationCta = computed(() => {
+    if (!this.hasAxisDetailRoute || !this.canWrite()) return false;
+    const sales = this.axes().find((a) => a.configuration_type === SALES_INVOICE_AXIS);
+    return !(sales?.environment === 'production' && sales?.enablement_status === 'enabled');
+  });
+
+  goToActivation(): void {
+    void this.router.navigate(['/admin/invoicing/activation']);
+  }
+
+  /**
    * «Configurar» sobre un eje sin configuración abre el asistente en alta con el
    * tipo ya elegido; sobre uno configurado, carga la fila y lo abre en edición.
    */
@@ -369,6 +401,13 @@ export class DianConfigComponent {
     if (!this.canWrite()) {
       const reason = this.writeBlockedReason();
       if (reason) this.toast.error(reason);
+      return;
+    }
+
+    // Factura de venta: un solo flujo, el asistente de activación. La consola
+    // de super admin (sin `axisDetailRoute`) conserva el modal.
+    if (this.hasAxisDetailRoute && axis.configuration_type === SALES_INVOICE_AXIS) {
+      this.goToActivation();
       return;
     }
 

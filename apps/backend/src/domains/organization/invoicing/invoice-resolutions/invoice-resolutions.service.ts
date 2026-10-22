@@ -27,9 +27,32 @@ import {
   ROTULO_CAMPO_INMUTABLE,
   toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+} from '../../../store/invoicing/utils/invoice-number-generator';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import {
+  deactivateOtherActiveSeries,
+  isSingleActiveDocumentType,
+  lockResolutionSeries,
+} from '../../../store/invoicing/utils/resolution-selection.util';
+import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
+import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
+import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
+
+/**
+ * Tope de años hacia adelante de `valid_to`: las series internas (notas) se
+ * abren con vigencia de INTERNAL_SERIES_VALIDITY_YEARS; el resto, el default.
+ */
+function validToMaxYearsAhead(document_type: string): number | undefined {
+  return isSingleActiveDocumentType(document_type)
+    ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+    : undefined;
+}
 
 /** Campos que fijan la identidad fiscal de una resolución ante la DIAN. */
 type CampoInmutable = keyof typeof ROTULO_CAMPO_INMUTABLE;
@@ -100,9 +123,10 @@ export class OrgInvoiceResolutionsService {
     return organization_id;
   }
 
-  async findAll(store_id?: number) {
+  async findAll(store_id?: number, include_archived = false) {
     const organization_id = this.requireOrganizationId();
     const where: any = { organization_id };
+    if (!include_archived) where.archived_at = null;
     if (typeof store_id === 'number') where.store_id = store_id;
 
     const rows = await this.prisma.invoice_resolutions.findMany({
@@ -124,6 +148,28 @@ export class OrgInvoiceResolutionsService {
     // sanitizadores paralelos es exactamente cómo un carril se queda atrás
     // cuando el otro se arregla.
     return rows.map(toPublicResolution);
+  }
+
+  /**
+   * Resolución en uso por tipo de documento para la entidad contable de la
+   * organización (o de `store_id` si el alcance fiscal es STORE). Misma regla
+   * que el generador de consecutivos.
+   */
+  async findInUse(store_id?: number) {
+    const organization_id = this.requireOrganizationId();
+    const resolved_store_id = await this.resolveStoreIdForWrite(
+      organization_id,
+      store_id,
+    );
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id,
+        store_id: resolved_store_id,
+      });
+    return buildResolutionsInUse(this.prisma.withoutScope(), {
+      accounting_entity_id: accounting_entity.id,
+      now: new Date(),
+    });
   }
 
   async findOne(id: number) {
@@ -188,7 +234,9 @@ export class OrgInvoiceResolutionsService {
       dto.resolution_date,
     );
     const valid_from = parsePlausibleFiscalDate('válida desde', dto.valid_from);
-    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to);
+    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+      max_years_ahead: validToMaxYearsAhead(document_type),
+    });
     this.assertValidityWindow(valid_from, valid_to);
 
     const organization_id = this.requireOrganizationId();
@@ -204,46 +252,87 @@ export class OrgInvoiceResolutionsService {
 
     await this.assertPrefixFree(accounting_entity.id, dto.prefix);
 
-    const resolution = await this.prisma.withoutScope().invoice_resolutions.create({
-      data: {
-        organization_id,
-        store_id,
-        accounting_entity_id: accounting_entity.id,
-        document_type,
-        // Las notas no cuelgan de una Autorización de Numeración y no tienen
-        // número DIAN que poner, pero la columna es NOT NULL y su fila sigue
-        // siendo obligatoria para `generateNextNumber`. Sin este respaldo el alta
-        // de una nota por este carril moría con un error de base (500).
-        resolution_number: this.resolveResolutionNumber(
-          dto.resolution_number,
-          dto.prefix,
-        ),
-        resolution_date,
-        prefix: dto.prefix,
-        range_from: dto.range_from,
-        range_to: dto.range_to,
-        current_number: dto.range_from - 1, // El piso autorizado, aún sin consumir
-        valid_from,
-        valid_to,
-        is_active: dto.is_active ?? true,
-        // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
-        // la misma función que usa el carril de tienda. Escribir una sin las
-        // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
-        ...this.technicalKeyVault.sealForWrite(technical_key),
-      },
-      include: {
-        store: { select: { id: true, name: true, slug: true } },
-        accounting_entity: {
-          select: { id: true, name: true, fiscal_scope: true, store_id: true },
-        },
-      },
-    });
+    const { resolution, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Serializa contra activaciones concurrentes y contra la emisión (misma
+        // llave que el generador de consecutivos).
+        if (isSingleActiveDocumentType(document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+          });
+        }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          lock_in_transaction: true,
+          accounting_entity_id: accounting_entity.id,
+          document_type,
+          prefix: dto.prefix,
+          range_from: dto.range_from,
+          range_to: dto.range_to,
+        });
+        const resolution = await tx.invoice_resolutions.create({
+          data: {
+            organization_id,
+            store_id,
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+            // Las notas no cuelgan de una Autorización de Numeración y no tienen
+            // número DIAN que poner, pero la columna es NOT NULL y su fila sigue
+            // siendo obligatoria para `generateNextNumber`. Sin este respaldo el alta
+            // de una nota por este carril moría con un error de base (500).
+            resolution_number: this.resolveResolutionNumber(
+              dto.resolution_number,
+              dto.prefix,
+            ),
+            resolution_date,
+            prefix: dto.prefix,
+            range_from: dto.range_from,
+            range_to: dto.range_to,
+            current_number: dto.range_from - 1, // El piso autorizado, aún sin consumir
+            valid_from,
+            valid_to,
+            is_active: dto.is_active ?? true,
+            // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
+            // la misma función que usa el carril de tienda. Escribir una sin las
+            // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
+            ...this.technicalKeyVault.sealForWrite(technical_key),
+          },
+          include: {
+            store: { select: { id: true, name: true, slug: true } },
+            accounting_entity: {
+              select: {
+                id: true,
+                name: true,
+                fiscal_scope: true,
+                store_id: true,
+              },
+            },
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): activar esta apaga
+        // las demás, en la MISMA transacción que el alta.
+        const deactivated_resolution_ids = resolution.is_active
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: accounting_entity.id,
+              document_type,
+              keep_id: resolution.id,
+            })
+          : [];
+        return { resolution, deactivated_resolution_ids };
+      });
 
     this.logger.log(
       `Org invoice resolution ${resolution.id} created for org ${organization_id}, entity ${accounting_entity.id}`,
     );
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Org invoice resolution ${resolution.id} (${document_type}) activated: deactivated previous active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
 
-    return toPublicResolution(resolution);
+    return { ...toPublicResolution(resolution), deactivated_resolution_ids };
   }
 
   async update(id: number, dto: UpdateOrgInvoiceResolutionDto) {
@@ -253,6 +342,15 @@ export class OrgInvoiceResolutionsService {
       id,
       this.requireOrganizationId(),
     );
+
+    // Archivada = solo lectura: primero que cualquier otra validación.
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -272,7 +370,10 @@ export class OrgInvoiceResolutionsService {
       ) {
         inmutables.push('document_type');
       }
-      if (dto.range_from !== undefined && dto.range_from !== current.range_from) {
+      if (
+        dto.range_from !== undefined &&
+        dto.range_from !== current.range_from
+      ) {
         inmutables.push('range_from');
       }
       if (
@@ -302,14 +403,25 @@ export class OrgInvoiceResolutionsService {
       dto.document_type !== undefined
         ? this.normalizeDocumentType(dto.document_type)
         : (current.document_type as FiscalDocumentType);
+    // Factura -> nota (serie interna): la fila hereda ClTec y número DIAN de la
+    // factura y la UI oculta el campo. Una serie interna no lleva ninguno de los
+    // dos: la ClTec resultante es null y el número toma el rótulo interno.
+    const becomes_internal_series =
+      isSingleActiveDocumentType(next_document_type) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType) &&
+      dto.technical_key === undefined;
     const next_resolution_number =
       dto.resolution_number !== undefined
         ? dto.resolution_number
-        : current.resolution_number;
+        : becomes_internal_series
+          ? internalSeriesResolutionNumber(dto.prefix ?? current.prefix)
+          : current.resolution_number;
     const next_technical_key =
       dto.technical_key !== undefined
         ? dto.technical_key
-        : current.technical_key;
+        : becomes_internal_series
+          ? null
+          : current.technical_key;
 
     // Los requisitos por tipo se re-juzgan SOLO si el PATCH toca alguno de los
     // campos que los deciden. Alternar `is_active` tiene que funcionar siempre:
@@ -354,7 +466,9 @@ export class OrgInvoiceResolutionsService {
       ? parsePlausibleFiscalDate('válida desde', dto.valid_from)
       : current.valid_from;
     const next_valid_to = dto.valid_to
-      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to)
+      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+          max_years_ahead: validToMaxYearsAhead(next_document_type),
+        })
       : current.valid_to;
     if (dto.valid_from !== undefined || dto.valid_to !== undefined) {
       this.assertValidityWindow(next_valid_from, next_valid_to, {
@@ -366,6 +480,11 @@ export class OrgInvoiceResolutionsService {
 
     if (dto.resolution_number !== undefined) {
       update_data.resolution_number = dto.resolution_number;
+    } else if (becomes_internal_series) {
+      update_data.resolution_number = next_resolution_number;
+    }
+    if (becomes_internal_series) {
+      Object.assign(update_data, this.technicalKeyVault.sealForWrite(null));
     }
     if (dto.resolution_date !== undefined) {
       update_data.resolution_date = parsePlausibleFiscalDate(
@@ -443,59 +562,113 @@ export class OrgInvoiceResolutionsService {
       await this.assertPrefixFree(next_accounting_entity_id, next_prefix, id);
     }
 
-    const updated = await this.prisma.withoutScope().invoice_resolutions.update({
-      where: { id },
-      data: update_data,
-      include: {
-        store: { select: { id: true, name: true, slug: true } },
-        accounting_entity: {
-          select: { id: true, name: true, fiscal_scope: true, store_id: true },
-        },
-      },
-    });
+    const { updated, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Bloquea la llave del DESTINO (tipo/entidad resultantes).
+        if (isSingleActiveDocumentType(next_document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: next_accounting_entity_id,
+            document_type: next_document_type,
+          });
+        }
+        if (
+          dto.prefix !== undefined ||
+          dto.range_from !== undefined ||
+          dto.range_to !== undefined ||
+          dto.document_type !== undefined ||
+          next_accounting_entity_id !== current.accounting_entity_id
+        ) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            lock_in_transaction: true,
+            accounting_entity_id: next_accounting_entity_id,
+            document_type: next_document_type,
+            prefix: next_prefix,
+            range_from: dto.range_from ?? current.range_from,
+            range_to: dto.range_to ?? current.range_to,
+            exclude_resolution_id: id,
+          });
+        }
+        const updated = await tx.invoice_resolutions.update({
+          where: { id },
+          data: update_data,
+          include: {
+            store: { select: { id: true, name: true, slug: true } },
+            accounting_entity: {
+              select: {
+                id: true,
+                name: true,
+                fiscal_scope: true,
+                store_id: true,
+              },
+            },
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
+        // (pasa de inactiva a activa, o cambia de tipo/entidad estando activa).
+        // Editar el rango/vigencia de la nota ya activa no apaga nada.
+        const transitioned =
+          current.is_active === false ||
+          next_document_type !== current.document_type ||
+          next_accounting_entity_id !== current.accounting_entity_id;
+        const deactivated_resolution_ids = updated.is_active && transitioned
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: next_accounting_entity_id,
+              document_type: next_document_type,
+              keep_id: id,
+            })
+          : [];
+        return { updated, deactivated_resolution_ids };
+      });
 
     this.logger.log(`Org invoice resolution #${id} updated`);
-    return toPublicResolution(updated);
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Org invoice resolution #${id} (${next_document_type}) active: deactivated other active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
+    return { ...toPublicResolution(updated), deactivated_resolution_ids };
   }
 
+  /**
+   * Archivado lógico (nunca hay borrado físico). `findOneInternal` valida la
+   * organización; la transacción corre sin scope porque el util toma el
+   * advisory lock de la serie y toca otras tablas.
+   */
+  async archive(id: number, dto: ArchiveResolutionDto) {
+    const organization_id = this.requireOrganizationId();
+    const current = await this.findOneInternal(id, organization_id);
+
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id,
+        }),
+      );
+
+    this.logger.log(`Org invoice resolution #${id} archived`);
+    return {
+      ...toPublicResolution(archived),
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
+
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
   async remove(id: number) {
-    const resolution = await this.findOneInternal(
-      id,
-      this.requireOrganizationId(),
-    );
-
-    if (resolution._count.invoices > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${resolution._count.invoices} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: resolution._count.invoices },
-      );
-    }
-
-    // `current_number` arranca en `range_from - 1`. Alcanzarlo significa que la
-    // DIAN ya vio un consecutivo de este rango —por ejemplo el set de pruebas de
-    // habilitación, que quema números sin escribir filas en `invoices`—, y borrar
-    // la fila borraría el único registro de qué números se consumieron.
-    if (resolution.current_number >= resolution.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${resolution.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: resolution.current_number },
-      );
-    }
-
-    await this.prisma.withoutScope().invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Org invoice resolution #${id} deleted`);
+    return this.archive(id, {});
   }
 
   private async resolveStoreIdForWrite(
     organization_id: number,
     requested_store_id?: number | null,
   ): Promise<number | null> {
-    const fiscal_scope = await this.fiscalScope.requireFiscalScope(organization_id);
+    const fiscal_scope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
 
     if (fiscal_scope === 'ORGANIZATION') {
       return null;

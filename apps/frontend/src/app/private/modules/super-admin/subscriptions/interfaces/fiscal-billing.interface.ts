@@ -298,7 +298,9 @@ export interface PaginatedEnvelope<T> {
 
 export type PlatformResolutionDocumentType =
   | 'sales_invoice'
-  | 'support_document';
+  | 'support_document'
+  | 'credit_note'
+  | 'debit_note';
 
 export interface PlatformResolution {
   id: number;
@@ -312,12 +314,25 @@ export interface PlatformResolution {
   valid_from: string | null;
   valid_to: string | null;
   is_active: boolean;
-  technical_key?: string | null;
+  /** ISO; no nulo = archivada (solo lectura, oculta por defecto). */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
+  /**
+   * El backend nunca devuelve la ClTec (ni su cifrado ni su huella): solo si hay
+   * una guardada y cuántos caracteres tiene.
+   */
+  technical_key_set?: boolean;
+  technical_key_length?: number;
   environment: SubscriptionFiscalEnvironment;
   organization_id: number;
   accounting_entity_id: number;
   created_at?: string | null;
   updated_at?: string | null;
+  /**
+   * Solo en la respuesta de create/update: series de nota que el backend
+   * desactivó al activar esta (una sola serie activa por tipo de nota).
+   */
+  deactivated_resolution_ids?: number[];
 }
 
 export interface CreatePlatformResolutionDto {
@@ -355,6 +370,14 @@ export interface ListPlatformResolutionsQuery {
   document_type?: PlatformResolutionDocumentType;
   environment?: SubscriptionFiscalEnvironment;
   is_active?: boolean;
+  /** Incluye las archivadas (el backend las oculta por defecto). */
+  include_archived?: boolean;
+}
+
+/** Respuesta de `POST resolutions/:id/archive`. */
+export interface ArchivePlatformResolutionResult extends PlatformResolution {
+  archived_at: string;
+  replacement_resolution_id: number | null;
 }
 
 // ─────────────────────────────────────────────────────────

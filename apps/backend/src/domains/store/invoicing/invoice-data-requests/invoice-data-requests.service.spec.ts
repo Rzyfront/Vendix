@@ -368,3 +368,53 @@ describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
     expect(kitchenStatusFor(null)).toBeNull();
   });
 });
+
+describe('InvoiceDataRequestsService#deriveLineGross (ADR-10, impuesto por unidad)', () => {
+  const service = new InvoiceDataRequestsService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  const deriveLineGross = (item: Record<string, unknown>) =>
+    (service as any).deriveLineGross(item);
+
+  it('neto 100, impuesto 19/u, qty 3 => 119 / 357', () => {
+    const r = deriveLineGross({
+      unit_price: 100,
+      total_price: 300,
+      tax_amount_item: 19,
+      final_unit_price: null,
+      quantity: 3,
+    });
+    expect(r.unit_price_gross).toBe(119);
+    expect(r.line_total_gross).toBe(357);
+  });
+
+  it('tax_amount_item null => bruto = neto', () => {
+    const r = deriveLineGross({
+      unit_price: 100,
+      total_price: 300,
+      tax_amount_item: null,
+      final_unit_price: null,
+      quantity: 3,
+    });
+    expect(r.unit_price_gross).toBe(100);
+    expect(r.line_total_gross).toBe(300);
+  });
+
+  it('final_unit_price poblado se respeta', () => {
+    const r = deriveLineGross({
+      unit_price: 100,
+      total_price: 300,
+      tax_amount_item: 999,
+      final_unit_price: 119,
+      quantity: 3,
+    });
+    expect(r.unit_price_gross).toBe(119);
+    expect(r.line_total_gross).toBe(357);
+  });
+});

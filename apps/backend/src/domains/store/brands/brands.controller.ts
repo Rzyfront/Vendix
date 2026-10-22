@@ -16,7 +16,13 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BrandsService } from './brands.service';
-import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
+import {
+  CreateBrandDto,
+  UpdateBrandDto,
+  BrandQueryDto,
+  AssignProductsDto,
+  PreviewAssignProductsDto,
+} from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
@@ -122,6 +128,53 @@ export class BrandsController {
     );
 
     return this.responseService.created(result, 'Logo subido exitosamente');
+  }
+
+  @ApiOperation({
+    summary: 'Listar los IDs de productos (no archivados) de una marca',
+  })
+  @Get(':id/products/ids')
+  @Permissions('store:brands:read')
+  async getProductIds(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.brandsService.getProductIds(id);
+    return this.responseService.success(
+      result,
+      'Productos de la marca obtenidos exitosamente',
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Vista previa de asignar productos a una marca (no escribe)',
+  })
+  @Post(':id/products/preview')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:brands:read')
+  async previewAssignProducts(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: PreviewAssignProductsDto,
+  ) {
+    const result = await this.brandsService.previewAssignProducts(id, dto);
+    return this.responseService.success(
+      result,
+      'Vista previa de asignación generada exitosamente',
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Asignar o quitar productos en bloque de una marca',
+  })
+  @Post(':id/products')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:brands:update')
+  async assignProducts(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignProductsDto,
+  ) {
+    const result = await this.brandsService.assignProducts(id, dto);
+    return this.responseService.success(
+      result,
+      'Productos de la marca actualizados exitosamente',
+    );
   }
 
   @ApiOperation({

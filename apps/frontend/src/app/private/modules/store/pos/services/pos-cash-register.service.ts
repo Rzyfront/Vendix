@@ -236,6 +236,7 @@ export interface CashSessionCloseReport {
     difference: number | null;
   };
   outflows?: CashReportOutflow[];
+  inflows?: CashReportInflow[];
   sales_summary?: CashSessionCloseReport['sales'] & {
     cancelled?: { count: number; total: number };
   };
@@ -266,7 +267,19 @@ export interface CashReportOutflow {
   payment_method: string;
   amount: number;
   reason: string | null;
+  reference?: string | null;
+  notes?: string | null;
   user_name: string | null;
+}
+
+export interface CashReportInflow {
+  id: number;
+  at: string;
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  user_name: string | null;
+  payment_method: string;
 }
 
 /**

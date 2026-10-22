@@ -16,7 +16,10 @@ import { IconComponent } from '../icon/icon.component';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
-import { DialogService, ToastService } from '../index';
+// Rutas directas, no el barrel '../index': este modal lo carga el shell de la
+// app y el barrel arrastra al arranque ECharts, marked y decenas de componentes.
+import { DialogService } from '../dialog/dialog.service';
+import { ToastService } from '../toast/toast.service';
 import { PanelUiModulesEditorComponent } from '../panel-ui-modules-editor/panel-ui-modules-editor.component';
 import { ThemeService } from '../../../core/services/theme.service';
 import { APP_MODULES } from '../../constants/app-modules.constant';

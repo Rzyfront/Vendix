@@ -1,3 +1,4 @@
+import { resolveOrderLinePrintedGross } from 'src/domains/store/taxes/utils/final-price.util';
 import {
   Injectable,
   Logger,
@@ -212,17 +213,10 @@ export class AccountService {
   }
 
   /**
-   * C.8 (R-1 / ADR-06) — deriva el bruto por línea en LECTURA, sin asumir
-   * `final_unit_price` poblado: este endpoint (F-008) nunca importó
-   * `resolveOrderLineFinals` ni escribió la columna, así que para pedidos de
-   * checkout (`checkout.service.ts` nunca setea `final_unit_price`, F-005)
-   * el fallback es el camino COMÚN, no la excepción. Fórmula exacta del
-   * paso: `final_unit_price ?? (unit_price + COALESCE(tax_amount_item,0) /
-   * line_units)`. `line_total_gross` usa el MISMO multiplicador que ya
-   * relaciona `total_price` con `unit_price` en la fila persistida (en vez
-   * de asumir `quantity` o `price_unit_quantity`), para no inventar una
-   * tercera convención de escala en un archivo que no importa
-   * `price-unit.util.ts`.
+   * Bruto por línea derivado en LECTURA (C.8 / ADR-06). `unit_price`/
+   * `total_price` siguen en la base. Si `final_unit_price` está poblado se
+   * respeta; si no, delega al util canónico `resolveOrderLinePrintedGross`
+   * (`tax_amount_item` es impuesto POR UNIDAD de precio, ADR-10).
    */
   /**
    * Cocina por línea (paridad guest order-summary): devuelve el estado
@@ -250,19 +244,24 @@ export class AccountService {
     final_unit_price?: any;
     price_unit_quantity?: any;
     quantity: any;
+    weight?: any;
   }): { unit_price_gross: number; line_total_gross: number } {
-    const netUnit = Number(item.unit_price ?? 0);
-    const netTotal = Number(item.total_price ?? 0);
-    const lineUnits = Number(item.price_unit_quantity ?? item.quantity ?? 1) || 1;
-    const grossUnit =
-      item.final_unit_price != null
-        ? Number(item.final_unit_price)
-        : netUnit + Number(item.tax_amount_item ?? 0) / lineUnits;
-    const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
-    const grossTotal = Math.round(grossUnit * multiplier * 100) / 100;
+    if (item.final_unit_price != null) {
+      const netUnit = Number(item.unit_price ?? 0);
+      const netTotal = Number(item.total_price ?? 0);
+      const grossUnit = Number(item.final_unit_price);
+      const multiplier =
+        netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
+      return {
+        unit_price_gross: Math.round(grossUnit * 100) / 100,
+        line_total_gross: Math.round(grossUnit * multiplier * 100) / 100,
+      };
+    }
+    const { gross_unit_price, gross_total_price } =
+      resolveOrderLinePrintedGross(item);
     return {
-      unit_price_gross: Math.round(grossUnit * 100) / 100,
-      line_total_gross: grossTotal,
+      unit_price_gross: gross_unit_price,
+      line_total_gross: gross_total_price,
     };
   }
 

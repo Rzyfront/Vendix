@@ -25,7 +25,7 @@ describe('FiscalConfigChecklistService', () => {
     accounting_mappings: { total: 12, mapped_keys: [] },
     initial_inventory: null,
     payroll_config: { enabled: false, has_minimal: true },
-    satisfied_steps: [],
+    satisfied_steps: ['dian_config'],
   };
 
   const activeStatus = {
@@ -103,6 +103,7 @@ describe('FiscalConfigChecklistService', () => {
         ...completePrefill,
         legal_data: { nit: '900123456', nit_dv: null, fiscal_regime: null },
         dian_config: null,
+        satisfied_steps: [],
         accounting_mappings: { total: 0, mapped_keys: [] },
       },
       unscoped: {
@@ -162,6 +163,7 @@ describe('FiscalConfigChecklistService', () => {
           has_certificate: true,
           certificate_expiry: new Date(Date.now() - 86_400_000).toISOString(),
         },
+        satisfied_steps: [],
       },
     });
 
@@ -170,5 +172,36 @@ describe('FiscalConfigChecklistService', () => {
 
     expect(dian?.complete).toBe(false);
     expect(dian?.detail).toContain('vencido');
+  });
+
+  it('marks a valid certificate not yet in production as incomplete with the wizard hint', async () => {
+    const { service } = createService({
+      prefill: { ...completePrefill, satisfied_steps: [] },
+    });
+
+    const result = await service.build(context as any);
+    const dian = result.items.find((item) => item.key === 'dian_config');
+
+    expect(dian?.complete).toBe(false);
+    expect(dian?.detail).toContain('aún no está en producción');
+    expect(dian?.action?.label).toBe('Activar facturación electrónica');
+  });
+
+  it('reports missing certificate and complete production detail', async () => {
+    const missing = await createService({
+      prefill: {
+        ...completePrefill,
+        dian_config: { has_certificate: false, certificate_expiry: null },
+        satisfied_steps: [],
+      },
+    }).service.build(context as any);
+    expect(
+      missing.items.find((i) => i.key === 'dian_config')?.detail,
+    ).toBe('Falta cargar el certificado digital DIAN');
+
+    const done = await createService().service.build(context as any);
+    const dian = done.items.find((i) => i.key === 'dian_config');
+    expect(dian?.complete).toBe(true);
+    expect(dian?.detail).toContain('Factura electrónica en producción');
   });
 });

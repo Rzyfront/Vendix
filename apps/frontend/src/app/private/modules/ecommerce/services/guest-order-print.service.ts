@@ -17,6 +17,9 @@ interface VoucherItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  unit_price_gross?: number;
+  line_total_gross?: number;
+  cancelled_at?: string | null;
   // Paso 8 (roku-shop-checkout): paridad con la vista (cocina por plato).
   kitchen_status?: string | null;
   preparation_time_minutes?: number | null;
@@ -175,6 +178,13 @@ export class GuestOrderPrintService {
     const customer = summary.customer;
 
     const fmt = (n: number) => this.currencyService.format(Number(n || 0));
+    // Subtotal con impuesto incluido: suma de líneas brutas no canceladas.
+    const grossSubtotal = (order.items ?? [])
+      .filter((i) => !i.cancelled_at)
+      .reduce(
+        (sum, i) => sum + Number(i.line_total_gross ?? i.total_price ?? 0),
+        0,
+      );
 
     const orderStateLabels: Record<string, string> = {
       draft: 'Borrador',
@@ -337,8 +347,8 @@ export class GuestOrderPrintService {
       <tr>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">${this.esc(item.product_name)}${variantLine}${noteLine}${kitchenLine}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${this.esc(item.quantity)}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price))}</td>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${fmt(Number(item.total_price))}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price_gross ?? item.unit_price))}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${fmt(Number(item.line_total_gross ?? item.total_price))}</td>
       </tr>`;
             })
             .join('')
@@ -439,31 +449,14 @@ export class GuestOrderPrintService {
     ${paymentHtml}
 
     <!-- Totals -->
-    <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza. Con
-         impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO — nunca un
-         Subtotal huérfano sin su fila de IVA al lado — gateado ahora por
-         prints_vat_breakdown (backend, C.7). -->
+    <!-- Precios con impuesto incluido: Subtotal = suma de líneas brutas,
+         sin desglose de impuestos ni subtotal neto. -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
       <div class="vx-totals">
-        ${
-          Number(order.tax_amount || 0) === 0
-            ? `
         <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Subtotal</span>
-          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
-        </div>`
-            : summary.prints_vat_breakdown
-              ? `
-        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
-          <span style="color: #6b7280;">Subtotal</span>
-          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
+          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(grossSubtotal)}</span>
         </div>
-        <div class="vx-flex-row" style="justify-content: space-between; padding: 6px 0; font-size: 14px;">
-          <span style="color: #6b7280;">Impuestos</span>
-          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.tax_amount))}</span>
-        </div>`
-              : ''
-        }
         ${
           Number(order.discount_amount) > 0
             ? `

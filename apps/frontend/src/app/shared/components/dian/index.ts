@@ -72,6 +72,30 @@ export type { ReadinessSummary } from './readiness-summary.util';
 export { DianDocumentTypeCardComponent } from './dian-document-type-card/dian-document-type-card.component';
 export { DianCertificatePanelComponent } from './dian-certificate-panel/dian-certificate-panel.component';
 export { DianTestSetPanelComponent } from './dian-test-set-panel/dian-test-set-panel.component';
+export { DianEnablementInheritancePanelComponent } from './dian-enablement-inheritance-panel/dian-enablement-inheritance-panel.component';
 export { DianNumberingRangePanelComponent } from './dian-numbering-range-panel/dian-numbering-range-panel.component';
 export { DianResolutionFormComponent } from './dian-resolution-form/dian-resolution-form.component';
 export type { DianResolutionFormValue } from './dian-resolution-form/dian-resolution-form.component';
+
+// Numeración vigente (qué serie toma el generador) y regla de serie única de notas
+export {
+  NOTE_SERIES_DOCUMENT_TYPES,
+  isNoteSeriesType,
+  findNoteSeriesConflicts,
+  noteSeriesActivationMessage,
+  isResolutionInUse,
+  extractDeactivatedResolutionIds,
+  deactivatedResolutionsToast,
+} from './resolutions-in-use.util';
+export type {
+  ResolutionInUse,
+  ResolutionsInUseResponse,
+  NoteSeriesRow,
+} from './resolutions-in-use.util';
+export { ResolutionsInUseCardComponent } from './resolutions-in-use-card/resolutions-in-use-card.component';
+export {
+  ResolutionArchiveModalComponent,
+  normalizeReplacementPrefix,
+  formatArchivedAt,
+} from './resolution-archive-modal/resolution-archive-modal.component';
+export type { ArchivableResolution } from './resolution-archive-modal/resolution-archive-modal.component';

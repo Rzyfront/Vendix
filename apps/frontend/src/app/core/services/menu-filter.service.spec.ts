@@ -471,4 +471,27 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     expect(observed.some((routes) => routes.includes('/admin/accounting'))).toBe(false);
     subscription.unsubscribe();
   });
+
+  it('hiddenWhenFiscalAreaActive: shows the activation entry while the area is WIP and hides it once ACTIVE', async () => {
+    const activation: MenuItem = {
+      label: 'Activar facturación electrónica', icon: 'zap', route: '/admin/invoicing/activation',
+      alwaysVisible: true, requiredFiscalScope: 'STORE', hiddenWhenFiscalAreaActive: 'invoicing',
+    };
+    const tree: MenuItem[] = [{ label: 'Fiscal', icon: 'landmark', children: [activation] }];
+    const routes = async () => (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1))))[0]?.children?.map((c) => c.route);
+    // `diagnose` lee la señal y el filtro el observable: ambos deben moverse juntos.
+    const facade = TestBed.inject(AuthFacade) as unknown as { activeFiscalAreas: { set(v: string[]): void } };
+    const setAreas = (areas: string[]) => { activeAreas$.next(areas); facade.activeFiscalAreas.set(areas); };
+
+    setAreas([]);
+    expect(await routes()).toEqual(['/admin/invoicing/activation']);
+    expect(service.diagnose(activation).visible).toBe(true);
+
+    setAreas(['invoicing']);
+    expect(await routes()).toBeUndefined();
+    expect(service.diagnose(activation).visible).toBe(false);
+
+    setAreas(['payroll']);
+    expect(await routes()).toEqual(['/admin/invoicing/activation']);
+  });
 });

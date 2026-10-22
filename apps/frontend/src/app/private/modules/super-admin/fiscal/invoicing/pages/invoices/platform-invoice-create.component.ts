@@ -1477,7 +1477,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       valid_to: row.valid_to ?? '',
       is_active: row.is_active,
       document_type: row.document_type,
-      technical_key: row.technical_key ?? undefined,
+      technical_key_set: row.technical_key_set,
+      technical_key_length: row.technical_key_length,
       created_at: row.created_at ?? '',
       updated_at: row.updated_at ?? '',
     };

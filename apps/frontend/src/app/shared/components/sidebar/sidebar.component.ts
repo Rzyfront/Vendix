@@ -91,6 +91,13 @@ export interface MenuItem {
    */
   requiresFiscalArea?: FiscalArea | 'any';
   /**
+   * Inverse of `requiresFiscalArea`: hides the item once the given fiscal area
+   * is ACTIVE/LOCKED (present in `AuthFacade.activeFiscalAreas()`). Used by the
+   * "Activar facturación electrónica" entry, reachable only while the area is
+   * still being set up.
+   */
+  hiddenWhenFiscalAreaActive?: FiscalArea;
+  /**
    * Narrow read-only route used when the fiscal owner cannot access the full
    * module yet. It never enables the emission module or changes fiscal state.
    */

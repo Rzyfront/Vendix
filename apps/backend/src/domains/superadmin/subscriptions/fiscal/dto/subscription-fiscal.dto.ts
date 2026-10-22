@@ -52,6 +52,8 @@ const transformTechnicalKey = ({ value }: { value: unknown }) => {
 export const PLATFORM_RESOLUTION_DOCUMENT_TYPES = [
   'sales_invoice',
   'support_document',
+  'credit_note',
+  'debit_note',
 ] as const;
 
 export type PlatformResolutionDocumentType =
@@ -312,10 +314,21 @@ export class ListPlatformResolutionsQueryDto {
   @IsIn(['test', 'production'])
   environment?: SubscriptionFiscalEnvironment;
 
-  @Type(() => Boolean)
   @IsOptional()
+  @Transform(({ obj, key }) =>
+    obj[key] === true || obj[key] === 'true'
+      ? true
+      : obj[key] === false || obj[key] === 'false'
+        ? false
+        : obj[key],
+  )
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => obj[key] === true || obj[key] === 'true')
+  @IsBoolean()
+  include_archived?: boolean;
 }
 
 /**

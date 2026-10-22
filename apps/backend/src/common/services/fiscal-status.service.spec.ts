@@ -357,3 +357,84 @@ describe('FiscalStatusService — deriveSatisfiedSteps.legal_data', () => {
     });
   });
 });
+
+/**
+ * El estado real de habilitación (`environment` + `enablement_status`) es la
+ * única fuente de verdad del paso `dian_config`: certificado vigente por sí
+ * solo ya no basta.
+ */
+describe('FiscalStatusService — deriveSatisfiedSteps.dian_config (habilitación real)', () => {
+  const createService = () =>
+    new FiscalStatusService(
+      { withoutScope: () => ({}) } as any,
+      { getStatusBlock: jest.fn(), writeStatusBlock: jest.fn() } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const dianConfig = (over: Record<string, unknown>) => ({
+    id: 1,
+    name: 'Facturación',
+    nit: '900123456',
+    nit_type: 'NIT',
+    nit_dv: '8',
+    environment: 'testing',
+    operation_mode: 'own_software',
+    enablement_status: 'testing',
+    configuration_type: 'invoicing',
+    is_default: true,
+    has_certificate: true,
+    certificate_expiry: new Date(Date.now() + 365 * DAY).toISOString(),
+    software_id: null,
+    test_set_id: null,
+    has_software_pin: false,
+    inherited_certificate: false,
+    inherited_from: null,
+    ...over,
+  });
+
+  const derive = (dian_config: any) =>
+    (createService() as any).deriveSatisfiedSteps({
+      legal_data: null,
+      legal_data_missing: [],
+      dian_config,
+      resolution: null,
+      puc: null,
+      accounting_period: null,
+      default_taxes: null,
+      accounting_mappings: null,
+      initial_inventory: null,
+      payroll_config: null,
+    });
+
+  it('certificado vigente + ambiente de pruebas → NO satisfecho', () => {
+    expect(derive(dianConfig({})).has('dian_config')).toBe(false);
+  });
+
+  it('certificado vigente + production sin enabled → NO satisfecho', () => {
+    expect(
+      derive(dianConfig({ environment: 'production' })).has('dian_config'),
+    ).toBe(false);
+  });
+
+  it('certificado vigente + production + enabled → satisfecho', () => {
+    expect(
+      derive(
+        dianConfig({ environment: 'production', enablement_status: 'enabled' }),
+      ).has('dian_config'),
+    ).toBe(true);
+  });
+
+  it('production + enabled con certificado vencido → NO satisfecho', () => {
+    expect(
+      derive(
+        dianConfig({
+          environment: 'production',
+          enablement_status: 'enabled',
+          certificate_expiry: new Date(Date.now() - DAY).toISOString(),
+        }),
+      ).has('dian_config'),
+    ).toBe(false);
+  });
+});

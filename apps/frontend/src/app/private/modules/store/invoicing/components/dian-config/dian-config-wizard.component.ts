@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
+import { Router } from '@angular/router';
 import {
   FormBuilder,
   FormControl,
@@ -43,6 +44,7 @@ import {
 } from '../../interfaces/invoice.interface';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -264,6 +266,7 @@ interface PersistedTestResult {
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
+    AlertBannerComponent,
     CardComponent,
     InputComponent,
     IconComponent,
@@ -348,6 +351,17 @@ interface PersistedTestResult {
               <p class="text-[11px] text-text-secondary -mt-2">
                 {{ configurationTypeHint() }}
               </p>
+              @if (salesInvoiceRedirected()) {
+                <app-alert-banner variant="info" heading="La factura de venta se activa en su propio asistente">
+                  <p>
+                    Para habilitar la factura de venta ante la DIAN usa el asistente
+                    «Activar facturación electrónica»: son 6 pasos y puedes retomarlo donde quedó.
+                  </p>
+                  <app-button bannerActions size="sm" variant="outline" customClasses="min-h-11" (clicked)="goToActivation()">
+                    Ir al asistente de activación
+                  </app-button>
+                </app-alert-banner>
+              }
             }
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -440,7 +454,7 @@ interface PersistedTestResult {
               <app-button class="w-full sm:w-auto"
                 variant="primary"
                 (clicked)="saveCredentials()"
-                [disabled]="credentialsForm.invalid || savingCredentials()"
+                [disabled]="credentialsForm.invalid || savingCredentials() || salesInvoiceRedirected()"
                 [loading]="savingCredentials()"
               >
                 {{ selectedConfig() ? 'Actualizar' : 'Guardar' }} Credenciales
@@ -1382,6 +1396,7 @@ interface PersistedTestResult {
 })
 export class DianConfigWizardComponent {
   private readonly invoicingService = inject(DianConfigApiService);
+  private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -1405,6 +1420,13 @@ export class DianConfigWizardComponent {
    * que existía.
    */
   readonly takenConfigurationTypes = input<DianConfigurationType[]>([]);
+
+  /**
+   * Contexto tienda: la factura de venta ya no se habilita desde este modal sino
+   * desde el asistente `/admin/invoicing/activation`. La consola de super admin
+   * no lo activa y conserva el alta completa.
+   */
+  readonly redirectSalesInvoice = input<boolean>(false);
 
   readonly saved = output<DianConfig>();
   readonly cancelled = output<void>();
@@ -1583,6 +1605,20 @@ export class DianConfigWizardComponent {
   );
 
   readonly isEditingConfig = computed(() => this.selectedConfig() !== null);
+
+  /** Alta de factura de venta en contexto tienda: se redirige al asistente. */
+  readonly salesInvoiceRedirected = computed(
+    () =>
+      this.redirectSalesInvoice() &&
+      !this.isEditingConfig() &&
+      !this.configurationTypeLocked() &&
+      this.effectiveConfigurationType() === 'invoicing',
+  );
+
+  goToActivation(): void {
+    this.cancelled.emit();
+    void this.router.navigate(['/admin/invoicing/activation']);
+  }
 
   /** El eje real: el de la configuración editada, o el elegido en el alta. */
   readonly effectiveConfigurationType = computed<DianConfigurationType>(
