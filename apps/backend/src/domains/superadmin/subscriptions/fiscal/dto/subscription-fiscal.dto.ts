@@ -314,8 +314,14 @@ export class ListPlatformResolutionsQueryDto {
   @IsIn(['test', 'production'])
   environment?: SubscriptionFiscalEnvironment;
 
-  @Type(() => Boolean)
   @IsOptional()
+  @Transform(({ obj, key }) =>
+    obj[key] === true || obj[key] === 'true'
+      ? true
+      : obj[key] === false || obj[key] === 'false'
+        ? false
+        : obj[key],
+  )
   @IsBoolean()
   is_active?: boolean;
 

@@ -24,6 +24,7 @@ import { InvoiceCalculatorService } from '../../../store/invoicing/services/invo
 import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
 import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import { toPublicResolution } from '../../../store/invoicing/resolutions/resolutions.service';
 import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
 import {
@@ -4337,7 +4338,7 @@ export class SubscriptionFiscalService {
 
     // The model has no env column; surface the platform env so the UI can group.
     const data = rows.map((row) => ({
-      ...row,
+      ...toPublicResolution(row),
       environment: platformEnv,
     }));
 
@@ -4568,15 +4569,6 @@ export class SubscriptionFiscalService {
         : undefined,
     });
 
-    // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
-    await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
-      accounting_entity_id: accountingEntityId,
-      document_type: dto.document_type,
-      prefix: dto.prefix,
-      range_from: dto.rango_inicial,
-      range_to: dto.rango_final,
-    });
-
     const organizationId = await this.resolvePlatformOrganizationId();
     const { created, deactivated_resolution_ids } = await this.prisma
       .withoutScope()
@@ -4589,6 +4581,17 @@ export class SubscriptionFiscalService {
             document_type: dto.document_type,
           });
         }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango
+        // solapado. Dentro de la transacción y con el advisory lock, igual que
+        // el carril tienda, para serializar altas simultáneas.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          accounting_entity_id: accountingEntityId,
+          document_type: dto.document_type,
+          prefix: dto.prefix,
+          range_from: dto.rango_inicial,
+          range_to: dto.rango_final,
+          lock_in_transaction: true,
+        });
         const created = await tx.invoice_resolutions.create({
           data: {
             organization_id: organizationId,
@@ -4630,7 +4633,7 @@ export class SubscriptionFiscalService {
       });
 
     return {
-      ...created,
+      ...toPublicResolution(created),
       deactivated_resolution_ids,
       environment: dto.environment,
     };
@@ -4787,6 +4790,23 @@ export class SubscriptionFiscalService {
       });
       data.valid_to = nextValidTo;
     }
+    const becomesInternalSeries =
+      isSingleActiveDocumentType(nextDocumentType) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType);
+    if (becomesInternalSeries && dto.technical_key === undefined) {
+      // Factura -> nota: la fila hereda ClTec y número DIAN de la factura. Una
+      // serie interna no lleva ninguno de los dos: se validan los requisitos con
+      // la clave actual y, si pasan (o tras limpiarla), se rotulan como internos.
+      const internalNumber =
+        dto.resolution_number ?? internalSeriesResolutionNumber(nextPrefix);
+      this.assertInternalSeriesRequirements({
+        document_type: nextDocumentType,
+        resolution_number: internalNumber,
+        technical_key: null,
+      });
+      data.resolution_number = internalNumber;
+      Object.assign(data, this.technicalKeyVault.sealForWrite(null));
+    }
     if (dto.technical_key !== undefined) {
       if (isSingleActiveDocumentType(nextDocumentType)) {
         this.assertInternalSeriesRequirements({
@@ -4815,22 +4835,13 @@ export class SubscriptionFiscalService {
       data.current_number = nextRangeFrom - 1;
     }
 
-    // Guarda entre cuentas: solo si el PATCH mueve prefijo, rango o tipo.
-    if (
+    // Guarda entre cuentas: solo si el PATCH mueve prefijo, rango o tipo. Se
+    // ejecuta dentro de la transacción, con el advisory lock.
+    const needsCrossTenantGuard =
       dto.prefix !== undefined ||
       dto.document_type !== undefined ||
       dto.rango_inicial !== undefined ||
-      dto.rango_final !== undefined
-    ) {
-      await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
-        accounting_entity_id: current.accounting_entity_id,
-        document_type: dto.document_type ?? current.document_type,
-        prefix: dto.prefix ?? current.prefix,
-        range_from: nextRangeFrom,
-        range_to: nextRangeTo,
-        exclude_resolution_id: id,
-      });
-    }
+      dto.rango_final !== undefined;
 
     // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
     // (pasa de inactiva a activa, o cambia de tipo estando activa). Editar el
@@ -4842,6 +4853,17 @@ export class SubscriptionFiscalService {
           await lockResolutionSeries(tx, {
             accounting_entity_id: current.accounting_entity_id,
             document_type: nextDocumentType,
+          });
+        }
+        if (needsCrossTenantGuard) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: dto.document_type ?? current.document_type,
+            prefix: dto.prefix ?? current.prefix,
+            range_from: nextRangeFrom,
+            range_to: nextRangeTo,
+            exclude_resolution_id: id,
+            lock_in_transaction: true,
           });
         }
         const updated = await tx.invoice_resolutions.update({
@@ -4873,7 +4895,7 @@ export class SubscriptionFiscalService {
     }
 
     return {
-      ...updated,
+      ...toPublicResolution(updated),
       deactivated_resolution_ids,
       environment: settings.environment,
     };
@@ -4931,7 +4953,7 @@ export class SubscriptionFiscalService {
 
     this.logger.log(`Platform resolution ${id} archived`);
     return {
-      ...archived,
+      ...toPublicResolution(archived),
       environment: (await this.getSettings()).environment,
       replacement_resolution_id: replacement?.id ?? null,
     };

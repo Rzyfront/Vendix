@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { CreatePlatformInvoiceDto } from './dto/subscription-fiscal.dto';
+import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
 import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
 import { CustomerFiscalIdentityValidator } from '../../../store/invoicing/validators/customer-fiscal-identity.validator';
 import {
@@ -543,7 +544,7 @@ describe('SubscriptionFiscalService · resoluciones · archivado lógico', () =>
     } as never);
 
     expect(result.resolution_number).toBe('INTERNA-NCP');
-    expect(result.technical_key).toBeNull();
+    expect(result).toMatchObject({ technical_key_set: false, technical_key_length: 0 });
     expect(result.valid_to.getUTCFullYear()).toBeGreaterThanOrEqual(
       new Date().getUTCFullYear() + 99,
     );
@@ -594,6 +595,193 @@ describe('SubscriptionFiscalService · resoluciones · archivado lógico', () =>
 
     expect((error as HttpException).getResponse()).toMatchObject({
       error_code: 'INVOICING_RESOLUTION_005',
+    });
+  });
+});
+
+describe('SubscriptionFiscalService · resoluciones · revisión F3/F5/F6', () => {
+  const unused = {};
+  const SECRET = {
+    technical_key: 'a'.repeat(40),
+    technical_key_encrypted: 'cipher',
+    technical_key_fingerprint: 'fp',
+  };
+  const vault = {
+    sealForWrite: (raw: string | null) => ({
+      technical_key: raw ?? null,
+      technical_key_encrypted: null,
+      technical_key_fingerprint: null,
+    }),
+  };
+
+  function buildService(model: Record<string, jest.Mock>, tx: unknown = {}) {
+    const prisma = {
+      withoutScope: () => ({
+        invoice_resolutions: model,
+        $transaction: jest.fn(async (cb: (t: unknown) => unknown) => cb(tx)),
+      }),
+    };
+    const service: SubscriptionFiscalService = Reflect.construct(
+      SubscriptionFiscalService,
+      [prisma, ...Array(16).fill(unused)],
+    );
+    const internals = service as unknown as Record<string, jest.Mock>;
+    jest.spyOn(internals as never, 'resolvePlatformOrganizationId').mockResolvedValue(1 as never);
+    jest.spyOn(internals as never, 'resolvePlatformAccountingEntityId').mockResolvedValue(5 as never);
+    jest.spyOn(internals as never, 'getSettings').mockResolvedValue({ environment: 'test' } as never);
+    (service as any).technicalKeyVault = vault;
+    return service;
+  }
+
+  afterEach(() => jest.clearAllMocks());
+
+  const expectNoSecrets = (out: any) => {
+    expect(out).not.toHaveProperty('technical_key');
+    expect(out).not.toHaveProperty('technical_key_encrypted');
+    expect(out).not.toHaveProperty('technical_key_fingerprint');
+  };
+
+  it('F3-H1: listado, archivado, DELETE, create y update no devuelven la ClTec ni su cifrado', async () => {
+    const fila = {
+      ...buildResolutionRow(),
+      id: 77,
+      organization_id: 1,
+      archived_at: null,
+      _count: { invoices: 0 },
+      ...SECRET,
+    };
+    const tx = {
+      $executeRaw: jest.fn(),
+      $executeRawUnsafe: jest.fn(),
+      invoice_resolutions: {
+        create: jest.fn().mockResolvedValue({ ...fila, is_active: false }),
+        update: jest.fn().mockResolvedValue({ ...fila, is_active: false }),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
+      },
+    };
+    const service = buildService(
+      {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([fila]),
+      },
+      tx,
+    );
+    (archiveResolutionInTx as jest.Mock).mockResolvedValue({
+      archived: { ...fila, archived_at: new Date() },
+      replacement: null,
+    });
+    jest
+      .spyOn(service as any, 'findPlatformResolution')
+      .mockResolvedValue(fila);
+
+    const outs = [
+      (await service.listResolutions({}))[0],
+      await service.archiveResolution(77, {}),
+      await service.deleteResolution(77),
+      await service.createResolution({
+        prefix: 'SETP',
+        document_type: 'sales_invoice',
+        environment: 'test',
+        rango_inicial: 1,
+        rango_final: 100,
+        technical_key: 'a'.repeat(40),
+      } as never),
+      await service.updateResolution(77, { rango_final: 500 } as never),
+    ];
+    for (const out of outs) {
+      expectNoSecrets(out);
+      expect(out).toMatchObject({ technical_key_set: true, technical_key_length: 40 });
+    }
+  });
+
+  it('F3-H2: listResolutions filtra is_active=false', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = buildService({ findMany });
+    await service.listResolutions({ is_active: false });
+    expect(findMany.mock.calls[0][0].where.is_active).toBe(false);
+  });
+
+  it('F5-H2: createResolution toma la guarda entre cuentas con el tx y lock_in_transaction', async () => {
+    const tx = {
+      $executeRawUnsafe: jest.fn(),
+      invoice_resolutions: {
+        create: jest.fn().mockResolvedValue({ id: 1, is_active: true, ...SECRET }),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
+      },
+    };
+    const service = buildService({ findFirst: jest.fn().mockResolvedValue(null) }, tx);
+    await service.createResolution({
+      prefix: 'SETP',
+      document_type: 'sales_invoice',
+      environment: 'test',
+      rango_inicial: 1,
+      rango_final: 100,
+      technical_key: 'a'.repeat(40),
+    } as never);
+    expect(assertNoCrossTenantNumberingOverlap).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ lock_in_transaction: true, prefix: 'SETP' }),
+    );
+  });
+
+  it('F5-H2: updateResolution toma la guarda con el tx y lock_in_transaction', async () => {
+    const fila = {
+      ...buildResolutionRow(),
+      id: 77,
+      accounting_entity_id: 5,
+      archived_at: null,
+      current_number: 0,
+      range_from: 1,
+      range_to: 100,
+      _count: { invoices: 0 },
+    };
+    const tx = {
+      $executeRawUnsafe: jest.fn(),
+      invoice_resolutions: {
+        update: jest.fn().mockResolvedValue({ ...fila, range_to: 200 }),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
+      },
+    };
+    const service = buildService({ findFirst: jest.fn().mockResolvedValue(fila) }, tx);
+    await service.updateResolution(77, { rango_final: 200 } as never);
+    expect(assertNoCrossTenantNumberingOverlap).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ lock_in_transaction: true, exclude_resolution_id: 77 }),
+    );
+  });
+
+  it('F6-L2: factura sin uso -> nota limpia la ClTec y rotula el número como interno', async () => {
+    const fila = {
+      ...buildResolutionRow(),
+      id: 77,
+      document_type: 'sales_invoice',
+      prefix: 'SETP',
+      resolution_number: '18760000001',
+      accounting_entity_id: 5,
+      archived_at: null,
+      current_number: 0,
+      range_from: 1,
+      range_to: 100,
+      is_active: true,
+      _count: { invoices: 0 },
+      ...SECRET,
+    };
+    const update = jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ ...fila, ...data }));
+    const tx = {
+      $executeRawUnsafe: jest.fn(),
+      invoice_resolutions: { update, findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() },
+    };
+    const service = buildService({ findFirst: jest.fn().mockResolvedValue(fila) }, tx);
+    await service.updateResolution(77, { document_type: 'credit_note' } as never);
+    const data = update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      resolution_number: 'INTERNA-SETP',
+      technical_key: null,
+      technical_key_encrypted: null,
+      technical_key_fingerprint: null,
     });
   });
 });
