@@ -12,6 +12,11 @@ import {
   TECHNICAL_KEY_LENGTHS,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
+import {
+  findActiveResolution,
+  findDormantInternalSeries,
+  lockResolutionSeries,
+} from './resolution-selection.util';
 import { RANGE_BOUND } from '../resolutions/dto/create-resolution.dto';
 
 type FiscalDocumentType =
@@ -146,28 +151,14 @@ export class InvoiceNumberGenerator {
 
     const client = this.prisma.withoutScope();
     const updated = await client.$transaction(async (tx: any) => {
-      const lockKey = `invoice_resolution:${accounting_entity_id}:${document_type}`;
-      // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
-      // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
-      // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
-      await tx.$executeRawUnsafe(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        lockKey,
-      );
-
-      const where = {
-        accounting_entity_id,
-        document_type,
-        is_active: true,
-        valid_from: { lte: new Date() },
-        valid_to: { gte: new Date() },
-        ...(normalized.resolution_id && { id: normalized.resolution_id }),
-      };
+      await lockResolutionSeries(tx, { accounting_entity_id, document_type });
 
       const resolution =
-        (await tx.invoice_resolutions.findFirst({
-          where,
-          orderBy: { created_at: 'desc' },
+        (await findActiveResolution(tx, {
+          accounting_entity_id,
+          document_type,
+          now: new Date(),
+          resolution_id: normalized.resolution_id,
         })) ??
         (await this.provisionInternalSeries(tx, {
           accounting_entity_id,
@@ -422,9 +413,9 @@ export class InvoiceNumberGenerator {
     const now = new Date();
     const defaults = buildInternalSeriesDefaults(prefix, now);
 
-    const dormant = await tx.invoice_resolutions.findFirst({
-      where: { accounting_entity_id, document_type },
-      orderBy: { created_at: 'desc' },
+    const dormant = await findDormantInternalSeries(tx, {
+      accounting_entity_id,
+      document_type,
     });
 
     if (dormant) {

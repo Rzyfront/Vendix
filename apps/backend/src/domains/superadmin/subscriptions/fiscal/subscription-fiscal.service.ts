@@ -24,6 +24,8 @@ import { InvoiceCalculatorService } from '../../../store/invoicing/services/invo
 import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
 import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
+import { findActiveResolution } from '../../../store/invoicing/utils/resolution-selection.util';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
 // la forma de una ClTec no puede tener dos definiciones, o el carril que valida
 // con la laxa emite lo que el otro rechaza.
@@ -4330,6 +4332,22 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Qué resolución usa hoy la plataforma para cada tipo de documento. Misma
+   * regla que el generador (`resolution-selection.util`); la única diferencia es
+   * `sales_invoice`, que no toma "la más reciente" sino la configurada en
+   * `settings.invoice_resolution_id` (sin configurar -> `source: 'none'`).
+   */
+  async listResolutionsInUse() {
+    const accounting_entity_id = await this.resolvePlatformAccountingEntityId();
+    const settings = await this.getSettings();
+    return buildResolutionsInUse(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      now: new Date(),
+      sales_invoice_resolution_id: settings.invoice_resolution_id ?? null,
+    });
+  }
+
+  /**
    * CP-platform-fiscal-invoicing-mvp · Phase A.4
    *
    * Lista de resoluciones aptas para EMISION en el rail super-admin.
@@ -5462,16 +5480,17 @@ export class SubscriptionFiscalService {
     // que está emitiendo contra la que eligió.
     const resolutionIdToFind =
       preferredResolutionId ?? settings.invoice_resolution_id;
-    const resolution = await tx.invoice_resolutions.findFirst({
-      where: {
-        id: resolutionIdToFind,
-        accounting_entity_id: settings.accounting_entity_id,
-        document_type: 'sales_invoice',
-        is_active: true,
-        valid_from: { lte: new Date() },
-        valid_to: { gte: new Date() },
-      },
-    });
+    // Sin id configurado ni pedido NO se cae a "la más reciente": la plataforma
+    // factura solo contra la resolución nombrada (la regla compartida filtra por
+    // `id` solo si viene).
+    const resolution = resolutionIdToFind
+      ? await findActiveResolution(tx, {
+          accounting_entity_id: settings.accounting_entity_id!,
+          document_type: 'sales_invoice',
+          now: new Date(),
+          resolution_id: resolutionIdToFind,
+        })
+      : null;
     if (!resolution) {
       if (
         preferredResolutionId !== undefined &&

@@ -60,6 +60,14 @@ export class ResolutionsController {
     return this.response_service.success(result);
   }
 
+  /** Declarado ANTES de `:id` para que `ParseIntPipe` no capture `in-use`. */
+  @Get('in-use')
+  @Permissions('invoicing:read')
+  async findInUse() {
+    const result = await this.resolutions_service.findInUse();
+    return this.response_service.success(result);
+  }
+
   /**
    * `ParseIntPipe` en todos los `:id` de este controlador, como en
    * `DianConfigController`: sin él, `+id` sobre un identificador no numérico

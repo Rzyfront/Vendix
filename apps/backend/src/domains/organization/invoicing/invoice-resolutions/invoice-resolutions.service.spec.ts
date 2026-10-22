@@ -41,6 +41,7 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
     overrides: {
       resolution?: Record<string, unknown> | null;
       duplicate?: Record<string, unknown> | null;
+      others?: Array<{ id: number }>;
     } = {},
   ) => {
     const unscoped = {
@@ -57,8 +58,13 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
             Promise.resolve({ id: where.id, ...data }),
           ),
         delete: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue(overrides.others ?? []),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      $transaction: jest.fn(),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
     };
+    unscoped.$transaction.mockImplementation((fn: any) => fn(unscoped));
 
     return {
       invoice_resolutions: {
@@ -128,10 +134,20 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
         delete: jest.fn().mockResolvedValue({}),
       },
       invoices: { count: jest.fn().mockResolvedValue(0) },
-      withoutScope: jest.fn().mockReturnValue({
-        invoice_resolutions: { findFirst: jest.fn().mockResolvedValue(null) },
-      }),
+      withoutScope: jest.fn(),
     };
+    const unscoped = {
+      invoice_resolutions: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: prisma.invoice_resolutions.create,
+        update: prisma.invoice_resolutions.update,
+      },
+      $transaction: jest.fn((fn: any) => fn(unscoped)),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+    };
+    prisma.withoutScope.mockReturnValue(unscoped);
     const fiscalScope = {
       resolveAccountingEntityForFiscal: jest
         .fn()
@@ -677,6 +693,141 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       const { data } =
         prisma.__unscoped.invoice_resolutions.create.mock.calls[0][0];
       expect(data.store_id).toBe(STORE_ID);
+    });
+  });
+
+  describe('una sola serie de notas activa por (entidad, tipo)', () => {
+    const fila = (document_type: string, is_active: boolean) => ({
+      id: 61,
+      organization_id: ORGANIZATION_ID,
+      store_id: null,
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      document_type,
+      resolution_number: 'INTERNA-NC',
+      resolution_date: new Date('2026-01-15'),
+      prefix: 'NC',
+      range_from: 1,
+      range_to: 5000,
+      current_number: 0,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active,
+      technical_key: null,
+      _count: { invoices: 0 },
+    });
+
+    it('crear una NC activa desactiva la previa de la misma entidad, en una transacción', async () => {
+      const { service, prisma } = createOrgService({ others: [{ id: 7 }] });
+
+      const result: any = await service.create({
+        ...facturaVentaValida(),
+        document_type: 'credit_note',
+        prefix: 'NC',
+        resolution_number: undefined,
+        technical_key: undefined,
+      } as any);
+
+      expect(prisma.__unscoped.$transaction).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.__unscoped.invoice_resolutions.updateMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          accounting_entity_id: ACCOUNTING_ENTITY_ID,
+          document_type: 'credit_note',
+          is_active: true,
+          id: { not: 100 },
+        },
+        data: { is_active: false },
+      });
+      expect(result.deactivated_resolution_ids).toEqual([7]);
+    });
+
+    it('activar una NC vía PATCH desactiva la otra activa', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', false),
+        others: [{ id: 8 }],
+      });
+
+      const result: any = await service.update(61, { is_active: true } as any);
+
+      expect(
+        prisma.__unscoped.invoice_resolutions.updateMany.mock.calls[0][0].where,
+      ).toEqual({
+        accounting_entity_id: ACCOUNTING_ENTITY_ID,
+        document_type: 'credit_note',
+        is_active: true,
+        id: { not: 61 },
+      });
+      expect(result.deactivated_resolution_ids).toEqual([8]);
+    });
+
+    it('sales_invoice no dispara la cascada (alta ni PATCH)', async () => {
+      const created = createOrgService({ others: [{ id: 9 }] });
+      const r1: any = await created.service.create(facturaVentaValida() as any);
+      expect(
+        created.prisma.__unscoped.invoice_resolutions.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(r1.deactivated_resolution_ids).toEqual([]);
+
+      const patched = createOrgService({
+        resolution: fila('sales_invoice', false),
+        others: [{ id: 9 }],
+      });
+      const r2: any = await patched.service.update(61, {
+        is_active: true,
+      } as any);
+      expect(
+        patched.prisma.__unscoped.invoice_resolutions.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(r2.deactivated_resolution_ids).toEqual([]);
+    });
+
+    it('activar una NC toma el lock con la llave del generador, antes del write', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', false),
+      });
+
+      await service.update(61, { is_active: true } as any);
+
+      const raw = prisma.__unscoped.$executeRawUnsafe;
+      expect(raw).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `invoice_resolution:${ACCOUNTING_ENTITY_ID}:credit_note`,
+      );
+      expect(raw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.__unscoped.invoice_resolutions.update.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('crear una NC toma el lock; crear sales_invoice no', async () => {
+      const nota = createOrgService();
+      await nota.service.create({
+        ...facturaVentaValida(),
+        document_type: 'credit_note',
+        prefix: 'NC',
+        resolution_number: undefined,
+        technical_key: undefined,
+      } as any);
+      expect(nota.prisma.__unscoped.$executeRawUnsafe).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `invoice_resolution:${ACCOUNTING_ENTITY_ID}:credit_note`,
+      );
+
+      const venta = createOrgService();
+      await venta.service.create(facturaVentaValida() as any);
+      expect(venta.prisma.__unscoped.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('editar el rango de una NC ya activa NO desactiva nada', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', true),
+        others: [{ id: 8 }],
+      });
+
+      const result: any = await service.update(61, { range_to: 9000 } as any);
+
+      expect(prisma.__unscoped.invoice_resolutions.updateMany).not.toHaveBeenCalled();
+      expect(result.deactivated_resolution_ids).toEqual([]);
     });
   });
 });

@@ -28,6 +28,12 @@ import {
   toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import {
+  deactivateOtherActiveSeries,
+  isSingleActiveDocumentType,
+  lockResolutionSeries,
+} from '../../../store/invoicing/utils/resolution-selection.util';
+import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
 
@@ -126,6 +132,28 @@ export class OrgInvoiceResolutionsService {
     return rows.map(toPublicResolution);
   }
 
+  /**
+   * Resolución en uso por tipo de documento para la entidad contable de la
+   * organización (o de `store_id` si el alcance fiscal es STORE). Misma regla
+   * que el generador de consecutivos.
+   */
+  async findInUse(store_id?: number) {
+    const organization_id = this.requireOrganizationId();
+    const resolved_store_id = await this.resolveStoreIdForWrite(
+      organization_id,
+      store_id,
+    );
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id,
+        store_id: resolved_store_id,
+      });
+    return buildResolutionsInUse(this.prisma.withoutScope(), {
+      accounting_entity_id: accounting_entity.id,
+      now: new Date(),
+    });
+  }
+
   async findOne(id: number) {
     const organization_id = this.requireOrganizationId();
     const resolution = await this.findOneInternal(id, organization_id);
@@ -204,46 +232,78 @@ export class OrgInvoiceResolutionsService {
 
     await this.assertPrefixFree(accounting_entity.id, dto.prefix);
 
-    const resolution = await this.prisma.withoutScope().invoice_resolutions.create({
-      data: {
-        organization_id,
-        store_id,
-        accounting_entity_id: accounting_entity.id,
-        document_type,
-        // Las notas no cuelgan de una Autorización de Numeración y no tienen
-        // número DIAN que poner, pero la columna es NOT NULL y su fila sigue
-        // siendo obligatoria para `generateNextNumber`. Sin este respaldo el alta
-        // de una nota por este carril moría con un error de base (500).
-        resolution_number: this.resolveResolutionNumber(
-          dto.resolution_number,
-          dto.prefix,
-        ),
-        resolution_date,
-        prefix: dto.prefix,
-        range_from: dto.range_from,
-        range_to: dto.range_to,
-        current_number: dto.range_from - 1, // El piso autorizado, aún sin consumir
-        valid_from,
-        valid_to,
-        is_active: dto.is_active ?? true,
-        // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
-        // la misma función que usa el carril de tienda. Escribir una sin las
-        // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
-        ...this.technicalKeyVault.sealForWrite(technical_key),
-      },
-      include: {
-        store: { select: { id: true, name: true, slug: true } },
-        accounting_entity: {
-          select: { id: true, name: true, fiscal_scope: true, store_id: true },
-        },
-      },
-    });
+    const { resolution, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Serializa contra activaciones concurrentes y contra la emisión (misma
+        // llave que el generador de consecutivos).
+        if (isSingleActiveDocumentType(document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+          });
+        }
+        const resolution = await tx.invoice_resolutions.create({
+          data: {
+            organization_id,
+            store_id,
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+            // Las notas no cuelgan de una Autorización de Numeración y no tienen
+            // número DIAN que poner, pero la columna es NOT NULL y su fila sigue
+            // siendo obligatoria para `generateNextNumber`. Sin este respaldo el alta
+            // de una nota por este carril moría con un error de base (500).
+            resolution_number: this.resolveResolutionNumber(
+              dto.resolution_number,
+              dto.prefix,
+            ),
+            resolution_date,
+            prefix: dto.prefix,
+            range_from: dto.range_from,
+            range_to: dto.range_to,
+            current_number: dto.range_from - 1, // El piso autorizado, aún sin consumir
+            valid_from,
+            valid_to,
+            is_active: dto.is_active ?? true,
+            // Las TRES columnas de la ClTec a la vez —claro, cifrado y huella—, con
+            // la misma función que usa el carril de tienda. Escribir una sin las
+            // otras deja la fila afirmando dos cosas distintas sobre la misma clave.
+            ...this.technicalKeyVault.sealForWrite(technical_key),
+          },
+          include: {
+            store: { select: { id: true, name: true, slug: true } },
+            accounting_entity: {
+              select: {
+                id: true,
+                name: true,
+                fiscal_scope: true,
+                store_id: true,
+              },
+            },
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): activar esta apaga
+        // las demás, en la MISMA transacción que el alta.
+        const deactivated_resolution_ids = resolution.is_active
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: accounting_entity.id,
+              document_type,
+              keep_id: resolution.id,
+            })
+          : [];
+        return { resolution, deactivated_resolution_ids };
+      });
 
     this.logger.log(
       `Org invoice resolution ${resolution.id} created for org ${organization_id}, entity ${accounting_entity.id}`,
     );
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Org invoice resolution ${resolution.id} (${document_type}) activated: deactivated previous active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
 
-    return toPublicResolution(resolution);
+    return { ...toPublicResolution(resolution), deactivated_resolution_ids };
   }
 
   async update(id: number, dto: UpdateOrgInvoiceResolutionDto) {
@@ -272,7 +332,10 @@ export class OrgInvoiceResolutionsService {
       ) {
         inmutables.push('document_type');
       }
-      if (dto.range_from !== undefined && dto.range_from !== current.range_from) {
+      if (
+        dto.range_from !== undefined &&
+        dto.range_from !== current.range_from
+      ) {
         inmutables.push('range_from');
       }
       if (
@@ -443,19 +506,55 @@ export class OrgInvoiceResolutionsService {
       await this.assertPrefixFree(next_accounting_entity_id, next_prefix, id);
     }
 
-    const updated = await this.prisma.withoutScope().invoice_resolutions.update({
-      where: { id },
-      data: update_data,
-      include: {
-        store: { select: { id: true, name: true, slug: true } },
-        accounting_entity: {
-          select: { id: true, name: true, fiscal_scope: true, store_id: true },
-        },
-      },
-    });
+    const { updated, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Bloquea la llave del DESTINO (tipo/entidad resultantes).
+        if (isSingleActiveDocumentType(next_document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: next_accounting_entity_id,
+            document_type: next_document_type,
+          });
+        }
+        const updated = await tx.invoice_resolutions.update({
+          where: { id },
+          data: update_data,
+          include: {
+            store: { select: { id: true, name: true, slug: true } },
+            accounting_entity: {
+              select: {
+                id: true,
+                name: true,
+                fiscal_scope: true,
+                store_id: true,
+              },
+            },
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
+        // (pasa de inactiva a activa, o cambia de tipo/entidad estando activa).
+        // Editar el rango/vigencia de la nota ya activa no apaga nada.
+        const transitioned =
+          current.is_active === false ||
+          next_document_type !== current.document_type ||
+          next_accounting_entity_id !== current.accounting_entity_id;
+        const deactivated_resolution_ids = updated.is_active && transitioned
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: next_accounting_entity_id,
+              document_type: next_document_type,
+              keep_id: id,
+            })
+          : [];
+        return { updated, deactivated_resolution_ids };
+      });
 
     this.logger.log(`Org invoice resolution #${id} updated`);
-    return toPublicResolution(updated);
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Org invoice resolution #${id} (${next_document_type}) active: deactivated other active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
+    return { ...toPublicResolution(updated), deactivated_resolution_ids };
   }
 
   async remove(id: number) {
@@ -495,7 +594,8 @@ export class OrgInvoiceResolutionsService {
     organization_id: number,
     requested_store_id?: number | null,
   ): Promise<number | null> {
-    const fiscal_scope = await this.fiscalScope.requireFiscalScope(organization_id);
+    const fiscal_scope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
 
     if (fiscal_scope === 'ORGANIZATION') {
       return null;

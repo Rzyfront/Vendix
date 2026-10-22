@@ -97,6 +97,29 @@ export class TenantResolutionsController {
     );
   }
 
+  @Get('in-use')
+  @Permissions('superadmin:tenants:resolutions:read')
+  @ApiOperation({
+    summary: 'Resolución en uso por tipo de documento del tenant',
+    description:
+      'Misma regla que el generador de consecutivos. Nunca expone la clave técnica.',
+  })
+  async inUse(
+    @Param('scope') scope: TenantScopeSegment,
+    @Param('tenantId', ParseIntPipe) tenantId: number,
+  ) {
+    const data = await this.runner.runAsTenant(
+      toTenantTarget(scope, tenantId),
+      this.opciones(PERMISOS_LECTURA),
+      () => this.resolutions.findInUse(),
+    );
+
+    return this.response.success(
+      data,
+      'Resoluciones en uso del tenant obtenidas',
+    );
+  }
+
   @Get(':resolutionId')
   @Permissions('superadmin:tenants:resolutions:read')
   @ApiOperation({ summary: 'Detalle de una resolución del tenant' })

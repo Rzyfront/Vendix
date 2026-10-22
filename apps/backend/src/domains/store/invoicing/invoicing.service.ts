@@ -29,10 +29,9 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import {
   InvoiceNumberGenerator,
-  buildInternalSeriesDefaults,
-  internalSeriesValidTo,
 } from './utils/invoice-number-generator';
-import { internalSeriesPrefixFor } from './fiscal-document-requirements';
+import { findActiveResolution } from './utils/resolution-selection.util';
+import { projectInternalSeries } from './utils/resolutions-in-use.util';
 import { RESOLUTION_PUBLIC_SELECT } from './utils/technical-key.util';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import {
@@ -2865,16 +2864,11 @@ export class InvoicingService {
     resolution_secret: StoredTechnicalKey | null;
   }> {
     const now = new Date();
-    const row = await this.prisma.withoutScope().invoice_resolutions.findFirst({
-      where: {
-        accounting_entity_id,
-        document_type: document_type as any,
-        is_active: true,
-        valid_from: { lte: now },
-        valid_to: { gte: now },
-        ...(requested_resolution_id ? { id: requested_resolution_id } : {}),
-      },
-      orderBy: { created_at: 'desc' },
+    const row = await findActiveResolution(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      document_type,
+      now,
+      resolution_id: requested_resolution_id,
     });
 
     const effective = row ?? (await this.peekInternalSeries(
@@ -2951,44 +2945,11 @@ export class InvoicingService {
     // puede emitir contra una fila que el generador va a rechazar.
     if (requested_resolution_id) return null;
 
-    const prefix = internalSeriesPrefixFor(document_type as any);
-    if (!prefix) return null;
-
-    // MISMA consulta que `provisionInternalSeries`: sin filtro de vigencia ni
-    // de `is_active`, porque lo que busca es precisamente la serie dormida.
-    const dormant = await this.prisma
-      .withoutScope()
-      .invoice_resolutions.findFirst({
-        where: { accounting_entity_id, document_type: document_type as any },
-        orderBy: { created_at: 'desc' },
-      });
-
-    if (dormant) {
-      return {
-        id: dormant.id,
-        resolution_number: dormant.resolution_number,
-        prefix: dormant.prefix,
-        range_from: dormant.range_from,
-        range_to: dormant.range_to,
-        // El cursor SE CONSERVA. El generador reactiva la fila sin tocarlo;
-        // devolverlo en cero acá anunciaría un número ya emitido.
-        current_number: dormant.current_number,
-        valid_from: now,
-        valid_to: internalSeriesValidTo(now),
-        is_active: true,
-        technical_key: dormant.technical_key,
-        technical_key_encrypted: dormant.technical_key_encrypted,
-      };
-    }
-
-    return {
-      id: null,
-      ...buildInternalSeriesDefaults(prefix, now),
-      // Sin ClTec, igual que la serie que se escribiría: el CUDE de estas notas
-      // se firma con el Software-PIN. Inventarle una haría que el prevalidador
-      // juzgara una clave que la emisión real no va a usar.
-      technical_key_encrypted: null,
-    };
+    return projectInternalSeries(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      document_type,
+      now,
+    });
   }
 
   /**

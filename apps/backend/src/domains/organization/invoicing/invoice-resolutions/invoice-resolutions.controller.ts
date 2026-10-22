@@ -36,6 +36,15 @@ export class OrgInvoiceResolutionsController {
     return this.responseService.success(result, 'Resoluciones obtenidas');
   }
 
+  /** Declarado ANTES de `:id` para que `ParseIntPipe` no capture `in-use`. */
+  @Get('in-use')
+  @Permissions('organization:invoicing:resolutions:read')
+  async findInUse(@Query('store_id') storeIdRaw?: string) {
+    const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
+    const result = await this.resolutionsService.findInUse(storeId);
+    return this.responseService.success(result, 'Resoluciones en uso obtenidas');
+  }
+
   @Get(':id')
   @Permissions('organization:invoicing:resolutions:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
