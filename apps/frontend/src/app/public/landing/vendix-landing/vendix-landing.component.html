@@ -48,7 +48,7 @@
         </a>
         <a
           [routerLink]="['/auth/register']"
-          class="inline-flex items-center justify-center text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-5 py-2.5 rounded-xl shadow-[0_4px_14px_0_rgba(16,185,129,0.3)] hover:shadow-none hover:-translate-y-0.5">
+          class="inline-flex items-center justify-center text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition-all duration-200 px-5 py-2.5 rounded-xl shadow-[0_4px_14px_0_rgba(16,185,129,0.3)] hover:shadow-none hover:-translate-y-0.5">
           Prueba Gratis 14 Días
         </a>
 
@@ -86,7 +86,7 @@
           <a [routerLink]="['/auth/login']" class="w-full py-2.5 text-center font-bold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
             Iniciar Sesión
           </a>
-          <a [routerLink]="['/auth/register']" class="w-full py-2.5 text-center font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md transition-all">
+          <a [routerLink]="['/auth/register']" class="w-full py-2.5 text-center font-bold text-white bg-emerald-700 rounded-xl hover:bg-emerald-800 shadow-md transition-all">
             Comenzar 14 Días Gratis
           </a>
         </div>
@@ -119,7 +119,7 @@
         <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto mb-8">
           <a
             [routerLink]="['/auth/register']"
-            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-none hover:-translate-y-0.5">
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition-all duration-200 px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-none hover:-translate-y-0.5">
             <app-icon name="zap" [size]="18"></app-icon>
             Comenzar Prueba Gratis 14 Días (Sin tarjeta)
           </a>
@@ -1213,12 +1213,13 @@
             <!-- Slider 1: Sucursales -->
             <div class="space-y-2">
               <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
-                <span class="text-slate-800">¿Cuántas sucursales o puntos de venta tienes?</span>
+                <span id="roi-stores-label" class="text-slate-800">¿Cuántas sucursales o puntos de venta tienes?</span>
                 <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ storeCount() }} {{ storeCount() === 1 ? 'Tienda' : 'Tiendas' }}</span>
               </div>
               <input
                 [value]="storeCount()"
                 (input)="updateStores($event)"
+                aria-labelledby="roi-stores-label"
                 class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
                 max="5"
                 min="1"
@@ -1230,12 +1231,13 @@
             <!-- Slider 2: Facturas al mes -->
             <div class="space-y-2 -mt-3">
               <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
-                <span class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
+                <span id="roi-invoices-label" class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
                 <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
               </div>
               <input
                 [value]="invoicesCount()"
                 (input)="updateInvoices($event)"
+                aria-labelledby="roi-invoices-label"
                 class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
                 max="10000"
                 min="300"
@@ -1269,7 +1271,7 @@
             </div>
             <button
               (click)="scrollToSection('precios-section')"
-              class="mt-6 w-full inline-flex items-center justify-center text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors py-3 rounded-xl shadow-md">
+              class="mt-6 w-full inline-flex items-center justify-center text-xs sm:text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition-colors py-3 rounded-xl shadow-md">
               Comenzar a Ahorrar Hoy
             </button>
           </div>
@@ -1788,7 +1790,7 @@
             <a
               [routerLink]="['/auth/register']"
               (click)="closeDemo()"
-              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/30 transition-colors">
+              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/30 transition-colors">
               <app-icon name="zap" [size]="16"></app-icon>
               Probar gratis 14 días
             </a>
@@ -1848,7 +1850,7 @@
       <button
         type="button"
         (click)="closePlanDetail()"
-        class="inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2.5 rounded-xl transition-colors">
+        class="inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 rounded-xl transition-colors">
         Entendido
       </button>
     </div>
