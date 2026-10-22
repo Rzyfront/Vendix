@@ -3892,7 +3892,7 @@ export class ProductsService {
   async update(
     id: number,
     updateProductDto: UpdateProductDto,
-    options?: { lean?: boolean },
+    options?: { lean?: boolean; skip_embedding_event?: boolean },
   ): Promise<any> {
     // Fase 1: pure-ingredient sanitization. Idempotent.
     let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
@@ -4944,6 +4944,12 @@ export class ProductsService {
         { timeout: 30000 },
       );
 
+      // Reindexado semántico: solo tras el commit. El lote (edición masiva)
+      // lo suprime y emite UN `products.bulk_updated` por su cuenta.
+      if (!options?.skip_embedding_event) {
+        await this.emitProductUpdatedEvent(result);
+      }
+
       // Retorno ligero: el consumidor en lote solo reporta identidad, así que
       // se sirve desde la fila ya devuelta por la transacción sin una lectura
       // extra.
@@ -4962,6 +4968,46 @@ export class ProductsService {
         }
       }
       throw error;
+    }
+  }
+
+  /**
+   * Emite `product.updated` para reindexar el embedding. Enriquecimiento, nunca
+   * precondición: cualquier fallo (lectura o emit) se traga y se registra.
+   */
+  private async emitProductUpdatedEvent(product: {
+    id: number;
+    store_id: number;
+    name: string;
+    description?: string | null;
+  }): Promise<void> {
+    try {
+      const row = await this.prisma.products.findFirst({
+        where: { id: product.id },
+        select: {
+          stores: { select: { organization_id: true } },
+          product_categories: {
+            take: 1,
+            orderBy: { category_id: 'asc' },
+            select: { categories: { select: { name: true } } },
+          },
+        },
+      });
+      const organization_id = row?.stores?.organization_id;
+      if (!organization_id) return;
+
+      this.eventEmitter.emit('product.updated', {
+        store_id: product.store_id,
+        organization_id,
+        product_id: product.id,
+        name: product.name,
+        description: product.description ?? undefined,
+        category: row?.product_categories?.[0]?.categories?.name,
+      });
+    } catch (error: any) {
+      this.logger.warn(
+        `No se pudo emitir product.updated (${product.id}): ${error?.message}`,
+      );
     }
   }
 

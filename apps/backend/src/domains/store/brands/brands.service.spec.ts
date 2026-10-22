@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
@@ -52,10 +53,13 @@ describe('BrandsService', () => {
     $transaction: jest.fn((fn: any) => fn(mockPrismaService)),
   };
 
+  const mockEventEmitter = { emit: jest.fn() };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BrandsService,
+        { provide: EventEmitter2, useValue: mockEventEmitter },
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
@@ -989,6 +993,68 @@ describe('BrandsService', () => {
         where: { id: { in: [1, 2] }, store_id: 1, brand_id: 10 },
         data: { brand_id: null, updated_at: expect.any(Date) },
       });
+    });
+
+    it('add emite UN products.bulk_updated solo con los productos cambiados', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, null),
+        P(2, 10),
+        P(3, 20),
+      ]);
+      mockPrismaService.brands.findMany.mockResolvedValue([
+        { id: 20, name: 'Adidas' },
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.assignProducts(10, {
+        action: 'add',
+        product_ids: [1, 2, 3],
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'products.bulk_updated',
+        { store_id: 1, organization_id: 1, product_ids: [1, 3] },
+      );
+    });
+
+    it('remove emite solo los productos que tenían la marca', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        P(1, 10),
+        P(2, 20),
+      ]);
+      mockPrismaService.products.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.assignProducts(10, {
+        action: 'remove',
+        product_ids: [1, 2],
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'products.bulk_updated',
+        { store_id: 1, organization_id: 1, product_ids: [1] },
+      );
+    });
+
+    it('no emite si no cambió nada (0 cambiados)', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, 10)]);
+
+      await service.assignProducts(10, { action: 'add', product_ids: [1] });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('no emite si la transacción falla', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([P(1, null)]);
+      mockPrismaService.products.updateMany.mockRejectedValue(
+        new Error('boom'),
+      );
+
+      await expect(
+        service.assignProducts(10, { action: 'add', product_ids: [1] }),
+      ).rejects.toThrow('boom');
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('rejects unknown products without writing', async () => {

@@ -18,6 +18,7 @@ import {
   CategoryProductIdsResult,
 } from './dto';
 import slugify from 'slugify';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { S3Service } from '@common/services/s3.service';
 import { ImageContext } from '@common/config/image-presets';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
@@ -31,6 +32,7 @@ export class CategoriesService {
     private accessValidation: AccessValidationService,
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
@@ -260,7 +262,8 @@ export class CategoriesService {
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const ids = [...new Set(dto.product_ids)];
 
-    return this.prisma.$transaction(async (tx: any) => {
+    let affectedIds: number[] = [];
+    const result = await this.prisma.$transaction(async (tx: any) => {
       await this.loadAssignContext(tx, store_id, categoryId, ids, dto.action);
 
       const current = await tx.product_categories.findMany({
@@ -304,8 +307,31 @@ export class CategoriesService {
         });
       }
 
+      affectedIds = added + removed > 0 ? changedIds : [];
       return { added, removed, unchanged: ids.length - added - removed };
     });
+
+    // Tras el commit: el nombre de categoría forma parte del texto indexado.
+    this.emitProductsBulkUpdated(store_id, affectedIds);
+    return result;
+  }
+
+  private emitProductsBulkUpdated(
+    store_id: number,
+    product_ids: number[],
+  ): void {
+    if (product_ids.length === 0) return;
+    try {
+      const organization_id = RequestContextService.getOrganizationId();
+      if (!organization_id) return;
+      this.eventEmitter.emit('products.bulk_updated', {
+        store_id,
+        organization_id,
+        product_ids,
+      });
+    } catch {
+      // Reindexar es enriquecimiento: jamás rompe la respuesta.
+    }
   }
 
   /** Valida categoría activa/inactiva (no archivada) y productos de la tienda. */

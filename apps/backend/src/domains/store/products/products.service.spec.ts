@@ -1028,12 +1028,17 @@ describe('ProductsService', () => {
       };
 
       // 1ª llamada: el producto a actualizar. 2ª: el chequeo de unicidad del
-      // slug dentro de la tienda (null = libre). 3ª: la relectura de findOne
+      // slug dentro de la tienda (null = libre). 3ª: la lectura de organización
+      // y categoría para el evento de reindexado. 4ª: la relectura de findOne
       // con la que update() cierra. Todas son findFirst — findUnique no puede
       // expresar el filtro de estado ni el scope de tienda.
       mockPrismaService.products.findFirst
         .mockResolvedValueOnce(existingProduct)
         .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          stores: { organization_id: 1 },
+          product_categories: [],
+        })
         .mockResolvedValueOnce(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
@@ -2317,6 +2322,83 @@ describe('ProductsService', () => {
         sku: 'ING-042',
       });
       expect(findOneSpy).not.toHaveBeenCalled();
+    });
+
+    describe('reindexado semántico (product.updated)', () => {
+      it('emite product.updated con el payload tras el commit', async () => {
+        primeUpdatePath({
+          ...existingProduct,
+          description: 'Harina fina',
+        });
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [{ categories: { name: 'Despensa' } }],
+        });
+        mockEventEmitter.emit.mockClear();
+
+        await service.update(existingProduct.id, {
+          is_featured: false,
+        } as UpdateProductDto);
+
+        expect(mockEventEmitter.emit).toHaveBeenCalledWith('product.updated', {
+          store_id: 1,
+          organization_id: 7,
+          product_id: existingProduct.id,
+          name: 'Harina de trigo',
+          description: 'Harina fina',
+          category: 'Despensa',
+        });
+      });
+
+      it('NO emite si la transacción falla', async () => {
+        primeUpdatePath();
+        mockPrismaService.$transaction.mockRejectedValue(new Error('boom'));
+        mockEventEmitter.emit.mockClear();
+
+        await expect(
+          service.update(existingProduct.id, {
+            is_featured: false,
+          } as UpdateProductDto),
+        ).rejects.toThrow('boom');
+
+        expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('skip_embedding_event suprime la emisión (lo usa la edición masiva)', async () => {
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [],
+        });
+        mockEventEmitter.emit.mockClear();
+
+        await service.update(
+          existingProduct.id,
+          { is_featured: false } as UpdateProductDto,
+          { lean: true, skip_embedding_event: true },
+        );
+
+        expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('un fallo del emit no rompe la respuesta', async () => {
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [],
+        });
+        mockEventEmitter.emit.mockImplementationOnce(() => {
+          throw new Error('listener down');
+        });
+
+        await expect(
+          service.update(
+            existingProduct.id,
+            { is_featured: false } as UpdateProductDto,
+            { lean: true },
+          ),
+        ).resolves.toMatchObject({ id: existingProduct.id });
+      });
     });
 
     it('sin opciones sigue delegando en findOne (retrocompatibilidad)', async () => {
