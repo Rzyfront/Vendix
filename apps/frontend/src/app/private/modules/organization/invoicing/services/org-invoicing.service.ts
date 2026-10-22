@@ -76,11 +76,13 @@ export interface OrgResolutionRow {
 
 export interface OrgResolutionPayload {
   store_id?: number | null;
-  resolution_number: string;
+  /** Se omite en series internas de notas (sin resolución DIAN). */
+  resolution_number?: string;
   resolution_date: string;
   prefix: string;
   range_from: number;
   range_to: number;
+  document_type?: string;
   valid_from: string;
   valid_to: string;
   is_active?: boolean;

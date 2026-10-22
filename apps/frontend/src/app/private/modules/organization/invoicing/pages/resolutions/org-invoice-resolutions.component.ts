@@ -1,12 +1,14 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs';
 
 import {
   AlertBannerComponent,
   ButtonComponent,
   CardComponent,
+  ConfirmationModalComponent,
   FilterConfig,
   FilterValues,
   InputComponent,
@@ -16,6 +18,7 @@ import {
   OptionsDropdownComponent,
   ResponsiveDataViewComponent,
   SaveRequirementsModalComponent,
+  SelectorComponent,
   StatsComponent,
   TableAction,
   TableColumn,
@@ -26,16 +29,25 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { formatDateOnlyUTC, toLocalDateString } from '../../../../../../shared/utils/date.util';
 import {
   ResolutionsInUseCardComponent,
   deactivatedResolutionsToast,
   extractDeactivatedResolutionIds,
+  findNoteSeriesConflicts,
   formatArchivedAt,
+  isFiscalDocumentType,
   isResolutionInUse,
+  noteSeriesActivationMessage,
+  requirementsFor,
+  type FiscalDocumentType,
   ResolutionArchiveModalComponent,
   type ResolutionsInUseResponse,
 } from '../../../../../../shared/components/dian';
+import {
+  INTERNAL_SERIES_INITIAL_RANGE,
+  INTERNAL_SERIES_VALIDITY_YEARS,
+} from '../../../../../../shared/components/dian/fiscal-document-requirements';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
 import {
   OrgInvoicingService,
@@ -50,6 +62,7 @@ import {
     AlertBannerComponent,
     ButtonComponent,
     CardComponent,
+    ConfirmationModalComponent,
     InputComponent,
     InputsearchComponent,
     ModalComponent,
@@ -57,6 +70,7 @@ import {
     ReactiveFormsModule,
     ResponsiveDataViewComponent,
     SaveRequirementsModalComponent,
+    SelectorComponent,
     StatsComponent,
     OrgFiscalScopeSelectorComponent,
     ResolutionsInUseCardComponent,
@@ -120,6 +134,8 @@ import {
         <app-resolutions-in-use-card
           [data]="inUse()"
           [loading]="inUseLoading()"
+          [canCreateSeries]="canCreate()"
+          (createSeries)="openCreateModalForType($event)"
         />
       </div>
 
@@ -195,13 +211,34 @@ import {
           [formGroup]="resolutionForm"
           (ngSubmit)="submitResolution()"
         >
+          <app-selector
+            label="Tipo de documento"
+            formControlName="document_type"
+            [required]="true"
+            [options]="documentTypeOptions()"
+          />
+
+          @if (isInternalSeries()) {
+            <p class="text-xs font-medium text-text-secondary">
+              Serie interna: no se valida ante la DIAN
+            </p>
+          }
+
+          @if (usedSeriesNotice(); as notice) {
+            <div class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+              {{ notice }}
+            </div>
+          }
+
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <app-input
-              label="Número de resolución"
-              formControlName="resolution_number"
-              placeholder="18764000001"
-              [required]="true"
-            />
+            @if (!isInternalSeries()) {
+              <app-input
+                label="Número de resolución"
+                formControlName="resolution_number"
+                placeholder="18764000001"
+                [required]="true"
+              />
+            }
             <app-input
               label="Prefijo"
               formControlName="prefix"
@@ -246,11 +283,13 @@ import {
             />
           </div>
 
-          <app-input
-            label="Clave técnica"
-            formControlName="technical_key"
-            placeholder="Opcional"
-          />
+          @if (!isInternalSeries()) {
+            <app-input
+              label="Clave técnica"
+              formControlName="technical_key"
+              placeholder="Opcional"
+            />
+          }
         </form>
 
         <div slot="footer" class="flex items-center justify-end gap-3 border-t border-border bg-surface p-3">
@@ -260,13 +299,27 @@ import {
           <app-button
             variant="primary"
             [loading]="savingResolution()"
-            [disabled]="resolutionForm.invalid || savingResolution()"
+            [disabled]="!formValid() || savingResolution()"
             (clicked)="submitResolution()"
           >
             {{ editingResolution() ? 'Actualizar' : 'Crear' }}
           </app-button>
         </div>
       </app-modal>
+
+      <!-- Activar una serie de notas desactiva la otra del mismo tipo. -->
+      @if (pendingConfirm(); as pending) {
+        <app-confirmation-modal
+          [isOpen]="true"
+          title="Activar serie de notas"
+          [message]="pending.message"
+          confirmText="Activar"
+          cancelText="Cancelar"
+          confirmVariant="primary"
+          (confirm)="confirmSave()"
+          (cancel)="pendingConfirm.set(null)"
+        />
+      }
 
       <!-- Archivar (las resoluciones no se borran) -->
       @if (pendingArchive(); as row) {
@@ -317,8 +370,49 @@ export class OrgInvoiceResolutionsComponent {
   readonly archiveBusy = signal(false);
   readonly archiveError = signal<string | null>(null);
   readonly archiveRequirePrefix = signal(false);
+  readonly pendingConfirm = signal<{
+    payload: OrgResolutionPayload;
+    message: string;
+  } | null>(null);
+  /** Tipo de documento elegido en el form (se mantiene en sync a mano y por valueChanges). */
+  readonly selectedType = signal<string>('sales_invoice');
+  private seededInternal: {
+    prefix: string;
+    range_from: number;
+    range_to: number;
+    valid_from: string;
+    valid_to: string;
+    resolution_date: string;
+  } | null = null;
 
   readonly requiresStoreSelector = computed(() => this.auth.fiscalScope() === 'STORE');
+  readonly canCreate = computed(
+    () => !this.requiresStoreSelector() || !!this.selectedStoreId(),
+  );
+  readonly isInternalSeries = computed(() => {
+    const type = this.selectedType();
+    if (!isFiscalDocumentType(type)) return false;
+    const req = requirementsFor(type);
+    return !req.requires_authorized_range && !!req.internal_series_prefix;
+  });
+  /** Serie ya usada: `current_number >= range_from` de la fila editada. */
+  readonly usedSeries = computed(() => {
+    const row = this.editingResolution();
+    return !!row && Number(row.current_number) >= Number(row.range_from);
+  });
+  readonly usedSeriesNotice = computed(() => {
+    const row = this.editingResolution();
+    if (!row || !this.usedSeries()) return null;
+    return `Esta serie ya emitió documentos (va en el consecutivo ${row.current_number}): el prefijo, el tipo y el número inicial no se pueden cambiar. Puedes ampliar el número final, cambiar la vigencia o archivarla.`;
+  });
+  readonly documentTypeOptions = computed(() => {
+    const types: FiscalDocumentType[] = ['sales_invoice', 'credit_note', 'debit_note'];
+    const current = this.editingResolution()?.document_type;
+    if (isFiscalDocumentType(current) && !types.includes(current)) {
+      types.push(current);
+    }
+    return types.map((value) => ({ value, label: requirementsFor(value).label }));
+  });
   /** Las archivadas no cuentan en los stats: ya no son parte de la numeración. */
   private readonly liveRows = computed(() => this.rows().filter((row) => !row.archived_at));
   readonly activeCount = computed(() => this.liveRows().filter((row) => row.is_active).length);
@@ -411,6 +505,12 @@ export class OrgInvoiceResolutionsComponent {
 
   readonly tableColumns: TableColumn[] = [
     { key: 'prefix', label: 'Prefijo', priority: 1 },
+    {
+      key: 'document_type',
+      label: 'Documento',
+      priority: 2,
+      transform: (value) => this.documentTypeLabel(value),
+    },
     { key: 'resolution_number', label: 'Resolución', priority: 1 },
     { key: 'store.name', label: 'Tienda', priority: 2, defaultValue: 'Organización' },
     {
@@ -466,6 +566,7 @@ export class OrgInvoiceResolutionsComponent {
     },
     badgeTransform: (value) => String(value ?? ''),
     detailKeys: [
+      { key: 'document_type', label: 'Documento', icon: 'file-text', transform: (value) => this.documentTypeLabel(value) },
       { key: 'in_use', label: 'Numeración', icon: 'hash', transform: (value) => (value ? 'En uso' : '-') },
       { key: 'current_number', label: 'Consecutivo', icon: 'hash', transform: (value, item) => `${value || 0} / ${item?.range_to || 0}` },
       { key: 'valid_to', label: 'Vigente hasta', icon: 'calendar', transform: (value) => this.formatDate(value) },
@@ -475,6 +576,7 @@ export class OrgInvoiceResolutionsComponent {
   };
 
   readonly resolutionForm = this.fb.group({
+    document_type: ['sales_invoice' as string, Validators.required],
     resolution_number: ['', [Validators.required, Validators.maxLength(100)]],
     prefix: ['', [Validators.required, Validators.maxLength(10)]],
     range_from: [null as number | null, [Validators.required, Validators.min(1)]],
@@ -485,7 +587,21 @@ export class OrgInvoiceResolutionsComponent {
     technical_key: [''],
   });
 
+  private readonly formStatus = toSignal(
+    this.resolutionForm.statusChanges.pipe(startWith(this.resolutionForm.status)),
+    { initialValue: this.resolutionForm.status },
+  );
+  readonly formValid = computed(() => this.formStatus() === 'VALID');
+
   constructor() {
+    this.resolutionForm.controls.document_type.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => {
+        if (this.editingResolution()) return;
+        this.selectedType.set(type ?? 'sales_invoice');
+        this.applyTypeRules();
+      });
+
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
@@ -526,38 +642,131 @@ export class OrgInvoiceResolutionsComponent {
   }
 
   openCreateModal(): void {
+    this.openCreateModalForType('sales_invoice');
+  }
+
+  /** Alta con el tipo sembrado (CTA de la tarjeta "en uso" o selector). */
+  openCreateModalForType(type: FiscalDocumentType): void {
+    if (!this.canCreate()) return;
+    const docType = ['sales_invoice', 'credit_note', 'debit_note'].includes(type)
+      ? type
+      : 'sales_invoice';
     this.editingResolution.set(null);
-    this.resolutionForm.reset({
-      resolution_number: '',
-      prefix: '',
-      range_from: null,
-      range_to: null,
-      resolution_date: '',
-      valid_from: '',
-      valid_to: '',
-      technical_key: '',
-    });
+    this.seededInternal = null;
+    this.setLocked(false);
+    this.resolutionForm.reset(
+      {
+        document_type: docType,
+        resolution_number: '',
+        prefix: '',
+        range_from: null,
+        range_to: null,
+        resolution_date: '',
+        valid_from: '',
+        valid_to: '',
+        technical_key: '',
+      },
+      { emitEvent: false },
+    );
+    this.selectedType.set(docType);
+    this.applyTypeRules();
     this.resolutionModalOpen.set(true);
   }
 
   openEditModal(row: OrgResolutionRow): void {
     this.editingResolution.set(row);
-    this.resolutionForm.reset({
-      resolution_number: row.resolution_number,
-      prefix: row.prefix,
-      range_from: row.range_from,
-      range_to: row.range_to,
-      resolution_date: this.toDateInput(row.resolution_date),
-      valid_from: this.toDateInput(row.valid_from),
-      valid_to: this.toDateInput(row.valid_to),
-      technical_key: row.technical_key || '',
-    });
+    this.seededInternal = null;
+    const docType = isFiscalDocumentType(row.document_type)
+      ? row.document_type
+      : 'sales_invoice';
+    this.selectedType.set(docType);
+    this.setLocked(false);
+    this.resolutionForm.reset(
+      {
+        document_type: docType,
+        resolution_number: row.resolution_number,
+        prefix: row.prefix,
+        range_from: row.range_from,
+        range_to: row.range_to,
+        resolution_date: this.toDateInput(row.resolution_date),
+        valid_from: this.toDateInput(row.valid_from),
+        valid_to: this.toDateInput(row.valid_to),
+        technical_key: row.technical_key || '',
+      },
+      { emitEvent: false },
+    );
+    this.setLocked(this.usedSeries());
+    this.applyTypeRules();
     this.resolutionModalOpen.set(true);
   }
 
   closeResolutionModal(): void {
     this.resolutionModalOpen.set(false);
     this.savingResolution.set(false);
+    this.pendingConfirm.set(null);
+  }
+
+  /** Prefijo, tipo y número inicial no cambian en una serie que ya emitió. */
+  private setLocked(locked: boolean): void {
+    const c = this.resolutionForm.controls;
+    for (const control of [c.prefix, c.document_type, c.range_from]) {
+      if (locked) control.disable({ emitEvent: false });
+      else control.enable({ emitEvent: false });
+    }
+  }
+
+  /** Validadores y siembra según el tipo elegido; refresca el estado del form. */
+  private applyTypeRules(): void {
+    const c = this.resolutionForm.controls;
+    const type = this.selectedType();
+    const internal = this.isInternalSeries();
+    const editing = this.editingResolution();
+
+    c.resolution_number.setValidators(
+      internal ? [Validators.maxLength(100)] : [Validators.required, Validators.maxLength(100)],
+    );
+    const minTo = editing && this.usedSeries() ? Math.max(1, Number(editing.current_number)) : 1;
+    c.range_to.setValidators([Validators.required, Validators.min(minTo)]);
+
+    if (!editing) {
+      const prev = this.seededInternal;
+      const clearIfSeeded = (control: { value: unknown; setValue: (v: any) => void }, seeded: unknown, empty: unknown) => {
+        if (prev && control.value === seeded) control.setValue(empty);
+      };
+      if (internal && isFiscalDocumentType(type)) {
+        const today = new Date();
+        const end = new Date(today);
+        end.setFullYear(today.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+        const seed = {
+          prefix: requirementsFor(type).internal_series_prefix ?? '',
+          range_from: 1,
+          range_to: INTERNAL_SERIES_INITIAL_RANGE,
+          valid_from: toLocalDateString(today),
+          valid_to: toLocalDateString(end),
+          resolution_date: toLocalDateString(today),
+        };
+        const fill = (control: { value: unknown; setValue: (v: any) => void }, key: keyof typeof seed) => {
+          const empty = control.value === '' || control.value === null;
+          if (empty || (prev && control.value === prev[key])) control.setValue(seed[key]);
+        };
+        fill(c.prefix, 'prefix');
+        fill(c.range_from, 'range_from');
+        fill(c.range_to, 'range_to');
+        fill(c.valid_from, 'valid_from');
+        fill(c.valid_to, 'valid_to');
+        fill(c.resolution_date, 'resolution_date');
+        this.seededInternal = seed;
+      } else if (prev) {
+        clearIfSeeded(c.prefix, prev.prefix, '');
+        clearIfSeeded(c.range_from, prev.range_from, null);
+        clearIfSeeded(c.range_to, prev.range_to, null);
+        clearIfSeeded(c.valid_from, prev.valid_from, '');
+        clearIfSeeded(c.valid_to, prev.valid_to, '');
+        clearIfSeeded(c.resolution_date, prev.resolution_date, '');
+        this.seededInternal = null;
+      }
+    }
+    this.resolutionForm.updateValueAndValidity();
   }
 
   submitResolution(): void {
@@ -567,18 +776,56 @@ export class OrgInvoiceResolutionsComponent {
     }
 
     const value = this.resolutionForm.getRawValue();
-    const payload: OrgResolutionPayload = {
+    const editing = this.editingResolution();
+    const internal = this.isInternalSeries();
+    const locked = !!editing && this.usedSeries();
+
+    const payload: Partial<OrgResolutionPayload> = {
       store_id: this.selectedStoreId(),
-      resolution_number: value.resolution_number!,
       resolution_date: value.resolution_date!,
-      prefix: value.prefix!,
-      range_from: Number(value.range_from),
       range_to: Number(value.range_to),
       valid_from: value.valid_from!,
       valid_to: value.valid_to!,
-      technical_key: value.technical_key || null,
-      is_active: true,
     };
+    if (!internal) {
+      payload.resolution_number = value.resolution_number!;
+      payload.technical_key = value.technical_key || null;
+    }
+    if (!locked) {
+      payload.prefix = value.prefix!;
+      payload.range_from = Number(value.range_from);
+    }
+    if (!editing) {
+      payload.document_type = value.document_type!;
+      payload.is_active = true;
+      const conflicts = findNoteSeriesConflicts(this.rows(), {
+        id: null,
+        document_type: value.document_type,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          payload: payload as OrgResolutionPayload,
+          message: noteSeriesActivationMessage(value.prefix, conflicts),
+        });
+        return;
+      }
+    } else if (
+      !locked &&
+      value.document_type !== (editing.document_type ?? 'sales_invoice')
+    ) {
+      payload.document_type = value.document_type!;
+    }
+
+    this.persist(payload as OrgResolutionPayload);
+  }
+
+  confirmSave(): void {
+    const pending = this.pendingConfirm();
+    this.pendingConfirm.set(null);
+    if (pending) this.persist(pending.payload);
+  }
+
+  private persist(payload: OrgResolutionPayload): void {
     const editing = this.editingResolution();
     const request = editing
       ? this.service.updateResolution(editing.id, payload)
@@ -670,6 +917,12 @@ export class OrgInvoiceResolutionsComponent {
 
   hasActiveFilters(): boolean {
     return !!(this.searchTerm() || this.filterValues()['state']);
+  }
+
+  documentTypeLabel(value: unknown): string {
+    return isFiscalDocumentType(value)
+      ? requirementsFor(value).label
+      : requirementsFor('sales_invoice').label;
   }
 
   formatDate(value: string | null | undefined): string {
