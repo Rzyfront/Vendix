@@ -164,4 +164,72 @@ describe('CashSessionCloseDataProvider', () => {
     expect(html).toContain('Ventas cobradas');
     expect(html).not.toContain('Lo que debe haber');
   });
+
+  describe('composer: entradas y detalle de salidas', () => {
+    const render = async (patch: (cr: any) => void) => {
+      const { provider, sample } = build();
+      const data: any = await sample.getSampleData();
+      patch(data.custom_variables.cash_report);
+      void provider;
+      const composer = new PrintLayoutComposerService(
+        new PrintTemplateCompilerService(),
+      );
+      return composer.compose(
+        {
+          paper: { format: 'thermal_80', width_mm: 80, is_roll: true, copies: 1 },
+          styles: { font_family: 'Arial', font_size_base_pt: 8.5, primary_color: '#000' },
+          sections: [
+            { id: 'sec_cash_report', type: 'cash_session_report', title: 'c', enabled: true, order: 1 },
+          ],
+          columns: [],
+        } as any,
+        data,
+      );
+    };
+
+    it('pinta Entradas de la sesión con referencia y notas, y salida sin repetidos', async () => {
+      const html = await render((cr) => {
+        cr.inflows = [
+          { id: 1, at: cr.session.closed_at, at_formatted: '14/10/2026 08:00', amount: 2000, reference: 'Cambio', notes: 'Billetes', user_name: null, payment_method: 'cash' },
+        ];
+        cr.outflows = [
+          { ...cr.outflows[0], reason: 'X', reference: 'Taxi', notes: 'X', user_name: null },
+        ];
+      });
+      expect(html).toContain('Entradas de la sesión');
+      expect(html).toContain('Cambio · Billetes');
+      expect(html).toContain('X · Taxi');
+      expect(html).not.toContain('X · Taxi · X');
+      expect(html).not.toContain('X · X');
+    });
+
+    it('Sin entradas cuando inflows está vacío', async () => {
+      const html = await render((cr) => {
+        cr.inflows = [];
+      });
+      expect(html).toContain('Entradas de la sesión');
+      expect(html).toContain('Sin entradas');
+    });
+
+    it('escapa el HTML del detalle', async () => {
+      const html = await render((cr) => {
+        cr.inflows = [
+          { id: 1, at: cr.session.closed_at, amount: 1, reference: '<b>x</b>', notes: null, user_name: null, payment_method: 'cash' },
+        ];
+      });
+      expect(html).not.toContain('<b>x</b>');
+      expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
+    });
+  });
+
+  it('fetchDocumentData calcula at_formatted también para inflows', async () => {
+    const base = await build().sample.getSampleData();
+    const report = { ...(base.custom_variables as any).cash_report };
+    report.inflows = [
+      { id: 1, at: '2026-10-14T13:00:00.000Z', amount: 5, reference: null, notes: null, user_name: null, payment_method: 'cash' },
+    ];
+    const { provider } = build({ report });
+    const model = await provider.fetchDocumentData(7, 55);
+    expect((model.custom_variables as any).cash_report.inflows[0].at_formatted).toMatch(/08:00/);
+  });
 });
