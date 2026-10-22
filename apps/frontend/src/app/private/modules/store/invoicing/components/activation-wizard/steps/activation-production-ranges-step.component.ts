@@ -16,8 +16,10 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import {
   DianNumberingRangePanelComponent,
   ResolutionsInUseCardComponent,
+  type FiscalDocumentType,
   type ResolutionsInUseResponse,
 } from '../../../../../../../shared/components/dian';
+import { ResolutionCreateComponent } from '../../resolutions/resolution-create/resolution-create.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { DianConfigApiService } from '../../../../../../../shared/services/dian';
 import { hasProductionResolution } from '../activation-step.util';
@@ -35,6 +37,7 @@ import type { ActivationContext } from '../activation-wizard.model';
     IconComponent,
     DianNumberingRangePanelComponent,
     ResolutionsInUseCardComponent,
+    ResolutionCreateComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -81,7 +84,15 @@ import type { ActivationContext } from '../activation-wizard.model';
       <app-resolutions-in-use-card
         [data]="inUse()"
         [loading]="inUseLoading()"
+        [canCreateSeries]="!context().readOnly"
+        (createSeries)="onCreateSeries($event)"
       ></app-resolutions-in-use-card>
+
+      <vendix-resolution-create
+        [(isOpen)]="createOpen"
+        [documentType]="seededType()"
+        (saved)="loadInUse()"
+      ></vendix-resolution-create>
     </div>
   `,
 })
@@ -94,6 +105,9 @@ export class ActivationProductionRangesStepComponent {
 
   readonly inUse = signal<ResolutionsInUseResponse | null>(null);
   readonly inUseLoading = signal(false);
+
+  readonly createOpen = signal(false);
+  readonly seededType = signal<FiscalDocumentType | null>(null);
 
   readonly done = computed(() => hasProductionResolution(this.context().axis));
 
@@ -110,7 +124,12 @@ export class ActivationProductionRangesStepComponent {
     this.changed.emit();
   }
 
-  private loadInUse(): void {
+  onCreateSeries(type: FiscalDocumentType): void {
+    this.seededType.set(type);
+    this.createOpen.set(true);
+  }
+
+  loadInUse(): void {
     this.inUseLoading.set(true);
     this.api
       .getResolutionsInUse()

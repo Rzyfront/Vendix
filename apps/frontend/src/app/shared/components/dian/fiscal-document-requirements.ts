@@ -148,13 +148,10 @@ export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
 
 /**
  * Vigencia, en años, que el formulario de resoluciones pre-llena para una serie
- * interna registrada A MANO. No es `INTERNAL_SERIES_VALIDITY_YEARS` porque el
- * backend rechaza en todo alta manual un `valid_to` a más de 10 años
- * (`MAX_YEARS_AHEAD` en `apps/backend/src/common/utils/fiscal-date.util.ts`).
- * No bloquea nada: cuando una serie interna vence, el generador la reactiva
- * solo con la vigencia completa en vez de cortar la numeración.
+ * interna registrada A MANO. El backend acepta para series internas una
+ * vigencia de hasta `INTERNAL_SERIES_VALIDITY_YEARS` años (decisión D2/D10).
  */
-export const INTERNAL_SERIES_FORM_VALIDITY_YEARS = 10;
+export const INTERNAL_SERIES_FORM_VALIDITY_YEARS = INTERNAL_SERIES_VALIDITY_YEARS;
 
 /**
  * LA TABLA. `Record<FiscalDocumentType, …>` es deliberado: añadir un valor a la

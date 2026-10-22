@@ -135,6 +135,8 @@ type ResolutionStatus =
         <app-resolutions-in-use-card
           [data]="in_use()"
           [loading]="in_use_loading()"
+          [canCreateSeries]="true"
+          (createSeries)="onCreateSeries($event)"
         ></app-resolutions-in-use-card>
       </div>
 
@@ -198,6 +200,7 @@ type ResolutionStatus =
       <vendix-resolution-create
         [(isOpen)]="is_create_modal_open"
         [resolution]="selected_resolution()"
+        [documentType]="seeded_document_type()"
       ></vendix-resolution-create>
 
       <!-- Archivar (las resoluciones no se borran) -->
@@ -251,6 +254,8 @@ export class ResolutionsPageComponent {
   readonly search_term = signal('');
   readonly is_create_modal_open = signal(false);
   readonly selected_resolution = signal<InvoiceResolution | null>(null);
+  /** Tipo sembrado al abrir el alta desde «Crear serie»; null en el alta normal. */
+  readonly seeded_document_type = signal<FiscalDocumentType | null>(null);
   readonly pending_archive = signal<InvoiceResolution | null>(null);
   readonly archive_busy = signal(false);
   readonly archive_error = signal<string | null>(null);
@@ -560,11 +565,19 @@ export class ResolutionsPageComponent {
   onActionClick(action: string): void {
     if (action === 'create') {
       this.selected_resolution.set(null);
+      this.seeded_document_type.set(null);
       this.is_create_modal_open.set(true);
     }
   }
 
+  onCreateSeries(type: FiscalDocumentType): void {
+    this.selected_resolution.set(null);
+    this.seeded_document_type.set(type);
+    this.is_create_modal_open.set(true);
+  }
+
   editResolution(resolution: InvoiceResolution): void {
+    this.seeded_document_type.set(null);
     this.selected_resolution.set(resolution);
     this.is_create_modal_open.set(true);
   }

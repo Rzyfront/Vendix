@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 
+import { ButtonComponent } from '../../button/button.component';
 import { IconComponent } from '../../icon/icon.component';
 import { formatDateOnlyUTC } from '../../../utils/date.util';
 import { requirementsFor, type FiscalDocumentType } from '../fiscal-document-requirements';
@@ -11,6 +12,9 @@ const CARD_DOCUMENT_TYPES: readonly FiscalDocumentType[] = [
   'debit_note',
 ];
 
+const isNote = (type: FiscalDocumentType): boolean =>
+  type === 'credit_note' || type === 'debit_note';
+
 interface InUseRow {
   readonly document_type: FiscalDocumentType;
   readonly label: string;
@@ -19,6 +23,8 @@ interface InUseRow {
   readonly detail: string;
   readonly note: string;
   readonly warn: boolean;
+  /** Nota sin serie real: ofrece «Crear serie» si el host lo habilita. */
+  readonly creatable: boolean;
 }
 
 /**
@@ -29,7 +35,7 @@ interface InUseRow {
 @Component({
   selector: 'app-resolutions-in-use-card',
   standalone: true,
-  imports: [IconComponent],
+  imports: [ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -68,6 +74,18 @@ interface InUseRow {
                   <p class="text-[11px] text-text-secondary">{{ row.note }}</p>
                 }
               </div>
+              @if (canCreateSeries() && row.creatable) {
+                <app-button
+                  class="mt-1 self-start md:mt-0"
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  (clicked)="createSeries.emit(row.document_type)"
+                >
+                  <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                  Crear serie
+                </app-button>
+              }
             </li>
           }
         </ul>
@@ -78,6 +96,9 @@ interface InUseRow {
 export class ResolutionsInUseCardComponent {
   readonly data = input<ResolutionsInUseResponse | null>(null);
   readonly loading = input<boolean>(false);
+  /** Muestra «Crear serie» en las notas sin serie real. Falso por defecto. */
+  readonly canCreateSeries = input<boolean>(false);
+  readonly createSeries = output<FiscalDocumentType>();
 
   readonly rows = computed<InUseRow[]>(() => {
     const items = this.data()?.items ?? [];
@@ -94,6 +115,7 @@ export class ResolutionsInUseCardComponent {
           detail: '',
           note: '',
           warn: true,
+          creatable: isNote(type),
         };
       }
 
@@ -106,6 +128,7 @@ export class ResolutionsInUseCardComponent {
           detail: 'Serie interna — se crea sola en la primera nota',
           note: '',
           warn: false,
+          creatable: isNote(type),
         };
       }
 
@@ -124,6 +147,7 @@ export class ResolutionsInUseCardComponent {
             ? `Hay ${item.active_count} resoluciones activas; el sistema usa esta`
             : '',
         warn: false,
+        creatable: false,
       };
     });
   });
