@@ -877,8 +877,17 @@ export class TenantDianConfigController {
       ...source,
       resolutions: source.resolutions.map((resolution: any) => {
         if (!resolution || typeof resolution !== 'object') return resolution;
-        const { technical_key, ...rest } = resolution as Record<string, any>;
-        return { ...rest, technical_key_set: Boolean(technical_key) };
+        // `getProductionReadiness` ya publica `technical_key_set` y quita la
+        // ClTec en origen; se respeta ese valor (incluido `false`) y solo se
+        // recalcula si llegara la columna en claro.
+        const { technical_key, technical_key_set, ...rest } = resolution as Record<
+          string,
+          any
+        >;
+        return {
+          ...rest,
+          technical_key_set: Boolean(technical_key_set ?? technical_key),
+        };
       }),
     } as T;
   }

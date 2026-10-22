@@ -1,4 +1,5 @@
 import { DianConfigService } from './dian-config.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 
 const VERDICT = { success: true, dian_response: { success: true }, track_id: 't1' };
 
@@ -263,5 +264,86 @@ describe('DianConfigService — herencia de habilitación DIAN', () => {
     await expect(service.inheritEnablement(10)).rejects.toMatchObject({
       errorCode: 'DIAN_CONFIG_004',
     });
+  });
+});
+
+describe('DianConfigService — SEC-3: la respuesta HTTP no expone la fila fuente de la herencia', () => {
+  const row = () => ({
+    id: 10,
+    store_id: 1,
+    software_pin_encrypted: 'enc:pin',
+    certificate_password_encrypted: null,
+    enablement_status: 'enabled',
+    enablement_inherited_from_id: 99,
+    enablement_evidence: {
+      success: true,
+      inheritance: {
+        from_dian_configuration_id: 99,
+        source_environment: 'production',
+        issuer_nit: '900123456',
+      },
+    },
+  });
+
+  const build = () => {
+    const unscoped = {
+      dian_configurations: {
+        findMany: jest.fn().mockResolvedValue([row()]),
+        findFirst: jest.fn().mockResolvedValue(row()),
+      },
+    };
+    const scoped: any = { withoutScope: () => unscoped };
+    const fiscalScope = {
+      requireFiscalScope: jest.fn().mockResolvedValue('STORE'),
+    } as any;
+    const service = new DianConfigService(
+      scoped,
+      {} as any,
+      fiscalScope,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+    );
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ organization_id: 1, store_id: 1 } as any);
+    return service;
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  const expectSanitized = (out: any) => {
+    expect(out).not.toHaveProperty('enablement_inherited_from_id');
+    expect(out.enablement_inherited).toBe(true);
+    expect(out.enablement_evidence.inheritance).not.toHaveProperty(
+      'from_dian_configuration_id',
+    );
+    expect(out.enablement_evidence.inheritance).toMatchObject({
+      source_environment: 'production',
+      issuer_nit: '900123456',
+    });
+    expect(out.enablement_evidence.success).toBe(true);
+    expect(JSON.stringify(out)).not.toContain('99');
+    expect(out.software_pin_encrypted).toBe('****');
+  };
+
+  it('getConfigById', async () => {
+    expectSanitized(await build().getConfigById(10));
+  });
+
+  it('getConfigs', async () => {
+    const [first] = await build().getConfigs();
+    expectSanitized(first);
+  });
+
+  it('una fila sin herencia reporta enablement_inherited=false', async () => {
+    const service = build();
+    const out: any = (service as any).maskSensitiveFields({
+      ...row(),
+      enablement_inherited_from_id: null,
+      enablement_evidence: null,
+    });
+    expect(out.enablement_inherited).toBe(false);
+    expect(out.enablement_evidence).toBeNull();
   });
 });
