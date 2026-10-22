@@ -11,6 +11,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { sumGrossSubtotal } from '../../utils/gross-subtotal.util';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -448,7 +449,7 @@ export interface GuestOrderSummary {
             </div>
             <div class="items items-print">
               @for (
-                item of data.order.items;
+                item of itemRows();
                 track item.product_name + item.variant_sku
               ) {
                 <!--
@@ -508,7 +509,7 @@ export interface GuestOrderSummary {
                     @if (!isItemCancelled(item)) {
                       <span class="item-qty"
                         >{{ item.quantity }} ×
-                        {{ unitPriceOf(item) | currency }}</span
+                        {{ item._unit_price | currency }}</span
                       >
                     }
                     @if (
@@ -537,7 +538,7 @@ export interface GuestOrderSummary {
                   </div>
                   @if (!isItemCancelled(item)) {
                     <strong class="item-total">{{
-                      lineTotalOf(item) | currency
+                      item._line_total | currency
                     }}</strong>
                   }
                 </div>
@@ -645,7 +646,7 @@ export interface GuestOrderSummary {
           <section class="order-section totals-panel">
             <div class="total-row">
               <span>Subtotal</span>
-              <span>{{ grossSubtotal(data.order.items) | currency }}</span>
+              <span>{{ grossSubtotal() | currency }}</span>
             </div>
 
             @for (
@@ -2702,11 +2703,9 @@ export class GuestOrderSummaryComponent implements OnInit {
   }
 
   /** Subtotal con impuesto: suma de líneas brutas no canceladas. */
-  grossSubtotal(items: GuestOrderItem[] | null | undefined): number {
-    return (items ?? [])
-      .filter((i) => !this.isItemCancelled(i))
-      .reduce((sum, i) => sum + this.lineTotalOf(i), 0);
-  }
+  readonly grossSubtotal = computed(() =>
+    sumGrossSubtotal(this.summary()?.order.items),
+  );
 
   // === E2 — helpers de cancelación de línea =================================
 

@@ -782,7 +782,7 @@
       @if (bill.items.length > 0) {
       <div class="bill-panel__summary-row">
         <span>Subtotal</span>
-        <span>{{ bill_gross_subtotal(bill.items) | currency }}</span>
+        <span>{{ bill_gross_subtotal() | currency }}</span>
       </div>
       }
       @if (bill.total_paid != null) {

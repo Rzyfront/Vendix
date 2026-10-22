@@ -20,6 +20,7 @@ import {
   CartItem,
   CartService,
 } from '../../modules/ecommerce/services/cart.service';
+import { sumGrossSubtotal } from '../../modules/ecommerce/utils/gross-subtotal.util';
 import { cartLineKey } from '../../modules/ecommerce/utils/cart-line-key.util';
 import {
   OrderLineItemComponent,
@@ -264,14 +265,9 @@ export class StoreEcommerceLayoutComponent {
   readonly bill_total_changed_notice = signal(false);
 
   /** Subtotal con impuesto incluido: suma de líneas brutas de la cuenta. */
-  bill_gross_subtotal(
-    items: ReadonlyArray<{ total: number; line_total_gross?: number }>,
-  ): number {
-    return items.reduce(
-      (sum, i) => sum + Number(i.line_total_gross ?? i.total ?? 0),
-      0,
-    );
-  }
+  readonly bill_gross_subtotal = computed(() =>
+    sumGrossSubtotal(this.table_context_service.bill()?.items),
+  );
   /** Baseline `grand_total` used to detect the diff above. Reset whenever
    *  the panel is closed so a stale diff never resurfaces on reopen. */
   private last_seen_grand_total: number | null = null;
