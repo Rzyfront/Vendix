@@ -444,6 +444,44 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
       expect(item.unit_price_gross).toBe(100);
       expect(item.line_total_gross).toBe(300);
     });
+
+    it('expone cancelled_at por línea y se pide en el select (U2-H1)', async () => {
+      jest.spyOn(service as any, 'resolveActiveSessionByToken').mockResolvedValue({
+        store_id: STORE_ID,
+        table: { id: TABLE_ID, name: 'M5' },
+        session: { id: SESSION_ID, order_id: ORDER_ID },
+      });
+      tableSessionsService.findOne = jest.fn().mockResolvedValue({ order: {} });
+      prismaMock.orders.findFirst.mockResolvedValue({ grand_total: 119, total_paid: 0 });
+      const cancelledAt = new Date('2026-01-01T10:00:00Z');
+      const base = {
+        variant_image_url: null,
+        products: null,
+        notes: null,
+        quantity: 1,
+        final_unit_price: null,
+        price_unit_quantity: null,
+      };
+      const findMany = jest.fn().mockResolvedValue([
+        { ...base, product_name: 'A', unit_price: 100, total_price: 100, tax_amount_item: 19, cancelled_at: null },
+        { ...base, product_name: 'B', unit_price: 50, total_price: 50, tax_amount_item: 9.5, cancelled_at: cancelledAt },
+      ]);
+      prismaMock.order_items = { findMany };
+
+      const bill = await service.getBill(TOKEN);
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ cancelled_at: true }),
+        }),
+      );
+      expect(bill.items[0].cancelled_at).toBeNull();
+      expect(bill.items[1].cancelled_at).toEqual(cancelledAt);
+      const grossActive = bill.items
+        .filter((i) => !i.cancelled_at)
+        .reduce((sum, i) => sum + i.line_total_gross, 0);
+      expect(grossActive).toBe(119);
+    });
   });
 });
 

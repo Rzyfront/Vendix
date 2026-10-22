@@ -149,6 +149,12 @@ export interface BillItemView {
    */
   tax_amount: number;
   /**
+   * Aditivo (U2-H1) — marca de línea cancelada (soft cancel). La línea sigue
+   * en la lista, pero el cliente debe excluirla del Subtotal: los totales de
+   * cabecera (`grand_total`, `balance_due`) ya la excluyen.
+   */
+  cancelled_at: Date | null;
+  /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
    * else `null`.
@@ -1015,6 +1021,7 @@ export class EcommerceTablesService {
         price_unit_quantity: true,
         variant_image_url: true,
         notes: true,
+        cancelled_at: true,
         products: {
           select: {
             product_images: {
@@ -1073,6 +1080,7 @@ export class EcommerceTablesService {
           // calculado arriba y la base (`total`). Nunca negativo por
           // redondeo (tasa 0% ⇒ grossUnit === netUnit ⇒ 0).
           tax_amount: Math.max(Math.round((lineTotalGross - netTotal) * 100) / 100, 0),
+          cancelled_at: it.cancelled_at ?? null,
           image_url: signedImageUrl,
           notes: it.notes ?? null,
         };
