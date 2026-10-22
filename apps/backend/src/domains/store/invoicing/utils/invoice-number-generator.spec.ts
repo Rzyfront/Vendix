@@ -424,7 +424,7 @@ describe('InvoiceNumberGenerator', () => {
       },
     );
 
-    it('abre la serie con rango 1-10.000.000, cursor en 0 y vigencia de 1000 años', async () => {
+    it('abre la serie con rango 1-10.000.000, cursor en 0 y vigencia de 100 años', async () => {
       const { service, tx } = createService(withoutRow());
       const before = Date.now();
 
@@ -441,7 +441,7 @@ describe('InvoiceNumberGenerator', () => {
       expect(data.current_number).toBe(0);
       const expected_year =
         new Date(before).getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS;
-      expect(INTERNAL_SERIES_VALIDITY_YEARS).toBe(1000);
+      expect(INTERNAL_SERIES_VALIDITY_YEARS).toBe(100);
       expect(data.valid_to.getFullYear()).toBe(expected_year);
       expect(data.valid_to.getTime()).toBeGreaterThan(data.valid_from.getTime());
     });

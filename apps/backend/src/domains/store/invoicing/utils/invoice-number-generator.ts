@@ -59,10 +59,10 @@ export const INTERNAL_SERIES_BLOCK = 1000;
  * Autorización de Numeración DIAN sí lo hace, y ponerle un año real haría que el
  * consecutivo de las notas se bloqueara solo el día del aniversario, que es
  * exactamente el bloqueo que este código existe para quitar. `valid_to` es una
- * columna NOT NULL, así que este valor solo la llena con una fecha que en la
+ * columna NOT NULL, así que este valor (100 años) solo la llena con una fecha que en la
  * práctica nunca llega.
  */
-export const INTERNAL_SERIES_VALIDITY_YEARS = 1000;
+export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
 
 /** Rótulo interno (no una autorización DIAN) de la serie con ese prefijo. */
 export const internalSeriesResolutionNumber = (prefix: string): string =>

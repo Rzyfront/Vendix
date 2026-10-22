@@ -144,7 +144,7 @@ export const INTERNAL_SERIES_INITIAL_RANGE = 10_000_000;
  * `apps/backend/src/domains/store/invoicing/utils/invoice-number-generator.ts`.
  * Vigencia, en años, de una serie interna nueva. Deben cambiar juntas.
  */
-export const INTERNAL_SERIES_VALIDITY_YEARS = 1000;
+export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
 
 /**
  * Vigencia, en años, que el formulario de resoluciones pre-llena para una serie
