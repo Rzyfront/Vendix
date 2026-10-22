@@ -170,6 +170,11 @@
       <app-input
         label="Llave técnica"
         type="text"
+        [placeholder]="
+          editing()?.technical_key_set
+            ? 'Guardada (' + editing()?.technical_key_length + ' caracteres). Déjala vacía para conservarla'
+            : ''
+        "
         formControlName="technical_key"
         [control]="form.get('technical_key')"
       ></app-input>

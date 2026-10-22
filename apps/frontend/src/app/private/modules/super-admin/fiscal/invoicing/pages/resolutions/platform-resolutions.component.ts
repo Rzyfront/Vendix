@@ -477,7 +477,8 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       environment: row.environment,
       rango_inicial: row.range_from,
       rango_final: row.range_to,
-      technical_key: row.technical_key ?? null,
+      // La ClTec guardada no llega al navegador: vacío = conservar la actual.
+      technical_key: null,
       resolution_number: row.resolution_number ?? null,
       resolution_date: this.dateOnly(row.resolution_date),
       valid_from: this.dateOnly(row.valid_from),
@@ -692,8 +693,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       dto.rango_final = Number(value.rango_final);
     }
 
+    // Vacío significa «conservar la guardada»: solo se envía si el usuario
+    // tecleó una clave nueva.
     const nextTechnicalKey = value.technical_key?.trim() ?? '';
-    if (nextTechnicalKey !== (editing.technical_key ?? '')) {
+    if (nextTechnicalKey) {
       dto.technical_key = nextTechnicalKey;
     }
     const nextNumber = value.resolution_number?.trim() ?? '';

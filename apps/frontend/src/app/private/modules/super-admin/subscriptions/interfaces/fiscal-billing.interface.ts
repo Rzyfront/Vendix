@@ -317,7 +317,12 @@ export interface PlatformResolution {
   /** ISO; no nulo = archivada (solo lectura, oculta por defecto). */
   archived_at?: string | null;
   archived_by_user_id?: number | null;
-  technical_key?: string | null;
+  /**
+   * El backend nunca devuelve la ClTec (ni su cifrado ni su huella): solo si hay
+   * una guardada y cuántos caracteres tiene.
+   */
+  technical_key_set?: boolean;
+  technical_key_length?: number;
   environment: SubscriptionFiscalEnvironment;
   organization_id: number;
   accounting_entity_id: number;
