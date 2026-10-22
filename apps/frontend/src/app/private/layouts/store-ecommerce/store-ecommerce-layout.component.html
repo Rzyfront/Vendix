@@ -741,9 +741,9 @@
             </div>
             <div class="bill-panel__item-info">
               <span class="bill-panel__item-name">{{ item.name }}</span>
-              <span class="bill-panel__item-meta"><span class="sr-only">Cantidad y precio unitario: </span>× {{ item.quantity }} · {{ item.unit_price | currency }}</span>
+              <span class="bill-panel__item-meta"><span class="sr-only">Cantidad y precio unitario: </span>× {{ item.quantity }} · {{ item.unit_price_gross ?? item.unit_price | currency }}</span>
             </div>
-            <span class="bill-panel__item-total"><span class="sr-only">Total de línea: </span>{{ item.total | currency }}</span>
+            <span class="bill-panel__item-total"><span class="sr-only">Total de línea: </span>{{ item.line_total_gross ?? item.total | currency }}</span>
           </li>
           }
         </ul>
@@ -778,18 +778,11 @@
         <span>Tu cuenta se actualizó: revisa el nuevo total antes de pagar.</span>
       </div>
       }
-      <!-- C.7 (§5.3, ADR-12): Subtotal e Impuestos van JUNTOS o NINGUNO —
-           `prints_vat_breakdown` (fail-closed, backend) es el gate fiscal;
-           un Subtotal sin su fila de IVA al lado es el huérfano F-077. Sin
-           el gate en `true` sólo se imprime el Total, que siempre va. -->
-      @if (bill.prints_vat_breakdown && (bill.tax_amount ?? 0) > 0) {
+      <!-- Precios con impuesto incluido: sin desglose de impuestos. -->
+      @if (bill.items.length > 0) {
       <div class="bill-panel__summary-row">
         <span>Subtotal</span>
-        <span>{{ bill.subtotal | currency }}</span>
-      </div>
-      <div class="bill-panel__summary-row">
-        <span>Impuestos</span>
-        <span>{{ bill.tax_amount | currency }}</span>
+        <span>{{ bill_gross_subtotal(bill.items) | currency }}</span>
       </div>
       }
       @if (bill.total_paid != null) {
