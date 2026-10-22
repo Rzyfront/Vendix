@@ -215,14 +215,13 @@ export class DianSetupGuideComponent {
       },
       {
         label: 'Certificado de firma P12 cargado',
-        // Dos formas para el mismo hecho, según quién pregunte. El panel del
-        // comerciante recibe `certificate_s3_key`; la consola de super admin
-        // la redacta —una clave de objeto nombra dónde vive el material
-        // criptográfico de un tercero— y en su lugar publica el booleano
-        // `certificate_present`. Leer sólo la primera hacía que la guía
+        // Todas las respuestas (tienda, organización y consola de super
+        // admin) redactan `certificate_s3_key` —una clave de objeto nombra
+        // dónde vive el material criptográfico— y publican en su lugar el
+        // booleano `certificate_present`. Leer sólo la clave hacía que la guía
         // marcara «falta el certificado» sobre configuraciones que sí lo
         // tienen, que es la peor forma de mentir: la que empuja a subirlo otra
-        // vez.
+        // vez. El respaldo en la clave cubre solo filas antiguas.
         done: !!(cfg?.certificate_present ?? cfg?.certificate_s3_key),
       },
       {

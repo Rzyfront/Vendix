@@ -2117,7 +2117,8 @@ export class DianConfigWizardComponent {
     const password = this.certificateForm.controls.certificate_password.value;
 
     // The backend persists only the s3_key (see vendix-s3-storage skill).
-    // We pass file + password; response.data.certificate_s3_key is the sanitized key.
+    // We pass file + password; the response only exposes certificate_present /
+    // certificate_uses_kms (the s3 key location never leaves the backend).
     this.invoicingService.uploadDianCertificate(cfg.id, file, password)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
