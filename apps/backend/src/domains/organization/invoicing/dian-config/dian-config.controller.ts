@@ -302,6 +302,37 @@ export class OrgDianConfigController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Re-consulta el veredicto del set de pruebas (GetStatusZip) sin reenviar los
+   * documentos. Gemelo del endpoint de tienda: el panel del paso 4 del asistente
+   * corre bajo este namespace en organización.
+   */
+  @Get(':id/test-set-status')
+  @Permissions('organization:invoicing:dian:read')
+  async checkTestSetStatus(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.checkTestSetStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /** Estado documento a documento del lote enviado. Solo lectura. */
+  @Get(':id/test-set-documents')
+  @Permissions('organization:invoicing:dian:read')
+  async getTestSetDocuments(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.getTestSetDocumentStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /** Descarta un lote que la DIAN nunca juzgó para poder enviar otro set. */
+  @Post(':id/abandon-test-set')
+  @Permissions('organization:invoicing:dian:write')
+  async abandonTestSet(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.assertOrgOwnedConfig(id);
+    const result = await this.dian_test_service.abandonTestSet(id);
+    return this.response_service.success(result);
+  }
+
   @Get(':id/numbering-ranges')
   @Permissions('organization:invoicing:dian:read')
   async getNumberingRanges(
