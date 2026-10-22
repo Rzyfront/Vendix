@@ -6,6 +6,7 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import {
   CASH_OUTFLOW_LABELS,
+  cashMovementDetail,
   cashBreakdownLines,
   cashDiffLabel,
   cashMethodLabel,
@@ -248,7 +249,7 @@ export class CashSessionReportPrintService {
           ? outflows
               .map((o) => {
                 const ord = o.order_number ? ` #${o.order_number}` : o.order_id ? ` #${o.order_id}` : '';
-                const detail = [o.reason, o.user_name].filter(Boolean).join(' · ');
+                const detail = cashMovementDetail([o.reason, o.reference, o.notes, o.user_name]);
                 return (
                   table(
                     row(
@@ -261,10 +262,24 @@ export class CashSessionReportPrintService {
               })
               .join('')
           : empty('Sin salidas');
+      const inflows = r.inflows ?? [];
+      const inflowsHtml =
+        inflows.length > 0
+          ? inflows
+              .map((i) => {
+                const detail = cashMovementDetail([i.reference, i.notes, i.user_name]);
+                return (
+                  table(row(`${formatStoreDateTime(i.at, tz)} Entrada`, fmt(i.amount))) +
+                  `<div class="empty">${this.esc(cashMethodLabel(i.payment_method))}${detail ? ` · ${this.esc(detail)}` : ''}</div>`
+                );
+              })
+              .join('')
+          : empty('Sin entradas');
       top =
         section('Lo que debe haber', consolidated) +
         integrity +
         section('Cómo se llega al efectivo', breakdown) +
+        section('Entradas de la sesión', inflowsHtml) +
         section('Salidas de la sesión', outflowsHtml) +
         section('Ventas', sales);
     } else {

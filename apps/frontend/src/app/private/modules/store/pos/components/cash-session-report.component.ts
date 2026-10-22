@@ -51,6 +51,20 @@ export function cashReportTaxes(r: CashSessionCloseReport) {
   };
 }
 
+/** Une partes de detalle omitiendo vacías y repetidas (trim). */
+export function cashMovementDetail(parts: Array<string | null | undefined>): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    const t = (p ?? '').trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out.join(' · ');
+}
+
 export const CASH_OUTFLOW_LABELS: Record<string, string> = {
   refund: 'Reembolso',
   cancellation: 'Anulación',
@@ -191,6 +205,24 @@ export function cashDiffLabel(diff: number | null | undefined): string {
               <span>{{ diffLabelNew() }}</span>
               <span class="csr-num">{{ r.cash_breakdown!.difference | currency }}</span>
             </div>
+          }
+        </section>
+
+        <!-- Entradas de la sesión -->
+        <section class="csr-sec">
+          <h3 class="csr-title">Entradas de la sesión</h3>
+          @for (i of inflowItems(); track i.id) {
+            <div class="csr-out">
+              <div class="csr-row">
+                <span>{{ i.time }} · Entrada</span>
+                <span class="csr-num">{{ i.amount | currency }}</span>
+              </div>
+              <div class="csr-row csr-sub">
+                <span>{{ i.methodLabel }}{{ i.detail ? ' · ' + i.detail : '' }}</span>
+              </div>
+            </div>
+          } @empty {
+            <p class="csr-empty">Sin entradas</p>
           }
         </section>
 
@@ -446,7 +478,17 @@ export class CashSessionReportComponent {
       order: o.order_number ? `#${o.order_number}` : o.order_id ? `#${o.order_id}` : '',
       methodLabel: cashMethodLabel(o.payment_method),
       amount: o.amount,
-      detail: [o.reason, o.user_name].filter(Boolean).join(' · '),
+      detail: cashMovementDetail([o.reason, o.reference, o.notes, o.user_name]),
+    }));
+  });
+  readonly inflowItems = computed(() => {
+    const tz = this.settings.timezone();
+    return (this.report().inflows ?? []).map((i) => ({
+      id: i.id,
+      time: formatStoreDateTime(i.at, tz),
+      methodLabel: cashMethodLabel(i.payment_method),
+      amount: i.amount,
+      detail: cashMovementDetail([i.reference, i.notes, i.user_name]),
     }));
   });
   readonly taxes = computed(() => cashReportTaxes(this.report()));
