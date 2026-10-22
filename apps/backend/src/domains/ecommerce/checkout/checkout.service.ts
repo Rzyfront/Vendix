@@ -1161,6 +1161,18 @@ export class CheckoutService {
     }
   }
 
+  /** Total de línea CON impuesto desde campos persistidos de order_items. */
+  private grossLineTotal(oi: {
+    total_price: Prisma.Decimal | number | string;
+    tax_amount_item?: Prisma.Decimal | number | string | null;
+    quantity: number;
+  }): number {
+    const lineTax = new Prisma.Decimal(oi.tax_amount_item ?? 0)
+      .times(new Prisma.Decimal(oi.quantity))
+      .toFixed(2, Prisma.Decimal.ROUND_DOWN);
+    return this.roundMoney(Number(oi.total_price) + Number(lineTax));
+  }
+
   /**
    * Round money to 2 decimals (HALF_UP). Centralized so quote, coupon and
    * order totals don't drift due to floating arithmetic.
@@ -2577,6 +2589,14 @@ export class CheckoutService {
       // el storefront tipa `total: number` (auditoría D.3).
       total: this.roundMoney(Number(order.grand_total)),
       subtotal,
+      // Aditivo: subtotal con impuesto (suma de líneas brutas = subtotal + impuesto).
+      subtotal_gross: this.roundMoney(
+        itemsWithTaxes.reduce(
+          (sum, item) =>
+            sum + this.roundMoney(item.total_net + item.total_tax),
+          0,
+        ),
+      ),
       tax_amount: total_tax,
       discount_amount: discountResult.total_discount,
       promotion_discount: discountResult.promotion_discount,
@@ -2600,6 +2620,13 @@ export class CheckoutService {
         quantity: item.quantity,
         unit_price: item.base_unit_price,
         total_price: item.total_net,
+        // Aditivo: precio CON impuesto, lo que el cliente vio en la web
+        // (base + impuesto). `tax_amount_item` es POR UNIDAD; `total_tax`
+        // ya es de línea.
+        unit_price_gross: this.roundMoney(
+          item.base_unit_price + item.tax_amount_item,
+        ),
+        total_price_gross: this.roundMoney(item.total_net + item.total_tax),
       })),
       channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
       message: 'Order placed successfully',
@@ -3341,6 +3368,13 @@ export class CheckoutService {
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       subtotal: subtotal,
+      // Aditivo: subtotal con impuesto (líneas brutas no canceladas; al crear
+      // no hay canceladas, igual que `subtotal`).
+      subtotal_gross: this.roundMoney(
+        order.order_items
+          .filter((oi) => !oi.cancelled_at)
+          .reduce((sum, oi) => sum + this.grossLineTotal(oi), 0),
+      ),
       tax: total_tax,
       // Discounts surfaced so the WhatsApp UI / order detail can render
       // the promo + coupon lines without recomputing on the client.
@@ -3355,6 +3389,13 @@ export class CheckoutService {
         quantity: oi.quantity,
         unit_price: Number(oi.unit_price),
         total_price: Number(oi.total_price),
+        // Aditivo: precio CON impuesto, lo que el cliente vio en la web.
+        // `tax_amount_item` persistido es POR UNIDAD; la línea = × cantidad
+        // (mismo truncado ROUND_DOWN que `total_tax` del cálculo).
+        unit_price_gross: this.roundMoney(
+          Number(oi.unit_price) + Number(oi.tax_amount_item ?? 0),
+        ),
+        total_price_gross: this.grossLineTotal(oi),
         // [resid-fiscal] — Aditivo. El FE pinta la línea tachada con
         // distintivo "Cancelado" cuando `cancelled_at != null` y oculta
         // precio/impuestos en ese caso. Camino principal en restaurante:
