@@ -87,7 +87,7 @@ Paths below are under `apps/backend/src/domains/store/invoicing/` (`BE`) unless 
 - `technical_key`, `technical_key_encrypted`, `technical_key_fingerprint` (ClTec = 14th CUFE input; the fingerprint correlates tenants). Every resolution response goes through `toPublicResolution` (`BE/resolutions/resolutions.service.ts`), which returns `technical_key_set` and `technical_key_length` instead. Used by store, organization and platform lanes; new endpoints must reuse it, not select the raw row.
 - PIN and certificate password are masked; the id of the inheritance source (possibly another account) is replaced by `enablement_inherited` and removed from `enablement_evidence.inheritance` in `maskSensitiveFields` (`dian-config.service.ts`). The column and audit keep the real value.
 - Cross-account reads (`withoutScope()`) are allowed ONLY for fiscal controls (numbering guard, enablement source lookup, ClTec sharing checks) and must `select` the minimum and return counts, booleans or ranges. Never ids, names, orgs or stores of other accounts. Add an explicit tenant filter whenever you use `withoutScope()` for anything else.
-- Known follow-ups (not yet fixed): `production-readiness` still returns `resolutions[].technical_key`; `resolutions-for-emission` (platform) returns a fingerprint. Do not copy that pattern.
+- `production-readiness` and the platform `resolutions-for-emission` used to leak `resolutions[].technical_key` and a fingerprint; both were fixed (SEC-1 `8e7612e3d`, SEC-2 `427613cc4`) and now return only `technical_key_set`/`technical_key_length`. Never reintroduce raw ClTec or fingerprints in a response.
 
 ## Rule 7 - One activation wizard (D8)
 
