@@ -1,3 +1,4 @@
+import { resolveOrderLinePrintedGross } from 'src/domains/store/taxes/utils/final-price.util';
 import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -198,16 +199,10 @@ export class InvoiceDataRequestsService {
   }
 
   /**
-   * C.8 (CP-pos-exclusive-tax-double-charge, ADR-06, FB-15) — `unit_price`/
-   * `total_price` siguen en la BASE (R-1: ningún lector viejo cambia de
-   * magnitud). El bruto viaja en campos ADITIVOS nuevos, derivado con el
-   * mismo fallback textual del ADR: `final_unit_price` si ya está poblado,
-   * si no `unit_price + tax_amount_item / line_units`. Mismo cálculo puro
-   * que `account.service.ts#deriveLineGross` — duplicado a propósito (no
-   * importado): ese archivo vive en el dominio `ecommerce/account` y este
-   * en `store/invoicing`, y ya hay una segunda copia local en
-   * `ecommerce-tables.service.ts` por la misma razón de no cruzar dominios
-   * para una función de 6 líneas.
+   * C.8 (ADR-06, FB-15) — `unit_price`/`total_price` siguen en la BASE (R-1).
+   * El bruto viaja en campos aditivos: `final_unit_price` si está poblado; si
+   * no, delega al util canónico `resolveOrderLinePrintedGross`
+   * (`tax_amount_item` es impuesto POR UNIDAD de precio, ADR-10).
    */
   private deriveLineGross(item: {
     unit_price: any;
@@ -216,21 +211,24 @@ export class InvoiceDataRequestsService {
     final_unit_price?: any;
     price_unit_quantity?: any;
     quantity: any;
+    weight?: any;
   }): { unit_price_gross: number; line_total_gross: number } {
-    const netUnit = Number(item.unit_price ?? 0);
-    const netTotal = Number(item.total_price ?? 0);
-    const lineUnits =
-      Number(item.price_unit_quantity ?? item.quantity ?? 1) || 1;
-    const grossUnit =
-      item.final_unit_price != null
-        ? Number(item.final_unit_price)
-        : netUnit + Number(item.tax_amount_item ?? 0) / lineUnits;
-    const multiplier =
-      netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
-    const grossTotal = Math.round(grossUnit * multiplier * 100) / 100;
+    if (item.final_unit_price != null) {
+      const netUnit = Number(item.unit_price ?? 0);
+      const netTotal = Number(item.total_price ?? 0);
+      const grossUnit = Number(item.final_unit_price);
+      const multiplier =
+        netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
+      return {
+        unit_price_gross: Math.round(grossUnit * 100) / 100,
+        line_total_gross: Math.round(grossUnit * multiplier * 100) / 100,
+      };
+    }
+    const { gross_unit_price, gross_total_price } =
+      resolveOrderLinePrintedGross(item);
     return {
-      unit_price_gross: Math.round(grossUnit * 100) / 100,
-      line_total_gross: grossTotal,
+      unit_price_gross: gross_unit_price,
+      line_total_gross: gross_total_price,
     };
   }
 
