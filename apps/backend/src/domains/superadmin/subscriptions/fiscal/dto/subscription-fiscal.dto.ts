@@ -52,6 +52,8 @@ const transformTechnicalKey = ({ value }: { value: unknown }) => {
 export const PLATFORM_RESOLUTION_DOCUMENT_TYPES = [
   'sales_invoice',
   'support_document',
+  'credit_note',
+  'debit_note',
 ] as const;
 
 export type PlatformResolutionDocumentType =

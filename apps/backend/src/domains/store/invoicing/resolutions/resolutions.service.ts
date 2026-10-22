@@ -27,8 +27,21 @@ import {
 import { buildResolutionsInUse } from '../utils/resolutions-in-use.util';
 import { archiveResolutionInTx } from '../utils/resolution-archive.util';
 import { ArchiveResolutionDto } from './dto/archive-resolution.dto';
-import { internalSeriesResolutionNumber } from '../utils/invoice-number-generator';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+} from '../utils/invoice-number-generator';
 import { assertNoCrossTenantNumberingOverlap } from '../utils/cross-tenant-numbering-guard.util';
+
+/**
+ * Tope de años hacia adelante de `valid_to`: las series internas (notas) se
+ * abren con vigencia de INTERNAL_SERIES_VALIDITY_YEARS; el resto, el default.
+ */
+function validToMaxYearsAhead(document_type: string): number | undefined {
+  return isSingleActiveDocumentType(document_type)
+    ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+    : undefined;
+}
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -163,7 +176,9 @@ export class ResolutionsService {
       dto.resolution_date,
     );
     const valid_from = parsePlausibleFiscalDate('válida desde', dto.valid_from);
-    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to);
+    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+      max_years_ahead: validToMaxYearsAhead(document_type),
+    });
     this.assertValidityWindow(valid_from, valid_to);
 
     const context = this.getContext();
@@ -409,7 +424,9 @@ export class ResolutionsService {
       ? parsePlausibleFiscalDate('válida desde', dto.valid_from)
       : current.valid_from;
     const next_valid_to = dto.valid_to
-      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to)
+      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+          max_years_ahead: validToMaxYearsAhead(next_document_type),
+        })
       : current.valid_to;
     if (dto.valid_from !== undefined || dto.valid_to !== undefined) {
       this.assertValidityWindow(next_valid_from, next_valid_to, {

@@ -605,6 +605,30 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
       expect(prisma.__unscoped.invoice_resolutions.create).toHaveBeenCalledTimes(1);
       expect(result.deactivated_resolution_ids).toEqual([]);
     });
+
+    it('alta de credit_note con valid_to a +100 años: OK; sales_invoice a +20 años sigue rechazándose', async () => {
+      const year = new Date().getUTCFullYear();
+      const { service, prisma } = createService({ others: [] });
+
+      await expect(
+        service.create({
+          ...facturaVentaValida(),
+          document_type: 'credit_note',
+          prefix: 'NCY',
+          resolution_number: undefined,
+          technical_key: undefined,
+          valid_to: `${year + 100}-01-15`,
+        } as any),
+      ).resolves.toBeDefined();
+      expect(prisma.__unscoped.invoice_resolutions.create).toHaveBeenCalledTimes(1);
+
+      await expect(
+        service.create({
+          ...facturaVentaValida(),
+          valid_to: `${year + 20}-01-15`,
+        } as any),
+      ).rejects.toThrow(/fuera de rango/);
+    });
   });
 
   describe('edición de una serie de nota (re-sembrado del cursor)', () => {

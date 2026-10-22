@@ -27,6 +27,7 @@ import {
   ROTULO_CAMPO_INMUTABLE,
   toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
+import { INTERNAL_SERIES_VALIDITY_YEARS } from '../../../store/invoicing/utils/invoice-number-generator';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import {
   deactivateOtherActiveSeries,
@@ -39,6 +40,16 @@ import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/ut
 import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
+
+/**
+ * Tope de años hacia adelante de `valid_to`: las series internas (notas) se
+ * abren con vigencia de INTERNAL_SERIES_VALIDITY_YEARS; el resto, el default.
+ */
+function validToMaxYearsAhead(document_type: string): number | undefined {
+  return isSingleActiveDocumentType(document_type)
+    ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+    : undefined;
+}
 
 /** Campos que fijan la identidad fiscal de una resolución ante la DIAN. */
 type CampoInmutable = keyof typeof ROTULO_CAMPO_INMUTABLE;
@@ -220,7 +231,9 @@ export class OrgInvoiceResolutionsService {
       dto.resolution_date,
     );
     const valid_from = parsePlausibleFiscalDate('válida desde', dto.valid_from);
-    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to);
+    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+      max_years_ahead: validToMaxYearsAhead(document_type),
+    });
     this.assertValidityWindow(valid_from, valid_to);
 
     const organization_id = this.requireOrganizationId();
@@ -439,7 +452,9 @@ export class OrgInvoiceResolutionsService {
       ? parsePlausibleFiscalDate('válida desde', dto.valid_from)
       : current.valid_from;
     const next_valid_to = dto.valid_to
-      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to)
+      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+          max_years_ahead: validToMaxYearsAhead(next_document_type),
+        })
       : current.valid_to;
     if (dto.valid_from !== undefined || dto.valid_to !== undefined) {
       this.assertValidityWindow(next_valid_from, next_valid_to, {

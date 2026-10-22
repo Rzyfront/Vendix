@@ -26,7 +26,18 @@ import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/x
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
-import { findActiveResolution } from '../../../store/invoicing/utils/resolution-selection.util';
+import {
+  deactivateOtherActiveSeries,
+  findActiveResolution,
+  isSingleActiveDocumentType,
+  lockResolutionSeries,
+} from '../../../store/invoicing/utils/resolution-selection.util';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+  internalSeriesValidTo,
+} from '../../../store/invoicing/utils/invoice-number-generator';
+import { CORRECCION_POR_VIOLACION } from '../../../store/invoicing/resolutions/resolutions.service';
 import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
 import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
@@ -35,6 +46,9 @@ import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/a
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
+  requirementsFor,
+  validateResolutionDraft,
+  type FiscalDocumentType,
   TECHNICAL_KEY_LENGTHS,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../../../store/invoicing/fiscal-document-requirements';
@@ -4505,9 +4519,7 @@ export class SubscriptionFiscalService {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_RESOLUTION_007,
         `Ya existe una resolución con prefijo "${dto.prefix}" para ${
-          duplicate.document_type === 'sales_invoice'
-            ? 'factura de venta'
-            : 'documento soporte'
+          requirementsFor(duplicate.document_type as FiscalDocumentType).label
         } (número ${duplicate.resolution_number}${
           duplicate.is_active ? '' : ', desactivada'
         }). La DIAN autoriza el prefijo por NIT, así que no puede repetirse: edita esa resolución o usa otro prefijo.`,
@@ -4520,18 +4532,41 @@ export class SubscriptionFiscalService {
       );
     }
 
+    // Series internas (notas): no son una autorización DIAN, así que no llevan
+    // ClTec y su número de resolución es un rótulo interno. Mismo contrato que
+    // el carril tienda (`requirementsFor` / `validateResolutionDraft`).
+    const isInternalSeries = isSingleActiveDocumentType(dto.document_type);
+    const resolutionNumber =
+      dto.resolution_number ??
+      (isInternalSeries
+        ? internalSeriesResolutionNumber(dto.prefix)
+        : `PLATFORM-${dto.prefix}-${Date.now()}`);
+    if (isInternalSeries) {
+      this.assertInternalSeriesRequirements({
+        document_type: dto.document_type as FiscalDocumentType,
+        resolution_number: resolutionNumber,
+        technical_key: dto.technical_key,
+      });
+    }
+
     const now = new Date();
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
     const validTo = dto.valid_to
       ? new Date(dto.valid_to)
-      : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
+      : isInternalSeries
+        ? internalSeriesValidTo(now)
+        : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
     const resolutionDate = dto.resolution_date
       ? new Date(dto.resolution_date)
       : now;
 
     assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
     assertPlausibleFiscalDate('válida desde', validFrom);
-    assertPlausibleFiscalDate('válida hasta', validTo);
+    assertPlausibleFiscalDate('válida hasta', validTo, {
+      max_years_ahead: isInternalSeries
+        ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+        : undefined,
+    });
 
     // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
     await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
@@ -4542,37 +4577,61 @@ export class SubscriptionFiscalService {
       range_to: dto.rango_final,
     });
 
-    const created = await this.prisma.withoutScope().invoice_resolutions.create({
-      data: {
-        organization_id: await this.resolvePlatformOrganizationId(),
-        store_id: null,
-        accounting_entity_id: accountingEntityId,
-        document_type: dto.document_type as PlatformResolutionDocumentType,
-        resolution_number: dto.resolution_number ?? `PLATFORM-${dto.prefix}-${Date.now()}`,
-        resolution_date: resolutionDate,
-        prefix: dto.prefix,
-        range_from: dto.rango_inicial,
-        range_to: dto.rango_final,
-        current_number: dto.rango_inicial - 1,
-        valid_from: validFrom,
-        valid_to: validTo,
-        is_active: true,
-        // Validada y normalizada, igual que en los carriles de tienda y de
-        // organización. Este es el tercero y el último que faltaba: la consola
-        // de super admin no pasa por el mismo `ValidationPipe` (entra por
-        // `TenantContextRunner`), así que lo que no exija el servicio no lo
-        // exige nadie — y una ClTec mal copiada quema un consecutivo autorizado
-        // que no se recupera.
-        ...this.technicalKeyVault.sealForWrite(
-          assertTechnicalKeyShape(dto.technical_key, {
+    const organizationId = await this.resolvePlatformOrganizationId();
+    const { created, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Serializa contra activaciones concurrentes y contra la emisión (misma
+        // llave que el generador de consecutivos).
+        if (isInternalSeries) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: accountingEntityId,
+            document_type: dto.document_type,
+          });
+        }
+        const created = await tx.invoice_resolutions.create({
+          data: {
+            organization_id: organizationId,
+            store_id: null,
+            accounting_entity_id: accountingEntityId,
+            document_type: dto.document_type as PlatformResolutionDocumentType,
+            resolution_number: resolutionNumber,
+            resolution_date: resolutionDate,
             prefix: dto.prefix,
-          }),
-        ),
-      },
-    });
+            range_from: dto.rango_inicial,
+            range_to: dto.rango_final,
+            current_number: dto.rango_inicial - 1,
+            valid_from: validFrom,
+            valid_to: validTo,
+            is_active: true,
+            // Validada y normalizada, igual que en los carriles de tienda y de
+            // organización. Este es el tercero y el último que faltaba: la
+            // consola de super admin no pasa por el mismo `ValidationPipe`
+            // (entra por `TenantContextRunner`), así que lo que no exija el
+            // servicio no lo exige nadie — y una ClTec mal copiada quema un
+            // consecutivo autorizado que no se recupera.
+            ...this.technicalKeyVault.sealForWrite(
+              assertTechnicalKeyShape(dto.technical_key, {
+                prefix: dto.prefix,
+              }),
+            ),
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): activar esta apaga
+        // las demás, en la MISMA transacción que el alta.
+        const deactivated_resolution_ids = created.is_active
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: accountingEntityId,
+              document_type: dto.document_type,
+              keep_id: created.id,
+            })
+          : [];
+        return { created, deactivated_resolution_ids };
+      });
 
     return {
       ...created,
+      deactivated_resolution_ids,
       environment: dto.environment,
     };
   }
@@ -4634,6 +4693,8 @@ export class SubscriptionFiscalService {
     }
 
     const nextPrefix = dto.prefix ?? current.prefix;
+    const nextDocumentType = (dto.document_type ??
+      current.document_type) as FiscalDocumentType;
     const nextRangeFrom = dto.rango_inicial ?? current.range_from;
     const nextRangeTo = dto.rango_final ?? current.range_to;
 
@@ -4675,9 +4736,7 @@ export class SubscriptionFiscalService {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_007,
           `Ya existe una resolución con prefijo "${nextPrefix}" para ${
-            duplicate.document_type === 'sales_invoice'
-              ? 'factura de venta'
-              : 'documento soporte'
+            requirementsFor(duplicate.document_type as FiscalDocumentType).label
           } (número ${duplicate.resolution_number}${
             duplicate.is_active ? '' : ', desactivada'
           }). El prefijo se autoriza por NIT y no puede repetirse.`,
@@ -4721,10 +4780,21 @@ export class SubscriptionFiscalService {
     }
     if (dto.valid_to !== undefined) {
       const nextValidTo = new Date(dto.valid_to);
-      assertPlausibleFiscalDate('válida hasta', nextValidTo);
+      assertPlausibleFiscalDate('válida hasta', nextValidTo, {
+        max_years_ahead: isSingleActiveDocumentType(nextDocumentType)
+          ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+          : undefined,
+      });
       data.valid_to = nextValidTo;
     }
     if (dto.technical_key !== undefined) {
+      if (isSingleActiveDocumentType(nextDocumentType)) {
+        this.assertInternalSeriesRequirements({
+          document_type: nextDocumentType,
+          resolution_number: dto.resolution_number ?? current.resolution_number,
+          technical_key: dto.technical_key,
+        });
+      }
       // Las TRES columnas se escriben juntas o la fila queda apuntando a dos
       // claves a la vez, y `reveal()` —que prefiere la cifrada— devolvería la
       // anterior. `sealForWrite` devuelve siempre las tres, incluso en `null`.
@@ -4762,16 +4832,81 @@ export class SubscriptionFiscalService {
       });
     }
 
-    const updated = await this.prisma
+    // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
+    // (pasa de inactiva a activa, o cambia de tipo estando activa). Editar el
+    // rango/vigencia de la nota ya activa no apaga nada.
+    const { updated, deactivated_resolution_ids } = await this.prisma
       .withoutScope()
-      .invoice_resolutions.update({ where: { id }, data });
+      .$transaction(async (tx: any) => {
+        if (isSingleActiveDocumentType(nextDocumentType)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: nextDocumentType,
+          });
+        }
+        const updated = await tx.invoice_resolutions.update({
+          where: { id },
+          data,
+        });
+        const transitioned =
+          current.is_active === false ||
+          nextDocumentType !== current.document_type;
+        const deactivated_resolution_ids =
+          updated.is_active && transitioned
+            ? await deactivateOtherActiveSeries(tx, {
+                accounting_entity_id: current.accounting_entity_id,
+                document_type: nextDocumentType,
+                keep_id: id,
+              })
+            : [];
+        return { updated, deactivated_resolution_ids };
+      });
 
     const settings = await this.getSettings();
     this.logger.log(
       `Platform resolution ${id} updated (${Object.keys(data).join(', ') || 'no-op'})`,
     );
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Platform resolution #${id} (${nextDocumentType}) active: deactivated other active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
 
-    return { ...updated, environment: settings.environment };
+    return {
+      ...updated,
+      deactivated_resolution_ids,
+      environment: settings.environment,
+    };
+  }
+
+  /**
+   * Contrato de requisitos por tipo (`fiscal-document-requirements.ts`) para las
+   * series internas de nota: sin ClTec (su CUDE lleva el Software-PIN). Mismo
+   * criterio e `INVOICING_RESOLUTION_008` que el carril tienda.
+   */
+  private assertInternalSeriesRequirements(draft: {
+    document_type: FiscalDocumentType;
+    resolution_number?: string | null;
+    technical_key?: string | null;
+  }): void {
+    const violations = validateResolutionDraft(draft);
+    if (violations.length === 0) return;
+    const requirements = requirementsFor(draft.document_type);
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_RESOLUTION_008,
+      violations
+        .map(
+          (violation) =>
+            `${violation.message} ${CORRECCION_POR_VIOLACION[violation.code]}`,
+        )
+        .join(' '),
+      {
+        document_type: draft.document_type,
+        document_label: requirements.label,
+        key_algorithm: requirements.key_algorithm,
+        violations: violations.map(({ field, code }) => ({ field, code })),
+      },
+    );
   }
 
   /**

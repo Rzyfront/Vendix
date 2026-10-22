@@ -13,6 +13,10 @@ import {
   ProviderInvoiceTax,
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 
+jest.mock('../../../store/invoicing/utils/cross-tenant-numbering-guard.util', () => ({
+  assertNoCrossTenantNumberingOverlap: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('../../../store/invoicing/utils/resolution-archive.util', () => ({
   archiveResolutionInTx: jest.fn(),
 }));
@@ -510,6 +514,86 @@ describe('SubscriptionFiscalService · resoluciones · archivado lógico', () =>
       id: 77,
       environment: 'test',
       replacement_resolution_id: 78,
+    });
+  });
+
+  it('createResolution de credit_note sin resolution_number ni ClTec: rótulo INTERNA-<prefijo>, vigencia de 100 años y desactiva la otra activa', async () => {
+    const create = jest
+      .fn()
+      .mockImplementation(({ data }: any) => Promise.resolve({ id: 100, ...data }));
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const findMany = jest.fn().mockResolvedValue([{ id: 7 }]);
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      invoice_resolutions: { create, findMany, updateMany },
+    };
+    const service = buildService({ findFirst }, tx);
+    const technicalKeyVault = {
+      sealForWrite: (raw: string | null) => ({ technical_key: raw ?? null }),
+    };
+    (service as any).technicalKeyVault = technicalKeyVault;
+
+    const result: any = await service.createResolution({
+      prefix: 'NCP',
+      document_type: 'credit_note',
+      environment: 'test',
+      rango_inicial: 1,
+      rango_final: 1000,
+    } as never);
+
+    expect(result.resolution_number).toBe('INTERNA-NCP');
+    expect(result.technical_key).toBeNull();
+    expect(result.valid_to.getUTCFullYear()).toBeGreaterThanOrEqual(
+      new Date().getUTCFullYear() + 99,
+    );
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        accounting_entity_id: 5,
+        document_type: 'credit_note',
+        is_active: true,
+        id: { not: 100 },
+      },
+      data: { is_active: false },
+    });
+    expect(result.deactivated_resolution_ids).toEqual([7]);
+
+    const conClave = await service
+      .createResolution({
+        prefix: 'NCQ',
+        document_type: 'credit_note',
+        environment: 'test',
+        rango_inicial: 1,
+        rango_final: 1000,
+        technical_key: 'a'.repeat(64),
+      } as never)
+      .catch((e) => e);
+    expect((conClave as HttpException).getResponse()).toMatchObject({
+      error_code: 'INVOICING_RESOLUTION_008',
+    });
+  });
+
+  it('updateResolution: editar el prefijo de una nota de plataforma usada lanza INVOICING_RESOLUTION_005', async () => {
+    const service = buildService({
+      findFirst: jest.fn().mockResolvedValue({
+        ...buildResolutionRow(),
+        document_type: 'credit_note',
+        prefix: 'NCP',
+        accounting_entity_id: 5,
+        archived_at: null,
+        current_number: 3,
+        range_from: 1,
+        _count: { invoices: 0 },
+      }),
+    });
+
+    const error = await service
+      .updateResolution(77, { prefix: 'NCZ' } as never)
+      .catch((e) => e);
+
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error_code: 'INVOICING_RESOLUTION_005',
     });
   });
 });
