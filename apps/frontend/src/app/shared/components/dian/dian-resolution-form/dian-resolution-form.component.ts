@@ -975,10 +975,13 @@ export class DianResolutionFormComponent {
 
     const payload: DianResolutionFormValue = {
       document_type: documentType,
-      // Serie interna: el campo está oculto; el backend genera el rótulo.
-      resolution_number: this.isInternalSeries()
-        ? ''
-        : raw.resolution_number.trim(),
+      // Serie interna en alta: el campo está oculto; el backend genera el
+      // rótulo. En edición se conserva el valor cargado: enviar '' se lee como
+      // cambio de un campo inmutable en series ya usadas.
+      resolution_number:
+        this.isInternalSeries() && !this.isEdit()
+          ? ''
+          : raw.resolution_number.trim(),
       resolution_date: raw.resolution_date,
       prefix: raw.prefix.trim(),
       range_from: Number(raw.range_from),
