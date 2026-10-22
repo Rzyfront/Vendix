@@ -640,19 +640,29 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       expect(codigosDeViolacion(error)).toContain('TECHNICAL_KEY_NOT_APPLICABLE');
     });
 
-    it('no la deja borrar: es el único registro de qué números se consumieron', async () => {
+    it('la archiva en vez de borrarla: la fila es el único registro de qué números se consumieron', async () => {
       const { service, prisma } = createOrgService({
         resolution: consumidaSucia,
       });
+      // El archivado revisa documentos en vuelo, cableado a la plataforma y
+      // sets de prueba DIAN; el doble base no los modela, así que van vacíos.
+      const unscoped = prisma.__unscoped as any;
+      unscoped.invoice_resolutions.findUnique = jest
+        .fn()
+        .mockResolvedValue({ ...consumidaSucia, archived_at: null });
+      unscoped.invoices = { count: jest.fn().mockResolvedValue(0) };
+      unscoped.invoice_retry_queue = { count: jest.fn().mockResolvedValue(0) };
+      unscoped.platform_settings = { findMany: jest.fn().mockResolvedValue([]) };
+      unscoped.dian_configurations = { count: jest.fn().mockResolvedValue(0) };
 
-      const error = await capturarError(() => service.remove(55));
+      await service.remove(55);
 
-      expect(error).toBeInstanceOf(VendixHttpException);
-      expect(error.errorCode).toBe('INVOICING_RESOLUTION_003');
-      expect(error).not.toBeInstanceOf(ConflictException);
-      expect(
-        prisma.__unscoped.invoice_resolutions.delete,
-      ).not.toHaveBeenCalled();
+      expect(unscoped.invoice_resolutions.delete).not.toHaveBeenCalled();
+      expect(unscoped.invoice_resolutions.update).toHaveBeenCalledTimes(1);
+      const { where, data } = unscoped.invoice_resolutions.update.mock.calls[0][0];
+      expect(where).toEqual({ id: 55 });
+      expect(data.is_active).toBe(false);
+      expect(data.archived_at).toBeInstanceOf(Date);
     });
   });
 
