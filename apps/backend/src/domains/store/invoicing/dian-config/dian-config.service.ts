@@ -948,7 +948,7 @@ export class DianConfigService {
       label: 'Resolución de numeración de producción vigente',
       satisfied: production_resolutions.length > 0,
       action:
-        'Solicita la Autorización de Numeración de Facturación en Muisca y registra su prefijo, rango y clave técnica. El rango SETP de habilitación no sirve para facturar.',
+        'Solicita la Autorización de Numeración de Facturación en Muisca y registra su prefijo, rango y clave técnica. El rango SETP de habilitación no sirve para facturar. Se sincroniza en el paso 5 · Resoluciones de producción.',
       owner: 'tenant',
     };
 

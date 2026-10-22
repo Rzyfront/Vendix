@@ -99,6 +99,39 @@ export class OrgDianConfigService {
   }
 
   /**
+   * Guarda multi-tenant de los endpoints que delegan en los servicios de TIENDA
+   * (readiness, rangos, promoción, resultados de pruebas). Esos servicios, bajo
+   * contexto de organización con `fiscal_scope=STORE`, pierden el filtro de
+   * tenant; por eso la delegación solo se permite cuando la organización opera
+   * con configuración DIAN consolidada (`fiscal_scope=ORGANIZATION`).
+   */
+  async assertOrganizationFiscalScope(): Promise<number> {
+    const organization_id = this.requireOrganizationId();
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope !== 'ORGANIZATION') {
+      throw new BadRequestException(
+        'DIAN configuration is managed per store for this organization.',
+      );
+    }
+    return organization_id;
+  }
+
+  /**
+   * Exige scope ORGANIZATION y que la configuración sea propia de la
+   * organización (`organization_id` del contexto y `store_id IS NULL`).
+   * Otra organización o una fila anclada a tienda responden 404.
+   */
+  async assertOrgOwnedConfig(id: number): Promise<void> {
+    await this.assertOrganizationFiscalScope();
+    const config = await this.getConfigById(id);
+    if (config.store_id !== null && config.store_id !== undefined) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+  }
+
+  /**
    * Creates a new DIAN configuration honoring the org's fiscal_scope:
    *  - ORGANIZATION → store_id = null (anchored to organization only).
    *  - STORE        → store_id required (from DTO); throws 400 if missing.
