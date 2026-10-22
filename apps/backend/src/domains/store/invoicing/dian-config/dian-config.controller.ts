@@ -432,6 +432,7 @@ export class DianConfigController {
     @Param('id', ParseIntPipe) id: number,
     @Param('jobId') job_id: string,
   ) {
+    await this.dian_config_service.getConfigById(id);
     const result = await this.dian_test_service.getTestSetJobStatus(job_id, id);
     return this.response_service.success(result);
   }

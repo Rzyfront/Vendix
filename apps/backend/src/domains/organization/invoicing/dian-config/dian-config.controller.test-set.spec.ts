@@ -9,6 +9,7 @@ describe('OrgDianConfigController — endpoints del set de pruebas', () => {
       checkTestSetStatus: jest.fn().mockResolvedValue({ status: 'waiting' }),
       getTestSetDocumentStatus: jest.fn().mockResolvedValue({ docs: [] }),
       abandonTestSet: jest.fn().mockResolvedValue({ abandoned: true }),
+      getTestSetJobStatus: jest.fn().mockResolvedValue({ state: 'completed' }),
     };
     const response = { success: jest.fn((d) => d) };
     const controller = new OrgDianConfigController(
@@ -56,5 +57,18 @@ describe('OrgDianConfigController — endpoints del set de pruebas', () => {
     expect(test.checkTestSetStatus).not.toHaveBeenCalled();
     expect(test.getTestSetDocumentStatus).not.toHaveBeenCalled();
     expect(test.abandonTestSet).not.toHaveBeenCalled();
+  });
+
+  it('getTestSetJobStatus exige la guarda de pertenencia antes de sondear el job', async () => {
+    const { controller, org, test } = build();
+    await controller.getTestSetJobStatus(7, '55');
+    expect(org.assertOrgOwnedConfig).toHaveBeenCalledWith(7);
+    expect(test.getTestSetJobStatus).toHaveBeenCalledWith('55', 7);
+  });
+
+  it('getTestSetJobStatus con configuración ajena rechaza y no consulta el job', async () => {
+    const { controller, test } = build(new BadRequestException('x'));
+    await expect(controller.getTestSetJobStatus(7, '55')).rejects.toThrow();
+    expect(test.getTestSetJobStatus).not.toHaveBeenCalled();
   });
 });
