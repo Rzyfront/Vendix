@@ -318,6 +318,7 @@ import {
           confirmVariant="primary"
           (confirm)="confirmSave()"
           (cancel)="pendingConfirm.set(null)"
+          (isOpenChange)="$event || pendingConfirm.set(null)"
         />
       }
 
@@ -597,7 +598,8 @@ export class OrgInvoiceResolutionsComponent {
     this.resolutionForm.controls.document_type.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((type) => {
-        if (this.editingResolution()) return;
+        // En edición también: el tipo define validadores y payload. La siembra
+        // de serie interna ya se salta sola cuando hay una fila en edición.
         this.selectedType.set(type ?? 'sales_invoice');
         this.applyTypeRules();
       });
