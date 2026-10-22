@@ -37,6 +37,7 @@ import {
   FiscalOverview,
 } from '../interfaces/fiscal-operations.interface';
 import { FiscalOperationsService } from '../services/fiscal-operations.service';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
 type FlowLaneKey = 'sales' | 'purchases' | 'payroll' | 'convergence';
 
@@ -626,6 +627,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
 export class FiscalFlowDashboardComponent {
   private readonly service = inject(FiscalOperationsService);
   private readonly router = inject(Router);
+  private readonly authFacade = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly currency = inject(CurrencyFormatService);
 
@@ -963,10 +965,16 @@ export class FiscalFlowDashboardComponent {
       };
       return map[item.link_hint] ?? null;
     }
+    // Organización con fiscal_scope=STORE: no hay asistente único; la DIAN se
+    // gestiona por tienda en la vista por tienda de la organización.
+    const orgDefersToStores =
+      this.scope() === 'organization' && this.authFacade.fiscalScope() === 'STORE';
     const map: Record<string, string | null> = {
       'settings/fiscal': '/admin/fiscal/wizard',
       // Asistente lineal único de activación (tienda y organización).
-      'fiscal/dian': '/admin/invoicing/activation',
+      'fiscal/dian': orgDefersToStores
+        ? '/admin/invoicing/dian-config'
+        : '/admin/invoicing/activation',
       'accounting/chart-of-accounts': '/admin/accounting/chart-of-accounts',
       'accounting/periods': '/admin/accounting/fiscal-periods',
       taxes: '/admin/accounting/taxes',

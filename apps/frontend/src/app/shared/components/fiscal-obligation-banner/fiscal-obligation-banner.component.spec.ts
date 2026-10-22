@@ -10,6 +10,8 @@ describe('FiscalObligationBannerComponent CTAs', () => {
   const pending = signal<FiscalArea[]>([]);
   const authStub = {
     pendingFiscalObligations: pending,
+    selectedAppType: signal<string>('STORE_ADMIN'),
+    fiscalScope: signal<string>('STORE'),
     userSettings: signal<any>(null),
     updateUserSettings: jasmine.createSpy('updateUserSettings'),
   };
@@ -52,5 +54,13 @@ describe('FiscalObligationBannerComponent CTAs', () => {
   it('sin invoicing el CTA va al wizard fiscal con las áreas pendientes', async () => {
     const hrefs = await render(['payroll']);
     expect(hrefs).toEqual(['/admin/fiscal/wizard?areas=payroll']);
+  });
+
+  it('organización con fiscal_scope STORE manda el CTA a la config DIAN por tienda', async () => {
+    authStub.selectedAppType.set('ORG_ADMIN');
+    authStub.fiscalScope.set('STORE');
+    const hrefs = await render(['invoicing']);
+    expect(hrefs).toEqual(['/admin/invoicing/dian-config']);
+    authStub.selectedAppType.set('STORE_ADMIN');
   });
 });

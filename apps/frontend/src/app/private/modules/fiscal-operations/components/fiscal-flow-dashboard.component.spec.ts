@@ -5,9 +5,12 @@ import { Router } from '@angular/router';
 
 import { FiscalFlowDashboardComponent } from './fiscal-flow-dashboard.component';
 import { FiscalOperationsService } from '../services/fiscal-operations.service';
+import { signal } from '@angular/core';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 describe('FiscalFlowDashboardComponent.checklistRoute', () => {
+  const fiscalScope = signal<'STORE' | 'ORGANIZATION'>('ORGANIZATION');
   let router: Router;
 
   function create(scope: 'store' | 'organization' | 'platform') {
@@ -29,6 +32,7 @@ describe('FiscalFlowDashboardComponent.checklistRoute', () => {
     TestBed.configureTestingModule({
       providers: [
         provideZonelessChangeDetection(),
+        { provide: AuthFacade, useValue: { fiscalScope } },
         { provide: FiscalOperationsService, useValue: serviceStub },
         {
           provide: CurrencyFormatService,
@@ -39,6 +43,7 @@ describe('FiscalFlowDashboardComponent.checklistRoute', () => {
     TestBed.overrideComponent(FiscalFlowDashboardComponent, {
       set: { template: '', imports: [] },
     });
+    fiscalScope.set('ORGANIZATION');
     router = TestBed.inject(Router);
   });
 
@@ -51,6 +56,16 @@ describe('FiscalFlowDashboardComponent.checklistRoute', () => {
       );
     });
   }
+
+  it('organización con fiscal_scope STORE lleva la config DIAN a la vista por tienda', () => {
+    fiscalScope.set('STORE');
+    expect(create('organization').checklistRoute(item('fiscal/dian'))).toBe(
+      '/admin/invoicing/dian-config',
+    );
+    expect(create('store').checklistRoute(item('fiscal/dian'))).toBe(
+      '/admin/invoicing/activation',
+    );
+  });
 
   it('fiscal/dian conserva la ruta de plataforma en scope platform', () => {
     expect(create('platform').checklistRoute(item('fiscal/dian'))).toBe(

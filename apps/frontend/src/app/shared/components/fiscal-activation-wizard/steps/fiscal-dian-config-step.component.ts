@@ -2,8 +2,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -24,6 +26,9 @@ import {
 
 /** Ruta del asistente lineal "Activar facturación electrónica". */
 const ACTIVATION_ROUTE = '/admin/invoicing/activation';
+
+/** Vista por tienda de la config DIAN en el panel de organización (fiscal_scope=STORE). */
+const ORG_DIAN_CONFIG_ROUTE = '/admin/invoicing/dian-config';
 
 /**
  * Paso `dian_config` del asistente fiscal: REDIRIGE al asistente de activación.
@@ -62,7 +67,13 @@ const ACTIVATION_ROUTE = '/admin/invoicing/activation';
         </div>
 
         <div class="rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 text-sm" aria-live="polite">
-          @if (loading()) {
+          @if (organizationDefersToStores()) {
+            <span class="text-text-secondary">
+              Cada tienda habilita su propia facturación electrónica. Revisa y
+              configura la DIAN de cada tienda desde la vista por tienda, o entra
+              al panel de la tienda.
+            </span>
+          } @else if (loading()) {
             <span class="text-text-secondary">Leyendo el estado de la habilitación…</span>
           } @else if (loadError(); as message) {
             <span class="text-text-secondary">{{ message }}</span>
@@ -83,7 +94,7 @@ const ACTIVATION_ROUTE = '/admin/invoicing/activation';
             [disabled]="submitting()"
             (clicked)="openActivation()"
           >
-            Abrir asistente de activación
+            {{ organizationDefersToStores() ? 'Ver configuración DIAN por tienda' : 'Abrir asistente de activación' }}
             <app-icon slot="icon" name="arrow-right" [size]="14" />
           </app-button>
         </div>
@@ -107,6 +118,18 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   readonly loadError = signal<string | null>(null);
   readonly axis = signal<FiscalReadinessAxis | null>(null);
 
+  /**
+   * Organización cuya propiedad fiscal es la tienda: no hay un
+   * `organization/.../fiscal-readiness` (responde 400) ni asistente único.
+   */
+  readonly organizationDefersToStores = computed(
+    () =>
+      this.service.userScope() === 'organization' &&
+      this.service.fiscalDataOwner() === 'store',
+  );
+
+  private readiness_requested = false;
+
   readonly statusLabel = computed(() => {
     const status = this.axis()?.enablement_status ?? 'not_started';
     return DIAN_ENABLEMENT_STATUS_LABELS[status] ?? status;
@@ -118,6 +141,22 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   });
 
   constructor() {
+    this.requestReadinessOnce();
+    // Si el estado fiscal se hidrata después del montaje, reacciona al cambio.
+    effect(() => {
+      this.organizationDefersToStores();
+      untracked(() => this.requestReadinessOnce());
+    });
+  }
+
+  private requestReadinessOnce(): void {
+    if (this.organizationDefersToStores()) {
+      this.loading.set(false);
+      return;
+    }
+    if (this.readiness_requested) return;
+    this.readiness_requested = true;
+    this.loading.set(true);
     this.loadReadiness();
   }
 
@@ -145,6 +184,10 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   }
 
   openActivation(): void {
+    if (this.organizationDefersToStores()) {
+      void this.router.navigate([ORG_DIAN_CONFIG_ROUTE]);
+      return;
+    }
     const storeId = this.service.storeContext().store_id;
     void this.router.navigate([ACTIVATION_ROUTE], {
       queryParams: storeId !== undefined ? { store_id: storeId } : undefined,

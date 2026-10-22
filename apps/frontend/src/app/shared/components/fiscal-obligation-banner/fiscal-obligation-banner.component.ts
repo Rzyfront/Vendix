@@ -24,7 +24,7 @@ import { IconComponent } from '../icon/icon.component';
           <span>{{ detail() }}</span>
         </div>
         @if (hasInvoicing()) {
-          <a class="fiscal-banner__cta" routerLink="/admin/invoicing/activation">
+          <a class="fiscal-banner__cta" [routerLink]="invoicingRoute()">
             Activar facturación electrónica
             <app-icon name="chevron-right" [size]="14" />
           </a>
@@ -146,6 +146,13 @@ export class FiscalObligationBannerComponent {
   readonly pendingAreas = this.authFacade.pendingFiscalObligations;
 
   readonly hasInvoicing = computed(() => this.pendingAreas().includes('invoicing'));
+  /** Organización con fiscal_scope=STORE: la DIAN se gestiona por tienda. */
+  readonly invoicingRoute = computed(() =>
+    this.authFacade.selectedAppType() === 'ORG_ADMIN' &&
+    this.authFacade.fiscalScope() === 'STORE'
+      ? '/admin/invoicing/dian-config'
+      : '/admin/invoicing/activation',
+  );
   readonly otherAreas = computed(() =>
     this.pendingAreas().filter((area: FiscalArea) => area !== 'invoicing'),
   );

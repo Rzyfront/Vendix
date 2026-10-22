@@ -14,6 +14,7 @@ describe('FiscalDianConfigStepComponent (redirect al asistente)', () => {
   const storeContext = signal<Record<string, number>>({});
   const wizard = {
     userScope: signal<'store' | 'organization'>('store'),
+    fiscalDataOwner: signal<'organization' | 'store'>('store'),
     storeContext,
     commitStep: jasmine.createSpy('commitStep').and.resolveTo(undefined),
   };
@@ -34,6 +35,7 @@ describe('FiscalDianConfigStepComponent (redirect al asistente)', () => {
   beforeEach(() => {
     storeContext.set({});
     wizard.userScope.set('store');
+    wizard.fiscalDataOwner.set('store');
     wizard.commitStep.calls.reset();
     TestBed.configureTestingModule({
       providers: [
@@ -108,5 +110,32 @@ describe('FiscalDianConfigStepComponent (redirect al asistente)', () => {
     expect(result).toEqual({ ref: { redirected_to: 'activation' } });
     expect(fixture.componentInstance.submitting()).toBeFalse();
     // httpTesting.verify() en afterEach: ningún POST/PATCH/PUT pendiente.
+  });
+
+  it('organización + fiscal_scope STORE no pide fiscal-readiness y ofrece la vista por tienda', async () => {
+    wizard.userScope.set('organization');
+    wizard.fiscalDataOwner.set('store');
+    const fixture = create();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    httpTesting.expectNone((r) => r.url.includes('fiscal-readiness'));
+    expect(fixture.componentInstance.organizationDefersToStores()).toBeTrue();
+    expect(fixture.nativeElement.textContent).toContain('Cada tienda habilita');
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'No se pudo leer el estado',
+    );
+    fixture.componentInstance.openActivation();
+    expect(navigate).toHaveBeenCalledWith(['/admin/invoicing/dian-config']);
+  });
+
+  it('organización + fiscal_scope ORGANIZATION sí pide fiscal-readiness de organización', () => {
+    wizard.userScope.set('organization');
+    wizard.fiscalDataOwner.set('organization');
+    create();
+    const req = httpTesting.expectOne((r) =>
+      r.url.endsWith('/organization/invoicing/dian-config/fiscal-readiness'),
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush({ data: { axes: [] } });
   });
 });
