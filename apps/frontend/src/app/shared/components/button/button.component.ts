@@ -266,7 +266,7 @@ export class ButtonComponent {
       secondary: [
         'bg-[var(--color-secondary)]',
         'hover:brightness-110',
-        'text-[var(--color-text-on-primary)]',
+        'text-[var(--color-text-on-secondary)]',
         'focus:ring-[var(--color-secondary)]/50',
         'btn-shadow-secondary',
       ],

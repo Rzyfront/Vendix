@@ -17,6 +17,12 @@ export interface ServiceStation {
   name: string;
   station_type?: StationType;
   capacity: number;
+  /** Si es false la estación no lleva cronómetro ni pide tiempo estimado al ingresar. */
+  track_time?: boolean;
+  /** Minutos objetivo por atención cuando track_time está activo; null usa la duración del servicio. */
+  target_minutes?: number | null;
+  /** Formulario de Recolección de datos de la estación; null = se usa el del servicio. */
+  intake_template_id?: number | null;
   status: 'active' | 'inactive';
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
@@ -150,11 +156,11 @@ export class ServiceStationsService {
       .pipe(map((response) => this.unwrap(response)));
   }
 
-  create(body: { name: string; capacity: number; station_type?: StationType }): Observable<ServiceStation> {
+  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null }): Observable<ServiceStation> {
     return this.http.post<{ data?: ServiceStation } | ServiceStation>(this.base, body).pipe(map((r) => this.unwrap(r)));
   }
 
-  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type'>>): Observable<ServiceStation> {
+  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id'>>): Observable<ServiceStation> {
     return this.http.patch<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`, body).pipe(map((r) => this.unwrap(r)));
   }
 
@@ -233,8 +239,9 @@ export class ServiceStationsService {
       );
   }
 
-  getIntakeTemplate(productId: number): Observable<IntakeTemplate | null> {
-    const params = new HttpParams().set('product_id', String(productId));
+  getIntakeTemplate(productId: number, stationId?: number | null): Observable<IntakeTemplate | null> {
+    let params = new HttpParams().set('product_id', String(productId));
+    if (stationId) params = params.set('station_id', String(stationId));
     return this.http
       .get<{ data?: { template: IntakeTemplate | null } } | { template: IntakeTemplate | null }>(
         `${environment.apiUrl}/store/service-sessions/intake-template`,
@@ -243,8 +250,9 @@ export class ServiceStationsService {
       .pipe(map((r) => this.unwrap<{ template: IntakeTemplate | null }>(r)?.template ?? null));
   }
 
-  getIntakePrefill(productId: number, customerId: number): Observable<Array<{ field_id: number; value: unknown }>> {
-    const params = new HttpParams().set('product_id', String(productId)).set('customer_id', String(customerId));
+  getIntakePrefill(productId: number, customerId: number, stationId?: number | null): Observable<Array<{ field_id: number; value: unknown }>> {
+    let params = new HttpParams().set('product_id', String(productId)).set('customer_id', String(customerId));
+    if (stationId) params = params.set('station_id', String(stationId));
     return this.http
       .get<{ data?: { values: Array<{ field_id: number; value: unknown }> } } | { values: Array<{ field_id: number; value: unknown }> }>(
         `${environment.apiUrl}/store/service-sessions/intake-prefill`,

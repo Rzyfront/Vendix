@@ -367,6 +367,7 @@ export class ThemeService {
           '--color-secondary': monoSecondary,
           '--color-secondary-rgb': this.hexToRgbString(monoSecondary),
           '--color-text-on-primary': monoOnPrimary,
+          '--color-text-on-secondary': ColorUtils.pickForeground(monoSecondary),
           // El LIENZO no viaja en `--color-background`. Ese token se usa en ~150
           // sitios del código NO como "fondo de página" sino como "un escalón por
           // DENTRO de la superficie": encabezados y pies de paneles, hovers de
@@ -459,8 +460,16 @@ export class ThemeService {
       const finalPrimary =
         this.asHex(getComputedStyle(root).getPropertyValue('--color-primary')) ||
         basePrimary;
+      // El secundario necesita su propio contraste: con un primario claro el
+      // texto "on-primary" sale oscuro y quedaba ilegible sobre el secundario
+      // oscuro (botones "Finalizar"/"Cancelar" negro sobre negro).
+      const finalSecondary =
+        this.asHex(getComputedStyle(root).getPropertyValue('--color-secondary'));
       this.setCssVariables({
         '--color-text-on-primary': ColorUtils.pickForeground(finalPrimary),
+        ...(finalSecondary
+          ? { '--color-text-on-secondary': ColorUtils.pickForeground(finalSecondary) }
+          : {}),
       });
     }
 
@@ -847,6 +856,7 @@ export class ThemeService {
       '--color-text-muted',
       '--color-text-muted-rgb',
       '--color-text-on-primary', // monocromo: relleno inverso por luminancia
+      '--color-text-on-secondary',
       '--color-border', // monocromo tiñe el borde con la escala
       '--color-surface-secondary', // monocromo tiñe la superficie secundaria
       '--color-text-on-background', // monocromo: texto sobre el lienzo oscuro

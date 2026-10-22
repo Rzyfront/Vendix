@@ -21,6 +21,7 @@ import {
   StickyHeaderComponent,
   TextareaComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../shared/components';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { ReservationsService } from '../../services/reservations.service';
@@ -48,6 +49,8 @@ export interface CheckinIntakeSection {
   items: IntakeTemplateItem[];
 }
 import { environment } from '../../../../../../../environments/environment';
+import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
+import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
 
 export interface ServiceSessionRow {
   id: number;
@@ -195,7 +198,9 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    ToggleComponent,
     DynamicFieldComponent,
+    ServiceRemindersPageComponent,
     CustomerSelectComponent,
   ],
   templateUrl: './service-stations-page.component.html',
@@ -206,6 +211,16 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private readonly stationsApi = inject(ServiceStationsService);
   private readonly reservationsApi = inject(ReservationsService);
   private readonly router = inject(Router);
+  private readonly templatesApi = inject(DataCollectionTemplatesService);
+
+  /** Formularios activos de Recolección de datos, para asignar uno a cada estación. */
+  readonly intakeTemplates = signal<Array<{ id: number; name: string }>>([]);
+  readonly intakeTemplateOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Usar el formulario de cada servicio' },
+    ...this.intakeTemplates().map((t) => ({ value: t.id, label: t.name })),
+  ]);
+  readonly newIntakeTemplateId = signal<number>(0);
+  readonly editIntakeTemplateId = signal<number>(0);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
 
@@ -277,6 +292,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly newName = signal('');
   readonly newStationType = signal<StationType>('carro');
   readonly newEquipment = signal('');
+  readonly newTrackTime = signal(false);
+  readonly newTargetMinutes = signal<number | null>(null);
 
   // Check-in form
   readonly checkinStationId = signal<number | null>(null);
@@ -345,6 +362,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     if (!st) return 'carro';
     return this.getStationType(st);
   });
+
+  /** El tiempo estimado solo se pide cuando la estación tiene el cronómetro activo. */
+  readonly checkinTracksTime = computed(() => !!this.selectedCheckinStation()?.track_time);
 
   readonly checkinRequiresVehicle = computed(() => {
     const type = this.checkinStationType();
@@ -537,10 +557,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Config station state
   readonly selectedStation = signal<ServiceStation | null>(null);
-  readonly selectedConfigTab = signal<'details' | 'services' | 'providers'>('details');
+  readonly selectedConfigTab = signal<'details' | 'intake' | 'services' | 'providers'>('details');
   readonly editName = signal('');
   readonly editStationType = signal<StationType>('carro');
   readonly editCapacity = signal(1);
+  readonly editTrackTime = signal(false);
+  readonly editTargetMinutes = signal<number | null>(null);
   readonly serviceIds = signal<number[]>([]);
   readonly providerIds = signal<number[]>([]);
 
@@ -757,6 +779,68 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     );
   }
 
+  /** Lleva al formulario del servicio, donde se elige su "Formulario de recepción". */
+  openServiceIntakeConfig(): void {
+    const productId = Number(this.checkinProductId() || 0);
+    if (!productId) return;
+    this.showCheckinModal.set(false);
+    this.router.navigate(['/admin/products/edit', productId]);
+  }
+
+  /** "Yamaha NMAX · ABC123": las dos primeras respuestas de texto del formulario identifican lo atendido. */
+  private intakeSubjectLabel(): string {
+    const values = this.checkinIntakeValues();
+    return this.checkinIntakeItems()
+      .filter((item) => ['text', 'select'].includes(item.metadata_field.field_type))
+      .map((item) => String(values[item.metadata_field.id] ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' · ')
+      .slice(0, 120);
+  }
+
+  /** Pestaña activa del módulo; se refleja en ?vista=registro para poder enlazarla. */
+  readonly view = signal<'stations' | 'registry'>(
+    new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('vista') === 'registro' ? 'registry' : 'stations',
+  );
+
+  setView(view: 'stations' | 'registry'): void {
+    this.view.set(view);
+    this.router.navigate([], { queryParams: { vista: view === 'registry' ? 'registro' : null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  private loadIntakeTemplates(): void {
+    this.templatesApi.getAll('active').subscribe({
+      next: (templates) => this.intakeTemplates.set((templates ?? []).map((t) => ({ id: t.id, name: t.name }))),
+      error: () => {}, // El selector queda solo con la opción "del servicio"
+    });
+  }
+
+  saveStationIntakeTemplate(): void {
+    const station = this.selectedStation();
+    if (!station) return;
+    this.runSave(
+      this.stationsApi.update(station.id, { intake_template_id: Number(this.editIntakeTemplateId()) || null }),
+      'Formulario de recepción guardado.',
+      station.id,
+    );
+  }
+
+  /** Recolección de datos en otra pestaña para crear o editar los campos del formulario. */
+  openIntakeDesigner(): void {
+    window.open('/admin/data-collection/templates', '_blank');
+  }
+
+  stationTracksTime(stationId: number): boolean {
+    return !!this.stations().find((s) => s.id === stationId)?.track_time;
+  }
+
+  /** Vacío o inválido → null (la estación usa la duración de cada servicio). */
+  private positiveMinutes(value: number | string | null): number | null {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n >= 1 ? Math.min(n, 1440) : null;
+  }
+
   sessionElapsedMinutes(openedAt: string): number {
     if (!openedAt) return 0;
     const diff = Math.max(0, this.now() - new Date(openedAt).getTime());
@@ -951,6 +1035,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.newName.set('');
     this.newStationType.set('carro');
     this.newEquipment.set('');
+    this.newTrackTime.set(false);
+    this.newTargetMinutes.set(null);
+    this.newIntakeTemplateId.set(0);
+    this.loadIntakeTemplates();
     this.showCreateModal.set(true);
   }
 
@@ -965,6 +1053,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       name,
       capacity: 1,
       station_type: this.newStationType(),
+      track_time: this.newTrackTime(),
+      target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
+      intake_template_id: Number(this.newIntakeTemplateId()) || null,
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
@@ -1042,7 +1133,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinProductId.set(this.defaultCheckinServiceId(target));
     this.loadCheckinIntake();
     this.checkinProviderId.set(0);
-    this.checkinDurationMinutes.set(45);
+    this.checkinDurationMinutes.set(this.defaultCheckinDuration());
     this.checkinNotes.set('');
 
     // Limpiar campos de presupuesto e insumos iniciales
@@ -1065,14 +1156,27 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
+    this.checkinDurationMinutes.set(this.defaultCheckinDuration());
     this.loadCheckinIntake();
+  }
+
+  /** Minutos objetivo de la estación; si no tiene, la duración del servicio elegido; si no, 45. */
+  private defaultCheckinDuration(): number {
+    const station = this.selectedCheckinStation();
+    if (station?.target_minutes) return station.target_minutes;
+    const productId = Number(this.checkinProductId() || 0);
+    const service = station?.services?.find((s) => s.product_id === productId)?.product;
+    return service?.service_duration_minutes || 45;
   }
 
   onCheckinServiceChange(productId: number | string): void {
     const next = Number(productId) || 0;
     const changed = next !== Number(this.checkinProductId() || 0);
     this.checkinProductId.set(next);
-    if (changed) this.loadCheckinIntake();
+    if (changed) {
+      this.checkinDurationMinutes.set(this.defaultCheckinDuration());
+      this.loadCheckinIntake();
+    }
   }
 
   /**
@@ -1097,7 +1201,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const productId = Number(this.checkinProductId() || 0);
     if (!customerId || !productId || !this.checkinIntakeTemplate()) return;
     const seq = ++this.prefillRequestSeq;
-    this.stationsApi.getIntakePrefill(productId, customerId).subscribe({
+    this.stationsApi.getIntakePrefill(productId, customerId, this.checkinStationId()).subscribe({
       next: (entries) => {
         if (seq !== this.prefillRequestSeq) return;
         if (this.checkinCustomer()?.id !== customerId || Number(this.checkinProductId() || 0) !== productId) return;
@@ -1118,7 +1222,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Carga el formulario de recepción vinculado al servicio seleccionado. */
+  /** Carga el formulario de recepción: el de la estación o, si no tiene, el del servicio. */
   private loadCheckinIntake(): void {
     const productId = Number(this.checkinProductId() || 0);
     const seq = ++this.intakeRequestSeq;
@@ -1129,7 +1233,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.checkinIntakeLoading.set(true);
-    this.stationsApi.getIntakeTemplate(productId).subscribe({
+    this.stationsApi.getIntakeTemplate(productId, this.checkinStationId()).subscribe({
       next: (template) => {
         if (seq !== this.intakeRequestSeq) return;
         this.checkinIntakeTemplate.set(template);
@@ -1243,7 +1347,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const stylePreference = this.checkinStylePreference().trim();
     const allergies = this.checkinAllergies().trim();
 
-    if (requiresVehicle) {
+    // Con formulario de recepción, los datos los define el formulario y no los campos fijos.
+    const usesIntakeForm = !!this.checkinIntakeTemplate();
+    if (usesIntakeForm) {
+      // Validado más abajo contra los campos obligatorios del formulario.
+    } else if (requiresVehicle) {
       if (!vehicleName) {
         this.toastService.error(
           stationType === 'moto'
@@ -1300,7 +1408,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
     // Spec: Label del subject: vehículo "<modelo> - <placa>", celular "<modelo equipo>", persona: nombre del cliente
     let label = customerName;
-    if (requiresVehicle) {
+    if (usesIntakeForm) {
+      label = this.intakeSubjectLabel() || customerName;
+    } else if (requiresVehicle) {
       label = `${vehicleName} - ${plate}`;
     } else if (isCelular) {
       label = deviceModel;
@@ -1642,6 +1752,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.editName.set(station.name);
     this.editStationType.set(this.getStationType(station));
     this.editCapacity.set(1);
+    this.editTrackTime.set(!!station.track_time);
+    this.editTargetMinutes.set(station.target_minutes ?? null);
+    this.editIntakeTemplateId.set(station.intake_template_id ?? 0);
+    this.loadIntakeTemplates();
     this.selectedConfigTab.set('details');
     this.serviceIds.set(station.services?.map((s) => s.product_id) ?? []);
     this.providerIds.set(station.providers?.map((p) => p.provider_id) ?? []);
@@ -1661,6 +1775,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         name,
         capacity: 1,
         station_type: this.editStationType(),
+        track_time: this.editTrackTime(),
+        target_minutes: this.editTrackTime() ? this.positiveMinutes(this.editTargetMinutes()) : null,
       }),
       'Datos guardados.',
       station.id,

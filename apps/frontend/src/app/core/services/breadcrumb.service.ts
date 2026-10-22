@@ -700,6 +700,12 @@ export class BreadcrumbService {
       parent: 'Reservas',
       icon: 'warehouse',
     },
+    {
+      path: '/admin/reservations/reminders',
+      title: 'Registro de Servicios',
+      parent: 'Reservas',
+      icon: 'history',
+    },
 
     // Products
     {

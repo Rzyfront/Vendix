@@ -10,6 +10,34 @@
     (actionClicked)="onHeaderAction($event)"
   />
 
+  <!-- Vistas del módulo: operación en vivo de las estaciones o registro de servicios realizados -->
+  <div class="px-2 md:px-0 mt-2 mb-3 flex items-center gap-1.5 border-b border-[var(--color-border)] text-sm font-semibold overflow-x-auto" role="tablist">
+    <button
+      type="button"
+      role="tab"
+      [attr.aria-selected]="view() === 'stations'"
+      (click)="setView('stations')"
+      class="px-3 py-2 -mb-px border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors"
+      [ngClass]="view() === 'stations' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+    >
+      <app-icon name="warehouse" [size]="15" /> Estaciones
+    </button>
+    <button
+      type="button"
+      role="tab"
+      [attr.aria-selected]="view() === 'registry'"
+      (click)="setView('registry')"
+      class="px-3 py-2 -mb-px border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors"
+      [ngClass]="view() === 'registry' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+    >
+      <app-icon name="history" [size]="15" /> Registro de servicios
+    </button>
+  </div>
+
+  @if (view() === 'registry') {
+    <app-service-reminders-page [embedded]="true" />
+  } @else {
+
   <div
     class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
   >
@@ -263,7 +291,8 @@
                         </span>
                       </div>
 
-                      <!-- Timer & Progress Bar -->
+                      <!-- Timer & Progress Bar: solo si la estación lleva cronómetro -->
+                      @if (station.track_time) {
                       <div class="mt-3 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 space-y-1.5">
                         <div class="flex items-center justify-between text-xs font-mono">
                           <span class="text-[var(--color-text-secondary)] flex items-center gap-1 text-[11px]">
@@ -277,6 +306,7 @@
                           <div class="bg-gradient-to-r from-red-500 to-amber-500 h-full rounded-full transition-all duration-300" [style.width.%]="sessionProgressPercent(session)"></div>
                         </div>
                       </div>
+                      }
                     </div>
 
                     <!-- Action Buttons -->
@@ -324,9 +354,11 @@
                         <p class="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
                           {{ session.subject?.label || 'Vehículo en bahía' }}
                         </p>
-                        <span class="inline-block font-mono text-xs font-semibold text-amber-600 mt-2">
-                          {{ sessionElapsedMinutes(session.opened_at) }} min transcurridos
-                        </span>
+                        @if (station.track_time) {
+                          <span class="inline-block font-mono text-xs font-semibold text-amber-600 mt-2">
+                            {{ sessionElapsedMinutes(session.opened_at) }} min transcurridos
+                          </span>
+                        }
                       </div>
                     </div>
 
@@ -435,6 +467,8 @@
     </app-card>
   </div>
 
+  }
+
   <!-- Modal 1: Creación de Nueva Estación / Bahía -->
   <app-modal [(isOpen)]="showCreateModal" title="Crear Nueva Estación" subtitle="Alta de nuevo punto operativo multirrubro" size="md">
     <div class="space-y-4">
@@ -466,6 +500,46 @@
         (ngModelChange)="newEquipment.set($event)"
         placeholder="Ej. Elevador 4T, Pistola neumática, Rampa de motos"
       />
+
+      <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2">
+        <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+          <div class="flex-1 min-w-0">
+            <app-selector
+              label="Formulario de recepción"
+              [options]="intakeTemplateOptions()"
+              [ngModel]="newIntakeTemplateId()"
+              (ngModelChange)="newIntakeTemplateId.set($event)"
+            />
+          </div>
+          <app-button variant="outline" size="sm" (clicked)="openIntakeDesigner()">
+            <app-icon name="pencil" [size]="14" slot="icon" /> Diseñar formularios
+          </app-button>
+        </div>
+        <p class="text-xs text-[var(--color-text-secondary)]">Los campos que pongas en este formulario (Recolección de datos) son los que se piden al ingresar un cliente a esta estación: placa, kilometraje, modelo, IMEI, alergias… lo que necesites.</p>
+      </div>
+
+      <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
+            <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Muestra el tiempo transcurrido de cada atención en esta estación. Apagado, no se controla tiempo.</p>
+          </div>
+          <app-toggle
+            [checked]="newTrackTime()"
+            ariaLabel="Activar cronómetro de atención"
+            (changed)="newTrackTime.set($event)"
+          />
+        </div>
+        @if (newTrackTime()) {
+          <app-input
+            label="Minutos objetivo por atención (opcional)"
+            type="number"
+            [ngModel]="newTargetMinutes()"
+            (ngModelChange)="newTargetMinutes.set($event)"
+            placeholder="Vacío = duración del servicio"
+          />
+        }
+      </div>
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">
@@ -486,6 +560,8 @@
         [required]="true"
       />
 
+      <!-- Campos fijos por tipo: solo cuando la estación/servicio no tiene formulario de recepción -->
+      @if (!checkinIntakeTemplate() && !checkinIntakeLoading()) {
       <!-- Datos del Vehículo (Solo si la estación es de Carro o Moto) -->
       @if (checkinRequiresVehicle()) {
         <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-amber-500/25 space-y-3">
@@ -590,6 +666,8 @@
         </div>
       }
 
+      }
+
       <!-- Datos del Cliente (Siempre solicitados para la orden / factura) -->
       <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
         <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
@@ -687,19 +765,21 @@
       </div>
 
       <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-2]="checkinTracksTime()">
         <app-selector
           label="Servicio Requerido Inicial"
           [options]="serviceSelectorOptions()"
           [ngModel]="checkinProductId()"
           (ngModelChange)="onCheckinServiceChange($event)"
         />
-        <app-input
-          label="Tiempo Estimado (Minutos)"
-          type="number"
-          [ngModel]="checkinDurationMinutes()"
-          (ngModelChange)="checkinDurationMinutes.set($event)"
-        />
+        @if (checkinTracksTime()) {
+          <app-input
+            label="Tiempo Estimado (Minutos)"
+            type="number"
+            [ngModel]="checkinDurationMinutes()"
+            (ngModelChange)="checkinDurationMinutes.set($event)"
+          />
+        }
       </div>
 
       @if (checkinIntakeLoading()) {
@@ -753,6 +833,13 @@
             }
           </div>
         }
+      } @else if (checkinProductId()) {
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+          <span>Este servicio no tiene formulario de recepción. Los datos a pedir se configuran en el servicio (Productos → editar → “Formulario de recepción”).</span>
+          <app-button variant="outline" size="sm" (clicked)="openServiceIntakeConfig()">
+            <app-icon name="pencil" [size]="14" slot="icon" /> Configurar
+          </app-button>
+        </div>
       }
 
       <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm flex flex-wrap items-center justify-between gap-2">
@@ -825,9 +912,11 @@
             <app-badge [variant]="session.status === 'paused' ? 'warning' : 'success'" size="sm">
               {{ session.status === 'paused' ? 'En Pausa' : 'Atención Activa' }}
             </app-badge>
-            <span class="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-xs font-mono font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-              <app-icon name="clock" [size]="12" /> {{ sessionElapsedMinutes(session.opened_at) }} min
-            </span>
+            @if (stationTracksTime(session.station_id)) {
+              <span class="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-xs font-mono font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                <app-icon name="clock" [size]="12" /> {{ sessionElapsedMinutes(session.opened_at) }} min
+              </span>
+            }
           </div>
         </div>
 
@@ -1111,6 +1200,14 @@
           </button>
           <button
             type="button"
+            (click)="selectedConfigTab.set('intake')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'intake' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Formulario de recepción
+          </button>
+          <button
+            type="button"
             (click)="selectedConfigTab.set('services')"
             class="px-3 py-1.5 rounded-lg transition-all"
             [ngClass]="selectedConfigTab() === 'services' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
@@ -1126,6 +1223,30 @@
             Proveedores ({{ providerIds().length }})
           </button>
         </div>
+
+        @if (selectedConfigTab() === 'intake') {
+          <div class="space-y-4">
+            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2">
+              <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                <div class="flex-1 min-w-0">
+                  <app-selector
+                    label="Formulario de recepción"
+                    [options]="intakeTemplateOptions()"
+                    [ngModel]="editIntakeTemplateId()"
+                    (ngModelChange)="editIntakeTemplateId.set($event)"
+                  />
+                </div>
+                <app-button variant="outline" size="sm" (clicked)="openIntakeDesigner()">
+                  <app-icon name="pencil" [size]="14" slot="icon" /> Diseñar formularios
+                </app-button>
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)]">Los campos que pongas en este formulario (Recolección de datos) son los que se piden al ingresar un cliente a esta estación: placa, kilometraje, modelo, IMEI, alergias… lo que necesites.</p>
+            </div>
+            <div class="flex justify-end">
+              <app-button variant="primary" [loading]="saving()" (clicked)="saveStationIntakeTemplate()">Guardar formulario</app-button>
+            </div>
+          </div>
+        }
 
         <!-- Pestaña 1: Datos & QR -->
         @if (selectedConfigTab() === 'details') {
@@ -1148,6 +1269,29 @@
                 <span class="text-xs font-bold text-[var(--color-text-primary)]">Capacidad</span>
                 <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">1 cliente a la vez (igual que una mesa)</span>
               </div>
+            </div>
+
+            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Muestra el tiempo transcurrido de cada atención en esta estación. Apagado, no se controla tiempo.</p>
+                </div>
+                <app-toggle
+                  [checked]="editTrackTime()"
+                  ariaLabel="Activar cronómetro de atención"
+                  (changed)="editTrackTime.set($event)"
+                />
+              </div>
+              @if (editTrackTime()) {
+                <app-input
+                  label="Minutos objetivo por atención (opcional)"
+                  type="number"
+                  [ngModel]="editTargetMinutes()"
+                  (ngModelChange)="editTargetMinutes.set($event)"
+                  placeholder="Vacío = duración del servicio"
+                />
+              }
             </div>
 
             <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">

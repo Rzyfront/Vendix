@@ -1,12 +1,14 @@
 <div class="w-full overflow-x-hidden">
-  <app-sticky-header
-    title="Registro de servicios"
-    subtitle="Servicios realizados en estaciones y cuándo le toca volver a cada cliente"
-    icon="clipboard-list"
-    variant="glass"
-    [showBackButton]="true"
-    backRoute="/admin/reservations"
-  />
+  @if (!embedded()) {
+    <app-sticky-header
+      title="Registro de servicios"
+      subtitle="Servicios realizados en estaciones y cuándo le toca volver a cada cliente"
+      icon="clipboard-list"
+      variant="glass"
+      [showBackButton]="true"
+      backRoute="/admin/services/stations"
+    />
+  }
 
   <!-- Stats (también funcionan como filtro rápido) -->
   <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">

@@ -4,6 +4,7 @@ import {
   TemplateRef,
   computed,
   inject,
+  input,
   signal,
   viewChild,
 } from '@angular/core';
@@ -101,6 +102,8 @@ function reminderLabel(row: ServiceRegistryRow): string {
   templateUrl: './service-reminders-page.component.html',
 })
 export class ServiceRemindersPageComponent {
+  /** Dentro de Estaciones de Servicio (pestaña) no muestra su propio encabezado. */
+  readonly embedded = input(false);
   private readonly registry = inject(ServiceRegistryService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
