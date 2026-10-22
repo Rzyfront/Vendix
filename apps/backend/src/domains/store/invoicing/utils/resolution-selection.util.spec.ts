@@ -411,6 +411,32 @@ describe('resolution-selection.util', () => {
       }
     });
 
+    it('todas las series de notas inactivas: la dormida se reporta como resolution (en uso) y coincide con la que reactiva el generador', async () => {
+      const { generator, client } = setup([
+        { ...base, ...valid, id: 8, document_type: 'credit_note', prefix: 'NCVS', current_number: 3, is_active: false, created_at: 100 },
+        { ...base, ...valid, id: 9, document_type: 'credit_note', prefix: 'NCX', current_number: 7, is_active: false, created_at: 200 },
+      ]);
+      jest.useFakeTimers().setSystemTime(now);
+      try {
+        const inUse = await buildResolutionsInUse(client, {
+          accounting_entity_id: 5,
+          now: new Date(),
+        });
+        const item = inUse.items.find((i) => i.document_type === 'credit_note')!;
+        expect(item.source).toBe('resolution');
+        expect(item.active_count).toBe(0);
+        const generated = await generator.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+        });
+        expect(generated.resolution_id).toBe(item.resolution_id);
+        expect(generated.invoice_number).toBe(item.next_number);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('tipo sin fila ni serie interna -> none', async () => {
       const { client } = setup([]);
       const inUse = await buildResolutionsInUse(client, {

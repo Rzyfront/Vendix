@@ -124,7 +124,7 @@ export class ResolutionsInUseCardComponent {
           document_type: type,
           label,
           item,
-          headline: `${item.prefix ?? ''} · Siguiente: ${item.prefix ?? ''}${item.next_number ?? ''}`.trim(),
+          headline: `${item.prefix ?? ''} · Siguiente: ${item.next_number ?? ''}`.trim(),
           detail: 'Serie interna — se crea sola en la primera nota',
           note: '',
           warn: false,
@@ -133,6 +133,8 @@ export class ResolutionsInUseCardComponent {
       }
 
       const details: string[] = [];
+      // Serie interna dormida: el generador la reactiva en la próxima nota.
+      const dormant = item.is_internal_series && item.active_count === 0;
       if (item.resolution_number) details.push(`Resolución ${item.resolution_number}`);
       if (item.valid_to) details.push(`vigente hasta ${formatDateOnlyUTC(item.valid_to)}`);
 
@@ -140,8 +142,10 @@ export class ResolutionsInUseCardComponent {
         document_type: type,
         label,
         item,
-        headline: `${item.prefix ?? ''} · Siguiente: ${item.prefix ?? ''}${item.next_number ?? ''}`.trim(),
-        detail: details.join(' · '),
+        headline: `${item.prefix ?? ''} · Siguiente: ${item.next_number ?? ''}`.trim(),
+        detail: dormant
+          ? 'Serie interna inactiva — se reactivará en la próxima nota'
+          : details.join(' · '),
         note:
           type === 'sales_invoice' && item.active_count > 1
             ? `Hay ${item.active_count} resoluciones activas; el sistema usa esta`

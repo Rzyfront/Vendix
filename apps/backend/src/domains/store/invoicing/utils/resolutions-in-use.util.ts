@@ -201,7 +201,10 @@ export async function buildResolutionsInUse(
     if (projected) {
       items.push({
         ...base,
-        source: 'internal_series_projected',
+        // Serie dormida: es una fila REAL que el generador reactivará, así que
+        // se reporta como `resolution` (la tabla la marca "En uso"). Solo la
+        // que aún no existe (id null) es una proyección.
+        source: projected.id != null ? 'resolution' : 'internal_series_projected',
         resolution_id: projected.id,
         prefix: projected.prefix,
         resolution_number: projected.resolution_number,
