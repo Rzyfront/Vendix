@@ -47,7 +47,8 @@ function buildPrisma(entities: Entity[], rows: Row[]) {
           .filter((e) =>
             where.OR.some(
               (c: any) =>
-                (c.tax_id && (e.tax_id ?? '').startsWith(c.tax_id.startsWith)) ||
+                (c.tax_id &&
+                  (e.tax_id ?? '').startsWith(c.tax_id.startsWith)) ||
                 (c.dian_configurations &&
                   e.nits.some((n) =>
                     n.startsWith(c.dian_configurations.some.nit.startsWith),
@@ -167,10 +168,7 @@ describe('assertNoCrossTenantNumberingOverlap', () => {
       tax_id: '111111111',
       nits: ['902056589-1'],
     };
-    const prisma = buildPrisma(
-      [seeded_target, seeded_other],
-      [foreign_row()],
-    );
+    const prisma = buildPrisma([seeded_target, seeded_other], [foreign_row()]);
     await expect(
       assertNoCrossTenantNumberingOverlap(prisma, params),
     ).rejects.toBeInstanceOf(VendixHttpException);
@@ -263,7 +261,10 @@ describe('assertNoCrossTenantNumberingOverlap', () => {
       [foreign_row({ prefix: 'setp' })],
     );
     await expect(
-      assertNoCrossTenantNumberingOverlap(prisma, { ...params, prefix: ' SETP ' }),
+      assertNoCrossTenantNumberingOverlap(prisma, {
+        ...params,
+        prefix: ' SETP ',
+      }),
     ).rejects.toBeInstanceOf(VendixHttpException);
   });
 
@@ -301,12 +302,54 @@ describe('assertNoCrossTenantNumberingOverlap', () => {
     const setp = await capture(
       assertNoCrossTenantNumberingOverlap(prisma, params),
     );
-    expect(JSON.stringify(setp.getResponse())).toContain(
-      '994000000–994999999',
-    );
+    expect(JSON.stringify(setp.getResponse())).toContain('994000000–994999999');
     const fe = await capture(
       assertNoCrossTenantNumberingOverlap(prisma, { ...params, prefix: 'FE' }),
     );
     expect(JSON.stringify(fe.getResponse())).not.toContain('994000000');
+  });
+});
+
+describe('D10: series internas de notas sin guarda entre cuentas', () => {
+  it.each([
+    ['credit_note', 'NCVS'],
+    ['debit_note', 'NDVS'],
+    ['support_adjustment_note', 'NASVS'],
+    ['equivalent_adjustment_note', 'NAEVS'],
+  ])(
+    '%s no consulta ni lanza aunque otra cuenta del mismo NIT solape',
+    async (document_type, prefix) => {
+      const prisma = buildPrisma(
+        [target, other],
+        [
+          foreign_row({
+            document_type,
+            prefix,
+            range_from: 1,
+            range_to: 10000000,
+          }),
+        ],
+      );
+      await expect(
+        assertNoCrossTenantNumberingOverlap(prisma, {
+          ...params,
+          document_type,
+          prefix,
+          range_from: 1,
+          range_to: 10000000,
+          lock_in_transaction: true,
+        }),
+      ).resolves.toBeUndefined();
+      expect(prisma.invoice_resolutions.findMany).not.toHaveBeenCalled();
+      expect(prisma.accounting_entities.findFirst).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it('sales_invoice sigue lanzando con solape', async () => {
+    const prisma = buildPrisma([target, other], [foreign_row()]);
+    await expect(
+      assertNoCrossTenantNumberingOverlap(prisma, params),
+    ).rejects.toBeInstanceOf(VendixHttpException);
   });
 });

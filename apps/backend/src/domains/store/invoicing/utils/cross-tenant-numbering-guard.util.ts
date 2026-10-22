@@ -1,4 +1,8 @@
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import {
+  internalSeriesPrefixFor,
+  type FiscalDocumentType,
+} from '../fiscal-document-requirements';
 
 /**
  * Guarda de numeración entre cuentas.
@@ -64,6 +68,14 @@ export async function assertNoCrossTenantNumberingOverlap(
   prisma: any,
   params: CrossTenantNumberingParams,
 ): Promise<void> {
+  // D10: las series internas de notas/ajustes (NC/ND/NCVS/NDVS/NAS/NAE) no tienen
+  // guarda entre cuentas; la numeración no es de la DIAN sino nuestra. Misma
+  // definición que `isSingleActiveDocumentType`: `internalSeriesPrefixFor !== null`.
+  if (
+    internalSeriesPrefixFor(params.document_type as FiscalDocumentType) !== null
+  ) {
+    return;
+  }
   const target = await prisma.accounting_entities.findFirst({
     where: { id: params.accounting_entity_id },
     select: {
