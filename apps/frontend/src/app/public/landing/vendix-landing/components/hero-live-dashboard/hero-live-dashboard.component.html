@@ -58,7 +58,7 @@
         @for (item of dockItems; track item.label; let i = $index) {
           <span
             class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold"
-            [class]="i === 0 ? 'bg-primary text-white' : 'text-slate-600'">
+            [class]="i === 0 ? 'bg-primary-900 text-white' : 'text-slate-600'">
             <app-icon [name]="item.icon" [size]="18"></app-icon>
             <span>{{ item.label }}</span>
           </span>
@@ -119,10 +119,10 @@
           </span>
           <span class="relative w-7 h-7 rounded-lg flex items-center justify-center text-slate-500" aria-hidden="true">
             <app-icon name="bell" [size]="14"></app-icon>
-            <span class="absolute -top-[3px] -right-[3px] min-w-[14px] h-[14px] px-[3px] rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center leading-none border-2 border-white">98</span>
+            <span class="absolute -top-[3px] -right-[3px] min-w-[14px] h-[14px] px-[3px] rounded-full bg-red-700 text-white text-[8px] font-bold flex items-center justify-center leading-none border-2 border-white">98</span>
           </span>
           <span class="flex items-center gap-2.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-[10px]" aria-hidden="true">
-            <span class="w-[26px] h-[26px] rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0">VD</span>
+            <span class="w-[26px] h-[26px] rounded-full bg-primary-900 text-white text-[10px] font-semibold flex items-center justify-center shrink-0">VD</span>
             <span class="hidden lg:flex flex-col items-start text-left">
               <span class="text-[11px] font-medium text-slate-900 leading-tight">Vendix Demo</span>
               <span class="text-[10px] text-slate-500 leading-tight">Dueño</span>
@@ -134,9 +134,9 @@
     </header>
 
     <!-- Main: mismo respiro que el outlet real (--admin-header-gap 12px → 10px) y px-4 → px-3 -->
-    <main class="flex-1 flex flex-col gap-3 px-3 pb-3 pt-2.5 min-w-0 overflow-hidden">
+    <div class="flex-1 flex flex-col gap-3 px-3 pb-3 pt-2.5 min-w-0 overflow-hidden">
     <!-- 4 cards: MISMO componente que el panel real (app-stats) -->
-    <div class="stats-container">
+    <div class="stats-container" tabindex="0" role="region" aria-label="Indicadores del panel de demostración">
       <app-stats
         title="Ingresos"
         [value]="ingresosText()"
@@ -226,7 +226,7 @@
             <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-warning truncate m-0">
               Tienes {{ lowStock() }} {{ lowStock() === 1 ? 'producto' : 'productos' }} con stock bajo
             </p>
-            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-warning/80">
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-warning">
               <span class="hidden sm:inline">Ver detalle</span>
               <app-icon name="chevron-right" [size]="12" class="text-warning/60"></app-icon>
             </span>
@@ -238,7 +238,7 @@
             <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-error truncate m-0">
               Tienes {{ outOfStock() }} {{ outOfStock() === 1 ? 'producto agotado' : 'productos agotados' }}
             </p>
-            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-error/80">
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-error">
               <span class="hidden sm:inline">Ver detalle</span>
               <app-icon name="chevron-right" [size]="12" class="text-error/60"></app-icon>
             </span>
@@ -247,10 +247,10 @@
             <div class="flex-shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center">
               <app-icon name="truck" [size]="12" class="text-primary"></app-icon>
             </div>
-            <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-primary truncate m-0">
+            <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-primary-900 truncate m-0">
               Tienes {{ dispatchPending() }} {{ dispatchPending() === 1 ? 'orden lista' : 'órdenes listas' }} para despachar
             </p>
-            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary/80">
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary-900">
               <span class="hidden sm:inline">Ver detalle</span>
               <app-icon name="chevron-right" [size]="12" class="text-primary/60"></app-icon>
             </span>
@@ -272,7 +272,7 @@
         </div>
       </div>
     </div>
-    </main>
+    </div>
   </div>
 
   <!-- Vexi flotante: réplica decorativa del dock real (94px → ~76px), sin interacción -->

@@ -6,6 +6,11 @@
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <!-- Abre la conexión (DNS + TLS) con la API mientras baja el JS: la primera
+         llamada de la app, /public/domains/resolve, decide qué vista pintar y
+         está en la ruta crítica del primer render. Es CORS sin credenciales,
+         por eso crossorigin (pool anónimo). -->
+    <link rel="preconnect" href="https://api.vendix.online" crossorigin />
 
     <!-- PWA / Web App Manifest — ESTÁTICOS y del MISMO ORIGEN a propósito.
          La instalación puede dispararse ANTES de que Angular arranque, así que el
