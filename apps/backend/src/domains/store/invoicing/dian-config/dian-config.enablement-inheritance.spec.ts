@@ -101,6 +101,58 @@ describe('DianConfigService — herencia de habilitación DIAN', () => {
     });
   });
 
+  it('no copia ni expone la evidencia cruda ni el id de la fuente', async () => {
+    const { service, scoped } = build({
+      candidates: [
+        source({
+          enablement_evidence: {
+            success: true,
+            resolution_id: 555,
+            documents: [{ cufe: 'CUFE-SECRETO', number: 1 }],
+            zip_key: 'ZIP-AJENO',
+            submissions: [{ a: 1 }],
+            poll_history: [{ b: 2 }],
+            dian_response: {
+              success: true,
+              status_code: '00',
+              status_message: 'Procesado',
+              raw_response: 'RAW-XML-AJENO',
+            },
+          },
+        }),
+      ],
+    });
+    const res: any = await service.inheritEnablement(10, 5);
+
+    const stored = scoped.dian_configurations.update.mock.calls[0][0].data;
+    const stored_json = JSON.stringify(stored.enablement_evidence);
+    for (const leak of [
+      '555',
+      'CUFE-SECRETO',
+      'ZIP-AJENO',
+      'RAW-XML-AJENO',
+      'documents',
+      'submissions',
+      'poll_history',
+      'resolution_id',
+    ]) {
+      expect(stored_json).not.toContain(leak);
+    }
+    expect(stored.enablement_evidence).toMatchObject({
+      success: true,
+      dian_response: { success: true, status_code: '00' },
+      inheritance: { from_dian_configuration_id: 99 },
+    });
+    expect(stored.enablement_inherited_from_id).toBe(99);
+
+    const res_json = JSON.stringify(res);
+    expect(res_json).not.toContain('555');
+    expect(res_json).not.toContain('99');
+    expect(res_json).not.toContain('enablement_evidence');
+    expect(res_json).not.toContain('enablement_inherited_from_id');
+    expect(res).toMatchObject({ inherited: true, enablement_status: 'enabled' });
+  });
+
   it('aplica la herencia desde enabled+production', async () => {
     const { service, scoped } = build({ candidates: [source()] });
     await service.inheritEnablement(10, 5);

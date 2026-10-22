@@ -1460,8 +1460,27 @@ export class DianConfigService {
     const legal_notice = this.buildInheritanceLegalNotice(issuer_nit);
     const now = new Date();
 
+    // Resumen SANEADO: la evidencia de la fuente (otro tenant) lleva resolution_id,
+    // documentos con CUFE, zip keys y raw_response; nada de eso se copia. Solo el
+    // veredicto mínimo que leen `looksLikeVerdict` / `resolveTestSetProof` y el
+    // puntero de auditoría `inheritance` (C1).
+    const source_evidence = (source.enablement_evidence ?? {}) as Record<
+      string,
+      any
+    >;
+    const source_response = (source_evidence.dian_response ?? {}) as Record<
+      string,
+      any
+    >;
     const evidence = {
-      ...(source.enablement_evidence as Record<string, any>),
+      success: true,
+      executed_at: now.toISOString(),
+      test_set_id: source.test_set_id ?? null,
+      dian_response: {
+        success: true,
+        status_code: source_response.status_code ?? null,
+        status_message: source_response.status_message ?? null,
+      },
       inheritance: {
         from_dian_configuration_id: source.id,
         source_enablement_status: source_status,
@@ -1510,7 +1529,15 @@ export class DianConfigService {
       `DIAN config ${id} inherited enablement (status=${source_status}) from config ${source.id}`,
     );
 
-    return this.maskSensitiveFields(updated);
+    // Proyección explícita: ni la evidencia ni el id de la fila origen (otro
+    // tenant) salen al cliente.
+    return {
+      id: updated.id,
+      enablement_status: updated.enablement_status,
+      environment: updated.environment,
+      enabled_at: updated.enabled_at ?? null,
+      inherited: true,
+    };
   }
 
   /** Compara dos PINs cifrados descifrados, en tiempo constante. */
