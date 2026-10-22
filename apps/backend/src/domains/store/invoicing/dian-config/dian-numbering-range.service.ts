@@ -16,6 +16,7 @@ import {
   parseNumberingRangeResponse,
 } from '../providers/dian-direct/dian-numbering-range.parser';
 import { DianTestService } from './dian-test.service';
+import { assertNoCrossTenantNumberingOverlap } from '../utils/cross-tenant-numbering-guard.util';
 import {
   ApplyNumberingRangeItemDto,
   ApplyNumberingRangesDto,
@@ -1025,6 +1026,15 @@ export class DianNumberingRangeService {
       prefix: range.prefix,
     });
 
+    // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+    await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      document_type: 'sales_invoice',
+      prefix: range.prefix,
+      range_from: range.range_from,
+      range_to: range.range_to,
+    });
+
     const created = await this.prisma.invoice_resolutions.create({
       data: {
         organization_id: config.organization_id,
@@ -1183,6 +1193,28 @@ export class DianNumberingRangeService {
       });
       Object.assign(data, this.technicalKeyVault.sealForWrite(technical_key));
       applied_fields.push('technical_key');
+    }
+
+    // Guarda entre cuentas: solo si la alineación mueve prefijo o rango.
+    if (
+      data.prefix !== undefined ||
+      data.range_from !== undefined ||
+      data.range_to !== undefined
+    ) {
+      const row = await this.prisma.withoutScope().invoice_resolutions.findFirst({
+        where: { id: local.id },
+        select: { accounting_entity_id: true },
+      });
+      if (row) {
+        await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
+          accounting_entity_id: row.accounting_entity_id,
+          document_type: local.document_type,
+          prefix: data.prefix ?? local.prefix,
+          range_from: data.range_from ?? local.range_from,
+          range_to: data.range_to ?? local.range_to,
+          exclude_resolution_id: local.id,
+        });
+      }
     }
 
     if (Object.keys(data).length > 0) {

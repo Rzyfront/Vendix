@@ -57,6 +57,11 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
     // `withoutScope()`. `create`/`update` se comparten con el scoped para que
     // las aserciones existentes sigan viendo la escritura.
     const unscoped: any = {
+      // Guarda de numeración entre cuentas: sin entidad no hay NIT que cruzar.
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       invoice_resolutions: {
         findFirst: withoutScopeFindFirst,
         findMany: jest.fn().mockResolvedValue(overrides.others ?? []),
@@ -66,6 +71,7 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
       },
       $transaction: jest.fn((fn: any) => fn(unscoped)),
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $executeRaw: jest.fn().mockResolvedValue(0),
     };
 
     return {

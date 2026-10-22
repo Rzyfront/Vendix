@@ -2458,6 +2458,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Resolution is archived and read-only',
   },
+  INVOICING_RESOLUTION_017: {
+    code: 'INVOICING_RESOLUTION_017',
+    httpStatus: 409,
+    devMessage:
+      'Numbering range overlaps another resolution with the same issuer NIT, prefix and document type on the platform',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
@@ -3846,6 +3852,18 @@ export const ErrorCodes = {
     code: 'DIAN_CONFIG_002',
     httpStatus: 409,
     devMessage: 'DIAN configuration already exists for this store',
+  },
+  DIAN_CONFIG_003: {
+    code: 'DIAN_CONFIG_003',
+    httpStatus: 409,
+    devMessage:
+      'No inheritable DIAN enablement exists for this configuration, or its current state does not allow inheriting one',
+  },
+  DIAN_CONFIG_004: {
+    code: 'DIAN_CONFIG_004',
+    httpStatus: 422,
+    devMessage:
+      'The software PIN does not match the one of the existing DIAN enablement for this NIT and software',
   },
   DIAN_CERT_001: {
     code: 'DIAN_CERT_001',

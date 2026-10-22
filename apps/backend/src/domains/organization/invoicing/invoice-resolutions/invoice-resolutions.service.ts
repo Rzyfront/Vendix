@@ -35,6 +35,7 @@ import {
 } from '../../../store/invoicing/utils/resolution-selection.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
 import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
+import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
 import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
@@ -246,6 +247,15 @@ export class OrgInvoiceResolutionsService {
             document_type,
           });
         }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          lock_in_transaction: true,
+          accounting_entity_id: accounting_entity.id,
+          document_type,
+          prefix: dto.prefix,
+          range_from: dto.range_from,
+          range_to: dto.range_to,
+        });
         const resolution = await tx.invoice_resolutions.create({
           data: {
             organization_id,
@@ -526,6 +536,23 @@ export class OrgInvoiceResolutionsService {
           await lockResolutionSeries(tx, {
             accounting_entity_id: next_accounting_entity_id,
             document_type: next_document_type,
+          });
+        }
+        if (
+          dto.prefix !== undefined ||
+          dto.range_from !== undefined ||
+          dto.range_to !== undefined ||
+          dto.document_type !== undefined ||
+          next_accounting_entity_id !== current.accounting_entity_id
+        ) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            lock_in_transaction: true,
+            accounting_entity_id: next_accounting_entity_id,
+            document_type: next_document_type,
+            prefix: next_prefix,
+            range_from: dto.range_from ?? current.range_from,
+            range_to: dto.range_to ?? current.range_to,
+            exclude_resolution_id: id,
           });
         }
         const updated = await tx.invoice_resolutions.update({

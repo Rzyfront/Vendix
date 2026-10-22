@@ -25,6 +25,12 @@ export interface DianApiCapabilities {
   readonly runTestSet: boolean;
   /** Promover la configuración a producción. */
   readonly promoteToProduction: boolean;
+  /**
+   * Heredar la habilitación de un software ya habilitado. El endpoint sólo
+   * existe en el carril de TIENDA: los hosts que no lo declaran (organización,
+   * super admin) quedan en `undefined`, que se lee como «no».
+   */
+  readonly inheritEnablement?: boolean;
 }
 
 export const ALL_DIAN_CAPABILITIES: DianApiCapabilities = {
@@ -32,7 +38,29 @@ export const ALL_DIAN_CAPABILITIES: DianApiCapabilities = {
   uploadCertificate: true,
   runTestSet: true,
   promoteToProduction: true,
+  inheritEnablement: true,
 };
+
+/** Por qué una configuración NO puede heredar la habilitación. */
+export type DianEnablementInheritanceReason =
+  | 'already_enabled'
+  | 'already_inherited'
+  | 'no_source'
+  | 'not_own_software';
+
+/**
+ * Respuesta de `GET dian-config/:id/enablement-inheritance` (carril tienda).
+ * Sólo se ofrece heredar cuando `available` es `true`.
+ */
+export interface DianEnablementInheritance {
+  available: boolean;
+  reason?: DianEnablementInheritanceReason;
+  source_enablement_status?: 'enabled' | 'test_set_passed';
+  target_environment?: 'production' | 'test';
+  issuer_nit: string;
+  software_id: string;
+  legal_notice: string;
+}
 
 export interface DianApiContext {
   /** Base sin barra final, relativa a `environment.apiUrl`. Ej: `store/invoicing`. */
@@ -474,6 +502,31 @@ export class DianConfigApiService {
   promoteDianToProduction(config_id: number): Observable<any> {
     return this.http.post(
       this.getApiUrl(`dian-config/${config_id}/promote-to-production`),
+      {},
+    );
+  }
+
+  /**
+   * Si esta configuración puede heredar la habilitación de un software que ya
+   * la tiene. Es una LECTURA. Sólo existe en el carril de tienda
+   * (`capabilities().inheritEnablement`).
+   */
+  getEnablementInheritance(
+    config_id: number,
+  ): Observable<ApiResponse<DianEnablementInheritance>> {
+    return this.http.get<ApiResponse<DianEnablementInheritance>>(
+      this.getApiUrl(`dian-config/${config_id}/enablement-inheritance`),
+    );
+  }
+
+  /**
+   * Hereda la habilitación (sin repetir el set de pruebas). Errores:
+   * `DIAN_CONFIG_003` (no heredable) y `DIAN_CONFIG_004` (el PIN guardado no
+   * coincide con el del software habilitado).
+   */
+  inheritEnablement(config_id: number): Observable<any> {
+    return this.http.post(
+      this.getApiUrl(`dian-config/${config_id}/inherit-enablement`),
       {},
     );
   }

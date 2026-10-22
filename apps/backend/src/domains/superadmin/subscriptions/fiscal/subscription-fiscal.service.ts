@@ -24,6 +24,7 @@ import { InvoiceCalculatorService } from '../../../store/invoicing/services/invo
 import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
 import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
 import { findActiveResolution } from '../../../store/invoicing/utils/resolution-selection.util';
 import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
@@ -4532,6 +4533,15 @@ export class SubscriptionFiscalService {
     assertPlausibleFiscalDate('válida desde', validFrom);
     assertPlausibleFiscalDate('válida hasta', validTo);
 
+    // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+    await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
+      accounting_entity_id: accountingEntityId,
+      document_type: dto.document_type,
+      prefix: dto.prefix,
+      range_from: dto.rango_inicial,
+      range_to: dto.rango_final,
+    });
+
     const created = await this.prisma.withoutScope().invoice_resolutions.create({
       data: {
         organization_id: await this.resolvePlatformOrganizationId(),
@@ -4733,6 +4743,23 @@ export class SubscriptionFiscalService {
     // first allocation would jump straight past the authorized start.
     if (!locked && nextRangeFrom !== current.range_from) {
       data.current_number = nextRangeFrom - 1;
+    }
+
+    // Guarda entre cuentas: solo si el PATCH mueve prefijo, rango o tipo.
+    if (
+      dto.prefix !== undefined ||
+      dto.document_type !== undefined ||
+      dto.rango_inicial !== undefined ||
+      dto.rango_final !== undefined
+    ) {
+      await assertNoCrossTenantNumberingOverlap(this.prisma.withoutScope(), {
+        accounting_entity_id: current.accounting_entity_id,
+        document_type: dto.document_type ?? current.document_type,
+        prefix: dto.prefix ?? current.prefix,
+        range_from: nextRangeFrom,
+        range_to: nextRangeTo,
+        exclude_resolution_id: id,
+      });
     }
 
     const updated = await this.prisma

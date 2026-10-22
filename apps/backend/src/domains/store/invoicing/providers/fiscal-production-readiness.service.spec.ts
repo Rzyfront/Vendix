@@ -107,6 +107,38 @@ describe('FiscalProductionReadinessService', () => {
     });
   });
 
+  it('una fila con habilitación heredada pasa el gate de producción y la prueba del set', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DIAN_ENCRYPTION_KEY = 'test-key';
+    const inherited = readyConfig({
+      enablement_inherited_from_id: 99,
+      last_test_result: null,
+      enablement_evidence: {
+        success: true,
+        dian_response: { success: true },
+        inheritance: { from_dian_configuration_id: 99 },
+      },
+    });
+    const { service } = createService(inherited);
+
+    await expect(
+      service.resolveOwnSoftwareConfig({
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        configuration_type: 'invoicing',
+        requireProduction: true,
+      }),
+    ).resolves.toMatchObject({ id: 1 });
+    expect(service.hasPassedTestSetForConfig(inherited)).toBe(true);
+
+    const report = service.evaluateProductionReadiness(inherited);
+    const check = report.checks.find((c) => c.key === 'test_set_evidence');
+    expect(check?.satisfied).toBe(true);
+    expect(check?.label).toContain('heredada');
+    expect(report.missing).not.toContain('test_set_evidence');
+  });
+
   it('blocks production when enablement evidence or secrets are missing', () => {
     const { service } = createService();
     delete process.env.DIAN_ENCRYPTION_KEY;

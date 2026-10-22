@@ -28,6 +28,7 @@ import { buildResolutionsInUse } from '../utils/resolutions-in-use.util';
 import { archiveResolutionInTx } from '../utils/resolution-archive.util';
 import { ArchiveResolutionDto } from './dto/archive-resolution.dto';
 import { internalSeriesResolutionNumber } from '../utils/invoice-number-generator';
+import { assertNoCrossTenantNumberingOverlap } from '../utils/cross-tenant-numbering-guard.util';
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -221,6 +222,15 @@ export class ResolutionsService {
             document_type,
           });
         }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          lock_in_transaction: true,
+          accounting_entity_id: accounting_entity.id,
+          document_type,
+          prefix: dto.prefix,
+          range_from: dto.range_from,
+          range_to: dto.range_to,
+        });
         const resolution = await tx.invoice_resolutions.create({
           data: {
             organization_id: context.organization_id,
@@ -443,6 +453,22 @@ export class ResolutionsService {
           await lockResolutionSeries(tx, {
             accounting_entity_id: current.accounting_entity_id,
             document_type: next_document_type,
+          });
+        }
+        if (
+          dto.prefix !== undefined ||
+          dto.range_from !== undefined ||
+          dto.range_to !== undefined ||
+          dto.document_type !== undefined
+        ) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            lock_in_transaction: true,
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: next_document_type,
+            prefix: dto.prefix || current.prefix,
+            range_from: next_range_from,
+            range_to: next_range_to,
+            exclude_resolution_id: id,
           });
         }
         const updated = await tx.invoice_resolutions.update({

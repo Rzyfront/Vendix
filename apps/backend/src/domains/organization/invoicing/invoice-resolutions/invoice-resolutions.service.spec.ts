@@ -45,6 +45,11 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
     } = {},
   ) => {
     const unscoped = {
+      // Guarda de numeración entre cuentas: sin entidad no hay NIT que cruzar.
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       invoice_resolutions: {
         findFirst: jest.fn().mockResolvedValue(overrides.duplicate ?? null),
         create: jest
@@ -63,6 +68,7 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       },
       $transaction: jest.fn(),
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $executeRaw: jest.fn().mockResolvedValue(0),
     };
     unscoped.$transaction.mockImplementation((fn: any) => fn(unscoped));
 
@@ -137,6 +143,11 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       withoutScope: jest.fn(),
     };
     const unscoped = {
+      // Guarda de numeración entre cuentas: sin entidad no hay NIT que cruzar.
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       invoice_resolutions: {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
@@ -146,6 +157,7 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       },
       $transaction: jest.fn((fn: any) => fn(unscoped)),
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $executeRaw: jest.fn().mockResolvedValue(0),
     };
     prisma.withoutScope.mockReturnValue(unscoped);
     const fiscalScope = {

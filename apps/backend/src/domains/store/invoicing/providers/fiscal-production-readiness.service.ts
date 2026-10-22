@@ -278,6 +278,8 @@ type ReadinessConfig = {
   nit?: string | null;
   nit_dv?: string | null;
   accounting_entity_id?: number | null;
+  /** Fila de la que se heredó la habilitación DIAN; sólo cambia el rótulo del check. */
+  enablement_inherited_from_id?: number | null;
 };
 
 interface ResolveConfigParams {
@@ -722,7 +724,10 @@ export class FiscalProductionReadinessService {
       },
       {
         key: 'test_set_evidence',
-        label: 'Set de pruebas aprobado por la DIAN',
+        label:
+          config.enablement_inherited_from_id != null
+            ? 'Set de pruebas aprobado por la DIAN (habilitación heredada del mismo software y NIT)'
+            : 'Set de pruebas aprobado por la DIAN',
         // Sobre la prueba DURABLE, no sobre el último lote: un reenvío posterior
         // sobrescribe `last_test_result` y borraría un hecho ya ocurrido. Ver
         // `resolveTestSetProof`.
@@ -733,7 +738,10 @@ export class FiscalProductionReadinessService {
       },
       {
         key: 'enablement_evidence',
-        label: 'Evidencia de habilitación almacenada',
+        label:
+          config.enablement_inherited_from_id != null
+            ? 'Evidencia de habilitación almacenada (heredada del mismo software y NIT)'
+            : 'Evidencia de habilitación almacenada',
         satisfied: !!config.enablement_evidence,
         action:
           'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',

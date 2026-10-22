@@ -611,6 +611,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
   DIAN_CONFIG_002:
     'Ya existe una configuración DIAN con ese NIT y tipo de documento en este alcance. Edita la existente en lugar de crear otra.',
+  DIAN_CONFIG_003:
+    'Esta configuración no puede heredar la habilitación del software.',
+  DIAN_CONFIG_004:
+    'El PIN guardado no coincide con el del software ya habilitado. Revisa el PIN e inténtalo de nuevo.',
   DIAN_CERT_001: 'El archivo de certificado es invalido.',
   DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
   DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',

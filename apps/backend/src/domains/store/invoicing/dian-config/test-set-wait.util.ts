@@ -120,7 +120,7 @@ export function resolveTestSetWait(
 }
 
 /** ¿Este registro lleva un veredicto de la DIAN, o es solo un objeto cualquiera? */
-function looksLikeVerdict(record: unknown): boolean {
+export function looksLikeVerdict(record: unknown): boolean {
   if (!record || typeof record !== 'object') return false;
   const data = record as Record<string, any>;
   return (

@@ -535,6 +535,30 @@ export class DianConfigController {
     );
   }
 
+  /**
+   * ¿Puede esta configuración heredar la habilitación DIAN de otra con el mismo
+   * NIT + software + tipo? Nunca expone datos de la fuente.
+   */
+  @Get(':id/enablement-inheritance')
+  @Permissions('invoicing:read')
+  async getEnablementInheritance(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.getEnablementInheritance(id);
+    return this.response_service.success(result);
+  }
+
+  /** Hereda la habilitación (exige coincidencia del PIN del software). */
+  @Post(':id/inherit-enablement')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async inheritEnablement(@Param('id', ParseIntPipe) id: number) {
+    const user_id = RequestContextService.getContext()?.user_id;
+    const result = await this.dian_config_service.inheritEnablement(id, user_id);
+    return this.response_service.success(
+      result,
+      'Habilitación DIAN heredada correctamente',
+    );
+  }
+
   // =====================================================================
   // QUI-657 — rama "no tengo certificado": documentos de identidad.
   //
