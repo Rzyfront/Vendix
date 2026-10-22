@@ -37,6 +37,7 @@ import {
   findNoteSeriesConflicts,
   isFiscalDocumentType,
   noteSeriesActivationMessage,
+  requirementsFor,
   type NoteSeriesRow,
   type DianConfigurationType,
   type DianResolutionFormValue,
@@ -345,8 +346,7 @@ export class ResolutionCreateComponent {
     // el `FormGroup` sigue inválido por un motivo que ya se corrigió.
     this.clearBackendErrors();
 
-    const payload = {
-      resolution_number: value.resolution_number,
+    const base = {
       resolution_date: value.resolution_date,
       prefix: value.prefix,
       range_from: value.range_from,
@@ -360,10 +360,25 @@ export class ResolutionCreateComponent {
 
     const row = this.resolution();
     if (row) {
-      this.store.dispatch(updateResolution({ id: row.id, resolution: payload }));
+      // Serie interna (nota): no se envía el número DIAN que arrastra la fila de
+      // la factura, para que el backend ponga el rótulo `INTERNA-<prefijo>` y no
+      // salga impreso en el PDF de la nota (F6-L5).
+      const requirements = requirementsFor(value.document_type);
+      const isNoteSeries =
+        !requirements.requires_authorized_range && !!requirements.internal_series_prefix;
+      this.store.dispatch(
+        updateResolution({
+          id: row.id,
+          resolution: isNoteSeries
+            ? base
+            : { ...base, resolution_number: value.resolution_number },
+        }),
+      );
       return;
     }
-    this.store.dispatch(createResolution({ resolution: payload }));
+    this.store.dispatch(
+      createResolution({ resolution: { ...base, resolution_number: value.resolution_number } }),
+    );
   }
 
   onClose(): void {
