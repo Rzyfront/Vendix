@@ -212,6 +212,7 @@ interface NumberingRow extends FiscalReadinessResolution {
         size="md"
         (confirm)="confirmNoteActivation()"
         (cancel)="pendingNoteActivation.set(null)"
+        (isOpenChange)="$event || pendingNoteActivation.set(null)"
       ></app-confirmation-modal>
     }
 

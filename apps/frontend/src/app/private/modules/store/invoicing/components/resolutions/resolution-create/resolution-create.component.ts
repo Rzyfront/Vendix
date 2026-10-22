@@ -120,6 +120,7 @@ export type EditableResolution = InvoiceResolution | FiscalReadinessResolution;
         confirmVariant="primary"
         (confirm)="confirmSave()"
         (cancel)="pendingConfirm.set(null)"
+        (isOpenChange)="$event || pendingConfirm.set(null)"
       ></app-confirmation-modal>
     }
   `,
