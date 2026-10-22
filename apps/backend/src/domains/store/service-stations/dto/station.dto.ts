@@ -37,6 +37,24 @@ export class CreateServiceStationDto {
   @IsOptional()
   @IsIn(['active', 'inactive'])
   status?: 'active' | 'inactive';
+
+  @IsOptional()
+  @IsBoolean()
+  track_time?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  target_minutes?: number | null;
+
+  /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  intake_template_id?: number | null;
 }
 
 export class UpdateServiceStationDto {
@@ -60,6 +78,24 @@ export class UpdateServiceStationDto {
   @IsOptional()
   @IsIn(['active', 'inactive'])
   status?: 'active' | 'inactive';
+
+  @IsOptional()
+  @IsBoolean()
+  track_time?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  target_minutes?: number | null;
+
+  /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  intake_template_id?: number | null;
 }
 
 export class SetStationServicesDto {

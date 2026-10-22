@@ -41,17 +41,21 @@ const template = {
 
 describe('ServiceSessionsService — intake (Recolección de datos) y carga masiva', () => {
   let service: ServiceSessionsService;
-  let templates: { getLinkedTemplateForProduct: jest.Mock };
+  let templates: { getLinkedTemplateForProduct: jest.Mock; getActiveTemplateById: jest.Mock };
   let prisma: any;
   let notifications: { push: jest.Mock };
 
   beforeEach(() => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9 } as any);
-    templates = { getLinkedTemplateForProduct: jest.fn().mockResolvedValue(template) };
+    templates = {
+      getLinkedTemplateForProduct: jest.fn().mockResolvedValue(template),
+      getActiveTemplateById: jest.fn().mockResolvedValue(null),
+    };
     notifications = { push: jest.fn() };
     prisma = {
       entity_metadata_values: { findMany: jest.fn().mockResolvedValue([]) },
       service_sessions: { findFirst: jest.fn() },
+      service_stations: { findFirst: jest.fn().mockResolvedValue({ intake_template_id: null }) },
       $transaction: jest.fn(),
     };
     service = new ServiceSessionsService(
@@ -69,7 +73,21 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
   afterEach(() => jest.restoreAllMocks());
 
   const prepare = (values: unknown, enforceRequired = true, customerId: number | null = null) =>
-    (service as any).prepareIntake(10, values, { enforceRequired, customerId, bookingId: null });
+    (service as any).prepareIntake(10, 3, values, { enforceRequired, customerId, bookingId: null });
+
+  it('usa el formulario de la estación antes que el del servicio', async () => {
+    const stationTemplate = { ...template, id: 77 };
+    prisma.service_stations.findFirst.mockResolvedValueOnce({ intake_template_id: 77 });
+    templates.getActiveTemplateById.mockResolvedValueOnce(stationTemplate);
+    await expect(prepare([], false)).resolves.toMatchObject({ templateId: 77 });
+    expect(prisma.service_stations.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 3, store_id: 1 } }));
+    expect(templates.getLinkedTemplateForProduct).not.toHaveBeenCalled();
+  });
+
+  it('si la estación no tiene formulario, usa el del servicio', async () => {
+    await expect(prepare([], false)).resolves.toMatchObject({ templateId: 50 });
+    expect(templates.getLinkedTemplateForProduct).toHaveBeenCalledWith(10);
+  });
 
   it('rechaza field_ids que no pertenecen a la plantilla vinculada', async () => {
     await expect(prepare([{ field_id: 1, value: 'ABC123' }, { field_id: 999, value: 'x' }])).rejects.toMatchObject({

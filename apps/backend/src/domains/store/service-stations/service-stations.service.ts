@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
   CreateServiceStationDto,
@@ -118,7 +119,18 @@ export class ServiceStationsService {
     return `${base}/estacion/${station.public_id}`;
   }
 
+  /** El formulario debe ser de esta tienda y no estar archivado. */
+  private async assertIntakeTemplate(templateId: number | null | undefined) {
+    if (!templateId) return;
+    const template = await this.prisma.data_collection_templates.findFirst({
+      where: { id: templateId, store_id: this.storeId, status: { not: 'archived' } },
+      select: { id: true },
+    });
+    if (!template) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
+  }
+
   async create(dto: CreateServiceStationDto) {
+    await this.assertIntakeTemplate(dto.intake_template_id);
     try {
       const station = await this.prisma.service_stations.create({
         data: {
@@ -127,6 +139,9 @@ export class ServiceStationsService {
           station_type: dto.station_type ?? 'carro',
           capacity: dto.capacity ?? 1,
           status: dto.status ?? 'active',
+          track_time: dto.track_time ?? false,
+          target_minutes: dto.target_minutes ?? null,
+          intake_template_id: dto.intake_template_id ?? null,
         },
       });
       return this.findOne(station.id);
@@ -140,6 +155,7 @@ export class ServiceStationsService {
 
   async update(id: number, dto: UpdateServiceStationDto) {
     await this.findOne(id);
+    await this.assertIntakeTemplate(dto.intake_template_id);
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -148,6 +164,9 @@ export class ServiceStationsService {
           ...(dto.station_type !== undefined && { station_type: dto.station_type }),
           ...(dto.capacity !== undefined && { capacity: dto.capacity }),
           ...(dto.status !== undefined && { status: dto.status }),
+          ...(dto.track_time !== undefined && { track_time: dto.track_time }),
+          ...(dto.target_minutes !== undefined && { target_minutes: dto.target_minutes }),
+          ...(dto.intake_template_id !== undefined && { intake_template_id: dto.intake_template_id }),
           updated_at: new Date(),
         },
       });

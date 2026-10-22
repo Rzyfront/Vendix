@@ -10146,6 +10146,7 @@ model data_collection_templates {
   submissions              data_collection_submissions[]
   consultation_products    products[]                          @relation("product_consultation_template")
   preconsultation_products products[]                          @relation("product_preconsultation_template")
+  intake_stations          service_stations[]                  @relation("station_intake_template")
 
   @@index([store_id, status])
   @@index([store_id, entity_type])
@@ -12595,6 +12596,10 @@ model service_stations {
   station_type String @default("carro") @db.VarChar(32)
   status     String   @default("active") @db.VarChar(20)
   capacity   Int      @default(1)
+  track_time Boolean  @default(false)
+  target_minutes Int?
+  intake_template_id Int?
+  intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull)
   public_id  String   @unique @default(uuid()) @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @updatedAt @db.Timestamptz(6)
@@ -12602,6 +12607,7 @@ model service_stations {
   @@unique([store_id, name])
   @@unique([store_id, id])
   @@index([store_id, status])
+  @@index([intake_template_id])
   @@map("service_stations")
 }
 

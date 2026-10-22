@@ -56,13 +56,13 @@ export class ServiceSessionsController {
   @Get('intake-template')
   @Permissions('store:reservations:read')
   async intakeTemplate(@Query() query: ServiceIntakeQueryDto) {
-    return this.response.success(await this.sessions.getIntakeTemplate(query.product_id));
+    return this.response.success(await this.sessions.getIntakeTemplate(query.product_id, query.station_id));
   }
 
   @Get('intake-prefill')
   @Permissions('store:reservations:read')
   async intakePrefill(@Query() query: ServiceIntakePrefillQueryDto) {
-    return this.response.success(await this.sessions.getIntakePrefill(query.product_id, query.customer_id));
+    return this.response.success(await this.sessions.getIntakePrefill(query.product_id, query.customer_id, query.station_id));
   }
 
   @Patch(':id')

@@ -110,6 +110,12 @@ export class ServiceIntakeQueryDto {
   @IsInt()
   @Min(1)
   product_id: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  station_id?: number;
 }
 
 export class ServiceIntakePrefillQueryDto extends ServiceIntakeQueryDto {

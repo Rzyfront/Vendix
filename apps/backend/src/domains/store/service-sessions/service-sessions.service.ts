@@ -102,7 +102,7 @@ export class ServiceSessionsService {
     const customerId = booking?.customer_id ?? dto.customer_id ?? null;
     // Required intake items are enforced on walk-in reception (the reservation flow may
     // have collected them earlier through a data-collection submission).
-    const intake = await this.prepareIntake(productId, dto.intake_values, { enforceRequired: Boolean(dto.station_id), customerId, bookingId: booking?.id ?? null });
+    const intake = await this.prepareIntake(productId, stationId, dto.intake_values, { enforceRequired: Boolean(dto.station_id), customerId, bookingId: booking?.id ?? null });
     if (providerId) {
       if (bookingAllocation) {
         const [stationProvider, providerService, provider] = await Promise.all([
@@ -273,16 +273,34 @@ export class ServiceSessionsService {
     return result;
   }
 
-  /** Plantilla de Recolección de datos vinculada explícitamente al servicio (sin fallback a la default). */
-  async getIntakeTemplate(productId: number) {
-    this.requireContext();
-    return { template: await this.templates.getLinkedTemplateForProduct(productId) };
+  /**
+   * Formulario de recepción de la atención: el configurado en la estación manda; si la
+   * estación no tiene, el vinculado explícitamente al servicio (sin fallback a la default).
+   */
+  private async resolveIntakeTemplate(productId: number, stationId?: number | null): Promise<IntakeTemplate | null> {
+    const { storeId } = this.requireContext();
+    if (stationId) {
+      const station = await this.prisma.service_stations.findFirst({
+        where: { id: stationId, store_id: storeId },
+        select: { intake_template_id: true },
+      });
+      if (station?.intake_template_id) {
+        const template = await this.templates.getActiveTemplateById(station.intake_template_id);
+        if (template) return template as unknown as IntakeTemplate;
+      }
+    }
+    return (await this.templates.getLinkedTemplateForProduct(productId)) as IntakeTemplate | null;
   }
 
-  /** Valores actuales del perfil del cliente para los campos `customer` de la plantilla del servicio. */
-  async getIntakePrefill(productId: number, customerId: number) {
+  async getIntakeTemplate(productId: number, stationId?: number) {
+    this.requireContext();
+    return { template: await this.resolveIntakeTemplate(productId, stationId) };
+  }
+
+  /** Valores actuales del perfil del cliente para los campos `customer` del formulario de recepción. */
+  async getIntakePrefill(productId: number, customerId: number, stationId?: number) {
     const { storeId } = this.requireContext();
-    const template = await this.templates.getLinkedTemplateForProduct(productId) as IntakeTemplate | null;
+    const template = await this.resolveIntakeTemplate(productId, stationId);
     if (!template) return { values: [] };
     const customerFields = this.collectIntakeItems(template)
       .map((item) => item.metadata_field)
@@ -318,12 +336,13 @@ export class ServiceSessionsService {
    */
   private async prepareIntake(
     productId: number,
+    stationId: number,
     values: ServiceIntakeValueDto[] | undefined,
     options: { enforceRequired: boolean; customerId: number | null; bookingId: number | null },
   ): Promise<PreparedIntake> {
     const { storeId } = this.requireContext();
     const submitted = values ?? [];
-    const template = await this.templates.getLinkedTemplateForProduct(productId) as IntakeTemplate | null;
+    const template = await this.resolveIntakeTemplate(productId, stationId);
     if (!template) {
       if (submitted.length) {
         throw new VendixHttpException(ErrorCodes.STATION_013, 'Este servicio no tiene campos de recepción configurados.');
@@ -444,9 +463,9 @@ export class ServiceSessionsService {
     }
   }
 
-  private async buildIntakeSummary(session: { id: number; product_id: number; booking_id: number | null; order_id: number | null }, customerId: number | null) {
+  private async buildIntakeSummary(session: { id: number; station_id: number; product_id: number; booking_id: number | null; order_id: number | null }, customerId: number | null) {
     const { storeId } = this.requireContext();
-    const template = await this.templates.getLinkedTemplateForProduct(session.product_id) as IntakeTemplate | null;
+    const template = await this.resolveIntakeTemplate(session.product_id, session.station_id);
     if (!template) return null;
     const fields = this.collectIntakeItems(template).map((item) => item.metadata_field).filter((field) => field.store_id === storeId);
     const ctx: EntityContext = { service_session_id: session.id, customer_id: customerId, booking_id: session.booking_id, order_id: session.order_id };

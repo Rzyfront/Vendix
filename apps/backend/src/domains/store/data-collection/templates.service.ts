@@ -214,6 +214,14 @@ export class TemplatesService {
    * solo si está activa. A diferencia de getTemplateForProduct, NO cae a la plantilla
    * `is_default`: la recepción de una atención solo pide campos que el servicio configuró.
    */
+  /** Plantilla activa por id con la misma forma que getLinkedTemplateForProduct (pestañas/secciones/campos). */
+  async getActiveTemplateById(templateId: number) {
+    return this.prisma.data_collection_templates.findFirst({
+      where: { id: templateId, status: 'active' },
+      include: this.TEMPLATE_INCLUDE,
+    });
+  }
+
   async getLinkedTemplateForProduct(productId: number) {
     const link = await this.prisma.data_collection_template_products.findFirst({
       where: { product_id: productId, template: { status: 'active' } },
