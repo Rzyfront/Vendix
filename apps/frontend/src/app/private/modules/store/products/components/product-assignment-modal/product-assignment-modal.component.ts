@@ -361,11 +361,16 @@ export class ProductAssignmentModalComponent {
 
     this.isSaving.set(true);
     try {
-      if (this.mode() === 'brand' && added.length > 0) {
-        const groups = await this.previewMoves(id, added);
-        if (groups.length > 0 && !(await this.confirmMoves(groups))) {
-          return;
-        }
+      const groups =
+        this.mode() === 'brand' && added.length > 0
+          ? await this.previewMoves(id, added)
+          : [];
+      // Un solo diálogo: quitados de esta entidad y/o movimientos desde otras marcas.
+      if (
+        (removed.length > 0 || groups.length > 0) &&
+        !(await this.confirmChanges(removed.length, groups))
+      ) {
+        return;
       }
 
       let addedCount = 0;
@@ -443,16 +448,35 @@ export class ProductAssignmentModalComponent {
     return [...merged.values()];
   }
 
-  private confirmMoves(groups: BrandMoveGroup[]): Promise<boolean> {
-    const lines = groups
-      .map(
-        (g) =>
-          `${g.count} ${g.count === 1 ? 'producto dejará' : 'productos dejarán'} la marca ${escapeHtml(g.brand_name)}`,
-      )
-      .join('<br>');
+  private confirmChanges(
+    removedCount: number,
+    groups: BrandMoveGroup[],
+  ): Promise<boolean> {
+    const isBrand = this.mode() === 'brand';
+    const lines: string[] = [];
+    if (removedCount > 0) {
+      const name = escapeHtml(this.entityName());
+      const target = isBrand ? `la marca «${name}»` : `la categoría «${name}»`;
+      lines.push(
+        `Se ${removedCount === 1 ? 'quitará 1 producto' : `quitarán ${removedCount} productos`} de ${target}`,
+      );
+    }
+    for (const g of groups) {
+      lines.push(
+        `${g.count} ${g.count === 1 ? 'producto dejará' : 'productos dejarán'} la marca ${escapeHtml(g.brand_name)}`,
+      );
+    }
+    const title =
+      removedCount === 0
+        ? 'Mover productos de otras marcas'
+        : groups.length > 0
+          ? 'Confirmar cambios de productos'
+          : isBrand
+            ? 'Quitar productos de la marca'
+            : 'Quitar productos de la categoría';
     return this.dialog.confirm({
-      title: 'Mover productos de otras marcas',
-      message: `${lines}<br><br>¿Deseas continuar?`,
+      title,
+      message: `${lines.join('<br>')}<br><br>¿Deseas continuar?`,
       confirmText: 'Continuar',
       cancelText: 'Cancelar',
     });
