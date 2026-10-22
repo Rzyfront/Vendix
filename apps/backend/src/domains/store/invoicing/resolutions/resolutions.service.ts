@@ -356,14 +356,25 @@ export class ResolutionsService {
       dto.document_type !== undefined
         ? this.normalizeDocumentType(dto.document_type)
         : (current.document_type as FiscalDocumentType);
+    // Factura -> nota (serie interna): la fila hereda ClTec y número DIAN de la
+    // factura y la UI oculta el campo. Una serie interna no lleva ninguno de los
+    // dos: la ClTec resultante es null y el número toma el rótulo interno.
+    const becomes_internal_series =
+      isSingleActiveDocumentType(next_document_type) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType) &&
+      dto.technical_key === undefined;
     const next_resolution_number =
       dto.resolution_number !== undefined
         ? dto.resolution_number
-        : current.resolution_number;
+        : becomes_internal_series
+          ? internalSeriesResolutionNumber(dto.prefix ?? current.prefix)
+          : current.resolution_number;
     const next_technical_key =
       dto.technical_key !== undefined
         ? dto.technical_key
-        : current.technical_key;
+        : becomes_internal_series
+          ? null
+          : current.technical_key;
 
     // Los requisitos por tipo se re-juzgan SOLO si el PATCH toca alguno de los
     // campos que los deciden. Alternar `is_active` tiene que funcionar siempre:
@@ -460,6 +471,13 @@ export class ResolutionsService {
       ...(dto.technical_key !== undefined &&
         this.technicalKeyVault.sealForWrite(patched_technical_key)),
     };
+
+    if (becomes_internal_series) {
+      if (dto.resolution_number === undefined) {
+        update_data.resolution_number = next_resolution_number;
+      }
+      Object.assign(update_data, this.technicalKeyVault.sealForWrite(null));
+    }
 
     // Una fila sin consumo lleva `current_number = range_from - 1` por
     // construcción. Si el piso se mueve hay que re-sembrar el cursor: si se queda

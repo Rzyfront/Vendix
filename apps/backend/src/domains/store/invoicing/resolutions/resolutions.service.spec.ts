@@ -1,6 +1,7 @@
 import { VendixHttpException } from 'src/common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { ResolutionsService } from './resolutions.service';
+import { internalSeriesResolutionNumber } from '../utils/invoice-number-generator';
 
 /**
  * Validación cruzada de resoluciones DIAN.
@@ -674,6 +675,103 @@ describe('ResolutionsService (validación fiscal por tipo de documento)', () => 
         expect(error.errorCode).toBe('INVOICING_RESOLUTION_005');
         expect(prisma.__unscoped.invoice_resolutions.update).not.toHaveBeenCalled();
       }
+    });
+  });
+
+  describe('factura sin uso con ClTec que pasa a nota (F6-M1)', () => {
+    const facturaSinUso = {
+      id: 70,
+      organization_id: ORGANIZATION_ID,
+      store_id: STORE_ID,
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      document_type: 'sales_invoice',
+      resolution_number: '18764000001234',
+      resolution_date: new Date('2026-01-15'),
+      prefix: 'FE',
+      range_from: 1,
+      range_to: 5000,
+      current_number: 0,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active: false,
+      technical_key: CLTEC,
+      _count: { invoices: 0 },
+    };
+
+    it('update(id, { document_type: credit_note }) no lanza, anula las 3 columnas de la ClTec y rotula el número interno', async () => {
+      const { service, prisma } = createService({ resolution: facturaSinUso });
+
+      await service.update(70, { document_type: 'credit_note' } as any);
+
+      const { data } = prisma.__unscoped.invoice_resolutions.update.mock
+        .calls[0][0];
+      expect(data.document_type).toBe('credit_note');
+      expect(data.technical_key).toBeNull();
+      expect(data.technical_key_encrypted).toBeNull();
+      expect(data.technical_key_fingerprint).toBeNull();
+      expect(data.resolution_number).toBe(internalSeriesResolutionNumber('FE'));
+    });
+
+    it('si el PATCH trae technical_key en una nota, se sigue rechazando (comportamiento intacto)', async () => {
+      const { service } = createService({ resolution: facturaSinUso });
+
+      const error = await capturarError(() =>
+        service.update(70, {
+          document_type: 'credit_note',
+          technical_key: CLTEC,
+        } as any),
+      );
+
+      expect(error.errorCode).toBe('INVOICING_RESOLUTION_008');
+    });
+  });
+
+  describe('guarda entre cuentas con solape real (D10, F6-L4)', () => {
+    const filaAjena = { id: 900, prefix: 'NCVS', range_from: 1, range_to: 10000000 };
+
+    const conSolape = () => {
+      const ctx = createService({ others: [filaAjena] });
+      const unscoped = ctx.prisma.__unscoped;
+      unscoped.accounting_entities.findFirst.mockResolvedValue({
+        tax_id: '900123456-7',
+        dian_configurations: [],
+      });
+      unscoped.accounting_entities.findMany.mockResolvedValue([
+        { id: 99, tax_id: '900123456', dian_configurations: [] },
+      ]);
+      return ctx;
+    };
+
+    it('crear credit_note NCVS 1-10.000.000 resuelve pese a la fila ajena', async () => {
+      const { service } = conSolape();
+
+      await expect(
+        service.create({
+          ...facturaVentaValida(),
+          document_type: 'credit_note',
+          prefix: 'NCVS',
+          range_from: 1,
+          range_to: 10000000,
+          valid_to: '2030-01-15',
+          resolution_number: undefined,
+          technical_key: undefined,
+        } as any),
+      ).resolves.toBeDefined();
+    });
+
+    it('el mismo alta como sales_invoice con solape lanza INVOICING_RESOLUTION_017', async () => {
+      const { service } = conSolape();
+
+      const error = await capturarError(() =>
+        service.create({
+          ...facturaVentaValida(),
+          prefix: 'NCVS',
+          range_from: 1,
+          range_to: 10000000,
+        } as any),
+      );
+
+      expect(error.errorCode).toBe('INVOICING_RESOLUTION_017');
     });
   });
 });

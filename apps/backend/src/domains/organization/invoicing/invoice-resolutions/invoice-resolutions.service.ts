@@ -27,7 +27,10 @@ import {
   ROTULO_CAMPO_INMUTABLE,
   toPublicResolution,
 } from '../../../store/invoicing/resolutions/resolutions.service';
-import { INTERNAL_SERIES_VALIDITY_YEARS } from '../../../store/invoicing/utils/invoice-number-generator';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+} from '../../../store/invoicing/utils/invoice-number-generator';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import {
   deactivateOtherActiveSeries,
@@ -400,14 +403,25 @@ export class OrgInvoiceResolutionsService {
       dto.document_type !== undefined
         ? this.normalizeDocumentType(dto.document_type)
         : (current.document_type as FiscalDocumentType);
+    // Factura -> nota (serie interna): la fila hereda ClTec y número DIAN de la
+    // factura y la UI oculta el campo. Una serie interna no lleva ninguno de los
+    // dos: la ClTec resultante es null y el número toma el rótulo interno.
+    const becomes_internal_series =
+      isSingleActiveDocumentType(next_document_type) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType) &&
+      dto.technical_key === undefined;
     const next_resolution_number =
       dto.resolution_number !== undefined
         ? dto.resolution_number
-        : current.resolution_number;
+        : becomes_internal_series
+          ? internalSeriesResolutionNumber(dto.prefix ?? current.prefix)
+          : current.resolution_number;
     const next_technical_key =
       dto.technical_key !== undefined
         ? dto.technical_key
-        : current.technical_key;
+        : becomes_internal_series
+          ? null
+          : current.technical_key;
 
     // Los requisitos por tipo se re-juzgan SOLO si el PATCH toca alguno de los
     // campos que los deciden. Alternar `is_active` tiene que funcionar siempre:
@@ -466,6 +480,11 @@ export class OrgInvoiceResolutionsService {
 
     if (dto.resolution_number !== undefined) {
       update_data.resolution_number = dto.resolution_number;
+    } else if (becomes_internal_series) {
+      update_data.resolution_number = next_resolution_number;
+    }
+    if (becomes_internal_series) {
+      Object.assign(update_data, this.technicalKeyVault.sealForWrite(null));
     }
     if (dto.resolution_date !== undefined) {
       update_data.resolution_date = parsePlausibleFiscalDate(
