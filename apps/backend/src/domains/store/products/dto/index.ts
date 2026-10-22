@@ -1317,6 +1317,35 @@ export class ProductQueryDto {
   @Min(1)
   brand_id?: number;
 
+  /**
+   * Filtra a productos sin ninguna categoría asignada (`product_categories`
+   * vacío). Solo `true` activa el filtro; `'false'`/ausente no lo aplican.
+   * El `@Transform` lee `obj[key]` (cadena cruda): con
+   * `enableImplicitConversion`, `Boolean('false')` sería `true`.
+   */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    return raw;
+  })
+  @IsBoolean()
+  without_category?: boolean;
+
+  /** Filtra a productos sin marca (`brand_id` nulo). Mismo contrato que `without_category`. */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    return raw;
+  })
+  @IsBoolean()
+  without_brand?: boolean;
+
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)

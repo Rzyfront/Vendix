@@ -1514,6 +1514,16 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             description: 'Filtrar por categoría.',
           },
           brand_id: { type: 'number', description: 'Filtrar por marca.' },
+          without_category: {
+            type: 'boolean',
+            description:
+              'true: solo productos sin ninguna categoría asignada ("productos sin categoría").',
+          },
+          without_brand: {
+            type: 'boolean',
+            description:
+              'true: solo productos sin marca ("productos sin marca").',
+          },
           product_type: {
             type: 'string',
             enum: PRODUCT_TYPES,
@@ -1571,6 +1581,8 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         if (args.search) query.search = String(args.search);
         if (args.category_id) query.category_id = Number(args.category_id);
         if (args.brand_id) query.brand_id = Number(args.brand_id);
+        if (args.without_category === true) query.without_category = true;
+        if (args.without_brand === true) query.without_brand = true;
         if (args.product_type) query.product_type = args.product_type;
         if (args.state) query.state = args.state;
         if (typeof args.track_inventory === 'boolean')

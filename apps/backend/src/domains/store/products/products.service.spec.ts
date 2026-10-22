@@ -1975,6 +1975,42 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('filtros without_category / without_brand (findAll)', () => {
+    const run = async (extra: Partial<ProductQueryDto>) => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      mockPrismaService.products.findMany.mockClear();
+      await service.findAll({ page: 1, limit: 10, ...extra } as ProductQueryDto);
+      return mockPrismaService.products.findMany.mock.calls[0][0].where;
+    };
+
+    it('without_category=true agrega product_categories none', async () => {
+      const where = await run({ without_category: true });
+      expect(where.product_categories).toEqual({ none: {} });
+      expect(where).not.toHaveProperty('brand_id');
+    });
+
+    it('without_brand=true agrega brand_id null', async () => {
+      const where = await run({ without_brand: true });
+      expect(where.brand_id).toBeNull();
+      expect(where).not.toHaveProperty('product_categories');
+    });
+
+    it('sin los params o con false no aparecen en el where', async () => {
+      for (const extra of [{}, { without_category: false, without_brand: false }]) {
+        const where = await run(extra);
+        expect(where).not.toHaveProperty('product_categories');
+        expect(where).not.toHaveProperty('brand_id');
+      }
+    });
+
+    it('se combina con los filtros existentes', async () => {
+      const where = await run({ without_brand: true, category_id: 5 });
+      expect(where.brand_id).toBeNull();
+      expect(where.product_categories).toEqual({ some: { category_id: 5 } });
+    });
+  });
+
   describe('STATE FILTER PRIORITY (findAll)', () => {
     // Regression: previously, the state filter was set with a ternary
     // (pos_optimized ? ACTIVE : include_inactive ? undefined : { not: ARCHIVED })

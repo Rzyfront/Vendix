@@ -1709,6 +1709,8 @@ export class ProductsService {
       pos_optimized,
       barcode,
       category_id,
+      without_category,
+      without_brand,
       track_inventory,
       product_type,
       requires_booking,
@@ -1766,10 +1768,18 @@ export class ProductsService {
       ...(search &&
         !barcode &&
         this.buildSearchCondition(search, smartAllowed)),
-      ...(brand_id && { brand_id }),
-      ...(category_id && {
+      // `without_brand` / `without_category` (solo `true` filtra). Si coexisten
+      // con `brand_id` / `category_id` explícitos se combinan en AND (conjunto
+      // vacío), sin reglas extra.
+      ...(brand_id && !without_brand && { brand_id }),
+      ...(without_brand && !brand_id && { brand_id: null }),
+      // brand_id explícito + sin marca: contradicción => conjunto vacío.
+      ...(without_brand &&
+        brand_id && { brand_id: { equals: brand_id, not: brand_id } }),
+      ...((category_id || without_category) && {
         product_categories: {
-          some: { category_id },
+          ...(category_id && { some: { category_id } }),
+          ...(without_category && { none: {} }),
         },
       }),
       ...(track_inventory !== undefined && { track_inventory }),

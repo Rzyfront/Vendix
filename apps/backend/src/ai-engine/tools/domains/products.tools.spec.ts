@@ -787,6 +787,33 @@ describe('products.tools · contrato canónico T4', () => {
       });
     });
 
+    it('without_category / without_brand se pasan al service solo si son true', async () => {
+      const { deps, tools } = buildTools();
+      deps.productsService.findAll.mockResolvedValue({
+        data: [],
+        meta: { total: 0, totalPages: 0 },
+      });
+
+      await run(tools, 'list_products', {
+        without_category: true,
+        without_brand: true,
+      });
+      expect(deps.productsService.findAll).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          without_category: true,
+          without_brand: true,
+        }),
+      );
+
+      await run(tools, 'list_products', {
+        without_category: false,
+        without_brand: false,
+      });
+      const q = deps.productsService.findAll.mock.calls.at(-1)![0];
+      expect(q).not.toHaveProperty('without_category');
+      expect(q).not.toHaveProperty('without_brand');
+    });
+
     it('(a) sad: sin tienda → error sin llamar al service', async () => {
       const { deps, tools } = buildTools();
 
