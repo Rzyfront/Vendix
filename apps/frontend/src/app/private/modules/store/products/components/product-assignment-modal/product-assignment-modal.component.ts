@@ -23,6 +23,7 @@ import {
   ModalComponent,
   PaginationComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../shared/components/index';
 import { runChunked } from '../../../../../../shared/utils/run-chunked';
 import { extractApiErrorMessage } from '../../../../../../core/utils';
@@ -64,6 +65,7 @@ function escapeHtml(value: string): string {
     IconComponent,
     InputsearchComponent,
     PaginationComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -83,6 +85,13 @@ function escapeHtml(value: string): string {
           [ngModel]="searchTerm()"
           (ngModelChange)="onSearch($event)"
         ></app-inputsearch>
+
+        <app-toggle
+          [checked]="onlyUnassigned()"
+          [disabled]="isBusy()"
+          [label]="mode() === 'brand' ? 'Sin marca' : 'Sin categoría'"
+          (toggled)="setOnlyUnassigned($event)"
+        ></app-toggle>
 
         <div class="flex flex-wrap items-center gap-2">
           <app-button
@@ -121,7 +130,7 @@ function escapeHtml(value: string): string {
             <app-icon name="package" [size]="28" />
             <span class="text-sm">
               {{
-                searchTerm()
+                searchTerm() || onlyUnassigned()
                   ? 'Ningún producto coincide con la búsqueda'
                   : 'No hay productos disponibles'
               }}
@@ -253,6 +262,8 @@ export class ProductAssignmentModalComponent {
   readonly total = signal(0);
   readonly page = signal(1);
   readonly searchTerm = signal('');
+  /** Filtro "Sin categoría" / "Sin marca" según el modo. */
+  readonly onlyUnassigned = signal(false);
   readonly isLoading = signal(false);
   readonly isSelectingAll = signal(false);
   readonly isSaving = signal(false);
@@ -324,6 +335,12 @@ export class ProductAssignmentModalComponent {
     this.loadPage();
   }
 
+  setOnlyUnassigned(value: boolean): void {
+    this.onlyUnassigned.set(value);
+    this.page.set(1);
+    this.loadPage();
+  }
+
   onPageChange(page: number): void {
     this.page.set(page);
     this.loadPage();
@@ -334,7 +351,10 @@ export class ProductAssignmentModalComponent {
     try {
       const search = this.searchTerm().trim() || undefined;
       const result = await firstValueFrom(
-        this.productsApi.getProductIds({ search }),
+        this.productsApi.getProductIds({
+          search,
+          ...this.unassignedFilter(),
+        }),
       );
       this.selected.update((current) => {
         const next = new Set(current);
@@ -491,6 +511,7 @@ export class ProductAssignmentModalComponent {
 
   private initialize(id: number): void {
     this.searchTerm.set('');
+    this.onlyUnassigned.set(false);
     this.page.set(1);
     this.products.set([]);
     this.total.set(0);
@@ -517,6 +538,13 @@ export class ProductAssignmentModalComponent {
     }
   }
 
+  private unassignedFilter(): { without_category?: true; without_brand?: true } {
+    if (!this.onlyUnassigned()) return {};
+    return this.mode() === 'brand'
+      ? { without_brand: true }
+      : { without_category: true };
+  }
+
   private loadPage(): void {
     const token = ++this.loadToken;
     this.isLoading.set(true);
@@ -525,6 +553,7 @@ export class ProductAssignmentModalComponent {
         page: this.page(),
         limit: PAGE_SIZE,
         search: this.searchTerm().trim() || undefined,
+        ...this.unassignedFilter(),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

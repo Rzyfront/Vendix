@@ -26,6 +26,8 @@ describe('ProductAssignmentModalComponent · tandas de asignación', () => {
     assignProducts: jasmine.Spy;
     previewAssignProducts: jasmine.Spy;
   };
+  let getProductsPage: jasmine.Spy;
+  let getProductIds: jasmine.Spy;
   let toast: { success: jasmine.Spy; error: jasmine.Spy; warning: jasmine.Spy };
 
   function build(mode: 'category' | 'brand' = 'category', members: number[] = []) {
@@ -52,6 +54,12 @@ describe('ProductAssignmentModalComponent · tandas de asignación', () => {
         .createSpy('previewAssignProducts')
         .and.returnValue(of({ to_move: [] })),
     };
+    getProductsPage = jasmine
+      .createSpy('getProductsPage')
+      .and.returnValue(of({ data: [], total: 0 }));
+    getProductIds = jasmine
+      .createSpy('getProductIds')
+      .and.returnValue(of({ ids: [5], total: 1, capped: false }));
     dialog = { confirm: jasmine.createSpy('confirm').and.resolveTo(true) };
     toast = {
       success: jasmine.createSpy('success'),
@@ -65,8 +73,8 @@ describe('ProductAssignmentModalComponent · tandas de asignación', () => {
         {
           provide: ProductsBulkEditService,
           useValue: {
-            getProductsPage: () => of({ data: [], total: 0 }),
-            getProductIds: () => of({ ids: [], total: 0, capped: false }),
+            getProductsPage,
+            getProductIds,
           },
         },
         { provide: ToastService, useValue: toast },
@@ -182,6 +190,58 @@ describe('ProductAssignmentModalComponent · tandas de asignación', () => {
       expect(msg).toContain('Se quitará 1 producto de la marca «Acme»');
       expect(msg).toContain('2 productos dejarán la marca Otra');
       expect(brandsService.assignProducts).toHaveBeenCalledWith(7, 'remove', [2]);
+    });
+  });
+
+  describe('filtro sin categoría / sin marca', () => {
+    it('categoría: al activarlo pide without_category=true en página 1', async () => {
+      const component = build('category');
+      await new Promise((r) => setTimeout(r));
+      component.onPageChange(3);
+      getProductsPage.calls.reset();
+
+      component.setOnlyUnassigned(true);
+
+      expect(getProductsPage).toHaveBeenCalledTimes(1);
+      const q = getProductsPage.calls.mostRecent().args[0];
+      expect(q.without_category).toBeTrue();
+      expect(q.without_brand).toBeUndefined();
+      expect(q.page).toBe(1);
+    });
+
+    it('marca: al activarlo pide without_brand=true en página 1', async () => {
+      const component = build('brand');
+      await new Promise((r) => setTimeout(r));
+      getProductsPage.calls.reset();
+
+      component.setOnlyUnassigned(true);
+
+      const q = getProductsPage.calls.mostRecent().args[0];
+      expect(q.without_brand).toBeTrue();
+      expect(q.without_category).toBeUndefined();
+      expect(q.page).toBe(1);
+    });
+
+    it('al desactivarlo deja de enviar el filtro', async () => {
+      const component = build('category');
+      await new Promise((r) => setTimeout(r));
+      component.setOnlyUnassigned(true);
+      getProductsPage.calls.reset();
+
+      component.setOnlyUnassigned(false);
+
+      const q = getProductsPage.calls.mostRecent().args[0];
+      expect(q.without_category).toBeUndefined();
+    });
+
+    it('seleccionar todos los resultados respeta el filtro activo', async () => {
+      const component = build('category');
+      await new Promise((r) => setTimeout(r));
+      component.setOnlyUnassigned(true);
+
+      await component.selectAllResults();
+
+      expect(getProductIds.calls.mostRecent().args[0].without_category).toBeTrue();
     });
   });
 });

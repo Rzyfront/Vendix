@@ -66,7 +66,13 @@ interface ApiEnvelope<T> {
  * `interfaces/product.interface.ts`, archivo fuera del alcance de este módulo.
  * Se extiende aquí en lugar de editarlo.
  */
-export type BulkEditProductQuery = ProductQueryDto & { ids?: number[] };
+export type BulkEditProductQuery = ProductQueryDto & {
+  ids?: number[];
+  /** Solo productos sin ninguna categoría. Se envía únicamente si es `true`. */
+  without_category?: boolean;
+  /** Solo productos sin marca. Se envía únicamente si es `true`. */
+  without_brand?: boolean;
+};
 
 /** Respuesta de `GET /store/products/ids`. */
 export interface ProductIdsResult {
@@ -566,6 +572,13 @@ export class ProductsBulkEditService {
     let params = new HttpParams();
     for (const [key, raw] of Object.entries(query)) {
       if (raw === undefined || raw === null || raw === '') {
+        continue;
+      }
+      // Filtros de ausencia: `false` equivale a no filtrar, no se envían.
+      if (
+        (key === 'without_category' || key === 'without_brand') &&
+        raw !== true
+      ) {
         continue;
       }
       if (Array.isArray(raw)) {
