@@ -21,6 +21,8 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../shared/components/index';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -29,7 +31,9 @@ import {
   ResolutionsInUseCardComponent,
   deactivatedResolutionsToast,
   extractDeactivatedResolutionIds,
+  formatArchivedAt,
   isResolutionInUse,
+  ResolutionArchiveModalComponent,
   type ResolutionsInUseResponse,
 } from '../../../../../../shared/components/dian';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
@@ -56,6 +60,8 @@ import {
     StatsComponent,
     OrgFiscalScopeSelectorComponent,
     ResolutionsInUseCardComponent,
+    ResolutionArchiveModalComponent,
+    ToggleComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -127,6 +133,12 @@ import {
             </h2>
 
             <div class="flex w-full items-center gap-2 md:w-auto">
+              <app-toggle
+                label="Ver archivadas"
+                ariaLabel="Ver resoluciones archivadas"
+                [checked]="showArchived()"
+                (toggled)="onToggleArchived($event)"
+              />
               <app-inputsearch
                 class="flex-1 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:w-72 md:shadow-none"
                 size="sm"
@@ -256,8 +268,20 @@ import {
         </div>
       </app-modal>
 
+      <!-- Archivar (las resoluciones no se borran) -->
+      @if (pendingArchive(); as row) {
+        <vendix-resolution-archive-modal
+          [resolution]="row"
+          [busy]="archiveBusy()"
+          [requirePrefix]="archiveRequirePrefix()"
+          [errorMessage]="archiveError()"
+          (confirmed)="confirmArchive(row, $event)"
+          (cancelled)="cancelArchive()"
+        />
+      }
+
       <!-- Modal de requisitos fiscales: explica un 4xx fiscal que bloquea
-           crear/actualizar/eliminar una resolucion DIAN con su CTA. -->
+           crear/actualizar/archivar una resolucion DIAN con su CTA. -->
       <app-save-requirements-modal
         [(isOpen)]="fiscalReq.isOpen"
         [requirements]="fiscalReq.requirements()"
@@ -288,17 +312,24 @@ export class OrgInvoiceResolutionsComponent {
   readonly rows = signal<OrgResolutionRow[]>([]);
   readonly inUse = signal<ResolutionsInUseResponse | null>(null);
   readonly inUseLoading = signal(false);
+  readonly showArchived = signal(false);
+  readonly pendingArchive = signal<OrgResolutionRow | null>(null);
+  readonly archiveBusy = signal(false);
+  readonly archiveError = signal<string | null>(null);
+  readonly archiveRequirePrefix = signal(false);
 
   readonly requiresStoreSelector = computed(() => this.auth.fiscalScope() === 'STORE');
-  readonly activeCount = computed(() => this.rows().filter((row) => row.is_active).length);
+  /** Las archivadas no cuentan en los stats: ya no son parte de la numeración. */
+  private readonly liveRows = computed(() => this.rows().filter((row) => !row.archived_at));
+  readonly activeCount = computed(() => this.liveRows().filter((row) => row.is_active).length);
   readonly invoiceCount = computed(() =>
-    this.rows().reduce((total, row) => total + Number(row._count?.invoices || 0), 0),
+    this.liveRows().reduce((total, row) => total + Number(row._count?.invoices || 0), 0),
   );
   readonly expiringCount = computed(() => {
     const now = new Date();
     const limit = new Date(now);
     limit.setDate(limit.getDate() + 30);
-    return this.rows().filter((row) => {
+    return this.liveRows().filter((row) => {
       if (!row.valid_to || !row.is_active) return false;
       const validTo = new Date(row.valid_to);
       return validTo >= now && validTo <= limit;
@@ -313,7 +344,8 @@ export class OrgInvoiceResolutionsComponent {
     // la `accounting_entity_id` devuelta cuando la fila la trae.
     const decorated = this.rows().map((row) => ({
       ...row,
-      in_use: isResolutionInUse(row, inUse),
+      in_use: !row.archived_at && isResolutionInUse(row, inUse),
+      state_label: row.archived_at ? 'Archivada' : row.is_active ? 'Activa' : 'Inactiva',
     }));
     return decorated.filter((row) => {
       if (state === 'active' && !row.is_active) return false;
@@ -358,14 +390,16 @@ export class OrgInvoiceResolutionsComponent {
       label: 'Editar',
       icon: 'pencil',
       variant: 'secondary',
+      show: (row: OrgResolutionRow) => !row.archived_at,
       action: (row: OrgResolutionRow) => this.openEditModal(row),
     },
     {
-      label: 'Eliminar',
-      icon: 'trash-2',
+      // «Ya no la voy a usar más». Las resoluciones DIAN nunca se borran.
+      label: 'Archivar',
+      icon: 'archive',
       variant: 'danger',
-      action: (row: OrgResolutionRow) => this.deleteResolution(row),
-      disabled: (row: OrgResolutionRow) => Number(row._count?.invoices || 0) > 0,
+      show: (row: OrgResolutionRow) => !row.archived_at,
+      action: (row: OrgResolutionRow) => this.askArchive(row),
     },
     {
       label: 'Config DIAN',
@@ -414,7 +448,8 @@ export class OrgInvoiceResolutionsComponent {
         type: 'status',
         colorMap: { true: 'success', false: 'default' },
       },
-      transform: (value) => (value ? 'Activa' : 'Inactiva'),
+      transform: (value, row) =>
+        row?.archived_at ? 'Archivada' : value ? 'Activa' : 'Inactiva',
     },
   ];
 
@@ -424,16 +459,17 @@ export class OrgInvoiceResolutionsComponent {
     subtitleTransform: (item) => item?.store?.name || 'Organización',
     avatarFallbackIcon: 'hash',
     avatarShape: 'square',
-    badgeKey: 'is_active',
+    badgeKey: 'state_label',
     badgeConfig: {
       type: 'status',
-      colorMap: { true: 'success', false: 'default' },
+      colorMap: { Activa: 'success', Inactiva: 'default', Archivada: 'default' },
     },
-    badgeTransform: (value) => (value ? 'Activa' : 'Inactiva'),
+    badgeTransform: (value) => String(value ?? ''),
     detailKeys: [
       { key: 'in_use', label: 'Numeración', icon: 'hash', transform: (value) => (value ? 'En uso' : '-') },
       { key: 'current_number', label: 'Consecutivo', icon: 'hash', transform: (value, item) => `${value || 0} / ${item?.range_to || 0}` },
       { key: 'valid_to', label: 'Vigente hasta', icon: 'calendar', transform: (value) => this.formatDate(value) },
+      { key: 'archived_at', label: 'Archivada', icon: 'archive', transform: (value) => (value ? formatArchivedAt(value) : '-') },
       { key: '_count.invoices', label: 'Facturas', icon: 'receipt', transform: (value) => String(value || 0) },
     ],
   };
@@ -572,23 +608,61 @@ export class OrgInvoiceResolutionsComponent {
     });
   }
 
-  deleteResolution(row: OrgResolutionRow): void {
-    if (Number(row._count?.invoices || 0) > 0) return;
-    if (!window.confirm(`Eliminar la resolución ${row.prefix}?`)) return;
+  onToggleArchived(value: boolean): void {
+    this.showArchived.set(value);
+    this.loadData();
+  }
+
+  askArchive(row: OrgResolutionRow): void {
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+    this.archiveBusy.set(false);
+    this.pendingArchive.set(row);
+  }
+
+  cancelArchive(): void {
+    if (this.archiveBusy()) return;
+    this.closeArchive();
+  }
+
+  private closeArchive(): void {
+    this.pendingArchive.set(null);
+    this.archiveBusy.set(false);
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+  }
+
+  confirmArchive(row: OrgResolutionRow, replacementPrefix: string | undefined): void {
+    this.archiveBusy.set(true);
+    this.archiveError.set(null);
 
     this.service
-      .deleteResolution(row.id)
+      .archiveResolution(row.id, replacementPrefix)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => this.loadData(),
+        next: (res) => {
+          this.closeArchive();
+          this.toast.success(
+            res.data?.replacement_resolution_id
+              ? 'Resolución archivada. Se creó la serie de reemplazo.'
+              : 'Resolución archivada',
+          );
+          this.loadData();
+        },
         error: (err) => {
-          // Restriccion fiscal reconocida: explicarla con el modal de
-          // requisitos en lugar del banner crudo.
+          this.archiveBusy.set(false);
+          // Restriccion fiscal reconocida: explicarla con el modal de requisitos.
           if (this.fiscalReq.presentFiscalError(err)) {
+            this.closeArchive();
             return;
           }
-          this.errorMessage.set(
-            this.errors.humanize(err, 'No se pudo eliminar la resolución.'),
+          const { errorCode } = parseApiError(err);
+          // 015: es la serie de notas en uso; hay que indicar la serie nueva.
+          if (errorCode === 'INVOICING_RESOLUTION_015') {
+            this.archiveRequirePrefix.set(true);
+          }
+          this.archiveError.set(
+            this.errors.humanize(err, 'No se pudo archivar la resolución.'),
           );
         },
       });
@@ -620,7 +694,10 @@ export class OrgInvoiceResolutionsComponent {
     this.errorMessage.set(null);
 
     this.service
-      .getResolutions(this.selectedStoreId() ? { store_id: this.selectedStoreId() } : undefined)
+      .getResolutions({
+        ...(this.selectedStoreId() ? { store_id: this.selectedStoreId() } : {}),
+        ...(this.showArchived() ? { include_archived: true } : {}),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

@@ -83,6 +83,8 @@ export interface DianNumberingRangeLocal {
   current_number: number;
   is_active: boolean;
   document_type: string;
+  /** ISO; no nulo cuando la resolución local fue archivada (solo lectura). */
+  archived_at?: string | null;
 }
 
 export type DianNumberingRangeStatus = 'in_sync' | 'differs' | 'missing_local';
@@ -152,6 +154,8 @@ export interface DianNumberingRangeLocalOnly {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /** ISO; no nulo cuando la resolución local fue archivada (solo lectura). */
+  archived_at?: string | null;
 }
 
 export interface DianNumberingRangesResponse {
@@ -298,9 +302,13 @@ export class DianConfigApiService {
     );
   }
 
-  getResolutions(): Observable<ApiResponse<InvoiceResolution[]>> {
+  /** Por defecto el backend oculta las archivadas; `include_archived` las trae. */
+  getResolutions(
+    includeArchived = false,
+  ): Observable<ApiResponse<InvoiceResolution[]>> {
     return this.http.get<ApiResponse<InvoiceResolution[]>>(
       this.getApiUrl('resolutions'),
+      includeArchived ? { params: { include_archived: 'true' } } : {},
     );
   }
 

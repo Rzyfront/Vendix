@@ -2,11 +2,16 @@ import {
   ACTIVE_RESOLUTION_ORDER_BY,
   activeResolutionWhere,
   deactivateOtherActiveSeries,
+  findActiveResolution,
+  findDormantInternalSeries,
   dormantInternalSeriesWhere,
   isSingleActiveDocumentType,
   lockResolutionSeries,
 } from './resolution-selection.util';
-import { buildResolutionsInUse } from './resolutions-in-use.util';
+import {
+  buildResolutionsInUse,
+  projectInternalSeries,
+} from './resolutions-in-use.util';
 import {
   InvoiceNumberGenerator,
   INTERNAL_SERIES_INITIAL_RANGE,
@@ -25,7 +30,7 @@ const matches = (row: any, where: any): boolean =>
       if ('in' in cond && !cond.in.includes(row[key])) return false;
       return true;
     }
-    return row[key] === cond;
+    return (row[key] ?? null) === cond;
   });
 
 /** Tabla `invoice_resolutions` en memoria que respeta `where`/`orderBy`. */
@@ -83,6 +88,7 @@ describe('resolution-selection.util', () => {
         accounting_entity_id: 5,
         document_type: 'sales_invoice',
         is_active: true,
+        archived_at: null,
         valid_from: { lte: now },
         valid_to: { gte: now },
       });
@@ -103,7 +109,56 @@ describe('resolution-selection.util', () => {
           accounting_entity_id: 5,
           document_type: 'credit_note',
         }),
-      ).toEqual({ accounting_entity_id: 5, document_type: 'credit_note' });
+      ).toEqual({
+        accounting_entity_id: 5,
+        document_type: 'credit_note',
+        archived_at: null,
+      });
+    });
+
+    it('ambos where excluyen las series archivadas', () => {
+      expect(
+        activeResolutionWhere({
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+          now,
+        }),
+      ).toHaveProperty('archived_at', null);
+      expect(
+        dormantInternalSeriesWhere({
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+        }),
+      ).toHaveProperty('archived_at', null);
+    });
+
+    it('findActiveResolution y findDormantInternalSeries ignoran filas archivadas', async () => {
+      const { table } = createTable([
+        {
+          id: 1,
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+          is_active: true,
+          archived_at: new Date(),
+          valid_from: new Date(now.getTime() - 1000),
+          valid_to: new Date(now.getTime() + 1000),
+          created_at: 1,
+        },
+      ]);
+      const client = { invoice_resolutions: table };
+      expect(
+        await findActiveResolution(client, {
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+          now,
+        }),
+      ).toBeNull();
+      expect(
+        await findDormantInternalSeries(client, {
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+        }),
+      ).toBeNull();
     });
 
     it('isSingleActiveDocumentType: solo los 4 tipos de nota', () => {
@@ -231,6 +286,49 @@ describe('resolution-selection.util', () => {
           ...FISCAL_DOCUMENT_TYPES,
         ]);
         expect(JSON.stringify(inUse)).not.toContain('technical_key');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('prefijo por defecto ocupado por una serie archivada: no se proyecta (none) y el generador rechaza', async () => {
+      const { generator, client, table } = setup([
+        {
+          ...base,
+          ...valid,
+          id: 7,
+          document_type: 'credit_note',
+          prefix: 'NCVS',
+          is_active: false,
+          archived_at: new Date('2026-05-01T00:00:00Z'),
+          created_at: 1,
+        },
+      ]);
+      jest.useFakeTimers().setSystemTime(now);
+      try {
+        const projected = await projectInternalSeries(client, {
+          accounting_entity_id: 5,
+          document_type: 'credit_note',
+          now: new Date(),
+        });
+        expect(projected).toBeNull();
+
+        const inUse = await buildResolutionsInUse(client, {
+          accounting_entity_id: 5,
+          now: new Date(),
+        });
+        const item = inUse.items.find((i) => i.document_type === 'credit_note')!;
+        expect(item.source).toBe('none');
+        expect(item.resolution_id).toBeNull();
+
+        await expect(
+          generator.generateNextNumber({
+            organization_id: 1,
+            accounting_entity_id: 5,
+            document_type: 'credit_note',
+          }),
+        ).rejects.toThrow('Crea una serie de notas nueva');
+        expect(table.create).not.toHaveBeenCalled();
       } finally {
         jest.useRealTimers();
       }

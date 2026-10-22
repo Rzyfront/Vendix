@@ -49,6 +49,15 @@
       Rangos de numeración autorizados por la DIAN para la organización plataforma.
     </p>
 
+    <div class="flex justify-end px-4 pt-2">
+      <app-toggle
+        label="Ver archivadas"
+        ariaLabel="Ver resoluciones archivadas"
+        [checked]="store.includeArchived()"
+        (toggled)="onToggleArchived($event)"
+      ></app-toggle>
+    </div>
+
     <div class="p-2 md:p-4">
       <app-responsive-data-view
         [columns]="columns"
@@ -219,15 +228,13 @@
   (confirmed)="applyScan($event)"
 ></app-dian-resolution-scanner-modal>
 
-@if (pendingDelete(); as row) {
-  <app-confirmation-modal
-    [isOpen]="true"
-    title="Eliminar resolución DIAN"
-    [message]="deleteMessage(row)"
-    confirmText="Eliminar"
-    cancelText="Cancelar"
-    confirmVariant="danger"
-    (confirm)="confirmDelete()"
-    (cancel)="cancelDelete()"
-  ></app-confirmation-modal>
+@if (pendingArchive(); as row) {
+  <vendix-resolution-archive-modal
+    [resolution]="row"
+    [busy]="archiveBusy()"
+    [requirePrefix]="archiveRequirePrefix()"
+    [errorMessage]="archiveError()"
+    (confirmed)="confirmArchive(row, $event)"
+    (cancelled)="cancelArchive()"
+  ></vendix-resolution-archive-modal>
 }

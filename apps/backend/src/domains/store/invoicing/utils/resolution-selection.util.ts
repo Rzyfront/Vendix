@@ -13,8 +13,8 @@ import {
  *  - `SubscriptionFiscalService.allocateFiscalNumber` (facturas de plataforma),
  *  - los endpoints `GET .../resolutions/in-use` (`resolutions-in-use.util.ts`).
  *
- * Regla: la resolución ACTIVA y VIGENTE más recientemente creada de la entidad
- * contable y el tipo. Puro: sin Nest ni acceso a datos propio.
+ * Regla: la resolución ACTIVA, VIGENTE y NO ARCHIVADA más recientemente creada
+ * de la entidad contable y el tipo. Puro: sin Nest ni acceso a datos propio.
  */
 
 export const ACTIVE_RESOLUTION_ORDER_BY = { created_at: 'desc' } as const;
@@ -33,6 +33,7 @@ export function activeResolutionWhere(params: ActiveResolutionWhereParams) {
     accounting_entity_id,
     document_type: document_type as FiscalDocumentType,
     is_active: true,
+    archived_at: null,
     valid_from: { lte: now },
     valid_to: { gte: now },
     ...(resolution_id ? { id: resolution_id } : {}),
@@ -47,6 +48,8 @@ export interface DormantInternalSeriesWhereParams {
 /**
  * `where` de la búsqueda de la serie interna "dormida": SIN filtro de
  * `is_active` ni de vigencia, porque busca justo la que quedó inactiva/vencida.
+ * Sí filtra `archived_at: null`: una serie ARCHIVADA no se reactiva nunca (su
+ * prefijo sigue ocupado, así que tampoco se abre otra con el mismo).
  */
 export function dormantInternalSeriesWhere(
   params: DormantInternalSeriesWhereParams,
@@ -54,6 +57,7 @@ export function dormantInternalSeriesWhere(
   return {
     accounting_entity_id: params.accounting_entity_id,
     document_type: params.document_type as FiscalDocumentType,
+    archived_at: null,
   };
 }
 

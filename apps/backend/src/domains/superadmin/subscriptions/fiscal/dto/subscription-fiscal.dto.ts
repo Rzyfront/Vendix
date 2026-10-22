@@ -316,6 +316,11 @@ export class ListPlatformResolutionsQueryDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => obj[key] === true || obj[key] === 'true')
+  @IsBoolean()
+  include_archived?: boolean;
 }
 
 /**

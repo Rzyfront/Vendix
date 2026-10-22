@@ -63,6 +63,9 @@ export interface OrgResolutionRow {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /** ISO; no nulo = archivada (solo lectura, oculta por defecto). */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
   technical_key?: string | null;
   document_type?: string | null;
   accounting_entity_id?: number | null;
@@ -156,9 +159,16 @@ export class OrgInvoicingService {
     );
   }
 
-  deleteResolution(id: number): Observable<ApiResponse<null>> {
-    return this.http.delete<ApiResponse<null>>(
-      `${this.apiUrl}/organization/invoicing/resolutions/${id}`,
+  /** Las resoluciones no se borran: se archivan. */
+  archiveResolution(
+    id: number,
+    replacementPrefix?: string,
+  ): Observable<ApiResponse<OrgResolutionRow & { replacement_resolution_id: number | null }>> {
+    return this.http.post<
+      ApiResponse<OrgResolutionRow & { replacement_resolution_id: number | null }>
+    >(
+      `${this.apiUrl}/organization/invoicing/resolutions/${id}/archive`,
+      replacementPrefix ? { replacement_prefix: replacementPrefix } : {},
     );
   }
 

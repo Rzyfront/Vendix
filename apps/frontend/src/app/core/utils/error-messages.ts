@@ -876,6 +876,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
    */
   INVOICING_RESOLUTION_011:
     'La clave técnica (ClTec) debe tener 40 o 64 caracteres hexadecimales, según la emita la DIAN. Cópiala completa del PDF de la autorización de numeración: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
+  // Archivado de resoluciones (las resoluciones DIAN nunca se borran).
+  INVOICING_RESOLUTION_012:
+    'No se puede archivar: la resolución tiene documentos en vuelo (transmisión pendiente o en reintento). Espera a que terminen.',
+  INVOICING_RESOLUTION_013:
+    'No se puede archivar: es la resolución configurada de la plataforma.',
+  INVOICING_RESOLUTION_014:
+    'No se puede archivar: hay un set de pruebas de la DIAN en curso con esta resolución.',
+  INVOICING_RESOLUTION_015:
+    'Es la serie de notas en uso: indica el prefijo de la serie nueva que la reemplazará (mayúsculas y números, máximo 10; no puede estar ya usado).',
+  INVOICING_RESOLUTION_016:
+    'La resolución está archivada: es de solo lectura y no admite cambios.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',

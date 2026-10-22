@@ -1,12 +1,14 @@
 import { Component, DestroyRef, inject, computed, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { Actions, ofType } from '@ngrx/effects';
 
 import { InvoiceResolution } from '../../interfaces/invoice.interface';
 import {
   selectResolutions,
   selectResolutionsLoading,
+  selectResolutionsIncludeArchived,
 } from '../../state/selectors/invoicing.selectors';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import { ResolutionCreateComponent } from './resolution-create/resolution-create.component';
@@ -31,6 +33,8 @@ import {
   isNoteSeriesType,
   isResolutionInUse,
   noteSeriesActivationMessage,
+  formatArchivedAt,
+  ResolutionArchiveModalComponent,
   ResolutionsInUseCardComponent,
   type FiscalDocumentType,
   type ResolutionsInUseResponse,
@@ -44,7 +48,13 @@ interface ResolutionStats {
   avgUsage: number;
 }
 
-type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inactive';
+type ResolutionStatus =
+  | 'expired'
+  | 'exhausted'
+  | 'expiring'
+  | 'active'
+  | 'inactive'
+  | 'archived';
 
 /**
  * Numeración autorizada, de TODOS los documentos.
@@ -54,10 +64,10 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
  * `document_type`, así que dos rangos con el mismo prefijo y distinto documento
  * son cosas completamente distintas y antes se veían iguales.
  *
- * La acción de activar/desactivar existe porque **desactivar es la única vía
- * para retirar del uso una resolución que ya consumió numeración** —la de
- * habilitación con prefijo SETP, señaladamente—. El backend rechaza su borrado:
- * es evidencia fiscal de documentos ya reportados a la DIAN.
+ * Las resoluciones NUNCA se borran: es evidencia fiscal de documentos ya
+ * reportados a la DIAN. Se desactivan (pausa reversible) o se ARCHIVAN («ya no la
+ * voy a usar más»): una archivada queda inactiva, solo lectura, oculta por
+ * defecto («Ver archivadas») y su prefijo sigue ocupado.
  */
 @Component({
   selector: 'vendix-resolutions-page',
@@ -65,6 +75,8 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
   imports: [
     CardComponent,
     ConfirmationModalComponent,
+    ResolutionArchiveModalComponent,
+    ToggleComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -143,6 +155,12 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
               Resoluciones ({{ filteredResolutions().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-toggle
+                label="Ver archivadas"
+                ariaLabel="Ver resoluciones archivadas"
+                [checked]="show_archived()"
+                (toggled)="onToggleArchived($event)"
+              ></app-toggle>
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 placeholder="Buscar por prefijo, número o documento..."
@@ -182,18 +200,16 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
         [resolution]="selected_resolution()"
       ></vendix-resolution-create>
 
-      <!-- Delete confirmation -->
-      @if (pending_delete(); as row) {
-        <app-confirmation-modal
-          [isOpen]="true"
-          title="Eliminar resolución"
-          [message]="deleteMessage(row)"
-          confirmText="Eliminar"
-          cancelText="Cancelar"
-          confirmVariant="danger"
-          (confirm)="confirmDelete(row)"
-          (cancel)="cancelDelete()"
-        ></app-confirmation-modal>
+      <!-- Archivar (las resoluciones no se borran) -->
+      @if (pending_archive(); as row) {
+        <vendix-resolution-archive-modal
+          [resolution]="row"
+          [busy]="archive_busy()"
+          [requirePrefix]="archive_require_prefix()"
+          [errorMessage]="archive_error()"
+          (confirmed)="confirmArchive(row, $event)"
+          (cancelled)="cancelArchive()"
+        ></vendix-resolution-archive-modal>
       }
 
       <!-- Activar / desactivar -->
@@ -225,12 +241,20 @@ export class ResolutionsPageComponent {
   readonly loading = toSignal(this.store.select(selectResolutionsLoading), {
     initialValue: false,
   });
+  /** «Ver archivadas»: vive en el store porque define qué pide el listado. */
+  readonly show_archived = toSignal(
+    this.store.select(selectResolutionsIncludeArchived),
+    { initialValue: false },
+  );
 
   // Local UI state
   readonly search_term = signal('');
   readonly is_create_modal_open = signal(false);
   readonly selected_resolution = signal<InvoiceResolution | null>(null);
-  readonly pending_delete = signal<InvoiceResolution | null>(null);
+  readonly pending_archive = signal<InvoiceResolution | null>(null);
+  readonly archive_busy = signal(false);
+  readonly archive_error = signal<string | null>(null);
+  readonly archive_require_prefix = signal(false);
   readonly pending_toggle = signal<InvoiceResolution | null>(null);
   readonly in_use = signal<ResolutionsInUseResponse | null>(null);
   readonly in_use_loading = signal(false);
@@ -242,7 +266,7 @@ export class ResolutionsPageComponent {
     // Se decora con `in_use` para que la tabla y las cards pinten el badge.
     const list = this.resolutions().map((r) => ({
       ...r,
-      in_use: isResolutionInUse(r, inUse),
+      in_use: !r.archived_at && isResolutionInUse(r, inUse),
     }));
     if (!term) return list;
     return list.filter(
@@ -254,7 +278,8 @@ export class ResolutionsPageComponent {
   });
 
   readonly stats = computed<ResolutionStats>(() => {
-    const list = this.resolutions();
+    // Las archivadas no cuentan en los stats: ya no son parte de la numeración.
+    const list = this.resolutions().filter((r) => !r.archived_at);
     const total = list.length;
     const now = Date.now();
     const in30d = now + 30 * 24 * 60 * 60 * 1000;
@@ -294,18 +319,49 @@ export class ResolutionsPageComponent {
 
     this.loadInUse();
 
-    // Tras crear, actualizar (incluye activar/desactivar) o borrar, la lista la
+    // Tras crear, actualizar (incluye activar/desactivar) o archivar, la lista la
     // refresca el store; aquí se refresca `in-use`, que depende de lo mismo.
     this.actions$
       .pipe(
         ofType(
           InvoicingActions.createResolutionSuccess,
           InvoicingActions.updateResolutionSuccess,
-          InvoicingActions.deleteResolutionSuccess,
+          InvoicingActions.archiveResolutionSuccess,
         ),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.loadInUse());
+
+    this.actions$
+      .pipe(
+        ofType(InvoicingActions.archiveResolutionSuccess),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.closeArchive());
+
+    this.actions$
+      .pipe(
+        ofType(InvoicingActions.archiveResolutionFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ error, errorCode }) => {
+        this.archive_busy.set(false);
+        this.archive_error.set(error);
+        // 015: es la serie de notas en uso; hay que indicar la serie nueva.
+        if (errorCode === 'INVOICING_RESOLUTION_015') {
+          this.archive_require_prefix.set(true);
+        }
+      });
+
+    // «Ver archivadas» no debe filtrarse a otras pantallas que leen el mismo
+    // store (crear factura): al salir se vuelve al listado por defecto.
+    this.destroyRef.onDestroy(() => {
+      if (this.show_archived()) {
+        this.store.dispatch(
+          InvoicingActions.setResolutionsIncludeArchived({ include_archived: false }),
+        );
+      }
+    });
   }
 
   private loadInUse(): void {
@@ -401,6 +457,7 @@ export class ResolutionsPageComponent {
           expiring: 'warn',
           active: 'success',
           inactive: 'neutral',
+          archived: 'neutral',
         },
       },
       transform: (_val: any, item?: InvoiceResolution) =>
@@ -417,6 +474,7 @@ export class ResolutionsPageComponent {
       label: 'Editar',
       icon: 'edit',
       variant: 'primary',
+      show: (row: InvoiceResolution) => !row.archived_at,
       action: (row: InvoiceResolution) => this.editResolution(row),
     },
     {
@@ -427,13 +485,16 @@ export class ResolutionsPageComponent {
       icon: (row: InvoiceResolution) =>
         row.is_active ? 'toggle-left' : 'toggle-right',
       variant: (row: InvoiceResolution) => (row.is_active ? 'warning' : 'success'),
+      show: (row: InvoiceResolution) => !row.archived_at,
       action: (row: InvoiceResolution) => this.askToggle(row),
     },
     {
-      label: 'Eliminar',
-      icon: 'trash-2',
+      // «Ya no la voy a usar más». Reemplaza al borrado: nunca se borra.
+      label: 'Archivar',
+      icon: 'archive',
       variant: 'danger',
-      action: (row: InvoiceResolution) => this.askDelete(row),
+      show: (row: InvoiceResolution) => !row.archived_at,
+      action: (row: InvoiceResolution) => this.askArchive(row),
     },
   ];
 
@@ -453,6 +514,7 @@ export class ResolutionsPageComponent {
         expiring: 'warn',
         active: 'success',
         inactive: 'neutral',
+        archived: 'neutral',
       },
     },
     badgeTransform: (_val: any) => '',
@@ -462,6 +524,12 @@ export class ResolutionsPageComponent {
         label: 'Numeración',
         icon: 'hash',
         transform: (val: unknown) => (val ? 'En uso' : '-'),
+      },
+      {
+        key: 'archived_at',
+        label: 'Archivada',
+        icon: 'archive',
+        transform: (val: any) => (val ? formatArchivedAt(val) : '-'),
       },
       {
         key: 'valid_from',
@@ -501,22 +569,45 @@ export class ResolutionsPageComponent {
     this.is_create_modal_open.set(true);
   }
 
+  onToggleArchived(value: boolean): void {
+    this.store.dispatch(
+      InvoicingActions.setResolutionsIncludeArchived({ include_archived: value }),
+    );
+  }
+
   /**
-   * Borrar una resolución es irreversible y el backend lo rechaza cuando ya
-   * numeró documentos. Se confirma primero para que el rechazo (o el borrado)
-   * sea una decisión, no un clic accidental en la fila equivocada.
+   * Las resoluciones DIAN nunca se borran: «Archivar» las retira para siempre
+   * del uso (solo lectura, prefijo ocupado). Se confirma en un modal que, para
+   * una serie de notas activa, ofrece el prefijo de la serie que la reemplaza.
    */
-  askDelete(row: InvoiceResolution): void {
-    this.pending_delete.set(row);
+  askArchive(row: InvoiceResolution): void {
+    this.archive_error.set(null);
+    this.archive_require_prefix.set(false);
+    this.archive_busy.set(false);
+    this.pending_archive.set(row);
   }
 
-  cancelDelete(): void {
-    this.pending_delete.set(null);
+  cancelArchive(): void {
+    if (this.archive_busy()) return;
+    this.closeArchive();
   }
 
-  confirmDelete(row: InvoiceResolution): void {
-    this.pending_delete.set(null);
-    this.store.dispatch(InvoicingActions.deleteResolution({ id: row.id }));
+  confirmArchive(row: InvoiceResolution, replacementPrefix: string | undefined): void {
+    this.archive_busy.set(true);
+    this.archive_error.set(null);
+    this.store.dispatch(
+      InvoicingActions.archiveResolution({
+        id: row.id,
+        ...(replacementPrefix ? { replacement_prefix: replacementPrefix } : {}),
+      }),
+    );
+  }
+
+  private closeArchive(): void {
+    this.pending_archive.set(null);
+    this.archive_busy.set(false);
+    this.archive_error.set(null);
+    this.archive_require_prefix.set(false);
   }
 
   askToggle(row: InvoiceResolution): void {
@@ -561,21 +652,8 @@ export class ResolutionsPageComponent {
     const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
     const base = `${identity} dejará de numerar documentos nuevos. Los ya emitidos con ella no cambian.`;
     return consumed
-      ? `${base} Es la única forma de retirarla: ya consumió numeración ante la DIAN, así que no se puede borrar.`
+      ? `${base} Ya consumió numeración ante la DIAN: si no la vas a usar más, archívala.`
       : base;
-  }
-
-  /**
-   * Anticipa el rechazo del backend: una resolución que ya consumió numeración
-   * ante la DIAN es evidencia fiscal y no se puede borrar. Decirlo aquí evita
-   * que el usuario confirme algo que va a fallar.
-   */
-  deleteMessage(row: InvoiceResolution): string {
-    const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
-    const identity = `${row.prefix} · ${row.resolution_number}`;
-    return consumed
-      ? `${identity} ya consumió numeración ante la DIAN (va en ${row.current_number}). No se puede borrar: desactívala para retirarla del uso.`
-      : `Se eliminará la resolución ${identity} (rango ${row.range_from} – ${row.range_to}). No ha numerado ningún documento, así que no hay evidencia fiscal que preservar.`;
   }
 
   /** Rótulo del documento que numera la fila, tomado del contrato compartido. */
@@ -592,6 +670,7 @@ export class ResolutionsPageComponent {
     item: InvoiceResolution | undefined,
   ): ResolutionStatus {
     if (!item) return 'inactive';
+    if (item.archived_at) return 'archived';
 
     const now = Date.now();
     const validTo = item.valid_to ? new Date(item.valid_to).getTime() : NaN;
@@ -618,6 +697,7 @@ export class ResolutionsPageComponent {
       expiring: 'Por vencer',
       active: 'Activa',
       inactive: 'Inactiva',
+      archived: 'Archivada',
     };
     return labels[status] || String(status);
   }

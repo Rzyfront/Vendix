@@ -312,6 +312,9 @@ export interface PlatformResolution {
   valid_from: string | null;
   valid_to: string | null;
   is_active: boolean;
+  /** ISO; no nulo = archivada (solo lectura, oculta por defecto). */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
   technical_key?: string | null;
   environment: SubscriptionFiscalEnvironment;
   organization_id: number;
@@ -355,6 +358,14 @@ export interface ListPlatformResolutionsQuery {
   document_type?: PlatformResolutionDocumentType;
   environment?: SubscriptionFiscalEnvironment;
   is_active?: boolean;
+  /** Incluye las archivadas (el backend las oculta por defecto). */
+  include_archived?: boolean;
+}
+
+/** Respuesta de `POST resolutions/:id/archive`. */
+export interface ArchivePlatformResolutionResult extends PlatformResolution {
+  archived_at: string;
+  replacement_resolution_id: number | null;
 }
 
 // ─────────────────────────────────────────────────────────

@@ -19,7 +19,6 @@ import {
 import {
   ButtonComponent,
   CardComponent,
-  ConfirmationModalComponent,
   DianResolutionScanResult,
   DianResolutionScannerModalComponent,
   IconComponent,
@@ -34,6 +33,8 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../../shared/components';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CreatePlatformResolutionDto,
   PlatformResolution,
@@ -44,7 +45,9 @@ import {
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import {
+  ResolutionArchiveModalComponent,
   ResolutionsInUseCardComponent,
+  formatArchivedAt,
   isResolutionInUse,
 } from '../../../../../../../shared/components/dian';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
@@ -79,8 +82,9 @@ interface ResolutionFormControls {
     ReactiveFormsModule,
     ButtonComponent,
     CardComponent,
-    ConfirmationModalComponent,
     DianResolutionScannerModalComponent,
+    ResolutionArchiveModalComponent,
+    ToggleComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
@@ -128,6 +132,8 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.shellActions.clear();
+    // «Ver archivadas» no debe filtrarse a las otras pestañas que comparten el store.
+    if (this.store.includeArchived()) this.store.setIncludeArchived(false);
   }
 
   readonly modalOpen = signal(false);
@@ -135,8 +141,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
   readonly formInvalid = signal(true);
   /** Non-null while the modal edits an existing row instead of creating one. */
   readonly editing = signal<PlatformResolution | null>(null);
-  readonly pendingDelete = signal<PlatformResolution | null>(null);
-  readonly deleting = signal(false);
+  readonly pendingArchive = signal<PlatformResolution | null>(null);
+  readonly archiveBusy = signal(false);
+  readonly archiveError = signal<string | null>(null);
+  readonly archiveRequirePrefix = signal(false);
   readonly togglingId = signal<number | null>(null);
   readonly scannerOpen = signal(false);
   /**
@@ -149,18 +157,22 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
   readonly environmentOptions = ENVIRONMENT_OPTIONS;
   readonly docTypeLabel = resolutionDocTypeLabel;
 
-  readonly totalCount = computed(() => this.store.resolutions().length);
+  /** Las archivadas no cuentan en los KPI: ya no son parte de la numeración. */
+  private readonly liveResolutions = computed(() =>
+    this.store.resolutions().filter((r) => !r.archived_at),
+  );
+  readonly totalCount = computed(() => this.liveResolutions().length);
   readonly activeCount = computed(
-    () => this.store.resolutions().filter((r) => r.is_active).length,
+    () => this.liveResolutions().filter((r) => r.is_active).length,
   );
   readonly salesCount = computed(
     () =>
-      this.store.resolutions().filter((r) => r.document_type === 'sales_invoice')
+      this.liveResolutions().filter((r) => r.document_type === 'sales_invoice')
         .length,
   );
   readonly supportCount = computed(
     () =>
-      this.store.resolutions().filter(
+      this.liveResolutions().filter(
         (r) => r.document_type === 'support_document',
       ).length,
   );
@@ -170,7 +182,8 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     const inUse = this.store.inUse();
     return this.store.resolutions().map((r) => ({
       ...r,
-      in_use: isResolutionInUse(r, inUse),
+      in_use: !r.archived_at && isResolutionInUse(r, inUse),
+      state_label: r.archived_at ? 'Archivada' : r.is_active ? 'Activa' : 'Inactiva',
     }));
   });
 
@@ -224,6 +237,12 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       },
       badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
     },
+    {
+      // Aparece solo en filas archivadas (con «Ver archivadas» encendido).
+      key: 'archived_at',
+      label: 'Archivada',
+      transform: (v) => (v ? formatArchivedAt(v as string) : ''),
+    },
   ];
 
   readonly cardConfig: ItemListCardConfig = {
@@ -231,15 +250,16 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     subtitleKey: 'document_type',
     subtitleTransform: (v) =>
       this.docTypeLabel(v as PlatformResolutionDocumentType),
-    badgeKey: 'is_active',
+    badgeKey: 'state_label',
     badgeConfig: {
       type: 'custom',
       colorMap: {
-        true: 'success',
-        false: 'secondary',
+        Activa: 'success',
+        Inactiva: 'secondary',
+        Archivada: 'secondary',
       },
     },
-    badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
+    badgeTransform: (v) => String(v ?? ''),
     detailKeys: [
       {
         key: 'in_use',
@@ -258,19 +278,22 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
+      show: (item: PlatformResolution) => !item.archived_at,
       action: (item: PlatformResolution) => this.openEdit(item),
     },
     {
       label: 'Alternar estado',
       icon: 'power',
+      show: (item: PlatformResolution) => !item.archived_at,
       action: (item: PlatformResolution) => this.toggleActive(item),
     },
     {
-      label: 'Eliminar',
-      icon: 'trash-2',
+      // «Ya no la voy a usar más». Las resoluciones DIAN nunca se borran.
+      label: 'Archivar',
+      icon: 'archive',
       variant: 'danger',
-      disabled: (item: PlatformResolution) => this.isLocked(item),
-      action: (item: PlatformResolution) => this.askDelete(item),
+      show: (item: PlatformResolution) => !item.archived_at,
+      action: (item: PlatformResolution) => this.askArchive(item),
     },
   ];
 
@@ -574,8 +597,8 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   /**
    * Flips `is_active` without opening the form. This is the supported way to
-   * retire a resolution that already numbered documents — deleting it is
-   * refused by the backend precisely because it is fiscal evidence.
+   * pause a resolution reversibly. To retire it for good use «Archivar»:
+   * resolutions are fiscal evidence and are never deleted.
    */
   toggleActive(row: PlatformResolution): void {
     if (this.togglingId() !== null) return;
@@ -602,40 +625,55 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       });
   }
 
-  askDelete(row: PlatformResolution): void {
-    this.pendingDelete.set(row);
+  onToggleArchived(value: boolean): void {
+    this.store.setIncludeArchived(value);
   }
 
-  deleteMessage(row: PlatformResolution): string {
-    return `Se eliminará la resolución ${row.prefix} · ${this.docTypeLabel(row.document_type)} (rango ${row.range_from} – ${row.range_to}). No ha numerado ningún documento, así que no hay evidencia fiscal que preservar. Si vuelve a necesitarse, tendrás que crearla de nuevo.`;
+  askArchive(row: PlatformResolution): void {
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+    this.archiveBusy.set(false);
+    this.pendingArchive.set(row);
   }
 
-  cancelDelete(): void {
-    this.pendingDelete.set(null);
+  cancelArchive(): void {
+    if (this.archiveBusy()) return;
+    this.closeArchive();
   }
 
-  confirmDelete(): void {
-    const row = this.pendingDelete();
-    if (!row || this.deleting()) return;
+  private closeArchive(): void {
+    this.pendingArchive.set(null);
+    this.archiveBusy.set(false);
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+  }
 
-    this.deleting.set(true);
+  confirmArchive(row: PlatformResolution, replacementPrefix: string | undefined): void {
+    if (this.archiveBusy()) return;
+    this.archiveBusy.set(true);
+    this.archiveError.set(null);
     this.fiscal
-      .deleteResolution(row.id)
+      .archiveResolution(row.id, replacementPrefix)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
-          this.deleting.set(false);
-          this.pendingDelete.set(null);
-          this.toast.success('Resolución DIAN eliminada', 'Plataforma');
+        next: (res) => {
+          this.closeArchive();
+          this.toast.success(
+            res?.replacement_resolution_id
+              ? 'Resolución DIAN archivada. Se creó la serie de reemplazo.'
+              : 'Resolución DIAN archivada',
+            'Plataforma',
+          );
           this.store.loadResolutions(true);
         },
-        error: (err: { error?: { message?: string } }) => {
-          this.deleting.set(false);
-          this.pendingDelete.set(null);
-          this.toast.error(
-            err?.error?.message ?? 'No se pudo eliminar la resolución',
-            'Error',
-          );
+        error: (err: unknown) => {
+          this.archiveBusy.set(false);
+          const { errorCode, userMessage } = parseApiError(err);
+          // 015: es la serie de notas en uso; hay que indicar la serie nueva.
+          if (errorCode === 'INVOICING_RESOLUTION_015') {
+            this.archiveRequirePrefix.set(true);
+          }
+          this.archiveError.set(userMessage);
         },
       });
   }

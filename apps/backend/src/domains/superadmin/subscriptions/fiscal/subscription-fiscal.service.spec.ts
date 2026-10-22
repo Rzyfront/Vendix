@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { CreatePlatformInvoiceDto } from './dto/subscription-fiscal.dto';
+import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
 import { CustomerFiscalIdentityValidator } from '../../../store/invoicing/validators/customer-fiscal-identity.validator';
 import {
   FiscalDocumentValidationInput,
@@ -11,6 +12,10 @@ import {
   ProviderInvoiceData,
   ProviderInvoiceTax,
 } from '../../../store/invoicing/providers/invoice-provider.interface';
+
+jest.mock('../../../store/invoicing/utils/resolution-archive.util', () => ({
+  archiveResolutionInTx: jest.fn(),
+}));
 
 /**
  * EL CARRIL DE PLATAFORMA — `POST /superadmin/subscriptions/fiscal/sales-invoices`.
@@ -404,6 +409,107 @@ describe('SubscriptionFiscalService · createPlatformInvoice · puerta de pre-em
       city_code: '05001',
       department_code: '05',
       country_code: 'CO',
+    });
+  });
+});
+
+describe('SubscriptionFiscalService · resoluciones · archivado lógico', () => {
+  const unused = {};
+
+  function buildService(model: Record<string, jest.Mock>, tx: unknown = {}) {
+    const prisma = {
+      withoutScope: () => ({
+        invoice_resolutions: model,
+        $transaction: jest.fn(async (cb: (t: unknown) => unknown) => cb(tx)),
+      }),
+    };
+    const service: SubscriptionFiscalService = Reflect.construct(
+      SubscriptionFiscalService,
+      [prisma, ...Array(16).fill(unused)],
+    );
+    const internals = service as unknown as Record<string, jest.Mock>;
+    jest.spyOn(internals as never, 'resolvePlatformOrganizationId').mockResolvedValue(1 as never);
+    jest.spyOn(internals as never, 'resolvePlatformAccountingEntityId').mockResolvedValue(5 as never);
+    jest.spyOn(internals as never, 'getSettings').mockResolvedValue({ environment: 'test' } as never);
+    return service;
+  }
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('listResolutions excluye archivadas por defecto y las incluye con include_archived', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = buildService({ findMany });
+
+    await service.listResolutions({});
+    expect(findMany.mock.calls[0][0].where.archived_at).toBeNull();
+
+    await service.listResolutions({ include_archived: true });
+    expect(findMany.mock.calls[1][0].where).not.toHaveProperty('archived_at');
+  });
+
+  it('archiveResolution de una resolución inexistente o ajena a plataforma lanza INVOICING_FIND_002', async () => {
+    const service = buildService({ findFirst: jest.fn().mockResolvedValue(null) });
+
+    const error = await service.archiveResolution(999, {}).catch((e) => e);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error_code: 'INVOICING_FIND_002',
+    });
+    expect(archiveResolutionInTx).not.toHaveBeenCalled();
+  });
+
+  it('updateResolution sobre una archivada lanza INVOICING_RESOLUTION_016', async () => {
+    const service = buildService({
+      findFirst: jest.fn().mockResolvedValue({
+        ...buildResolutionRow(),
+        archived_at: new Date(),
+        _count: { invoices: 0 },
+      }),
+    });
+
+    const error = await service.updateResolution(77, {} as never).catch((e) => e);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error_code: 'INVOICING_RESOLUTION_016',
+    });
+  });
+
+  it('archiveResolution delega en archiveResolutionInTx dentro de la transacción y devuelve replacement_resolution_id', async () => {
+    const current = {
+      ...buildResolutionRow(),
+      id: 77,
+      organization_id: 1,
+      archived_at: null,
+      _count: { invoices: 0 },
+    };
+    const tx = { marker: 'tx' };
+    const service = buildService(
+      { findFirst: jest.fn().mockResolvedValue(current) },
+      tx,
+    );
+    (archiveResolutionInTx as jest.Mock).mockResolvedValue({
+      archived: { id: 77, archived_at: new Date() },
+      replacement: { id: 78 },
+    });
+
+    const result = await service.archiveResolution(77, { replacement_prefix: 'VS2' });
+
+    expect(archiveResolutionInTx).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        resolution: current,
+        replacement_prefix: 'VS2',
+        organization_id: 1,
+      }),
+    );
+    expect(result).toMatchObject({
+      id: 77,
+      environment: 'test',
+      replacement_resolution_id: 78,
     });
   });
 });

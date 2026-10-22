@@ -2,6 +2,7 @@ import { createAction, props } from '@ngrx/store';
 import {
   Invoice,
   InvoiceResolution,
+  ArchiveResolutionResult,
   InvoiceStats,
   CreateInvoiceDto,
   UpdateInvoiceDto,
@@ -412,17 +413,25 @@ export const updateResolutionFailure = createAction(
   props<MutationFailure>(),
 );
 
-export const deleteResolution = createAction(
-  '[Invoicing] Delete Resolution',
-  props<{ id: number }>(),
+/** Las resoluciones DIAN nunca se borran: se archivan. */
+export const archiveResolution = createAction(
+  '[Invoicing] Archive Resolution',
+  props<{ id: number; replacement_prefix?: string }>(),
 );
-export const deleteResolutionSuccess = createAction(
-  '[Invoicing] Delete Resolution Success',
-  props<{ id: number }>(),
+export const archiveResolutionSuccess = createAction(
+  '[Invoicing] Archive Resolution Success',
+  props<{ resolution: ArchiveResolutionResult }>(),
 );
-export const deleteResolutionFailure = createAction(
-  '[Invoicing] Delete Resolution Failure',
-  props<{ error: string }>(),
+/** Lleva `errorCode`: el modal pasa a pedir prefijo ante INVOICING_RESOLUTION_015. */
+export const archiveResolutionFailure = createAction(
+  '[Invoicing] Archive Resolution Failure',
+  props<MutationFailure>(),
+);
+
+/** Toggle «Ver archivadas»: cambia el flag del store y recarga el listado. */
+export const setResolutionsIncludeArchived = createAction(
+  '[Invoicing] Set Resolutions Include Archived',
+  props<{ include_archived: boolean }>(),
 );
 
 // ── Filter setters (filter-as-state pattern) ────────────────

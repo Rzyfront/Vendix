@@ -22,6 +22,8 @@ export interface InvoicingState {
   resolutions: InvoiceResolution[];
   loading: boolean;
   resolutionsLoading: boolean;
+  /** «Ver archivadas»: el listado se pide con `include_archived=true`. */
+  resolutionsIncludeArchived: boolean;
   currentInvoice: Invoice | null;
   currentInvoiceLoading: boolean;
   error: string | null;
@@ -199,6 +201,7 @@ export const initialInvoicingState: InvoicingState = {
   resolutions: [],
   loading: false,
   resolutionsLoading: false,
+  resolutionsIncludeArchived: false,
   currentInvoice: null,
   currentInvoiceLoading: false,
   error: null,

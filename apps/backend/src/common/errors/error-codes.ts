@@ -2427,6 +2427,37 @@ export const ErrorCodes = {
     devMessage:
       'Technical key (ClTec) must be exactly 40 (SHA-1) or 64 (SHA-256) hexadecimal characters as issued by the DIAN numbering-range web service',
   },
+  // Archivado lógico de resoluciones (invoice_resolutions.archived_at). 409: el
+  // estado actual del recurso impide la operación; el usuario puede resolverlo.
+  INVOICING_RESOLUTION_012: {
+    code: 'INVOICING_RESOLUTION_012',
+    httpStatus: 409,
+    devMessage:
+      'Resolution has in-flight documents (pending transmission or retry queue); cannot archive',
+  },
+  INVOICING_RESOLUTION_013: {
+    code: 'INVOICING_RESOLUTION_013',
+    httpStatus: 409,
+    devMessage:
+      'Resolution is wired to the platform fiscal configuration (invoice_resolution_id); cannot archive',
+  },
+  INVOICING_RESOLUTION_014: {
+    code: 'INVOICING_RESOLUTION_014',
+    httpStatus: 409,
+    devMessage:
+      'DIAN test set in progress (enablement_status=testing) on the same configuration axis; cannot archive',
+  },
+  INVOICING_RESOLUTION_015: {
+    code: 'INVOICING_RESOLUTION_015',
+    httpStatus: 409,
+    devMessage:
+      'Resolution is the note series in use; provide a replacement series to archive it (also used for an invalid or already-taken replacement prefix)',
+  },
+  INVOICING_RESOLUTION_016: {
+    code: 'INVOICING_RESOLUTION_016',
+    httpStatus: 409,
+    devMessage: 'Resolution is archived and read-only',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,

@@ -73,9 +73,19 @@ export async function projectInternalSeries(
     };
   }
 
+  // Prefijo por defecto ocupado por una fila (necesariamente archivada, porque
+  // la dormida ya se descartó): `provisionInternalSeries` rechazaría la emisión,
+  // así que no se proyecta una serie que no se puede abrir.
+  const defaults = buildInternalSeriesDefaults(prefix, now);
+  const occupying = await client.invoice_resolutions.findFirst({
+    where: { accounting_entity_id, document_type, prefix: defaults.prefix },
+    select: { id: true },
+  });
+  if (occupying) return null;
+
   return {
     id: null,
-    ...buildInternalSeriesDefaults(prefix, now),
+    ...defaults,
     // Sin ClTec, igual que la serie que se escribiría.
     technical_key_encrypted: null,
   };

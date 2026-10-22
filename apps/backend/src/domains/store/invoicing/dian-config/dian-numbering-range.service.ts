@@ -34,6 +34,8 @@ export interface LocalResolutionView {
   current_number: number;
   is_active: boolean;
   document_type: string;
+  /** ISO cuando la resolución está archivada (solo lectura); `null` si no. */
+  archived_at: string | null;
 }
 
 export interface NumberingRangeComparison {
@@ -110,6 +112,8 @@ export interface NumberingRangeReport {
     valid_from: string;
     valid_to: string;
     is_active: boolean;
+    /** ISO cuando la fila está archivada (solo lectura); `null` si no. */
+    archived_at: string | null;
     /** Misma marca derivada que en `ranges`, aquí sobre la fila guardada. */
     is_habilitation_numbering: boolean;
   }>;
@@ -248,6 +252,7 @@ type StoredResolution = {
   valid_to: Date;
   is_active: boolean;
   document_type: string;
+  archived_at: Date | null;
   technical_key: string | null;
   technical_key_encrypted: string | null;
   technical_key_fingerprint: string | null;
@@ -368,6 +373,7 @@ export class DianNumberingRangeService {
           valid_from: row.valid_from.toISOString(),
           valid_to: row.valid_to.toISOString(),
           is_active: row.is_active,
+          archived_at: row.archived_at ? row.archived_at.toISOString() : null,
           is_habilitation_numbering: isHabilitationNumbering(row),
         })),
     };
@@ -647,6 +653,17 @@ export class DianNumberingRangeService {
       context.accounting_entity_id,
     );
     const existing = this.matchLocal(target, local_rows, new Set<number>());
+
+    // Archivada = solo lectura y sigue ocupando su prefijo: se empareja (para no
+    // intentar recrearla) pero no se escribe sobre ella. El error viaja por el
+    // catch por elemento de `applyRanges`, así que no aborta el lote.
+    if (existing?.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución guardada con este prefijo está archivada y es de solo lectura; no se sincroniza sobre ella.',
+        { resolution_id: existing.id },
+      );
+    }
 
     const applied = existing
       ? await this.updateFromDian(existing, target, config_id)
@@ -1290,5 +1307,6 @@ function toLocalView(row: StoredResolution): LocalResolutionView {
     current_number: row.current_number,
     is_active: row.is_active,
     document_type: String(row.document_type),
+    archived_at: row.archived_at ? row.archived_at.toISOString() : null,
   };
 }

@@ -434,6 +434,35 @@ export class InvoiceNumberGenerator {
       });
     }
 
+    // El prefijo por defecto puede estar ocupado por una serie ARCHIVADA (la
+    // búsqueda de arriba la excluye). Los únicos parciales `(entidad, prefijo,
+    // tipo)` no distinguen archivadas: crear aquí chocaría con P2002, y
+    // reactivarla reabriría `NC1`. Ninguna de las dos: se rechaza con un
+    // mensaje accionable y sin asignar numeración.
+    const occupying = await tx.invoice_resolutions.findFirst({
+      where: {
+        accounting_entity_id,
+        document_type,
+        prefix: defaults.prefix,
+      },
+      select: { id: true, archived_at: true },
+    });
+
+    if (occupying) {
+      const label = requirementsFor(document_type).label;
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_RESOLUTION_MISSING,
+        `La serie de «${label}» con prefijo ${defaults.prefix} está archivada y no se puede reabrir. ` +
+          'Crea una serie de notas nueva en Facturación → Resoluciones. No se asignó numeración.',
+        {
+          document_type,
+          document_label: label,
+          accounting_entity_id,
+          archived_resolution_id: occupying.id,
+        },
+      );
+    }
+
     const created = await tx.invoice_resolutions.create({
       data: {
         organization_id,

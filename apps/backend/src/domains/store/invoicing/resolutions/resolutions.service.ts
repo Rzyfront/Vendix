@@ -25,6 +25,8 @@ import {
   lockResolutionSeries,
 } from '../utils/resolution-selection.util';
 import { buildResolutionsInUse } from '../utils/resolutions-in-use.util';
+import { archiveResolutionInTx } from '../utils/resolution-archive.util';
+import { ArchiveResolutionDto } from './dto/archive-resolution.dto';
 import { internalSeriesResolutionNumber } from '../utils/invoice-number-generator';
 
 /**
@@ -87,8 +89,9 @@ export class ResolutionsService {
     return context;
   }
 
-  async findAll() {
+  async findAll(include_archived = false) {
     const rows = await this.prisma.invoice_resolutions.findMany({
+      ...(include_archived ? {} : { where: { archived_at: null } }),
       orderBy: { created_at: 'desc' },
     });
     return rows.map(toPublicResolution);
@@ -267,6 +270,15 @@ export class ResolutionsService {
 
   async update(id: number, dto: UpdateResolutionDto) {
     const current = await this.findOneInternal(id);
+
+    // Archivada = solo lectura: primero que cualquier otra validación.
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -462,39 +474,36 @@ export class ResolutionsService {
     return { ...toPublicResolution(updated), deactivated_resolution_ids };
   }
 
+  /**
+   * Archivado lógico (nunca hay borrado físico). `findOneInternal` valida el
+   * tenant con el cliente scopeado; la transacción corre sin scope porque el
+   * util toma el advisory lock de la serie y toca otras tablas.
+   */
+  async archive(id: number, dto: ArchiveResolutionDto) {
+    const current = await this.findOneInternal(id);
+
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id: current.organization_id,
+        }),
+      );
+
+    this.logger.log(`Resolution #${id} archived`);
+    return {
+      ...toPublicResolution(archived),
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
+
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
   async remove(id: number) {
-    const resolution = await this.findOneInternal(id);
-
-    // Check if resolution has been used
-    const usage_count = await this.prisma.invoices.count({
-      where: { resolution_id: id },
-    });
-
-    if (usage_count > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${usage_count} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: usage_count },
-      );
-    }
-
-    // `current_number` starts at range_from - 1. Reaching range_from means the
-    // DIAN already saw a consecutive from this range — for instance a habilitación
-    // test set, which burns numbers without writing rows in `invoices`. Deleting
-    // the row would erase the only record of which numbers were consumed.
-    if (resolution.current_number >= resolution.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${resolution.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: resolution.current_number },
-      );
-    }
-
-    await this.prisma.invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Resolution #${id} deleted`);
+    return this.archive(id, {});
   }
 
   // ---------------------------------------------------------------------------

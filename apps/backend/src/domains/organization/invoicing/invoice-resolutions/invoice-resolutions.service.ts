@@ -34,6 +34,8 @@ import {
   lockResolutionSeries,
 } from '../../../store/invoicing/utils/resolution-selection.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
+import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
 
@@ -106,9 +108,10 @@ export class OrgInvoiceResolutionsService {
     return organization_id;
   }
 
-  async findAll(store_id?: number) {
+  async findAll(store_id?: number, include_archived = false) {
     const organization_id = this.requireOrganizationId();
     const where: any = { organization_id };
+    if (!include_archived) where.archived_at = null;
     if (typeof store_id === 'number') where.store_id = store_id;
 
     const rows = await this.prisma.invoice_resolutions.findMany({
@@ -313,6 +316,15 @@ export class OrgInvoiceResolutionsService {
       id,
       this.requireOrganizationId(),
     );
+
+    // Archivada = solo lectura: primero que cualquier otra validación.
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -557,37 +569,37 @@ export class OrgInvoiceResolutionsService {
     return { ...toPublicResolution(updated), deactivated_resolution_ids };
   }
 
+  /**
+   * Archivado lógico (nunca hay borrado físico). `findOneInternal` valida la
+   * organización; la transacción corre sin scope porque el util toma el
+   * advisory lock de la serie y toca otras tablas.
+   */
+  async archive(id: number, dto: ArchiveResolutionDto) {
+    const organization_id = this.requireOrganizationId();
+    const current = await this.findOneInternal(id, organization_id);
+
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id,
+        }),
+      );
+
+    this.logger.log(`Org invoice resolution #${id} archived`);
+    return {
+      ...toPublicResolution(archived),
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
+
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
   async remove(id: number) {
-    const resolution = await this.findOneInternal(
-      id,
-      this.requireOrganizationId(),
-    );
-
-    if (resolution._count.invoices > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${resolution._count.invoices} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: resolution._count.invoices },
-      );
-    }
-
-    // `current_number` arranca en `range_from - 1`. Alcanzarlo significa que la
-    // DIAN ya vio un consecutivo de este rango —por ejemplo el set de pruebas de
-    // habilitación, que quema números sin escribir filas en `invoices`—, y borrar
-    // la fila borraría el único registro de qué números se consumieron.
-    if (resolution.current_number >= resolution.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${resolution.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: resolution.current_number },
-      );
-    }
-
-    await this.prisma.withoutScope().invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Org invoice resolution #${id} deleted`);
+    return this.archive(id, {});
   }
 
   private async resolveStoreIdForWrite(

@@ -92,3 +92,9 @@ export type {
   NoteSeriesRow,
 } from './resolutions-in-use.util';
 export { ResolutionsInUseCardComponent } from './resolutions-in-use-card/resolutions-in-use-card.component';
+export {
+  ResolutionArchiveModalComponent,
+  normalizeReplacementPrefix,
+  formatArchivedAt,
+} from './resolution-archive-modal/resolution-archive-modal.component';
+export type { ArchivableResolution } from './resolution-archive-modal/resolution-archive-modal.component';

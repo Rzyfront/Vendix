@@ -859,6 +859,12 @@ export interface InvoiceResolution {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /**
+   * ISO. No nulo = resolución ARCHIVADA: inactiva, solo lectura y oculta por
+   * defecto en los listados. Las resoluciones DIAN nunca se borran.
+   */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
   /** Entidad contable dueña de la resolución, cuando el backend la incluye. */
   accounting_entity_id?: number | null;
   /**
@@ -1505,4 +1511,11 @@ export interface DianEmissionStatus {
   actionable: DianReadinessCheck[];
   /** Blockers waiting on a DIAN verdict. */
   waiting_on_dian: DianReadinessCheck[];
+}
+
+/** Respuesta de `POST {rail}/resolutions/:id/archive`. */
+export interface ArchiveResolutionResult extends InvoiceResolution {
+  archived_at: string;
+  /** Id de la serie de notas creada como reemplazo, si hubo `replacement_prefix`. */
+  replacement_resolution_id: number | null;
 }

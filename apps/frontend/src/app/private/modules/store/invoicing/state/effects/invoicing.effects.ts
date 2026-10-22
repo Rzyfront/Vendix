@@ -5,7 +5,7 @@ import { Observable, of } from 'rxjs';
 import { map, switchMap, exhaustMap, catchError, withLatestFrom, filter } from 'rxjs/operators';
 import { InvoicingService } from '../../services/invoicing.service';
 import * as InvoicingActions from '../actions/invoicing.actions';
-import { selectInvoicingState } from '../selectors/invoicing.selectors';
+import { selectInvoicingState, selectResolutionsIncludeArchived } from '../selectors/invoicing.selectors';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import {
@@ -734,8 +734,9 @@ export class InvoicingEffects {
   loadResolutions$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.loadResolutions),
-      exhaustMap(() =>
-        this.invoicingService.getResolutions().pipe(
+      withLatestFrom(this.store.select(selectResolutionsIncludeArchived)),
+      exhaustMap(([, includeArchived]) =>
+        this.invoicingService.getResolutions(includeArchived).pipe(
           map((response) =>
             InvoicingActions.loadResolutionsSuccess({ resolutions: response.data })
           ),
@@ -829,28 +830,57 @@ export class InvoicingEffects {
     }
   }
 
-  // Delete resolution
+  // Archive resolution
   //
-  // Sin los toasts, un rechazo legítimo del backend (409: la resolución ya
-  // numeró documentos) se veía exactamente igual que no hacer nada: la fila se
-  // quedaba y el usuario concluía que borrar está roto.
-  deleteResolution$ = createEffect(() =>
+  // Las resoluciones DIAN nunca se borran. El rechazo del backend (409: docs en
+  // vuelo, resolución de plataforma, set de pruebas, serie de notas en uso…)
+  // viaja en la acción de fallo para que el modal lo muestre y, ante 015, pida
+  // el prefijo de la serie nueva. Para 015 NO hay toast: el modal ya lo dice.
+  archiveResolution$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(InvoicingActions.deleteResolution),
-      switchMap(({ id }) =>
-        this.invoicingService.deleteResolution(id).pipe(
-          map(() => {
-            this.toastService.success('Resolución eliminada');
-            return InvoicingActions.deleteResolutionSuccess({ id });
+      ofType(InvoicingActions.archiveResolution),
+      switchMap(({ id, replacement_prefix }) =>
+        this.invoicingService.archiveResolution(id, replacement_prefix).pipe(
+          map((response) => {
+            this.toastService.success(
+              response.data?.replacement_resolution_id
+                ? 'Resolución archivada. Se creó la serie de reemplazo.'
+                : 'Resolución archivada',
+            );
+            return InvoicingActions.archiveResolutionSuccess({
+              resolution: response.data,
+            });
           }),
-          catchError((error) =>
-            this.fail(error, (f) =>
-              InvoicingActions.deleteResolutionFailure({ error: f.message }),
-            ),
-          )
-        )
-      )
-    )
+          catchError((error) => {
+            const build = (f: ApiFailure) =>
+              InvoicingActions.archiveResolutionFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              });
+            const failure = describeApiFailure(error);
+            return failure.errorCode === 'INVOICING_RESOLUTION_015'
+              ? of(build(failure))
+              : this.fail(error, build);
+          }),
+        ),
+      ),
+    ),
+  );
+
+  /** Tras archivar (y crear una serie de reemplazo) se recarga el listado. */
+  reloadAfterArchive$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.archiveResolutionSuccess),
+      map(() => InvoicingActions.loadResolutions()),
+    ),
+  );
+
+  reloadOnIncludeArchivedChange$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.setResolutionsIncludeArchived),
+      map(() => InvoicingActions.loadResolutions()),
+    ),
   );
 
   // ── DIAN configs (gate pre-factura) ───────────────────────

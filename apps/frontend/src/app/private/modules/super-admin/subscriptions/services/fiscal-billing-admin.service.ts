@@ -13,6 +13,7 @@ import {
   ApiEnvelope,
   ClonePlatformProfilePayload,
   CreatePlatformProfilePayload,
+  ArchivePlatformResolutionResult,
   CreatePlatformResolutionDto,
   ListPlatformProfilesQuery,
   ListPlatformResolutionsQuery,
@@ -266,6 +267,9 @@ export class FiscalBillingAdminService {
     if (query.is_active !== undefined) {
       params = params.set('is_active', String(query.is_active));
     }
+    if (query.include_archived) {
+      params = params.set('include_archived', 'true');
+    }
     return this.http
       .get<ApiEnvelope<PlatformResolution[]>>(`${this.base}/resolutions`, {
         params,
@@ -305,10 +309,15 @@ export class FiscalBillingAdminService {
       .pipe(map((res) => res.data));
   }
 
-  deleteResolution(id: number): Observable<{ id: number; deleted: boolean }> {
+  /** Las resoluciones no se borran: se archivan (solo lectura, prefijo ocupado). */
+  archiveResolution(
+    id: number,
+    replacementPrefix?: string,
+  ): Observable<ArchivePlatformResolutionResult> {
     return this.http
-      .delete<ApiEnvelope<{ id: number; deleted: boolean }>>(
-        `${this.base}/resolutions/${id}`,
+      .post<ApiEnvelope<ArchivePlatformResolutionResult>>(
+        `${this.base}/resolutions/${id}/archive`,
+        replacementPrefix ? { replacement_prefix: replacementPrefix } : {},
       )
       .pipe(map((res) => res.data));
   }

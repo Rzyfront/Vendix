@@ -8,6 +8,7 @@ datasource db {
 }
 
 model users {
+  invoice_resolutions_archived invoice_resolutions[] @relation("invoice_resolutions_archived_by")
   financial_split_creations order_financial_splits[] @relation("financial_split_creator")
   financial_accounts order_financial_accounts[] @relation("financial_account_customer")
   id                         Int                          @id @default(autoincrement())
@@ -6769,10 +6770,21 @@ model invoice_resolutions {
   technical_key_fingerprint String?                   @db.VarChar(64)
   created_at                DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                 @default(now()) @db.Timestamp(6)
+  /// Archivado lógico (nunca hay borrado físico). `null` = no archivada. Una fila
+  /// archivada SIGUE ocupando su prefijo en los únicos parciales, así una serie
+  /// `NC` archivada no se reabre como `NC1`.
+  ///
+  /// El índice parcial `idx_invoice_resolutions_archived`
+  /// `(accounting_entity_id, document_type) WHERE archived_at IS NULL` existe en
+  /// SQL (migración 20261022120000) y NO se declara aquí: Prisma no soporta
+  /// índices parciales. Un `migrate dev` generado puede proponer su DROP; rechazarlo.
+  archived_at               DateTime?                 @db.Timestamp(6)
+  archived_by_user_id       Int?
 
   organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?             @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  archived_by       users?              @relation("invoice_resolutions_archived_by", fields: [archived_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "invoice_resolutions_archived_by_user_id_fkey")
   invoices          invoices[]
 
   @@index([store_id, is_active])

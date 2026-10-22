@@ -50,6 +50,7 @@ import {
   UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
@@ -659,11 +660,24 @@ export class SubscriptionFiscalController {
   @HttpCode(HttpStatus.OK)
   @Permissions('superadmin:subscriptions:fiscal:write')
   @ApiOperation({
-    summary:
-      'Delete a pristine platform DIAN resolution (used ones must be deactivated)',
+    summary: 'Archive a platform DIAN resolution (no physical delete)',
   })
   async deleteResolution(@Param('id', ParseIntPipe) id: number): Promise<any> {
     const result = await this.fiscalService.deleteResolution(id);
-    return this.responseService.success(result, 'Platform resolution deleted');
+    return this.responseService.success(result, 'Platform resolution archived');
+  }
+
+  @Post('resolutions/:id/archive')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Archive a platform DIAN resolution (optional replacement series)',
+  })
+  async archiveResolution(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ArchiveResolutionDto,
+  ): Promise<any> {
+    const result = await this.fiscalService.archiveResolution(id, dto);
+    return this.responseService.success(result, 'Platform resolution archived');
   }
 }

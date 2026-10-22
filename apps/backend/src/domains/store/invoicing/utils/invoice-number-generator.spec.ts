@@ -488,6 +488,78 @@ describe('InvoiceNumberGenerator', () => {
       expect(data.is_active).toBe(true);
     });
 
+    it('la búsqueda de la dormida excluye las series archivadas (no se reactivan)', async () => {
+      const overrides = withoutRow();
+      const { service, tx } = createService(overrides);
+
+      await service.generateNextNumber({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        document_type: 'credit_note',
+      });
+
+      const wheres = tx.invoice_resolutions.findFirst.mock.calls.map(
+        (c: any[]) => c[0].where,
+      );
+      // activa (1ª) y dormida (2ª) filtran archivado; la del prefijo no.
+      expect(wheres[0]).toHaveProperty('archived_at', null);
+      expect(wheres[1]).toHaveProperty('archived_at', null);
+      expect(wheres[2]).not.toHaveProperty('archived_at');
+      expect(tx.invoice_resolutions.update).not.toHaveBeenCalled();
+    });
+
+    it('prefijo por defecto ocupado por una serie archivada: rechaza sin crear ni actualizar', async () => {
+      const invoice_resolutions = {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null) // activa
+          .mockResolvedValueOnce(null) // dormida (excluye archivadas)
+          .mockResolvedValueOnce({ id: 55, archived_at: new Date() }), // prefijo ocupado
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        findUnique: jest.fn(),
+      };
+      const { service, tx } = createService({ invoice_resolutions });
+
+      const attempt = service.generateNextNumber({
+        organization_id: 1,
+        accounting_entity_id: 77,
+        document_type: 'credit_note',
+      });
+      await expect(attempt).rejects.toThrow('Crea una serie de notas nueva');
+      await expect(attempt).rejects.toMatchObject({
+        errorCode: 'FISCAL_RESOLUTION_MISSING',
+      });
+
+      expect(tx.invoice_resolutions.create).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.update).not.toHaveBeenCalled();
+      expect(tx.invoice_resolutions.findFirst.mock.calls[2][0].where).toEqual({
+        accounting_entity_id: 77,
+        document_type: 'credit_note',
+        prefix: 'NCVS',
+      });
+    });
+
+    it('si la archivada era la legacy NC y el prefijo por defecto está libre, abre la serie nueva', async () => {
+      // La dormida excluye archivadas (null); el prefijo NCVS no lo ocupa nadie.
+      const overrides = withoutRow();
+      const { service, tx } = createService(overrides);
+
+      await expect(
+        service.generateNextNumber({
+          organization_id: 1,
+          accounting_entity_id: 77,
+          document_type: 'credit_note',
+        }),
+      ).resolves.toEqual(expect.objectContaining({ resolution_id: 31 }));
+
+      expect(tx.invoice_resolutions.create).toHaveBeenCalledTimes(1);
+      expect(tx.invoice_resolutions.create.mock.calls[0][0].data.prefix).toBe(
+        'NCVS',
+      );
+    });
+
     /** CONTRAPRUEBA del auto-alta. */
     it('NO fabrica numeración para una factura de venta sin resolución', async () => {
       const { service, tx } = createService(withoutRow());

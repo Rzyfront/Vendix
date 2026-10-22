@@ -48,6 +48,7 @@ export class PlatformInvoicingStore {
   private readonly _resolutions = signal<PlatformResolution[]>([]);
   private readonly _loadingStatus = signal(true);
   private readonly _loadingResolutions = signal(false);
+  private readonly _includeArchived = signal(false);
   private readonly _inUse = signal<ResolutionsInUseResponse | null>(null);
   private readonly _loadingInUse = signal(false);
 
@@ -69,6 +70,8 @@ export class PlatformInvoicingStore {
   readonly resolutions = this._resolutions.asReadonly();
   readonly loadingStatus = this._loadingStatus.asReadonly();
   readonly loadingResolutions = this._loadingResolutions.asReadonly();
+  /** «Ver archivadas»: el listado se pide con `include_archived=true`. */
+  readonly includeArchived = this._includeArchived.asReadonly();
   /** Qué serie toma hoy el generador por tipo de documento. */
   readonly inUse = this._inUse.asReadonly();
   readonly loadingInUse = this._loadingInUse.asReadonly();
@@ -156,11 +159,17 @@ export class PlatformInvoicingStore {
     this._loadingStatus.set(false);
   }
 
+  setIncludeArchived(value: boolean): void {
+    if (this._includeArchived() === value) return;
+    this._includeArchived.set(value);
+    this.loadResolutions(true);
+  }
+
   loadResolutions(force = false): void {
     if (!force && this._resolutions().length > 0) return;
     this._loadingResolutions.set(true);
     this.fiscal
-      .listResolutions()
+      .listResolutions(this._includeArchived() ? { include_archived: true } : {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (rows) => {

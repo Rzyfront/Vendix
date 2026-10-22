@@ -26,6 +26,8 @@ import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/x
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
 import { findActiveResolution } from '../../../store/invoicing/utils/resolution-selection.util';
+import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
 // la forma de una ClTec no puede tener dos definiciones, o el carril que valida
 // con la laxa emite lo que el otro rechaza.
@@ -4300,6 +4302,9 @@ export class SubscriptionFiscalService {
       store_id: null,
       accounting_entity_id,
     };
+    if (!query.include_archived) {
+      where.archived_at = null;
+    }
     if (query.document_type) {
       where.document_type = query.document_type;
     }
@@ -4379,6 +4384,7 @@ export class SubscriptionFiscalService {
         accounting_entity_id: args.accountingEntityId,
         document_type: args.documentType,
         is_active: true,
+        archived_at: null,
         valid_from: { lte: now },
         valid_to: { gte: now },
       },
@@ -4573,6 +4579,13 @@ export class SubscriptionFiscalService {
    */
   async updateResolution(id: number, dto: UpdatePlatformResolutionDto) {
     const current = await this.findPlatformResolution(id);
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
     const issued = current._count.invoices;
     // `current_number` starts at range_from - 1, so reaching range_from means
     // at least one number left the building.
@@ -4735,38 +4748,36 @@ export class SubscriptionFiscalService {
   }
 
   /**
-   * Delete a platform resolution, but only while it is pristine.
-   *
-   * A resolution that already numbered a document is fiscal evidence: deleting
-   * it would orphan the trail of which numbers were reported under which DIAN
-   * authorization. Those get deactivated, never removed.
+   * Archiva (soft delete) una resolución de plataforma. Nunca se borra: la
+   * validación (en vuelo, cableada, set de pruebas, serie de notas) y la serie
+   * de reemplazo las resuelve `archiveResolutionInTx`.
    */
-  async deleteResolution(id: number) {
+  async archiveResolution(id: number, dto: ArchiveResolutionDto) {
     const current = await this.findPlatformResolution(id);
 
-    if (current._count.invoices > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${current._count.invoices} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: current._count.invoices },
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id: current.organization_id,
+        }),
       );
-    }
-    if (current.current_number >= current.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${current.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: current.current_number },
-      );
-    }
 
-    await this.assertResolutionNotWired(id, 'borrar');
+    this.logger.log(`Platform resolution ${id} archived`);
+    return {
+      ...archived,
+      environment: (await this.getSettings()).environment,
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
 
-    await this.prisma.withoutScope().invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Platform resolution ${id} deleted`);
-    return { id, deleted: true };
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
+  async deleteResolution(id: number) {
+    return this.archiveResolution(id, {});
   }
 
   /**
@@ -5196,6 +5207,7 @@ export class SubscriptionFiscalService {
         accounting_entity_id: accountingEntityId,
         document_type: 'sales_invoice',
         is_active: true,
+        archived_at: null,
       },
     });
     if (!resolution) {
