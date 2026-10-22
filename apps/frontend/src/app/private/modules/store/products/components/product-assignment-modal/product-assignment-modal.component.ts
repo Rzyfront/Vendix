@@ -51,7 +51,7 @@ function escapeHtml(value: string): string {
 /**
  * Modal reutilizable "Productos de <nombre>": asigna o quita productos en bloque
  * de una categoría o una marca. El diff (agregados / quitados) se calcula contra
- * los miembros actuales y se envía en tandas de 500 ids.
+ * los miembros actuales y se envía en tandas de 100 ids.
  */
 @Component({
   selector: 'app-product-assignment-modal',
