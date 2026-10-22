@@ -879,12 +879,13 @@ export class FiscalProductionReadinessService {
             'alimenta el CUFE: con una clave ajena el CUFE que calculamos no coincide ' +
             'con el que la DIAN recomputa desde el XML, y el documento se rechaza con ' +
             'el consecutivo ya gastado. ' +
-            'SI LA RESOLUCIÓN ES LA DE HABILITACIÓN (prefijo SETP), esto es lo ' +
-            'esperado y no hay nada que corregir en ella: ese rango es el sandbox de ' +
-            'la DIAN, lo comparten todos los contribuyentes y NO es facturable. Lo ' +
-            'que falta es la resolución de PRODUCCIÓN: solicítala en MUISCA (Formato ' +
-            '1876), asocia el rango en el portal, y regístrala aquí con su propio ' +
-            'prefijo y su propia clave técnica.'
+            'Si esta resolución usa la clave técnica de habilitación (la del ' +
+            'rango de pruebas SETP, que la DIAN reparte a todos los ' +
+            'contribuyentes y NO es facturable), es la clave del sandbox cargada ' +
+            'en una resolución de producción. Lo que falta es la resolución de ' +
+            'PRODUCCIÓN: solicítala en MUISCA (Formato 1876), asocia el rango en ' +
+            'el portal, y regístrala aquí con su propio prefijo y su propia ' +
+            'clave técnica.'
           : '',
         owner: 'tenant',
       },
@@ -1249,6 +1250,7 @@ export class FiscalProductionReadinessService {
     // el detector funcionando el día que se anule la columna en claro — que es
     // un paso de DATOS pendiente de aprobación, no algo que este servicio pueda
     // dar por hecho.
+
     // El rango de habilitación (SETP) comparte la ClTec fija por diseño de la
     // DIAN: no es hallazgo. Se excluye por prefijo en el lado PROPIO, en JS y no
     // con un `NOT` de Prisma (excluiría las filas con `prefix` NULL). Se revisan

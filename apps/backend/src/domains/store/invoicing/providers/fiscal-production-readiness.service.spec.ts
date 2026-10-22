@@ -211,6 +211,7 @@ describe('FiscalProductionReadinessService', () => {
     // `own` puede ser una fila, un arreglo de filas o null. La primera llamada a
     // `findMany` es la consulta propia; las siguientes, la de ajenas (una por
     // fila propia revisada).
+    let lastFindMany: jest.Mock;
     function withResolutions(own: any, others: any[]) {
       const own_rows = own == null ? [] : Array.isArray(own) ? own : [own];
       const client = {
@@ -223,6 +224,7 @@ describe('FiscalProductionReadinessService', () => {
             .mockResolvedValue(others),
         },
       };
+      lastFindMany = client.invoice_resolutions.findMany;
       return new FiscalProductionReadinessService(
         { withoutScope: () => client } as any,
         {
@@ -263,6 +265,44 @@ describe('FiscalProductionReadinessService', () => {
       // un hallazgo. La 8 es de otro NIT: sí lo es.
       expect(finding!.foreign_count).toBe(1);
       expect(JSON.stringify(finding)).not.toContain('902075738');
+    });
+
+    it('SEC3-L3: la consulta de ajenas excluye todas las filas propias (SETP incluida) y consulta solo la huella de la FE', async () => {
+      const service = withResolutions(
+        [
+          {
+            id: 10,
+            prefix: 'SETP',
+            technical_key_fingerprint: 'fp-setp',
+            accounting_entity: { tax_id: '902056589' },
+          },
+          {
+            id: 3,
+            prefix: 'FE',
+            technical_key_fingerprint: 'fp-fe',
+            accounting_entity: { tax_id: '902056589' },
+          },
+        ],
+        [{ id: 8, accounting_entity: { tax_id: '902075738' } }],
+      );
+
+      const finding = await service.findResolutionsSharingTechnicalKey(
+        PARAMS,
+        'production',
+      );
+
+      expect(finding).toEqual({ resolution_id: 3, foreign_count: 1 });
+      // 1 consulta propia + 1 de ajenas: la SETP propia no genera consulta.
+      expect(lastFindMany).toHaveBeenCalledTimes(2);
+      expect(lastFindMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: {
+            OR: [{ technical_key_fingerprint: 'fp-fe' }],
+            id: { notIn: [10, 3] },
+          },
+        }),
+      );
     });
 
     it('no reporta nada cuando la clave solo la usan entidades del mismo NIT', async () => {
