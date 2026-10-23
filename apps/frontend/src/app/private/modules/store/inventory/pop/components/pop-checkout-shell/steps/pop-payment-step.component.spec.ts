@@ -111,4 +111,61 @@ describe('PopPaymentStepComponent — payment plan reactive bridge', () => {
     fixture.detectChanges();
     expect(component.installmentsBalanced()).toBe(false);
   });
+
+  // QUI-713 — cambiar CUOTAS / CADA (DÍAS) recalcula sin pulsar "Generar".
+  // El bloque `@if (installments)` del template lee `form.controls.mode.value`
+  // (no signal) y en zoneless no se re-renderiza tras `setValue`; se invoca el
+  // handler del `(change)` con un evento falso, igual que el binding del template.
+  function commitInput(field: 'count' | 'everyDays', value: number): void {
+    const event = { target: { value: String(value) } } as unknown as Event;
+    component.onInstallmentParamsChange(event, field);
+    fixture.detectChanges();
+  }
+
+  it('(g) QUI-713: cambiar CUOTAS a 4 regenera 4 filas que cuadran con el saldo', () => {
+    setMode('installments');
+    component.generateInstallments();
+    fixture.detectChanges();
+    expect(component.form.controls.installments.length).toBe(2);
+
+    commitInput('count', 4);
+
+    const rows = component.plan().payment_installments;
+    expect(rows.length).toBe(4);
+    const sum = rows.reduce((s, i) => s + Number(i.amount ?? 0), 0);
+    expect(Math.abs(sum - component.pendingBalance())).toBeLessThanOrEqual(0.01);
+    const dates = rows.map((r) => r.scheduled_date);
+    expect(new Set(dates).size).toBe(4);
+    expect([...dates].sort()).toEqual(dates);
+  });
+
+  it('(h) QUI-713: cambiar CADA (DÍAS) regenera las fechas con el nuevo intervalo', () => {
+    setMode('installments');
+    component.generateInstallments();
+    fixture.detectChanges();
+    const before = component.plan().payment_installments.map((r) => r.scheduled_date);
+
+    commitInput('everyDays', 10);
+
+    const after = component.plan().payment_installments.map((r) => r.scheduled_date);
+    expect(after.length).toBe(2);
+    expect(after).not.toEqual(before);
+    const diffDays = Math.round(
+      (Date.parse(after[1]) - Date.parse(after[0])) / 86_400_000,
+    );
+    expect(diffDays).toBe(10);
+  });
+
+  it('(i) QUI-713: fuera de modo installments el change no genera filas', () => {
+    setMode('installments');
+    commitInput('count', 3);
+    setMode('partial');
+    expect(component.form.controls.installments.length).toBe(3);
+    component.form.controls.installments.clear();
+    component.onInstallmentParamsChange(
+      { target: { value: '5' } } as unknown as Event,
+      'count',
+    );
+    expect(component.form.controls.installments.length).toBe(0);
+  });
 });
