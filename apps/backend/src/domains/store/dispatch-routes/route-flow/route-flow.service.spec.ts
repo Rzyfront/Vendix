@@ -1,3 +1,4 @@
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RouteFlowService } from './route-flow.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -815,5 +816,47 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
       expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
     });
+  });
+
+  // ── QUI-492: existencia de la parada (404) antes que estado de planilla (400) ──
+  describe('orden de validación: parada inexistente (404) antes que estado de planilla (400)', () => {
+    const cases: Array<[string, string, (s: RouteFlowService) => Promise<any>]> = [
+      [
+        'settleStop',
+        'closed',
+        (s) => s.settleStop(ROUTE_ID, 99999999, { result: 'delivered' } as any),
+      ],
+      ['startStop', 'closed', (s) => s.startStop(ROUTE_ID, 99999999)],
+      [
+        'releaseStop',
+        'closed',
+        (s) => s.releaseStop(ROUTE_ID, 99999999, { reason: 'x' } as any),
+      ],
+    ];
+
+    it.each(cases)(
+      '%s: planilla %s + parada inexistente => NotFoundException',
+      async (_name, status, call) => {
+        prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+          buildRoute({ status }),
+        );
+        prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(null);
+        await expect(call(service)).rejects.toBeInstanceOf(NotFoundException);
+      },
+    );
+
+    it.each(cases)(
+      '%s: planilla %s + parada existente => BadRequestException por estado de planilla',
+      async (_name, status, call) => {
+        prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+          buildRoute({ status }),
+        );
+        prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+        const err: any = await call(service).catch((e) => e);
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect(err.message).toContain(`'${status}'`);
+        expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+      },
+    );
   });
 });
