@@ -54,6 +54,16 @@ import { DataCollectionTemplatesService } from '../../../data-collection/service
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
 import { ServiceRegistryService } from '../service-reminders-page/service-registry.service';
 
+interface CheckinLine {
+  key: number;
+  product_id: number | null;
+  product_variant_id: number | null;
+  quantity: number;
+  unit_price: number | null;
+  /** true si el usuario cambió el precio: solo entonces se envía `unit_price`. */
+  price_edited: boolean;
+}
+
 export interface ServiceSessionRow {
   id: number;
   status: string;
@@ -227,7 +237,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     { value: 0, label: 'Usar el formulario de cada servicio' },
     ...this.intakeTemplates().map((t) => ({ value: t.id, label: t.name })),
   ]);
-  readonly newIntakeTemplateId = signal<number>(0);
+  readonly designingTemplate = signal(false);
   readonly editIntakeTemplateId = signal<number>(0);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
@@ -344,9 +354,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Presupuesto inicial e insumo inicial (Aplica como opcional a TODOS los tipos)
   readonly checkinBudgetAmount = signal<number | null>(null);
-  readonly checkinInitialProductId = signal<number | null>(null);
-  readonly checkinInitialProductQty = signal<number>(1);
-  readonly checkinInitialProductPrice = signal<number | null>(null);
+  /** Productos que entran a la cuenta desde el ingreso (además del servicio). */
+  readonly checkinLines = signal<CheckinLine[]>([]);
+  private checkinLineSeq = 0;
 
   // Tracking de access_url por sesión (para compartir seguimiento con QR y WhatsApp)
   readonly lastAccessUrlBySession = signal<Map<number, string>>(new Map());
@@ -484,9 +494,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly getItemWidthClass = getItemWidthClass;
 
   readonly checkinInitialLineTotal = computed(() => {
-    if (!this.checkinInitialProductId()) return 0;
-    return Math.max(0, Number(this.checkinInitialProductQty() || 1)) *
-      Math.max(0, Number(this.checkinInitialProductPrice() ?? 0));
+    return this.checkinLines().reduce((acc, line) => acc + this.checkinLineEstimate(line), 0);
   });
 
   /** Total de la línea con impuestos; líneas viejas sin `final_unit_price` muestran su base. */
@@ -908,9 +916,51 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     );
   }
 
-  /** Recolección de datos en otra pestaña para crear o editar los campos del formulario. */
-  openIntakeDesigner(): void {
-    window.open('/admin/data-collection/templates', '_blank');
+  /**
+   * Abre el editor de la plantilla de la estación en esta misma pestaña. Si la
+   * estación aún no tiene plantilla, crea una vacía ("Atención de servicio") y la
+   * deja ligada; el editor vuelve a Estaciones al guardar.
+   */
+  designStationTemplate(station: ServiceStation): void {
+    const openEditor = (templateId: number) => {
+      this.designingTemplate.set(false);
+      this.showConfigModal.set(false);
+      this.showCreateModal.set(false);
+      this.router.navigate(['/admin/data-collection/templates', templateId, 'edit'], {
+        queryParams: { returnTo: '/admin/services/stations' },
+      });
+    };
+    const linked = Number(this.editIntakeTemplateId()) || station.intake_template_id;
+    if (linked) {
+      openEditor(linked);
+      return;
+    }
+    this.designingTemplate.set(true);
+    this.templatesApi
+      .create({ name: `Plantilla ${station.name}`, entity_type: 'service_session', status: 'active', sections: [] })
+      .subscribe({
+        next: (template) => {
+          this.stationsApi.update(station.id, { intake_template_id: template.id }).subscribe({
+            next: () => openEditor(template.id),
+            error: (error: unknown) => {
+              this.designingTemplate.set(false);
+              this.toastService.error(this.errorText(error, 'No fue posible ligar la plantilla a la estación.'));
+            },
+          });
+        },
+        error: (error: unknown) => {
+          this.designingTemplate.set(false);
+          this.toastService.error(this.errorText(error, 'No fue posible crear la plantilla de la estación.'));
+        },
+      });
+  }
+
+  /** Desde "Crear estación": guarda la estación y pasa a diseñar su plantilla. */
+  createStationAndDesignTemplate(): void {
+    this.createStation((station) => {
+      this.editIntakeTemplateId.set(0);
+      this.designStationTemplate(station);
+    });
   }
 
   stationTracksTime(stationId: number): boolean {
@@ -1118,12 +1168,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.newStationType.set('carro');
     this.newTrackTime.set(false);
     this.newTargetMinutes.set(null);
-    this.newIntakeTemplateId.set(0);
     this.loadIntakeTemplates();
     this.showCreateModal.set(true);
   }
 
-  createStation(): void {
+  createStation(afterCreate?: (station: ServiceStation) => void): void {
     const name = this.newName().trim();
     if (!name) {
       this.toastService.error('El nombre de la estación es obligatorio.');
@@ -1136,13 +1185,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       station_type: this.newStationType(),
       track_time: this.newTrackTime(),
       target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
-      intake_template_id: Number(this.newIntakeTemplateId()) || null,
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
         this.showCreateModal.set(false);
         this.toastService.success('Estación creada con éxito.');
         this.loadStations(station.id);
+        afterCreate?.(station);
       },
       error: (error: unknown) => {
         this.saving.set(false);
@@ -1219,14 +1268,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
     // Limpiar campos de presupuesto e insumos iniciales
     this.checkinBudgetAmount.set(null);
-    this.checkinInitialProductId.set(null);
-    this.checkinInitialProductQty.set(1);
-    this.checkinInitialProductPrice.set(null);
+    this.checkinLines.set([]);
 
     // Asegurar carga de catálogo de productos para el selector de insumos
-    if (!this.allCatalogProducts().length) {
-      this.stationsApi.getAllProducts().subscribe({
-        next: (prods) => this.allCatalogProducts.set(prods || []),
+    // Catálogo vendible con variantes para las líneas de "Agregar producto"
+    if (!this.sellableCatalogProducts().length) {
+      this.stationsApi.getSellableProducts().subscribe({
+        next: (prods) => this.sellableCatalogProducts.set(prods || []),
         error: () => {},
       });
     }
@@ -1385,17 +1433,81 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return this.services()[0]?.id ?? 0;
   }
 
-  onCheckinInitialProductSelect(productId: number | null): void {
-    const id = productId ? Number(productId) : null;
-    this.checkinInitialProductId.set(id);
-    if (!id) {
-      this.checkinInitialProductPrice.set(null);
-      return;
-    }
-    const found = this.allCatalogProducts().find((p) => p.id === id);
-    if (found) {
-      this.checkinInitialProductPrice.set(Number(found.base_price || 0));
-    }
+  readonly checkinProductOptions = computed<SelectorOption[]>(() =>
+    this.sellableCatalogProducts()
+      .filter((prod) => prod.is_ingredient !== true && prod.is_sellable !== false && prod.product_type !== 'service')
+      .map((prod) => ({ value: prod.id, label: prod.name })),
+  );
+
+  checkinLineVariantOptions(productId: number | null): SelectorOption[] {
+    if (!productId) return [];
+    const product = this.sellableCatalogProducts().find((p) => p.id === productId);
+    return (product?.product_variants ?? []).map((v: any) => ({ value: v.id, label: v.name || v.sku }));
+  }
+
+  addCheckinLine(): void {
+    this.checkinLines.update((lines) => [
+      ...lines,
+      { key: ++this.checkinLineSeq, product_id: null, product_variant_id: null, quantity: 1, unit_price: null, price_edited: false },
+    ]);
+  }
+
+  removeCheckinLine(key: number): void {
+    this.checkinLines.update((lines) => lines.filter((line) => line.key !== key));
+  }
+
+  updateCheckinLine(key: number, patch: Partial<CheckinLine>): void {
+    this.checkinLines.update((lines) =>
+      lines.map((line) =>
+        line.key === key
+          ? { ...line, ...patch, ...('unit_price' in patch ? { price_edited: true } : {}) }
+          : line,
+      ),
+    );
+  }
+
+  onCheckinLineProduct(key: number, productId: number | string | null): void {
+    const id = Number(productId) || null;
+    const product = this.sellableCatalogProducts().find((p) => p.id === id);
+    this.checkinLines.update((lines) =>
+      lines.map((line) =>
+        line.key === key
+          ? { ...line, product_id: id, product_variant_id: null, unit_price: product ? this.publishedPrice(product) : null, price_edited: false }
+          : line,
+      ),
+    );
+  }
+
+  onCheckinLineVariant(key: number, variantId: number | string | null): void {
+    const vid = Number(variantId) || null;
+    this.checkinLines.update((lines) =>
+      lines.map((line) => {
+        if (line.key !== key) return line;
+        const product = this.sellableCatalogProducts().find((p) => p.id === line.product_id);
+        const variant = product?.product_variants?.find((v: any) => v.id === vid);
+        return { ...line, product_variant_id: vid, unit_price: this.publishedPrice(product, variant), price_edited: false };
+      }),
+    );
+  }
+
+  /** Precio publicado (antes del IVA adicional), misma escalera que el backend. */
+  private publishedPrice(product: any, variant?: any): number {
+    if (variant?.is_on_sale && Number(variant.sale_price) > 0) return Number(variant.sale_price);
+    if (Number(variant?.price_override) > 0) return Number(variant.price_override);
+    if (product?.is_on_sale && Number(product.sale_price) > 0) return Number(product.sale_price);
+    return Number(product?.base_price || 0);
+  }
+
+  /** Estimado con IVA: `final_price` del catálogo ya trae el impuesto resuelto por el backend. */
+  private checkinLineEstimate(line: CheckinLine): number {
+    if (!line.product_id) return 0;
+    const product = this.sellableCatalogProducts().find((p) => p.id === line.product_id);
+    const variant = product?.product_variants?.find((v: any) => v.id === line.product_variant_id);
+    const published = this.publishedPrice(product, variant);
+    const finalPrice = Number(variant?.final_price ?? product?.final_price ?? published);
+    const taxFactor = published > 0 ? finalPrice / published : 1;
+    const unit = line.price_edited ? Number(line.unit_price ?? 0) * taxFactor : finalPrice;
+    return Math.max(1, Number(line.quantity || 1)) * Math.max(0, unit);
   }
 
   submitCheckin(): void {
@@ -1549,9 +1661,15 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     };
 
     const budgetVal = this.checkinBudgetAmount();
-    const initialProdId = this.checkinInitialProductId();
-    const initialQty = Math.max(1, Number(this.checkinInitialProductQty() || 1));
-    const initialPrice = this.checkinInitialProductPrice() != null ? Number(this.checkinInitialProductPrice()) : undefined;
+    const initialLines = this.checkinLines()
+      .filter((line) => line.product_id)
+      .map((line) => ({
+        product_id: line.product_id!,
+        ...(line.product_variant_id ? { product_variant_id: line.product_variant_id } : {}),
+        quantity: Math.max(1, Number(line.quantity || 1)),
+        // Sin editar, la cuenta toma el precio de catálogo (con oferta/variante).
+        ...(line.price_edited && line.unit_price != null ? { unit_price: Number(line.unit_price) } : {}),
+      }));
 
     this.http.post<any>(`${environment.apiUrl}/store/service-sessions`, payload).subscribe({
       next: (res) => {
@@ -1573,18 +1691,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
                 ),
             });
           }
-          // 2. Agregar insumo inicial opcional para TODOS los tipos
-          if (initialProdId) {
-            this.stationsApi.addItem(newSessionId, {
-              product_id: Number(initialProdId),
-              quantity: initialQty,
-              unit_price: initialPrice,
-              description: 'Insumo / producto inicial de ingreso',
-            }).subscribe({
+          // 2. Productos del ingreso: todos en una sola transacción
+          if (initialLines.length) {
+            this.stationsApi.addItemsBulk(newSessionId, initialLines).subscribe({
               next: () => this.loadActiveSessions(),
               error: (error: unknown) =>
                 this.toastService.warning(
-                  this.errorText(error, 'La atención se abrió, pero no se pudo agregar el producto inicial. Agrégalo desde "Ver Cuenta".'),
+                  this.errorText(error, 'La atención se abrió, pero no se pudieron agregar los productos. Agrégalos desde "Ver Cuenta".'),
                   undefined,
                   6000,
                 ),

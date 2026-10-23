@@ -108,7 +108,7 @@ interface Selection {
         subtitle="Editor de plantilla"
         icon="layout-template"
         [showBackButton]="true"
-        backRoute="/admin/data-collection/templates"
+        [backRoute]="returnTo() || '/admin/data-collection/templates'"
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
@@ -809,6 +809,13 @@ export class TemplateEditorComponent implements OnInit {
 
   templateName = computed(() => this.formData().name || 'Nueva Plantilla');
 
+  /**
+   * Pantalla que abrió el editor (p. ej. Estaciones de servicio al diseñar la
+   * plantilla de una estación): Volver y Guardar regresan ahí. Solo rutas internas
+   * del panel, para no convertir el parámetro en una redirección abierta.
+   */
+  readonly returnTo = signal<string | null>(null);
+
   previewSteps = computed(() => {
     const fd = this.formData();
     if (fd.use_tabs && fd.tabs.length > 0) {
@@ -893,6 +900,8 @@ export class TemplateEditorComponent implements OnInit {
   readonly activeTabId = computed(() => String(this.activeTabIndex()));
 
   ngOnInit() {
+    const returnTo = this.route.snapshot.queryParamMap.get('returnTo');
+    if (returnTo && /^\/admin\/[\w\-/?=&]*$/.test(returnTo)) this.returnTo.set(returnTo);
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!id) {
       this.toastService.error('ID de plantilla no valido');
@@ -1026,6 +1035,11 @@ export class TemplateEditorComponent implements OnInit {
     if (id === 'preview') this.togglePreview();
   }
 
+  private goBackIfRequested(): void {
+    const target = this.returnTo();
+    if (target) this.router.navigateByUrl(target);
+  }
+
   save() {
     const fd = this.formData();
     if (!fd.name) return;
@@ -1059,6 +1073,7 @@ export class TemplateEditorComponent implements OnInit {
             next: () => {
               this.saving.set(false);
               this.toastService.success('Plantilla actualizada');
+              this.goBackIfRequested();
             },
             error: () => {
               this.saving.set(false);

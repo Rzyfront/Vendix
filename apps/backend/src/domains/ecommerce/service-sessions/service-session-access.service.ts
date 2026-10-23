@@ -139,7 +139,7 @@ export class ServiceSessionAccessService {
 
   async getPublicProgress(token: string) {
     const binding = await this.resolveToken(token);
-    const [events, budget, proposal, order] = await Promise.all([
+    const [events, budget, proposal, order, details] = await Promise.all([
       this.prisma.service_progress_events.findMany({
         where: { store_id: binding.store_id, session_id: binding.session_id, public_text: { not: null } },
         select: { event_type: true, public_text: true, created_at: true },
@@ -166,7 +166,10 @@ export class ServiceSessionAccessService {
             select: {
               currency: true,
               grand_total: true,
+              subtotal_amount: true,
+              tax_amount: true,
               order_items: {
+                where: { cancelled_at: null },
                 orderBy: { id: 'asc' },
                 take: 100,
                 select: {
@@ -175,12 +178,14 @@ export class ServiceSessionAccessService {
                   quantity: true,
                   unit_price: true,
                   total_price: true,
+                  final_unit_price: true,
                   item_type: true,
                 },
               },
             },
           })
         : Promise.resolve(null),
+      this.loadPublicDetails(binding.store_id, binding.session_id),
     ]);
     const verifiedSnapshot = proposal ? this.verifyProposalSnapshot(proposal) : false;
     const currentOrder = proposal && binding.order_id
@@ -210,6 +215,7 @@ export class ServiceSessionAccessService {
     return {
       store_id: binding.store_id,
       status: binding.status,
+      service: details,
       budget: budget ? {
         amount: String(budget.amount),
         currency: budget.currency,
@@ -218,14 +224,23 @@ export class ServiceSessionAccessService {
       } : null,
       account: {
         currency: order?.currency ?? budget?.currency ?? 'COP',
-        items: (order?.order_items ?? []).map((item) => ({
-          name: item.product_name,
-          description: item.description,
-          quantity: Number(item.quantity),
-          unit_price: String(item.unit_price),
-          total: String(item.total_price),
-          item_type: item.item_type,
-        })),
+        // Precios con impuestos (lo que el cliente pagará); líneas viejas sin
+        // final_unit_price caen a su base.
+        items: (order?.order_items ?? []).map((item) => {
+          const unit = item.final_unit_price ?? item.unit_price;
+          return {
+            name: item.product_name,
+            description: item.description,
+            quantity: Number(item.quantity),
+            unit_price: String(unit),
+            total: item.final_unit_price != null
+              ? String(Math.round(Number(item.final_unit_price) * Number(item.quantity) * 100) / 100)
+              : String(item.total_price),
+            item_type: item.item_type,
+          };
+        }),
+        subtotal: String(order?.subtotal_amount ?? 0),
+        tax: String(order?.tax_amount ?? 0),
         total: String(accountTotal),
         budget_spent: String(accountTotal),
         budget_amount: budgetAmount === null ? null : String(budgetAmount),
@@ -238,6 +253,30 @@ export class ServiceSessionAccessService {
         created_at: e.created_at,
       })),
       events_have_older: events.length > 100,
+    };
+  }
+
+  /**
+   * Qué se está atendiendo, para que el cliente reconozca su servicio: estación,
+   * servicio, lo atendido (p. ej. "Yamaha NMAX · ABC123") y hora de ingreso. Sin
+   * datos personales: el enlace puede reenviarse.
+   */
+  private async loadPublicDetails(storeId: number, sessionId: number) {
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+      select: { station_id: true, product_id: true, opened_at: true },
+    });
+    if (!session) return null;
+    const [station, product, subject] = await Promise.all([
+      this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { name: true } }),
+      this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { name: true } }),
+      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true } }),
+    ]);
+    return {
+      station_name: station?.name ?? null,
+      service_name: product?.name ?? null,
+      subject_label: subject?.subject_type === 'person' ? null : subject?.label ?? null,
+      opened_at: session.opened_at,
     };
   }
 

@@ -293,6 +293,16 @@ export class ServiceStationsService {
     );
   }
 
+  /** Varias líneas en una sola transacción (todo o nada). */
+  addItemsBulk(
+    sessionId: number,
+    items: Array<{ product_id: number; product_variant_id?: number; quantity?: number; unit_price?: number; description?: string }>,
+  ): Observable<any> {
+    return this.http
+      .post<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${sessionId}/items/bulk`, { items })
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
   removeItem(sessionId: number, itemId: number): Observable<any> {
     return this.http.delete<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${sessionId}/items/${itemId}`).pipe(
       map((r) => this.unwrap(r)),

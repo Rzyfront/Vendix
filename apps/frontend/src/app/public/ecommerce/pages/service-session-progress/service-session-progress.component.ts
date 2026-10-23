@@ -22,9 +22,13 @@ interface ServiceProposal {
 interface PublicProgress {
   store_id: number;
   status: string;
+  /** Qué se atiende: estación, servicio y lo atendido (p. ej. la moto). */
+  service?: { station_name: string | null; service_name: string | null; subject_label: string | null; opened_at: string } | null;
   account: {
     currency: string;
     items: Array<{ name: string; description?: string | null; quantity: number; unit_price: string; total: string; item_type: string }>;
+    subtotal?: string;
+    tax?: string;
     total: string;
     budget_spent: string;
     budget_amount: string | null;
@@ -56,6 +60,8 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   readonly decisionPrompt = signal<'approved' | 'rejected' | null>(null);
   readonly decisionMessage = signal<string | null>(null);
   readonly connected = signal(false);
+  /** El enlace se cierra al finalizar la atención: se conserva la última cuenta vista. */
+  readonly finished = signal(false);
   readonly proposalLines = computed(() => {
     const lines = this.progress()?.proposal?.lines as { items?: unknown[] } | null | undefined;
     return Array.isArray(lines?.items) ? (lines.items as Array<Record<string, unknown>>) : [];
@@ -204,8 +210,11 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
       });
     }
     this.stream.addEventListener('link_expired', () => {
-      this.state.set('unavailable');
       this.stream?.close();
+      this.connected.set(false);
+      // Con una cuenta ya mostrada, el cierre del enlace es el fin del servicio.
+      if (this.progress()) this.finished.set(true);
+      else this.state.set('unavailable');
     });
   }
 }

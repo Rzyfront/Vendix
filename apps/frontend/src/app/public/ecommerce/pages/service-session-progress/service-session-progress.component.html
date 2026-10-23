@@ -4,7 +4,7 @@
     <h1 id="page-title">Estado de atención</h1>
     <div class="connection" aria-live="polite">
       <span class="connection-dot" [class.online]="connected()"></span>
-      <span>{{ connected() ? 'Actualización en vivo' : 'Última información recibida' }}</span>
+      <span>{{ finished() ? 'Servicio finalizado' : connected() ? 'Actualización en vivo' : 'Última información recibida' }}</span>
       <app-button variant="ghost" size="xsm" (clicked)="refresh()">
         <app-icon name="refresh-cw" [size]="12" slot="icon" />
         Actualizar
@@ -32,11 +32,31 @@
       <div class="status-mark" aria-hidden="true">✓</div>
       <div>
         <h2 id="service-status-title">
-          {{ progress()?.status === 'paused' ? 'Atención en pausa' : progress()?.status === 'closed' ? 'Servicio finalizado' : 'Atención en curso' }}
+          {{ finished() || progress()?.status === 'closed' ? 'Servicio finalizado' : progress()?.status === 'paused' ? 'Atención en pausa' : 'Atención en curso' }}
         </h2>
-        <p>El establecimiento actualizará este seguimiento durante el servicio.</p>
+        <p>
+          {{ finished()
+            ? 'Tu servicio terminó. Esta es la última cuenta registrada; acércate al establecimiento para pagar o recoger.'
+            : 'El establecimiento actualizará este seguimiento durante el servicio.' }}
+        </p>
       </div>
     </section>
+
+    @if (progress()?.service; as svc) {
+      <section class="proposal-card" aria-labelledby="service-detail-title">
+        <p class="eyebrow">Tu servicio</p>
+        <h2 id="service-detail-title">{{ svc.subject_label || svc.service_name || 'Servicio' }}</h2>
+        <dl class="totals">
+          @if (svc.service_name) {
+            <div><dt>Servicio</dt><dd>{{ svc.service_name }}</dd></div>
+          }
+          @if (svc.station_name) {
+            <div><dt>Estación</dt><dd>{{ svc.station_name }}</dd></div>
+          }
+          <div><dt>Ingreso</dt><dd>{{ svc.opened_at | date:'short' }}</dd></div>
+        </dl>
+      </section>
+    }
 
     @if (progress()?.account; as account) {
       <section class="proposal-card" aria-labelledby="account-title">
@@ -59,6 +79,10 @@
           <p>Aún no se han agregado servicios o productos a la cuenta.</p>
         }
         <dl class="totals">
+          @if (account.subtotal !== undefined) {
+            <div><dt>Subtotal</dt><dd>{{ money(account.subtotal, account.currency) }}</dd></div>
+            <div><dt>Impuestos</dt><dd>{{ money(account.tax ?? 0, account.currency) }}</dd></div>
+          }
           <div class="grand-total"><dt>Total acumulado</dt><dd>{{ money(account.total, account.currency) }}</dd></div>
           @if (account.budget_amount !== null) {
             <div><dt>Presupuesto aprobado</dt><dd>{{ money(account.budget_amount, account.currency) }}</dd></div>
