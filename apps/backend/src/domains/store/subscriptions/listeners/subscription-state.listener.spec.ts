@@ -93,6 +93,18 @@ describe('SubscriptionStateListener — onStateChanged', () => {
     });
   });
 
+  it('draft -> cancelled does NOT enqueue an email but still invalidates cache (QUI-677)', async () => {
+    await listener.onStateChanged({
+      storeId: 9,
+      fromState: 'draft',
+      toState: 'cancelled',
+      reason: 'Draft abandoned',
+    });
+
+    expect(invalidateCache).toHaveBeenCalledWith(9);
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
   it('enqueues reactivation email on cancelled -> active', async () => {
     await listener.onStateChanged({
       storeId: 7,
