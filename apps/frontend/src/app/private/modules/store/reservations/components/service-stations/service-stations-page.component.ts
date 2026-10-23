@@ -65,6 +65,7 @@ export interface ServiceSessionRow {
   allocation?: { provider_id?: number; provider_name?: string } | null;
   budget_amount?: number | null;
   access_url?: string | null;
+  contact_email?: string | null;
   intake?: SessionIntake | null;
   order?: {
     id: number;
@@ -291,7 +292,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   // Create station form
   readonly newName = signal('');
   readonly newStationType = signal<StationType>('carro');
-  readonly newEquipment = signal('');
   readonly newTrackTime = signal(false);
   readonly newTargetMinutes = signal<number | null>(null);
 
@@ -344,6 +344,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   // Tracking de access_url por sesión (para compartir seguimiento con QR y WhatsApp)
   readonly lastAccessUrlBySession = signal<Map<number, string>>(new Map());
   readonly sessionAccessUrl = signal<string | null>(null);
+  /** El enlace solo existe en memoria; tras recargar se reemite (requiere verificar identidad). */
+  readonly reissueIdentityChecked = signal(false);
+  readonly reissuingLink = signal(false);
   readonly sessionAccessQrDataUrl = signal<string | null>(null);
   readonly sessionAccessQrLoading = signal(false);
 
@@ -779,6 +782,48 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     );
   }
 
+  /** Muestra el enlace de seguimiento con su QR y lo recuerda mientras la página esté abierta. */
+  private showSessionAccessUrl(sessionId: number, url: string | null): void {
+    this.sessionAccessUrl.set(url);
+    this.sessionAccessQrDataUrl.set(null);
+    if (!url) return;
+    this.lastAccessUrlBySession.update((map) => new Map(map).set(sessionId, url));
+    this.sessionAccessQrLoading.set(true);
+    import('qrcode')
+      .then((QRCode) => QRCode.toDataURL(url, { width: 320, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } }))
+      .then((dataUrl) => this.sessionAccessQrDataUrl.set(dataUrl))
+      .catch(() => {})
+      .finally(() => this.sessionAccessQrLoading.set(false));
+  }
+
+  /** Genera un enlace nuevo (el anterior deja de servir) y lo envía al correo de contacto. */
+  reissueSessionLink(): void {
+    const session = this.selectedSession();
+    if (!session || !this.reissueIdentityChecked()) return;
+    this.reissuingLink.set(true);
+    this.stationsApi.reissueAccessLink(session.id, {
+      identity_verified: true,
+      verification_method: 'in_person',
+      verification_note: 'Reemitido desde el panel de estaciones con el cliente presente',
+      idempotency_key: crypto.randomUUID(),
+    }).subscribe({
+      next: (res) => {
+        this.reissuingLink.set(false);
+        this.reissueIdentityChecked.set(false);
+        this.showSessionAccessUrl(session.id, res.access_url ?? null);
+        this.toastService.success(
+          res.email_delivery_status === 'sent'
+            ? 'Enlace nuevo generado y enviado al correo del cliente.'
+            : 'Enlace nuevo generado.',
+        );
+      },
+      error: (error: unknown) => {
+        this.reissuingLink.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible generar el enlace.'));
+      },
+    });
+  }
+
   /** Lleva al formulario del servicio, donde se elige su "Formulario de recepción". */
   openServiceIntakeConfig(): void {
     const productId = Number(this.checkinProductId() || 0);
@@ -1034,7 +1079,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   openCreateModal(): void {
     this.newName.set('');
     this.newStationType.set('carro');
-    this.newEquipment.set('');
     this.newTrackTime.set(false);
     this.newTargetMinutes.set(null);
     this.newIntakeTemplateId.set(0);
@@ -1255,8 +1299,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinIntakeValues.update((values) => ({ ...values, [fieldId]: value }));
   }
 
-  private isIntakeItemRequired(item: IntakeTemplateItem): boolean {
-    return !!(item.is_required ?? item.metadata_field.is_required);
+  isIntakeItemRequired(item: IntakeTemplateItem): boolean {
+    // Igual que el servidor: manda el "obligatorio" del ítem en la plantilla.
+    return !!item.is_required;
   }
 
   private normalizeIntakeValue(fieldType: string, raw: unknown): IntakeValue | undefined {
@@ -1389,8 +1434,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const missingIntakeItem = this.checkinIntakeItems().find(
       (item) =>
         this.isIntakeItemRequired(item) &&
-        item.metadata_field.field_type !== 'checkbox' &&
-        !answered.has(item.metadata_field.id),
+        (item.metadata_field.field_type === 'checkbox'
+          ? this.checkinIntakeValues()[item.metadata_field.id] !== true // casilla obligatoria = marcada
+          : !answered.has(item.metadata_field.id)),
     );
     if (missingIntakeItem) {
       this.toastService.error(`Completa el campo obligatorio "${missingIntakeItem.metadata_field.label}".`);
@@ -1482,7 +1528,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
           // 1. Guardar presupuesto inicial opcional para TODOS los tipos
           if (budgetVal != null && Number(budgetVal) > 0) {
             this.stationsApi.setBudget(newSessionId, Number(budgetVal)).subscribe({
-              error: () => {},
+              error: (error: unknown) =>
+                this.toastService.warning(
+                  this.errorText(error, 'La atención se abrió, pero no se pudo guardar el presupuesto. Ajústalo desde "Ver Cuenta".'),
+                  undefined,
+                  6000,
+                ),
             });
           }
           // 2. Agregar insumo inicial opcional para TODOS los tipos
@@ -1493,7 +1544,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
               unit_price: initialPrice,
               description: 'Insumo / producto inicial de ingreso',
             }).subscribe({
-              error: () => {},
+              next: () => this.loadActiveSessions(),
+              error: (error: unknown) =>
+                this.toastService.warning(
+                  this.errorText(error, 'La atención se abrió, pero no se pudo agregar el producto inicial. Agrégalo desde "Ver Cuenta".'),
+                  undefined,
+                  6000,
+                ),
             });
           }
         }
@@ -1501,7 +1558,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         this.saving.set(false);
         this.showCheckinModal.set(false);
         this.toastService.success(
-          requiresVehicle
+          usesIntakeForm
+            ? `Ingreso de ${label} registrado con éxito.`
+            : requiresVehicle
             ? `Ingreso de ${vehicleName} (${plate}) registrado con éxito.`
             : isCelular
               ? `Ingreso de ${deviceModel} (${customerName}) registrado con éxito.`
@@ -1527,26 +1586,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.addUnitPrice.set(null);
     this.addDescription.set('');
 
-    const knownUrl = this.lastAccessUrlBySession().get(session.id) || session.access_url || null;
-    this.sessionAccessUrl.set(knownUrl);
-    this.sessionAccessQrDataUrl.set(null);
-    if (knownUrl) {
-      this.sessionAccessQrLoading.set(true);
-      import('qrcode').then((QRCode) => {
-        QRCode.toDataURL(knownUrl, {
-          width: 320,
-          margin: 2,
-          color: { dark: '#0f172a', light: '#ffffff' },
-        }).then((dataUrl) => {
-          this.sessionAccessQrDataUrl.set(dataUrl);
-          this.sessionAccessQrLoading.set(false);
-        }).catch(() => {
-          this.sessionAccessQrLoading.set(false);
-        });
-      }).catch(() => {
-        this.sessionAccessQrLoading.set(false);
-      });
-    }
+    this.reissueIdentityChecked.set(false);
+    this.showSessionAccessUrl(session.id, this.lastAccessUrlBySession().get(session.id) || session.access_url || null);
 
     // Load full session with order_items
     this.stationsApi.getSession(session.id).subscribe({
@@ -1556,8 +1597,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
           this.selectedSession.set(full);
           this.sessionOrder.set(full.order ?? null);
           if (full.access_url && !this.sessionAccessUrl()) {
-            this.sessionAccessUrl.set(full.access_url);
-            this.lastAccessUrlBySession.update((map) => new Map(map).set(session.id, full.access_url));
+            this.showSessionAccessUrl(session.id, full.access_url);
           }
         }
       },

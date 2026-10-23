@@ -494,12 +494,6 @@
         </div>
       </div>
 
-      <app-input
-        label="Equipamiento & Herramental Asignado (Opcional)"
-        [ngModel]="newEquipment()"
-        (ngModelChange)="newEquipment.set($event)"
-        placeholder="Ej. Elevador 4T, Pistola neumática, Rampa de motos"
-      />
 
       <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2">
         <div class="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -819,7 +813,7 @@
                         <app-dynamic-field
                           [field]="item.metadata_field"
                           [value]="intakeValue(item.metadata_field.id)"
-                          [required]="!!(item.is_required ?? item.metadata_field.is_required)"
+                          [required]="isIntakeItemRequired(item)"
                           [placeholder]="item.placeholder || ''"
                           [helpText]="item.help_text || ''"
                           [icon]="item.icon || ''"
@@ -1157,8 +1151,19 @@
               </div>
             </div>
           } @else {
-            <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs text-[var(--color-text-secondary)] italic">
-              El enlace de seguimiento se genera al abrir la atención (requiere dominio de tienda en línea activo).
+            <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs text-[var(--color-text-secondary)] space-y-3">
+              <p>Por seguridad el enlace solo se muestra al abrir la atención. Si se cerró o recargó la página, genera uno nuevo: el anterior deja de funcionar.</p>
+              @if (session.contact_email) {
+                <label class="flex items-start gap-2 cursor-pointer text-[var(--color-text-primary)]">
+                  <input type="checkbox" class="mt-0.5" [checked]="reissueIdentityChecked()" (change)="reissueIdentityChecked.set($any($event.target).checked)" />
+                  <span>Verifiqué en persona que es el cliente ({{ session.contact_email }})</span>
+                </label>
+                <app-button variant="outline" size="sm" [disabled]="!reissueIdentityChecked()" [loading]="reissuingLink()" (clicked)="reissueSessionLink()">
+                  <app-icon name="refresh-cw" [size]="14" slot="icon" /> Generar nuevo enlace
+                </app-button>
+              } @else {
+                <p class="italic">Esta atención no tiene correo de contacto, así que no se puede reemitir el enlace.</p>
+              }
             </div>
           }
         </div>

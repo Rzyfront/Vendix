@@ -239,6 +239,18 @@ export class ServiceStationsService {
       );
   }
 
+  reissueAccessLink(
+    sessionId: number,
+    body: { identity_verified: true; verification_method: 'in_person' | 'phone_callback' | 'known_customer'; verification_note: string; idempotency_key: string },
+  ): Observable<{ access_url?: string | null; email_delivery_status?: string }> {
+    return this.http
+      .post<{ data?: { access_url?: string | null; email_delivery_status?: string } } | { access_url?: string | null; email_delivery_status?: string }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/access-link/reissue`,
+        body,
+      )
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
   getIntakeTemplate(productId: number, stationId?: number | null): Observable<IntakeTemplate | null> {
     let params = new HttpParams().set('product_id', String(productId));
     if (stationId) params = params.set('station_id', String(stationId));

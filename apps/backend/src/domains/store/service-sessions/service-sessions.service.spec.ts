@@ -202,4 +202,17 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     });
     expect(notifications.push).not.toHaveBeenCalled();
   });
+
+  it('rechaza un cliente que no pertenece a la tienda al abrir un walk-in', async () => {
+    prisma.service_stations.findFirst.mockResolvedValue({ id: 3, intake_template_id: null });
+    prisma.products = { findFirst: jest.fn().mockResolvedValue({ id: 10, product_type: 'service' }) };
+    prisma.users = { findFirst: jest.fn().mockResolvedValue(null) };
+    await expect(service.open({ station_id: 3, product_id: 10, customer_id: 999 } as any)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'CUST_FIND_001' }),
+    });
+    expect(prisma.users.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 999, store_users: { some: { store_id: 1 } } } }),
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 });

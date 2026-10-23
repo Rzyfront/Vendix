@@ -100,6 +100,14 @@ export class ServiceSessionsService {
       throw new VendixHttpException(ErrorCodes.STATION_001);
     }
     const customerId = booking?.customer_id ?? dto.customer_id ?? null;
+    // Un cliente elegido a mano debe pertenecer a esta tienda (el de la reserva ya viene de ella).
+    if (!booking && dto.customer_id) {
+      const customer = await this.prisma.users.findFirst({
+        where: { id: dto.customer_id, store_users: { some: { store_id: storeId } } },
+        select: { id: true },
+      });
+      if (!customer) throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
     // Required intake items are enforced on walk-in reception (the reservation flow may
     // have collected them earlier through a data-collection submission).
     const intake = await this.prepareIntake(productId, stationId, dto.intake_values, { enforceRequired: Boolean(dto.station_id), customerId, bookingId: booking?.id ?? null });
