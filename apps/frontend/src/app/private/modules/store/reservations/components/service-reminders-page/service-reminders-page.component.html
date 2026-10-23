@@ -133,6 +133,27 @@
     }
   </app-card>
 
+  @if (assignRow(); as row) {
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="!$event && assignRow.set(null)"
+      title="Asignar cliente"
+      [subtitle]="row.service.name + ' · ' + row.service_date_label"
+      size="md"
+    >
+      <app-customer-select
+        label="Cliente"
+        helpText="Busca el cliente o créalo. Con cliente asignado entra a los recordatorios de este servicio."
+        [selected]="assignCustomer()"
+        (selectedChange)="assignCustomer.set($event)"
+      />
+      <div slot="footer" class="flex items-center justify-end gap-2.5">
+        <app-button variant="outline" (clicked)="assignRow.set(null)">Cancelar</app-button>
+        <app-button variant="primary" [disabled]="!assignCustomer()" [loading]="assigning()" (clicked)="confirmAssignCustomer()">Asignar</app-button>
+      </div>
+    </app-modal>
+  }
+
   <ng-template #countdownTpl let-row>
     <div class="flex flex-col items-start gap-0.5">
       <app-days-remaining-badge

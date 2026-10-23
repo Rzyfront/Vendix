@@ -11,10 +11,14 @@ import {
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  ButtonComponent,
   CardComponent,
+  CustomerSelectComponent,
+  CustomerSelectOption,
   DropdownAction,
   EmptyStateComponent,
   FilterConfig,
+  ModalComponent,
   FilterValues,
   InputsearchComponent,
   ItemListCardConfig,
@@ -98,6 +102,9 @@ function reminderLabel(row: ServiceRegistryRow): string {
     PaginationComponent,
     EmptyStateComponent,
     DaysRemainingBadgeComponent,
+    ModalComponent,
+    ButtonComponent,
+    CustomerSelectComponent,
   ],
   templateUrl: './service-reminders-page.component.html',
 })
@@ -150,7 +157,23 @@ export class ServiceRemindersPageComponent {
     { key: 'reminder_label', label: 'Recordatorio', priority: 3 },
   ]);
 
+  /** Fila atendida sin cliente a la que se le está asignando uno. */
+  readonly assignRow = signal<RegistryViewRow | null>(null);
+  readonly assignCustomer = signal<CustomerSelectOption | null>(null);
+  readonly assigning = signal(false);
+
   readonly actions: TableAction[] = [
+    {
+      label: 'Asignar cliente',
+      icon: 'user-plus',
+      variant: 'primary',
+      action: (row: RegistryViewRow) => {
+        this.assignCustomer.set(null);
+        this.assignRow.set(row);
+      },
+      show: (row: RegistryViewRow) => !row.customer.registered,
+      tooltip: () => 'Vincula un cliente para poder recordarle el próximo servicio',
+    },
     {
       label: 'Correo',
       icon: 'mail',
@@ -322,6 +345,28 @@ export class ServiceRemindersPageComponent {
           tab?.close();
           this.busyKey.set(null);
           this.toast.error(error?.error?.message || 'No se pudo preparar el mensaje de WhatsApp');
+        },
+      });
+  }
+
+  confirmAssignCustomer(): void {
+    const row = this.assignRow();
+    const customer = this.assignCustomer();
+    if (!row || !customer) return;
+    this.assigning.set(true);
+    this.registry
+      .assignCustomer(row, customer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.assigning.set(false);
+          this.assignRow.set(null);
+          this.toast.success('Cliente asignado. Ya puedes enviarle el recordatorio.');
+          this.load();
+        },
+        error: (error: { error?: { message?: string } }) => {
+          this.assigning.set(false);
+          this.toast.error(error?.error?.message || 'No se pudo asignar el cliente');
         },
       });
   }

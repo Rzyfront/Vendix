@@ -16,10 +16,9 @@ import {
   SelectorComponent,
   SelectorOption,
   SpinnerComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
   StatsComponent,
   StickyHeaderActionButton,
+  StickyHeaderTab,
   StickyHeaderComponent,
   TextareaComponent,
   ToastService,
@@ -53,6 +52,7 @@ export interface CheckinIntakeSection {
 import { environment } from '../../../../../../../environments/environment';
 import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
+import { ServiceRegistryService } from '../service-reminders-page/service-registry.service';
 
 export interface ServiceSessionRow {
   id: number;
@@ -208,7 +208,6 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     ToggleComponent,
     DynamicFieldComponent,
     ServiceRemindersPageComponent,
-    ScrollableTabsComponent,
     CustomerSelectComponent,
   ],
   templateUrl: './service-stations-page.component.html',
@@ -220,6 +219,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private readonly reservationsApi = inject(ReservationsService);
   private readonly router = inject(Router);
   private readonly templatesApi = inject(DataCollectionTemplatesService);
+  private readonly registryApi = inject(ServiceRegistryService);
 
   /** Formularios activos de Recolección de datos, para asignar uno a cada estación. */
   readonly intakeTemplates = signal<Array<{ id: number; name: string }>>([]);
@@ -570,6 +570,21 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly allCatalogProducts = signal<any[]>([]);
   readonly sellableCatalogProducts = signal<any[]>([]);
   readonly selectedAddProductId = signal<number | null>(null);
+  readonly selectedAddVariantId = signal<number | null>(null);
+
+  /** Variantes del producto elegido para agregar (talla, presentación, viscosidad…). */
+  readonly addProductVariants = computed<any[]>(() => {
+    const id = this.selectedAddProductId();
+    if (!id) return [];
+    return this.sellableCatalogProducts().find((p) => p.id === id)?.product_variants ?? [];
+  });
+
+  readonly addVariantOptions = computed<SelectorOption[]>(() =>
+    this.addProductVariants().map((v) => ({
+      value: v.id,
+      label: `${v.name || v.sku} ($${this.variantPublishedPrice(v).toLocaleString('es-CO')})`,
+    })),
+  );
   readonly addQuantity = signal<number>(1);
   readonly addUnitPrice = signal<number | null>(null);
   readonly addDescription = signal('');
@@ -866,7 +881,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('vista') === 'registro' ? 'registry' : 'stations',
   );
 
-  readonly viewTabs: ScrollableTab[] = [
+  readonly viewTabs: StickyHeaderTab[] = [
     { id: 'stations', label: 'Estaciones', icon: 'warehouse' },
     { id: 'registry', label: 'Registro de servicios', icon: 'history' },
   ];
@@ -1683,8 +1698,24 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     window.open(waUrl, '_blank');
   }
 
+  /** Misma escalera que el backend: oferta de variante → precio propio → oferta/base del producto. */
+  private variantPublishedPrice(variant: any): number {
+    if (variant?.is_on_sale && Number(variant.sale_price) > 0) return Number(variant.sale_price);
+    if (Number(variant?.price_override) > 0) return Number(variant.price_override);
+    const product = this.sellableCatalogProducts().find((p) => p.id === this.selectedAddProductId());
+    if (product?.is_on_sale && Number(product.sale_price) > 0) return Number(product.sale_price);
+    return Number(product?.base_price || 0);
+  }
+
+  onAddVariantSelect(variantId: number | null): void {
+    this.selectedAddVariantId.set(Number(variantId) || null);
+    const variant = this.addProductVariants().find((v) => v.id === Number(variantId));
+    if (variant) this.addUnitPrice.set(this.variantPublishedPrice(variant));
+  }
+
   onAddProductSelect(productId: number | null): void {
     this.selectedAddProductId.set(productId);
+    this.selectedAddVariantId.set(null);
     if (!productId) {
       this.addUnitPrice.set(null);
       return;
@@ -1701,12 +1732,17 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const session = this.selectedSession();
     const productId = this.selectedAddProductId();
     if (!session || !productId) return;
+    if (this.addProductVariants().length && !this.selectedAddVariantId()) {
+      this.toastService.error('Elige la variante del producto.');
+      return;
+    }
     const qty = Math.max(1, Number(this.addQuantity() || 1));
     const price = this.addUnitPrice() != null ? Number(this.addUnitPrice()) : undefined;
 
     this.addingItem.set(true);
     this.stationsApi.addItem(session.id, {
       product_id: productId,
+      product_variant_id: this.selectedAddVariantId() ?? undefined,
       quantity: qty,
       unit_price: price,
       description: this.addDescription().trim() || undefined,
@@ -1714,6 +1750,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       next: () => {
         this.addingItem.set(false);
         this.selectedAddProductId.set(null);
+        this.selectedAddVariantId.set(null);
         this.addQuantity.set(1);
         this.addUnitPrice.set(null);
         this.addDescription.set('');
@@ -1805,7 +1842,37 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close'): void {
+  /** Atención por cerrar mientras se decide su cliente (servicio recurrente sin cliente). */
+  readonly closePrompt = signal<ServiceSessionRow | null>(null);
+  readonly closeCustomer = signal<CustomerSelectOption | null>(null);
+
+  /**
+   * Finalizar: si el servicio es recurrente y la atención no tiene cliente, primero
+   * se ofrece asignarlo; sin cliente no hay a quién enviarle el recordatorio.
+   */
+  async requestClose(session: ServiceSessionRow): Promise<void> {
+    const recurring = !!this.services().find((s) => s.id === session.product_id)?.is_recurring;
+    if (recurring) {
+      const full = await firstValueFrom(this.stationsApi.getSession(session.id)).catch(() => null);
+      const order = (full?.order ?? session.order) as { customer?: { id?: number } | null; customer_id?: number | null } | null | undefined;
+      if (!order?.customer?.id && !order?.customer_id) {
+        this.closeCustomer.set(null);
+        this.closePrompt.set(full ?? session);
+        return;
+      }
+    }
+    this.transitionSession(session, 'close');
+  }
+
+  confirmClose(withCustomer: boolean): void {
+    const session = this.closePrompt();
+    if (!session) return;
+    const customer = withCustomer ? this.closeCustomer() : null;
+    this.closePrompt.set(null);
+    this.transitionSession(session, 'close', customer?.id ?? null);
+  }
+
+  transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close', assignCustomerId: number | null = null): void {
     this.saving.set(true);
     // Saldo pendiente al cerrar → se lleva a cobrar la cuenta.
     const order = this.sessionOrder()?.id === session.order?.id ? this.sessionOrder() ?? session.order : session.order;
@@ -1816,6 +1883,20 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         this.showSessionModal.set(false);
         this.selectedSession.set(null);
         this.loadActiveSessions();
+        const orderId = order?.id;
+        if (assignCustomerId && orderId && session.product_id) {
+          // La fila ya existe en el registro: se le vincula el cliente para el recordatorio.
+          this.registryApi
+            .assignCustomerToOrder(orderId, session.product_id, assignCustomerId)
+            .subscribe({
+              error: (error: unknown) =>
+                this.toastService.warning(
+                  this.errorText(error, 'La atención se cerró, pero no se pudo asignar el cliente. Hazlo desde el Registro de servicios.'),
+                  undefined,
+                  6000,
+                ),
+            });
+        }
         if (pendingOrderId) {
           this.toastService.success('Atención finalizada. Registra el pago de la cuenta.');
           this.router.navigate(['/admin/orders', pendingOrderId]);

@@ -80,3 +80,12 @@ export class ServiceRegistryActionDto {
   @Min(1)
   product_id: number;
 }
+
+/** Asigna un cliente registrado a una fila del registro que se atendió sin cliente. */
+export class ServiceRegistryAssignCustomerDto extends ServiceRegistryActionDto {
+  @ApiProperty({ description: 'Cliente registrado de la tienda' })
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  customer_id: number;
+}

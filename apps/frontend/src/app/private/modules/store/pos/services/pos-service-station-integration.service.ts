@@ -67,6 +67,7 @@ export interface PosServiceSession {
 /** Línea del contrato `POST /store/service-sessions/:id/items/bulk`. */
 export interface PosServiceSessionItemLine {
   product_id: number;
+  product_variant_id?: number;
   quantity: number;
   unit_price?: number;
   description?: string;
@@ -167,8 +168,8 @@ export class PosServiceStationIntegrationService {
    * Traduce las líneas del carrito al contrato de la cuenta de estación.
    *
    * La cuenta de estación (AddSessionItemDto) solo conoce
-   * `product_id + quantity(int) + unit_price + description`: no hay variante,
-   * empaque, peso legado ni ítems libres. Esas líneas se BLOQUEAN con motivo
+   * `product_id + product_variant_id? + quantity(int) + unit_price + description`:
+   * no hay empaque, peso legado ni ítems libres. Esas líneas se BLOQUEAN con motivo
    * en lugar de cargarse con datos perdidos (ej. cargar el producto padre sin
    * la variante elegida).
    *
@@ -195,10 +196,6 @@ export class PosServiceStationIntegrationService {
         blocked.push({ name, reason: 'producto sin identificador' });
         continue;
       }
-      if (it.variant_id != null) {
-        blocked.push({ name, reason: 'la cuenta de estación aún no admite variantes' });
-        continue;
-      }
       if ((it.units_per_package ?? 1) > 1) {
         blocked.push({ name, reason: 'las presentaciones por empaque no se pueden cargar a una estación' });
         continue;
@@ -221,6 +218,7 @@ export class PosServiceStationIntegrationService {
         quantity,
         unit_price: unitPrice,
       };
+      if (it.variant_id != null) line.product_variant_id = Number(it.variant_id);
       const note = it.notes?.trim();
       if (note) line.description = note.slice(0, 255);
       lines.push(line);

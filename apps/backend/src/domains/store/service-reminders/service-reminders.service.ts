@@ -6,8 +6,9 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../../../email/email.service';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { resolveStoreTimezone, localDateString } from '@common/utils/store-timezone.util';
-import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto } from './dto';
+import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto } from './dto';
 import {
   buildReminderMessage,
   computeRecurrence,
@@ -550,6 +551,29 @@ export class ServiceRemindersService {
     const ctx = await this.resolveRow(storeId, dto.source_order_id, dto.product_id);
     if (!ctx.row.customer.phone) throw new BadRequestException('El cliente no tiene un número de teléfono registrado');
     return this.deliverWhatsapp(ctx, await this.ensureLog(storeId, ctx.row));
+  }
+
+  /**
+   * Asocia un cliente a una atención hecha sin cliente para que entre a los
+   * recordatorios. Solo completa órdenes SIN cliente: nunca reemplaza uno existente
+   * (la orden pudo facturarse a nombre de ese cliente).
+   */
+  async registryAssignCustomer(dto: ServiceRegistryAssignCustomerDto) {
+    const storeId = this.requireStoreId();
+    await this.resolveRow(storeId, dto.source_order_id, dto.product_id);
+    const customer = await this.prisma.users.findFirst({
+      where: { id: dto.customer_id, store_users: { some: { store_id: storeId } } },
+      select: { id: true },
+    });
+    if (!customer) throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    const updated = await this.prisma.orders.updateMany({
+      where: { id: dto.source_order_id, store_id: storeId, customer_id: null },
+      data: { customer_id: dto.customer_id, updated_at: new Date() },
+    });
+    if (updated.count !== 1) {
+      throw new BadRequestException('Esta atención ya tiene un cliente asignado.');
+    }
+    return { success: true, source_order_id: dto.source_order_id, customer_id: dto.customer_id };
   }
 
   async registryDismiss(dto: ServiceRegistryActionDto) {

@@ -161,6 +161,13 @@ export class AddSessionItemDto {
   @Min(1)
   product_id: number;
 
+  /** Obligatoria si el producto maneja variantes (talla, presentación, viscosidad…). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

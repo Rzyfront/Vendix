@@ -38,8 +38,20 @@ type IntakeValueColumns = { value_text: string | null; value_number: number | nu
 type PreparedIntake = { templateId: number; entries: Array<{ field: IntakeField; columns: IntakeValueColumns }> } | null;
 type StoredMetadataValue = { field_id: number; entity_type: string; value_text: string | null; value_number: Prisma.Decimal | null; value_date: Date | null; value_bool: boolean | null; value_json: Prisma.JsonValue | null };
 
-/** Precio publicado del producto: oferta vigente o precio base (misma escalera que la mesa sin variantes). */
-function catalogUnitPrice(product: { base_price: Prisma.Decimal | number | null; sale_price?: Prisma.Decimal | number | null; is_on_sale?: boolean | null }): number {
+type PriceRow = { sale_price?: Prisma.Decimal | number | null; is_on_sale?: boolean | null };
+
+/**
+ * Precio publicado con la misma escalera que la mesa y el POS: oferta de la variante →
+ * precio propio de la variante → oferta del producto → precio base.
+ */
+function catalogUnitPrice(
+  product: PriceRow & { base_price: Prisma.Decimal | number | null },
+  variant?: (PriceRow & { price_override?: Prisma.Decimal | number | null }) | null,
+): number {
+  const variantSale = variant?.is_on_sale === true ? Number(variant.sale_price ?? 0) : 0;
+  if (variantSale > 0) return variantSale;
+  const override = Number(variant?.price_override ?? NaN);
+  if (Number.isFinite(override) && override > 0) return override;
   const sale = product.is_on_sale === true ? Number(product.sale_price ?? 0) : 0;
   return sale > 0 ? sale : Number(product.base_price ?? 0);
 }
@@ -979,9 +991,24 @@ export class ServiceSessionsService {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001, 'Producto no encontrado.');
     }
     const qty = Math.max(1, Number(dto.quantity || 1));
+    // Variante: debe ser del producto, y un producto con variantes exige elegir una.
+    const variant = dto.product_variant_id
+      ? await tx.product_variants.findFirst({
+          where: { id: dto.product_variant_id, product_id: product.id },
+          select: { id: true, name: true, sku: true, price_override: true, is_on_sale: true, sale_price: true, track_inventory_override: true },
+        })
+      : null;
+    if (dto.product_variant_id && !variant) {
+      throw new VendixHttpException(ErrorCodes.PRODUCT_VARIANT_MISMATCH, 'La variante no pertenece al producto.');
+    }
+    if (!variant && (await tx.product_variants.count({ where: { product_id: product.id } })) > 0) {
+      throw new VendixHttpException(ErrorCodes.PRODUCT_VARIANT_MISMATCH, `Elige la variante de ${product.name}.`);
+    }
     // Un precio escrito a mano se trata como el precio publicado del producto: el
     // impuesto se despeja o se suma según la configuración de ESE producto.
-    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : catalogUnitPrice(product);
+    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : catalogUnitPrice(product, variant);
+    const lineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
+    const tracksInventory = variant?.track_inventory_override ?? product.track_inventory;
     const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
 
     if (!session.order_id) {
@@ -1011,13 +1038,13 @@ export class ServiceSessionsService {
     }
     const orderId = session.order_id;
 
-    if (product.track_inventory && product.product_type === 'physical') {
+    if (tracksInventory && product.product_type === 'physical') {
       const stockLevel = await tx.stock_levels.findFirst({
-        where: { product_id: product.id },
+        where: { product_id: product.id, product_variant_id: variant?.id ?? null },
         orderBy: { quantity_available: 'desc' },
       });
       if (stockLevel && stockLevel.quantity_available < qty) {
-        throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${product.name}`);
+        throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${lineName}`);
       }
       if (stockLevel) {
         const store = await tx.stores.findUnique({ where: { id: storeId }, select: { organization_id: true } });
@@ -1026,6 +1053,7 @@ export class ServiceSessionsService {
             data: {
               organization_id: store.organization_id,
               product_id: product.id,
+              product_variant_id: variant?.id ?? null,
               location_id: stockLevel.location_id,
               quantity: qty,
               reserved_for_type: 'order',
@@ -1050,7 +1078,8 @@ export class ServiceSessionsService {
         order_id: orderId,
         service_session_id: session.id,
         product_id: product.id,
-        product_name: product.name,
+        product_variant_id: variant?.id ?? null,
+        product_name: lineName,
         description: dto.description || null,
         quantity: qty,
         item_type: product.product_type === 'physical' ? 'physical' : 'service',
@@ -1060,7 +1089,7 @@ export class ServiceSessionsService {
       },
     });
 
-    await this.writeProgress(tx, storeId, session.id, 'item_added', userId, `Se agregó ${qty}x ${product.name} a la cuenta`);
+    await this.writeProgress(tx, storeId, session.id, 'item_added', userId, `Se agregó ${qty}x ${lineName} a la cuenta`);
     return item;
   }
 
@@ -1120,12 +1149,12 @@ export class ServiceSessionsService {
     const result = await this.prisma.$transaction(async (tx) => {
       if (item.product_id) {
         const reservation = await tx.stock_reservations.findFirst({
-          where: { reserved_for_type: 'order', reserved_for_id: session.order_id!, product_id: item.product_id, status: 'active' },
+          where: { reserved_for_type: 'order', reserved_for_id: session.order_id!, product_id: item.product_id, product_variant_id: item.product_variant_id ?? null, status: 'active' },
         });
         if (reservation) {
           await tx.stock_reservations.update({ where: { id: reservation.id }, data: { status: 'cancelled', updated_at: now } });
           await tx.stock_levels.updateMany({
-            where: { product_id: item.product_id, location_id: reservation.location_id },
+            where: { product_id: item.product_id, product_variant_id: item.product_variant_id ?? null, location_id: reservation.location_id },
             data: {
               quantity_reserved: { decrement: reservation.quantity },
               quantity_available: { increment: reservation.quantity },

@@ -8,18 +8,11 @@
     backRoute="/admin"
     [actions]="headerActions()"
     (actionClicked)="onHeaderAction($event)"
+    [tabs]="viewTabs"
+    [activeTab]="view()"
+    tabsAriaLabel="Vistas de estaciones de servicio"
+    (tabChanged)="setView($any($event))"
   />
-
-  <!-- Vistas del módulo: operación en vivo de las estaciones o registro de servicios realizados -->
-  <div class="mt-2 mb-3">
-    <app-scrollable-tabs
-      [tabs]="viewTabs"
-      [activeTab]="view()"
-      size="md"
-      ariaLabel="Vistas de estaciones de servicio"
-      (tabChange)="setView($any($event))"
-    />
-  </div>
 
   @if (view() === 'registry') {
     <app-service-reminders-page [embedded]="true" />
@@ -304,7 +297,7 @@
                       <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
                         <app-icon name="qr-code" [size]="14" slot="icon" />
                       </app-button>
-                      <app-button variant="secondary" size="sm" (clicked)="transitionSession(session, 'close')">
+                      <app-button variant="secondary" size="sm" (clicked)="requestClose(session)">
                         Finalizar
                       </app-button>
                     </div>
@@ -454,6 +447,32 @@
     </app-card>
   </div>
 
+  }
+
+  <!-- Servicio recurrente sin cliente: pedir cliente para poder recordarle -->
+  @if (closePrompt(); as pending) {
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="!$event && closePrompt.set(null)"
+      title="¿A quién le recordamos el próximo servicio?"
+      [subtitle]="pending.product_name + ' es un servicio recurrente'"
+      size="md"
+    >
+      <div class="space-y-3">
+        <p class="text-sm text-[var(--color-text-secondary)]">
+          Esta atención no tiene cliente registrado, así que no recibirá recordatorio. Búscalo o créalo; también puedes asignarlo después desde el Registro de servicios.
+        </p>
+        <app-customer-select
+          label="Cliente"
+          [selected]="closeCustomer()"
+          (selectedChange)="closeCustomer.set($event)"
+        />
+      </div>
+      <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
+        <app-button variant="outline" [disabled]="saving()" (clicked)="confirmClose(false)">Finalizar sin cliente</app-button>
+        <app-button variant="primary" [disabled]="!closeCustomer()" [loading]="saving()" (clicked)="confirmClose(true)">Asignar y finalizar</app-button>
+      </div>
+    </app-modal>
   }
 
   <!-- Modal 1: Creación de Nueva Estación / Bahía -->
@@ -966,6 +985,19 @@
                 />
               </div>
 
+              @if (addVariantOptions().length) {
+                <div class="sm:col-span-12">
+                  <app-selector
+                    label="Variante"
+                    [options]="addVariantOptions()"
+                    [ngModel]="selectedAddVariantId()"
+                    (ngModelChange)="onAddVariantSelect($event)"
+                    placeholder="-- Elegir variante --"
+                    [required]="true"
+                  />
+                </div>
+              }
+
               <div class="sm:col-span-2">
                 <app-input
                   label="Cantidad"
@@ -1192,7 +1224,7 @@
             <app-button variant="outline" size="sm" (clicked)="chargeSessionAccount(session)">
               <app-icon name="credit-card" [size]="14" slot="icon" /> Cobrar cuenta
             </app-button>
-            <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="transitionSession(session, 'close')">
+            <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="requestClose(session)">
               <app-icon name="check-circle" [size]="14" slot="icon" /> Finalizar y cobrar
             </app-button>
           </div>

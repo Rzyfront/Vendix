@@ -14,7 +14,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
-import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto } from './dto';
+import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto } from './dto';
 import { ServiceRemindersService } from './service-reminders.service';
 
 @ApiTags('Store Service Reminders')
@@ -72,6 +72,15 @@ export class ServiceRemindersController {
   async registryWhatsapp(@Body() dto: ServiceRegistryActionDto) {
     const result = await this.serviceReminders.registryWhatsapp(dto);
     return this.response.success(result, 'Enlace de WhatsApp generado exitosamente');
+  }
+
+  @Post('registry/assign-customer')
+  @HttpCode(200)
+  @Permissions('store:reservations:update')
+  @ApiOperation({ summary: 'Asignar un cliente registrado a una atención hecha sin cliente' })
+  async registryAssignCustomer(@Body() dto: ServiceRegistryAssignCustomerDto) {
+    const result = await this.serviceReminders.registryAssignCustomer(dto);
+    return this.response.updated(result, 'Cliente asignado');
   }
 
   @Post('registry/dismiss')

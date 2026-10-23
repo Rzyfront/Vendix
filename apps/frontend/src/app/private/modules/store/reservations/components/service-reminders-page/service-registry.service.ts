@@ -35,6 +35,22 @@ export class ServiceRegistryService {
       .pipe(map((res) => res.data));
   }
 
+  /** Vincula un cliente registrado a una atención hecha sin cliente (solo si no tenía). */
+  assignCustomer(row: ServiceRegistryRow, customerId: number): Observable<{ success: boolean }> {
+    return this.assignCustomerToOrder(row.source_order_id, row.service.id, customerId);
+  }
+
+  /** Igual que `assignCustomer`, desde una atención recién cerrada (orden SVC + servicio). */
+  assignCustomerToOrder(sourceOrderId: number, productId: number, customerId: number): Observable<{ success: boolean }> {
+    return this.http
+      .post<{ data: { success: boolean } }>(`${this.base}/assign-customer`, {
+        source_order_id: sourceOrderId,
+        product_id: productId,
+        customer_id: customerId,
+      })
+      .pipe(map((res) => res.data));
+  }
+
   dismiss(row: ServiceRegistryRow): Observable<{ success: boolean }> {
     return this.http
       .post<{ data: { success: boolean } }>(`${this.base}/dismiss`, this.ref(row))

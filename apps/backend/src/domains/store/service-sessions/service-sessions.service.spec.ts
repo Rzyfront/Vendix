@@ -169,6 +169,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         findFirst: jest.fn(({ where }: any) => Promise.resolve({ id: where.id, name: `P${where.id}`, base_price: 1000, product_type: 'service', track_inventory: false })),
       },
       orders: { create: jest.fn().mockResolvedValue({ id: 88 }), update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
+      product_variants: { count: jest.fn().mockResolvedValue(0) },
       service_sessions: { updateMany: jest.fn() },
       // Producto 2 lleva IVA 19 % sumado encima; el 1 no tiene impuesto.
       product_tax_assignments: {
@@ -215,6 +216,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     prisma.service_sessions.findFirst.mockResolvedValue({ id: 77, status: 'open', order_id: 88 });
     const tx = {
       products: { findFirst: jest.fn().mockResolvedValue({ id: 3, name: 'Cambio de aceite', base_price: 119000, product_type: 'service', track_inventory: false }) },
+      product_variants: { count: jest.fn().mockResolvedValue(0) },
       orders: { update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
       product_tax_assignments: {
         findMany: jest.fn().mockResolvedValue([{ product_id: 3, is_inclusive: true, tax_categories: { tax_type: 'iva', tax_rates: [{ id: 5, name: 'IVA 19%', rate: 0.19 }] } }]),
@@ -285,6 +287,45 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       const tx = setup({ amount: 150000, currency: 'COP' });
       await expect(service.prepareCharge(77)).resolves.toEqual({ order_id: 88 });
       expect(tx.service_budgets.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('variantes en la cuenta', () => {
+    const txWith = (variant: any, variantCount = 0) => ({
+      products: { findFirst: jest.fn().mockResolvedValue({ id: 4, name: 'Aceite', base_price: 50000, product_type: 'physical', track_inventory: false }) },
+      product_variants: { findFirst: jest.fn().mockResolvedValue(variant), count: jest.fn().mockResolvedValue(variantCount) },
+      orders: { update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
+      product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: { create: jest.fn(({ data }: any) => Promise.resolve({ id: 1, ...data })), findMany: jest.fn().mockResolvedValue([]) },
+      service_progress_events: { create: jest.fn() },
+    });
+
+    beforeEach(() => prisma.service_sessions.findFirst.mockResolvedValue({ id: 77, status: 'open', order_id: 88 }));
+
+    it('usa el precio y el nombre de la variante', async () => {
+      const tx = txWith({ id: 9, name: '4 L', sku: 'AC-4L', price_override: 180000, is_on_sale: false, sale_price: null, track_inventory_override: null });
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      await service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 9, quantity: 1 }]);
+      const line = tx.order_items.create.mock.calls[0][0].data;
+      expect(line).toMatchObject({ product_variant_id: 9, product_name: 'Aceite - 4 L' });
+      expect(Number(line.unit_price)).toBe(180000);
+    });
+
+    it('exige elegir variante si el producto las tiene', async () => {
+      const tx = txWith(null, 2);
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      await expect(service.addItemsBulk(77, [{ product_id: 4, quantity: 1 }])).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
+      });
+    });
+
+    it('rechaza una variante de otro producto', async () => {
+      const tx = txWith(null);
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      await expect(service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 99, quantity: 1 }])).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
+      });
+      expect(tx.order_items.create).not.toHaveBeenCalled();
     });
   });
 });

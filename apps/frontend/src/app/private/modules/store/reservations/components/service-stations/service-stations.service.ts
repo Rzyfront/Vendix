@@ -50,6 +50,7 @@ export interface StationServiceOption {
   name: string;
   base_price?: number | string | null;
   service_duration_minutes?: number | null;
+  is_recurring?: boolean;
 }
 
 /** Campo de Recolección de datos tal como viene en un item de plantilla. */
@@ -225,7 +226,7 @@ export class ServiceStationsService {
   getSellableProducts(): Observable<any[]> {
     return this.http
       .get<{ data?: unknown } | unknown>(
-        `${environment.apiUrl}/store/products?limit=150&is_sellable=true&is_ingredient=false`,
+        `${environment.apiUrl}/store/products?limit=150&is_sellable=true&is_ingredient=false&include_variants=true`,
       )
       .pipe(
         map((r) => {
@@ -286,7 +287,7 @@ export class ServiceStationsService {
     );
   }
 
-  addItem(sessionId: number, body: { product_id: number; quantity?: number; unit_price?: number; description?: string }): Observable<any> {
+  addItem(sessionId: number, body: { product_id: number; product_variant_id?: number; quantity?: number; unit_price?: number; description?: string }): Observable<any> {
     return this.http.post<{ data?: any } | any>(`${environment.apiUrl}/store/service-sessions/${sessionId}/items`, body).pipe(
       map((r) => this.unwrap(r)),
     );
