@@ -3017,7 +3017,10 @@ export class PurchaseOrdersService {
   /**
    * Bug 4 — Helper público de derivación. Recibe un set de PO ids y devuelve un
    * `Map<poId, { date: string | null }>` con la próxima fecha de pago planeada
-   * (`status='planned'` ASC) o `null` si no hay. Exposed para tests y para que
+   * pendiente (`status IN ('planned','materialized')`, fecha ASC) o `null` si no
+   * hay. QUI-713: tras la recepción de la OC las cuotas pendientes quedan en
+   * 'materialized' (copiadas a CxP) y siguen siendo pendientes; solo las 'paid'
+   * se excluyen. Exposed para tests y para que
    * `findOne` pueda enriquecer en el futuro sin duplicar lógica.
    *
    * Implementación: usa `$queryRaw` directo contra `baseClient` porque
@@ -3040,7 +3043,7 @@ export class PurchaseOrdersService {
         `SELECT purchase_order_id, scheduled_date
          FROM purchase_order_payment_schedules
          WHERE purchase_order_id IN (${idsList})
-           AND status = 'planned'
+           AND status IN ('planned', 'materialized') -- QUI-713
          ORDER BY purchase_order_id ASC, scheduled_date ASC`,
       );
     for (const r of rows) {
@@ -6160,7 +6163,9 @@ export class PurchaseOrdersService {
             where: {
               id: dto.payment_schedule_id,
               purchase_order_id: purchaseOrderId,
-              status: 'planned',
+              // QUI-713 — tras la recepción la cuota queda 'materialized'
+              // y también debe poder marcarse como pagada.
+              status: { in: ['planned', 'materialized'] },
             },
             data: {
               status: 'paid',

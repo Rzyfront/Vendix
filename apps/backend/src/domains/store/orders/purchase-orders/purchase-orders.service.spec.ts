@@ -4148,3 +4148,133 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
     expect(res).toEqual({ conflicts: [] });
   });
 });
+
+describe('QUI-713: próximo pago y pago de cuota con cuotas materializadas', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+  let tx: any;
+
+  beforeEach(async () => {
+    tx = {
+      purchase_order_payments: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }),
+        create: jest.fn().mockResolvedValue({
+          id: 77,
+          payment_date: new Date('2026-10-01T00:00:00Z'),
+        }),
+      },
+      purchase_order_payment_schedules: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      accounts_payable: { findFirst: jest.fn().mockResolvedValue(null) },
+      purchase_orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prismaService = {
+      purchase_orders: { findUnique: jest.fn(), findMany: jest.fn() },
+      $queryRawUnsafe: jest.fn(),
+      $transaction: jest.fn((cb: any) => cb(tx)),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { logCustom: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(5);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  describe('deriveNextPaymentDates', () => {
+    it('el SQL incluye cuotas planned y materialized', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([]);
+      prismaService.purchase_orders.findMany.mockResolvedValue([]);
+
+      await service.deriveNextPaymentDates([1, 2]);
+
+      const sql: string = prismaService.$queryRawUnsafe.mock.calls[0][0];
+      expect(sql).toContain("'planned'");
+      expect(sql).toContain("'materialized'");
+      expect(sql).not.toMatch(/status\s*=\s*'planned'/);
+    });
+
+    it('con filas devuelve la primera fecha por OC', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([
+        {
+          purchase_order_id: 1,
+          scheduled_date: new Date('2026-11-05T12:00:00Z'),
+        },
+        {
+          purchase_order_id: 1,
+          scheduled_date: new Date('2026-12-05T12:00:00Z'),
+        },
+      ]);
+
+      const out = await service.deriveNextPaymentDates([1]);
+
+      expect(out.get(1)).toEqual({ date: '2026-11-05' });
+      expect(prismaService.purchase_orders.findMany).not.toHaveBeenCalled();
+    });
+
+    it('sin filas usa payment_due_date de la OC como fallback', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([]);
+      prismaService.purchase_orders.findMany.mockResolvedValue([
+        { id: 3, payment_due_date: new Date('2026-11-20T12:00:00Z') },
+        { id: 4, payment_due_date: null },
+      ]);
+
+      const out = await service.deriveNextPaymentDates([3, 4]);
+
+      expect(out.get(3)).toEqual({ date: '2026-11-20' });
+      expect(out.get(4)).toEqual({ date: null });
+    });
+  });
+
+  describe('registerPayment con payment_schedule_id', () => {
+    it('marca la cuota como pagada si está planned o materialized', async () => {
+      prismaService.purchase_orders.findUnique.mockResolvedValue({
+        id: 9,
+        total_amount: 1000,
+      });
+      jest
+        .spyOn(service as any, 'recalculatePaymentStatus')
+        .mockResolvedValue('partial');
+      jest
+        .spyOn(service as any, 'emitPurchaseOrderPaymentEvent')
+        .mockResolvedValue(undefined);
+
+      await service.registerPayment(9, {
+        amount: 100,
+        payment_date: '2026-10-01',
+        payment_method: 'cash',
+        payment_schedule_id: 42,
+      } as any);
+
+      const arg =
+        tx.purchase_order_payment_schedules.updateMany.mock.calls[0][0];
+      expect(arg.where.id).toBe(42);
+      expect(arg.where.purchase_order_id).toBe(9);
+      expect(arg.where.status).toEqual({ in: ['planned', 'materialized'] });
+      expect(arg.data.status).toBe('paid');
+    });
+  });
+});
