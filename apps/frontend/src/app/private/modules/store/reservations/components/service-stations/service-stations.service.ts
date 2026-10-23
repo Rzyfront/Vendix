@@ -239,6 +239,13 @@ export class ServiceStationsService {
       );
   }
 
+  /** Asegura el presupuesto base para cobrar; falla si un tope del cliente no cubre el total. */
+  prepareCharge(sessionId: number): Observable<{ order_id: number }> {
+    return this.http
+      .post<{ data?: { order_id: number } } | { order_id: number }>(`${environment.apiUrl}/store/service-sessions/${sessionId}/prepare-charge`, {})
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
   reissueAccessLink(
     sessionId: number,
     body: { identity_verified: true; verification_method: 'in_person' | 'phone_callback' | 'known_customer'; verification_note: string; idempotency_key: string },

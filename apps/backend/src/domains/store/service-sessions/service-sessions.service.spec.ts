@@ -168,11 +168,20 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       products: {
         findFirst: jest.fn(({ where }: any) => Promise.resolve({ id: where.id, name: `P${where.id}`, base_price: 1000, product_type: 'service', track_inventory: false })),
       },
-      orders: { create: jest.fn().mockResolvedValue({ id: 88 }), update: jest.fn() },
+      orders: { create: jest.fn().mockResolvedValue({ id: 88 }), update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
       service_sessions: { updateMany: jest.fn() },
+      // Producto 2 lleva IVA 19 % sumado encima; el 1 no tiene impuesto.
+      product_tax_assignments: {
+        findMany: jest.fn(({ where }: any) => Promise.resolve(where.product_id.in.includes(2)
+          ? [{ product_id: 2, is_inclusive: false, tax_categories: { tax_type: 'iva', tax_rates: [{ id: 5, name: 'IVA 19%', rate: 0.19 }] } }]
+          : [])),
+      },
       order_items: {
         create: jest.fn(({ data }: any) => Promise.resolve({ id: ++createdItems, ...data })),
-        findMany: jest.fn().mockResolvedValue([{ total_price: 2000 }, { total_price: 1500 }]),
+        findMany: jest.fn().mockResolvedValue([
+          { total_price: 2000, tax_amount_item: 0, quantity: 2, weight: null, price_unit_quantity: null, order_item_taxes: [] },
+          { total_price: 1500, tax_amount_item: 285, quantity: 1, weight: null, price_unit_quantity: null, order_item_taxes: [{ tax_amount: 285 }] },
+        ]),
       },
       service_progress_events: { create: jest.fn() },
     };
@@ -186,11 +195,39 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.orders.create).toHaveBeenCalledTimes(1);
     expect(tx.order_items.create).toHaveBeenCalledTimes(2);
-    expect(tx.order_items.create.mock.calls[1][0].data).toMatchObject({ order_id: 88, unit_price: 1500, total_price: 1500 });
-    expect(result).toMatchObject({ order_id: 88, grand_total: 3500 });
+    const taxed = tx.order_items.create.mock.calls[1][0].data;
+    expect(Number(taxed.unit_price)).toBe(1500);
+    expect(Number(taxed.total_price)).toBe(1500);
+    expect(Number(taxed.tax_amount_item)).toBe(285);
+    expect(Number(taxed.final_unit_price)).toBe(1785);
+    expect(taxed.order_item_taxes.create[0]).toMatchObject({ tax_rate_id: 5, tax_type: 'iva', is_inclusive: false, tax_amount: 285 });
+    expect(tx.order_items.create.mock.calls[0][0].data.order_item_taxes).toBeUndefined();
+    expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ subtotal_amount: 3500, tax_amount: 285, grand_total: 3785, remaining_balance: 3785 }),
+    }));
+    expect(result).toMatchObject({ order_id: 88, grand_total: 3785 });
     expect(result.items).toHaveLength(2);
     expect(notifications.push).toHaveBeenCalledTimes(1);
-    expect(notifications.push.mock.calls[0][1].data).toMatchObject({ session_id: 77, event_type: 'item_added', grand_total: 3500 });
+    expect(notifications.push.mock.calls[0][1].data).toMatchObject({ session_id: 77, event_type: 'item_added', grand_total: 3785 });
+  });
+
+  it('IVA incluido: el precio publicado se mantiene y se despeja la base', async () => {
+    prisma.service_sessions.findFirst.mockResolvedValue({ id: 77, status: 'open', order_id: 88 });
+    const tx = {
+      products: { findFirst: jest.fn().mockResolvedValue({ id: 3, name: 'Cambio de aceite', base_price: 119000, product_type: 'service', track_inventory: false }) },
+      orders: { update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
+      product_tax_assignments: {
+        findMany: jest.fn().mockResolvedValue([{ product_id: 3, is_inclusive: true, tax_categories: { tax_type: 'iva', tax_rates: [{ id: 5, name: 'IVA 19%', rate: 0.19 }] } }]),
+      },
+      order_items: { create: jest.fn(({ data }: any) => Promise.resolve({ id: 1, ...data })), findMany: jest.fn().mockResolvedValue([]) },
+      service_progress_events: { create: jest.fn() },
+    };
+    prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+    await service.addItemsBulk(77, [{ product_id: 3, quantity: 1 }]);
+    const line = tx.order_items.create.mock.calls[0][0].data;
+    expect(Number(line.final_unit_price)).toBe(119000);
+    expect(Number(line.unit_price)).toBe(100000);
+    expect(Number(line.tax_amount_item)).toBe(19000);
   });
 
   it('addItemsBulk revierte todo si un producto no existe', async () => {
@@ -214,5 +251,40 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       expect.objectContaining({ where: { id: 999, store_users: { some: { store_id: 1 } } } }),
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  describe('prepareCharge', () => {
+    const setup = (budget: any) => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: 77, order_id: 88 } as any);
+      const tx = {
+        orders: { findFirst: jest.fn().mockResolvedValue({ grand_total: 119000, tip_amount: 0, currency: 'COP' }) },
+        service_budgets: { findFirst: jest.fn().mockResolvedValue(budget), create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('sin presupuesto pactado crea el base con el total de la cuenta', async () => {
+      const tx = setup(null);
+      await expect(service.prepareCharge(77)).resolves.toEqual({ order_id: 88 });
+      expect(tx.service_budgets.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ session_id: 77, version: 1, currency: 'COP', approved_at: null }),
+      });
+      expect(Number(tx.service_budgets.create.mock.calls[0][0].data.amount)).toBe(119000);
+    });
+
+    it('no sube un presupuesto del cliente que no cubre el total', async () => {
+      const tx = setup({ amount: 100000, currency: 'COP' });
+      await expect(service.prepareCharge(77)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'SERVICE_BUDGET_001' }),
+      });
+      expect(tx.service_budgets.create).not.toHaveBeenCalled();
+    });
+
+    it('acepta un presupuesto que cubre el total', async () => {
+      const tx = setup({ amount: 150000, currency: 'COP' });
+      await expect(service.prepareCharge(77)).resolves.toEqual({ order_id: 88 });
+      expect(tx.service_budgets.create).not.toHaveBeenCalled();
+    });
   });
 });

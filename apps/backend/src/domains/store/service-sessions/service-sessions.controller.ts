@@ -83,6 +83,12 @@ export class ServiceSessionsController {
     return this.response.updated(await this.sessions.extend(id, new Date(dto.planned_end_at)), 'Atención extendida');
   }
 
+  @Post(':id/prepare-charge')
+  @Permissions('store:reservations:update')
+  async prepareCharge(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success(await this.sessions.prepareCharge(id));
+  }
+
   @Post(':id/access-link/reissue')
   @Permissions('store:reservations:update')
   async reissueAccessLink(

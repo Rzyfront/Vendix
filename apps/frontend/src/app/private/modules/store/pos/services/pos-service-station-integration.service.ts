@@ -6,6 +6,23 @@ import { environment } from '../../../../../../environments/environment';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { getModulesHiddenByIndustries } from '../../../../../shared/constants/industry-modules.constant';
 import type { CartItem } from '../models/cart.model';
+import { catalogInclusiveDefault } from '../../products/utils/product-tax-inclusive.util';
+
+/**
+ * Tasa que el producto lleva INCLUIDA en su precio publicado (misma precedencia
+ * asignación > categoría > tasa que `PosCartService.calculateInclusiveRateSplit`).
+ * Las tasas que se suman encima no cuentan: esas las agrega la cuenta.
+ */
+function inclusiveRateOf(product: unknown): number {
+  let rate = 0;
+  for (const assignment of (product as { tax_assignments?: any[] } | null)?.tax_assignments ?? []) {
+    const rates = assignment?.tax_categories?.tax_rates ?? [];
+    const assignmentRate = rates.reduce((sum: number, tr: any) => sum + parseFloat(tr?.rate || '0'), 0);
+    if (assignmentRate === 0) continue;
+    if (assignment?.is_inclusive ?? catalogInclusiveDefault(assignment?.tax_categories)) rate += assignmentRate;
+  }
+  return rate;
+}
 
 interface ApiResponse<T> {
   success: boolean;
@@ -66,7 +83,7 @@ export interface StationCartMapping {
   lines: PosServiceSessionItemLine[];
   /** Líneas que NO se pueden cargar a la estación, con el motivo legible. */
   blocked: Array<{ name: string; reason: string }>;
-  /** Suma (antes de impuestos) de lo que se cargará: qty × unit_price. */
+  /** Lo que se cargará con impuestos (qty × precio final del carrito), igual que la cuenta. */
   amount: number;
 }
 
@@ -155,9 +172,12 @@ export class PosServiceStationIntegrationService {
    * en lugar de cargarse con datos perdidos (ej. cargar el producto padre sin
    * la variante elegida).
    *
-   * `unit_price` viaja como el precio unitario antes de impuestos del carrito
-   * (`CartItem.unitPrice`), que ya refleja tarifa aplicada y precio manual; es
-   * la misma base que usa el backend cuando lo omite (`products.base_price`).
+   * `unit_price` viaja como PRECIO PUBLICADO (el mismo significado que
+   * `products.base_price` cuando el backend lo omite): la base del carrito
+   * (`CartItem.unitPrice`, que ya refleja tarifa y precio manual) más el
+   * impuesto que el producto lleva incluido. La cuenta despeja ese impuesto y
+   * suma encima el adicional según la configuración de cada producto, así que
+   * enviar la base pura cobraría de menos los productos con IVA incluido.
    */
   mapCartToLines(items: CartItem[]): StationCartMapping {
     const lines: PosServiceSessionItemLine[] = [];
@@ -192,7 +212,10 @@ export class PosServiceStationIntegrationService {
         blocked.push({ name, reason: 'la cantidad debe ser un número entero' });
         continue;
       }
-      const unitPrice = Math.max(0, Math.round(Number(it.unitPrice ?? 0) * 100) / 100);
+      const unitPrice = Math.max(
+        0,
+        Math.round(Number(it.unitPrice ?? 0) * (1 + inclusiveRateOf(it.product)) * 100) / 100,
+      );
       const line: PosServiceSessionItemLine = {
         product_id: productId,
         quantity,
@@ -201,7 +224,7 @@ export class PosServiceStationIntegrationService {
       const note = it.notes?.trim();
       if (note) line.description = note.slice(0, 255);
       lines.push(line);
-      amount += unitPrice * quantity;
+      amount += Number(it.finalPrice ?? unitPrice) * quantity;
     }
 
     return { lines, blocked, amount: Math.round(amount * 100) / 100 };

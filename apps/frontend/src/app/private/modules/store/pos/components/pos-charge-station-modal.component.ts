@@ -93,7 +93,7 @@ export interface StationChargedEvent {
                 <span>{{ currentTotal() | currency }}</span>
               </div>
               <div class="summary-row">
-                <span>+ Este carrito (antes de impuestos)</span>
+                <span>+ Este carrito (con impuestos)</span>
                 <span>{{ mapping().amount | currency }}</span>
               </div>
               <div class="summary-row total">

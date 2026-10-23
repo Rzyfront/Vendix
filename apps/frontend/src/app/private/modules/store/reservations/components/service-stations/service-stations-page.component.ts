@@ -16,6 +16,8 @@ import {
   SelectorComponent,
   SelectorOption,
   SpinnerComponent,
+  ScrollableTab,
+  ScrollableTabsComponent,
   StatsComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
@@ -72,6 +74,7 @@ export interface ServiceSessionRow {
     order_number: string;
     grand_total: number;
     subtotal_amount: number;
+    tax_amount?: number;
     remaining_balance: number;
     order_items?: Array<{
       id: number;
@@ -80,6 +83,9 @@ export interface ServiceSessionRow {
       quantity: number;
       unit_price: number;
       total_price: number;
+      /** Precio por unidad con impuestos (base + IVA del producto). */
+      final_unit_price?: number | null;
+      tax_rate?: number | null;
       item_type?: string;
     }>;
   } | null;
@@ -202,6 +208,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     ToggleComponent,
     DynamicFieldComponent,
     ServiceRemindersPageComponent,
+    ScrollableTabsComponent,
     CustomerSelectComponent,
   ],
   templateUrl: './service-stations-page.component.html',
@@ -435,7 +442,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   readonly checkinServicePrice = computed(() => {
     const productId = Number(this.checkinProductId() || 0);
-    return Number(this.services().find((service) => service.id === productId)?.base_price || 0);
+    const service = this.services().find((svc) => svc.id === productId) as { base_price?: unknown; final_price?: unknown } | undefined;
+    // final_price ya trae el IVA del servicio resuelto por el backend (incluido o sumado).
+    return Number(service?.final_price ?? service?.base_price ?? 0);
   });
 
   /** Secciones del formulario de recepción, aplanadas en orden (tabs → secciones → subsecciones). */
@@ -479,6 +488,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return Math.max(0, Number(this.checkinInitialProductQty() || 1)) *
       Math.max(0, Number(this.checkinInitialProductPrice() ?? 0));
   });
+
+  /** Total de la línea con impuestos; líneas viejas sin `final_unit_price` muestran su base. */
+  lineTotalWithTax(item: { quantity: number; total_price: number; final_unit_price?: number | null }): number {
+    return item.final_unit_price != null
+      ? Math.round(Number(item.final_unit_price) * Number(item.quantity) * 100) / 100
+      : Number(item.total_price);
+  }
 
   readonly checkinEstimatedTotal = computed(() => this.checkinServicePrice() + this.checkinInitialLineTotal());
 
@@ -543,6 +559,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Manage session / Cuenta state (estilo mesas / cuenta abierta)
   readonly selectedSession = signal<ServiceSessionRow | null>(null);
+  protected readonly Number = Number;
   readonly sessionOrder = signal<any | null>(null);
   readonly sessionOrderLoading = signal(false);
   readonly budget = signal<any>(null);
@@ -848,6 +865,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly view = signal<'stations' | 'registry'>(
     new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('vista') === 'registro' ? 'registry' : 'stations',
   );
+
+  readonly viewTabs: ScrollableTab[] = [
+    { id: 'stations', label: 'Estaciones', icon: 'warehouse' },
+    { id: 'registry', label: 'Registro de servicios', icon: 'history' },
+  ];
 
   setView(view: 'stations' | 'registry'): void {
     this.view.set(view);
@@ -1763,14 +1785,42 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  /**
+   * La cuenta SVC queda como orden en borrador: se cobra con "Registrar pago" del
+   * detalle de la orden (mismo flujo `flow/pay` de cualquier orden, que promueve el borrador).
+   */
+  chargeSessionAccount(session: ServiceSessionRow): void {
+    this.saving.set(true);
+    this.stationsApi.prepareCharge(session.id).subscribe({
+      next: ({ order_id }) => {
+        this.saving.set(false);
+        this.showSessionModal.set(false);
+        this.toastService.info('Registra el pago desde "Registrar pago" en la orden.');
+        this.router.navigate(['/admin/orders', order_id]);
+      },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible preparar el cobro de la cuenta.'));
+      },
+    });
+  }
+
   transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close'): void {
     this.saving.set(true);
+    // Saldo pendiente al cerrar → se lleva a cobrar la cuenta.
+    const order = this.sessionOrder()?.id === session.order?.id ? this.sessionOrder() ?? session.order : session.order;
+    const pendingOrderId = action === 'close' && order?.id && Number(order.remaining_balance ?? order.grand_total ?? 0) > 0 ? order.id : null;
     this.http.patch<any>(`${environment.apiUrl}/store/service-sessions/${session.id}`, { action }).subscribe({
       next: () => {
         this.saving.set(false);
         this.showSessionModal.set(false);
         this.selectedSession.set(null);
         this.loadActiveSessions();
+        if (pendingOrderId) {
+          this.toastService.success('Atención finalizada. Registra el pago de la cuenta.');
+          this.router.navigate(['/admin/orders', pendingOrderId]);
+          return;
+        }
         this.toastService.success(
           action === 'close'
             ? 'Atención finalizada con éxito.'

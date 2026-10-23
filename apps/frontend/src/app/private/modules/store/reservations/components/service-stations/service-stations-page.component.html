@@ -11,27 +11,14 @@
   />
 
   <!-- Vistas del módulo: operación en vivo de las estaciones o registro de servicios realizados -->
-  <div class="px-2 md:px-0 mt-2 mb-3 flex items-center gap-1.5 border-b border-[var(--color-border)] text-sm font-semibold overflow-x-auto" role="tablist">
-    <button
-      type="button"
-      role="tab"
-      [attr.aria-selected]="view() === 'stations'"
-      (click)="setView('stations')"
-      class="px-3 py-2 -mb-px border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors"
-      [ngClass]="view() === 'stations' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
-    >
-      <app-icon name="warehouse" [size]="15" /> Estaciones
-    </button>
-    <button
-      type="button"
-      role="tab"
-      [attr.aria-selected]="view() === 'registry'"
-      (click)="setView('registry')"
-      class="px-3 py-2 -mb-px border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors"
-      [ngClass]="view() === 'registry' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
-    >
-      <app-icon name="history" [size]="15" /> Registro de servicios
-    </button>
+  <div class="mt-2 mb-3">
+    <app-scrollable-tabs
+      [tabs]="viewTabs"
+      [activeTab]="view()"
+      size="md"
+      ariaLabel="Vistas de estaciones de servicio"
+      (tabChange)="setView($any($event))"
+    />
   </div>
 
   @if (view() === 'registry') {
@@ -837,7 +824,7 @@
       }
 
       <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm flex flex-wrap items-center justify-between gap-2">
-        <span class="text-[var(--color-text-secondary)]">Total inicial estimado (servicio + producto inicial)</span>
+        <span class="text-[var(--color-text-secondary)]">Total inicial estimado (servicio con impuestos + producto inicial; la cuenta aplica el IVA de cada producto)</span>
         <strong class="font-mono text-emerald-700 dark:text-emerald-300">${{ checkinEstimatedTotal() | number }} COP</strong>
       </div>
 
@@ -1033,14 +1020,17 @@
                       <div class="min-w-0">
                         <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
                         <div class="text-[11px] text-[var(--color-text-secondary)] font-mono">
-                          {{ item.quantity }} x ${{ item.unit_price | number }}
+                          {{ item.quantity }} x ${{ (item.final_unit_price ?? item.unit_price) | number }}
+                          @if (Number(item.tax_rate) > 0) {
+                            <span class="ml-1 text-[10px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
+                          }
                         </div>
                       </div>
                     </div>
 
                     <div class="flex items-center gap-3">
                       <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">
-                        ${{ item.total_price | number }} COP
+                        ${{ lineTotalWithTax(item) | number }} COP
                       </span>
                       <app-button variant="ghost" size="sm" (clicked)="removeItemFromAccount(item.id)" ariaLabel="Eliminar ítem">
                         <app-icon name="trash-2" [size]="13" class="text-red-500" />
@@ -1049,6 +1039,23 @@
                   </div>
                 }
               </div>
+              <div class="mt-2 p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs space-y-1 font-mono">
+                <div class="flex justify-between text-[var(--color-text-secondary)]">
+                  <span>Subtotal</span><span>$ {{ sessionOrder()?.subtotal_amount | number }}</span>
+                </div>
+                <div class="flex justify-between text-[var(--color-text-secondary)]">
+                  <span>Impuestos</span><span>$ {{ (sessionOrder()?.tax_amount || 0) | number }}</span>
+                </div>
+                <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
+                  <span>Total</span><span>$ {{ sessionOrder()?.grand_total | number }} COP</span>
+                </div>
+              </div>
+              @if (budget() && Number(sessionOrder()?.grand_total) > Number(budget()?.amount)) {
+                <div class="mt-2 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                  <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
+                  <span>La cuenta supera el presupuesto autorizado por el cliente ($ {{ budget()?.amount | number }}). Ajusta el presupuesto abajo para poder cobrarla.</span>
+                </div>
+              }
             } @else {
               <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-center text-xs text-[var(--color-text-secondary)] italic">
                 La cuenta de esta estación está abierta con el servicio inicial. Puedes agregar productos, consumibles o servicios adicionales con el botón de arriba.
@@ -1181,9 +1188,14 @@
               </app-button>
             }
           </div>
-          <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="transitionSession(session, 'close')">
-            <app-icon name="check-circle" [size]="14" slot="icon" /> Finalizar y Cerrar Atención
-          </app-button>
+          <div class="flex items-center gap-2">
+            <app-button variant="outline" size="sm" (clicked)="chargeSessionAccount(session)">
+              <app-icon name="credit-card" [size]="14" slot="icon" /> Cobrar cuenta
+            </app-button>
+            <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="transitionSession(session, 'close')">
+              <app-icon name="check-circle" [size]="14" slot="icon" /> Finalizar y cobrar
+            </app-button>
+          </div>
         </div>
       </div>
     </app-modal>
