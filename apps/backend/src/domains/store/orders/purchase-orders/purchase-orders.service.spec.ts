@@ -4149,6 +4149,81 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
   });
 });
 
+describe('QUI-712 — próximo pago de OC sin desfase de día por timezone', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  beforeEach(async () => {
+    prismaService = {
+      $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+      purchase_orders: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('schedule con scheduled_date medianoche UTC devuelve la misma fecha civil', async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      {
+        purchase_order_id: 1,
+        scheduled_date: new Date('2026-08-21T00:00:00Z'),
+      },
+    ]);
+    const map = await service.deriveNextPaymentDates([1]);
+    expect(map.get(1)).toEqual({ date: '2026-08-21' });
+  });
+
+  it('fallback payment_due_date medianoche UTC devuelve la misma fecha civil', async () => {
+    prismaService.purchase_orders.findMany.mockResolvedValue([
+      { id: 2, payment_due_date: new Date('2026-08-21T00:00:00Z') },
+    ]);
+    const map = await service.deriveNextPaymentDates([2]);
+    expect(map.get(2)).toEqual({ date: '2026-08-21' });
+  });
+
+  it('a las 20:00 Bogotá (ya 22/08 en UTC) vence hoy: días = 0', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-21T20:00:00-05:00'));
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      {
+        purchase_order_id: 1,
+        scheduled_date: new Date('2026-08-21T00:00:00Z'),
+      },
+    ]);
+    const result = await (service as any).decorateWithNextPaymentDate([
+      { id: 1 },
+    ]);
+    expect(result[0].next_payment_date).toBe('2026-08-21');
+    expect(result[0].next_payment_due_in_days).toBe(0);
+  });
+});
+
+
 describe('decorateWithNextPaymentDate — QUI-711', () => {
   let service: PurchaseOrdersService;
   let prismaService: any;

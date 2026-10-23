@@ -239,6 +239,27 @@ export function localDateString(date: Date, tz: string): string {
 }
 
 /**
+ * Civil date `YYYY-MM-DD` of a date-only column (`@db.Date` or a value written
+ * as midnight UTC), read in UTC. Also accepts what `$queryRawUnsafe` returns.
+ * NEVER use `localDateString` for these columns: it shifts them back one day.
+ */
+export function dateOnlyString(date: Date): string {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
+/**
+ * Calendar days `to - from` between two `YYYY-MM-DD` strings (exact integer,
+ * independent of the server timezone).
+ */
+export function daysBetweenDateStrings(from: string, to: string): number {
+  const toUtc = (s: string) => {
+    const [y, m, d] = s.split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((toUtc(to) - toUtc(from)) / 86_400_000);
+}
+
+/**
  * Local wall-clock time of a UTC instant as `HH:MM:SS` plus its real offset,
  * e.g. `18:15:44-05:00`. This is the shape DIAN expects for `IssueTime` and the
  * `HorFac` component of the CUFE.
