@@ -7,6 +7,7 @@ import {
   signal,
   computed,
   model,
+  effect,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
@@ -62,6 +63,7 @@ import {
 // tolera EXACTAMENTE 1 centavo; la traducción fiel es
 // `differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
 import { differsByAtLeastCents } from '@money-kernel/money-compare';
+import { StoreSeoService, productPageSeo } from '../../services/store-seo';
 
 @Component({
   selector: 'app-product-detail',
@@ -1853,6 +1855,35 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
   ],
 })
 export class ProductDetailComponent implements OnInit {
+  // SEO de la tienda: título, canonical único (/products/<slug>), og y JSON-LD
+  // Product con su oferta real. Reemplaza los metadatos de Vendix del index.html.
+  private readonly storeSeo = inject(StoreSeoService);
+  private readonly storeSeoOwner = {};
+  private readonly storeSeoSync = effect(() => {
+    const store = this.storeSeo.storeName();
+    if (!store) return;
+    if (this.notFound()) {
+      this.storeSeo.apply(this.storeSeoOwner, {
+        title: `Producto no disponible | ${store}`,
+        description: `Este producto no está disponible en ${store}.`,
+        canonicalPath: null,
+        robots: 'noindex, follow',
+        image: null,
+        jsonLd: null,
+      });
+      return;
+    }
+    const product = this.product();
+    if (!product) return;
+    this.storeSeo.apply(
+      this.storeSeoOwner,
+      productPageSeo(product, store, this.storeSeo.origin, this.currencyFormat.currencyCode()),
+    );
+  });
+  private readonly storeSeoCleanup = inject(DestroyRef).onDestroy(() =>
+    this.storeSeo.release(this.storeSeoOwner),
+  );
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private catalogService = inject(CatalogService);

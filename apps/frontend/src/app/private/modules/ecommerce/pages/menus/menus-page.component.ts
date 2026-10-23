@@ -6,6 +6,7 @@ import {
   computed,
   inject,
   signal,
+  effect,
 } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -35,6 +36,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { StoreSeoService } from '../../services/store-seo';
 
 type AvailabilityDisplay = 'hide' | 'badge';
 
@@ -73,6 +75,17 @@ interface RenderMenu extends PublicMenu {
   styleUrls: ['./menus-page.component.scss'],
 })
 export class MenusPageComponent implements OnInit {
+  // SEO de la tienda: página de cartas con canonical propio.
+  private readonly storeSeo = inject(StoreSeoService);
+  private readonly storeSeoOwner = {};
+  private readonly storeSeoSync = effect(() => {
+    const page = this.storeSeo.listingPage('/cartas', 'Carta');
+    if (page) this.storeSeo.apply(this.storeSeoOwner, page);
+  });
+  private readonly storeSeoCleanup = inject(DestroyRef).onDestroy(() =>
+    this.storeSeo.release(this.storeSeoOwner),
+  );
+
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
   private readonly wishlistService = inject(WishlistService);
