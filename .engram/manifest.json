@@ -3536,6 +3536,14 @@
       "sessions": 0,
       "memories": 41,
       "prompts": 0
+    },
+    {
+      "id": "70741e70",
+      "created_by": "rzy",
+      "created_at": "2026-10-23T07:15:26Z",
+      "sessions": 49,
+      "memories": 32,
+      "prompts": 0
     }
   ]
 }
