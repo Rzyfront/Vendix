@@ -51,6 +51,7 @@ export interface StationServiceOption {
   base_price?: number | string | null;
   service_duration_minutes?: number | null;
   is_recurring?: boolean;
+  state?: string;
 }
 
 /** Campo de Recolección de datos tal como viene en un item de plantilla. */

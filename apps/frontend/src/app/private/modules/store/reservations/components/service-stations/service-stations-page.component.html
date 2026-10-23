@@ -486,21 +486,6 @@
         [required]="true"
       />
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <app-selector
-          label="Tipo de Estación"
-          [options]="stationTypeOptions"
-          [ngModel]="newStationType()"
-          (ngModelChange)="newStationType.set($event)"
-          [required]="true"
-        />
-        <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col justify-center">
-          <span class="text-xs font-bold text-[var(--color-text-primary)]">Capacidad</span>
-          <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">1 cliente a la vez (igual que una mesa)</span>
-        </div>
-      </div>
-
-
       <div class="p-3 rounded-xl border border-dashed border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <span class="text-xs font-bold text-[var(--color-text-primary)]">Plantilla de estación (opcional)</span>
@@ -725,12 +710,19 @@
 
       <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
       <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-2]="checkinTracksTime()">
-        <app-selector
-          label="Servicio Requerido Inicial"
-          [options]="serviceSelectorOptions()"
-          [ngModel]="checkinProductId()"
-          (ngModelChange)="onCheckinServiceChange($event)"
-        />
+        <div>
+          <app-selector
+            label="Servicio"
+            [options]="serviceSelectorOptions()"
+            [ngModel]="checkinProductId() || null"
+            (ngModelChange)="onCheckinServiceChange($event)"
+            placeholder="Selecciona el servicio"
+            [required]="true"
+          />
+          @if (!serviceSelectorOptions().length) {
+            <p class="mt-1 text-xs text-red-600">Esta estación no tiene servicios activos. Asígnalos en Configurar estación → Servicios.</p>
+          }
+        </div>
         @if (checkinTracksTime()) {
           <app-input
             label="Tiempo Estimado (Minutos)"
@@ -1309,19 +1301,13 @@
         <!-- Pestaña 1: Datos & QR -->
         @if (selectedConfigTab() === 'details') {
           <div class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <app-input
                 label="Nombre de la Estación"
                 [ngModel]="editName()"
                 (ngModelChange)="editName.set($event)"
                 placeholder="Ej. Bahía de Alineación 1, Silla Barber 2"
                 [required]="true"
-              />
-              <app-selector
-                label="Tipo de Estación / Categoría"
-                [options]="stationTypeOptions"
-                [ngModel]="editStationType()"
-                (ngModelChange)="editStationType.set($event)"
               />
               <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col justify-center">
                 <span class="text-xs font-bold text-[var(--color-text-primary)]">Capacidad</span>

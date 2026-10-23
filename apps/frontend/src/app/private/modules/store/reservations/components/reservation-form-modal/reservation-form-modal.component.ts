@@ -156,6 +156,21 @@ export class ReservationFormModalComponent {
       (!providerId || station.providers?.some((entry) => entry.provider_id === providerId)),
     );
   });
+  /**
+   * Servicio que se presta en estación: solo los proveedores asignados a alguna
+   * estación activa que ofrece ese servicio (Configurar estación → Proveedores).
+   */
+  readonly visibleProviders = computed(() => {
+    const all = this.providers();
+    if (!this.requiresStation()) return all;
+    const serviceId = this.selectedService()?.id;
+    const allowed = new Set(
+      this.stations()
+        .filter((station) => station.status === 'active' && station.services?.some((entry) => entry.product_id === serviceId))
+        .flatMap((station) => station.providers?.map((entry) => entry.provider_id) ?? []),
+    );
+    return all.filter((provider) => allowed.has(provider.id));
+  });
   readonly stationOptions = computed(() => this.compatibleStations().map((station) => ({ value: station.id, label: station.name })));
 
   readonly hasMoreServices = computed(() => {

@@ -145,13 +145,16 @@ export class ServiceSessionsService {
       select: { id: true },
     });
     const [stationService, product] = await Promise.all([
-      bookingAllocation
-        ? this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } })
-        : Promise.resolve(null),
-      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, sale_price: true, is_on_sale: true, product_type: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
+      this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } }),
+      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, sale_price: true, is_on_sale: true, product_type: true, state: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
     ]);
-    if (!station || (bookingAllocation && !stationService) || product?.product_type !== 'service') {
+    if (!station || product?.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.STATION_001);
+    }
+    // El servicio tiene que estar asignado a la estación (reserva o walk-in) y,
+    // para un walk-in, activo en el catálogo.
+    if (!stationService || (!bookingAllocation && product.state !== 'active')) {
+      throw new VendixHttpException(ErrorCodes.STATION_001, 'El servicio no está activo para esta estación.');
     }
     const customerId = booking?.customer_id ?? dto.customer_id ?? null;
     // Un cliente elegido a mano debe pertenecer a esta tienda (el de la reserva ya viene de ella).

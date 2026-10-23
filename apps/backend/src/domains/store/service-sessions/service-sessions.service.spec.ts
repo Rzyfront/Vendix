@@ -244,7 +244,8 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
   it('rechaza un cliente que no pertenece a la tienda al abrir un walk-in', async () => {
     prisma.service_stations.findFirst.mockResolvedValue({ id: 3, intake_template_id: null });
-    prisma.products = { findFirst: jest.fn().mockResolvedValue({ id: 10, product_type: 'service' }) };
+    prisma.products = { findFirst: jest.fn().mockResolvedValue({ id: 10, product_type: 'service', state: 'active' }) };
+    prisma.service_station_services = { findFirst: jest.fn().mockResolvedValue({ id: 1 }) };
     prisma.users = { findFirst: jest.fn().mockResolvedValue(null) };
     await expect(service.open({ station_id: 3, product_id: 10, customer_id: 999 } as any)).rejects.toMatchObject({
       response: expect.objectContaining({ error_code: 'CUST_FIND_001' }),
@@ -252,6 +253,19 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     expect(prisma.users.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 999, store_users: { some: { store_id: 1 } } } }),
     );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no asignado a la estación', null, 'active'],
+    ['inactivo en el catálogo', { id: 1 }, 'inactive'],
+  ])('rechaza abrir un walk-in con un servicio %s', async (_label, link, state) => {
+    prisma.service_stations.findFirst.mockResolvedValue({ id: 3 });
+    prisma.products = { findFirst: jest.fn().mockResolvedValue({ id: 10, product_type: 'service', state }) };
+    prisma.service_station_services = { findFirst: jest.fn().mockResolvedValue(link) };
+    await expect(service.open({ station_id: 3, product_id: 10 } as any)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'STATION_001' }),
+    });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 

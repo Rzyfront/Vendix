@@ -428,10 +428,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   readonly serviceSelectorOptions = computed<SelectorOption[]>(() => {
     const opts: SelectorOption[] = [];
+    // Solo los servicios asignados a ESTA estación y activos en el catálogo.
     const linked = this.checkinLinkedServiceIds();
-    const list = linked.length
-      ? this.services().filter((s) => linked.includes(s.id))
-      : this.services();
+    const list = this.services().filter((s) => linked.includes(s.id) && (!s.state || s.state === 'active'));
     const effective = linked.length && !list.length
       ? this.selectedCheckinStation()?.services?.map((s) => ({
           id: s.product_id,
@@ -1182,7 +1181,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.stationsApi.create({
       name,
       capacity: 1,
-      station_type: this.newStationType(),
+      // El tipo ya no se elige: lo que pide cada estación lo define su plantilla.
+      station_type: 'general',
       track_time: this.newTrackTime(),
       target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
     }).subscribe({
@@ -1425,12 +1425,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   }
 
   private defaultCheckinServiceId(station: ServiceStation | null): number {
+    // Con un único servicio se preselecciona; con varios se elige a mano (es obligatorio).
     const linked = station?.services?.map((s) => s.product_id) ?? [];
-    if (linked.length) {
-      const known = linked.find((id) => this.services().some((s) => s.id === id));
-      return known ?? linked[0] ?? 0;
-    }
-    return this.services()[0]?.id ?? 0;
+    const active = linked.filter((id) => this.services().some((s) => s.id === id && (!s.state || s.state === 'active')));
+    return active.length === 1 ? active[0] : 0;
   }
 
   readonly checkinProductOptions = computed<SelectorOption[]>(() =>
@@ -1569,9 +1567,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       }
     }
 
-    const selectedServiceId = Number(this.checkinProductId() || 0) || station?.services[0]?.product_id || this.services()[0]?.id;
-    if (!selectedServiceId) {
-      this.toastService.error('Agrega al menos un servicio al catálogo y asígnalo a esta estación antes de iniciar la atención.');
+    const selectedServiceId = Number(this.checkinProductId() || 0);
+    if (!this.serviceSelectorOptions().length) {
+      this.toastService.error('Esta estación no tiene servicios activos. Asígnalos en Configurar estación → Servicios.');
+      return;
+    }
+    if (!selectedServiceId || !this.serviceSelectorOptions().some((o) => Number(o.value) === selectedServiceId)) {
+      this.toastService.error('Selecciona el servicio de la atención.');
       return;
     }
     if (this.checkinIntakeLoading()) {
@@ -1612,7 +1614,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }
 
     // Spec: CORRIGE BUG: ServiceSubjectDto.subject_type solo acepta 'vehicle' | 'person' | 'other'
-    const subjectType: 'vehicle' | 'person' | 'other' = requiresVehicle
+    // Con plantilla, lo atendido sale de sus respuestas (placa, equipo…): 'other' lo
+    // deja visible en el seguimiento; 'person' lo ocultaría por ser el nombre del cliente.
+    const subjectType: 'vehicle' | 'person' | 'other' = usesIntakeForm && label !== customerName
+      ? 'other'
+      : requiresVehicle
       ? 'vehicle'
       : isCelular
         ? 'other'
@@ -2058,7 +2064,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.stationsApi.update(station.id, {
         name,
         capacity: 1,
-        station_type: this.editStationType(),
         track_time: this.editTrackTime(),
         target_minutes: this.editTrackTime() ? this.positiveMinutes(this.editTargetMinutes()) : null,
       }),

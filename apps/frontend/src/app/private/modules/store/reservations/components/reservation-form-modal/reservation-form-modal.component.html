@@ -281,7 +281,7 @@
             >
               <app-icon name="users" [size]="14"></app-icon> Cualquiera
             </button>
-            @for (p of providers(); track p.id) {
+            @for (p of visibleProviders(); track p.id) {
               <button
                 type="button"
                 class="provider-chip"
@@ -294,7 +294,7 @@
             }
           </div>
 
-          @if (providers().length === 0) {
+          @if (visibleProviders().length === 0) {
             <div class="empty-state" style="padding: 24px 16px">
               <div
                 class="empty-icon-wrapper"
