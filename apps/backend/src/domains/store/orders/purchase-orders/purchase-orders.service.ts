@@ -2993,6 +2993,15 @@ export class PurchaseOrdersService {
     const map = await this.deriveNextPaymentDates(poIds);
     const todayLocal = localDateString(new Date(), DEFAULT_STORE_TIMEZONE);
     return rows.map((row) => {
+      // QUI-711: una OC 100% pagada no tiene "próximo pago" aunque conserve
+      // cuotas o payment_due_date históricos.
+      if ((row as any).payment_status === 'paid') {
+        return {
+          ...row,
+          next_payment_date: null,
+          next_payment_due_in_days: null,
+        };
+      }
       const next = map.get(row.id);
       if (!next || !next.date) {
         return {

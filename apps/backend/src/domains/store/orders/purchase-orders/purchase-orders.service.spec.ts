@@ -4148,3 +4148,72 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
     expect(res).toEqual({ conflicts: [] });
   });
 });
+
+describe('decorateWithNextPaymentDate — QUI-711', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  beforeEach(async () => {
+    prismaService = {
+      purchase_orders: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRawUnsafe: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  // Cuota planned vencida hace ~5 días (relativa para no depender del día).
+  const pastDate = () => new Date(Date.now() - 5 * 86_400_000);
+
+  it("una OC 'paid' con cuota planned pasada no tiene próximo pago", async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      { purchase_order_id: 1, scheduled_date: pastDate() },
+    ]);
+
+    const [row] = await (service as any).decorateWithNextPaymentDate([
+      { id: 1, payment_status: 'paid' },
+    ]);
+
+    expect(row.next_payment_date).toBeNull();
+    expect(row.next_payment_due_in_days).toBeNull();
+  });
+
+  it("una OC 'partial' con cuota planned conserva fecha y días (sin regresión)", async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      { purchase_order_id: 2, scheduled_date: pastDate() },
+    ]);
+
+    const [row] = await (service as any).decorateWithNextPaymentDate([
+      { id: 2, payment_status: 'partial' },
+    ]);
+
+    expect(row.next_payment_date).toEqual(expect.any(String));
+    expect(row.next_payment_due_in_days).toEqual(expect.any(Number));
+    expect(row.next_payment_due_in_days).toBeLessThan(0);
+  });
+});
