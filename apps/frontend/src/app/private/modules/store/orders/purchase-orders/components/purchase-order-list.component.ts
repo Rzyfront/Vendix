@@ -173,10 +173,12 @@ export class PurchaseOrderListComponent {
     },
     // CP-ID-VNDX-2026-08-18-PO-PROD — Anotación 3: badge dinámico por proximity.
     // Verde > 7d, amarillo 1-7d, naranja 0d (vence hoy), rojo < 0 (vencida),
-    // gris null (sin plan). La clave apunta al campo numérico crudo para
-    // que table.component.ts:583 pase `value` (número) al colorFn.
+    // gris null (sin plan). QUI-711: pagada ('paid') → verde "Pagada".
+    // La clave apunta al campo derivado `next_payment_badge` (número de días,
+    // 'paid' o null), calculado al cargar las órdenes, porque table.component
+    // pasa solo `value` al colorFn (sin la fila).
     {
-      key: 'next_payment_due_in_days',
+      key: 'next_payment_badge',
       label: 'Próximo pago',
       priority: 2,
       badge: true,
@@ -184,6 +186,7 @@ export class PurchaseOrderListComponent {
         type: 'custom',
         size: 'sm',
         colorFn: (value: any) => {
+          if (value === 'paid') return '#10b981';     // pagada: verde
           if (value === null || value === undefined || value === '') return '#9ca3af';
           const num = Number(value);
           if (!Number.isFinite(num)) return '#9ca3af';
@@ -193,8 +196,7 @@ export class PurchaseOrderListComponent {
           return '#10b981';                 // > 7d: verde
         },
       },
-      transform: (value: any, row?: any) =>
-        this.formatNextPaymentBadge(row?.next_payment_due_in_days ?? value),
+      transform: (value: any) => this.formatNextPaymentBadge(value),
       sortable: true,
     },
     {
@@ -347,7 +349,16 @@ export class PurchaseOrderListComponent {
       .subscribe({
         next: (response: any) => {
           const orders = response.data || response;
-          const parsedOrders: PurchaseOrder[] = Array.isArray(orders) ? orders : [];
+          // QUI-711: campo derivado por fila (el TableComponent no pasa la fila al colorFn).
+          const parsedOrders: PurchaseOrder[] = (Array.isArray(orders) ? orders : []).map(
+            (order: any) => ({
+              ...order,
+              next_payment_badge:
+                order.payment_status === 'paid'
+                  ? 'paid'
+                  : (order.next_payment_due_in_days ?? null),
+            }),
+          );
           this.orders.set(parsedOrders);
           this.totalItems.set(
             response.meta?.pagination?.total ??
@@ -597,10 +608,12 @@ export class PurchaseOrderListComponent {
   /**
    * Bug 4 frontend — Etiqueta del badge de "Próximo pago" según días restantes.
    * Verde > 7d, amarillo 0–7d, rojo < 0 (vencida), gris si null.
+   * QUI-711: 'paid' (OC totalmente pagada) → "Pagada" en verde.
    * Devuelve solo el label; el color va por CSS class del badge (negociado
    * en el colorMap de la columna: ok / soon / overdue / none).
    */
-  formatNextPaymentBadge(days: number | null | undefined): string {
+  formatNextPaymentBadge(days: number | 'paid' | null | undefined): string {
+    if (days === 'paid') return 'Pagada';
     if (days === null || days === undefined) return 'Sin plan';
     if (days < 0) return `Vencida hace ${Math.abs(days)}d`;
     if (days === 0) return 'Vence hoy';
