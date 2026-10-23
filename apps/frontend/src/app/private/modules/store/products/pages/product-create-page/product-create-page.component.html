@@ -1775,7 +1775,7 @@
                     placeholder="Sin formulario"
                   />
                 </div>
-                <app-button variant="outline" size="sm" (clicked)="openTemplateManager()">
+                <app-button variant="outline" size="sm" [loading]="designingIntakeTemplate()" (clicked)="openTemplateManager()">
                   <app-icon name="pencil" [size]="14" slot="icon" />
                   Diseñar
                 </app-button>
@@ -1850,7 +1850,7 @@
                         <app-button
                           variant="outline"
                           size="sm"
-                          (clicked)="openTemplateManager()"
+                          (clicked)="openTemplatesListInNewTab()"
                         >
                           <app-icon name="external-link" [size]="14" slot="icon"></app-icon>
                           Diseñar

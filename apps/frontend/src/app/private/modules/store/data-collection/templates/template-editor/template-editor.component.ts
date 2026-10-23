@@ -108,7 +108,8 @@ interface Selection {
         subtitle="Editor de plantilla"
         icon="layout-template"
         [showBackButton]="true"
-        [backRoute]="returnTo() || '/admin/data-collection/templates'"
+        [backRoute]="returnPath()"
+        [backQueryParams]="returnQuery()"
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
@@ -815,6 +816,12 @@ export class TemplateEditorComponent implements OnInit {
    * del panel, para no convertir el parámetro en una redirección abierta.
    */
   readonly returnTo = signal<string | null>(null);
+  /** returnTo partido en ruta + query: routerLink codificaría el "?" dentro de la ruta. */
+  readonly returnPath = computed(() => (this.returnTo() ?? '/admin/data-collection/templates').split('?')[0]);
+  readonly returnQuery = computed<Record<string, string> | undefined>(() => {
+    const query = this.returnTo()?.split('?')[1];
+    return query ? Object.fromEntries(new URLSearchParams(query)) : undefined;
+  });
 
   previewSteps = computed(() => {
     const fd = this.formData();

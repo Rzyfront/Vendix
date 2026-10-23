@@ -1743,8 +1743,14 @@ export class ProductCreatePageComponent {
       this.applyDraftData(navState.draft);
     }
 
+    this.takeIntakeDraft();
+
     // Check for ID in route to determine edit mode
     this.route.params.subscribe((params: Params) => {
+      if (!params['id'] && this.pendingIntakeDraft) {
+        // Creación: no hay nada que cargar del servidor; se aplica ya.
+        queueMicrotask(() => this.applyIntakeDraft());
+      }
       if (params['id']) {
         this.productId = +params['id'];
         this.isEditMode.set(true);
@@ -2044,8 +2050,93 @@ export class ProductCreatePageComponent {
       });
   }
 
+  /**
+   * "Diseñar": abre el editor de plantillas en ESTA pestaña. Antes guarda el
+   * avance del formulario (sessionStorage) para recuperarlo al volver; si el
+   * servicio aún no tiene formulario, crea uno vacío y lo deja elegido.
+   */
+  readonly designingIntakeTemplate = signal(false);
+
   openTemplateManager(): void {
+    const goToEditor = (templateId: number) => {
+      this.saveIntakeDraft(templateId);
+      const [path, query = ''] = this.router.url.split('?');
+      const params = new URLSearchParams(query);
+      params.set('restoreDraft', '1');
+      this.router.navigate(['/admin/data-collection/templates', templateId, 'edit'], {
+        queryParams: { returnTo: `${path}?${params.toString()}` },
+      });
+    };
+    const current = Number(this.intakeTemplateId()) || 0;
+    if (current) {
+      goToEditor(current);
+      return;
+    }
+    this.designingIntakeTemplate.set(true);
+    const name = String(this.productForm.get('name')?.value || '').trim();
+    this.dataCollectionTemplatesService
+      .create({ name: `Formulario ${name || 'del servicio'}`, entity_type: 'service_session', status: 'active', sections: [] })
+      .subscribe({
+        next: (template) => {
+          this.designingIntakeTemplate.set(false);
+          goToEditor(template.id);
+        },
+        error: (error) => {
+          this.designingIntakeTemplate.set(false);
+          this.toastService.error(extractApiErrorMessage(error) || 'No fue posible crear el formulario.');
+        },
+      });
+  }
+
+  /** Plantillas de consulta: se gestionan en su listado (pestaña aparte, como antes). */
+  openTemplatesListInNewTab(): void {
     window.open('/admin/data-collection/templates', '_blank');
+  }
+
+  private intakeDraftKey(): string {
+    return `vendix:product-intake-draft:${this.productId ?? 'new'}`;
+  }
+
+  private saveIntakeDraft(templateId: number): void {
+    try {
+      sessionStorage.setItem(
+        this.intakeDraftKey(),
+        JSON.stringify({ form: this.productForm.getRawValue(), intake_template_id: templateId }),
+      );
+    } catch {
+      /* Sin storage (modo privado): se vuelve sin borrador. */
+    }
+  }
+
+  /** Borrador pendiente de aplicar al volver del editor (solo con ?restoreDraft=1). */
+  private pendingIntakeDraft: { form: Record<string, unknown>; intake_template_id: number } | null = null;
+  /** Plantilla elegida en el editor; gana sobre el vínculo guardado aunque este llegue después. */
+  private restoredIntakeTemplateId: number | null = null;
+
+  private takeIntakeDraft(): void {
+    if (this.route.snapshot.queryParamMap.get('restoreDraft') !== '1') return;
+    try {
+      const raw = sessionStorage.getItem(this.intakeDraftKey());
+      sessionStorage.removeItem(this.intakeDraftKey());
+      this.pendingIntakeDraft = raw ? JSON.parse(raw) : null;
+    } catch {
+      this.pendingIntakeDraft = null;
+    }
+    // Quita el parámetro para que recargar no vuelva a aplicar el borrador.
+    this.router.navigate([], { queryParams: { restoreDraft: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /** Reaplica lo que el usuario llevaba (sobre lo cargado del servidor) y elige la plantilla. */
+  private applyIntakeDraft(): void {
+    const draft = this.pendingIntakeDraft;
+    if (!draft) return;
+    this.pendingIntakeDraft = null;
+    this.productForm.patchValue(draft.form ?? {});
+    this.productForm.markAsDirty();
+    this.restoredIntakeTemplateId = Number(draft.intake_template_id) || 0;
+    this.intakeTemplateId.set(this.restoredIntakeTemplateId);
+    this.loadDataCollectionTemplates();
+    this.toastService.info('Recuperamos lo que llevabas del producto. Guarda para conservar los cambios.');
   }
 
 
@@ -2059,8 +2150,9 @@ export class ProductCreatePageComponent {
       .subscribe({
         next: (templateId) => {
           const id = Number(templateId) || 0;
-          this.intakeTemplateId.set(id);
           this.originalIntakeTemplateId.set(id);
+          // Volviendo del editor, la plantilla elegida allí gana sobre la guardada.
+          this.intakeTemplateId.set(this.restoredIntakeTemplateId ?? id);
         },
         error: () => {}, // No crítico: el selector queda en "Sin formulario"
       });
@@ -2390,6 +2482,8 @@ export class ProductCreatePageComponent {
         this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
+        // Volviendo del editor de plantillas: lo que el usuario llevaba va encima de lo cargado.
+        this.applyIntakeDraft();
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
         this.productLoaded.set(true);
         // Auto-load tier rows if the product already has multi-tarifa enabled.
