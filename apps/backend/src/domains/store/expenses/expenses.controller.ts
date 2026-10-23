@@ -104,12 +104,9 @@ export class ExpensesController {
     @Query('date_from') date_from?: string,
     @Query('date_to') date_to?: string,
   ) {
-    const dateFrom = date_from ? new Date(date_from) : undefined;
-    const dateTo = date_to ? new Date(date_to) : undefined;
-
     const result = await this.expenses_service.getExpensesSummary(
-      dateFrom,
-      dateTo,
+      date_from,
+      date_to,
     );
     return this.response_service.success(result);
   }
