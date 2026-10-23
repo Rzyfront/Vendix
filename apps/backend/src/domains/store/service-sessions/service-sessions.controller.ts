@@ -32,8 +32,10 @@ import {
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 import { ServiceSessionsService } from './service-sessions.service';
 
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
+
 @Controller('store/service-sessions')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, ServiceIndustryGuard)
 export class ServiceSessionsController {
   constructor(
     private readonly sessions: ServiceSessionsService,

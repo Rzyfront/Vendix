@@ -322,6 +322,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // Contratos de obra (A.2, ADR-02, ERR-03): el backend responde 403 cuando
   // la tienda no tiene la industria `construction`. Mensaje estructural, no
   // accionable por el usuario (no es un permiso pedible al admin).
+  // Estaciones de servicio: el backend responde 403 cuando la tienda no tiene
+  // la industria `service` (el menú ya lo oculta; esto cubre llamadas directas).
+  STATION_INDUSTRY_001:
+    'No disponible en tu industria. Estaciones de servicio aplica solo a tiendas de servicios.',
+
   CONTRACT_INDUSTRY_001:
     'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
 

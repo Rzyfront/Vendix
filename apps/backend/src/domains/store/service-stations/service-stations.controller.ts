@@ -25,8 +25,10 @@ import {
 import { ServiceStationsService } from './service-stations.service';
 import { StationListQueryDto } from './dto/station-list-query.dto';
 
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
+
 @Controller('store/service-stations')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, ServiceIndustryGuard)
 export class ServiceStationsController {
   constructor(
     private readonly service: ServiceStationsService,

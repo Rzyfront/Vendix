@@ -5075,6 +5075,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'A station is required for this service',
   },
+  STATION_INDUSTRY_001: {
+    code: 'STATION_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Store industry does not support service stations (service required)',
+  },
   STATION_013: {
     code: 'STATION_013',
     httpStatus: 400,
