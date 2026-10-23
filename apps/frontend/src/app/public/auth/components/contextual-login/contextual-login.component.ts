@@ -4,6 +4,7 @@ import {
   signal,
   computed,
   effect,
+  DestroyRef,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -27,6 +28,9 @@ import {
   CardComponent,
   IconComponent} from '../../../../shared/components';
 import { RateLimitLockModalComponent } from '../../../../shared/components/rate-limit-lock-modal/rate-limit-lock-modal.component';
+import { DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 
 export type LoginState =
   | 'idle'
@@ -578,6 +582,17 @@ export interface OrganizationCandidate {
     `,
   ]})
 export class ContextualLoginComponent {
+  // SEO-TECH-04: título, descripción, robots y canonical propios en el host comercial.
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.login,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   loginForm: FormGroup;
   private readonly formStatus;
 
