@@ -139,7 +139,7 @@ export interface ReminderMessageInput {
 
 /**
  * Mensaje al cliente (tuteo, cercano, corto — tono vendix-contactar-clientes).
- * Ej: "Hola Juan, en Taller X le hicimos el servicio de cambio de aceite a tu
+ * Ej: "Hola Juan, en Taller X te hicimos el servicio de cambio de aceite a tu
  * moto AKT (ABC12D) el 3 de oct. Ya pasaron 30 días, que es el periodo
  * recomendado; te sugerimos agendar de nuevo para repetirlo. ¡Te esperamos!"
  */
@@ -148,10 +148,14 @@ export function buildReminderMessage(input: ReminderMessageInput): string {
   const greeting = firstName && firstName.toLowerCase() !== 'cliente' ? `Hola ${firstName}` : 'Hola';
   const storeName = str(input.storeName) ?? 'nuestra tienda';
   const service = str(input.productName) ?? 'tu servicio';
-  const serviceLower = service.charAt(0).toLowerCase() + service.slice(1);
+  // "Cambio de aceite" → "cambio de aceite", pero una sigla o marca al inicio
+  // ("SOAT", "QA-REC", "iPhone") se deja tal cual.
+  const firstWord = service.split(/\s+/)[0];
+  const isAcronymOrBrand = firstWord.length > 1 && firstWord.slice(1) !== firstWord.slice(1).toLowerCase();
+  const serviceLower = isAcronymOrBrand ? service : service.charAt(0).toLowerCase() + service.slice(1);
   const datePart = input.serviceDay ? ` el ${formatDayEs(input.serviceDay, input.referenceYear)}` : '';
   const what = input.subjectPhrase
-    ? `le hicimos el servicio de ${serviceLower} a tu ${input.subjectPhrase}${datePart}`
+    ? `te hicimos el servicio de ${serviceLower} a tu ${input.subjectPhrase}${datePart}`
     : `te hicimos el servicio de ${serviceLower}${datePart}`;
   const opening = `${greeting}, en ${storeName} ${what}.`;
 

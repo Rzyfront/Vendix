@@ -74,7 +74,7 @@ describe('service-reminders utils', () => {
 
     it('due exactly at the interval, with vehicle', () => {
       expect(buildReminderMessage({ ...base, subjectPhrase: 'moto AKT (ABC12D)', intervalDays: 30, daysSince: 30 })).toBe(
-        'Hola Juan, en Taller Rápido le hicimos el servicio de cambio de aceite a tu moto AKT (ABC12D) el 3 de oct. ' +
+        'Hola Juan, en Taller Rápido te hicimos el servicio de cambio de aceite a tu moto AKT (ABC12D) el 3 de oct. ' +
           'Ya pasaron 30 días, que es el periodo recomendado; te sugerimos agendar de nuevo para repetirlo. ¡Te esperamos!',
       );
     });
@@ -93,6 +93,13 @@ describe('service-reminders utils', () => {
     it('not yet due tells how many days are left', () => {
       expect(buildReminderMessage({ ...base, subjectPhrase: null, intervalDays: 30, daysSince: 27 }))
         .toContain('en 3 días es buen momento');
+    });
+
+    it('keeps acronyms and brands at the start of the service name', () => {
+      expect(buildReminderMessage({ ...base, productName: 'SOAT y revisión', subjectPhrase: null, intervalDays: 30, daysSince: 30 }))
+        .toContain('servicio de SOAT y revisión');
+      expect(buildReminderMessage({ ...base, productName: 'iPhone pantalla', subjectPhrase: null, intervalDays: 30, daysSince: 30 }))
+        .toContain('servicio de iPhone pantalla');
     });
 
     it('non recurring is a thank-you', () => {
