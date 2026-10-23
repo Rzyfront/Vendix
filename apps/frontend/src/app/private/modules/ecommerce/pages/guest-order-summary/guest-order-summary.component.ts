@@ -2301,7 +2301,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   getStateLabel(state: string): string {
     const labels: Record<string, string> = {
-      draft: 'Borrador',
+      draft: 'En proceso', // cuenta abierta de mesa o estación de servicio
       created: 'Creada',
       pending_payment: 'Pendiente de pago',
       processing: 'En proceso',

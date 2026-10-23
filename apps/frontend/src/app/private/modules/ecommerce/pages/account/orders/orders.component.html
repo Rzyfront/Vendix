@@ -35,6 +35,15 @@
                     <app-icon name="calendar" [size]="14"></app-icon>
                     {{ order.created_at | date:'dd MMM yyyy' }}
                 </div>
+                @if (order.service_session; as svc) {
+                <div class="order-items">
+                    <app-icon name="warehouse" [size]="14"></app-icon>
+                    {{ svc.station_name || 'Estación' }} · {{ svc.service_name || 'Servicio' }}
+                    @if (svc.subject_label) {
+                        · {{ svc.subject_label }}
+                    }
+                </div>
+                }
                 <div class="order-items">
                     <app-icon name="package" [size]="14"></app-icon>
                     {{ order.item_count }} producto(s)
@@ -42,6 +51,12 @@
                         · {{ order.first_item_name }}
                     }
                 </div>
+                @if (hasPendingPayment(order)) {
+                <div class="order-items" style="color: var(--color-warning, #b45309); font-weight: 600;">
+                    <app-icon name="clock" [size]="14"></app-icon>
+                    Pago pendiente
+                </div>
+                }
             </div>
             <div class="order-total">
                 {{ order.grand_total | currency }}

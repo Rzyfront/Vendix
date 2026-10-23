@@ -1819,8 +1819,13 @@ export class OrdersService {
       }),
     }));
 
+    const service_session = (order as any).service_session_id
+      ? await this.loadServiceSessionSummary((order as any).store_id, (order as any).service_session_id)
+      : null;
+
     return {
       ...order,
+      service_session,
       payments: (order.payments ?? []).map((p: any) => ({
         ...p,
         financial_account_id: p.financial_account_id ?? null,
@@ -1836,6 +1841,42 @@ export class OrdersService {
         ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
         : null,
       available_actions,
+    };
+  }
+
+  /**
+   * Resumen de la atención de estación de servicio dueña de una orden SVC, el
+   * equivalente a la tarjeta de mesa: estación, servicio, lo atendido, estado,
+   * técnico y horas de ingreso/cierre.
+   */
+  private async loadServiceSessionSummary(storeId: number, sessionId: number) {
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+      select: { id: true, status: true, opened_at: true, closed_at: true, station_id: true, product_id: true },
+    });
+    if (!session) return null;
+    const [station, product, subject, allocation] = await Promise.all([
+      this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { id: true, name: true, station_type: true } }),
+      this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { id: true, name: true } }),
+      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true } }),
+      this.prisma.service_allocations.findFirst({
+        where: { store_id: storeId, session_id: sessionId },
+        orderBy: { id: 'desc' },
+        select: { provider_id: true },
+      }),
+    ]);
+    const provider = allocation?.provider_id
+      ? await this.prisma.service_providers.findFirst({ where: { id: allocation.provider_id, store_id: storeId }, select: { display_name: true } })
+      : null;
+    return {
+      id: session.id,
+      status: session.status,
+      opened_at: session.opened_at,
+      closed_at: session.closed_at,
+      station: station ? { id: station.id, name: station.name, station_type: station.station_type } : null,
+      service_name: product?.name ?? null,
+      subject_label: subject?.label ?? null,
+      provider_name: provider?.display_name ?? null,
     };
   }
 

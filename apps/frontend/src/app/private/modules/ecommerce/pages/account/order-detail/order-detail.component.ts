@@ -51,6 +51,13 @@ import {
 export class OrderDetailComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   readonly order = signal<OrderDetail | null>(null);
+
+  /** Saldo por pagar de la orden (total − pagado). */
+  readonly pendingBalance = computed(() => {
+    const order = this.order();
+    if (!order) return 0;
+    return Math.max(0, Math.round((Number(order.grand_total ?? 0) - Number(order.total_paid ?? 0)) * 100) / 100);
+  });
   readonly is_loading = signal(true);
   readonly is_new_order = signal(false);
 

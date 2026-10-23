@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { lockOrderLifecycle } from '../../store/orders/order-flow/order-lifecycle-lock.util';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   UpdateProfileDto,
@@ -44,7 +45,42 @@ export class AccountService {
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
+    // Solo lectura de las atenciones de estación ligadas a órdenes del cliente
+    // (los modelos de estaciones no están en el scope de ecommerce).
+    private readonly storePrisma: StorePrismaService,
   ) {}
+
+  /**
+   * Resumen de las atenciones de estación de servicio dueñas de órdenes SVC del
+   * cliente: estación, servicio, lo atendido y estado. Las órdenes ya vienen
+   * filtradas por cliente, así que solo se leen sesiones de esas órdenes.
+   */
+  private async serviceSessionSummaries(sessionIds: number[]) {
+    const ids = [...new Set(sessionIds)];
+    const out = new Map<number, { status: string; opened_at: Date; closed_at: Date | null; station_name: string | null; service_name: string | null; subject_label: string | null }>();
+    if (!ids.length) return out;
+    const sessions = await this.storePrisma.service_sessions.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true, opened_at: true, closed_at: true, station_id: true, product_id: true },
+    });
+    const [stations, products, subjects] = await Promise.all([
+      this.storePrisma.service_stations.findMany({ where: { id: { in: sessions.map((x) => x.station_id) } }, select: { id: true, name: true } }),
+      this.storePrisma.products.findMany({ where: { id: { in: sessions.map((x) => x.product_id) } }, select: { id: true, name: true } }),
+      this.storePrisma.service_subjects.findMany({ where: { session_id: { in: ids } }, select: { session_id: true, label: true, subject_type: true } }),
+    ]);
+    for (const session of sessions) {
+      const subject = subjects.find((x) => x.session_id === session.id);
+      out.set(session.id, {
+        status: session.status,
+        opened_at: session.opened_at,
+        closed_at: session.closed_at,
+        station_name: stations.find((x) => x.id === session.station_id)?.name ?? null,
+        service_name: products.find((x) => x.id === session.product_id)?.name ?? null,
+        subject_label: subject && subject.subject_type !== 'person' ? subject.label : null,
+      });
+    }
+    return out;
+  }
 
   async getProfile() {
     // user_id se obtiene del contexto del JWT
@@ -175,6 +211,8 @@ export class AccountService {
           created_at: true,
           placed_at: true,
           completed_at: true,
+          total_paid: true,
+          service_session_id: true,
           // Pull the first order item's product name so the list view
           // can show "1 producto(s): <name>" instead of just the count.
           // We take 1 ordered by id asc to get a stable "first" item.
@@ -193,6 +231,10 @@ export class AccountService {
       }),
     ]);
 
+    const sessions = await this.serviceSessionSummaries(
+      data.map((order) => order.service_session_id).filter((id): id is number => id != null),
+    );
+
     return {
       data: data.map((order) => {
         const { order_items, _count, ...rest } = order;
@@ -200,6 +242,8 @@ export class AccountService {
           ...rest,
           item_count: _count.order_items,
           first_item_name: order_items?.[0]?.product_name ?? null,
+          // Orden de estación de servicio: qué se atendió y dónde.
+          service_session: order.service_session_id ? sessions.get(order.service_session_id) ?? null : null,
         };
       }),
       meta: {
@@ -409,10 +453,16 @@ export class AccountService {
       order.stores,
     );
 
+    const serviceSession = order.service_session_id
+      ? (await this.serviceSessionSummaries([order.service_session_id])).get(order.service_session_id) ?? null
+      : null;
+
     return {
       id: order.id,
       order_number: order.order_number,
       state: order.state,
+      service_session: serviceSession,
+      total_paid: order.total_paid,
       subtotal_amount: order.subtotal_amount,
       discount_amount: order.discount_amount,
       tax_amount: order.tax_amount,
