@@ -43,6 +43,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
              desde el nodo que recibe el foco. -->
         <div
           #modalContainer
+          tabindex="-1"
           class="relative transform transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none"
           [class]="modalClasses()"
           [class.scale-100]="isOpen()"
@@ -179,11 +180,12 @@ export class ModalComponent {
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
   readonly customClasses = input<string>('');
-  // QUI-audit-round-1: opt-in, backwards-compatible. Activar `dialog=true`
-  // sella el contrato de accesibilidad: role="dialog", aria-modal="true",
-  // aria-labelledby al título, focus trap Tab/Shift+Tab, restauración del
-  // foco al elemento que abrió el modal al cerrar, y Escape cierra (siempre).
-  readonly dialog = input<boolean>(false);
+  // QUI-746: activo por defecto. `dialog=true` sella el contrato de
+  // accesibilidad: role="dialog", aria-modal="true", aria-labelledby al
+  // título, foco inicial en el contenedor, focus trap Tab/Shift+Tab,
+  // restauración del foco al elemento que abrió el modal al cerrar, y Escape
+  // cierra (siempre). Pasar `[dialog]="false"` solo en modales decorativos.
+  readonly dialog = input<boolean>(true);
   // QUI-438: el consumidor puede bloquear el cierre (ej. cuando hay form
   // dirty). Default: `() => true` (cierra normal — sin cambio de comportamiento).
   readonly canClose = input<() => boolean | Promise<boolean>>(() => true);
@@ -322,11 +324,11 @@ export class ModalComponent {
               document.activeElement as HTMLElement | null;
           }
           this.opened.emit();
-          // Mover el foco al primer elemento focuseable del modal después
-          // de que el DOM se haya pintado (microtask, suficiente para el
-          // @if wrapper).
+          // Mover el foco al contenedor del modal (no a un input: en
+          // tablets abriría el teclado) después de que el DOM se haya
+          // pintado (microtask, suficiente para el @if wrapper).
           if (this.isBrowser && this.dialog()) {
-            queueMicrotask(() => this.focusFirstElement());
+            queueMicrotask(() => this.focusContainer());
           }
         } else {
           this.closed.emit();
@@ -451,18 +453,10 @@ export class ModalComponent {
     return root.contains(el);
   }
 
-  private focusFirstElement(): void {
-    const container = this.modalContainer();
-    if (!container) return;
-    const focusables = this.getFocusableElements(container.nativeElement);
-    if (focusables.length > 0) {
-      focusables[0].focus();
-    } else {
-      // Si no hay nada focuseable, mover el foco al contenedor del modal
-      // para que el lector de pantalla anuncie el diálogo.
-      container.nativeElement.setAttribute('tabindex', '-1');
-      container.nativeElement.focus();
-    }
+  // QUI-746: el foco inicial va al contenedor (tabindex="-1") para que el
+  // lector de pantalla anuncie el diálogo sin abrir el teclado en tablets.
+  private focusContainer(): void {
+    this.modalContainer()?.nativeElement.focus({ preventScroll: true });
   }
 
   open(): void {
