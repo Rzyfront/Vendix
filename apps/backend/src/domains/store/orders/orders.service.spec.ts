@@ -302,6 +302,7 @@ describe('OrdersService', () => {
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
     mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+    mockPrismaService.payments.findFirst.mockReset().mockResolvedValue(null);
     mockPrismaService.invoices.findMany.mockResolvedValue([]);
     mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([]);
     mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
@@ -3840,36 +3841,116 @@ describe('OrdersService', () => {
     //
     // ADR-07/G.1: updateOrderItems comparte ahora este guard, para que
     // PUT items no reabra una orden cuyo historial solo tiene cierres.
+    //
+    // QUI-940: con solo sesiones cerradas la orden sigue editable mientras
+    // no tenga pagos liquidados ni factura titular activa.
     // ----------------------------------------------------------------
 
-    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando solo existe una table_session CERRADA', async () => {
+    const arrangeClosedSession = () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+      mockPrismaService.table_sessions.findFirst
+        .mockResolvedValueOnce(null) // ninguna abierta
+        .mockResolvedValueOnce({ id: 77, closed_at: new Date() });
+    };
+
+    const expectEditorBlocked = async () => {
+      let caught: VendixHttpException | null = null;
+      try {
+        await service.updateOrderFromEditor(500, minimalDto);
+      } catch (err) {
+        caught = err as VendixHttpException;
+      }
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught!.errorCode).toBe(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code);
+      expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.store_users.findFirst).not.toHaveBeenCalled();
+    };
+
+    const settledStatesQuery = {
+      where: {
+        order_id: 500,
+        state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+      },
+      select: { id: true },
+    };
+
+    it('QUI-940: PERMITE editar con table_session CERRADA si no hay pagos liquidados ni factura titular', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
-        // La orden está en estado editable (el guard de estado pasaría).
-        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
-        // PERO la sesión de mesa ya fue cerrada (mesero la cerró sin cobrar).
-        // El guard del editor tiene que detectarlo y cortar antes del claim.
+        arrangeEditableDraft();
         mockPrismaService.table_sessions.findFirst
+          .mockReset()
           .mockResolvedValueOnce(null) // ninguna abierta
           .mockResolvedValueOnce({ id: 77, closed_at: new Date() });
+        mockPrismaService.payments.findFirst.mockResolvedValue(null);
+        mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
 
-        let caught: VendixHttpException | null = null;
-        try {
-          await service.updateOrderFromEditor(500, minimalDto);
-        } catch (err) {
-          caught = err as VendixHttpException;
-        }
+        await service.updateOrderFromEditor(500, fullDto);
 
-        expect(caught).toBeInstanceOf(VendixHttpException);
-        expect(caught!.errorCode).toBe(
-          ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
+        expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(
+          settledStatesQuery,
         );
-        // El guard corta ANTES del claim atómico ni de cualquier escritura.
-        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
-        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
-        // La membresía del cliente ni se consulta: el guard es anterior.
-        expect(mockPrismaService.store_users.findFirst).not.toHaveBeenCalled();
+        expect(mockPrismaService.invoices.findFirst).toHaveBeenCalled();
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('QUI-940: lanza 409 ORD_EDIT_NOT_ALLOWED_001 con table_session CERRADA y pago succeeded', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeClosedSession();
+        mockPrismaService.payments.findFirst.mockResolvedValue({ id: 9 });
+        await expectEditorBlocked();
+        expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(
+          settledStatesQuery,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('QUI-940: lanza 409 con table_session CERRADA y pago parcial (estado liquidado)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeClosedSession();
+        // Un pago por monto menor al total sigue siendo un pago liquidado.
+        mockPrismaService.payments.findFirst.mockResolvedValue({ id: 10 });
+        await expectEditorBlocked();
+        expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(
+          settledStatesQuery,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('QUI-940: lanza 409 con table_session CERRADA y factura titular activa', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeClosedSession();
+        mockPrismaService.payments.findFirst.mockResolvedValue(null);
+        mockPrismaService.invoices.findFirst.mockResolvedValue({
+          id: 31,
+          status: 'accepted',
+          customer_id: 5,
+        });
+        await expectEditorBlocked();
+        expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(
+          settledStatesQuery,
+        );
       } finally {
         contextSpy.mockRestore();
       }
@@ -4082,22 +4163,79 @@ describe('OrdersService', () => {
       expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
     });
 
-    it('rechaza PUT items sobre orden con solo sesión cerrada antes de escribir', async () => {
-      const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
-        store_id: 1, organization_id: 1, user_id: 99,
-      } as any);
-      try {
-        arrange();
-        mockPrismaService.table_sessions.findFirst
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce({ id: 70 });
+    describe('QUI-940: sesión cerrada en PUT items', () => {
+      const withClosedSession = async (fn: () => Promise<void>) => {
+        const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+          store_id: 1, organization_id: 1, user_id: 99,
+        } as any);
+        try {
+          arrange();
+          mockPrismaService.table_sessions.findFirst
+            .mockResolvedValueOnce(null) // ninguna abierta
+            .mockResolvedValueOnce({ id: 70 });
+          await fn();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      };
 
-        await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
-          .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
-        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
-      } finally {
-        contextSpy.mockRestore();
-      }
+      const settledQuery = {
+        where: {
+          order_id: 700,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        },
+        select: { id: true },
+      };
+
+      it('PERMITE PUT items con solo sesión cerrada si no hay pago liquidado ni factura titular', async () => {
+        await withClosedSession(async () => {
+          mockPrismaService.payments.findFirst.mockResolvedValue(null);
+          mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+
+          await service.updateOrderItems(700, {
+            items: [{ product_id: 1, product_name: 'Test product', quantity: 2, unit_price: 11900, total_price: 23800 }],
+          } as any);
+
+          expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(settledQuery);
+          expect(mockPrismaService.orders.update).toHaveBeenCalled();
+        });
+      });
+
+      it('rechaza PUT items con sesión cerrada y pago succeeded antes de escribir', async () => {
+        await withClosedSession(async () => {
+          mockPrismaService.payments.findFirst.mockResolvedValue({ id: 9 });
+
+          await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
+            .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
+          expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(settledQuery);
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+          expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        });
+      });
+
+      it('rechaza PUT items con sesión cerrada y pago parcial (estado liquidado)', async () => {
+        await withClosedSession(async () => {
+          // Pago por monto menor al total: sigue siendo un pago liquidado.
+          mockPrismaService.payments.findFirst.mockResolvedValue({ id: 10 });
+
+          await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
+            .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
+          expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(settledQuery);
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        });
+      });
+
+      it('rechaza PUT items con sesión cerrada y factura titular activa', async () => {
+        await withClosedSession(async () => {
+          mockPrismaService.payments.findFirst.mockResolvedValue(null);
+          mockPrismaService.invoices.findFirst.mockResolvedValue({ id: 31, status: 'accepted', customer_id: 5 });
+
+          await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
+            .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
+          expect(mockPrismaService.payments.findFirst).toHaveBeenCalledWith(settledQuery);
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        });
+      });
     });
 
     it('orden con order_item_taxes (antes 409): borra el desglose, recrea desde el catálogo y cabecera = Σ', async () => {

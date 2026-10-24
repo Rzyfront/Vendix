@@ -459,6 +459,30 @@ describe('PaymentsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('hasPendingKitchenItemsTx (QUI-892)', () => {
+    it('false cuando solo la fila vieja está pendiente (la última está delivered)', async () => {
+      const tx: any = {
+        order_items: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 1, product_name: 'Plato', kitchen_ticket_items: [{ status: 'delivered', quantity: 1, variant_label: null }] },
+          ]),
+        },
+      };
+      expect(await (service as any).hasPendingKitchenItemsTx(tx, 5)).toBe(false);
+    });
+
+    it('true cuando la última fila de una línea está pending', async () => {
+      const tx: any = {
+        order_items: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 1, product_name: 'Plato', kitchen_ticket_items: [{ status: 'pending', quantity: 1, variant_label: null }] },
+          ]),
+        },
+      };
+      expect(await (service as any).hasPendingKitchenItemsTx(tx, 5)).toBe(true);
+    });
+  });
+
   describe('POS table payment previous status (B.5)', () => {
     const dto = { store_id: 1, table_id: 4, currency: 'COP' } as any;
     const user = { id: 7 };
