@@ -89,6 +89,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
       [title]="derivedModalTitle()"
       [subtitle]="derivedModalSubtitle()"
       (closed)="onModalClosed()"
+      [dialog]="true"
       >
       <div slot="header"
         class="confirm-header-icon">

@@ -82,6 +82,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { findLinesAwaitingKitchenDelivery } from '../kitchen-fire/kitchen-superseded-rows.util';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import {
@@ -6863,9 +6864,9 @@ export class PaymentsService {
    * For POS without payment (credit sale): stays in 'created'
    */
   /**
-   * F2-guard helper — true when the order still has kitchen items the cook
-   * has not handed off (`kitchen_ticket_items.status NOT IN
-   * ('delivered','cancelled')`). Mirrors `OrderFlowService.hasPendingKitchenItems`
+   * F2-guard helper — true when the LATEST kitchen row of some non-cancelled
+   * line is not `delivered`/`cancelled` (QUI-892: older rows superseded by a
+   * resend do not count). Mirrors `OrderFlowService.hasPendingKitchenItems`
    * but runs on the payment `$transaction` client so it sees uncommitted
    * writes from this same POS payment. Scope-safe: `kitchen_ticket_items` is
    * auto-scoped through `kitchen_ticket.store_id` in StorePrismaService, and
@@ -6875,13 +6876,7 @@ export class PaymentsService {
     tx: any,
     orderId: number,
   ): Promise<boolean> {
-    const pendingCount = await tx.kitchen_ticket_items.count({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-    });
-    return pendingCount > 0;
+    return (await findLinesAwaitingKitchenDelivery(tx, orderId)).length > 0;
   }
 
   private async updateOrderPaymentStatus(

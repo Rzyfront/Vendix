@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { VendixHttpException } from '../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../common/errors/error-codes';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
 
@@ -62,6 +64,16 @@ export class SubscriptionDraftCleanupJob {
           `Draft cleanup: sub ${sub.id} (store ${sub.store_id}) → cancelled`,
         );
       } catch (err: any) {
+        // QUI-677: an illegal transition is a programming error (the
+        // TRANSITIONS table and this job disagree), not an operational
+        // condition. Swallowing it per-row hid a cron that never cleaned
+        // anything, so abort the batch and let handleDraftCleanup log it.
+        if (
+          err instanceof VendixHttpException &&
+          err.errorCode === ErrorCodes.SUBSCRIPTION_010.code
+        ) {
+          throw err;
+        }
         this.logger.error(
           `Draft cleanup failed for sub ${sub.id}: ${err?.message ?? err}`,
         );

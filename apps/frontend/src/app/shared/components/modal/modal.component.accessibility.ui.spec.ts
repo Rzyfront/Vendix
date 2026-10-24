@@ -18,7 +18,7 @@ describe('ModalComponent compact accessible header source guards', () => {
 
   it('preserves model visibility, optional dialog semantics, lifecycle outputs, and close guards', () => {
     expect(source).toContain('readonly isOpen = model<boolean>(false);');
-    expect(source).toContain('readonly dialog = input<boolean>(false);');
+    expect(source).toContain('readonly dialog = input<boolean>(true);');
     expect(source).toContain('readonly canClose = input<() => boolean | Promise<boolean>>(() => true);');
     expect(source).toContain('readonly closed = output<void>();');
     expect(source).toContain('readonly opened = output<void>();');

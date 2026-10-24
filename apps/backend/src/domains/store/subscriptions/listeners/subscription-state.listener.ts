@@ -432,6 +432,9 @@ export class SubscriptionStateListener {
 
       // Cancellation — must include the no-refund disclaimer flag for G10.
       if (toState === 'cancelled') {
+        // QUI-677: a draft never paid, so the cancellation / no-refund email
+        // does not apply.
+        if (fromState === 'draft') return;
         const subscriptionId = await this.resolveSubscriptionId(
           payload.storeId,
         );

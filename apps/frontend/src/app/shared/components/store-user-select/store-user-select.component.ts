@@ -289,6 +289,13 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   writeValue(value: number | null): void {
     if (value == null) {
       this.selected.set(null);
+      // QUI-480: el formulario se reconstruye con el componente ya montado y
+      // Angular llama writeValue(null); sin esto el texto buscado persiste entre
+      // aperturas. Se reinicia también el distinctUntilChanged del buscador.
+      this.query.set('');
+      this.results.set([]);
+      this.isOpen.set(false);
+      this.searchSubject.next('');
       return;
     }
     // Resolve name/avatar for the incoming id.

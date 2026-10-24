@@ -591,7 +591,8 @@ interface ReceiveLine {
                               </span>
                             </td>
                             <td class="py-2 text-right">
-                              @if (schedule.status === 'planned') {
+                              <!-- QUI-713: tras la recepción la cuota queda 'materialized' y sigue pendiente -->
+                              @if (schedule.status === 'planned' || schedule.status === 'materialized') {
                                 <button
                                   type="button"
                                   class="inline-flex items-center justify-center w-7 h-7 rounded-md text-primary hover:bg-primary/10 transition-colors"
