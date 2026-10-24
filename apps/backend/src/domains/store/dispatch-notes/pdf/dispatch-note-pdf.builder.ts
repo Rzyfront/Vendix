@@ -458,7 +458,7 @@ export class DispatchNotePdfBuilder {
   ): void {
     this.sectionTitle(doc, 'TRANSPORTADOR');
     doc.font('Helvetica').fontSize(9);
-    doc.text(`Planilla / Ruta: ${transporter.route_number}`, MARGIN, doc.y);
+    doc.text(`Ruta: ${transporter.route_number}`, MARGIN, doc.y);
     doc.text(`Vehículo (placa): ${transporter.vehicle_plate || '—'}`, MARGIN, doc.y + 1);
     doc.text(`Conductor: ${transporter.driver_name || '—'}`, MARGIN, doc.y + 1);
     doc.moveDown(0.3);

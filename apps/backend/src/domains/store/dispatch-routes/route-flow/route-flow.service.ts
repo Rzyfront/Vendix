@@ -227,7 +227,7 @@ export class RouteFlowService {
       where: { id, store_id },
       include: ROUTE_INCLUDE,
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
     return this.withDerivedStopPrepaid(route);
   }
 
@@ -242,7 +242,7 @@ export class RouteFlowService {
       where: { id, store_id },
       include: ROUTE_PDF_INCLUDE,
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
     return this.withDerivedStopPrepaid(route);
   }
 
@@ -439,11 +439,11 @@ export class RouteFlowService {
 
     if (route.status !== 'draft') {
       throw new BadRequestException(
-        `Solo se puede despachar una planilla en estado 'draft' (actual: '${route.status}')`,
+        `Solo se puede despachar una ruta en estado 'draft' (actual: '${route.status}')`,
       );
     }
     if (route.stops.length === 0) {
-      throw new BadRequestException('La planilla no tiene paradas');
+      throw new BadRequestException('La ruta no tiene paradas');
     }
 
     // Conductor obligatorio al despachar (regla del plan: si interno, driver_user_id;
@@ -584,7 +584,7 @@ export class RouteFlowService {
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
-        `No se puede iniciar liquidación en planilla en estado '${route.status}'`,
+        `No se puede iniciar liquidación en ruta en estado '${route.status}'`,
       );
     }
     if (stop.status !== 'pending') {
@@ -665,7 +665,7 @@ export class RouteFlowService {
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
-        `No se puede liquidar una parada en planilla en estado '${route.status}'`,
+        `No se puede liquidar una parada en ruta en estado '${route.status}'`,
       );
     }
 
@@ -927,7 +927,7 @@ export class RouteFlowService {
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (['closed', 'voided'].includes(route.status)) {
       throw new BadRequestException(
-        `No se puede liberar una parada en planilla '${route.status}'`,
+        `No se puede liberar una parada en ruta '${route.status}'`,
       );
     }
     if (['released', 'delivered'].includes(stop.status)) {
@@ -990,7 +990,7 @@ export class RouteFlowService {
       where: { id, store_id },
       select: { id: true, status: true, is_carrier_route: true },
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
 
     // State guard: draft / dispatched siempre. Vendix Repartos (B7): las rutas
     // CARRIER admiten además `in_transit` (el repartidor reordena sus paradas
@@ -1003,7 +1003,7 @@ export class RouteFlowService {
     if (!REORDERABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(
         ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001,
-        `No se pueden reordenar las paradas de una planilla en estado '${route.status}'`,
+        `No se pueden reordenar las paradas de una ruta en estado '${route.status}'`,
       );
     }
 
@@ -1031,7 +1031,7 @@ export class RouteFlowService {
     const foreign = stopIds.filter((sid) => !routeStopIds.has(sid));
     if (foreign.length > 0) {
       throw new BadRequestException(
-        `Las paradas ${foreign.join(', ')} no pertenecen a la planilla #${id}`,
+        `Las paradas ${foreign.join(', ')} no pertenecen a la ruta #${id}`,
       );
     }
 
@@ -1157,7 +1157,7 @@ export class RouteFlowService {
     }
     if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
-        `No se puede cerrar una planilla en estado '${route.status}'`,
+        `No se puede cerrar una ruta en estado '${route.status}'`,
       );
     }
 
@@ -1195,7 +1195,7 @@ export class RouteFlowService {
         FOR UPDATE
       `;
       if (locked.length !== 1) {
-        throw new NotFoundException(`Planilla #${id} no encontrada`);
+        throw new NotFoundException(`Ruta #${id} no encontrada`);
       }
       const locked_status = locked[0].status;
       if (locked_status === 'closed') {
@@ -1203,7 +1203,7 @@ export class RouteFlowService {
       }
       if (!['dispatched', 'in_transit'].includes(locked_status)) {
         throw new BadRequestException(
-          `No se puede cerrar una planilla en estado '${locked_status}'`,
+          `No se puede cerrar una ruta en estado '${locked_status}'`,
         );
       }
 
@@ -1471,7 +1471,7 @@ export class RouteFlowService {
     const route = await this.getRoute(id, store_id);
     if (route.status === 'closed') {
       throw new BadRequestException(
-        'No se puede anular una planilla cerrada. Solicita una nota de ajuste manual.',
+        'No se puede anular una ruta cerrada. Solicita una nota de ajuste manual.',
       );
     }
 
@@ -1491,8 +1491,8 @@ export class RouteFlowService {
             result: 'released',
             released_at: new Date(),
             notes: dto.notes
-              ? `Anulada planilla: ${dto.reason}. ${dto.notes}`
-              : `Anulada planilla: ${dto.reason}`,
+              ? `Anulada ruta: ${dto.reason}. ${dto.notes}`
+              : `Anulada ruta: ${dto.reason}`,
             updated_at: new Date(),
           },
         });

@@ -241,9 +241,9 @@ export class GenerateDispatchWizardComponent {
   readonly routeModeHint = computed<string>(() => {
     switch (this.routeMode()) {
       case 'existing':
-        return 'Asigna esta remisión a una planilla de despacho ya creada (en borrador o despachada).';
+        return 'Asigna esta remisión a una ruta ya creada (en borrador o despachada).';
       case 'new':
-        return 'Crea una nueva planilla de despacho (conductor, vehículo y fecha) y asígnale esta remisión.';
+        return 'Crea una nueva ruta (conductor, vehículo y fecha) y asígnale esta remisión.';
       default:
         return 'La remisión se genera y la orden se marca como enviada, sin asignarla a ninguna ruta de despacho. Podrás asignarla a una ruta más adelante.';
     }

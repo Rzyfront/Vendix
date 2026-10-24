@@ -34,12 +34,12 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
         (click)="$event.stopPropagation()"
       >
         <div class="p-3 border-b border-border flex justify-between items-center">
-          <h2 class="text-lg font-semibold">Planilla PDF</h2>
+          <h2 class="text-lg font-semibold">Ruta PDF</h2>
           <div class="flex gap-2">
 @if (pdfUrl(); as url) {
               <a
                 [href]="url"
-                [download]="'planilla-' + routeId() + '.pdf'"
+                [download]="'ruta-' + routeId() + '.pdf'"
                 class="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm"
               >Descargar</a>
             }

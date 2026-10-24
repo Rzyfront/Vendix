@@ -235,7 +235,7 @@ const GROUP_DEFINITIONS: Array<{
   },
   {
     key: 'dispatch_routes',
-    label: 'Planillas de Ruta (DSD)',
+    label: 'Rutas (DSD)',
     icon: 'truck',
     prefixes: ['dispatch_route.closed.', 'dispatch_route.settlement.'],
   },

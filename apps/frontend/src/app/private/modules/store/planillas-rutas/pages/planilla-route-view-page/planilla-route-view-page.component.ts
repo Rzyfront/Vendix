@@ -190,7 +190,7 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
               </div>
             </li>
           } @empty {
-            <li class="py-6 text-center text-sm text-text-secondary">Esta planilla no tiene paradas.</li>
+            <li class="py-6 text-center text-sm text-text-secondary">Esta ruta no tiene paradas.</li>
           }
         </ul>
       </div>
@@ -205,7 +205,7 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
       <div class="m-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
         <app-icon name="alert-triangle" [size]="18" class="mt-0.5 shrink-0 text-red-600"></app-icon>
         <div>
-          <p class="font-semibold">No se pudo cargar la planilla</p>
+          <p class="font-semibold">No se pudo cargar la ruta</p>
           <p class="mt-0.5">{{ error() }}</p>
           <button type="button" class="mt-2 text-xs font-semibold underline" (click)="backToDetail()">Volver al detalle</button>
         </div>
@@ -218,7 +218,7 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
             <app-icon name="arrow-left" [size]="16"></app-icon>
             <span>Detalle</span>
           </button>
-          <h1 class="text-base font-bold text-text-primary">Planilla {{ r.route_number }}</h1>
+          <h1 class="text-base font-bold text-text-primary">Ruta {{ r.route_number }}</h1>
           <span class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-semibold text-primary-700">{{ routeStatusLabel() }}</span>
           <span class="text-sm text-text-secondary">Encargado: <span class="font-medium text-text-primary">{{ responsibleLabel() }}</span></span>
 
@@ -644,7 +644,7 @@ export class PlanillaRouteViewPageComponent {
         },
         error: (e: Error) => {
           this.loading.set(false);
-          this.error.set(e?.message || 'Error al cargar la planilla');
+          this.error.set(e?.message || 'Error al cargar la ruta');
         },
       });
   }
@@ -709,14 +709,14 @@ export class PlanillaRouteViewPageComponent {
         next: (r) => {
           this.actionLoading.set(false);
           this.route.set(r);
-          this.toast.success('Planilla despachada');
+          this.toast.success('Ruta despachada');
           if (this.isResponsible()) this.publisher.start(this.routeId());
           this.loadMap();
           this.loadTracking(true);
         },
         error: (e: Error) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.message || 'Error al despachar la planilla');
+          this.toast.error(e?.message || 'Error al despachar la ruta');
         },
       });
   }

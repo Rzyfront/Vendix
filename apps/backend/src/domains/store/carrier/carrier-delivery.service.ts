@@ -400,7 +400,7 @@ export class CarrierDeliveryService {
       },
     });
     if (!route) {
-      throw new NotFoundException(`Planilla #${id} no encontrada`);
+      throw new NotFoundException(`Ruta #${id} no encontrada`);
     }
     return route;
   }

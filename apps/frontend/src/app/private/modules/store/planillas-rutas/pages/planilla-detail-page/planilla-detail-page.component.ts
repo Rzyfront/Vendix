@@ -123,7 +123,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                   No se puede despachar: hay remisiones sin dirección de entrega
                 </p>
                 <p class="mt-0.5 text-amber-700">
-                  Agrega una dirección a {{ stopsWithoutAddressLabel() }} antes de despachar la planilla.
+                  Agrega una dirección a {{ stopsWithoutAddressLabel() }} antes de despachar la ruta.
                 </p>
               </div>
             </div>
@@ -301,7 +301,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
               [actions]="stopActions"
               [cardConfig]="stopCardConfig"
               actionsDisplay="buttons"
-              emptyMessage="Esta planilla no tiene paradas."
+              emptyMessage="Esta ruta no tiene paradas."
               emptyIcon="map-pin"
               (rowClick)="openStopDetail($event)"
             ></app-responsive-data-view>
@@ -468,7 +468,7 @@ export class PlanillaDetailPageComponent {
       case 'DISPATCH_ROUTE_CASH_SESSION_INVALID':
         return 'La caja seleccionada ya no está abierta. Elige otra caja abierta e inténtalo de nuevo.';
       case 'DISPATCH_ROUTE_ALREADY_CLOSED':
-        return 'Esta planilla ya fue cerrada.';
+        return 'Esta ruta ya fue cerrada.';
       default:
         return parsed.devMessage || parsed.userMessage || fallback;
     }
@@ -530,7 +530,7 @@ export class PlanillaDetailPageComponent {
 
   /** Documental / AI actions surfaced in the Paradas options dropdown. */
   readonly documentalActions = computed<DropdownAction[]>(() => [
-    { label: 'Imprimir planilla', icon: 'printer', action: 'print' },
+    { label: 'Imprimir ruta', icon: 'printer', action: 'print' },
     {
       label: this.downloadingPdf() ? 'Descargando…' : 'Descargar PDF',
       icon: 'download',
@@ -538,18 +538,18 @@ export class PlanillaDetailPageComponent {
       disabled: this.downloadingPdf(),
     },
     {
-      label: 'Cargar planilla escaneada (IA)',
+      label: 'Cargar hoja de ruta escaneada (IA)',
       icon: 'scan-line',
       action: 'scan',
       disabled: !this.canScanSheet(),
     },
   ]);
 
-  readonly headerTitle = computed(() => this.route()?.route_number ?? 'Planilla');
+  readonly headerTitle = computed(() => this.route()?.route_number ?? 'Ruta');
 
   readonly headerSubtitle = computed(() => {
     const r = this.route();
-    return r?.route_code ? `Ruta ${r.route_code}` : 'Detalle de planilla';
+    return r?.route_code ? `Ruta ${r.route_code}` : 'Detalle de ruta';
   });
 
   readonly headerBadgeColor = computed<StickyHeaderBadgeColor>(() => {
@@ -644,7 +644,7 @@ export class PlanillaDetailPageComponent {
     if (this.canScanSheet()) return null;
     const r = this.route();
     if (!r || !['dispatched', 'in_transit'].includes(r.status)) {
-      return 'Solo disponible en planillas despachadas o en ruta.';
+      return 'Solo disponible en rutas despachadas o en curso.';
     }
     return 'Todas las paradas ya están liquidadas o liberadas.';
   });
@@ -974,7 +974,7 @@ export class PlanillaDetailPageComponent {
         next: (r) => {
           this.actionLoading.set(false);
           this.route.set(r);
-          this.toast.success('Planilla despachada');
+          this.toast.success('Ruta despachada');
         },
         error: (e) => {
           this.actionLoading.set(false);
@@ -982,7 +982,7 @@ export class PlanillaDetailPageComponent {
           // ships a Spanish, remisión-listing message for
           // DISPATCH_ROUTE_STOP_NO_ADDRESS, so surfacing `e.message` already
           // gives a clear, actionable toast.
-          this.toast.error(this.routeActionError(e, 'Error al despachar la planilla'));
+          this.toast.error(this.routeActionError(e, 'Error al despachar la ruta'));
         },
       });
   }
@@ -1082,7 +1082,7 @@ export class PlanillaDetailPageComponent {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `planilla-${r.route_number || r.id}.pdf`;
+          a.download = `ruta-${r.route_number || r.id}.pdf`;
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -1113,7 +1113,7 @@ export class PlanillaDetailPageComponent {
    */
   onNotesAdded() {
     this.showAddNotesModal.set(false);
-    this.toast.success('Remisiones agregadas a la planilla');
+    this.toast.success('Remisiones agregadas a la ruta');
     this.load();
   }
 
@@ -1203,12 +1203,12 @@ export class PlanillaDetailPageComponent {
           this.actionLoading.set(false);
           this.showCloseModal.set(false);
           this.route.set(r);
-          this.toast.success('Planilla cerrada');
+          this.toast.success('Ruta cerrada');
           this.load();
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(this.routeActionError(e, 'Error al cerrar la planilla'));
+          this.toast.error(this.routeActionError(e, 'Error al cerrar la ruta'));
           if (parseApiError(e).errorCode === 'DISPATCH_ROUTE_ALREADY_CLOSED') {
             this.showCloseModal.set(false);
             this.load();
@@ -1233,11 +1233,11 @@ export class PlanillaDetailPageComponent {
           this.actionLoading.set(false);
           this.showVoidModal.set(false);
           this.route.set(r);
-          this.toast.success(`Planilla ${r.route_number} anulada`);
+          this.toast.success(`Ruta ${r.route_number} anulada`);
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.error?.message || e?.message || 'Error al anular la planilla');
+          this.toast.error(e?.error?.message || e?.message || 'Error al anular la ruta');
         },
       });
   }

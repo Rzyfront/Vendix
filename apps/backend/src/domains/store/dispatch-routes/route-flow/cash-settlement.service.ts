@@ -103,7 +103,7 @@ export class CashSettlementService {
         amount: input.amount,
         payment_method: 'cash',
         reference: `dispatch_route:${input.route_id}:stop:${input.stop_id}`,
-        notes: `Recaudo planilla #${input.route_id} parada #${input.stop_id}`,
+        notes: `Recaudo ruta #${input.route_id} parada #${input.stop_id}`,
       },
     });
     const store = await tx.stores.findUnique({
@@ -256,7 +256,7 @@ export class CashSettlementService {
           amount,
           payment_method: method,
           reference,
-          notes: `Recaudo planilla ${input.route_number} (${agg.stops} paradas)`,
+          notes: `Recaudo ruta ${input.route_number} (${agg.stops} paradas)`,
         },
       });
       created.push({ id: movement.id, payment_method: method, amount, reference });

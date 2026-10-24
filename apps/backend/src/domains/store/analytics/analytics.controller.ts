@@ -1959,7 +1959,7 @@ export class AnalyticsController {
       await this.dispatch_analytics_service.getPlanillasForExport(query);
 
     const columns: ReportColumn[] = [
-      { key: 'route_number', header: 'Nº Planilla', type: 'text' },
+      { key: 'route_number', header: 'Nº Ruta', type: 'text' },
       { key: 'route_code', header: 'Código', type: 'text' },
       { key: 'status', header: 'Estado', type: 'text' },
       { key: 'planned_date', header: 'Fecha Planificada', type: 'date' },
@@ -1982,7 +1982,7 @@ export class AnalyticsController {
       { key: 'closed_at', header: 'Cierre', type: 'date' },
     ];
 
-    await this.emitReport(res, 'planillas_despacho', tz, [
+    await this.emitReport(res, 'rutas_despacho', tz, [
       this.toSheet('Planillas', columns, rows, tz),
     ]);
   }

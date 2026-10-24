@@ -84,7 +84,7 @@ const STATUS_COLORS: Record<string, string> = {
             <h2
               class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
-              Planillas ({{ totalItems() }})
+              Rutas ({{ totalItems() }})
             </h2>
 
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -117,7 +117,7 @@ const STATUS_COLORS: Record<string, string> = {
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
-            <p class="mt-2 text-text-secondary">Cargando planillas...</p>
+            <p class="mt-2 text-text-secondary">Cargando rutas...</p>
           </div>
         }
 
@@ -127,7 +127,7 @@ const STATUS_COLORS: Record<string, string> = {
             icon="truck"
             [title]="emptyStateTitle()"
             [description]="emptyStateDescription()"
-            actionButtonText="Nueva Planilla"
+            actionButtonText="Nueva Ruta"
             [showActionButton]="!hasFilters()"
             [showClearFilters]="hasFilters()"
             (actionClick)="create.emit()"
@@ -217,7 +217,7 @@ export class PlanillasListComponent implements OnInit {
 
   readonly dropdownActions: DropdownAction[] = [
     {
-      label: 'Nueva Planilla',
+      label: 'Nueva Ruta',
       icon: 'plus',
       action: 'create',
       variant: 'primary',
@@ -233,7 +233,7 @@ export class PlanillasListComponent implements OnInit {
   readonly tableColumns: TableColumn[] = [
     {
       key: 'route_number',
-      label: 'Planilla',
+      label: 'Ruta',
       sortable: true,
       width: '140px',
       priority: 1,
@@ -423,14 +423,14 @@ export class PlanillasListComponent implements OnInit {
 
   emptyStateTitle(): string {
     return this.hasFilters()
-      ? 'No se encontraron planillas'
-      : 'No hay planillas';
+      ? 'No se encontraron rutas'
+      : 'No hay rutas';
   }
 
   emptyStateDescription(): string {
     return this.hasFilters()
       ? 'Intenta ajustar tus filtros para ver más resultados'
-      : 'Comienza creando tu primera planilla de despacho.';
+      : 'Comienza creando tu primera ruta.';
   }
 
   getDriverName(route: DispatchRoute): string {

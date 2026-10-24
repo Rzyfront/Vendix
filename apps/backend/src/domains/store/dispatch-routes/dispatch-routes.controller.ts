@@ -35,7 +35,7 @@ export class DispatchRoutesController {
     const result = await this.dispatchRoutesService.findAll(query);
     return this.responseService.success(
       result,
-      'Planillas obtenidas exitosamente',
+      'Rutas obtenidas exitosamente',
     );
   }
 
@@ -45,7 +45,7 @@ export class DispatchRoutesController {
     const result = await this.dispatchRoutesService.getStats();
     return this.responseService.success(
       result,
-      'Estadísticas de planillas obtenidas',
+      'Estadísticas de rutas obtenidas',
     );
   }
 
@@ -65,7 +65,7 @@ export class DispatchRoutesController {
     });
     return this.responseService.success(
       result,
-      'Monitor de planillas obtenido',
+      'Monitor de rutas obtenido',
     );
   }
 
@@ -86,7 +86,7 @@ export class DispatchRoutesController {
     );
     return this.responseService.success(
       result,
-      'Remisiones disponibles para planilla',
+      'Remisiones disponibles para ruta',
     );
   }
 
@@ -94,7 +94,7 @@ export class DispatchRoutesController {
   @Permissions('store:dispatch_routes:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchRoutesService.findOne(id);
-    return this.responseService.success(result, 'Planilla obtenida');
+    return this.responseService.success(result, 'Ruta obtenida');
   }
 
   /**
@@ -117,7 +117,7 @@ export class DispatchRoutesController {
   @Permissions('store:dispatch_routes:create')
   async create(@Body() dto: CreateDispatchRouteDto) {
     const result = await this.dispatchRoutesService.create(dto);
-    return this.responseService.created(result, 'Planilla creada exitosamente');
+    return this.responseService.created(result, 'Ruta creada exitosamente');
   }
 
   @Patch(':id')
@@ -127,7 +127,7 @@ export class DispatchRoutesController {
     @Body() dto: UpdateDispatchRouteDto,
   ) {
     const result = await this.dispatchRoutesService.update(id, dto);
-    return this.responseService.success(result, 'Planilla actualizada');
+    return this.responseService.success(result, 'Ruta actualizada');
   }
 
   @Post(':id/stops')
@@ -137,13 +137,13 @@ export class DispatchRoutesController {
     @Body() dto: AddStopsDto,
   ) {
     const result = await this.dispatchRoutesService.addStops(id, dto);
-    return this.responseService.success(result, 'Paradas agregadas a la planilla');
+    return this.responseService.success(result, 'Paradas agregadas a la ruta');
   }
 
   @Delete(':id')
   @Permissions('store:dispatch_routes:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchRoutesService.remove(id);
-    return this.responseService.success(result, 'Planilla eliminada');
+    return this.responseService.success(result, 'Ruta eliminada');
   }
 }

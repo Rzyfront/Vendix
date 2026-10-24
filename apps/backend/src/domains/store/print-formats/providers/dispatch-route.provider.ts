@@ -112,13 +112,13 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
       },
       document: {
         id: 0,
-        number: 'PLANILLA-2026-0001',
+        number: 'RUTA-2026-0001',
         date: new Date().toISOString(),
         date_formatted: new Date().toLocaleDateString('es-CO'),
         time: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
         state: 'dispatched',
         state_label: 'Despachada',
-        notes: 'Planilla demo con 4 paradas y 1 anulada.',
+        notes: 'Ruta demo con 4 paradas y 1 anulada.',
       },
       // F-213 (C.3, minor — revisión 2026-09-14): este formato SIEMPRE tiene
       // `tax_total === 0` e `items: []` (no es un documento de línea a línea,
@@ -172,7 +172,7 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
 
   getAvailableTokens(): PrintTokenDefinition[] {
     return [
-      { token: '{{ document.number }}', path: 'document.number', description: 'Número de la ruta', example: 'PLANILLA-0001' },
+      { token: '{{ document.number }}', path: 'document.number', description: 'Número de la ruta', example: 'RUTA-0001' },
       { token: '{{ vehicle_plate }}', path: 'custom_variables.vehicle_plate', description: 'Placa del vehículo', example: 'WXB-987' },
       { token: '{{ driver_name }}', path: 'custom_variables.driver_name', description: 'Nombre del conductor', example: 'Carlos Pérez' },
       { token: '{{ carrier_name }}', path: 'custom_variables.carrier_name', description: 'Transportista externo (si aplica)', example: 'Transportes XYZ' },

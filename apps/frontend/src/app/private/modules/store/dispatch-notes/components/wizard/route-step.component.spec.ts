@@ -76,6 +76,15 @@ describe('RouteStepComponent', () => {
     expect(cmp.routes().length).toBe(2);
   });
 
+  it('labels the mode options as "ruta", never "planilla" (QUI-720)', () => {
+    const cmp = TestBed.createComponent(RouteStepComponent).componentInstance;
+    const labels = cmp.modeOptions.map((o) => `${o.label} ${o.description}`).join(' ');
+
+    expect(labels).toContain('Ruta existente');
+    expect(labels).toContain('Nueva ruta');
+    expect(labels.toLowerCase()).not.toContain('planilla');
+  });
+
   it('ignores non-assignable routes and selects assignable ones', () => {
     const cmp = TestBed.createComponent(RouteStepComponent).componentInstance;
     cmp.onModeChange('existing');

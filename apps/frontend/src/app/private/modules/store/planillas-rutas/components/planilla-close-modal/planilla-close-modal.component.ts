@@ -19,7 +19,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
   template: `
     <app-modal
       [isOpen]="true"
-      title="Cerrar y Cuadrar Planilla"
+      title="Cerrar y Cuadrar Ruta"
       size="md"
       (cancel)="close.emit()"
     >
@@ -135,7 +135,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
           [disabled]="!canSubmit()"
           class="flex-1 rounded-md bg-green-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
-          {{ submitting() ? 'Cerrando...' : 'Cerrar Planilla' }}
+          {{ submitting() ? 'Cerrando...' : 'Cerrar Ruta' }}
         </button>
       </div>
     </app-modal>
