@@ -106,6 +106,8 @@ const DISPATCH_NOTE_INCLUDE = {
       id: true,
       order_number: true,
       state: true,
+      shipping_tax_amount: true,
+      shipping_tax_name: true,
     },
   },
   invoice: {

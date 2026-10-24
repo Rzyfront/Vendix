@@ -106,6 +106,33 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
     expect(data.delivery_address).toContain('Cra 7 # 1-3');
   });
 
+  it('pasa shipping_cost y el impuesto del envío (de la orden) al builder', async () => {
+    const generateSpy = mockBuilder();
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue({
+      ...baseNote(),
+      shipping_cost: '11900',
+      order: { id: 1, shipping_tax_amount: '1900', shipping_tax_name: 'IVA' },
+    });
+
+    await service.generatePdf(220);
+
+    const data: DispatchNotePdfData = generateSpy.mock.calls[0][0];
+    expect(data.shipping_cost).toBe(11900);
+    expect(data.shipping_tax_amount).toBe(1900);
+    expect(data.shipping_tax_name).toBe('IVA');
+  });
+
+  it('shipping_cost es 0 cuando la remisión no tiene envío', async () => {
+    const generateSpy = mockBuilder();
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(baseNote());
+
+    await service.generatePdf(220);
+
+    const data: DispatchNotePdfData = generateSpy.mock.calls[0][0];
+    expect(data.shipping_cost).toBe(0);
+    expect(data.shipping_tax_amount).toBe(0);
+  });
+
   it('ausenta courier_name cuando es solo espacios', async () => {
     const generateSpy = mockBuilder();
     prismaMock.dispatch_notes.findFirst.mockResolvedValue({
@@ -190,6 +217,7 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
       discount_amount: 0,
       tax_amount: 0,
       prints_vat_breakdown: false,
+      shipping_cost: 0,
       grand_total: 10000,
     });
 
@@ -206,6 +234,41 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
       });
       expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
       expect(pdf.length).toBeGreaterThan(0);
+    });
+
+    it('imprime la fila Envío y su impuesto como líneas aparte (QUI-718)', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const PDFKit = require('pdfkit');
+      const textSpy = jest.spyOn(PDFKit.prototype, 'text');
+      try {
+        const pdf = await DispatchNotePdfBuilder.generate({
+          ...minimalData(),
+          prints_vat_breakdown: true,
+          shipping_cost: 5950,
+          shipping_tax_amount: 950,
+          shipping_tax_name: 'IVA',
+          grand_total: 15950,
+        });
+        expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+        const labels = textSpy.mock.calls.map((c) => c[0]);
+        expect(labels).toContain('Envío:');
+        expect(labels).toContain('Incluye IVA:');
+      } finally {
+        textSpy.mockRestore();
+      }
+    });
+
+    it('no imprime la fila Envío cuando shipping_cost es 0', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const PDFKit = require('pdfkit');
+      const textSpy = jest.spyOn(PDFKit.prototype, 'text');
+      try {
+        await DispatchNotePdfBuilder.generate(minimalData());
+        const labels = textSpy.mock.calls.map((c) => c[0]);
+        expect(labels).not.toContain('Envío:');
+      } finally {
+        textSpy.mockRestore();
+      }
     });
 
     it('genera PDF válido con tax_amount > 0 pero prints_vat_breakdown en false (fila IVA no se imprime)', async () => {
