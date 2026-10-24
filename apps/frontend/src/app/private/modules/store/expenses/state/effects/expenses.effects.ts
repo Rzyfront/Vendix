@@ -113,28 +113,42 @@ export class ExpensesEffects {
     ),
   );
 
+  // Summary depends only on the date range
+  summaryRangeChanged$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ExpensesActions.setDateRange, ExpensesActions.clearFilters),
+      map(() => ExpensesActions.loadExpensesSummary()),
+    ),
+  );
+
   // Load summary
   loadSummary$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ExpensesActions.loadExpensesSummary),
-      switchMap(() =>
-        this.expensesService.getExpensesSummary().pipe(
-          map((response) =>
-            ExpensesActions.loadExpensesSummarySuccess({
-              summary: response.data,
-            }),
-          ),
-          catchError((error) =>
-            of(
-              ExpensesActions.loadExpensesSummaryFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error loading summary',
+      withLatestFrom(this.store.select(selectExpensesState)),
+      switchMap(([, state]) =>
+        this.expensesService
+          .getExpensesSummary({
+            date_from: state.dateFrom || undefined,
+            date_to: state.dateTo || undefined,
+          })
+          .pipe(
+            map((response) =>
+              ExpensesActions.loadExpensesSummarySuccess({
+                summary: response.data,
               }),
             ),
+            catchError((error) =>
+              of(
+                ExpensesActions.loadExpensesSummaryFailure({
+                  error:
+                    error.error?.message ||
+                    error.message ||
+                    'Error loading summary',
+                }),
+              ),
+            ),
           ),
-        ),
       ),
     ),
   );
