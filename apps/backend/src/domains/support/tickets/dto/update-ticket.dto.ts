@@ -1,8 +1,16 @@
 import { PartialType } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ticket_status_enum } from '@prisma/client';
 import { CreateTicketDto } from './create-ticket.dto';
+import { toOptionalBoolean } from '../../../store/orders/purchase-orders/dto/create-purchase-order.dto';
 
 export class UpdateTicketDto extends PartialType(CreateTicketDto) {
   @ApiProperty({
@@ -28,6 +36,8 @@ export class UpdateTicketDto extends PartialType(CreateTicketDto) {
     description: 'Customer satisfaction (true/false)',
     required: false,
   })
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
   @IsOptional()
   customer_satisfied?: boolean;
 }

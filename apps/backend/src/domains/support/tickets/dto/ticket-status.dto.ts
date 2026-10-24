@@ -1,6 +1,14 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ticket_status_enum } from '@prisma/client';
+import { toOptionalBoolean } from '../../../store/orders/purchase-orders/dto/create-purchase-order.dto';
 
 export class UpdateTicketStatusDto {
   @ApiProperty({
@@ -32,6 +40,8 @@ export class CloseTicketDto {
     description: 'Customer satisfaction (true/false)',
     required: false,
   })
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
   @IsOptional()
   customer_satisfied?: boolean;
 }
