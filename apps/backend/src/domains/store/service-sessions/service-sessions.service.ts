@@ -177,11 +177,14 @@ export class ServiceSessionsService {
         ]);
         if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
       } else {
-        const provider = await this.prisma.service_providers.findFirst({
-          where: { id: providerId, store_id: storeId, is_active: true },
-          select: { id: true },
-        });
-        if (!provider) throw new VendixHttpException(ErrorCodes.STATION_001);
+        // Walk-in: el técnico debe estar activo y asignado a ESTA estación.
+        const [provider, stationProvider] = await Promise.all([
+          this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true }, select: { id: true } }),
+          this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: stationId, provider_id: providerId }, select: { id: true } }),
+        ]);
+        if (!provider || !stationProvider) {
+          throw new VendixHttpException(ErrorCodes.STATION_001, 'El técnico no está asignado a esta estación.');
+        }
       }
     } else if (bookingAllocation && product.booking_mode === 'provider_required') {
       throw new VendixHttpException(ErrorCodes.STATION_001, 'Selecciona un proveedor compatible.');

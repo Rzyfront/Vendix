@@ -269,6 +269,19 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('rechaza un walk-in con un técnico que no está asignado a la estación', async () => {
+    prisma.service_stations.findFirst.mockResolvedValue({ id: 3 });
+    prisma.products = { findFirst: jest.fn().mockResolvedValue({ id: 10, product_type: 'service', state: 'active' }) };
+    prisma.service_station_services = { findFirst: jest.fn().mockResolvedValue({ id: 1 }) };
+    prisma.service_providers = { findFirst: jest.fn().mockResolvedValue({ id: 7 }) };
+    prisma.service_station_providers = { findFirst: jest.fn().mockResolvedValue(null) };
+    templates.getLinkedTemplateForProduct.mockResolvedValue(null); // sin formulario: aísla la regla del técnico
+    await expect(service.open({ station_id: 3, product_id: 10, provider_id: 7 } as any)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'STATION_001', message: expect.stringContaining('no está asignado') }),
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   describe('prepareCharge', () => {
     const setup = (budget: any) => {
       jest.spyOn(service, 'findOne').mockResolvedValue({ id: 77, order_id: 88 } as any);

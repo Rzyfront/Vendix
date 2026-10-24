@@ -516,7 +516,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const opts: SelectorOption[] = [
       { value: 0, label: 'Rotativo / Sin asignar' },
     ];
-    for (const p of this.providers()) {
+    // Solo el personal asignado a ESTA estación (Configurar estación → Proveedores).
+    const assigned = new Set(this.selectedCheckinStation()?.providers?.map((entry) => entry.provider_id) ?? []);
+    for (const p of this.providers().filter((provider) => assigned.has(provider.id))) {
       opts.push({
         value: p.id,
         label: p.display_name,
@@ -1284,6 +1286,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
+    this.checkinProviderId.set(0); // el técnico elegido puede no estar asignado a la nueva estación
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
     this.loadCheckinIntake();
