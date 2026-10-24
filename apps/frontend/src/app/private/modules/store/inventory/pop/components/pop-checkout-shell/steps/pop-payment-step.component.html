@@ -105,6 +105,7 @@
             [value]="installmentCount()"
             min="1"
             (input)="onCountInput($event)"
+            (change)="onInstallmentParamsChange($event, 'count')"
           />
         </label>
         <label class="gen-field">
@@ -115,6 +116,7 @@
             [value]="installmentEveryDays()"
             min="1"
             (input)="onEveryDaysInput($event)"
+            (change)="onInstallmentParamsChange($event, 'everyDays')"
           />
         </label>
         <button type="button" class="gen-btn" (click)="generateInstallments()">
