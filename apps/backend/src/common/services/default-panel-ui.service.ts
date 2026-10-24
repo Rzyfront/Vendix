@@ -109,6 +109,7 @@ export class DefaultPanelUIService {
         orders_contracts: true,
         orders_layaway: true,
         orders_reservations: true,
+        orders_service_stations: true,
         orders_dispatch_notes: true,
         orders_dispatch_routes: true,
         // Despacho (módulo padre agrupador) + Flota.

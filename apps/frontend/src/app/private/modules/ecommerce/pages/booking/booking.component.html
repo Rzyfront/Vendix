@@ -232,6 +232,12 @@
                 <span class="summary-value">{{ provider.display_name }}</span>
               </div>
             }
+            @if (selectedSlot()?.station_name) {
+              <div class="summary-row">
+                <span class="summary-label">Estación</span>
+                <span class="summary-value">{{ selectedSlot()?.station_name }}</span>
+              </div>
+            }
             @if (serviceLocation(); as loc) {
               <div class="summary-row">
                 <span class="summary-label">Ubicación</span>

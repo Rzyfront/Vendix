@@ -3,6 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { Request, Response, NextFunction } from 'express';
 import { PublicDomainsService } from '../../domains/public/domains/public-domains.service';
+import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 
 /**
  * D.3 (F-042) — Entero positivo estricto: solo dígitos (sin `+`, `-`, `.`,
@@ -30,7 +31,8 @@ export class DomainResolverMiddleware implements NestMiddleware {
       return next();
     }
 
-    this.logger.log(`Path matched for domain resolution: ${req.originalUrl}`);
+    const safePath = redactSensitiveRoute(req.originalUrl);
+    this.logger.log(`Path matched for domain resolution: ${safePath}`);
 
     const hostname = this.extractHostname(req);
     const x_store_id_header = req.headers['x-store-id'] || req.query.store_id;
@@ -56,7 +58,7 @@ export class DomainResolverMiddleware implements NestMiddleware {
           error_code: 'SYS_VALIDATION_001',
           message: 'Invalid x-store-id: must be a single positive integer',
           timestamp: new Date().toISOString(),
-          path: req.originalUrl,
+          path: safePath,
         });
         return;
       }

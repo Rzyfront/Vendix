@@ -9,6 +9,7 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ErrorCodes, FinancialSplitErrors, VendixHttpException } from '../errors';
 import { RequestContextService } from '../context/request-context.service';
+import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 
 /**
  * DESAJUSTE DE TIPO EN UN VALOR — el ÚNICO subconjunto de
@@ -50,6 +51,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const safePath = redactSensitiveRoute(request.url);
 
     let status =
       exception instanceof HttpException
@@ -158,8 +160,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // El texto crudo trae el fragmento de la invocación con nombres de tabla
       // y columna: se queda en el log del servidor, nunca en la respuesta.
       console.error(
-        `[AllExceptionsFilter] Prisma P2020 on ${request.method} ${request.url}:`,
-        exception.message,
+        `[AllExceptionsFilter] Prisma P2020 on ${request.method} ${safePath}:`,
+        redactSensitiveRoute(exception.message, request.url),
       );
     } else if (
       exception instanceof Prisma.PrismaClientValidationError &&
@@ -172,22 +174,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // Mismo motivo que arriba: el mensaje de Prisma reproduce el objeto de la
       // consulta completo, con los nombres de campo del modelo.
       console.error(
-        `[AllExceptionsFilter] Prisma validation (value type mismatch) on ${request.method} ${request.url}:`,
-        exception.message,
+        `[AllExceptionsFilter] Prisma validation (value type mismatch) on ${request.method} ${safePath}:`,
+        redactSensitiveRoute(exception.message, request.url),
       );
     } else {
       errorCode = 'SYS_INTERNAL_001';
       message = 'Internal server error';
       console.error(
-        `[AllExceptionsFilter] Unhandled exception on ${request.method} ${request.url}:`,
-        exception,
+        `[AllExceptionsFilter] Unhandled exception on ${request.method} ${safePath}:`,
+        redactSensitiveRoute(exception instanceof Error ? exception.stack || exception.message : String(exception), request.url),
       );
     }
 
     const responseBody: Record<string, any> = {
       statusCode: status,
       ...(errorCode && { error_code: errorCode }),
-      message,
+      message: typeof message === 'string' ? redactSensitiveRoute(message, request.url) : message,
       ...(details && { details }),
       // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
       // Surface the per-request id from AsyncLocalStorage so the frontend
@@ -209,7 +211,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? { request_id: RequestContextService.getRequestId() }
         : {}),
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: safePath,
     };
 
     // Dev-friendly error details
@@ -238,7 +240,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // o referencias circulares que revientan JSON.stringify.
       responseBody['devDetails'] = {
         name: exception instanceof Error ? exception.name : 'UnknownException',
-        stack: exception instanceof Error ? exception.stack : undefined,
+        stack: exception instanceof Error ? redactSensitiveRoute(exception.stack, request.url) : undefined,
       };
     }
 

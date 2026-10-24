@@ -619,6 +619,16 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_recurring?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number | null;
+
   @IsOptional()
   @IsString()
   service_instructions?: string;
@@ -1102,6 +1112,14 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   requires_booking?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Indica que el servicio requiere asignación de estación física para reservar o iniciar atención.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_station?: boolean;
+
   @IsOptional()
   @IsEnum(BookingMode)
   booking_mode?: BookingMode;
@@ -1110,6 +1128,16 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_recurring?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number | null;
 
   @IsOptional()
   @IsString()
@@ -1940,6 +1968,16 @@ export class UpdateProductWithVariantsDto {
   @Type(() => Boolean)
   is_recurring?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number | null;
+
   @IsOptional()
   @IsString()
   service_instructions?: string;
@@ -2254,6 +2292,16 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   is_recurring?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Intervalo de días en que se repite el servicio recurrente (1-365)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El intervalo de recurrencia debe ser al menos 1 día' })
+  @Max(365, { message: 'El intervalo de recurrencia no puede superar los 365 días' })
+  recurrence_interval_days?: number | null;
 
   @IsOptional()
   @IsString()

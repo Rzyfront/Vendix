@@ -23,6 +23,12 @@ import {
 } from '@prisma/client';
 
 export class CreateOrderItemDto {
+  /** Existing scheduled reservation that authorizes a station-required service line. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  booking_id?: number;
+
   @IsOptional()
   @IsInt()
   @Min(1)

@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, output, OnInit } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
-import { MetadataField } from '../../interfaces/metadata-field.interface';
+import { FIELD_TYPE_LABELS, FieldType, MetadataField } from '../../interfaces/metadata-field.interface';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
@@ -23,14 +23,14 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
     >
       <div class="space-y-4">
         <app-input
-          label="Label"
+          label="Nombre del campo"
           [(ngModel)]="formData.label"
           (inputChange)="autoGenerateKey()"
           [required]="true"
         />
 
         <app-input
-          label="Key"
+          label="Clave interna"
           [(ngModel)]="formData.field_key"
           [disabled]="!!field()"
         />
@@ -59,7 +59,7 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 
         <div class="grid grid-cols-2 gap-4">
           <app-selector
-            label="Modo de Display"
+            label="Modo de visualización"
             [(ngModel)]="formData.display_mode"
             [options]="displayModeOptions"
           />
@@ -90,6 +90,8 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 })
 export class FieldModalComponent implements OnInit {
   field = input<MetadataField | null>(null);
+  /** Tipo de entidad con el que nace un campo nuevo (p. ej. desde el editor de una plantilla). */
+  defaultEntityType = input<string | null>(null);
   save = output<any>();
   close = output<void>();
 
@@ -99,9 +101,11 @@ export class FieldModalComponent implements OnInit {
     { value: 'customer', label: 'Cliente' },
     { value: 'booking', label: 'Reserva' },
     { value: 'order', label: 'Orden' },
+    { value: 'service_session', label: 'Atención de servicio' },
   ];
 
-  fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: t }));
+
+  fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: FIELD_TYPE_LABELS[t as FieldType] ?? t }));
 
   displayModeOptions = [
     { value: 'detail', label: 'Detalle' },
@@ -122,6 +126,7 @@ export class FieldModalComponent implements OnInit {
 
   ngOnInit() {
     const f = this.field();
+    if (!f && this.defaultEntityType()) this.formData.entity_type = this.defaultEntityType();
     if (f) {
       this.formData = {
         label: f.label,

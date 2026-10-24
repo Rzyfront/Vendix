@@ -862,6 +862,19 @@ export function isConfirmedStateTransition(
  * ONE map instead of two copies drifting apart. Unknown values pass through
  * as-is. Pure for spec sin TestBed.
  */
+export interface OrderServiceSessionSummary {
+  id: number;
+  status: string;
+  opened_at: string;
+  closed_at: string | null;
+  station: { id: number; name: string; station_type: string } | null;
+  service_name: string | null;
+  subject_label: string | null;
+  provider_name: string | null;
+  customer_name?: string | null;
+  intake?: Array<{ label: string; value: string }>;
+}
+
 export function orderStateLabel(status: string | null | undefined): string {
   if (!status) return 'Desconocido';
   const labels: Record<string, string> = {
@@ -1727,6 +1740,23 @@ export class OrderDetailsPageComponent {
       return {};
     }
   });
+
+  /** Atención de estación de servicio dueña de la orden (órdenes SVC-*). */
+  readonly serviceSession = computed<OrderServiceSessionSummary | null>(
+    () => ((this.order() as any)?.service_session as OrderServiceSessionSummary | null) ?? null,
+  );
+
+  /** Saldo por cobrar de la orden (total − pagado). */
+  readonly serviceSessionBalance = computed(() => {
+    const order = this.order() as any;
+    if (!order) return 0;
+    const remaining = order.remaining_balance != null ? Number(order.remaining_balance) : Number(order.grand_total ?? 0) - Number(order.total_paid ?? 0);
+    return Math.max(0, Math.round(remaining * 100) / 100);
+  });
+
+  serviceSessionStatusLabel(status: string): string {
+    return ({ open: 'En proceso', paused: 'En pausa', closed: 'Finalizada', cancelled: 'Cancelada', no_show: 'No se presentó' } as Record<string, string>)[status] ?? status;
+  }
 
   readonly tableSession = computed<OrderTableSession | null>(() => {
     const sessions = this.order()?.table_sessions;

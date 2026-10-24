@@ -19,6 +19,11 @@ export class AvailabilityQueryDto {
   product_variant_id?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  station_id?: number;
+
+  @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   include_booked?: boolean;

@@ -77,6 +77,11 @@ export class CreateBookingDto {
   provider_id?: number;
 
   @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  station_id?: number;
+
+  @IsOptional()
   @IsBoolean()
   skip_availability_check?: boolean;
 

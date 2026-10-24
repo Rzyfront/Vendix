@@ -476,6 +476,20 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.BusinessHoursComponent),
           },
           {
+            path: 'stations',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-stations/service-stations-page.component').then(
+                (c) => c.ServiceStationsPageComponent,
+              ),
+          },
+          {
+            path: 'reminders',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-reminders-page/service-reminders-page.component').then(
+                (c) => c.ServiceRemindersPageComponent,
+              ),
+          },
+          {
             // Appointment redesign phase 2 — dedicated page for the
             // pending-reschedule-requests queue. Reached from the
             // "Solicitudes de reagenda" header button.
@@ -484,6 +498,18 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/reservations/components/reschedule-requests-page/reschedule-requests-page.component'
               ).then((c) => c.RescheduleRequestsPageComponent),
+          },
+        ],
+      },
+      {
+        path: 'services',
+        children: [
+          {
+            path: 'stations',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-stations/service-stations-page.component').then(
+                (c) => c.ServiceStationsPageComponent,
+              ),
           },
         ],
       },

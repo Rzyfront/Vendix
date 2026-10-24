@@ -905,6 +905,7 @@ export class CheckoutComponent implements OnInit {
         newSelections.set(this.getBookingKey(cartItem), {
           product_id: booking['product_id'],
           product_variant_id: booking['product_variant_id'],
+          station_id: booking['station_id'],
           date: booking['date'],
           start_time: booking['start_time'],
           end_time: booking['end_time'],
@@ -3567,6 +3568,7 @@ export class CheckoutComponent implements OnInit {
     const pendingBookings: Array<{
       product_id: number;
       product_variant_id?: number;
+      station_id?: number;
       date: string;
       start_time: string;
       end_time: string;
@@ -3593,6 +3595,7 @@ export class CheckoutComponent implements OnInit {
             pendingBookings.push({
               product_id: parsed.product_id,
               product_variant_id: parsed.product_variant_id,
+              station_id: parsed.station_id,
               date: parsed.date,
               start_time: parsed.start_time,
               end_time: parsed.end_time,

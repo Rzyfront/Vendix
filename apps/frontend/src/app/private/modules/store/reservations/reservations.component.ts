@@ -24,6 +24,7 @@ import {
   BookingStatus,
 } from './interfaces/reservation.interface';
 import {
+  ButtonComponent,
   ToastService,
   DialogService,
   IconComponent,
@@ -48,6 +49,7 @@ type ReservationView = 'calendar' | 'list';
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
     CardComponent,
+    ButtonComponent,
     IconComponent,
     TooltipComponent,
     InputButtonsComponent,

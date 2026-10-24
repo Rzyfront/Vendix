@@ -2,6 +2,7 @@ export interface EntityContext {
   customer_id?: number | null;
   booking_id?: number | null;
   order_id?: number | null;
+  service_session_id?: number | null;
 }
 
 /**
@@ -19,6 +20,8 @@ export function resolveEntityId(
       return ctx.booking_id ?? null;
     case 'order':
       return ctx.order_id ?? null;
+    case 'service_session':
+      return ctx.service_session_id ?? null;
     default:
       return null;
   }
@@ -38,5 +41,10 @@ export function buildEntityQueries(
     queries.push({ entityType: 'booking', entityId: ctx.booking_id });
   if (ctx.order_id)
     queries.push({ entityType: 'order', entityId: ctx.order_id });
+  if (ctx.service_session_id)
+    queries.push({
+      entityType: 'service_session',
+      entityId: ctx.service_session_id,
+    });
   return queries;
 }

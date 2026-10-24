@@ -3,7 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { MetadataFieldsService } from '../services/metadata-fields.service';
-import { MetadataField } from '../interfaces/metadata-field.interface';
+import { DISPLAY_MODE_LABELS, ENTITY_TYPE_LABELS, EntityType, FIELD_TYPE_LABELS, FieldType, MetadataField } from '../interfaces/metadata-field.interface';
 import { FieldModalComponent } from './field-modal/field-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
@@ -144,14 +144,15 @@ export class FieldsComponent implements OnInit {
     { id: 'customer', label: 'Cliente' },
     { id: 'booking', label: 'Reserva' },
     { id: 'order', label: 'Orden' },
+    { id: 'service_session', label: 'Atención de servicio' },
   ];
 
   columns: TableColumn[] = [
-    { key: 'label', label: 'Label', sortable: true },
-    { key: 'field_key', label: 'Key' },
-    { key: 'field_type', label: 'Tipo' },
-    { key: 'entity_type', label: 'Entidad' },
-    { key: 'display_mode', label: 'Display' },
+    { key: 'label', label: 'Nombre', sortable: true },
+    { key: 'field_key', label: 'Clave' },
+    { key: 'field_type', label: 'Tipo', transform: (value: FieldType) => FIELD_TYPE_LABELS[value] ?? value },
+    { key: 'entity_type', label: 'Entidad', transform: (value: EntityType) => ENTITY_TYPE_LABELS[value] ?? value },
+    { key: 'display_mode', label: 'Visualización', transform: (value: string) => DISPLAY_MODE_LABELS[value] ?? value },
     {
       key: 'is_active',
       label: 'Estado',
@@ -204,9 +205,9 @@ export class FieldsComponent implements OnInit {
     },
     badgeTransform: (val: any) => val ? 'Activo' : 'Inactivo',
     detailKeys: [
-      { key: 'entity_type', label: 'Entidad' },
-      { key: 'field_type', label: 'Tipo' },
-      { key: 'display_mode', label: 'Display' },
+      { key: 'entity_type', label: 'Entidad', transform: (value: EntityType) => ENTITY_TYPE_LABELS[value] ?? value },
+      { key: 'field_type', label: 'Tipo', transform: (value: FieldType) => FIELD_TYPE_LABELS[value] ?? value },
+      { key: 'display_mode', label: 'Visualización', transform: (value: string) => DISPLAY_MODE_LABELS[value] ?? value },
     ],
   };
 

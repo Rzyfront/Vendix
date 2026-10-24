@@ -50,6 +50,7 @@ import { OrderSseService } from './services/order-sse.service';
 // y seeds, y el ciclo rompería el arranque en silencio.
 import { InvoicingModule } from '../invoicing/invoicing.module';
 import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
+import { ServiceAllocationModule } from '../reservations/service-allocation.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     // Release-853 paso 10: propagación del titular al borrador de factura.
     forwardRef(() => InvoicingModule),
     OrderHistoryModule,
+    ServiceAllocationModule,
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [

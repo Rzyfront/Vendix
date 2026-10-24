@@ -62,6 +62,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   orders_contracts: '/admin/orders/contracts',
   orders_layaway: '/admin/orders/layaway',
   orders_reservations: '/admin/reservations',
+  orders_service_stations: '/admin/services/stations',
 
   // Despacho
   dispatch: '/admin/orders/dispatch-notes',

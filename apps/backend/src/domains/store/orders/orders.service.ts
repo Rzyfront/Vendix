@@ -1,6 +1,7 @@
+import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
-import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef, BadRequestException, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
@@ -97,6 +98,7 @@ import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 // Release-853 paso 10 — propagación del titular al borrador de factura.
 import { InvoicingService } from '../invoicing/invoicing.service';
 import { OrderHistoryService } from './order-history/order-history.service';
+import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -328,6 +330,7 @@ export class OrdersService {
     // `orders.module.ts`).
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
     @Optional() private readonly stockValidator?: StockValidatorService,
+    @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
   ) {}
 
   /**
@@ -755,6 +758,27 @@ export class OrdersService {
           .filter((id): id is number => typeof id === 'number' && id > 0),
       ),
     );
+    const stationProducts = lineProductIds.length
+      ? await this.prisma.products.findMany({ where: { id: { in: lineProductIds }, store_id }, select: { id: true, requires_station: true } })
+      : [];
+    const stationProductIds = new Set(stationProducts.filter((product) => product.requires_station).map((product) => product.id));
+    const requiredStationLines = createOrderDto.items.filter((item) => item.product_id != null && stationProductIds.has(item.product_id));
+    const requiredBookingIds = requiredStationLines.map((item) => item.booking_id).filter((id): id is number => typeof id === 'number');
+    if (requiredStationLines.some((item) => item.quantity !== 1 || !item.booking_id) || new Set(requiredBookingIds).size !== requiredBookingIds.length) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'Cada línea de servicio con estación debe incluir una reserva asignada, una unidad por reserva.');
+    }
+    if (requiredBookingIds.length) {
+      const requiredBookings = await this.prisma.bookings.findMany({ where: { id: { in: requiredBookingIds }, store_id, order_id: null, status: { in: ['pending', 'confirmed'] } }, select: { id: true, product_id: true, product_variant_id: true } });
+      const validBookingById = new Map<number, { id: number; product_id: number; product_variant_id: number | null }>(requiredBookings.map((booking) => [booking.id, booking]));
+      const allocations = await this.prisma.service_allocations.findMany({ where: { store_id, booking_id: { in: requiredBookingIds }, state: { in: ['held', 'payment_pending', 'confirmed'] }, OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] }, select: { booking_id: true } });
+      const allocatedIds = new Set(allocations.map((allocation) => allocation.booking_id));
+      if (requiredStationLines.some((item) => {
+        const booking = validBookingById.get(item.booking_id!);
+        return !booking || booking.product_id !== item.product_id || (booking.product_variant_id ?? null) !== (item.product_variant_id ?? null) || !allocatedIds.has(item.booking_id!);
+      })) {
+        throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La reserva indicada no está activa o no corresponde al servicio/variante de la línea.');
+      }
+    }
     const lineTaxByProductId =
       lineProductIds.length > 0
         ? await this.resolveLineTaxesForOrder(lineProductIds)
@@ -1015,6 +1039,16 @@ export class OrdersService {
             },
           },
         });
+
+          for (const bookingId of requiredBookingIds) {
+            const allocation = await tx.service_allocations.findFirst({
+              where: { store_id, booking_id: bookingId, state: { in: ['held', 'payment_pending', 'confirmed'] }, OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] },
+              select: { id: true },
+            });
+            if (!allocation) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+            const linked = await tx.bookings.updateMany({ where: { id: bookingId, store_id, order_id: null, service_allocation_id: allocation.id }, data: { order_id: createdOrder.id, updated_at: new Date() } });
+            if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+          }
 
           // The order and its reservations must commit or roll back together.
           for (const item of createdOrder.order_items) {
@@ -1786,8 +1820,13 @@ export class OrdersService {
       }),
     }));
 
+    const service_session = (order as any).service_session_id
+      ? await this.loadServiceSessionSummary((order as any).store_id, (order as any).service_session_id)
+      : null;
+
     return {
       ...order,
+      service_session,
       payments: (order.payments ?? []).map((p: any) => ({
         ...p,
         financial_account_id: p.financial_account_id ?? null,
@@ -1803,6 +1842,48 @@ export class OrdersService {
         ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
         : null,
       available_actions,
+    };
+  }
+
+  /**
+   * Resumen de la atención de estación de servicio dueña de una orden SVC, el
+   * equivalente a la tarjeta de mesa: estación, servicio, lo atendido, estado,
+   * técnico y horas de ingreso/cierre.
+   */
+  private async loadServiceSessionSummary(storeId: number, sessionId: number) {
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+      select: { id: true, status: true, opened_at: true, closed_at: true, station_id: true, product_id: true },
+    });
+    if (!session) return null;
+    const [station, product, subject, allocation, intake, order] = await Promise.all([
+      this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { id: true, name: true, station_type: true } }),
+      this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { id: true, name: true } }),
+      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true, metadata: true } }),
+      this.prisma.service_allocations.findFirst({
+        where: { store_id: storeId, session_id: sessionId },
+        orderBy: { id: 'desc' },
+        select: { provider_id: true },
+      }),
+      loadSessionIntakeAnswers(this.prisma, storeId, sessionId, { hideSensitive: false }),
+      this.prisma.orders.findFirst({ where: { store_id: storeId, service_session_id: sessionId }, select: { users: { select: { first_name: true, last_name: true } } } }),
+    ]);
+    const walkInName = String((subject?.metadata as Record<string, unknown> | null)?.['customer_name'] ?? '').trim();
+    const customerName = [order?.users?.first_name, order?.users?.last_name].filter(Boolean).join(' ') || walkInName || null;
+    const provider = allocation?.provider_id
+      ? await this.prisma.service_providers.findFirst({ where: { id: allocation.provider_id, store_id: storeId }, select: { display_name: true } })
+      : null;
+    return {
+      id: session.id,
+      status: session.status,
+      opened_at: session.opened_at,
+      closed_at: session.closed_at,
+      station: station ? { id: station.id, name: station.name, station_type: station.station_type } : null,
+      service_name: product?.name ?? null,
+      subject_label: subject?.label ?? null,
+      provider_name: provider?.display_name ?? null,
+      customer_name: customerName,
+      intake,
     };
   }
 
@@ -2228,6 +2309,25 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
+    if (order.service_session_id) {
+      const clientOwnedTotals = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount'];
+      const suppliedTotals = clientOwnedTotals.filter((key) =>
+        Object.prototype.hasOwnProperty.call(updateOrderDto, key),
+      );
+      if (suppliedTotals.length > 0) {
+        throw new BadRequestException(
+          'Las líneas, precios, impuestos y descuentos de una orden de servicio deben editarse por el flujo autorizado de cotización.',
+        );
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(updateOrderDto, 'currency') &&
+        updateOrderDto.currency !== order.currency
+      ) {
+        throw new BadRequestException(
+          'La moneda de una orden de servicio no puede cambiarse desde la edición general.',
+        );
+      }
+    }
     const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
@@ -2472,7 +2572,6 @@ export class OrdersService {
         tip: (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
       });
     }
-
     // Release-853 paso 10 — propagación al borrador. Va AQUÍ (después de
     // todas las validaciones que pueden lanzar, justo antes del write de la
     // orden): si falla, la orden queda intacta; y nada entre ambas
@@ -2505,9 +2604,60 @@ export class OrdersService {
 
     let updatedOrder;
     try {
-      updatedOrder = await this.prisma.orders.update({
+      updatedOrder = await this.prisma.$transaction(async (tx) => {
+        let data: Record<string, any> = { ...updateOrderDto };
+        if (order.service_session_id && shippingChanged) {
+          // Keep the budget read and the order write in one serializable unit.
+          // The preflight above is useful for an early error, but cannot protect
+          // against a concurrent budget/order update on its own.
+          const current = await tx.orders.findFirst({
+            where: { id, store_id: order.store_id },
+            select: {
+              subtotal_amount: true,
+              tax_amount: true,
+              discount_amount: true,
+              shipping_cost: true,
+              tip_amount: true,
+              grand_total: true,
+              currency: true,
+              service_session_id: true,
+            },
+          });
+          if (!current) throw new NotFoundException('Orden no encontrada');
+          const nextGrandTotal = this.computeOrderGrandTotal({
+            subtotal: Number(current.subtotal_amount),
+            tax: Number(updateOrderDto.tax_amount ?? current.tax_amount),
+            discount: Number(current.discount_amount),
+            shipping: hasShippingKey('shipping_cost')
+              ? Number(updateOrderDto.shipping_cost ?? 0)
+              : Number(current.shipping_cost ?? 0),
+            tip: Number(current.tip_amount ?? 0),
+          });
+          const budget = await tx.service_budgets.findFirst({
+            where: { store_id: order.store_id, session_id: current.service_session_id! },
+            orderBy: { version: 'desc' },
+            select: { amount: true, currency: true },
+          });
+          const nextTotalExcludingTip = new Prisma.Decimal(nextGrandTotal)
+            .minus(current.tip_amount ?? 0);
+          if (!budget || budget.currency !== current.currency || nextTotalExcludingTip.greaterThan(budget.amount)) {
+            throw new VendixHttpException(
+              ErrorCodes.SERVICE_BUDGET_001,
+              'El cambio de envío supera el límite vigente o no hay un presupuesto válido para la sesión de servicio.',
+              { order_id: id, service_session_id: current.service_session_id },
+            );
+          }
+          data = { ...data, grand_total: nextGrandTotal };
+        }
+        return tx.orders.update({
         where: { id },
-        data: { ...updateOrderDto, updated_at: new Date() },
+        data: {
+          ...data,
+          ...(order.service_session_id && shippingChanged
+            ? { service_version: { increment: 1 } }
+            : {}),
+          updated_at: new Date(),
+        },
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
@@ -2560,6 +2710,7 @@ export class OrdersService {
           },
         },
       });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       // Release-854 follow-up paso 1 — compensación: el borrador ya tiene
       // el titular nuevo pero la orden no se escribió. Se restaura el
@@ -2579,6 +2730,9 @@ export class OrdersService {
               `${compensationError instanceof Error ? compensationError.message : String(compensationError)}`,
           );
         }
+      }
+      if ((error as { code?: string })?.code === 'P2034') {
+        throw new ConflictException('La orden o el presupuesto cambió durante la actualización; recarga y vuelve a intentar.');
       }
       throw error;
     }
@@ -2719,6 +2873,37 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Fail closed when an edit would raise a service-session order above its
+   * current, versioned customer limit. Proposal creation/application is owned
+   * by ServiceBudgetsService; until that workflow is complete, no writer may
+   * silently turn an over-limit edit into a chargeable order.
+   */
+  private async assertServiceBudgetLimit(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    storeId: number,
+    nextTotal: number,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      select: { service_session_id: true, currency: true },
+    });
+    if (!order?.service_session_id) return;
+    const budget = await tx.service_budgets.findFirst({
+      where: { store_id: storeId, session_id: order.service_session_id },
+      orderBy: { version: 'desc' },
+      select: { amount: true, currency: true },
+    });
+    if (!budget || budget.currency !== order.currency || new Prisma.Decimal(nextTotal).greaterThan(budget.amount)) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_BUDGET_001,
+        'El total supera el límite vigente o su moneda no coincide. Registra una propuesta y espera la autorización del cliente.',
+        { order_id: orderId, service_session_id: order.service_session_id },
+      );
+    }
+  }
+
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     const order = await this.findOne(id);
     assertNoActiveFinancialSplit(order);
@@ -2791,6 +2976,26 @@ export class OrdersService {
           .filter((pid): pid is number => pid != null && pid > 0),
       ),
     ];
+    const stationProductsForReplacement = updateItemsProductIds.length
+      ? await this.prisma.products.findMany({ where: { id: { in: updateItemsProductIds }, store_id: order.store_id }, select: { id: true, requires_station: true } })
+      : [];
+    const stationProductIdsForReplacement = new Set(stationProductsForReplacement.filter((product) => product.requires_station).map((product) => product.id));
+    const stationReplacementLines = dto.items.filter((item) => item.product_id != null && stationProductIdsForReplacement.has(item.product_id));
+    const replacementBookingIds = stationReplacementLines.map((item) => item.booking_id).filter((bookingId): bookingId is number => typeof bookingId === 'number');
+    if (stationReplacementLines.some((item) => item.quantity !== 1 || !item.booking_id) || new Set(replacementBookingIds).size !== replacementBookingIds.length) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'Cada línea de servicio con estación debe conservar o indicar una reserva asignada, una unidad por reserva.');
+    }
+    if (stationProductIdsForReplacement.size && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+    if (replacementBookingIds.length) {
+      const bookings = await this.prisma.bookings.findMany({ where: { id: { in: replacementBookingIds }, store_id: order.store_id, status: { in: ['pending', 'confirmed'] }, OR: [{ order_id: id }, { order_id: null }] }, select: { id: true, product_id: true, product_variant_id: true } });
+      const bookingById = new Map<number, { id: number; product_id: number; product_variant_id: number | null }>(bookings.map((booking) => [booking.id, booking]));
+      const allocations = await this.prisma.service_allocations.findMany({ where: { store_id: order.store_id, booking_id: { in: replacementBookingIds }, state: { in: ['held', 'payment_pending', 'confirmed'] }, OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] }, select: { booking_id: true } });
+      const allocatedIds = new Set(allocations.map((allocation) => allocation.booking_id));
+      if (stationReplacementLines.some((item) => {
+        const booking = bookingById.get(item.booking_id!);
+        return !booking || booking.product_id !== item.product_id || (booking.product_variant_id ?? null) !== (item.product_variant_id ?? null) || !allocatedIds.has(item.booking_id!);
+      })) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+    }
     const updateItemsRatesByProductId =
       updateItemsProductIds.length > 0
         ? await this.resolveLineTaxesForOrder(updateItemsProductIds)
@@ -2836,6 +3041,20 @@ export class OrdersService {
           },
         },
       });
+      const existingStationBookings = await tx.bookings.findMany({
+        where: { store_id: order.store_id, order_id: id, product: { requires_station: true }, status: { in: ['pending', 'confirmed'] } },
+        select: { id: true },
+      });
+      if (existingStationBookings.length > 0 && !this.allocationCoordinator) {
+        throw new VendixHttpException(ErrorCodes.STATION_012);
+      }
+      const retainedBookingIds = new Set(replacementBookingIds);
+      for (const existingBooking of existingStationBookings) {
+        if (!retainedBookingIds.has(existingBooking.id)) {
+          await this.allocationCoordinator!.releaseBooking(tx, order.store_id, existingBooking.id, 'cancelled');
+          await tx.bookings.update({ where: { id: existingBooking.id }, data: { status: 'cancelled', updated_at: new Date() } });
+        }
+      }
 
       // Plan fiscal por línea: la línea persistida sin cambios conserva su
       // snapshot (ADR-10); la nueva o cambiada se resuelve contra el catálogo.
@@ -2875,6 +3094,7 @@ export class OrdersService {
         0,
         roundMoney(subtotal + taxAmount - discountAmount + persistedShipping),
       );
+      await this.assertServiceBudgetLimit(tx, id, order.store_id, grandTotal);
       if (
         (dto.tax_amount != null &&
           differsByAtLeastCents(Number(dto.tax_amount), taxAmount, 1)) ||
@@ -2963,6 +3183,7 @@ export class OrdersService {
         await tx.order_items.create({
           data: {
             order_id: id,
+            service_session_id: order.service_session_id ?? null,
             product_id: item.product_id || null,
             product_variant_id: item.product_id
               ? item.product_variant_id
@@ -3001,6 +3222,14 @@ export class OrdersService {
         });
       }
 
+      for (const bookingId of replacementBookingIds) {
+        const linked = await tx.bookings.updateMany({
+          where: { id: bookingId, store_id: order.store_id, OR: [{ order_id: id }, { order_id: null }] },
+          data: { order_id: id, updated_at: new Date() },
+        });
+        if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+      }
+
       // Update order totals
       await tx.orders.update({
         where: { id },
@@ -3009,6 +3238,7 @@ export class OrdersService {
           tax_amount: taxAmount,
           discount_amount: discountAmount,
           grand_total: grandTotal,
+          service_version: { increment: 1 },
           updated_at: new Date(),
         },
       });
@@ -3068,7 +3298,7 @@ export class OrdersService {
           },
         },
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return stockWarnings.length > 0
       ? { ...finalOrder, stock_warnings: stockWarnings }
       : finalOrder;
@@ -3243,7 +3473,7 @@ export class OrdersService {
     if (productIds.length > 0) {
       const productRows = await this.prisma.products.findMany({
         where: { id: { in: productIds }, store_id: storeId },
-        select: { id: true },
+        select: { id: true, requires_station: true, product_type: true },
       });
       const found = new Set(productRows.map((p) => p.id));
       const missing = productIds.filter((id) => !found.has(id));
@@ -3253,6 +3483,15 @@ export class OrdersService {
           undefined,
           { missing_product_ids: missing },
         );
+      }
+      const requiredStationProducts = new Set(productRows.filter((p) => p.requires_station).map((p) => p.id));
+      for (const item of dto.items) {
+        if (item.product_id && requiredStationProducts.has(item.product_id)) {
+          if (item.quantity !== 1 || !item.booking?.date || !item.booking.start_time || !item.booking.end_time || (!item.booking.booking_id && !item.booking.station_id)) {
+            throw new VendixHttpException(ErrorCodes.STATION_012, 'El servicio requiere una reserva y estación para cada unidad.');
+          }
+          if (!this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+        }
       }
     }
 
@@ -4006,6 +4245,12 @@ export class OrdersService {
       //        variante". Mismo helper que `create` y `updateOrderItems`:
       //        una sola definición para que no vuelva a divergir.
       await assertVariantRequiredForPrepared(tx, dto.items);
+      await this.assertServiceBudgetLimit(
+        tx,
+        orderId,
+        storeId,
+        roundMoney(grandTotal - Number(existingOrder.tip_amount ?? 0)),
+      );
 
       // 13a) Claim atómico del estado. Si otro operador cambió la orden
       //      entre el findFirst y acá, count=0 → 409.
@@ -4239,6 +4484,7 @@ export class OrdersService {
               : null;
           return {
             order_id: orderId,
+            service_session_id: existingOrder.service_session_id ?? null,
             product_id: item.product_id || null,
             product_variant_id: item.product_id
               ? item.product_variant_id
@@ -4352,7 +4598,7 @@ export class OrdersService {
                 order_id: orderId,
                 store_id: storeId,
               },
-              select: { id: true },
+              select: { id: true, product_id: true, product_variant_id: true, provider_id: true, date: true, start_time: true, end_time: true },
             });
             if (!existing) {
               throw new VendixHttpException(
@@ -4361,10 +4607,13 @@ export class OrdersService {
                 { stage: 'booking_update' },
               );
             }
+            const product = await tx.products.findFirst({ where: { id: existing.product_id, store_id: storeId }, select: { requires_station: true } });
+            const previousAllocation = product?.requires_station ? await tx.service_allocations.findFirst({ where: { store_id: storeId, booking_id: existing.id, state: { in: ['held', 'payment_pending', 'confirmed', 'in_service'] } }, select: { station_id: true } }) : null;
+            if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, storeId, existing.id, 'cancelled');
             await tx.bookings.update({
               where: { id: b.booking_id },
               data: {
-                provider_id: b.provider_id ?? null,
+                provider_id: b.provider_id ?? existing.provider_id,
                 date: b.date ? new Date(b.date) : undefined,
                 start_time: b.start_time ?? undefined,
                 end_time: b.end_time ?? undefined,
@@ -4374,6 +4623,18 @@ export class OrdersService {
                 updated_at: new Date(),
               },
             });
+            if (product?.requires_station) {
+              await this.allocationCoordinator!.allocateBooking(tx, {
+                storeId, bookingId: existing.id, productId: existing.product_id,
+                productVariantId: existing.product_variant_id,
+                stationId: b.station_id ?? previousAllocation?.station_id,
+                providerId: b.provider_id ?? existing.provider_id,
+                date: b.date ?? existing.date.toISOString().split('T')[0],
+                startTime: b.start_time ?? existing.start_time,
+                endTime: b.end_time ?? existing.end_time,
+                excludeBookingId: existing.id,
+              });
+            }
           } else if (b.date && b.start_time && b.end_time) {
             // Fresh booking. Generate a stable per-day booking_number
             // so the cashier has a human-readable handle. Mirrors
@@ -4383,7 +4644,7 @@ export class OrdersService {
               storeId,
               b.date,
             );
-            await tx.bookings.create({
+            const createdBooking = await tx.bookings.create({
               data: {
                 store_id: storeId,
                 customer_id: dto.customer_id!,
@@ -4402,7 +4663,18 @@ export class OrdersService {
                 status: 'confirmed',
                 booking_number,
               },
+              select: { id: true },
             });
+            const product = await tx.products.findFirst({ where: { id: item.product_id!, store_id: storeId }, select: { requires_station: true } });
+            if (product?.requires_station) {
+              if (!this.allocationCoordinator || !b.station_id) throw new VendixHttpException(ErrorCodes.STATION_012);
+              await this.allocationCoordinator.allocateBooking(tx, {
+                storeId, bookingId: createdBooking.id, productId: item.product_id!,
+                productVariantId: item.product_variant_id ?? null,
+                stationId: b.station_id, providerId: b.provider_id ?? null,
+                date: b.date, startTime: b.start_time, endTime: b.end_time,
+              });
+            }
           } else {
             // Booking block present but missing required fields. Reject
             // explicitly — silent skip would leave a service line
@@ -4700,6 +4972,7 @@ export class OrdersService {
           tax_amount: recalculatedTax,
           discount_amount: discountAmount,
           grand_total: grandTotal,
+          service_version: { increment: 1 },
           coupon_id: couponId,
           coupon_code: requestedCode || null,
           updated_at: new Date(),
@@ -4912,7 +5185,7 @@ export class OrdersService {
       }
 
       return hydrated;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     // 15) Firma las imágenes S3.
     await this.signOrderItemImages(result);

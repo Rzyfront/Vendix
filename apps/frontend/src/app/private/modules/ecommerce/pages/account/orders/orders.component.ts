@@ -45,6 +45,11 @@ export class OrdersComponent implements OnInit {
 
   getStateLabel(state: string): string {
     const labels: Record<string, string> = {
+      // Cuenta abierta (mesa o estación de servicio): el servicio sigue en curso.
+      draft: 'En proceso',
+      created: 'Creado',
+      pending_payment: 'Pago pendiente',
+      finished: 'Finalizado',
       pending: 'Pendiente',
       confirmed: 'Confirmado',
       processing: 'En proceso',
@@ -55,6 +60,11 @@ export class OrdersComponent implements OnInit {
       refunded: 'Reembolsado',
     };
     return labels[state] || state;
+  }
+
+  /** Saldo pendiente: total menos lo pagado. */
+  hasPendingPayment(order: Order): boolean {
+    return Number(order.grand_total ?? 0) - Number(order.total_paid ?? 0) > 0.009 && order.state !== 'cancelled';
   }
 
   getStateClass(state: string): string {

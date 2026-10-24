@@ -229,6 +229,20 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        path: 'estacion/:publicId',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/service-station-status/service-station-status.component').then(
+            (c) => c.ServiceStationStatusComponent,
+          ),
+      },
+      {
+        path: 'seguimiento-servicio/:token',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/service-session-progress/service-session-progress.component').then(
+            (c) => c.ServiceSessionProgressComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

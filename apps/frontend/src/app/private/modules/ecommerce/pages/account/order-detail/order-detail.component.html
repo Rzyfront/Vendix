@@ -37,6 +37,11 @@
       [orderId]="order.id"
       (receiptUploaded)="loadOrder(order.id)"
     >
+      <!-- Orden de estación de servicio: qué se atiende, quién lo trabaja, datos de recepción y pago -->
+      @if (order.service_session; as svc) {
+        <app-service-session-details data-slot="after-products" [data]="svc" [pendingBalance]="pendingBalance()" />
+      }
+
       <!-- Tarjeta de envío proyectada en el slot del guest: queda
            debajo de Productos, al mismo ancho y ritmo. -->
       @if (shippingBlock(); as block) {
