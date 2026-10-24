@@ -182,6 +182,7 @@ import {
   OrderPaymentModalComponent,
   type OrderPendingPaymentPreset,
 } from '../../components/order-payment-modal/order-payment-modal.component';
+import { OrderItemsEditModalComponent } from '../../components/order-items-edit-modal/order-items-edit-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import {
   OrderCompleteModalComponent,
@@ -1046,6 +1047,7 @@ export interface InvoiceCardView {
     CurrencyPipe,
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
+    OrderItemsEditModalComponent,
     OrderRefundModalComponent,
     OrderCompleteModalComponent,
     CustomerModalComponent,
@@ -1308,6 +1310,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** QUI-650: modal de edición de ítems de la orden. */
+  showItemsEditModal = signal(false);
   /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
   payModalError = signal<unknown>(null);
   showShipModal = signal(false);
@@ -3232,7 +3236,7 @@ export class OrderDetailsPageComponent {
         this.cancelPayment();
         break;
       case 'edit-order':
-        this.editOrderInPos();
+        this.openItemsEditModal();
         break;
       case 'ship':
         this.openShipModal();
@@ -3565,7 +3569,7 @@ export class OrderDetailsPageComponent {
    * cliente (`POST /store/addresses`) y se asigna a la orden
    * (`PATCH /store/orders/:id { shipping_address_id }`) en
    * {@link onShippingAddressSubmit}. Reemplaza el antiguo redireccionamiento al
-   * POS (que sigue disponible vía {@link editOrderInPos}).
+   * POS.
    */
   promptAddShippingAddress(): void {
     if (!this.order()) return;
@@ -5242,12 +5246,11 @@ export class OrderDetailsPageComponent {
       });
   }
 
-  editOrderInPos(): void {
+  /** QUI-650: editar ítems en el mismo detalle (sin navegar al POS). */
+  openItemsEditModal(): void {
     const order = this.order();
     if (!order || order.active_financial_split_id) return;
-    this.router.navigate(['/admin/pos'], {
-      queryParams: { editOrder: order.id },
-    });
+    this.showItemsEditModal.set(true);
   }
 
   getShippingTypeBadgeClass(type: string): string {
