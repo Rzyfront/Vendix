@@ -47,6 +47,8 @@ export interface DataCollectionTemplate {
   icon?: string;
   status: TemplateStatus;
   entity_type: string;
+  /** Tipo de estación para el que se diseñó (plantillas de atención). */
+  station_type?: string | null;
   is_default: boolean;
   tabs?: TemplateTab[];
   sections: TemplateSection[];

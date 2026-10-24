@@ -17,6 +17,7 @@ import { ResponseService } from '@common/responses/response.service';
 import {
   CreateServiceStationDto,
   CreateStationExceptionDto,
+  SetProductStationsDto,
   SetStationProvidersDto,
   SetStationSchedulesDto,
   SetStationServicesDto,
@@ -52,6 +53,21 @@ export class ServiceStationsController {
   @Permissions('store:reservations:update')
   async create(@Body() dto: CreateServiceStationDto) {
     return this.response.created(await this.service.create(dto), 'Estación creada');
+  }
+
+  @Get('by-product/:productId')
+  @Permissions('store:reservations:read')
+  async getProductStations(@Param('productId', ParseIntPipe) productId: number) {
+    return this.response.success(await this.service.getProductStations(productId));
+  }
+
+  @Put('by-product/:productId')
+  @Permissions('store:reservations:update')
+  async setProductStations(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Body() dto: SetProductStationsDto,
+  ) {
+    return this.response.updated(await this.service.setProductStations(productId, dto), 'Estaciones del servicio actualizadas');
   }
 
   @Put(':id/services')

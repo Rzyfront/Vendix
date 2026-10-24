@@ -75,6 +75,7 @@ export class TemplatesService {
         icon: dto.icon,
         status: (dto.status as any) ?? 'active',
         entity_type: (dto.entity_type as any) ?? 'booking',
+        station_type: dto.station_type ?? null,
         is_default: dto.is_default ?? false,
       },
     });
@@ -133,6 +134,7 @@ export class TemplatesService {
         icon: dto.icon,
         status: dto.status as any,
         entity_type: dto.entity_type as any,
+        ...(dto.station_type !== undefined && { station_type: dto.station_type }),
         is_default: dto.is_default,
         updated_at: new Date(),
       },

@@ -126,6 +126,11 @@ export class CreateTemplateDto {
   @IsIn(['customer', 'booking', 'order', 'service_session'])
   entity_type?: string;
 
+  /** Tipo de estación para el que se diseñó; la estación creada con esta plantilla lo hereda. */
+  @IsOptional()
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
+  station_type?: string;
+
   @IsOptional()
   @IsBoolean()
   is_default?: boolean;

@@ -10135,6 +10135,8 @@ model data_collection_templates {
   icon        String?              @db.VarChar(100)
   status      template_status_enum @default(active)
   entity_type entity_type_enum     @default(booking)
+  /// Tipo de estación para el que se diseñó (carro, moto, barberia…); null = plantilla general.
+  station_type             String?                             @db.VarChar(32)
   is_default  Boolean              @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)

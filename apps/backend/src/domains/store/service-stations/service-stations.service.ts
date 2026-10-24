@@ -10,6 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import {
   CreateServiceStationDto,
   CreateStationExceptionDto,
+  SetProductStationsDto,
   SetStationProvidersDto,
   SetStationSchedulesDto,
   SetStationServicesDto,
@@ -130,13 +131,24 @@ export class ServiceStationsService {
   }
 
   async create(dto: CreateServiceStationDto) {
+    // Cada estación nace con su plantilla: define qué se pide al ingresar un cliente.
+    if (!dto.intake_template_id) {
+      throw new BadRequestException('Elige la plantilla de la estación (o diséñala primero).');
+    }
     await this.assertIntakeTemplate(dto.intake_template_id);
+    // Sin tipo explícito, la estación toma el tipo para el que se diseñó su plantilla.
+    const template = !dto.station_type && dto.intake_template_id
+      ? await this.prisma.data_collection_templates.findFirst({
+          where: { id: dto.intake_template_id, store_id: this.storeId },
+          select: { station_type: true },
+        })
+      : null;
     try {
       const station = await this.prisma.service_stations.create({
         data: {
           store_id: this.storeId,
           name: dto.name.trim(),
-          station_type: dto.station_type ?? 'carro',
+          station_type: dto.station_type ?? (template?.station_type as CreateServiceStationDto['station_type']) ?? 'general',
           capacity: dto.capacity ?? 1,
           status: dto.status ?? 'active',
           track_time: dto.track_time ?? false,
@@ -177,6 +189,53 @@ export class ServiceStationsService {
       throw error;
     }
     return this.findOne(id);
+  }
+
+  /** Estaciones de la tienda que prestan este servicio. */
+  async getProductStations(productId: number) {
+    await this.assertServiceProduct(productId);
+    const links = await this.prisma.service_station_services.findMany({
+      where: { store_id: this.storeId, product_id: productId },
+      select: { station_id: true },
+    });
+    return { station_ids: links.map((link) => link.station_id) };
+  }
+
+  /**
+   * Reemplaza en qué estaciones se presta el servicio, sin tocar los demás
+   * servicios de cada estación (a diferencia de `setServices`, que reemplaza la
+   * lista completa de UNA estación).
+   */
+  async setProductStations(productId: number, dto: SetProductStationsDto) {
+    await this.assertServiceProduct(productId);
+    const ids = dto.station_ids;
+    if (ids.length) {
+      const count = await this.prisma.service_stations.count({ where: { id: { in: ids }, store_id: this.storeId } });
+      if (count !== ids.length) throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+    }
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.service_station_services.deleteMany({
+        where: { store_id: this.storeId, product_id: productId, ...(ids.length ? { station_id: { notIn: ids } } : {}) },
+      });
+      if (ids.length) {
+        await tx.service_station_services.createMany({
+          data: ids.map((station_id) => ({ store_id: this.storeId, station_id, product_id: productId })),
+          skipDuplicates: true,
+        });
+      }
+    });
+    return this.getProductStations(productId);
+  }
+
+  private async assertServiceProduct(productId: number) {
+    const product = await this.prisma.products.findFirst({
+      where: { id: productId, store_id: this.storeId },
+      select: { product_type: true },
+    });
+    if (!product) throw new NotFoundException('Servicio no encontrado');
+    if (product.product_type !== 'service') {
+      throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
+    }
   }
 
   async setServices(id: number, dto: SetStationServicesDto) {

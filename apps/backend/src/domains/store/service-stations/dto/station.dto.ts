@@ -98,6 +98,17 @@ export class UpdateServiceStationDto {
   intake_template_id?: number | null;
 }
 
+/** Estaciones donde se presta un servicio (vista desde el producto). */
+export class SetProductStationsDto {
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(200)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  station_ids: number[];
+}
+
 export class SetStationServicesDto {
   @IsArray()
   @ArrayUnique()

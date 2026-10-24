@@ -51,6 +51,16 @@ export interface CheckinIntakeSection {
 }
 import { environment } from '../../../../../../../environments/environment';
 import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
+import { MetadataFieldsService } from '../../../data-collection/services/metadata-fields.service';
+import { MetadataField } from '../../../data-collection/interfaces/metadata-field.interface';
+import {
+  SERVICE_FIELD_PRESETS,
+  STATION_TEMPLATE_TYPES,
+  StationTemplateType,
+  presetEntityType,
+} from '../../../data-collection/utils/service-field-presets';
+import { forkJoin, of } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
 import { ServiceRegistryService } from '../service-reminders-page/service-registry.service';
 
@@ -229,14 +239,29 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private readonly reservationsApi = inject(ReservationsService);
   private readonly router = inject(Router);
   private readonly templatesApi = inject(DataCollectionTemplatesService);
+  private readonly fieldsApi = inject(MetadataFieldsService);
+  readonly stationTemplateTypes = STATION_TEMPLATE_TYPES;
+  /** Selector de tipo antes de diseñar una plantilla de estación. */
+  readonly showTemplateTypePicker = signal(false);
   private readonly registryApi = inject(ServiceRegistryService);
 
   /** Formularios activos de Recolección de datos, para asignar uno a cada estación. */
-  readonly intakeTemplates = signal<Array<{ id: number; name: string }>>([]);
+  readonly intakeTemplates = signal<Array<{ id: number; name: string; entity_type?: string; station_type?: string | null }>>([]);
   readonly intakeTemplateOptions = computed<SelectorOption[]>(() => [
     { value: 0, label: 'Usar el formulario de cada servicio' },
     ...this.intakeTemplates().map((t) => ({ value: t.id, label: t.name })),
   ]);
+  /** Plantillas de estación (Atención de servicio): una es obligatoria para crear la estación. */
+  readonly stationTemplateOptions = computed<SelectorOption[]>(() =>
+    this.intakeTemplates()
+      .filter((t) => !t.entity_type || t.entity_type === 'service_session')
+      .map((t) => ({
+        value: t.id,
+        label: t.name,
+        description: STATION_TEMPLATE_TYPES.find((type) => type.value === t.station_type)?.label ?? 'General',
+      })),
+  );
+  readonly newIntakeTemplateId = signal<number>(0);
   readonly designingTemplate = signal(false);
   readonly editIntakeTemplateId = signal<number>(0);
   private readonly storeSettings = inject(StoreSettingsFacade);
@@ -264,6 +289,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       loading: this.loading(),
     },
     {
+      id: 'design-template',
+      label: 'Diseñar plantilla de estación',
+      variant: 'outline',
+      icon: 'layout-template',
+      loading: this.designingTemplate(),
+    },
+    {
       id: 'create-station',
       label: 'Nueva Estación',
       variant: 'outline',
@@ -281,6 +313,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     if (id === 'refresh') {
       this.loadData();
       this.toastService.info('Actualizando datos de estaciones...');
+    } else if (id === 'design-template') {
+      this.designNewStationTemplate();
     } else if (id === 'create-station') {
       this.openCreateModal();
     } else if (id === 'new-checkin') {
@@ -902,7 +936,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   private loadIntakeTemplates(): void {
     this.templatesApi.getAll('active').subscribe({
-      next: (templates) => this.intakeTemplates.set((templates ?? []).map((t) => ({ id: t.id, name: t.name }))),
+      next: (templates) => this.intakeTemplates.set((templates ?? []).map((t) => ({ id: t.id, name: t.name, entity_type: t.entity_type, station_type: t.station_type }))),
       error: () => {}, // El selector queda solo con la opción "del servicio"
     });
   }
@@ -956,12 +990,81 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       });
   }
 
-  /** Desde "Crear estación": guarda la estación y pasa a diseñar su plantilla. */
-  createStationAndDesignTemplate(): void {
-    this.createStation((station) => {
-      this.editIntakeTemplateId.set(0);
-      this.designStationTemplate(station);
-    });
+  /**
+   * Botón del encabezado: crea una plantilla de estación vacía y abre su editor en
+   * esta pestaña. Al guardar vuelve a Estaciones, donde ya se puede elegir al
+   * crear una estación.
+   */
+  designNewStationTemplate(): void {
+    this.showTemplateTypePicker.set(true);
+  }
+
+  /**
+   * Crea la plantilla del tipo elegido ya con sus campos (reutiliza los que existan
+   * por clave y entidad, crea los que falten) y abre el editor para ajustarla.
+   */
+  createTemplateForType(type: StationTemplateType): void {
+    const meta = STATION_TEMPLATE_TYPES.find((t) => t.value === type)!;
+    this.showTemplateTypePicker.set(false);
+    this.designingTemplate.set(true);
+    const presets = meta.keys.map((key) => SERVICE_FIELD_PRESETS[key]);
+    this.fieldsApi
+      .getFields()
+      .pipe(
+        switchMap((existing: MetadataField[]) =>
+          presets.length
+            ? forkJoin(
+                presets.map((preset) => {
+                  const entity_type = presetEntityType(preset, 'service_session');
+                  const found = existing.find((f) => f.field_key === preset.field_key && f.entity_type === entity_type);
+                  return found
+                    ? of(found)
+                    : this.fieldsApi.createField({
+                        label: preset.label,
+                        field_key: preset.field_key,
+                        entity_type,
+                        field_type: preset.field_type,
+                        display_mode: 'detail',
+                        is_required: false,
+                        ...(preset.options ? { options: preset.options } : {}),
+                      } as Partial<MetadataField>);
+                }),
+              )
+            : of([] as MetadataField[]),
+        ),
+        switchMap((fields: MetadataField[]) =>
+          this.templatesApi.create({
+            name: `Plantilla ${meta.label}`,
+            entity_type: 'service_session',
+            station_type: type,
+            status: 'active',
+            sections: [
+              {
+                title: 'Datos de ingreso',
+                sort_order: 0,
+                items: fields.map((field, index) => ({
+                  metadata_field_id: field.id,
+                  sort_order: index,
+                  is_required: meta.required.includes(field.field_key),
+                })),
+              },
+            ],
+          }),
+        ),
+      )
+      .subscribe({
+        next: (template) => {
+          this.designingTemplate.set(false);
+          this.router.navigate(['/admin/data-collection/templates', template.id, 'edit'], {
+            queryParams: { returnTo: '/admin/services/stations' },
+          });
+        },
+        error: (error: unknown) => {
+          this.designingTemplate.set(false);
+          this.toastService.error(this.errorText(error, 'No fue posible crear la plantilla de estación.'));
+          this.loadIntakeTemplates();
+        },
+      });
   }
 
   stationTracksTime(stationId: number): boolean {
@@ -1169,31 +1272,36 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.newStationType.set('carro');
     this.newTrackTime.set(false);
     this.newTargetMinutes.set(null);
+    this.newIntakeTemplateId.set(0);
     this.loadIntakeTemplates();
     this.showCreateModal.set(true);
   }
 
-  createStation(afterCreate?: (station: ServiceStation) => void): void {
+  createStation(): void {
     const name = this.newName().trim();
     if (!name) {
       this.toastService.error('El nombre de la estación es obligatorio.');
+      return;
+    }
+    const templateId = Number(this.newIntakeTemplateId()) || 0;
+    if (!templateId) {
+      this.toastService.error('Elige la plantilla de la estación (o diséñala con el botón de arriba).');
       return;
     }
     this.saving.set(true);
     this.stationsApi.create({
       name,
       capacity: 1,
-      // El tipo ya no se elige: lo que pide cada estación lo define su plantilla.
-      station_type: 'general',
+      // Sin tipo: el backend le pone el de su plantilla (carro, moto, barbería…).
       track_time: this.newTrackTime(),
       target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
+      intake_template_id: templateId,
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
         this.showCreateModal.set(false);
         this.toastService.success('Estación creada con éxito.');
         this.loadStations(station.id);
-        afterCreate?.(station);
       },
       error: (error: unknown) => {
         this.saving.set(false);

@@ -11,7 +11,13 @@ import {
   TemplateSection,
   TemplateItem,
 } from '../../interfaces/data-collection-template.interface';
-import { FIELD_TYPE_LABELS, MetadataField } from '../../interfaces/metadata-field.interface';
+import { EntityType, FIELD_TYPE_LABELS, MetadataField } from '../../interfaces/metadata-field.interface';
+import {
+  SERVICE_FIELD_GROUPS,
+  SERVICE_FIELD_PRESETS,
+  STATION_TEMPLATE_TYPES,
+  presetEntityType,
+} from '../../utils/service-field-presets';
 import { DataCollectionTemplatesService } from '../../services/data-collection-templates.service';
 import { MetadataFieldsService } from '../../services/metadata-fields.service';
 import { FieldModalComponent } from '../../fields/field-modal/field-modal.component';
@@ -398,6 +404,14 @@ interface Selection {
                       [options]="statusOptions"
                     />
                   </div>
+                  @if (formData().entity_type === 'service_session') {
+                    <app-selector
+                      label="Tipo de estación"
+                      [ngModel]="formData().station_type || ''"
+                      (ngModelChange)="updateFormData('station_type', $event || null)"
+                      [options]="stationTypeOptions"
+                    />
+                  }
                   <app-setting-toggle
                     label="Plantilla por defecto"
                     [ngModel]="formData().is_default"
@@ -855,6 +869,7 @@ export class TemplateEditorComponent implements OnInit {
     description: string;
     icon: string;
     entity_type: string;
+    station_type: string | null;
     status: string;
     is_default: boolean;
     use_tabs: boolean;
@@ -865,6 +880,7 @@ export class TemplateEditorComponent implements OnInit {
     description: '',
     icon: '',
     entity_type: 'booking',
+    station_type: null,
     status: 'active',
     is_default: false,
     use_tabs: false,
@@ -1004,6 +1020,7 @@ export class TemplateEditorComponent implements OnInit {
         description: t.description || '',
         icon: t.icon || '',
         entity_type: t.entity_type,
+        station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
         use_tabs: true,
@@ -1022,6 +1039,7 @@ export class TemplateEditorComponent implements OnInit {
         description: t.description || '',
         icon: t.icon || '',
         entity_type: t.entity_type,
+        station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
         use_tabs: false,
@@ -1122,6 +1140,7 @@ export class TemplateEditorComponent implements OnInit {
       description: fd.description,
       icon: fd.icon || undefined,
       entity_type: fd.entity_type,
+      station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
     };
@@ -1746,42 +1765,16 @@ export class TemplateEditorComponent implements OnInit {
    * atención. Placa y marca van primero: con ellas se arma el nombre de lo
    * atendido ("ABC123 · Yamaha NMAX").
    */
-  readonly suggestedGroups: Array<{ title: string; customer: boolean; fields: Array<{ field_key: string; label: string; field_type: string; hint: string; options?: string[] }> }> = [
-    {
-      title: 'Vehículo o equipo',
-      customer: false,
-      fields: [
-        { field_key: 'placa', label: 'Placa', field_type: 'text', hint: 'Texto · ej. ABC123' },
-        { field_key: 'marca_modelo', label: 'Marca y modelo', field_type: 'text', hint: 'Texto · ej. Yamaha NMAX' },
-        { field_key: 'anio', label: 'Año', field_type: 'number', hint: 'Número' },
-        { field_key: 'color', label: 'Color', field_type: 'text', hint: 'Texto' },
-        { field_key: 'kilometraje', label: 'Kilometraje', field_type: 'number', hint: 'Número' },
-        { field_key: 'serial_imei', label: 'Serial / IMEI', field_type: 'text', hint: 'Texto · para celulares y equipos' },
-        { field_key: 'nivel_combustible', label: 'Nivel de combustible', field_type: 'select', hint: 'Lista', options: ['Reserva', '1/4', '1/2', '3/4', 'Lleno'] },
-      ],
-    },
-    {
-      title: 'Atención',
-      customer: false,
-      fields: [
-        { field_key: 'motivo_ingreso', label: 'Falla o motivo del ingreso', field_type: 'textarea', hint: 'Texto largo' },
-        { field_key: 'estado_recepcion', label: 'Estado en que se recibe', field_type: 'textarea', hint: 'Golpes, rayones, faltantes…' },
-        { field_key: 'accesorios', label: 'Accesorios entregados', field_type: 'textarea', hint: 'Cargador, casco, llaves…' },
-        { field_key: 'autoriza_adicionales', label: 'Autoriza trabajos adicionales', field_type: 'checkbox', hint: 'Casilla' },
-      ],
-    },
-    {
-      title: 'Cliente (se guarda en su perfil)',
-      customer: true,
-      fields: [
-        { field_key: 'tipo_documento', label: 'Tipo de documento', field_type: 'select', hint: 'Lista', options: ['CC', 'NIT', 'CE', 'Pasaporte', 'TI'] },
-        { field_key: 'numero_documento', label: 'Número de documento', field_type: 'text', hint: 'Texto' },
-        { field_key: 'correo', label: 'Correo', field_type: 'email', hint: 'Correo electrónico' },
-        { field_key: 'telefono', label: 'Teléfono / WhatsApp', field_type: 'phone', hint: 'Teléfono' },
-        { field_key: 'direccion', label: 'Dirección', field_type: 'text', hint: 'Texto' },
-        { field_key: 'fecha_nacimiento', label: 'Fecha de nacimiento', field_type: 'date', hint: 'Fecha' },
-      ],
-    },
+  /** Grupos de "Campos sugeridos" (lista compartida con Estaciones de servicio). */
+  readonly suggestedGroups = SERVICE_FIELD_GROUPS.map((group) => ({
+    title: group.title,
+    fields: group.keys.map((key) => SERVICE_FIELD_PRESETS[key]),
+  }));
+
+  /** Tipos de estación para plantillas de atención: la estación creada con ella lo hereda. */
+  readonly stationTypeOptions = [
+    { value: '', label: 'Sin tipo (general)' },
+    ...STATION_TEMPLATE_TYPES.map((t) => ({ value: t.value, label: t.label })),
   ];
 
   readonly showSuggested = signal(false);
@@ -1804,11 +1797,11 @@ export class TemplateEditorComponent implements OnInit {
   /** Reutiliza los campos que ya existen (misma clave y entidad) y crea los que falten. */
   applySuggested() {
     const picked = this.suggestedPicked();
-    const templateEntity = this.formData().entity_type || 'service_session';
+    const templateEntity = (this.formData().entity_type || 'service_session') as EntityType;
     const wanted = this.suggestedGroups.flatMap((group) =>
       group.fields
         .filter((f) => picked.has(f.field_key))
-        .map((f) => ({ ...f, entity_type: group.customer ? 'customer' : templateEntity })),
+        .map((f) => ({ ...f, entity_type: presetEntityType(f, templateEntity) })),
     );
     if (!wanted.length) return;
     this.addingSuggested.set(true);

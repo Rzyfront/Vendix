@@ -475,6 +475,27 @@
     </app-modal>
   }
 
+  <!-- Tipo de la plantilla de estación: define con qué campos arranca -->
+  <app-modal [(isOpen)]="showTemplateTypePicker" title="¿Para qué tipo de estación es la plantilla?" subtitle="Arranca con los campos típicos de ese tipo; luego los puedes cambiar" size="md">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      @for (t of stationTemplateTypes; track t.value) {
+        <button
+          type="button"
+          class="p-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 flex items-center gap-3 text-left transition-colors"
+          (click)="createTemplateForType(t.value)"
+        >
+          <span class="w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center shrink-0">
+            <app-icon [name]="t.icon" [size]="18" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-semibold text-[var(--color-text-primary)]">{{ t.label }}</span>
+            <span class="block text-xs text-[var(--color-text-secondary)] truncate">{{ t.keys.length }} campos para empezar</span>
+          </span>
+        </button>
+      }
+    </div>
+  </app-modal>
+
   <!-- Modal 1: Creación de Nueva Estación / Bahía -->
   <app-modal [(isOpen)]="showCreateModal" title="Crear Nueva Estación" subtitle="Alta de nuevo punto operativo multirrubro" size="md">
     <div class="space-y-4">
@@ -486,14 +507,20 @@
         [required]="true"
       />
 
-      <div class="p-3 rounded-xl border border-dashed border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <span class="text-xs font-bold text-[var(--color-text-primary)]">Plantilla de estación (opcional)</span>
-          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Los datos que se piden al ingresar un cliente: placa, kilometraje, modelo, IMEI, alergias… lo que necesites.</p>
-        </div>
-        <app-button variant="outline" size="sm" [loading]="designingTemplate()" (clicked)="createStationAndDesignTemplate()">
-          <app-icon name="layout-template" [size]="14" slot="icon" /> Diseñar plantilla de estación
-        </app-button>
+      <div>
+        <app-selector
+          label="Plantilla de estación"
+          [options]="stationTemplateOptions()"
+          [ngModel]="newIntakeTemplateId() || null"
+          (ngModelChange)="newIntakeTemplateId.set($event)"
+          placeholder="Elige la plantilla"
+          [required]="true"
+        />
+        @if (!stationTemplateOptions().length) {
+          <p class="mt-1 text-xs text-red-600">Aún no tienes plantillas de estación. Créala con “Diseñar plantilla de estación” (arriba, junto a Nueva Estación).</p>
+        } @else {
+          <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Define los datos que se piden al ingresar un cliente en esta estación.</p>
+        }
       </div>
 
       <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
