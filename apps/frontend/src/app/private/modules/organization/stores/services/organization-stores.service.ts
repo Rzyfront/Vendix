@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { CurrencyService } from '../../../../../services/currency.service';
 
@@ -11,7 +10,6 @@ import {
   CreateStoreDto,
   UpdateStoreDto,
   StoreQueryDto,
-  StoreStats,
   PaginatedStoresResponse,
   StoreSettings,
   StoreSettingsUpdateDto,
@@ -20,6 +18,7 @@ import {
   StoreDashboardResponse,
   StoreType,
   StoreState,
+  OrganizationProfitLossSummary,
 } from '../interfaces/store.interface';
 
 // All interfaces now available locally
@@ -44,20 +43,11 @@ export interface PaginatedResponse<T> {
   };
 }
 
-// Caché estático global (persiste entre instancias del servicio)
-interface CacheEntry<T> {
-  observable: T;
-  lastFetch: number;
-}
-
-let orgStoresStatsCache: CacheEntry<Observable<ApiResponse<StoreStats>>> | null = null;
-
 @Injectable({
   providedIn: 'root',
 })
 export class OrganizationStoresService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) {}
 
@@ -144,34 +134,18 @@ export class OrganizationStoresService {
   }
 
   /**
-   * Get global store statistics for current organization
+   * Estado de resultados (base caja) agregado sobre todas las tiendas de la
+   * organización; mismas cifras que el dashboard de tienda. Sin caché: se
+   * refresca tras crear/editar/eliminar tiendas.
    */
-  getOrganizationStoreStats(): Observable<ApiResponse<StoreStats>> {
-    const now = Date.now();
-
-    if (orgStoresStatsCache && (now - orgStoresStatsCache.lastFetch) < this.CACHE_TTL) {
-      return orgStoresStatsCache.observable;
-    }
-
-    const observable$ = this.http
-      .get<ApiResponse<StoreStats>>(
-        `${this.apiUrl}/organization/stores/stats`,
-      )
-      .pipe(
-        shareReplay({ bufferSize: 1, refCount: false }),
-        tap(() => {
-          if (orgStoresStatsCache) {
-            orgStoresStatsCache.lastFetch = Date.now();
-          }
-        }),
-      );
-
-    orgStoresStatsCache = {
-      observable: observable$,
-      lastFetch: now,
-    };
-
-    return observable$;
+  getOrganizationProfitLoss(
+    datePreset = 'today',
+  ): Observable<ApiResponse<OrganizationProfitLossSummary>> {
+    const params = new HttpParams().set('date_preset', datePreset);
+    return this.http.get<ApiResponse<OrganizationProfitLossSummary>>(
+      `${this.apiUrl}/organization/stores/dashboard/profit-loss`,
+      { params },
+    );
   }
 
   /**
@@ -269,13 +243,5 @@ export class OrganizationStoresService {
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
     }
-  }
-
-  /**
-   * Invalida el caché de estadísticas
-   * Útil después de crear/editar/eliminar tiendas
-   */
-  invalidateCache(): void {
-    orgStoresStatsCache = null;
   }
 }
