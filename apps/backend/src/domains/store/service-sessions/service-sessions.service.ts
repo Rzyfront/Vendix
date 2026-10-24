@@ -24,7 +24,7 @@ const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
 
-type IntakeField = {
+export type IntakeField = {
   id: number;
   store_id: number;
   entity_type: string;
@@ -32,14 +32,14 @@ type IntakeField = {
   label: string;
   is_active: boolean;
 };
-type IntakeItem = { metadata_field_id: number; is_required: boolean; sort_order: number; metadata_field: IntakeField };
-type IntakeTemplate = { id: number; name: string; sections?: IntakeSection[]; tabs?: Array<{ sections?: IntakeSection[] }> };
-type IntakeSection = { items?: IntakeItem[]; child_sections?: IntakeSection[] };
-type IntakeValueColumns = { value_text: string | null; value_number: number | null; value_date: Date | null; value_bool: boolean | null };
-type PreparedIntake = { templateId: number; entries: Array<{ field: IntakeField; columns: IntakeValueColumns }> } | null;
-type StoredMetadataValue = { field_id: number; entity_type: string; value_text: string | null; value_number: Prisma.Decimal | null; value_date: Date | null; value_bool: boolean | null; value_json: Prisma.JsonValue | null };
+export type IntakeItem = { metadata_field_id: number; is_required: boolean; sort_order: number; metadata_field: IntakeField };
+export type IntakeTemplate = { id: number; name: string; sections?: IntakeSection[]; tabs?: Array<{ sections?: IntakeSection[] }> };
+export type IntakeSection = { items?: IntakeItem[]; child_sections?: IntakeSection[] };
+export type IntakeValueColumns = { value_text: string | null; value_number: number | null; value_date: Date | null; value_bool: boolean | null };
+export type PreparedIntake = { templateId: number; entries: Array<{ field: IntakeField; columns: IntakeValueColumns }> } | null;
+export type StoredMetadataValue = { field_id: number; entity_type: string; value_text: string | null; value_number: Prisma.Decimal | null; value_date: Date | null; value_bool: boolean | null; value_json: Prisma.JsonValue | null };
 
-type PriceRow = { sale_price?: Prisma.Decimal | number | null; is_on_sale?: boolean | null };
+export type PriceRow = { sale_price?: Prisma.Decimal | number | null; is_on_sale?: boolean | null };
 
 /**
  * Precio publicado con la misma escalera que la mesa y el POS: oferta de la variante →
