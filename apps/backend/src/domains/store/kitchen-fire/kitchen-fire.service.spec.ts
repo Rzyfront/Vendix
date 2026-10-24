@@ -2115,6 +2115,41 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       );
     });
 
+    it('QUI-892 — markDelivered cierra las filas viejas de las líneas entregadas', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [takeawayItem(11, true)]),
+      );
+      // 1ª findMany: líneas entregadas del ticket; 2ª: filas viejas; 3ª: filas del ticket viejo.
+      prismaMock.kitchen_ticket_items.findMany
+        .mockResolvedValueOnce([{ order_item_id: 21 }])
+        .mockResolvedValueOnce([{ kitchen_ticket_id: 444 }])
+        .mockResolvedValueOnce([{ status: 'cancelled' }]);
+      prismaMock.kitchen_ticket_items.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 900, status: 'delivered' });
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+      ]);
+      const emitSpy = jest
+        .spyOn(service, 'emitTicketUpdatedEvent')
+        .mockResolvedValue(undefined);
+
+      await service.markDelivered(555);
+
+      expect(prismaMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+        where: {
+          order_item_id: 21,
+          id: { lt: 900 },
+          status: { notIn: ['delivered', 'cancelled'] },
+        },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect(prismaMock.kitchen_tickets.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 444 } }),
+      );
+      expect(emitSpy).toHaveBeenCalledWith(444);
+    });
+
     it('paso 3 — ticket 100 % takeaway se entrega y evalúa el puente', async () => {
       prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
         makeTicket('ready', [takeawayItem(11, true), takeawayItem(12, true)]),
