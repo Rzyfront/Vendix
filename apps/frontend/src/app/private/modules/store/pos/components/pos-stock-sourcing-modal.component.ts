@@ -40,6 +40,7 @@ import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
       size="md"
       [showCloseButton]="true"
       (cancel)="onClose()"
+      [dialog]="true"
     >
       <div class="space-y-4 py-2">
         <!-- Product summary -->
