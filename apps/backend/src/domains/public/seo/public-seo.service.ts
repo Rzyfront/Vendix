@@ -154,7 +154,6 @@ Disallow: /
   }
 
   private async buildEcommerceSitemap(context: DomainContext): Promise<string> {
-    const now = new Date().toISOString();
 
     const static_urls = [
       { path: '/', priority: '1.0', changefreq: 'daily' },
@@ -176,12 +175,17 @@ Disallow: /
         })
       : [];
 
+    // Los listados cambian cuando cambia un producto: su lastmod es el del producto
+    // modificado más reciente. La hora de generación del sitemap no es una fecha de
+    // modificación (antes se publicaba «ahora» en cada consulta).
+    const listings_lastmod = products[0]?.updated_at?.toISOString() ?? null;
+
     const static_entries = static_urls
       .map(
         (u) => `  <url>
     <loc>${escapeXml(context.base_url + u.path)}</loc>
-    <lastmod>${now}</lastmod>
-    <changefreq>${u.changefreq}</changefreq>
+${listings_lastmod ? `    <lastmod>${listings_lastmod}</lastmod>
+` : ''}    <changefreq>${u.changefreq}</changefreq>
     <priority>${u.priority}</priority>
   </url>`,
       )
@@ -191,8 +195,8 @@ Disallow: /
       .map(
         (p) => `  <url>
     <loc>${escapeXml(context.base_url + '/products/' + p.slug)}</loc>
-    <lastmod>${(p.updated_at ?? new Date()).toISOString()}</lastmod>
-    <changefreq>weekly</changefreq>
+${p.updated_at ? `    <lastmod>${p.updated_at.toISOString()}</lastmod>
+` : ''}    <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>`,
       )
