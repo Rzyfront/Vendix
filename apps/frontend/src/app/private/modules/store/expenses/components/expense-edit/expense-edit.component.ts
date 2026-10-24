@@ -20,6 +20,7 @@ import {
   deleteExpense,
 } from '../../state/actions/expenses.actions';
 import { ExpensesService } from '../../services/expenses.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   selectActiveExpenseCategories,
   selectExpensesLoading,
@@ -366,6 +367,7 @@ export class ExpenseEditComponent {
   private expensesService = inject(ExpensesService);
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private toastService = inject(ToastService);
 
   readonly loading = toSignal(this.store.select(selectExpensesLoading), { initialValue: false });
   readonly categoryOptions = toSignal(
@@ -477,6 +479,7 @@ export class ExpenseEditComponent {
         next: (result: { key: string; url: string }) =>
           dispatchUpdate(result.key),
         error: () => {
+          this.toastService.warning('No se pudo subir el recibo; los cambios se guardarán sin él');
           this.submitting.set(false);
           dispatchUpdate();
         },

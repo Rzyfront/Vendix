@@ -60,6 +60,7 @@ interface TableGroup {
       [showCloseButton]="true"
       [title]="modalTitle()"
       [subtitle]="modalSubtitle()"
+      [dialog]="true"
     >
       <div
         slot="header"

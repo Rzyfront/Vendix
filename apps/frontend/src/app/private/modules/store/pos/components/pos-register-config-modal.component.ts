@@ -38,6 +38,7 @@ import {
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="true"
+      [dialog]="true"
     >
       <!-- Modal Header -->
       <div
