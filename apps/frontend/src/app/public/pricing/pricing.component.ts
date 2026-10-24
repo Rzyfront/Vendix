@@ -1,7 +1,7 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal, DestroyRef } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { PublicPlansService, PublicPlan } from './services/public-plans.service';
 import { PricingCardComponent } from '../../shared/components';
 import {
@@ -9,6 +9,8 @@ import {
   PricingCardSelectEvent,
 } from '../../shared/components/pricing-card/pricing-card.component';
 import { PlanComparisonTableComponent } from './components/plan-comparison-table/plan-comparison-table.component';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../marketing-page-metadata';
 
 type PricingViewMode = 'cards' | 'compare';
 const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
@@ -21,6 +23,17 @@ const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
   styleUrls: ['./pricing.component.scss'],
 })
 export class PricingComponent {
+  // SEO-TECH-04: título, descripción, robots y canonical propios en el host comercial.
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.pricing,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private publicPlansService = inject(PublicPlansService);
   private router = inject(Router);
 
