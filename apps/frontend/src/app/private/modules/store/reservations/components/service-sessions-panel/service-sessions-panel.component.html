@@ -152,7 +152,7 @@
                 <div class="p-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
                   <div>
                     <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
-                    <span class="text-[var(--color-text-secondary)] ml-2">Total: {{ prop.currency }} {{ prop.total | number }}</span>
+                    <span class="text-[var(--color-text-secondary)] ml-2">Total: {{ prop.total | currency }}</span>
                   </div>
                   <app-badge
                     [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'"

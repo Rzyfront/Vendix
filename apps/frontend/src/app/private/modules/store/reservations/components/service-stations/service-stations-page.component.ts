@@ -1,4 +1,5 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -215,6 +216,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
   imports: [
     CommonModule,
     DecimalPipe,
+    CurrencyPipe,
     FormsModule,
     StickyHeaderComponent,
     StatsComponent,
@@ -268,6 +270,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly editIntakeTemplateId = signal<number>(0);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
+  private readonly currencyService = inject(CurrencyFormatService);
 
   private timerInterval?: any;
   readonly now = signal(Date.now());
@@ -477,7 +480,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     for (const s of effective) {
       opts.push({
         value: s.id,
-        label: `${s.name} · $${Number(s.base_price || 0).toLocaleString('es-CO')} COP`,
+        label: `${s.name} · ${this.currencyService.format(Number(s.base_price || 0))}`,
         description: s.service_duration_minutes ? `${s.service_duration_minutes} min estimados` : 'Precio cargado a la cuenta al iniciar',
       });
     }
@@ -584,7 +587,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly catalogProductSelectorOptions = computed<SelectorOption[]>(() => {
     return this.allCatalogProducts().map((prod) => ({
       value: prod.id,
-      label: `${prod.name} ($${Number(prod.base_price || 0).toLocaleString('es-CO')})`,
+      label: `${prod.name} (${this.currencyService.format(Number(prod.base_price || 0))})`,
       description: prod.product_type === 'physical' ? 'Insumo / Repuesto físico' : 'Servicio / Mano de obra',
     }));
   });
@@ -609,7 +612,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       })
       .map((prod) => ({
         value: prod.id,
-        label: `${prod.name} ($${Number(prod.base_price || 0).toLocaleString('es-CO')})`,
+        label: `${prod.name} (${this.currencyService.format(Number(prod.base_price || 0))})`,
         description:
           prod.product_type === 'service'
             ? linked.length
@@ -644,7 +647,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly addVariantOptions = computed<SelectorOption[]>(() =>
     this.addProductVariants().map((v) => ({
       value: v.id,
-      label: `${v.name || v.sku} ($${this.variantPublishedPrice(v).toLocaleString('es-CO')})`,
+      label: `${v.name || v.sku} (${this.currencyService.format(this.variantPublishedPrice(v))})`,
     })),
   );
   readonly addQuantity = signal<number>(1);
@@ -1199,7 +1202,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const st = this.qrStation();
     if (!dataUrl || !st) return;
     const meta = STATION_TYPES_META[this.getStationType(st)];
-    const publicId = st.public_id || `station-${st.id}`;
+    // La ventana comparte origen con la app: todo texto del usuario va escapado.
+    const name = escapeHtml(st.name);
+    const label = escapeHtml(meta.singularLabel);
+    const publicId = escapeHtml(st.public_id || `station-${st.id}`);
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -1211,7 +1217,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>QR - ${st.name}</title>
+  <title>QR - ${name}</title>
   <style>
     @page { size: auto; margin: 15mm; }
     body {
@@ -1283,10 +1289,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 </head>
 <body>
   <div class="card">
-    <div class="badge">${meta.singularLabel}</div>
-    <h1>${st.name}</h1>
+    <div class="badge">${label}</div>
+    <h1>${name}</h1>
     <p class="subtitle">Estación de Servicio • Vendix</p>
-    <img src="${dataUrl}" class="qr" alt="QR ${st.name}" />
+    <img src="${dataUrl}" class="qr" alt="QR ${name}" />
     <div class="instruction">Escanea para consultar estado o autoservicio</div>
     <div class="token">ID: ${publicId}</div>
   </div>
@@ -2339,4 +2345,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }
     return fallback;
   }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

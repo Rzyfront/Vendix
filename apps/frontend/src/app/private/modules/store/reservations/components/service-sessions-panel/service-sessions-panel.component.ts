@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -29,6 +30,7 @@ export interface ServiceSessionRow {
     ButtonComponent,
     IconComponent,
     BadgeComponent,
+    CurrencyPipe,
   ],
   templateUrl: './service-sessions-panel.component.html',
   styleUrl: './service-sessions-panel.component.scss',

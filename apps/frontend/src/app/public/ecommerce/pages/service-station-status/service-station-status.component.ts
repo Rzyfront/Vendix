@@ -30,5 +30,6 @@ export class ServiceStationStatusComponent implements OnInit {
   readonly station = signal<StationStatus | null>(null); readonly state = signal<'loading'|'loaded'|'unavailable'>('loading');
   private id = '';
   ngOnInit(): void { this.meta.updateTag({ name: 'referrer', content: 'no-referrer' }); this.id = this.route.snapshot.paramMap.get('publicId') ?? ''; if (!/^[0-9a-f-]{36}$/i.test(this.id)) { this.state.set('unavailable'); return; } this.refresh(); const timer = setInterval(() => this.refresh(), 15000); this.destroyRef.onDestroy(() => clearInterval(timer)); }
-  private refresh(): void { this.http.get<StationStatus>(`${environment.apiUrl}/ecommerce/service-sessions/station/${encodeURIComponent(this.id)}`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({ next: value => { this.station.set(value); this.state.set('loaded'); }, error: () => this.state.set('unavailable') }); }
+  private refresh(): void { this.http.get<StationStatus>(`${environment.apiUrl}/ecommerce/service-sessions/station/${encodeURIComponent(this.id)}`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({ next: value => { this.station.set(value); this.state.set('loaded'); }, error: (err) => { // Un fallo transitorio conserva la última foto; solo 404/410 invalidan el QR.
+    if (err?.status === 404 || err?.status === 410 || !this.station()) this.state.set('unavailable'); } }); }
 }

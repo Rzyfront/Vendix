@@ -266,7 +266,7 @@
                           <app-icon name="shopping-bag" [size]="12" /> Cuenta abierta:
                         </span>
                         <span class="font-bold text-xs font-mono text-emerald-700 dark:text-emerald-300">
-                          $ {{ (session.order?.grand_total || session.budget_amount || 0) | number }} COP
+                          {{ (session.order?.grand_total || session.budget_amount || 0) | currency }}
                         </span>
                       </div>
 
@@ -812,7 +812,7 @@
 
         <div class="pt-2 border-t border-[var(--color-border)]/60 flex flex-wrap items-center justify-between gap-2">
           <span class="text-sm font-semibold text-[var(--color-text-primary)]">Total de la cuenta</span>
-          <strong class="font-mono text-lg text-emerald-700 dark:text-emerald-300">${{ checkinEstimatedTotal() | number }} COP</strong>
+          <strong class="font-mono text-lg text-emerald-700 dark:text-emerald-300">{{ checkinEstimatedTotal() | currency }}</strong>
         </div>
         <p class="text-[11px] text-[var(--color-text-secondary)]">Estimado: el IVA de cada producto se aplica según su configuración (incluido o adicional).</p>
       </div>
@@ -1008,7 +1008,7 @@
             <div class="text-right">
               <span class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Total Acumulado</span>
               <span class="font-mono font-black text-lg text-emerald-600 dark:text-emerald-400">
-                $ {{ (sessionOrder()?.grand_total || session.order?.grand_total || session.budget_amount || 0) | number }} COP
+                {{ (sessionOrder()?.grand_total || session.order?.grand_total || session.budget_amount || 0) | currency }}
               </span>
             </div>
           </div>
@@ -1076,7 +1076,7 @@
               </div>
             </div>
             <div class="flex justify-end text-xs text-[var(--color-text-secondary)]">
-              Total estimado al agregar: <strong class="ml-1 font-mono text-emerald-600">${{ addItemEstimatedTotal() | number }} COP</strong>
+              Total estimado al agregar: <strong class="ml-1 font-mono text-emerald-600">{{ addItemEstimatedTotal() | currency }}</strong>
             </div>
           </div>
 
@@ -1097,7 +1097,7 @@
                       <div class="min-w-0">
                         <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
                         <div class="text-[11px] text-[var(--color-text-secondary)] font-mono">
-                          {{ item.quantity }} x ${{ (item.final_unit_price ?? item.unit_price) | number }}
+                          {{ item.quantity }} x {{ (item.final_unit_price ?? item.unit_price) | currency }}
                           @if (Number(item.tax_rate) > 0) {
                             <span class="ml-1 text-[10px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
                           }
@@ -1107,7 +1107,7 @@
 
                     <div class="flex items-center gap-3">
                       <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">
-                        ${{ lineTotalWithTax(item) | number }} COP
+                        {{ lineTotalWithTax(item) | currency }}
                       </span>
                       <app-button variant="ghost" size="sm" (clicked)="removeItemFromAccount(item.id)" ariaLabel="Eliminar ítem">
                         <app-icon name="trash-2" [size]="13" class="text-red-500" />
@@ -1118,19 +1118,19 @@
               </div>
               <div class="mt-2 p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs space-y-1 font-mono">
                 <div class="flex justify-between text-[var(--color-text-secondary)]">
-                  <span>Subtotal</span><span>$ {{ sessionOrder()?.subtotal_amount | number }}</span>
+                  <span>Subtotal</span><span>{{ sessionOrder()?.subtotal_amount | currency }}</span>
                 </div>
                 <div class="flex justify-between text-[var(--color-text-secondary)]">
-                  <span>Impuestos</span><span>$ {{ (sessionOrder()?.tax_amount || 0) | number }}</span>
+                  <span>Impuestos</span><span>{{ (sessionOrder()?.tax_amount || 0) | currency }}</span>
                 </div>
                 <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
-                  <span>Total</span><span>$ {{ sessionOrder()?.grand_total | number }} COP</span>
+                  <span>Total</span><span>{{ sessionOrder()?.grand_total | currency }}</span>
                 </div>
               </div>
               @if (budget() && Number(sessionOrder()?.grand_total) > Number(budget()?.amount)) {
                 <div class="mt-2 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
                   <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
-                  <span>La cuenta supera el presupuesto autorizado por el cliente ($ {{ budget()?.amount | number }}). Ajusta el presupuesto abajo para poder cobrarla.</span>
+                  <span>La cuenta supera el presupuesto autorizado por el cliente ({{ budget()?.amount | currency }}). Ajusta el presupuesto abajo para poder cobrarla.</span>
                 </div>
               }
             } @else {
@@ -1177,7 +1177,7 @@
                 <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
                   <div>
                     <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
-                    <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ prop.currency }} {{ prop.total | number }}</span>
+                    <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ prop.total | currency }}</span>
                   </div>
                   <app-badge [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'" size="xs">
                     {{ prop.status === 'approved' ? 'Aprobada' : prop.status === 'rejected' ? 'Rechazada' : 'Pendiente' }}
