@@ -18,6 +18,7 @@ import { AddSessionItemDto, OpenServiceSessionDto, ServiceIntakeValueDto, Servic
 import { TemplatesService } from '../data-collection/templates.service';
 import { buildEntityQueries, EntityContext, resolveEntityId } from '../data-collection/utils/entity-resolver.util';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 
 const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
@@ -794,6 +795,15 @@ export class ServiceSessionsService {
         if (dto.action === 'close' && existing.order_id) {
           await this.ensureChargeBudget(tx, storeId, id, existing.order_id);
         }
+        // Cancelar o no-show: la cuenta no se cobrará, así que el stock reservado vuelve
+        // a estar disponible y la orden en borrador se cancela (una ya cobrada no se toca).
+        if (dto.action !== 'close' && existing.order_id) {
+          const order = await lockOrderLifecycle(tx, existing.order_id, storeId);
+          if (order.state === 'draft') {
+            await this.releaseOrderReservations(tx, existing.order_id, new Date());
+            await tx.orders.updateMany({ where: { id: existing.order_id, store_id: storeId, state: 'draft' }, data: { state: 'cancelled', updated_at: new Date() } });
+          }
+        }
         if (existing.booking_id) {
           const bookingStatus = dto.action === 'no_show' ? 'no_show' : dto.action === 'cancel' ? 'cancelled' : 'completed';
           await tx.bookings.updateMany({ where: { id: existing.booking_id, store_id: storeId, status: { in: ['confirmed', 'arriving', 'in_progress', 'attending'] } }, data: { status: bookingStatus, updated_at: new Date() } });
@@ -1058,6 +1068,12 @@ export class ServiceSessionsService {
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (session.order_id) {
+        const order = await lockOrderLifecycle(tx, session.order_id, storeId);
+        if (order.state !== 'draft') {
+          throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se pueden agregar ítems.');
+        }
+      }
       const items: order_items[] = [];
       for (const dto of dtos) {
         items.push(await this.addItemTx(tx, storeId, userId ?? null, session, dto, now));
@@ -1243,6 +1259,9 @@ export class ServiceSessionsService {
     if (!session || !session.order_id) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'Atención no encontrada.');
     }
+    if (!ITEM_SESSION_STATUSES.includes(session.status)) {
+      throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
+    }
     const item = await this.prisma.order_items.findFirst({
       where: { id: itemId, order_id: session.order_id },
     });
@@ -1252,21 +1271,13 @@ export class ServiceSessionsService {
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Con la orden bloqueada: si ya se cobró (dejó de ser borrador) la cuenta no se edita.
+      const order = await lockOrderLifecycle(tx, session.order_id!, storeId);
+      if (order.state !== 'draft') {
+        throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se pueden quitar ítems.');
+      }
       if (item.product_id) {
-        const reservation = await tx.stock_reservations.findFirst({
-          where: { reserved_for_type: 'order', reserved_for_id: session.order_id!, product_id: item.product_id, product_variant_id: item.product_variant_id ?? null, status: 'active' },
-        });
-        if (reservation) {
-          await tx.stock_reservations.update({ where: { id: reservation.id }, data: { status: 'cancelled', updated_at: now } });
-          await tx.stock_levels.updateMany({
-            where: { product_id: item.product_id, product_variant_id: item.product_variant_id ?? null, location_id: reservation.location_id },
-            data: {
-              quantity_reserved: { decrement: reservation.quantity },
-              quantity_available: { increment: reservation.quantity },
-              updated_at: now,
-            },
-          });
-        }
+        await this.releaseOrderReservations(tx, session.order_id!, now, { product_id: item.product_id, product_variant_id: item.product_variant_id ?? null }, 1);
       }
 
       // order_item_taxes cae en cascada con la línea.
@@ -1279,6 +1290,35 @@ export class ServiceSessionsService {
 
     this.emit(storeId, sessionId, 'item_removed', { item_id: itemId, grand_total: result.grand_total });
     return result;
+  }
+
+  /**
+   * Cancela reservas de stock activas de la orden y devuelve las unidades al nivel de
+   * stock de su ubicación. Con `match` libera solo las de esa línea (y `limit` acota cuántas).
+   */
+  private async releaseOrderReservations(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    now: Date,
+    match?: { product_id: number; product_variant_id: number | null },
+    limit?: number,
+  ) {
+    const reservations = await tx.stock_reservations.findMany({
+      where: { reserved_for_type: 'order', reserved_for_id: orderId, status: 'active', ...(match ?? {}) },
+      orderBy: { id: 'asc' },
+      ...(limit ? { take: limit } : {}),
+    });
+    for (const reservation of reservations) {
+      await tx.stock_reservations.update({ where: { id: reservation.id }, data: { status: 'cancelled', updated_at: now } });
+      await tx.stock_levels.updateMany({
+        where: { product_id: reservation.product_id, product_variant_id: reservation.product_variant_id ?? null, location_id: reservation.location_id },
+        data: {
+          quantity_reserved: { decrement: reservation.quantity },
+          quantity_available: { increment: reservation.quantity },
+          updated_at: now,
+        },
+      });
+    }
   }
 
   async publicProgress(id: number) {

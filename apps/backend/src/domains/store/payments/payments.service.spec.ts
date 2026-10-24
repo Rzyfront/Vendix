@@ -4335,6 +4335,7 @@ describe('PaymentsService', () => {
           })),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn().mockResolvedValue({ id: 4242 }),
           findUnique: jest
             .fn()
@@ -4775,6 +4776,7 @@ describe('PaymentsService', () => {
           findFirst: jest.fn().mockResolvedValue(null),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn(async ({ data }: any) => {
             if (data.total_paid != null) totalPaid = Number(data.total_paid);
             if (typeof data.state === 'string') orderState = data.state;
@@ -5070,6 +5072,7 @@ describe('PaymentsService', () => {
           findFirst: jest.fn().mockResolvedValue(null),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn(async ({ data }: any) => {
             if (data.total_paid != null) {
               fakeTotalPaid = Number(data.total_paid);

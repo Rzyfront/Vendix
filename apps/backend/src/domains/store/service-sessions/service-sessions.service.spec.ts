@@ -186,7 +186,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       },
       service_progress_events: { create: jest.fn() },
     };
-    prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
 
     const result = await service.addItemsBulk(77, [
       { product_id: 1, quantity: 2 },
@@ -224,7 +224,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       order_items: { create: jest.fn(({ data }: any) => Promise.resolve({ id: 1, ...data })), findMany: jest.fn().mockResolvedValue([]) },
       service_progress_events: { create: jest.fn() },
     };
-    prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
     await service.addItemsBulk(77, [{ product_id: 3, quantity: 1 }]);
     const line = tx.order_items.create.mock.calls[0][0].data;
     expect(Number(line.final_unit_price)).toBe(119000);
@@ -235,7 +235,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
   it('addItemsBulk revierte todo si un producto no existe', async () => {
     prisma.service_sessions.findFirst.mockResolvedValue({ id: 77, status: 'open', order_id: 88 });
     const tx = { products: { findFirst: jest.fn().mockResolvedValue(null) } };
-    prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
     await expect(service.addItemsBulk(77, [{ product_id: 1 }])).rejects.toMatchObject({
       response: expect.objectContaining({ error_code: 'PROD_FIND_001' }),
     });
@@ -289,7 +289,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         orders: { findFirst: jest.fn().mockResolvedValue({ grand_total: 119000, tip_amount: 0, currency: 'COP' }) },
         service_budgets: { findFirst: jest.fn().mockResolvedValue(budget), create: jest.fn() },
       };
-      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
       return tx;
     };
 
@@ -340,7 +340,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('usa el precio y el nombre de la variante', async () => {
       const tx = txWith({ id: 9, name: '4 L', sku: 'AC-4L', price_override: 180000, is_on_sale: false, sale_price: null, track_inventory_override: null });
-      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
       await service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 9, quantity: 1 }]);
       const line = tx.order_items.create.mock.calls[0][0].data;
       expect(line).toMatchObject({ product_variant_id: 9, product_name: 'Aceite - 4 L' });
@@ -349,7 +349,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('exige elegir variante si el producto las tiene', async () => {
       const tx = txWith(null, 2);
-      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
       await expect(service.addItemsBulk(77, [{ product_id: 4, quantity: 1 }])).rejects.toMatchObject({
         response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
       });
@@ -357,7 +357,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('rechaza una variante de otro producto', async () => {
       const tx = txWith(null);
-      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
       await expect(service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 99, quantity: 1 }])).rejects.toMatchObject({
         response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
       });
