@@ -101,6 +101,8 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
       order: {
         order_number: p.order_number || 'Servicio',
         state: this.finished() ? 'finished' : 'draft',
+        channel: 'pos',
+        delivery_type: 'direct_delivery',
         created_at: p.order_created_at ?? p.service?.opened_at ?? null,
         currency: p.account.currency,
         items: p.account.items.map((item, index) => ({

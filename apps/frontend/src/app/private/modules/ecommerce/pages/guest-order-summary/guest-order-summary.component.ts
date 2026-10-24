@@ -316,7 +316,11 @@ export interface GuestOrderSummary {
             <div class="meta-cell">
               <span class="meta-label">Canal</span>
               <strong class="meta-value">{{
-                data.order.channel === 'whatsapp' ? 'WhatsApp' : 'E-commerce'
+                data.order.channel === 'whatsapp'
+                  ? 'WhatsApp'
+                  : data.order.channel === 'pos'
+                    ? 'En tienda'
+                    : 'E-commerce'
               }}</strong>
             </div>
             @if (worstPaymentState(data.order.payments); as payState) {
@@ -697,14 +701,17 @@ export interface GuestOrderSummary {
               </div>
             }
 
-            <div class="total-row">
-              <span>Envío</span>
-              <span>{{
-                data.order.shipping_cost === 0
-                  ? 'Gratis'
-                  : (data.order.shipping_cost | currency)
-              }}</span>
-            </div>
+            <!-- Atención en el local (mesa, estación): sin envío que mostrar -->
+            @if (!(data.order.delivery_type === 'direct_delivery' && !data.order.shipping_cost)) {
+              <div class="total-row">
+                <span>Envío</span>
+                <span>{{
+                  data.order.shipping_cost === 0
+                    ? 'Gratis'
+                    : (data.order.shipping_cost | currency)
+                }}</span>
+              </div>
+            }
             <div class="total-row grand">
               <span>Total</span>
               <span>{{ data.order.grand_total | currency }}</span>

@@ -282,11 +282,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   // Header Actions
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
-      id: 'refresh',
-      label: 'Actualizar',
+      id: 'templates',
+      label: 'Ver plantillas',
       variant: 'secondary',
-      icon: 'refresh-cw',
-      loading: this.loading(),
+      icon: 'layout-template',
     },
     {
       id: 'design-template',
@@ -310,9 +309,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   ]);
 
   onHeaderAction(id: string): void {
-    if (id === 'refresh') {
-      this.loadData();
-      this.toastService.info('Actualizando datos de estaciones...');
+    if (id === 'templates') {
+      // Plantillas creadas (Recolección de datos); su flecha ← vuelve a Estaciones.
+      this.router.navigate(['/admin/data-collection/templates']);
     } else if (id === 'design-template') {
       this.designNewStationTemplate();
     } else if (id === 'create-station') {
