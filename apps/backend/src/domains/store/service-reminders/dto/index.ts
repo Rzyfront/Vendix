@@ -81,6 +81,15 @@ export class ServiceRegistryActionDto {
   product_id: number;
 }
 
+/** WhatsApp de una fila; `phone` sirve cuando el cliente no tiene teléfono guardado. */
+export class ServiceRegistryWhatsappDto extends ServiceRegistryActionDto {
+  @ApiPropertyOptional({ description: 'Teléfono a usar (y guardar en el perfil) si no hay uno registrado' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  phone?: string;
+}
+
 /** Asigna un cliente registrado a una fila del registro que se atendió sin cliente. */
 export class ServiceRegistryAssignCustomerDto extends ServiceRegistryActionDto {
   @ApiProperty({ description: 'Cliente registrado de la tienda' })

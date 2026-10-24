@@ -18,6 +18,7 @@ import {
   DropdownAction,
   EmptyStateComponent,
   FilterConfig,
+  InputComponent,
   ModalComponent,
   FilterValues,
   InputsearchComponent,
@@ -104,6 +105,7 @@ function reminderLabel(row: ServiceRegistryRow): string {
     EmptyStateComponent,
     DaysRemainingBadgeComponent,
     ModalComponent,
+    InputComponent,
     ButtonComponent,
     CustomerSelectComponent,
   ],
@@ -189,9 +191,9 @@ export class ServiceRemindersPageComponent {
       icon: 'message-circle',
       variant: 'success',
       action: (row: RegistryViewRow) => this.openWhatsapp(row),
-      disabled: (row: RegistryViewRow) => !row.customer.phone || this.busyKey() === row.row_key,
+      disabled: (row: RegistryViewRow) => this.busyKey() === row.row_key,
       tooltip: (row: RegistryViewRow) =>
-        row.customer.phone ? `Abrir WhatsApp con ${row.customer.phone}` : 'El cliente no tiene teléfono registrado',
+        row.customer.phone ? `Abrir WhatsApp con ${row.customer.phone}` : 'Sin teléfono: te lo pediremos para enviar el mensaje',
     },
     {
       label: 'Descartar',
@@ -319,13 +321,33 @@ export class ServiceRemindersPageComponent {
       });
   }
 
-  private openWhatsapp(row: RegistryViewRow): void {
+  /** Fila sin teléfono a la que se le está pidiendo el número para WhatsApp. */
+  readonly phoneRow = signal<RegistryViewRow | null>(null);
+  readonly phoneInput = signal('');
+
+  confirmWhatsappPhone(): void {
+    const row = this.phoneRow();
+    const phone = this.phoneInput().trim();
+    if (!row || phone.replace(/\D/g, '').length < 7) {
+      this.toast.error('Escribe un número de teléfono válido');
+      return;
+    }
+    this.phoneRow.set(null);
+    this.openWhatsapp(row, phone);
+  }
+
+  private openWhatsapp(row: RegistryViewRow, phone?: string): void {
+    if (!row.customer.phone && !phone) {
+      this.phoneInput.set('');
+      this.phoneRow.set(row);
+      return;
+    }
     // Se abre la pestaña de forma síncrona (gesto del usuario) para que el
     // navegador no la bloquee como popup; luego se le asigna la URL.
     const tab = window.open('', '_blank');
     this.busyKey.set(row.row_key);
     this.registry
-      .whatsapp(row)
+      .whatsapp(row, phone)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

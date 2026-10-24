@@ -14,7 +14,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
-import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto } from './dto';
+import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto, ServiceRegistryWhatsappDto } from './dto';
 import { ServiceRemindersService } from './service-reminders.service';
 
 @ApiTags('Store Service Reminders')
@@ -69,7 +69,7 @@ export class ServiceRemindersController {
   @HttpCode(200)
   @Permissions('store:reservations:update')
   @ApiOperation({ summary: 'Generar enlace de WhatsApp para una fila del registro (crea el recordatorio si no existe)' })
-  async registryWhatsapp(@Body() dto: ServiceRegistryActionDto) {
+  async registryWhatsapp(@Body() dto: ServiceRegistryWhatsappDto) {
     const result = await this.serviceReminders.registryWhatsapp(dto);
     return this.response.success(result, 'Enlace de WhatsApp generado exitosamente');
   }

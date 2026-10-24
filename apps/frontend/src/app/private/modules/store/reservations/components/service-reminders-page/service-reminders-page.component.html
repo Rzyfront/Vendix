@@ -133,6 +133,29 @@
     }
   </app-card>
 
+  @if (phoneRow(); as row) {
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="!$event && phoneRow.set(null)"
+      title="Teléfono para WhatsApp"
+      [subtitle]="row.customer_name + ' no tiene teléfono guardado'"
+      size="sm"
+    >
+      <app-input
+        label="Teléfono / WhatsApp"
+        type="tel"
+        placeholder="Ej. 310 123 4567"
+        [ngModel]="phoneInput()"
+        (ngModelChange)="phoneInput.set($event)"
+        hint="Si el cliente está registrado, queda guardado en su perfil."
+      />
+      <div slot="footer" class="flex items-center justify-end gap-2.5">
+        <app-button variant="outline" (clicked)="phoneRow.set(null)">Cancelar</app-button>
+        <app-button variant="primary" (clicked)="confirmWhatsappPhone()">Abrir WhatsApp</app-button>
+      </div>
+    </app-modal>
+  }
+
   @if (assignRow(); as row) {
     <app-modal
       [isOpen]="true"

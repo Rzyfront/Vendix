@@ -8,7 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../../../email/email.service';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { resolveStoreTimezone, localDateString } from '@common/utils/store-timezone.util';
-import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto } from './dto';
+import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto, ServiceRegistryWhatsappDto } from './dto';
 import {
   buildReminderMessage,
   computeRecurrence,
@@ -300,6 +300,26 @@ export class ServiceRemindersService {
       if ((latestByCustomerProduct.get(key) ?? -Infinity) < time) latestByCustomerProduct.set(key, time);
     }
 
+    // Teléfonos capturados en plantillas (campos tipo teléfono de la atención o del
+    // perfil del cliente): respaldo cuando el perfil no tiene `phone`.
+    const sessionIdsForPhone = entries.map((e) => e.session_id).filter((id): id is number => id != null);
+    const customerIdsForPhone = entries.map((e) => e.customer_id).filter((id): id is number => id != null);
+    const phoneValues = sessionIdsForPhone.length || customerIdsForPhone.length
+      ? await this.prisma.entity_metadata_values.findMany({
+          where: {
+            store_id: storeId,
+            field: { field_type: 'phone' },
+            OR: [
+              ...(sessionIdsForPhone.length ? [{ entity_type: 'service_session' as const, entity_id: { in: sessionIdsForPhone } }] : []),
+              ...(customerIdsForPhone.length ? [{ entity_type: 'customer' as const, entity_id: { in: customerIdsForPhone } }] : []),
+            ],
+          },
+          select: { entity_type: true, entity_id: true, value_text: true },
+        })
+      : [];
+    const templatePhone = (type: 'service_session' | 'customer', id: number | null) =>
+      id == null ? null : phoneValues.find((v) => v.entity_type === type && v.entity_id === id && v.value_text?.trim())?.value_text?.trim() ?? null;
+
     const now = new Date();
     const subjectPhrases = new Map<string, string | null>();
     const rows: ServiceRegistryRow[] = [];
@@ -312,7 +332,11 @@ export class ServiceRemindersService {
       const metaName = typeof meta['customer_name'] === 'string' ? (meta['customer_name'] as string).trim() : '';
       const customerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim() || metaName || 'Cliente';
       const email = user?.email || entry.contact_email || (typeof meta['customer_email'] === 'string' ? (meta['customer_email'] as string) : null) || null;
-      const phone = user?.phone || (typeof meta['customer_phone'] === 'string' ? (meta['customer_phone'] as string) : null) || null;
+      const phone = user?.phone
+        || (typeof meta['customer_phone'] === 'string' ? (meta['customer_phone'] as string) : null)
+        || templatePhone('customer', entry.customer_id)
+        || templatePhone('service_session', entry.session_id)
+        || null;
 
       const isRecurring = Boolean(product.is_recurring && product.recurrence_interval_days);
       const recurrence = computeRecurrence(entry.service_at, isRecurring ? product.recurrence_interval_days : null, now, tz);
@@ -546,9 +570,21 @@ export class ServiceRemindersService {
     return this.deliverEmail(ctx, await this.ensureLog(storeId, ctx.row));
   }
 
-  async registryWhatsapp(dto: ServiceRegistryActionDto) {
+  async registryWhatsapp(dto: ServiceRegistryWhatsappDto) {
     const storeId = this.requireStoreId();
     const ctx = await this.resolveRow(storeId, dto.source_order_id, dto.product_id);
+    // Sin teléfono guardado, el comercio lo escribe al enviar; si el cliente está
+    // registrado y su perfil no tiene teléfono, queda guardado para la próxima vez.
+    if (!ctx.row.customer.phone && dto.phone) {
+      if (!normalizeWhatsappPhone(dto.phone)) throw new BadRequestException('El teléfono no es válido');
+      if (ctx.row.customer.id != null) {
+        await this.prisma.users.updateMany({
+          where: { id: ctx.row.customer.id, store_users: { some: { store_id: storeId } }, OR: [{ phone: null }, { phone: '' }] },
+          data: { phone: dto.phone.trim() },
+        });
+      }
+      ctx.row.customer.phone = dto.phone.trim();
+    }
     if (!ctx.row.customer.phone) throw new BadRequestException('El cliente no tiene un número de teléfono registrado');
     return this.deliverWhatsapp(ctx, await this.ensureLog(storeId, ctx.row));
   }

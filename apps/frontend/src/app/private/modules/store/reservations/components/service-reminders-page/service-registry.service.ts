@@ -29,9 +29,10 @@ export class ServiceRegistryService {
       .pipe(map((res) => res.data));
   }
 
-  whatsapp(row: ServiceRegistryRow): Observable<{ url: string; message: string }> {
+  /** `phone` solo cuando el cliente no tiene teléfono guardado (queda en su perfil). */
+  whatsapp(row: ServiceRegistryRow, phone?: string): Observable<{ url: string; message: string }> {
     return this.http
-      .post<{ data: { url: string; message: string } }>(`${this.base}/whatsapp`, this.ref(row))
+      .post<{ data: { url: string; message: string } }>(`${this.base}/whatsapp`, { ...this.ref(row), ...(phone ? { phone } : {}) })
       .pipe(map((res) => res.data));
   }
 
