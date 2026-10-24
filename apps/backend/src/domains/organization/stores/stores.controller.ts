@@ -23,6 +23,8 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { StoresDashboardService } from './stores-dashboard.service';
+import { AnalyticsQueryDto } from '../../store/analytics/dto/analytics-query.dto';
 
 @Controller('organization/stores')
 @UseGuards(PermissionsGuard)
@@ -30,6 +32,7 @@ export class StoresController {
   constructor(
     private readonly storesService: StoresService,
     private readonly responseService: ResponseService,
+    private readonly storesDashboardService: StoresDashboardService,
   ) {}
 
   @Post()
@@ -118,6 +121,19 @@ export class StoresController {
         error.message,
       );
     }
+  }
+
+  @Get('dashboard/profit-loss')
+  @Permissions('organization:stores:read')
+  async getDashboardProfitLoss(@Query() query: AnalyticsQueryDto) {
+    // Sin try/catch: un fallo debe llegar como error HTTP (vendix-error-handling),
+    // no como 200 con success:false que la vista pintaría como ceros reales.
+    const result =
+      await this.storesDashboardService.getProfitLossSummary(query);
+    return this.responseService.success(
+      result,
+      'Resumen financiero de tiendas obtenido exitosamente',
+    );
   }
 
   @Get(':id')

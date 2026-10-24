@@ -345,3 +345,37 @@ export interface StoreSettingsUpdateDto {
 }
 
 // Enums defined locally to avoid circular dependencies
+
+/** Cobertura de costo de las unidades vendidas (base caja). */
+export interface OrganizationCostCoverage {
+  units_total: number;
+  units_without_cost: number;
+  coverage_ratio: number;
+}
+
+/** Cifras en base caja agregadas sobre todas las tiendas de la organización. */
+export interface OrganizationProfitLossCash {
+  income: number;
+  income_without_tax: number;
+  refunds: number;
+  refunds_tax: number;
+  refunds_pending: number;
+  net_profit: number;
+  net_profit_after_expenses: number;
+  net_margin: number;
+  balance: number;
+  balance_accumulated: number;
+  expenses_paid: number;
+  cost_coverage: OrganizationCostCoverage;
+}
+
+/** Respuesta de GET /organization/stores/dashboard/profit-loss. */
+export interface OrganizationProfitLossSummary {
+  store_count: number;
+  cash: OrganizationProfitLossCash;
+  operating_expenses: number;
+  comparison: {
+    operating_expenses: number;
+    expenses_growth: number | null;
+  };
+}
