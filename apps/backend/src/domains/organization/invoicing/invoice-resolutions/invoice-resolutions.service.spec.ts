@@ -6,6 +6,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResolutionsService } from '../../../store/invoicing/resolutions/resolutions.service';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
 import { OrgInvoiceResolutionsService } from './invoice-resolutions.service';
+import { internalSeriesResolutionNumber } from '../../../store/invoicing/utils/invoice-number-generator';
 
 /**
  * Paridad de validación del carril de ORGANIZACIÓN.
@@ -41,9 +42,15 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
     overrides: {
       resolution?: Record<string, unknown> | null;
       duplicate?: Record<string, unknown> | null;
+      others?: Array<{ id: number }>;
     } = {},
   ) => {
     const unscoped = {
+      // Guarda de numeración entre cuentas: sin entidad no hay NIT que cruzar.
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       invoice_resolutions: {
         findFirst: jest.fn().mockResolvedValue(overrides.duplicate ?? null),
         create: jest
@@ -57,8 +64,14 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
             Promise.resolve({ id: where.id, ...data }),
           ),
         delete: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue(overrides.others ?? []),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      $transaction: jest.fn(),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $executeRaw: jest.fn().mockResolvedValue(0),
     };
+    unscoped.$transaction.mockImplementation((fn: any) => fn(unscoped));
 
     return {
       invoice_resolutions: {
@@ -128,10 +141,26 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
         delete: jest.fn().mockResolvedValue({}),
       },
       invoices: { count: jest.fn().mockResolvedValue(0) },
-      withoutScope: jest.fn().mockReturnValue({
-        invoice_resolutions: { findFirst: jest.fn().mockResolvedValue(null) },
-      }),
+      withoutScope: jest.fn(),
     };
+    const unscoped = {
+      // Guarda de numeración entre cuentas: sin entidad no hay NIT que cruzar.
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      invoice_resolutions: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: prisma.invoice_resolutions.create,
+        update: prisma.invoice_resolutions.update,
+      },
+      $transaction: jest.fn((fn: any) => fn(unscoped)),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+    };
+    prisma.withoutScope.mockReturnValue(unscoped);
     const fiscalScope = {
       resolveAccountingEntityForFiscal: jest
         .fn()
@@ -612,19 +641,29 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       expect(codigosDeViolacion(error)).toContain('TECHNICAL_KEY_NOT_APPLICABLE');
     });
 
-    it('no la deja borrar: es el único registro de qué números se consumieron', async () => {
+    it('la archiva en vez de borrarla: la fila es el único registro de qué números se consumieron', async () => {
       const { service, prisma } = createOrgService({
         resolution: consumidaSucia,
       });
+      // El archivado revisa documentos en vuelo, cableado a la plataforma y
+      // sets de prueba DIAN; el doble base no los modela, así que van vacíos.
+      const unscoped = prisma.__unscoped as any;
+      unscoped.invoice_resolutions.findUnique = jest
+        .fn()
+        .mockResolvedValue({ ...consumidaSucia, archived_at: null });
+      unscoped.invoices = { count: jest.fn().mockResolvedValue(0) };
+      unscoped.invoice_retry_queue = { count: jest.fn().mockResolvedValue(0) };
+      unscoped.platform_settings = { findMany: jest.fn().mockResolvedValue([]) };
+      unscoped.dian_configurations = { count: jest.fn().mockResolvedValue(0) };
 
-      const error = await capturarError(() => service.remove(55));
+      await service.remove(55);
 
-      expect(error).toBeInstanceOf(VendixHttpException);
-      expect(error.errorCode).toBe('INVOICING_RESOLUTION_003');
-      expect(error).not.toBeInstanceOf(ConflictException);
-      expect(
-        prisma.__unscoped.invoice_resolutions.delete,
-      ).not.toHaveBeenCalled();
+      expect(unscoped.invoice_resolutions.delete).not.toHaveBeenCalled();
+      expect(unscoped.invoice_resolutions.update).toHaveBeenCalledTimes(1);
+      const { where, data } = unscoped.invoice_resolutions.update.mock.calls[0][0];
+      expect(where).toEqual({ id: 55 });
+      expect(data.is_active).toBe(false);
+      expect(data.archived_at).toBeInstanceOf(Date);
     });
   });
 
@@ -677,6 +716,238 @@ describe('OrgInvoiceResolutionsService (paridad de validación con el carril de 
       const { data } =
         prisma.__unscoped.invoice_resolutions.create.mock.calls[0][0];
       expect(data.store_id).toBe(STORE_ID);
+    });
+  });
+
+  describe('una sola serie de notas activa por (entidad, tipo)', () => {
+    const fila = (document_type: string, is_active: boolean) => ({
+      id: 61,
+      organization_id: ORGANIZATION_ID,
+      store_id: null,
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      document_type,
+      resolution_number: 'INTERNA-NC',
+      resolution_date: new Date('2026-01-15'),
+      prefix: 'NC',
+      range_from: 1,
+      range_to: 5000,
+      current_number: 0,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active,
+      technical_key: null,
+      _count: { invoices: 0 },
+    });
+
+    it('crear una NC activa desactiva la previa de la misma entidad, en una transacción', async () => {
+      const { service, prisma } = createOrgService({ others: [{ id: 7 }] });
+
+      const result: any = await service.create({
+        ...facturaVentaValida(),
+        document_type: 'credit_note',
+        prefix: 'NC',
+        resolution_number: undefined,
+        technical_key: undefined,
+      } as any);
+
+      expect(prisma.__unscoped.$transaction).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.__unscoped.invoice_resolutions.updateMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          accounting_entity_id: ACCOUNTING_ENTITY_ID,
+          document_type: 'credit_note',
+          is_active: true,
+          id: { not: 100 },
+        },
+        data: { is_active: false },
+      });
+      expect(result.deactivated_resolution_ids).toEqual([7]);
+    });
+
+    it('activar una NC vía PATCH desactiva la otra activa', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', false),
+        others: [{ id: 8 }],
+      });
+
+      const result: any = await service.update(61, { is_active: true } as any);
+
+      expect(
+        prisma.__unscoped.invoice_resolutions.updateMany.mock.calls[0][0].where,
+      ).toEqual({
+        accounting_entity_id: ACCOUNTING_ENTITY_ID,
+        document_type: 'credit_note',
+        is_active: true,
+        id: { not: 61 },
+      });
+      expect(result.deactivated_resolution_ids).toEqual([8]);
+    });
+
+    it('sales_invoice no dispara la cascada (alta ni PATCH)', async () => {
+      const created = createOrgService({ others: [{ id: 9 }] });
+      const r1: any = await created.service.create(facturaVentaValida() as any);
+      expect(
+        created.prisma.__unscoped.invoice_resolutions.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(r1.deactivated_resolution_ids).toEqual([]);
+
+      const patched = createOrgService({
+        resolution: fila('sales_invoice', false),
+        others: [{ id: 9 }],
+      });
+      const r2: any = await patched.service.update(61, {
+        is_active: true,
+      } as any);
+      expect(
+        patched.prisma.__unscoped.invoice_resolutions.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(r2.deactivated_resolution_ids).toEqual([]);
+    });
+
+    it('activar una NC toma el lock con la llave del generador, antes del write', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', false),
+      });
+
+      await service.update(61, { is_active: true } as any);
+
+      const raw = prisma.__unscoped.$executeRawUnsafe;
+      expect(raw).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `invoice_resolution:${ACCOUNTING_ENTITY_ID}:credit_note`,
+      );
+      expect(raw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.__unscoped.invoice_resolutions.update.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('crear una NC toma el lock; crear sales_invoice no', async () => {
+      const nota = createOrgService();
+      await nota.service.create({
+        ...facturaVentaValida(),
+        document_type: 'credit_note',
+        prefix: 'NC',
+        resolution_number: undefined,
+        technical_key: undefined,
+      } as any);
+      expect(nota.prisma.__unscoped.$executeRawUnsafe).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `invoice_resolution:${ACCOUNTING_ENTITY_ID}:credit_note`,
+      );
+
+      const venta = createOrgService();
+      await venta.service.create(facturaVentaValida() as any);
+      expect(venta.prisma.__unscoped.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('editar el rango de una NC ya activa NO desactiva nada', async () => {
+      const { service, prisma } = createOrgService({
+        resolution: fila('credit_note', true),
+        others: [{ id: 8 }],
+      });
+
+      const result: any = await service.update(61, { range_to: 9000 } as any);
+
+      expect(prisma.__unscoped.invoice_resolutions.updateMany).not.toHaveBeenCalled();
+      expect(result.deactivated_resolution_ids).toEqual([]);
+    });
+  });
+
+  describe('factura sin uso con ClTec que pasa a nota (F6-M1)', () => {
+    const facturaSinUso = {
+      id: 70,
+      organization_id: ORGANIZATION_ID,
+      store_id: STORE_ID,
+      accounting_entity_id: ACCOUNTING_ENTITY_ID,
+      document_type: 'sales_invoice',
+      resolution_number: '18764000001234',
+      resolution_date: new Date('2026-01-15'),
+      prefix: 'FE',
+      range_from: 1,
+      range_to: 5000,
+      current_number: 0,
+      valid_from: new Date('2026-01-15'),
+      valid_to: new Date('2027-01-15'),
+      is_active: false,
+      technical_key: CLTEC,
+      _count: { invoices: 0 },
+    };
+
+    it('update(id, { document_type: credit_note }) no lanza, anula las 3 columnas de la ClTec y rotula el número interno', async () => {
+      const { service, prisma } = createOrgService({ resolution: facturaSinUso });
+
+      await service.update(70, { document_type: 'credit_note' } as any);
+
+      const { data } = prisma.__unscoped.invoice_resolutions.update.mock
+        .calls[0][0];
+      expect(data.document_type).toBe('credit_note');
+      expect(data.technical_key).toBeNull();
+      expect(data.technical_key_encrypted).toBeNull();
+      expect(data.technical_key_fingerprint).toBeNull();
+      expect(data.resolution_number).toBe(internalSeriesResolutionNumber('FE'));
+    });
+
+    it('si el PATCH trae technical_key en una nota, se sigue rechazando (comportamiento intacto)', async () => {
+      const { service } = createOrgService({ resolution: facturaSinUso });
+
+      const error = await capturarError(() =>
+        service.update(70, {
+          document_type: 'credit_note',
+          technical_key: CLTEC,
+        } as any),
+      );
+
+      expect(error.errorCode).toBe('INVOICING_RESOLUTION_008');
+    });
+  });
+
+  describe('guarda entre cuentas con solape real (D10, F6-L4)', () => {
+    const filaAjena = { id: 900, prefix: 'NCVS', range_from: 1, range_to: 10000000 };
+
+    const conSolape = () => {
+      const ctx = createOrgService({ others: [filaAjena] });
+      const unscoped = ctx.prisma.__unscoped;
+      unscoped.accounting_entities.findFirst.mockResolvedValue({
+        tax_id: '900123456-7',
+        dian_configurations: [],
+      });
+      unscoped.accounting_entities.findMany.mockResolvedValue([
+        { id: 99, tax_id: '900123456', dian_configurations: [] },
+      ]);
+      return ctx;
+    };
+
+    it('crear credit_note NCVS 1-10.000.000 resuelve pese a la fila ajena', async () => {
+      const { service } = conSolape();
+
+      await expect(
+        service.create({
+          ...facturaVentaValida(),
+          document_type: 'credit_note',
+          prefix: 'NCVS',
+          range_from: 1,
+          range_to: 10000000,
+          valid_to: '2030-01-15',
+          resolution_number: undefined,
+          technical_key: undefined,
+        } as any),
+      ).resolves.toBeDefined();
+    });
+
+    it('el mismo alta como sales_invoice con solape lanza INVOICING_RESOLUTION_017', async () => {
+      const { service } = conSolape();
+
+      const error = await capturarError(() =>
+        service.create({
+          ...facturaVentaValida(),
+          prefix: 'NCVS',
+          range_from: 1,
+          range_to: 10000000,
+        } as any),
+      );
+
+      expect(error.errorCode).toBe('INVOICING_RESOLUTION_017');
     });
   });
 });

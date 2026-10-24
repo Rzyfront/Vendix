@@ -174,7 +174,8 @@ export class MenuFilterService {
     // STORE_ADMIN - Despacho (padre + submódulos)
     Despacho: 'dispatch',
     Remisiones: 'orders_dispatch_notes',
-    'Planillas de Ruta': 'orders_dispatch_routes',
+    'Planillas de Ruta': 'orders_dispatch_routes', // legacy label
+    Rutas: 'orders_dispatch_routes',
     Flota: 'dispatch_fleet',
 
     // ORG_ADMIN - Compras (consolidado) + analytics_purchases (Analiticas > Compras)
@@ -520,6 +521,12 @@ export class MenuFilterService {
     item: MenuItem,
     activeFiscalAreas: FiscalArea[],
   ): boolean {
+    if (
+      item.hiddenWhenFiscalAreaActive &&
+      activeFiscalAreas.includes(item.hiddenWhenFiscalAreaActive)
+    ) {
+      return false;
+    }
     if (!item.requiresFiscalArea) return true;
     if (item.requiresFiscalArea === 'any') return activeFiscalAreas.length > 0;
     return activeFiscalAreas.includes(item.requiresFiscalArea);
@@ -886,6 +893,15 @@ export class MenuFilterService {
 
     // ─── 2. Fiscal area activation ───────────────────────────────────
     if (!this.matchesFiscalArea(menuItem, this.authFacade.activeFiscalAreas())) {
+      if (menuItem.hiddenWhenFiscalAreaActive) {
+        return {
+          visible: false,
+          blockedBy: 'fiscal_area',
+          detail:
+            'La facturación electrónica ya está activa, así que este asistente de activación ya no se ofrece. Usa el módulo Facturación.',
+          fixPath: '/admin/invoicing',
+        };
+      }
       return {
         visible: false,
         blockedBy: 'fiscal_area',

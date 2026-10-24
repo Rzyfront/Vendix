@@ -1,3 +1,5 @@
+import { firstValueFrom } from 'rxjs';
+import { VexiApiService } from '../../../core/services/vexi-api.service';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -157,7 +159,10 @@ const FAREWELL_MAX_MS = 15_000;
           class="vexi-dock__veil"
           [class.vexi-dock__veil--hidden]="panelOpen()"
         >
-          <app-vexi-avatar [expression]="expression()" [voice]="voiceActive()" />
+          <app-vexi-avatar
+            [expression]="expression()"
+            [voice]="voiceActive()"
+          />
         </span>
       </div>
 
@@ -437,6 +442,7 @@ export class VexiDockComponent {
   private readonly voice = inject(VexiRealtimeService);
   private readonly presence = inject(VexiPresenceService);
   private readonly chat = inject(VexiFacade);
+  private readonly chatApi = inject(VexiApiService);
 
   protected readonly mode = signal<DockMode>('idle');
   protected readonly panelOpen = signal(false);
@@ -629,7 +635,10 @@ export class VexiDockComponent {
     // ancla congelada este computed deja de recalcularse durante el gesto.
     if (frozen) return frozen.left;
     if (!this.isBrowser) return false;
-    return this.position().x + this.positionService.size() / 2 < window.innerWidth / 2;
+    return (
+      this.position().x + this.positionService.size() / 2 <
+      window.innerWidth / 2
+    );
   });
 
   /**
@@ -641,7 +650,10 @@ export class VexiDockComponent {
     const frozen = this.anchorFrozen();
     if (frozen) return frozen.top;
     if (!this.isBrowser) return false;
-    return this.position().y + this.positionService.size() / 2 < window.innerHeight / 2;
+    return (
+      this.position().y + this.positionService.size() / 2 <
+      window.innerHeight / 2
+    );
   });
 
   protected readonly ariaLabel = computed(() =>
@@ -656,6 +668,15 @@ export class VexiDockComponent {
   private activePointerId: number | null = null;
 
   constructor() {
+    effect(() => {
+      const pending = this.voice.pendingProposal();
+      if (!pending || pending.context.agent_key !== 'vexi') return;
+      untracked(() => {
+        this.chat.receiveRealtimeProposal(pending.proposal, pending.context);
+        this.panelOpen.set(true);
+        this.openPanelInVoice.set(true);
+      });
+    });
     // Position depends on window dimensions, so it can only be resolved once
     // the browser has laid out — never during SSR.
     afterNextRender(() => this.positionService.restore());
@@ -1063,11 +1084,33 @@ export class VexiDockComponent {
     }
 
     this.mode.set('voice');
-    void this.voice.start().then((opened) => {
+    void this.openRealtimeVoice().then((opened) => {
       // The attempt was spent on the permission dialog, which also killed the
       // hold. Drop back to idle so the next press starts a real turn.
       if (!opened) this.mode.set('idle');
     });
+  }
+
+  private async openRealtimeVoice(): Promise<boolean> {
+    let conversation_id = this.chat.activeConversationId() ?? undefined;
+    if (await this.voice.voiceConsentEnabled()) {
+      if (!conversation_id) {
+        try {
+          const conversation = await firstValueFrom(
+            this.chatApi.createConversation({}),
+          );
+          conversation_id = conversation.id;
+          this.chat.selectConversation(conversation_id);
+        } catch {
+          return false;
+        }
+      }
+      // The hold may have been released while the handshake was in flight.
+      if (this.mode() !== 'voice') return false;
+    }
+    return this.voice.start(
+      conversation_id ? { conversation_id, agent_key: 'vexi' } : undefined,
+    );
   }
 
   private exitVoiceMode(): void {
@@ -1093,5 +1136,7 @@ export class VexiDockComponent {
   }
 
   /** Diámetro vigente como valor CSS, para la custom property del host. */
-  protected readonly dockSizeVar = computed(() => `${this.positionService.size()}px`);
+  protected readonly dockSizeVar = computed(
+    () => `${this.positionService.size()}px`,
+  );
 }

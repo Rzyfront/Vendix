@@ -10,11 +10,26 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import {
+  AgentDurableSessionService,
+  ObjectiveProgress,
+} from '../../../ai-engine/tasks/agent-durable-session.service';
+
+import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
+import {
+  clientSafeChunk,
+  clientSafeExecution,
+  clientSafeObjective,
+  clientSafeReceipt,
+  USER_NOTICES,
+} from '../../../ai-engine/agent-execution.contract';
 import type {
+  AgentResult,
   AgentBlockSink,
   AgentPlanApprovalHook,
 } from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
+import { recentStoredToolNames } from '../../../ai-engine/tools/tool-working-set';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
@@ -53,6 +68,12 @@ import {
   ConversationWithMessages,
   PaginatedConversations,
 } from './interfaces/ai-chat.interface';
+import {
+  ChatStreamReplay,
+  ChatReplayRequest,
+  ChatReplayCursor,
+} from './chat-stream-replay';
+import { resumeReferenceBlock } from './resume-reference';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -92,7 +113,8 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
     `Propusiste: ${operation}.`,
     'La tarjeta con «Aprobar» y «Rechazar» ya está en pantalla, encima de este mensaje.',
     'Si la persona confirma en palabras («sí», «dale», «hazlo», «apruebo»), NO vuelvas a llamar `write_endpoint`: eso solo genera otra tarjeta idéntica y se ve como si le pidieras permiso en círculos. Contéstale en una frase que toque «Aprobar» en la tarjeta que ya tiene.',
-    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos.',
+    'Si la rechaza o la cancela en palabras («no», «cancela», «déjalo»), no llames ninguna herramienta de escritura: confírmale en una frase que no se aplicó nada.',
+    'Vuelve a proponer SOLO si pide cambiar algún dato, y entonces propone con los datos nuevos. Si pide otra cosa, atiéndela: la tarjeta sigue en pantalla por si la quiere aprobar después.',
   ].join(' ');
 
 /**
@@ -119,7 +141,10 @@ const PLAN_MESSAGE_RULES_BLOCK =
  * would make every implementation carry a case it cannot reach. The SSE
  * controller only serializes what it is handed, so the transport needs no change.
  */
-export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
+export type ChatStreamFrame = (AIStreamChunk | VexiVoiceFrame) & {
+  replay?: ChatReplayCursor;
+  reconcile_required?: boolean;
+};
 
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
@@ -187,6 +212,7 @@ interface VexTurnCollection {
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
   private readonly MAX_CONTEXT_MESSAGES = 20;
+  private readonly streamReplay = new ChatStreamReplay<ChatStreamFrame>();
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -223,6 +249,7 @@ export class AIChatService {
     // cannot persist hashes, so approve will ask to re-propose.
     @Optional() private readonly planApproval?: PlanApprovalService,
     @Optional() private readonly confirmations?: VexiConfirmationService,
+    @Optional() private readonly durableSessions?: AgentDurableSessionService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -416,13 +443,13 @@ export class AIChatService {
       (app?.metadata && (app.metadata as any).agent_enabled === true);
 
     let responseContent = '';
+    let execution: AgentExecutionSummary | undefined;
+    let objective: ObjectiveProgress | undefined;
     let tokensUsed = 0;
     // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
     // el cierre persiste byte-idéntico a hoy.
     const vexTurn: VexTurnCollection | null =
-      agentKey === VEX_AGENT_KEY
-        ? { blocks: new Map(), plan: null }
-        : null;
+      agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
     let vexPlan: VexTurnCollection['plan'] = null;
     let vexToolsUsed: Array<{ name: string; args: any; result: string }> = [];
 
@@ -435,19 +462,33 @@ export class AIChatService {
       // duplicate and every `{{placeholder}}` would reach the model verbatim.
       // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
       // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
+      const variables =
+        agentKey === VEX_AGENT_KEY
+          ? await this.buildVexVariables(conversationId)
+          : await this.vexiContext.buildSnapshot();
+      const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const goal = await this.withBlockSelection(
+        dto.content,
+        agentKey,
+        conversationId,
+      );
+      const durableArgs = await this.durableTurnArgs(
+        conversation,
+        agentKey ?? 'vexi',
+        goal,
+        base,
+      );
       const agentResult = await this.aiAgent.runAgent({
-        goal: await this.withBlockSelection(
-          dto.content,
-          agentKey,
-          conversationId,
-        ),
-        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
-        messages: this.buildContextWindow(conversation),
-        variables:
-          agentKey === VEX_AGENT_KEY
-            ? await this.buildVexVariables(conversationId)
-            : await this.vexiContext.buildSnapshot(),
+        goal,
+        ...base,
+        variables,
+        ...durableArgs,
       });
+      // Persisted and returned to the browser: model instructions stripped.
+      execution =
+        agentResult.execution && clientSafeExecution(agentResult.execution);
+      objective =
+        agentResult.objective && clientSafeObjective(agentResult.objective);
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
       vexPlan = agentResult.pending_plan ?? null;
@@ -501,7 +542,15 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: 0,
-        ...(vexMetadata ? { metadata: vexMetadata } : {}),
+        ...(vexMetadata || execution || objective
+          ? {
+              metadata: {
+                ...vexMetadata,
+                ...(execution ? { execution } : {}),
+                ...(objective ? { objective } : {}),
+              } as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
       },
     });
     await this.attachVexTurnBlocks(vexBlockRefs, assistantMessage.id);
@@ -534,6 +583,8 @@ export class AIChatService {
         role: 'assistant',
         content: responseContent,
         tokens_used: assistantMessage.tokens_used,
+        ...(execution ? { execution } : {}),
+        ...(objective ? { objective } : {}),
       },
     };
   }
@@ -578,15 +629,72 @@ export class AIChatService {
    * Observable body runs after the handler returned and the interceptor's
    * AsyncLocalStorage scope has already been torn down.
    *
-   * `signal` is aborted when the client disconnects. It stops the synthesis queue
-   * from spending on a turn nobody is listening to; it deliberately does **not**
-   * interrupt the generator, because leaving the loop early would skip the writes
-   * that persist the assistant reply and its tool trace.
+   * OFF: disconnect stops speech only, preserving the legacy drain.
+   * H ON: disconnect also cancels provider/tools cooperatively. The single
+   * producer still drains to persist checkpoints, receipts and uncertain effects;
+   * reconnect only replays transport and never resumes inference.
    */
   async *sendMessageStream(
     conversationId: number,
     streamId: string,
     signal?: AbortSignal,
+    replay: ChatReplayRequest = {},
+  ): AsyncGenerator<ChatStreamFrame> {
+    // Revalidate owner, tenant, archive and Vex gates on EVERY attach, before
+    // looking up transport frames. A cached frame never retains authorization.
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    if (!context?.store_id || !context.organization_id || !context.user_id)
+      throw new BadRequestException('AI_STREAM_CONTEXT_REQUIRED');
+    const conversation = await this.getConversation(conversationId);
+    if (conversation.status === 'archived')
+      throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
+    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+    for await (const frame of this.streamReplay.open(
+      streamId,
+      {
+        store_id: context.store_id,
+        organization_id: context.organization_id,
+        user_id: context.user_id,
+        conversation_id: conversationId,
+      },
+      replay,
+      (runSignal, checkpoint) =>
+        this.executeMessageStream(
+          conversationId,
+          streamId,
+          runSignal,
+          checkpoint,
+        ),
+      signal,
+    )) {
+      // Another tab may already have consumed/rejected this approval. A cached
+      // consent card is NOT current authority. Keep sequence continuity but
+      // force a canonical transcript/objective read, without replaying a token.
+      let cachedApproval = frame.type === 'plan_approval';
+      if (
+        frame.type === 'tool_result' &&
+        frame.tool?.summary?.includes('confirmation_token')
+      )
+        cachedApproval = true;
+      yield replay.after_sequence !== undefined && cachedApproval
+        ? {
+            type: 'progress',
+            content:
+              'Reconecté la conversación. Consulta el estado actual de la propuesta antes de continuar.',
+            replay: frame.replay,
+            reconcile_required: true,
+          }
+        : frame;
+    }
+  }
+
+  private async *executeMessageStream(
+    conversationId: number,
+    streamId: string,
+    signal?: AbortSignal,
+    checkpoint?: (
+      read: () => { objective_id: string; checkpoint: number },
+    ) => void,
   ): AsyncGenerator<ChatStreamFrame> {
     // Every timing mark is relative to this. Taken before the first await so it
     // includes the intent lookup the browser is already waiting through.
@@ -623,9 +731,14 @@ export class AIChatService {
     // cotización recién creada). Esos turnos sí corren el loop.
     let continuationPlan: AgentPlan | null = null;
     if (intent.continuation) {
+      if (intent.continuation === 'rejected')
+        await this.planState.rejectPendingObjective(conversationId);
       continuationPlan = await this.planState.getActive(conversationId);
+      const durableContinuation =
+        await this.durableSessions?.canContinue(conversationId);
       if (
         !continuationPlan &&
+        !durableContinuation &&
         this.turnAgentKey(conversation) !== VEX_AGENT_KEY
       ) {
         yield { type: 'done' };
@@ -736,7 +849,9 @@ export class AIChatService {
 
     let fullContent = '';
     let totalTokens = 0;
-    let toolsUsed: Array<{ name: string; args: any; result: string }> = [];
+    let toolsUsed: AgentResult['tools_used'] = [];
+    let execution: AgentExecutionSummary | undefined;
+    let objective: ObjectiveProgress | undefined;
     /**
      * La ruta que quedó propuesta y sin aplicar, para marcarla en el mensaje
      * que se persiste. El turno siguiente la lee con `findPendingProposal` y
@@ -773,45 +888,53 @@ export class AIChatService {
       const storedPlan = activePlan
         ? null
         : await this.planState.get(conversationId);
+      const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const variables =
+        agentKey === VEX_AGENT_KEY
+          ? await this.buildVexVariables(conversationId, intent.attachment_ids)
+          : await this.vexiContext.buildSnapshot({
+              uiContext: intent.ui_context,
+              attachmentIds: intent.attachment_ids,
+            });
+      const durableArgs = await this.durableTurnArgs(
+        conversation,
+        agentKey ?? 'vexi',
+        goal,
+        base,
+        {
+          speak: intent.speak,
+          continuation: !!intent.continuation,
+        },
+      );
+      if (durableArgs.durable) {
+        const session = durableArgs.durable;
+        checkpoint?.(() => ({
+          objective_id: session.objective_id,
+          checkpoint: session.lease.version,
+        }));
+      }
       const agentStream = this.aiAgent.runAgentStream({
         goal,
-        ...this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn),
+        ...base,
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
         // hilo sigue por escrito en el turno siguiente, vuelve a prosa sola.
-        messages: this.buildContextWindow(
-          conversation,
-          undefined,
-          intent.speak,
-          {
-            active: activePlan,
-            paused: storedPlan?.status === 'paused' ? storedPlan : null,
-            isContinuation: !!intent.continuation,
-          },
-        ),
         // Vex no navega pantallas (`denied_tools` le quita las `ui_*`), así
         // que su snapshot no lleva `ui_context`: además de inútil, es
         // material no confiable compuesto en el navegador — en su lugar trae
         // `vex_blocks`, los bloques vivos de la conversación. Los adjuntos
         // sí viajan: Vex también lee documentos del turno.
-        variables:
-          agentKey === VEX_AGENT_KEY
-            ? await this.buildVexVariables(
-                conversationId,
-                intent.attachment_ids,
-              )
-            : await this.vexiContext.buildSnapshot({
-                uiContext: intent.ui_context,
-                attachmentIds: intent.attachment_ids,
-              }),
+        variables,
         // What lets the loop wait for the browser instead of assuming its UI
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
         stream_id: streamId,
-        plan: this.planState.createHook(conversation.id),
         shouldAbort: async () =>
+          signal?.aborted === true ||
           !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
+        ...{ signal },
+        ...durableArgs,
       });
 
       let step = await agentStream.next();
@@ -852,6 +975,25 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
+      // Persisted, replayed and sent in `done`: model instructions stripped.
+      execution = result.execution && clientSafeExecution(result.execution);
+      objective = result.objective && clientSafeObjective(result.objective);
+      if (!doneChunk) {
+        // H can be enabled independently of D0/D1. The legacy loop sometimes
+        // returns on cancellation without yielding done; do not leave clients
+        // reconnecting forever after persistence. No invented usage/success.
+        doneChunk = {
+          type: 'done',
+          ...(execution ? { execution } : {}),
+          ...(objective ? { objective } : {}),
+        };
+      }
+      if (result.aborted && !fullContent) {
+        // Cancelling transport is not rollback. Persist an honest terminal turn
+        // even when the durable wrapper suppressed all buffered model prose.
+        fullContent = USER_NOTICES.stopped;
+        yield { type: 'text', content: fullContent };
+      }
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
       // sobre lo capturado por frames si ambos existen.
       vexPlan = result.pending_plan ?? null;
@@ -869,9 +1011,7 @@ export class AIChatService {
         // is left staring at an empty bubble with no idea whether Vexi is
         // still thinking. Whatever the agent returned goes out as text, and if
         // even that is empty the silence is named rather than shipped.
-        fullContent =
-          result.content?.trim() ||
-          'No logré completar eso. Vuelve a pedírmelo con otras palabras, o dime el nombre exacto del registro sobre el que quieres que trabaje.';
+        fullContent = result.content?.trim() || USER_NOTICES.no_answer;
         yield { type: 'text', content: fullContent };
         // Spoken too, fallback included. A turn that only ran tools already got
         // its human filler at the top; leaving the failure text unspoken as well
@@ -913,11 +1053,15 @@ export class AIChatService {
         intent.speak,
       );
 
-      for await (const chunk of this.aiEngine.runStream(
+      const completionStream = this.aiEngine.runStream(
         appKey,
         undefined,
         contextMessages,
-      )) {
+        {
+          signal,
+        },
+      );
+      for await (const chunk of completionStream) {
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content;
           voice?.push(chunk.content);
@@ -964,7 +1108,13 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
     );
     let assistantMessage: { id: number } | null = null;
-    if (fullContent || vexMetadata) {
+    if (
+      fullContent ||
+      vexMetadata ||
+      execution ||
+      objective ||
+      toolsUsed.length > 0
+    ) {
       // La propuesta no entra en `tool_calls`: la rama de confirmación del
       // bucle sale por `continue` sin registrarla como herramienta usada.
       // Sin esta marca, el turno siguiente no tiene forma de saber que hay
@@ -972,8 +1122,11 @@ export class AIChatService {
       // propuesta idéntica en vez de señalar la que ya está en pantalla.
       // Convive con los bloques/plan de Vex en el mismo objeto.
       const metadata = {
+        ...{ stream_id: streamId },
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
+        ...(execution ? { execution } : {}),
+        ...(objective ? { objective } : {}),
         ...(intent.continuation
           ? {
               continuation: intent.continuation,
@@ -996,11 +1149,18 @@ export class AIChatService {
             ? (toolsUsed.map((tool) => ({
                 name: tool.name,
                 arguments: tool.args,
-                result: tool.result.slice(0, PERSISTED_TOOL_RESULT_CHARS),
-              })) as Prisma.InputJsonValue)
+                // H has already persisted/compacted the recoverable payload in
+                // the loop. A string prefix here would corrupt JSON and discard
+                // artifact refs when the conversation is reopened. No sink means
+                // keeping full data, not inventing a complete truncated result.
+                result: tool.result,
+                ...(tool.execution
+                  ? { execution: clientSafeReceipt(tool.execution) }
+                  : {}),
+              })) as unknown as Prisma.InputJsonValue)
             : undefined,
           ...(Object.keys(metadata).length > 0
-            ? { metadata: metadata as Prisma.InputJsonValue }
+            ? { metadata: metadata as unknown as Prisma.InputJsonValue }
             : {}),
         },
       });
@@ -1017,9 +1177,11 @@ export class AIChatService {
     // que el frontend enlace la continuación (el cliente cierra el SSE al
     // recibirlo, así que nada que viaje después se vería).
     if (doneChunk) {
+      // Client boundary: model guidance never rides on the final frame.
+      const safeDone = clientSafeChunk(doneChunk);
       yield assistantMessage
-        ? { ...doneChunk, message_id: assistantMessage.id }
-        : doneChunk;
+        ? { ...safeDone, message_id: assistantMessage.id }
+        : safeDone;
     }
 
     // Auto-generate title if first message
@@ -1120,7 +1282,7 @@ export class AIChatService {
     // `conversation` propia colisionaría con la inyectada.
     const { count } = await this.prisma.ai_messages.updateMany({
       where: { id: message.id, conversation_id: conversationId },
-      data: { metadata: metadata as Prisma.InputJsonValue },
+      data: { metadata: metadata as unknown as Prisma.InputJsonValue },
     });
     return count > 0;
   }
@@ -1363,9 +1525,8 @@ export class AIChatService {
     conversationId: number,
   ): Promise<string> {
     if (agentKey !== VEX_AGENT_KEY || !this.vexBlocks) return goal;
-    let selections: Awaited<
-      ReturnType<VexBlockService['recentSelections']>
-    > = [];
+    let selections: Awaited<ReturnType<VexBlockService['recentSelections']>> =
+      [];
     try {
       selections = await this.vexBlocks.recentSelections(conversationId);
     } catch (error) {
@@ -1392,6 +1553,89 @@ export class AIChatService {
       `Si se refiere a "esas", "las seleccionadas" o "lo marcado", usa estos datos, ` +
       `no los adivines ni pidas que los repita.]\n${notes.join('\n')}`
     );
+  }
+
+  /** The same durable plan/context builder for POST and SSE, never Vex hooks in Vexi. */
+  private async durableTurnArgs(
+    conversation: ConversationWithMessages,
+    agentKey: string,
+    goal: string,
+    base: { plan_approval?: AgentPlanApprovalHook },
+    options: { speak?: boolean; continuation?: boolean } = {},
+  ) {
+    if (!this.durableSessions)
+      throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
+    if (agentKey === VEX_AGENT_KEY && !base.plan_approval)
+      throw new BadRequestException(
+        'No está disponible el circuito de aprobación de este agente.',
+      );
+    const session = await this.durableSessions.open(
+      conversation.id,
+      agentKey,
+      goal,
+      options,
+    );
+    if (!session) throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
+    try {
+      const hook = this.planState.createHook(conversation.id, session);
+      const active = await hook.snapshot();
+      const messages = this.buildContextWindow(
+        conversation,
+        undefined,
+        options.speak,
+        {
+          active,
+          paused:
+            session.objective.plan?.status === 'paused'
+              ? session.objective.plan
+              : null,
+          isContinuation: !!options.continuation,
+        },
+      );
+      if (!active && !options.continuation) {
+        const resume = resumeReferenceBlock(conversation.messages, goal);
+        if (resume) messages.push({ role: 'system', content: resume });
+      }
+      // Durable structured facts take precedence; transcript is a bounded secondary window.
+      if (session.context)
+        messages.unshift({ role: 'system', content: session.context });
+      const approval = base.plan_approval;
+      return {
+        durable: session,
+        objective_id: session.objective_id,
+        turn_id: session.turn_id,
+        conversation_id: conversation.id,
+        plan: hook,
+        messages,
+        // `messages` viaja como `{ role, content }`: el agente no puede sacar de
+        // ahí qué tools se usaron, y el seguimiento («y con tarjeta») perdía la
+        // del turno anterior (E2E g18). Se calculan de las filas persistidas,
+        // con la misma ventana de turnos que usa el agente.
+        recent_tool_names: recentStoredToolNames(conversation.messages),
+        ...(approval
+          ? {
+              plan_approval: {
+                ...approval,
+                saveProposedSteps: async (
+                  steps: Parameters<
+                    NonNullable<AgentPlanApprovalHook['saveProposedSteps']>
+                  >[0],
+                ) => {
+                  await this.planState.setStepHashes(
+                    conversation.id,
+                    steps,
+                    approval.plan_id,
+                    session,
+                  );
+                },
+              },
+            }
+          : {}),
+      };
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
   }
 
   /**
@@ -1595,13 +1839,15 @@ export class AIChatService {
     conversationId: number,
     attachmentIds?: string[],
   ): Promise<Record<string, string>> {
-    let vexBlocks: Array<{
-      block_id: string;
-      kind: string;
-      version: number;
-      title?: string;
-      rows?: number;
-    }> | undefined;
+    let vexBlocks:
+      | Array<{
+          block_id: string;
+          kind: string;
+          version: number;
+          title?: string;
+          rows?: number;
+        }>
+      | undefined;
     if (this.vexBlocks) {
       try {
         const rows = await this.vexBlocks.listByConversation(conversationId);
@@ -1613,7 +1859,10 @@ export class AIChatService {
             ? { title: row.spec.title as string }
             : {}),
           ...(Array.isArray((row.data as Record<string, any>)?.rows)
-            ? { rows: ((row.data as Record<string, any>).rows as unknown[]).length }
+            ? {
+                rows: ((row.data as Record<string, any>).rows as unknown[])
+                  .length,
+              }
             : {}),
         }));
       } catch (error) {
@@ -1646,11 +1895,7 @@ export class AIChatService {
       });
     }
     const approval = chunk.plan_approval;
-    if (
-      chunk.type === 'plan_approval' &&
-      approval?.plan_id &&
-      approval.steps
-    ) {
+    if (chunk.type === 'plan_approval' && approval?.plan_id && approval.steps) {
       vexTurn.plan = { plan_id: approval.plan_id, steps: approval.steps };
     }
   }
@@ -1781,7 +2026,11 @@ export class AIChatService {
               status: 'proposed',
               steps: plan.steps.map((raw, index) => {
                 const step = (raw ?? {}) as Record<string, any>;
-                return { ...step, order: step.order ?? index + 1, status: 'pending' };
+                return {
+                  ...step,
+                  order: step.order ?? index + 1,
+                  status: 'pending',
+                };
               }),
             },
           }

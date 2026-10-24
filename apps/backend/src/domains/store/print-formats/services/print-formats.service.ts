@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { isAlwaysActiveFormat } from '../lib/always-active-formats';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
@@ -87,6 +88,29 @@ function isEmptyDefinitionPayload(payload: unknown): boolean {
  * newer compositor may add a section kind the adapter hasn't been taught
  * about yet, and persisting it should not block.
  */
+/**
+ * Normaliza el papel de rollo/hoja antes de validar y guardar: un formato
+ * `thermal_*` es SIEMPRE rollo (sin orientación); una hoja conocida NUNCA es
+ * rollo. No toca filas existentes en BD: sólo lo que entra por guardado.
+ * Opera sobre el payload (parche parcial o definición completa).
+ */
+function normalizeRollPaper<T extends Record<string, any> | null | undefined>(
+  payload: T,
+): T {
+  const paper = payload?.paper;
+  if (!paper || typeof paper !== 'object') return payload;
+  const format = paper.format;
+  if (typeof format !== 'string') return payload;
+  if (format.startsWith('thermal_')) {
+    const { orientation: _orientation, ...rest } = paper;
+    return { ...payload, paper: { ...rest, is_roll: true } } as T;
+  }
+  if (format === 'letter' || format === 'a4' || format === 'half_letter') {
+    return { ...payload, paper: { ...paper, is_roll: false } } as T;
+  }
+  return payload;
+}
+
 function assertSectionsWithinAdapterRegions(
   formatType: print_format_type_enum,
   payload: Record<string, any> | null | undefined,
@@ -137,6 +161,7 @@ export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
   'withholding_practiced',
   'withholding_suffered',
   'withholding_employee_certificate',
+  'cash_session_close',
 ];
 
 export const FORMAT_TYPE_METADATA: Record<
@@ -155,10 +180,11 @@ export const FORMAT_TYPE_METADATA: Record<
   fiscal_credit_note: { name: 'Nota Crédito Electrónica', category: 'Facturación', icon: 'file-minus', engine: 'html' },
   kitchen_ticket: { name: 'Ticket de Cocina (KDS)', category: 'Restaurante', icon: 'utensils', engine: 'html' },
   dispatch_ticket: { name: 'Tiquete de Despacho', category: 'Logística', icon: 'package', engine: 'html' },
-  dispatch_route: { name: 'Planilla de Ruta (DSD)', category: 'Logística', icon: 'route', engine: 'html' },
+  dispatch_route: { name: 'Ruta (DSD)', category: 'Logística', icon: 'route', engine: 'html' },
   withholding_practiced: { name: 'Certificado Retención Practicada', category: 'Tributario', icon: 'file-minus', engine: 'html' },
   withholding_suffered: { name: 'Certificado Retención Sufrida', category: 'Tributario', icon: 'file-plus', engine: 'html' },
   withholding_employee_certificate: { name: 'Certificado Laboral Empleado', category: 'Tributario', icon: 'file-badge', engine: 'html' },
+  cash_session_close: { name: 'Cierre de Caja', category: 'Ventas POS', icon: 'wallet', engine: 'html' },
 };
 
 @Injectable()
@@ -200,7 +226,8 @@ export class PrintFormatsService {
         icon: meta.icon,
         engine: meta.engine,
         is_configured: Boolean(cfg),
-        is_active: cfg?.is_active ?? true,
+        is_active: isAlwaysActiveFormat(type) || (cfg?.is_active ?? true),
+        always_active: isAlwaysActiveFormat(type),
         gateway_enabled: cfg?.gateway_enabled ?? false,
         template_name: cfg?.template?.name || (cfg?.overrides ? 'Personalizado (Overrides)' : 'Por defecto del sistema'),
         updated_at: cfg?.updated_at || null,
@@ -226,6 +253,7 @@ export class PrintFormatsService {
       name: meta.name,
       category: meta.category,
       is_active: effective.is_active,
+      always_active: isAlwaysActiveFormat(formatType),
       gateway_enabled: effective.gateway_enabled,
       is_customized: effective.is_customized,
       template_id: storeConfig?.template_id || null,
@@ -245,6 +273,16 @@ export class PrintFormatsService {
     formatType: print_format_type_enum,
     dto: UpdatePrintFormatConfigDto,
   ) {
+    // Formato siempre activo (p. ej. `cash_session_close`): desactivarlo se
+    // rechaza de forma explícita; cualquier otro payload persiste `true`.
+    if (isAlwaysActiveFormat(formatType) && dto.is_active === false) {
+      throw new VendixHttpException(
+        ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+        'El formato Cierre de Caja no se puede desactivar',
+      );
+    }
+    const alwaysActive = isAlwaysActiveFormat(formatType);
+
     // [print-editor-dsk] — Normalización + validación INCONDICIONAL (ver
     // `shouldValidateV2Payload` arriba para el porqué del cambio). `null` o
     // `{}` siguen siendo el no-op legítimo de "limpiar personalización":
@@ -261,7 +299,9 @@ export class PrintFormatsService {
       | undefined;
 
     if (rawOverrides !== undefined && !overridesIsNoop) {
-      normalizedOverrides = normalizeDefinition(rawOverrides) as Record<string, any>;
+      normalizedOverrides = normalizeRollPaper(
+        normalizeDefinition(rawOverrides) as Record<string, any>,
+      );
 
       const result = validatePrintFormatDefinition(normalizedOverrides);
       if (!result.valid) {
@@ -298,7 +338,7 @@ export class PrintFormatsService {
       result = await this.storePrisma.store_print_format_configs.update({
         where: { id: existing.id },
         data: {
-          is_active: dto.is_active !== undefined ? dto.is_active : existing.is_active,
+          is_active: alwaysActive ? true : dto.is_active !== undefined ? dto.is_active : existing.is_active,
           gateway_enabled: dto.gateway_enabled !== undefined ? dto.gateway_enabled : existing.gateway_enabled,
           template_id: dto.template_id !== undefined ? dto.template_id : existing.template_id,
           overrides: rawOverrides !== undefined ? (normalizedOverrides as any) : existing.overrides,
@@ -312,7 +352,7 @@ export class PrintFormatsService {
           store_id: storeId,
           organization_id: organizationId,
           format_type: formatType,
-          is_active: dto.is_active ?? true,
+          is_active: alwaysActive ? true : dto.is_active ?? true,
           gateway_enabled: dto.gateway_enabled ?? true,
           template_id: dto.template_id || null,
           overrides: (normalizedOverrides as any) || null,
@@ -416,7 +456,9 @@ export class PrintFormatsService {
     // parche parcial como `overrides`), así que no hay caso "no-op vacío"
     // equivalente al de `updateStoreFormat`: un `definition` sin `paper`
     // debe fallar, no pasarse en silencio.
-    const normalizedDefinition = normalizeDefinition(dto.definition) as Record<string, any>;
+    const normalizedDefinition = normalizeRollPaper(
+      normalizeDefinition(dto.definition) as Record<string, any>,
+    );
 
     const result = validatePrintFormatDefinition(normalizedDefinition);
     if (!result.valid) {

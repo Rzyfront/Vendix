@@ -1,25 +1,40 @@
 import { Test } from '@nestjs/testing';
 import { OrdersBulkService } from './orders-bulk.service';
+import { OrdersService } from './orders.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import { createHash } from 'crypto';
 
 describe('OrdersBulkService', () => {
   let service: OrdersBulkService;
-  let orderFlowService: { forceOrderState: jest.Mock };
+  let orderFlowService: {
+    forceOrderState: jest.Mock;
+    finishCashSessionOrders: jest.Mock;
+    fastTrackOrder: jest.Mock;
+  };
   let dispatchNotesService: { createFromOrdersBatch: jest.Mock };
   let dispatchRoutesService: { addStops: jest.Mock };
   let prisma: {
-    orders: { findMany: jest.Mock };
+    orders: { findMany: jest.Mock; findFirst: jest.Mock };
+    cash_register_sessions: { findFirst: jest.Mock };
     store_settings: { findUnique: jest.Mock };
+  };
+  let ordersServiceMock: { assignShipping: jest.Mock };
+  let stockValidator: {
+    resolveInventoryPolicy: jest.Mock;
+    assertLinesAvailable: jest.Mock;
   };
 
   beforeEach(async () => {
     orderFlowService = {
       forceOrderState: jest.fn(),
+      finishCashSessionOrders: jest.fn(),
+      fastTrackOrder: jest.fn(),
     };
     dispatchNotesService = {
       createFromOrdersBatch: jest.fn(),
@@ -28,8 +43,18 @@ describe('OrdersBulkService', () => {
       addStops: jest.fn(),
     };
     prisma = {
-      orders: { findMany: jest.fn() },
+      orders: { findMany: jest.fn(), findFirst: jest.fn() },
+      cash_register_sessions: { findFirst: jest.fn() },
       store_settings: { findUnique: jest.fn() },
+    };
+    ordersServiceMock = {
+      assignShipping: jest.fn().mockResolvedValue(undefined),
+    };
+    stockValidator = {
+      resolveInventoryPolicy: jest
+        .fn()
+        .mockResolvedValue({ allowOversell: false }),
+      assertLinesAvailable: jest.fn().mockResolvedValue([]),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -37,8 +62,10 @@ describe('OrdersBulkService', () => {
         OrdersBulkService,
         { provide: StorePrismaService, useValue: prisma },
         { provide: OrderFlowService, useValue: orderFlowService },
+        { provide: OrdersService, useValue: ordersServiceMock },
         { provide: DispatchNotesService, useValue: dispatchNotesService },
         { provide: DispatchRoutesService, useValue: dispatchRoutesService },
+        { provide: StockValidatorService, useValue: stockValidator },
       ],
     }).compile();
 
@@ -96,6 +123,302 @@ describe('OrdersBulkService', () => {
     });
   });
 
+  describe('previewCashSessionFinish', () => {
+    const makeOrder = (overrides: Record<string, unknown> = {}) => ({
+      id: 12,
+      store_id: 3,
+      origin_cash_session_id: 8,
+      order_number: 'POS-12',
+      state: 'processing',
+      remaining_balance: 0,
+      grand_total: 20,
+      payment_form: '1',
+      updated_at: new Date('2026-10-07T10:00:00.000Z'),
+      shipping_method_id: null,
+      delivery_type: 'direct_delivery',
+      dispatch_fulfillment: 'none',
+      payments: [{ state: 'succeeded', amount: 20 }],
+      stores: { industries: [] },
+      order_items: [],
+      ...overrides,
+    });
+    const fingerprintFor = (row: ReturnType<typeof makeOrder>) =>
+      createHash('sha256')
+        .update(
+          `${row.id}:${row.state}:${Number(row.remaining_balance).toFixed(2)}:${row.updated_at?.toISOString() ?? ''}`,
+        )
+        .digest('hex');
+
+    beforeEach(() => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 3 } as any);
+      prisma.cash_register_sessions.findFirst.mockResolvedValue({
+        id: 8,
+        store_id: 3,
+      });
+    });
+
+    it('previews only the same-session pending order and fingerprints the result without mutation', async () => {
+      const row = makeOrder();
+      prisma.orders.findMany.mockResolvedValue([row]);
+
+      const result = await service.previewCashSessionFinish({
+        session_id: 8,
+        orders: [
+          {
+            id: row.id,
+            version: row.updated_at!.toISOString(),
+            fingerprint: fingerprintFor(row),
+          },
+        ],
+      } as any);
+
+      expect(prisma.orders.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: 3,
+            origin_cash_session_id: 8,
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        session_id: 8,
+        total: 1,
+        eligible: 1,
+        ineligible: 0,
+        items: [
+          {
+            id: 12,
+            current_state: 'processing',
+            target_state: 'finished',
+            eligible: true,
+            reasons: [],
+          },
+        ],
+      });
+      expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.eligible_fingerprint).toBe(result.fingerprint);
+      expect(orderFlowService.forceOrderState).not.toHaveBeenCalled();
+    });
+
+    it('does not require a delivery confirmation for a dine-in table order', async () => {
+      const row = makeOrder({
+        delivery_type: 'dine_in',
+        shipping_method_id: 14,
+      });
+      prisma.orders.findMany.mockResolvedValue([row]);
+
+      const result = await service.previewCashSessionFinish({
+        session_id: 8,
+        orders: [
+          {
+            id: row.id,
+            version: row.updated_at!.toISOString(),
+            fingerprint: fingerprintFor(row),
+          },
+        ],
+      } as any);
+
+      expect(result.items[0].eligible).toBe(true);
+      expect(result.items[0].reasons).not.toContain(
+        'El envío asignado aún no está confirmado como entregado.',
+      );
+    });
+
+    it('still requires delivery confirmation for a home-delivery order with a shipping method', async () => {
+      const row = makeOrder({
+        delivery_type: 'home_delivery',
+        shipping_method_id: 14,
+      });
+      prisma.orders.findMany.mockResolvedValue([row]);
+
+      const result = await service.previewCashSessionFinish({
+        session_id: 8,
+        orders: [
+          {
+            id: row.id,
+            version: row.updated_at!.toISOString(),
+            fingerprint: fingerprintFor(row),
+          },
+        ],
+      } as any);
+
+      expect(result.items[0].eligible).toBe(false);
+      expect(result.items[0].reasons).toContain(
+        'El envío asignado aún no está confirmado como entregado.',
+      );
+    });
+
+    it('rejects stale versions and ids outside the authoritative session set', async () => {
+      const row = makeOrder();
+      prisma.orders.findMany.mockResolvedValue([row]);
+      await expect(
+        service.previewCashSessionFinish({
+          session_id: 8,
+          orders: [{ id: 12, version: 'stale', fingerprint: 'stale' }],
+        } as any),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+
+      prisma.orders.findMany.mockResolvedValue([]);
+      await expect(
+        service.previewCashSessionFinish({
+          session_id: 8,
+          orders: [{ id: 99, version: 'v1', fingerprint: 'x'.repeat(64) }],
+        } as any),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('marks unpaid, noncanonical, kitchen-blocked, and serial-unverifiable rows ineligible', async () => {
+      const row = makeOrder({
+        state: 'cancelled',
+        remaining_balance: 8,
+        payments: [],
+        order_items: [
+          {
+            id: 1,
+            product_id: 44,
+            product_variant_id: null,
+            quantity: 1,
+            product_name: 'Plato',
+            cancelled_at: null,
+            skip_kds: false,
+            inventory_committed: false,
+            products: {
+              product_type: 'physical',
+              track_inventory: true,
+              requires_serial_numbers: true,
+            },
+            product_variants: null,
+            kitchen_ticket_items: [{ status: 'pending' }],
+          },
+        ],
+      });
+      prisma.orders.findMany.mockResolvedValue([row]);
+      const result = await service.previewCashSessionFinish({
+        session_id: 8,
+        orders: [
+          {
+            id: row.id,
+            version: row.updated_at!.toISOString(),
+            fingerprint: fingerprintFor(row),
+          },
+        ],
+      } as any);
+
+      expect(result.items[0].eligible).toBe(false);
+      expect(result.items[0].reasons).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('transición canónica'),
+          expect.stringContaining('Saldo pendiente'),
+          expect.stringContaining('cocina'),
+          expect.stringContaining('seriales'),
+        ]),
+      );
+      expect(result.eligible_fingerprint).toBe(
+        createHash('sha256').update('8:').digest('hex'),
+      );
+    });
+  });
+
+  describe('processCashSessionOrder', () => {
+    it('requires an open tracked session and delegates the order to canonical fast-track', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 3 } as any);
+      prisma.cash_register_sessions.findFirst.mockResolvedValue({ id: 8 });
+      prisma.orders.findFirst.mockResolvedValue({
+        id: 12,
+        state: 'processing',
+        updated_at: new Date('2026-10-08T12:00:00.000Z'),
+      });
+      orderFlowService.fastTrackOrder.mockResolvedValue({
+        id: 12,
+        state: 'finished',
+      });
+      const flow = { payment: { amount_received: 100 } };
+      const shipping = { shipping_method_id: 2, shipping_cost: 5000 };
+
+      await expect(
+        service.processCashSessionOrder({
+          session_id: 8,
+          order_id: 12,
+          expected_version: '2026-10-08T12:00:00.000Z',
+          flow,
+          shipping,
+        } as any),
+      ).resolves.toEqual({ id: 12, state: 'finished' });
+      expect(prisma.orders.findFirst).toHaveBeenCalledWith({
+        where: { id: 12, store_id: 3, origin_cash_session_id: 8 },
+        select: { id: true, updated_at: true, state: true },
+      });
+      expect(ordersServiceMock.assignShipping).toHaveBeenCalledWith(
+        12,
+        shipping,
+      );
+      expect(orderFlowService.fastTrackOrder).toHaveBeenCalledWith(12, flow);
+    });
+
+    it('rejects a stale order version before executing any flow step', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 3 } as any);
+      prisma.cash_register_sessions.findFirst.mockResolvedValue({ id: 8 });
+      prisma.orders.findFirst.mockResolvedValue({
+        id: 12,
+        state: 'processing',
+        updated_at: new Date('2026-10-08T12:00:00.000Z'),
+      });
+      await expect(
+        service.processCashSessionOrder({
+          session_id: 8,
+          order_id: 12,
+          expected_version: 'old-version',
+          flow: {},
+        } as any),
+      ).rejects.toMatchObject({
+        errorCode: 'ORD_CASH_SESSION_ORDER_STALE_001',
+      });
+      expect(orderFlowService.fastTrackOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('finishCashSessionOrders', () => {
+    it('delegates the full selection atomically with the authenticated store and actor', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 3,
+        user_id: 7,
+      } as any);
+      orderFlowService.finishCashSessionOrders.mockResolvedValue({
+        finished: 1,
+        order_ids: [12],
+        idempotent: false,
+      });
+      const dto = {
+        session_id: 8,
+        orders: [{ id: 12, version: 'v1', fingerprint: 'a'.repeat(64) }],
+        fingerprint: 'b'.repeat(64),
+        reason: 'Cierre de caja',
+      };
+
+      await expect(
+        service.finishCashSessionOrders(dto as any),
+      ).resolves.toMatchObject({
+        finished: 1,
+        idempotent: false,
+      });
+      expect(orderFlowService.finishCashSessionOrders).toHaveBeenCalledWith({
+        storeId: 3,
+        sessionId: 8,
+        selected: dto.orders,
+        expectedFingerprint: dto.fingerprint,
+        reason: dto.reason,
+        actorId: 7,
+      });
+      expect(orderFlowService.forceOrderState).not.toHaveBeenCalled();
+    });
+  });
+
   describe('bulkAssignRoute', () => {
     it('maps created notes to ok and calls addStops once with all note ids', async () => {
       dispatchNotesService.createFromOrdersBatch.mockResolvedValue({
@@ -129,10 +452,7 @@ describe('OrdersBulkService', () => {
       expect(dispatchRoutesService.addStops).toHaveBeenCalledWith(
         7,
         expect.objectContaining({
-          stops: [
-            { dispatch_note_id: 501 },
-            { dispatch_note_id: 502 },
-          ],
+          stops: [{ dispatch_note_id: 501 }, { dispatch_note_id: 502 }],
         }),
       );
 
@@ -316,9 +636,7 @@ describe('OrdersBulkService', () => {
       // El NOMBRE del método de pago no está en `gateway_response`: el cobro
       // POS guarda el método como FK. Sin esta relación el tiquete imprime
       // "Método de pago: N/A" aunque `payments` esté incluido.
-      expect(
-        args.include.payments.select.store_payment_method,
-      ).toBeDefined();
+      expect(args.include.payments.select.store_payment_method).toBeDefined();
 
       // El pie afirma "validada por la DIAN": solo `accepted` lo respalda, y
       // solo la factura de la orden (las de cuenta de una division financiera

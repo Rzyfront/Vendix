@@ -766,11 +766,17 @@ export class ProductsService {
     sessionId: string,
     offset: number,
     limit: number,
+    initialLoadAck?: boolean,
   ): Observable<BulkProductUploadPage> {
     return this.http
       .post<
         ApiResponse<BulkProductUploadPage>
-      >(`${this.apiUrl}/store/products/bulk/upload-session`, { session_id: sessionId, offset, limit })
+      >(`${this.apiUrl}/store/products/bulk/upload-session`, {
+        session_id: sessionId,
+        offset,
+        limit,
+        ...(initialLoadAck ? { initial_load_ack: true } : {}),
+      })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

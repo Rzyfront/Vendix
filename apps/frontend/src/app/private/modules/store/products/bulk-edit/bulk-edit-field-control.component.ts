@@ -61,6 +61,7 @@ import {
 import { describeBulkEditIndustryRequirement } from './bulk-editable-fields.constant';
 import type { BulkEditableField } from './bulk-edit.interface';
 import type { TaxCategory } from '../interfaces';
+import { AccountCodeSelectComponent } from '../components/account-code-select.component';
 
 @Component({
   selector: 'app-bulk-edit-field-control',
@@ -76,6 +77,7 @@ import type { TaxCategory } from '../interfaces';
     TextareaComponent,
     SettingToggleComponent,
     InputButtonsComponent,
+    AccountCodeSelectComponent,
   ],
   templateUrl: './bulk-edit-field-control.component.html',
 })

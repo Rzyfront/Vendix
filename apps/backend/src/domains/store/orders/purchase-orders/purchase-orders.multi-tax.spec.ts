@@ -762,9 +762,12 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
       },
       purchase_order_items: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({}),
+        createManyAndReturn: jest.fn().mockResolvedValue([{ id: 1 }]),
       },
     };
+    (tx.purchase_order_item_taxes as any).createMany = jest
+      .fn()
+      .mockResolvedValue({ count: 0 });
     jest
       .spyOn(service as any, 'assertNoBaseLineOnVariantProduct')
       .mockResolvedValue(undefined);

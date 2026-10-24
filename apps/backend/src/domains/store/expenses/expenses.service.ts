@@ -10,6 +10,11 @@ import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveLocalDateOnlyRange,
+  resolveStoreTimezone,
+} from '../../../common/utils/store-timezone.util';
 
 @Injectable()
 export class ExpensesService {
@@ -21,6 +26,37 @@ export class ExpensesService {
       throw new Error('No request context found');
     }
     return context;
+  }
+
+  /**
+   * Inclusive filter for the DATE-ONLY column `expense_date` (naive midnight).
+   * Accepts a single bound; each bound is a whole local day built with
+   * `resolveLocalDateOnlyRange` (start of day for date_from, 23:59:59.999 for date_to).
+   */
+  private async buildExpenseDateFilter(
+    date_from?: string,
+    date_to?: string,
+  ): Promise<Prisma.DateTimeFilter | undefined> {
+    if (!date_from && !date_to) return undefined;
+
+    const store_id = this.getContext().store_id;
+    const tz = store_id
+      ? await resolveStoreTimezone(this.prisma, store_id)
+      : DEFAULT_STORE_TIMEZONE;
+    const filter: Prisma.DateTimeFilter = {};
+    if (date_from) {
+      filter.gte = resolveLocalDateOnlyRange(
+        { date_from, date_to: date_from },
+        tz,
+      ).startDate;
+    }
+    if (date_to) {
+      filter.lte = resolveLocalDateOnlyRange(
+        { date_from: date_to, date_to },
+        tz,
+      ).endDate;
+    }
+    return filter;
   }
 
   async findAll(query: QueryExpenseDto) {
@@ -38,6 +74,8 @@ export class ExpensesService {
 
     const skip = (page - 1) * limit;
 
+    const expense_date = await this.buildExpenseDateFilter(date_from, date_to);
+
     const where: Prisma.expensesWhereInput = {
       ...(search && {
         OR: [
@@ -47,11 +85,8 @@ export class ExpensesService {
       }),
       ...(state && { state: state as any }),
       ...(category_id && { category_id }),
-      ...(date_from && {
-        expense_date: {
-          gte: new Date(date_from),
-          ...(date_to && { lte: new Date(date_to) }),
-        },
+      ...(expense_date && {
+        expense_date, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
       }),
     };
 
@@ -274,15 +309,12 @@ export class ExpensesService {
     });
   }
 
-  async getExpensesSummary(dateFrom?: Date, dateTo?: Date) {
+  async getExpensesSummary(date_from?: string, date_to?: string) {
+    const expense_date = await this.buildExpenseDateFilter(date_from, date_to);
     const where: Prisma.expensesWhereInput = {
-      ...(dateFrom &&
-        dateTo && {
-          expense_date: {
-            gte: dateFrom,
-            lte: dateTo,
-          },
-        }),
+      ...(expense_date && {
+        expense_date, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
+      }),
     };
 
     // Aggregate totals for approved+paid expenses

@@ -3,8 +3,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -35,6 +37,7 @@ import { StopReleaseModalComponent } from '../../store/planillas-rutas/component
 import { PlanillaCloseModalComponent } from '../../store/planillas-rutas/components/planilla-close-modal/planilla-close-modal.component';
 import { StopDetailModalComponent } from '../../store/planillas-rutas/components/stop-detail-modal/stop-detail-modal.component';
 
+import { RoutePositionPublisherService } from '../../store/planillas-rutas/services/route-position-publisher.service';
 import { ActiveRouteStore } from '../state/active-route.store';
 import { RepartosService } from '../services/repartos.service';
 import type {
@@ -102,6 +105,16 @@ import type { Observable } from 'rxjs';
       ></app-sticky-header>
 
       <div class="p-3 md:p-4 space-y-4">
+        @if (publisher.state() === 'denied') {
+          <p class="text-xs text-text-secondary">
+            Activa el permiso de ubicación para que el equipo vea tu recorrido.
+          </p>
+        } @else if (publisher.state() === 'unavailable') {
+          <p class="text-xs text-text-secondary">
+            Tu dispositivo no permite compartir la ubicación, el equipo no verá
+            tu recorrido.
+          </p>
+        }
         @if (loading() && !route()) {
           <div class="py-12 text-center text-sm text-text-secondary">
             Cargando tu ruta…
@@ -555,6 +568,35 @@ export class RutaActivaPageComponent {
   private readonly router = inject(Router);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
+  readonly publisher = inject(RoutePositionPublisherService);
+
+  /** Última ruta cuya posición publica esta página (para detener al terminar). */
+  private publishedRouteId: number | null = null;
+
+  /**
+   * Comparte la posición mientras la ruta está en curso (dispatched |
+   * in_transit). No se detiene al destruir la página: el repartidor sigue
+   * compartiendo con la app en otra pestaña del shell.
+   */
+  private readonly trackingEffect = effect(() => {
+    const route = this.store.activeRoute();
+    const live =
+      !!route && (route.status === 'dispatched' || route.status === 'in_transit');
+    untracked(() => {
+      if (live && route) {
+        this.publishedRouteId = route.id;
+        this.publisher.start(route.id, (b) =>
+          this.repartosService.publishMyRoutePositions(b),
+        );
+      } else if (
+        this.publishedRouteId != null &&
+        this.publisher.currentRouteId === this.publishedRouteId
+      ) {
+        this.publisher.stop();
+        this.publishedRouteId = null;
+      }
+    });
+  });
 
   // ── Estado leído del store (single source of truth) ────────────────────────
   readonly route = this.store.activeRoute;

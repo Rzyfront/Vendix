@@ -20,6 +20,7 @@ const VALID_ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 export class AdjustmentItemDto {
@@ -49,6 +50,12 @@ export class AdjustmentItemDto {
   @Min(0)
   @Type(() => Number)
   quantity_after: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unit_cost?: number;
 
   @IsOptional()
   @IsString()

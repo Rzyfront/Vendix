@@ -407,6 +407,11 @@ export class AdjustmentDetailModalComponent {
       icon: 'edit',
       colorClass: 'bg-primary/15 text-primary-700 border border-primary/30',
     },
+    initial_load: {
+      label: 'Carga inicial',
+      icon: 'package',
+      colorClass: 'bg-gray-100 text-gray-700 border border-gray-200',
+    },
   };
 
   private reasonLabels: Record<string, string> = {

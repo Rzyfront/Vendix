@@ -1028,12 +1028,17 @@ describe('ProductsService', () => {
       };
 
       // 1ª llamada: el producto a actualizar. 2ª: el chequeo de unicidad del
-      // slug dentro de la tienda (null = libre). 3ª: la relectura de findOne
+      // slug dentro de la tienda (null = libre). 3ª: la lectura de organización
+      // y categoría para el evento de reindexado. 4ª: la relectura de findOne
       // con la que update() cierra. Todas son findFirst — findUnique no puede
       // expresar el filtro de estado ni el scope de tienda.
       mockPrismaService.products.findFirst
         .mockResolvedValueOnce(existingProduct)
         .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          stores: { organization_id: 1 },
+          product_categories: [],
+        })
         .mockResolvedValueOnce(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
@@ -1970,6 +1975,42 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('filtros without_category / without_brand (findAll)', () => {
+    const run = async (extra: Partial<ProductQueryDto>) => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      mockPrismaService.products.findMany.mockClear();
+      await service.findAll({ page: 1, limit: 10, ...extra } as ProductQueryDto);
+      return mockPrismaService.products.findMany.mock.calls[0][0].where;
+    };
+
+    it('without_category=true agrega product_categories none', async () => {
+      const where = await run({ without_category: true });
+      expect(where.product_categories).toEqual({ none: {} });
+      expect(where).not.toHaveProperty('brand_id');
+    });
+
+    it('without_brand=true agrega brand_id null', async () => {
+      const where = await run({ without_brand: true });
+      expect(where.brand_id).toBeNull();
+      expect(where).not.toHaveProperty('product_categories');
+    });
+
+    it('sin los params o con false no aparecen en el where', async () => {
+      for (const extra of [{}, { without_category: false, without_brand: false }]) {
+        const where = await run(extra);
+        expect(where).not.toHaveProperty('product_categories');
+        expect(where).not.toHaveProperty('brand_id');
+      }
+    });
+
+    it('se combina con los filtros existentes', async () => {
+      const where = await run({ without_brand: true, category_id: 5 });
+      expect(where.brand_id).toBeNull();
+      expect(where.product_categories).toEqual({ some: { category_id: 5 } });
+    });
+  });
+
   describe('STATE FILTER PRIORITY (findAll)', () => {
     // Regression: previously, the state filter was set with a ternary
     // (pos_optimized ? ACTIVE : include_inactive ? undefined : { not: ARCHIVED })
@@ -2317,6 +2358,83 @@ describe('ProductsService', () => {
         sku: 'ING-042',
       });
       expect(findOneSpy).not.toHaveBeenCalled();
+    });
+
+    describe('reindexado semántico (product.updated)', () => {
+      it('emite product.updated con el payload tras el commit', async () => {
+        primeUpdatePath({
+          ...existingProduct,
+          description: 'Harina fina',
+        });
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [{ categories: { name: 'Despensa' } }],
+        });
+        mockEventEmitter.emit.mockClear();
+
+        await service.update(existingProduct.id, {
+          is_featured: false,
+        } as UpdateProductDto);
+
+        expect(mockEventEmitter.emit).toHaveBeenCalledWith('product.updated', {
+          store_id: 1,
+          organization_id: 7,
+          product_id: existingProduct.id,
+          name: 'Harina de trigo',
+          description: 'Harina fina',
+          category: 'Despensa',
+        });
+      });
+
+      it('NO emite si la transacción falla', async () => {
+        primeUpdatePath();
+        mockPrismaService.$transaction.mockRejectedValue(new Error('boom'));
+        mockEventEmitter.emit.mockClear();
+
+        await expect(
+          service.update(existingProduct.id, {
+            is_featured: false,
+          } as UpdateProductDto),
+        ).rejects.toThrow('boom');
+
+        expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('skip_embedding_event suprime la emisión (lo usa la edición masiva)', async () => {
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [],
+        });
+        mockEventEmitter.emit.mockClear();
+
+        await service.update(
+          existingProduct.id,
+          { is_featured: false } as UpdateProductDto,
+          { lean: true, skip_embedding_event: true },
+        );
+
+        expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('un fallo del emit no rompe la respuesta', async () => {
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          stores: { organization_id: 7 },
+          product_categories: [],
+        });
+        mockEventEmitter.emit.mockImplementationOnce(() => {
+          throw new Error('listener down');
+        });
+
+        await expect(
+          service.update(
+            existingProduct.id,
+            { is_featured: false } as UpdateProductDto,
+            { lean: true },
+          ),
+        ).resolves.toMatchObject({ id: existingProduct.id });
+      });
     });
 
     it('sin opciones sigue delegando en findOne (retrocompatibilidad)', async () => {
@@ -3523,6 +3641,46 @@ describe('ProductsService', () => {
       // Cero Prisma ORM: el conjunto lo define el raw (acentos incluidos).
       expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
       expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+    });
+
+    it('findIds trigram con without_brand/without_category: el SQL incluye los predicados (T8-H1)', async () => {
+      const { calls } = primeTx([{ id: 11 }], 1);
+      await RequestContextService.run(CTX_1, () =>
+        service.findIds({
+          search: 'cafe',
+          without_brand: true,
+          without_category: true,
+        } as any),
+      );
+      const rank = calls.filter((c) => c.method === 'query');
+      expect(rank.length).toBeGreaterThan(0);
+      for (const c of rank) {
+        expect(c.sql).toContain('p.brand_id IS NULL');
+        expect(c.sql).toContain('NOT EXISTS (SELECT 1 FROM public.product_categories');
+      }
+    });
+
+    it('findIds trigram sin los filtros: el SQL no los incluye', async () => {
+      const { calls } = primeTx([{ id: 11 }], 1);
+      await RequestContextService.run(CTX_1, () =>
+        service.findIds({ search: 'cafe' } as any),
+      );
+      for (const c of calls.filter((x) => x.method === 'query')) {
+        expect(c.sql).not.toContain('p.brand_id IS NULL');
+        expect(c.sql).not.toContain('NOT EXISTS (SELECT 1 FROM public.product_categories');
+      }
+    });
+
+    it('clave de caché L2 difiere con/sin without_* y sin filtros no cambia', () => {
+      const key = (q: any) =>
+        (service as any).buildSmartSearchCacheKey(1, 'cafe', q);
+      const base = key({ search: 'cafe' });
+      expect(key({ search: 'cafe', without_brand: true })).not.toBe(base);
+      expect(key({ search: 'cafe', without_category: true })).not.toBe(base);
+      expect(key({ search: 'cafe', without_brand: true })).not.toBe(
+        key({ search: 'cafe', without_category: true }),
+      );
+      expect(key({ search: 'cafe', without_brand: false })).toBe(base);
     });
 
     it('findIds: throw operativo del raw → fail-open a legacy', async () => {

@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Patch,
   Body,
   Param,
@@ -50,7 +51,7 @@ export class RouteFlowController {
   @Permissions('store:dispatch_routes:dispatch')
   async dispatch(@Param('id', ParseIntPipe) id: number) {
     const result = await this.routeFlowService.dispatch(id);
-    return this.responseService.success(result, 'Planilla despachada');
+    return this.responseService.success(result, 'Ruta despachada');
   }
 
   @Post(':id/stops/:stopId/start')
@@ -112,6 +113,13 @@ export class RouteFlowController {
     );
   }
 
+  @Get(':id/close-options')
+  @Permissions('store:dispatch_routes:close')
+  async closeOptions(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.routeFlowService.getCloseOptions(id);
+    return this.responseService.success(result, 'Opciones de cierre');
+  }
+
   @Post(':id/close')
   @HttpCode(HttpStatus.OK)
   @Permissions('store:dispatch_routes:close')
@@ -120,7 +128,7 @@ export class RouteFlowController {
     @Body() dto: CloseDispatchRouteDto,
   ) {
     const result = await this.routeFlowService.close(id, dto);
-    return this.responseService.success(result, 'Planilla cerrada');
+    return this.responseService.success(result, 'Ruta cerrada');
   }
 
   @Post(':id/void')
@@ -131,7 +139,7 @@ export class RouteFlowController {
     @Body() dto: VoidDispatchRouteDto,
   ) {
     const result = await this.routeFlowService.void(id, dto);
-    return this.responseService.success(result, 'Planilla anulada');
+    return this.responseService.success(result, 'Ruta anulada');
   }
 
   @Post(':id/pdf')
@@ -144,7 +152,7 @@ export class RouteFlowController {
     const buffer = await this.routeFlowService.generatePdf(id);
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="planilla-${id}.pdf"`,
+      'Content-Disposition': `inline; filename="ruta-${id}.pdf"`,
       'Content-Length': buffer.length.toString(),
     });
     res.end(buffer);
@@ -164,7 +172,7 @@ export class RouteFlowController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     const result = await this.routeSheetScanner.scanRouteSheet(id, file);
-    return this.responseService.success(result, 'Planilla escaneada');
+    return this.responseService.success(result, 'Hoja de ruta escaneada');
   }
 
   @Post(':id/scan/async')
@@ -227,7 +235,7 @@ export class RouteFlowController {
     );
     return this.responseService.success(
       result,
-      'Planilla liquidada desde escaneo',
+      'Ruta liquidada desde escaneo',
     );
   }
 

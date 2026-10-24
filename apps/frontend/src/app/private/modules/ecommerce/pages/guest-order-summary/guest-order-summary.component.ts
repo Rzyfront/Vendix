@@ -11,6 +11,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { sumGrossSubtotal } from '../../utils/gross-subtotal.util';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -65,6 +66,9 @@ export interface GuestOrderItem {
   unit_price: number;
   product_type?: 'physical' | 'service' | 'prepared' | null;
   total_price: number;
+  /** Precio con impuesto incluido (lo que ve el cliente). */
+  unit_price_gross?: number;
+  line_total_gross?: number;
   tax_amount_item?: number | null;
   image_url?: string | null;
   variant_image_url?: string | null;
@@ -449,7 +453,7 @@ export interface GuestOrderSummary {
             </div>
             <div class="items items-print">
               @for (
-                item of data.order.items;
+                item of itemRows();
                 track item.product_name + item.variant_sku
               ) {
                 <!--
@@ -509,7 +513,7 @@ export interface GuestOrderSummary {
                     @if (!isItemCancelled(item)) {
                       <span class="item-qty"
                         >{{ item.quantity }} ×
-                        {{ item.unit_price | currency }}</span
+                        {{ item._unit_price | currency }}</span
                       >
                     }
                     @if (
@@ -538,7 +542,7 @@ export interface GuestOrderSummary {
                   </div>
                   @if (!isItemCancelled(item)) {
                     <strong class="item-total">{{
-                      item.total_price | currency
+                      item._line_total | currency
                     }}</strong>
                   }
                 </div>
@@ -640,26 +644,14 @@ export interface GuestOrderSummary {
           }
 
           <!-- TOTALES -->
-          <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza.
-               Con impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO —
-               nunca un Subtotal huérfano sin su fila de IVA al lado — y el
-               gate lo trae ahora prints_vat_breakdown (backend, C.7). -->
+          <!-- Precios con impuesto incluido (lo que el cliente vio al
+               comprar): Subtotal = suma de líneas brutas, sin desglose de
+               impuestos ni subtotal neto. -->
           <section class="order-section totals-panel">
-            @if ((data.order.tax_amount || 0) === 0) {
-              <div class="total-row">
-                <span>Subtotal</span>
-                <span>{{ data.order.subtotal_amount | currency }}</span>
-              </div>
-            } @else if (data.prints_vat_breakdown) {
-              <div class="total-row">
-                <span>Subtotal</span>
-                <span>{{ data.order.subtotal_amount | currency }}</span>
-              </div>
-              <div class="total-row">
-                <span>Impuestos</span>
-                <span>{{ data.order.tax_amount | currency }}</span>
-              </div>
-            }
+            <div class="total-row">
+              <span>Subtotal</span>
+              <span>{{ grossSubtotal() | currency }}</span>
+            </div>
 
             @for (
               p of data.order.applied_promotions || [];
@@ -2516,6 +2508,8 @@ export class GuestOrderSummaryComponent implements OnInit {
         _image: item.variant_image_url || item.image_url || null,
         _subtitle: parts.join(' · '),
         _cancelled: cancelled,
+        _unit_price: this.unitPriceOf(item),
+        _line_total: this.lineTotalOf(item),
         _badge: cancelled ? 'cancelled' : null,
       };
     }),
@@ -2560,7 +2554,7 @@ export class GuestOrderSummaryComponent implements OnInit {
         transform: (v, item) => (item?._cancelled ? '—' : String(v)),
       },
       {
-        key: 'unit_price',
+        key: '_unit_price',
         label: 'Precio unit.',
         transform: (v, item) =>
           item?._cancelled
@@ -2568,7 +2562,7 @@ export class GuestOrderSummaryComponent implements OnInit {
             : this.currencyService.format(Number(v) || 0),
       },
     ],
-    footerKey: 'total_price',
+    footerKey: '_line_total',
     footerLabel: 'Total',
     footerStyle: 'prominent',
     footerTransform: (v, item) =>
@@ -2704,6 +2698,21 @@ export class GuestOrderSummaryComponent implements OnInit {
         return 'neutral';
     }
   }
+
+  /** Precio unitario con impuesto incluido (fallback al neto legado). */
+  unitPriceOf(item: GuestOrderItem): number {
+    return Number(item.unit_price_gross ?? item.unit_price) || 0;
+  }
+
+  /** Total de línea con impuesto incluido (fallback al neto legado). */
+  lineTotalOf(item: GuestOrderItem): number {
+    return Number(item.line_total_gross ?? item.total_price) || 0;
+  }
+
+  /** Subtotal con impuesto: suma de líneas brutas no canceladas. */
+  readonly grossSubtotal = computed(() =>
+    sumGrossSubtotal(this.summary()?.order.items),
+  );
 
   // === E2 — helpers de cancelación de línea =================================
 

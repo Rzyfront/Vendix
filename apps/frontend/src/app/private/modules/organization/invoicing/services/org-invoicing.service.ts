@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import type { ResolutionsInUseResponse } from '../../../../../shared/components/dian/resolutions-in-use.util';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -62,7 +63,12 @@ export interface OrgResolutionRow {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /** ISO; no nulo = archivada (solo lectura, oculta por defecto). */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
   technical_key?: string | null;
+  document_type?: string | null;
+  accounting_entity_id?: number | null;
   store_id?: number | null;
   store?: { id: number; name: string; slug: string } | null;
   _count?: { invoices: number };
@@ -70,11 +76,13 @@ export interface OrgResolutionRow {
 
 export interface OrgResolutionPayload {
   store_id?: number | null;
-  resolution_number: string;
+  /** Se omite en series internas de notas (sin resolución DIAN). */
+  resolution_number?: string;
   resolution_date: string;
   prefix: string;
   range_from: number;
   range_to: number;
+  document_type?: string;
   valid_from: string;
   valid_to: string;
   is_active?: boolean;
@@ -128,6 +136,14 @@ export class OrgInvoicingService {
     );
   }
 
+  /** Numeración que toma hoy el generador; respeta el filtro de tienda (`store_id`). */
+  getResolutionsInUse(storeId?: number | null): Observable<ApiResponse<ResolutionsInUseResponse>> {
+    return this.http.get<ApiResponse<ResolutionsInUseResponse>>(
+      `${this.apiUrl}/organization/invoicing/resolutions/in-use`,
+      { params: this.toParams(storeId ? { store_id: storeId } : undefined) },
+    );
+  }
+
   createResolution(payload: OrgResolutionPayload): Observable<ApiResponse<OrgResolutionRow>> {
     return this.http.post<ApiResponse<OrgResolutionRow>>(
       `${this.apiUrl}/organization/invoicing/resolutions`,
@@ -145,9 +161,16 @@ export class OrgInvoicingService {
     );
   }
 
-  deleteResolution(id: number): Observable<ApiResponse<null>> {
-    return this.http.delete<ApiResponse<null>>(
-      `${this.apiUrl}/organization/invoicing/resolutions/${id}`,
+  /** Las resoluciones no se borran: se archivan. */
+  archiveResolution(
+    id: number,
+    replacementPrefix?: string,
+  ): Observable<ApiResponse<OrgResolutionRow & { replacement_resolution_id: number | null }>> {
+    return this.http.post<
+      ApiResponse<OrgResolutionRow & { replacement_resolution_id: number | null }>
+    >(
+      `${this.apiUrl}/organization/invoicing/resolutions/${id}/archive`,
+      replacementPrefix ? { replacement_prefix: replacementPrefix } : {},
     );
   }
 

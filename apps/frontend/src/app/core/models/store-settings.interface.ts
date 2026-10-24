@@ -747,7 +747,7 @@ export const PRINT_DOCUMENT_LABELS: Record<PrintDocument, string> = {
   invoice: 'Factura electrónica',
   dispatch_ticket: 'Tiquete de despacho',
   dispatch_note: 'Remisión',
-  dispatch_route: 'Planilla de ruta',
+  dispatch_route: 'Ruta',
   sales_order: 'Orden de venta',
   purchase_order: 'Orden de compra',
   quotation: 'Cotización',
@@ -761,6 +761,8 @@ export interface PrintDocumentConfig {
   format: PrintFormat;
   /** Page margin in millimetres. Ignored on roll formats. */
   margin_mm?: number;
+  /** Printable width of a roll in mm (kernel clamps to [paper-16, paper-4]). */
+  printable_width_mm?: number;
   /** Printed copies. 0 = do not print. */
   copies?: number;
 }

@@ -27,6 +27,7 @@ import {
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import {
@@ -223,12 +224,12 @@ export class AuthService {
     email: string,
     organizationIdentifier?: string,
   ): Promise<UserAccountLookupResult> {
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = normalizeEmail(email);
 
     // 1. Find ALL accounts with this email (excluding suspended/archived)
     const allAccounts = await this.prismaService.users.findMany({
       where: {
-        email: normalizedEmail,
+        email: emailEquals(normalizedEmail),
         state: { notIn: ['suspended', 'archived'] },
       },
       include: {
@@ -649,8 +650,15 @@ export class AuthService {
     registerOwnerDto: RegisterOwnerDto,
     client_info?: { ip_address?: string; user_agent?: string },
   ) {
-    const { email, password, first_name, last_name, organization_name, phone } =
-      registerOwnerDto as any;
+    const {
+      email: rawEmail,
+      password,
+      first_name,
+      last_name,
+      organization_name,
+      phone,
+    } = registerOwnerDto as any;
+    const email = normalizeEmail(rawEmail);
 
     // Preparar datos críticos antes de la transacción
     const organization_slug = this.generateSlugFromName(organization_name);
@@ -676,7 +684,7 @@ export class AuthService {
     // IMPORTANTE: Solo considerar owners, NO customers u otros roles
     const existingUser = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organizations: {
           onboarding: false,
         },
@@ -805,7 +813,7 @@ export class AuthService {
 
       // Verificar si ya existe usuario en esta organización (doble check)
       const existingUserInOrg = await tx.users.findFirst({
-        where: { email, organization_id: organization.id },
+        where: { email: emailEquals(email), organization_id: organization.id },
       });
       if (existingUserInOrg) {
         throw new ConflictException(
@@ -817,7 +825,7 @@ export class AuthService {
       // En este caso, permitir crear el OWNER (diferente organización)
       const existingCustomer = await tx.users.findFirst({
         where: {
-          email,
+          email: emailEquals(email),
           user_roles: {
             some: {
               roles: {
@@ -1051,7 +1059,7 @@ export class AuthService {
     app: string = 'STORE_ECOMMERCE',
   ) {
     const {
-      email,
+      email: rawEmail,
       password,
       first_name,
       last_name,
@@ -1060,6 +1068,7 @@ export class AuthService {
       document_number,
       store_id,
     } = registerCustomerDto;
+    const email = normalizeEmail(rawEmail);
 
     // Buscar la tienda por ID
     const store = await this.prismaService.stores.findUnique({
@@ -1072,7 +1081,7 @@ export class AuthService {
     // Verificar si el usuario ya existe en la tienda
     const existingUser = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: store.organization_id,
       },
     });
@@ -1107,9 +1116,7 @@ export class AuthService {
         // exponer al mundo que existe.
         const isArchived = existingUser.state === 'archived';
         if ((!alreadyLinked || !isActive) && !isArchived) {
-          throw new VendixHttpException(
-            ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001,
-          );
+          throw new VendixHttpException(ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001);
         }
       }
       throw new ConflictException(
@@ -1380,8 +1387,15 @@ export class AuthService {
     admin_user_id: number,
     app: string = 'STORE_ADMIN',
   ) {
-    const { email, password, first_name, last_name, role, store_id } =
-      registerStaffDto;
+    const {
+      email: rawEmail,
+      password,
+      first_name,
+      last_name,
+      role,
+      store_id,
+    } = registerStaffDto;
+    const email = normalizeEmail(rawEmail);
 
     // Verificar que el usuario admin tenga permisos
     const adminUser = await this.prismaService.users.findUnique({
@@ -1423,7 +1437,7 @@ export class AuthService {
     // Verificar si el usuario ya existe en la organización
     const existingUser = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: adminUser.organization_id,
       },
     });
@@ -2640,7 +2654,7 @@ export class AuthService {
     alreadyVerified?: boolean;
   }> {
     const user = await this.prismaService.users.findFirst({
-      where: { email },
+      where: { email: emailEquals(email) },
     });
 
     if (!user) {
@@ -2673,7 +2687,7 @@ export class AuthService {
     email: string,
   ): Promise<{ exists: boolean; verified: boolean }> {
     const user = await this.prismaService.users.findFirst({
-      where: { email },
+      where: { email: emailEquals(email) },
       select: { email_verified: true },
     });
 
@@ -2705,7 +2719,7 @@ export class AuthService {
     // Buscar usuario específico en la organización
     const user = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: organization.id,
       },
     });
@@ -2794,7 +2808,7 @@ export class AuthService {
     // con roles y asociación a la tienda filtrada por store_id
     const user = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: store.organization_id,
       },
       include: {
@@ -3060,7 +3074,11 @@ export class AuthService {
     // back, so the password change is not persisted.
     const consumed = await this.prismaService.$transaction(async (tx) => {
       const result = await tx.password_reset_tokens.updateMany({
-        where: { id: resetToken.id, used: false, expires_at: { gt: new Date() } },
+        where: {
+          id: resetToken.id,
+          used: false,
+          expires_at: { gt: new Date() },
+        },
         data: { used: true },
       });
       if (result.count === 0) {
@@ -3098,10 +3116,7 @@ export class AuthService {
         where: { id: store_id },
         select: { organization_id: true },
       });
-      if (
-        store &&
-        store.organization_id === resetToken.users.organization_id
-      ) {
+      if (store && store.organization_id === resetToken.users.organization_id) {
         const existingLink = await this.prismaService.store_users.findFirst({
           where: { user_id: resetToken.user_id, store_id },
         });
@@ -3506,7 +3521,7 @@ export class AuthService {
     if (store_id_to_log) {
       await this.prismaService.login_attempts.create({
         data: {
-          email: emailToLog || '',
+          email: emailToLog ? normalizeEmail(emailToLog) : '',
           store_id: store_id_to_log,
           success: successful,
           ip_address: '', // Se puede obtener del request en el controller
@@ -4185,7 +4200,7 @@ export class AuthService {
     // Buscar usuario
     const user = await this.prismaService.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: store.organization_id,
       },
       include: {

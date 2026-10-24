@@ -258,7 +258,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
   BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
   BULK_PROD_LIMIT_EXCEEDED:
-    'Se excedio el limite maximo de productos por carga.',
+    'Se excedio el limite maximo de 10.000 productos por carga.',
   BULK_PROD_SESSION_EXPIRED:
     'La sesion de analisis expiro. Suba el archivo nuevamente.',
   BULK_PROD_VALIDATE_001:
@@ -359,14 +359,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
   INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',
-  INV_BULK_002: 'Se excedio el limite maximo de 1000 items por carga.',
+  INV_BULK_002: 'Se excedio el limite maximo de 10.000 items por carga.',
 
   // Customers
   CUST_FIND_001: 'Cliente no encontrado.',
   CUST_CREATE_001: 'Error al crear el cliente.',
   CUST_VALIDATE_001: 'La validacion del cliente fallo.',
   CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',
-  CUST_BULK_001: 'El archivo excede el limite de 1000 clientes.',
+  CUST_BULK_001: 'El archivo excede el limite de 10.000 clientes.',
   CUST_BULK_002: 'Error de validacion en los datos del cliente.',
   CUST_BULK_003: 'Email duplicado en el archivo.',
   CUST_BULK_004: 'No se pudo determinar la tienda actual.',
@@ -412,7 +412,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYROLL_CALC_001: 'No se encontraron empleados activos para calcular.',
   PAYROLL_PROVIDER_001: 'Error en el proveedor de nomina.',
   PAYROLL_PERM_001: 'No tiene permisos para acceder a nomina.',
-  PAYROLL_BULK_001: 'El archivo excede el limite de 1000 empleados.',
+  PAYROLL_BULK_001: 'El archivo excede el limite de 10.000 empleados.',
   PAYROLL_BULK_002: 'Error de validacion en los datos del empleado.',
   PAYROLL_BULK_003: 'Documento duplicado en el archivo.',
   PAYROLL_BULK_004: 'El email es obligatorio cuando se marca como usuario.',
@@ -618,6 +618,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
   DIAN_CONFIG_002:
     'Ya existe una configuración DIAN con ese NIT y tipo de documento en este alcance. Edita la existente en lugar de crear otra.',
+  DIAN_CONFIG_003:
+    'Esta configuración no puede heredar la habilitación del software.',
+  DIAN_CONFIG_004:
+    'El PIN guardado no coincide con el del software ya habilitado. Revisa el PIN e inténtalo de nuevo.',
   DIAN_CERT_001: 'El archivo de certificado es invalido.',
   DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
   DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',
@@ -764,6 +768,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Falta la entidad fiscal de la tienda. Completa los datos legales (NIT y razon social) antes de crear el plan de cuentas.',
 
   // Invoicing
+  INVOICING_ACQUIRER_EMAIL_REQUIRED:
+    'El correo del cliente es obligatorio para crear la factura electrónica.',
+  INVOICING_ACQUIRER_EMAIL_INVALID:
+    'El correo del cliente no es válido (ej. cliente@dominio.com).',
   INVOICING_FIND_001: 'No se encontro la factura.',
   INVOICING_FIND_002: 'No se encontro la resolucion de facturacion.',
   INVOICING_FIND_003: 'No se encontro la orden asociada.',
@@ -832,6 +840,23 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer los documentos de habilitación. Intenta con fotos más nítidas o escribe los datos a mano.',
   HABILITATION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de «Nueva factura» (cotizaciones, órdenes de compra, RUT del
+  // cliente…). FacturIA sólo completa el formulario: un fallo significa «no
+  // pude leerlo», el formulario sigue disponible para capturarlo a mano.
+  INVOICE_DRAFT_SCAN_NO_FILES:
+    'Sube al menos un documento (PDF o imagen) para que FacturIA complete la factura.',
+  INVOICE_DRAFT_SCAN_TOO_MANY_FILES:
+    'Máximo 6 documentos por escaneo. Quita alguno e inténtalo de nuevo.',
+  INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE:
+    'Formato no soportado. Usa PDF, JPG, PNG o WebP (Word y Excel no se aceptan).',
+  INVOICE_DRAFT_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o captura la factura a mano.',
+  INVOICE_DRAFT_SCAN_AI_FAILED:
+    'La IA no pudo leer los documentos. Intenta con archivos más nítidos o captura la factura a mano.',
+  INVOICE_DRAFT_SCAN_NOT_READY:
+    'El escáner de facturas no está disponible en este momento. Captura la factura a mano o inténtalo más tarde.',
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN:
+    'El escáner de facturas de la plataforma sólo está disponible para el superadministrador de la plataforma (sin tienda seleccionada).',
   INVOICING_RESOLUTION_006:
     'La identidad fiscal no tiene una entidad contable activa, y una resolución tiene que colgar de una. Actívala antes de crear la resolución.',
   INVOICING_RESOLUTION_007:
@@ -862,6 +887,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
    */
   INVOICING_RESOLUTION_011:
     'La clave técnica (ClTec) debe tener 40 o 64 caracteres hexadecimales, según la emita la DIAN. Cópiala completa del PDF de la autorización de numeración: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
+  // Archivado de resoluciones (las resoluciones DIAN nunca se borran).
+  INVOICING_RESOLUTION_012:
+    'No se puede archivar: la resolución tiene documentos en vuelo (transmisión pendiente o en reintento). Espera a que terminen.',
+  INVOICING_RESOLUTION_013:
+    'No se puede archivar: es la resolución configurada de la plataforma.',
+  INVOICING_RESOLUTION_014:
+    'No se puede archivar: hay un set de pruebas de la DIAN en curso con esta resolución.',
+  INVOICING_RESOLUTION_015:
+    'Es la serie de notas en uso: indica el prefijo de la serie nueva que la reemplazará (mayúsculas y números, máximo 10; no puede estar ya usado).',
+  INVOICING_RESOLUTION_016:
+    'La resolución está archivada: es de solo lectura y no admite cambios.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
@@ -1165,6 +1201,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // Caja registradora — cierre contra un esperado rancio (QUI-572)
   CASH_SESSION_EXPECTED_STALE_001:
     'El efectivo esperado cambió mientras contabas el arqueo. Revisa el resumen actualizado antes de cerrar la caja.',
+  ORD_CASH_SESSION_ORDER_STALE_001:
+    'La orden cambió mientras estaba abierta. Actualizamos sus datos; revísalos e inténtalo de nuevo.',
 
   // Escáner de facturas de compra (POP). Ninguno estaba mapeado: el modal
   // mostraba el devMessage crudo en inglés («AI OCR response parsed but is

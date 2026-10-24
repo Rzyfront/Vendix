@@ -173,6 +173,8 @@ export interface CheckoutResponse {
   promotion_discount?: number;
   coupon_discount?: number;
   shipping_cost?: number;
+  /** Suma de líneas con impuesto incluido (lo que vio el cliente). */
+  subtotal_gross?: number;
   /**
    * CP-tienda-checkout-whatsapp: líneas de la orden creada (para el resumen y
    * el automensaje de WhatsApp, armados desde lo realmente comprado).
@@ -183,6 +185,10 @@ export interface CheckoutResponse {
     quantity: number;
     unit_price: number;
     total_price: number;
+    /** Precio con impuesto incluido (lo que vio el cliente). */
+    unit_price_gross?: number;
+    total_price_gross?: number;
+    cancelled_at?: string | null;
   }>;
   channel?: 'ecommerce' | 'whatsapp';
 }

@@ -94,6 +94,18 @@
                   <span class="text-[var(--color-text-secondary)]">IVA</span>
                   <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(dispatch_note().tax_amount) }}</span>
                 </div>
+                @if (shippingCost() > 0) {
+                  <div class="flex justify-between text-sm">
+                    <span class="text-[var(--color-text-secondary)]">Envío</span>
+                    <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(shippingCost()) }}</span>
+                  </div>
+                  @if (shippingTax() > 0) {
+                    <div class="flex justify-between pl-4 text-xs">
+                      <span class="text-[var(--color-text-secondary)]">Incluye {{ shippingTaxName() }}</span>
+                      <span class="font-mono text-[var(--color-text-secondary)]">{{ formatCurrency(shippingTax()) }}</span>
+                    </div>
+                  }
+                }
                 <div class="flex justify-between pt-2 border-t border-[var(--color-border)] text-base font-bold">
                   <span class="text-[var(--color-text-primary)]">Total</span>
                   <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(dispatch_note().grand_total) }}</span>

@@ -2,8 +2,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -34,7 +36,9 @@ import { PlanillaPdfViewerComponent } from '../../components/planilla-pdf-viewer
 import { VoidDispatchRouteModalComponent } from '../../components/void-dispatch-route-modal/void-dispatch-route-modal.component';
 import { RouteSheetScannerModalComponent } from '../../components/route-sheet-scanner-modal/route-sheet-scanner-modal.component';
 import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
-import { PlanillaMapModalComponent } from '../../components/planilla-map-modal/planilla-map-modal.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { RoutePositionPublisherService } from '../../services/route-position-publisher.service';
 import { AddNotesModalComponent } from '../../components/add-notes-modal/add-notes-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -71,7 +75,6 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
     RouteSheetScannerModalComponent,
     VoidDispatchRouteModalComponent,
     StopDetailModalComponent,
-    PlanillaMapModalComponent,
     AddNotesModalComponent,
   ],
   template: `
@@ -120,9 +123,18 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                   No se puede despachar: hay remisiones sin dirección de entrega
                 </p>
                 <p class="mt-0.5 text-amber-700">
-                  Agrega una dirección a {{ stopsWithoutAddressLabel() }} antes de despachar la planilla.
+                  Agrega una dirección a {{ stopsWithoutAddressLabel() }} antes de despachar la ruta.
                 </p>
               </div>
+            </div>
+          }
+
+          @if (dispatchBlockedReason(); as blockedReason) {
+            <div
+              class="p-3 rounded-md text-sm bg-yellow-50 text-yellow-800 border border-yellow-200"
+              role="status"
+            >
+              {{ blockedReason }}
             </div>
           }
 
@@ -136,7 +148,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
 
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 items-start">
               <div class="flex flex-col gap-1">
-                <span class="text-xs text-text-secondary uppercase tracking-wide">Conductor</span>
+                <span class="text-xs text-text-secondary uppercase tracking-wide">Encargado</span>
                 <span class="font-semibold text-gray-900">
                   @if (r.driver_user) {
                     {{ r.driver_user.first_name }} {{ r.driver_user.last_name }}
@@ -235,6 +247,10 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                   </div>
                 </div>
               }
+
+              <p class="mt-3 text-sm text-text-secondary">
+                {{ settlementCashLabel() }}
+              </p>
             </app-card>
           }
 
@@ -261,10 +277,10 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                   <app-button
                     variant="outline"
                     size="sm"
-                    (clicked)="showMapModal.set(true)"
+                    (clicked)="openRouteView()"
                   >
                     <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
-                    Ver mapa
+                    Ver recorrido
                   </app-button>
                 }
 
@@ -285,7 +301,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
               [actions]="stopActions"
               [cardConfig]="stopCardConfig"
               actionsDisplay="buttons"
-              emptyMessage="Esta planilla no tiene paradas."
+              emptyMessage="Esta ruta no tiene paradas."
               emptyIcon="map-pin"
               (rowClick)="openStopDetail($event)"
             ></app-responsive-data-view>
@@ -316,6 +332,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
       <app-planilla-close-modal
         [route]="route()!"
         (close)="showCloseModal.set(false)"
+        [submitting]="actionLoading()"
         (submitted)="onClose($event)"
       ></app-planilla-close-modal>
     }
@@ -356,14 +373,6 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
       ></app-stop-detail-modal>
     }
 
-    @if (showMapModal() && route()) {
-      <app-planilla-map-modal
-        [routeId]="route()!.id"
-        (close)="showMapModal.set(false)"
-        (reordered)="load()"
-      ></app-planilla-map-modal>
-    }
-
     @if (showAddNotesModal() && route()) {
       <app-add-notes-modal
         [routeId]="route()!.id"
@@ -381,6 +390,93 @@ export class PlanillaDetailPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly positionPublisher = inject(RoutePositionPublisherService);
+
+  /**
+   * The responsible (internal driver) shares live position while the route is
+   * in progress; spectators never touch geolocation. The publisher outlives
+   * this page on purpose (see RoutePositionPublisherService).
+   */
+  private readonly publishPositionEffect = effect(() => {
+    const r = this.route();
+    if (!r) return;
+    const responsible = this.responsibleUserId();
+    const run =
+      responsible !== null &&
+      responsible === this.currentUserId() &&
+      (r.status === 'dispatched' || r.status === 'in_transit');
+    untracked(() => {
+      if (run) this.positionPublisher.start(r.id);
+      else if (this.positionPublisher.currentRouteId === r.id) {
+        this.positionPublisher.stop();
+      }
+    });
+  });
+
+  /** Logged-in user id (null while the session is loading). */
+  private readonly currentUserId = computed<number | null>(() => {
+    const id = Number(this.authFacade.user()?.id);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  });
+
+  /**
+   * D1: the "encargado" is `driver_user_id` when the primary driver is not
+   * external. Only that user may dispatch; external => anyone with permission.
+   */
+  private readonly responsibleUserId = computed<number | null>(() => {
+    const r = this.route();
+    if (!r || r.is_primary_driver_external) return null;
+    return r.driver_user_id ?? null;
+  });
+
+  private readonly responsibleName = computed(() => {
+    const u = this.route()?.driver_user;
+    const name = `${u?.first_name ?? ''} ${u?.last_name ?? ''}`.trim();
+    return name || 'el encargado';
+  });
+
+  /** Non-null text when the current user cannot dispatch (not the encargado). */
+  readonly dispatchBlockedReason = computed<string | null>(() => {
+    const r = this.route();
+    if (!r || r.status !== 'draft') return null;
+    const responsible = this.responsibleUserId();
+    if (responsible === null || responsible === this.currentUserId()) return null;
+    return `Solo ${this.responsibleName()} puede despachar esta ruta`;
+  });
+
+  /** Closed-route summary line: where the collection was handed in. */
+  readonly settlementCashLabel = computed(() => {
+    const r = this.route();
+    if (!r || !r.settlement_cash_session_id) return 'Recaudo registrado sin caja';
+    const register = r.settlement_cash_session?.register?.name || 'Caja';
+    const u = r.settlement_cash_user;
+    const owner = `${u?.first_name ?? ''} ${u?.last_name ?? ''}`.trim();
+    return owner
+      ? `Recaudo entregado en caja: ${register} · responsable ${owner}`
+      : `Recaudo entregado en caja: ${register}`;
+  });
+
+  /** Spanish copy for the dispatch/close business errors. */
+  private routeActionError(e: unknown, fallback: string): string {
+    const parsed = parseApiError(e);
+    switch (parsed.errorCode) {
+      case 'DISPATCH_ROUTE_NOT_RESPONSIBLE':
+        return 'Solo el encargado de la ruta puede despacharla.';
+      case 'DISPATCH_ROUTE_CASH_SESSION_REQUIRED':
+        return 'Selecciona la caja donde se entrega el recaudo.';
+      case 'DISPATCH_ROUTE_CASH_SESSION_INVALID':
+        return 'La caja seleccionada ya no está abierta. Elige otra caja abierta e inténtalo de nuevo.';
+      case 'DISPATCH_ROUTE_ALREADY_CLOSED':
+        return 'Esta ruta ya fue cerrada.';
+      default:
+        return parsed.devMessage || parsed.userMessage || fallback;
+    }
+  }
+
+  openRouteView(): void {
+    this.router.navigate(['/admin/orders/planillas', this.routeId(), 'recorrido']);
+  }
 
   readonly routeId = signal<number>(0);
   readonly route = signal<DispatchRoute | null>(null);
@@ -394,8 +490,6 @@ export class PlanillaDetailPageComponent {
   readonly showPdfViewer = signal(false);
   readonly showVoidModal = signal(false);
   readonly showScannerModal = signal(false);
-  /** Route map modal (pending stops + suggested order). */
-  readonly showMapModal = signal(false);
   /** "Agregar remisiones" modal (append eligible notes to a hot route). */
   readonly showAddNotesModal = signal(false);
 
@@ -436,7 +530,7 @@ export class PlanillaDetailPageComponent {
 
   /** Documental / AI actions surfaced in the Paradas options dropdown. */
   readonly documentalActions = computed<DropdownAction[]>(() => [
-    { label: 'Imprimir planilla', icon: 'printer', action: 'print' },
+    { label: 'Imprimir ruta', icon: 'printer', action: 'print' },
     {
       label: this.downloadingPdf() ? 'Descargando…' : 'Descargar PDF',
       icon: 'download',
@@ -444,18 +538,18 @@ export class PlanillaDetailPageComponent {
       disabled: this.downloadingPdf(),
     },
     {
-      label: 'Cargar planilla escaneada (IA)',
+      label: 'Cargar hoja de ruta escaneada (IA)',
       icon: 'scan-line',
       action: 'scan',
       disabled: !this.canScanSheet(),
     },
   ]);
 
-  readonly headerTitle = computed(() => this.route()?.route_number ?? 'Planilla');
+  readonly headerTitle = computed(() => this.route()?.route_number ?? 'Ruta');
 
   readonly headerSubtitle = computed(() => {
     const r = this.route();
-    return r?.route_code ? `Ruta ${r.route_code}` : 'Detalle de planilla';
+    return r?.route_code ? `Ruta ${r.route_code}` : 'Detalle de ruta';
   });
 
   readonly headerBadgeColor = computed<StickyHeaderBadgeColor>(() => {
@@ -482,7 +576,8 @@ export class PlanillaDetailPageComponent {
     const actions: StickyHeaderActionButton[] = [];
 
     if (r.status === 'draft') {
-      const blocked = !this.canDispatch();
+      const notResponsible = this.dispatchBlockedReason();
+      const blocked = !this.canDispatch() || notResponsible !== null;
       actions.push({
         id: 'dispatch',
         label: 'Despachar',
@@ -490,7 +585,9 @@ export class PlanillaDetailPageComponent {
         icon: 'truck',
         loading: busy,
         disabled: busy || blocked,
-        title: blocked
+        title: notResponsible
+          ? notResponsible
+          : blocked
           ? `No se puede despachar: las siguientes remisiones no tienen dirección de entrega: ${this.stopsWithoutAddressLabel()}`
           : undefined,
       });
@@ -547,7 +644,7 @@ export class PlanillaDetailPageComponent {
     if (this.canScanSheet()) return null;
     const r = this.route();
     if (!r || !['dispatched', 'in_transit'].includes(r.status)) {
-      return 'Solo disponible en planillas despachadas o en ruta.';
+      return 'Solo disponible en rutas despachadas o en curso.';
     }
     return 'Todas las paradas ya están liquidadas o liberadas.';
   });
@@ -877,7 +974,7 @@ export class PlanillaDetailPageComponent {
         next: (r) => {
           this.actionLoading.set(false);
           this.route.set(r);
-          this.toast.success('Planilla despachada');
+          this.toast.success('Ruta despachada');
         },
         error: (e) => {
           this.actionLoading.set(false);
@@ -885,7 +982,7 @@ export class PlanillaDetailPageComponent {
           // ships a Spanish, remisión-listing message for
           // DISPATCH_ROUTE_STOP_NO_ADDRESS, so surfacing `e.message` already
           // gives a clear, actionable toast.
-          this.toast.error(e?.message || 'Error al despachar la planilla');
+          this.toast.error(this.routeActionError(e, 'Error al despachar la ruta'));
         },
       });
   }
@@ -985,7 +1082,7 @@ export class PlanillaDetailPageComponent {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `planilla-${r.route_number || r.id}.pdf`;
+          a.download = `ruta-${r.route_number || r.id}.pdf`;
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -1016,7 +1113,7 @@ export class PlanillaDetailPageComponent {
    */
   onNotesAdded() {
     this.showAddNotesModal.set(false);
-    this.toast.success('Remisiones agregadas a la planilla');
+    this.toast.success('Remisiones agregadas a la ruta');
     this.load();
   }
 
@@ -1106,12 +1203,16 @@ export class PlanillaDetailPageComponent {
           this.actionLoading.set(false);
           this.showCloseModal.set(false);
           this.route.set(r);
-          this.toast.success('Planilla cerrada');
+          this.toast.success('Ruta cerrada');
           this.load();
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.error?.message || e?.message || 'Error al cerrar la planilla');
+          this.toast.error(this.routeActionError(e, 'Error al cerrar la ruta'));
+          if (parseApiError(e).errorCode === 'DISPATCH_ROUTE_ALREADY_CLOSED') {
+            this.showCloseModal.set(false);
+            this.load();
+          }
         },
       });
   }
@@ -1132,11 +1233,11 @@ export class PlanillaDetailPageComponent {
           this.actionLoading.set(false);
           this.showVoidModal.set(false);
           this.route.set(r);
-          this.toast.success(`Planilla ${r.route_number} anulada`);
+          this.toast.success(`Ruta ${r.route_number} anulada`);
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.error?.message || e?.message || 'Error al anular la planilla');
+          this.toast.error(e?.error?.message || e?.message || 'Error al anular la ruta');
         },
       });
   }

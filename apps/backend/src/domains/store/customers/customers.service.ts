@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { user_state_enum, persona_type_enum } from '@prisma/client';
+import {
+  address_type_enum,
+  user_state_enum,
+  persona_type_enum,
+} from '@prisma/client';
 
 // Local alias mirroring `create-customer.dto.ts`'s own PascalCase alias for
 // `persona_type_enum` — the DTO does not export it, so it is redeclared here.
@@ -12,6 +16,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
+import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
@@ -45,6 +50,96 @@ const CUSTOMER_PRIVATE_COLUMNS = {
   locked_until: true,
 } as const;
 
+/**
+ * Dirección FISCAL (type `billing`) expuesta junto a la ficha del cliente.
+ *
+ * Las lecturas de clientes siempre devolvieron `addresses` filtrado a
+ * `shipping` (POS, checkout, despacho y Vexi leen `addresses[0]` como
+ * dirección de envío) y la de facturación nunca salía. `billing_address` se
+ * AGREGA sin tocar `addresses`: Nueva factura precarga con ella la dirección
+ * fiscal completa (municipio DANE incluido).
+ */
+export interface CustomerBillingAddress {
+  id: number;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state_province: string | null;
+  country_code: string;
+  postal_code: string | null;
+  municipality_code: string | null;
+  phone_number: string | null;
+  type: 'billing';
+  is_primary: boolean;
+}
+
+/**
+ * Dirección fiscal capturada en otro flujo (Nueva factura) para persistirla
+ * como `billing` del cliente recién creado. Forma neutra: el llamador mapea
+ * su propio DTO a ésta para que clientes no dependa de facturación.
+ */
+export interface InlineCustomerBillingAddressInput {
+  address_line1: string;
+  city?: string | null;
+  state_province?: string | null;
+  municipality_code?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+}
+
+/**
+ * Include de `addresses` para las lecturas de clientes: shipping (contrato
+ * histórico) + billing (para `billing_address`) en UNA sola consulta anidada.
+ * Va por la relación `users.addresses` a propósito: una consulta top-level a
+ * `addresses` queda store-scoped y perdería las direcciones con
+ * `store_id = null`. El `orderBy` es el mismo de siempre para no alterar el
+ * orden de `addresses`; el desempate de billing se hace en memoria.
+ */
+const CUSTOMER_ADDRESSES_INCLUDE = {
+  where: {
+    type: { in: [address_type_enum.shipping, address_type_enum.billing] },
+  },
+  orderBy: { is_primary: 'desc' as const },
+};
+
+/**
+ * Separa las direcciones leídas con `CUSTOMER_ADDRESSES_INCLUDE`:
+ * `addresses` queda IDÉNTICO al contrato previo (sólo shipping, mismo orden) y
+ * `billing_address` es la billing primaria, si no la más reciente, o `null`.
+ */
+function withBillingAddress<T extends { addresses?: any[] | null }>(
+  user: T,
+): T & { billing_address: CustomerBillingAddress | null } {
+  const all = Array.isArray(user.addresses) ? user.addresses : [];
+  const shipping = all.filter((a) => a?.type === 'shipping');
+  const billing = all
+    .filter((a) => a?.type === 'billing')
+    .sort(
+      (a, b) =>
+        Number(!!b.is_primary) - Number(!!a.is_primary) ||
+        Number(b.id) - Number(a.id),
+    )[0];
+  return {
+    ...user,
+    addresses: shipping,
+    billing_address: billing
+      ? {
+          id: billing.id,
+          address_line1: billing.address_line1,
+          address_line2: billing.address_line2 ?? null,
+          city: billing.city,
+          state_province: billing.state_province ?? null,
+          country_code: billing.country_code,
+          postal_code: billing.postal_code ?? null,
+          municipality_code: billing.municipality_code ?? null,
+          phone_number: billing.phone_number ?? null,
+          type: 'billing',
+          is_primary: !!billing.is_primary,
+        }
+      : null,
+  };
+}
+
 @Injectable()
 export class CustomersService {
   private readonly logger = new Logger(CustomersService.name);
@@ -77,7 +172,10 @@ export class CustomersService {
   }): { type: string | null; number: string | null } {
     const type = input.type ? input.type.trim().toUpperCase() : null;
     const number = input.number
-      ? input.number.trim().toUpperCase().replace(/[\s\-.]/g, '')
+      ? input.number
+          .trim()
+          .toUpperCase()
+          .replace(/[\s\-.]/g, '')
       : null;
     return { type, number };
   }
@@ -115,7 +213,10 @@ export class CustomersService {
     // El número traía el DV pegado Y además vino un DV aparte: si no son el
     // mismo dígito, el comerciante declaró dos verdades distintas.
     const inlineConflict =
-      raw.includes('-') && !!dv && result.provided_dv !== null && result.provided_dv !== dv;
+      raw.includes('-') &&
+      !!dv &&
+      result.provided_dv !== null &&
+      result.provided_dv !== dv;
 
     return {
       number: result.number || null,
@@ -172,7 +273,11 @@ export class CustomersService {
       `person_type 'JURIDICA' requiere document_type 'NIT'; '${documentType}' ` +
         'es un tipo de documento de persona natural y no puede combinarse con ' +
         'persona jurídica.',
-      { field: 'person_type', person_type: personType, document_type: documentType },
+      {
+        field: 'person_type',
+        person_type: personType,
+        document_type: documentType,
+      },
     );
   }
 
@@ -186,7 +291,7 @@ export class CustomersService {
   private resolveCustomerEmail(
     email: string | null | undefined,
   ): string | null {
-    const trimmed = (email ?? '').trim().toLowerCase();
+    const trimmed = normalizeEmail(email ?? '');
     return trimmed ? trimmed : null;
   }
 
@@ -196,9 +301,7 @@ export class CustomersService {
    * instancia, `cliente`. El contador del while garantiza unicidad real contra
    * la tabla `users`.
    */
-  private async generateUniqueUsername(
-    seed: string | null,
-  ): Promise<string> {
+  private async generateUniqueUsername(seed: string | null): Promise<string> {
     const rawBase = seed ? seed.split('@')[0] : '';
     // Eliminar caracteres especiales
     let baseUsername = rawBase.replace(/[^a-zA-Z0-9]/g, '');
@@ -261,7 +364,7 @@ export class CustomersService {
     customerRoleId: number;
   }) {
     return {
-      email: args.email,
+      email: this.resolveCustomerEmail(args.email),
       password: args.hashedPassword,
       first_name: args.firstName,
       last_name: args.lastName,
@@ -317,7 +420,7 @@ export class CustomersService {
   } | null> {
     if (!guest) return null;
 
-    const normalizedEmail = guest.email?.toLowerCase().trim() || null;
+    const normalizedEmail = this.resolveCustomerEmail(guest.email);
     const normalizedPhone = guest.phone?.replace(/\s+/g, '').trim() || null;
     const normalizedDoc = this.normalizeDocument({
       type: guest.document_type ?? null,
@@ -340,7 +443,7 @@ export class CustomersService {
     if (normalizedEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: normalizedEmail, mode: 'insensitive' },
+          email: emailEquals(normalizedEmail),
           store_users: { some: { store_id: storeId } },
           user_roles: { some: { roles: { name: 'customer' } } },
           // Treat archived customers as "no longer exists" so a guest with
@@ -368,7 +471,11 @@ export class CustomersService {
       if (!normalizedEmail) return null;
 
       const customerRole = await this.prisma.roles.findFirst({
-        where: { name: 'customer', organization_id: null, is_system_role: true },
+        where: {
+          name: 'customer',
+          organization_id: null,
+          is_system_role: true,
+        },
       });
 
       if (!customerRole) {
@@ -542,7 +649,7 @@ export class CustomersService {
     if (effectiveEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: effectiveEmail, mode: 'insensitive' },
+          email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
           user_roles: { some: { roles: { name: 'customer' } } },
           state: { not: user_state_enum.archived },
@@ -588,10 +695,20 @@ export class CustomersService {
           // acentos — "Ana" y "ANA" son la misma fila, "Ana" y
           // "Anabella" no.
           ...(dto.first_name?.trim()
-            ? { first_name: { equals: dto.first_name.trim(), mode: 'insensitive' as const } }
+            ? {
+                first_name: {
+                  equals: dto.first_name.trim(),
+                  mode: 'insensitive' as const,
+                },
+              }
             : {}),
           ...(dto.last_name?.trim()
-            ? { last_name: { equals: dto.last_name.trim(), mode: 'insensitive' as const } }
+            ? {
+                last_name: {
+                  equals: dto.last_name.trim(),
+                  mode: 'insensitive' as const,
+                },
+              }
             : {}),
         },
         omit: CUSTOMER_PRIVATE_COLUMNS,
@@ -642,11 +759,7 @@ export class CustomersService {
           type: existing.document_type ?? null,
           number: existing.document_number ?? null,
         });
-        if (
-          !existingDoc.number &&
-          normalizedDoc.number &&
-          normalizedDoc.type
-        ) {
+        if (!existingDoc.number && normalizedDoc.number && normalizedDoc.type) {
           updateData.document_type = normalizedDoc.type;
           updateData.document_number = normalizedDoc.number;
         } else if (
@@ -858,8 +971,18 @@ export class CustomersService {
       data[field] = candidate;
     };
 
-    maybeWrite(incoming.first_name, 'first_name', toTitleCase, existing.first_name);
-    maybeWrite(incoming.last_name, 'last_name', toTitleCase, existing.last_name);
+    maybeWrite(
+      incoming.first_name,
+      'first_name',
+      toTitleCase,
+      existing.first_name,
+    );
+    maybeWrite(
+      incoming.last_name,
+      'last_name',
+      toTitleCase,
+      existing.last_name,
+    );
     maybeWrite(incoming.phone, 'phone', undefined, existing.phone);
 
     // Task 2 (QUI-728 follow-up) — ficha completion, FILL-IF-BLANK semantics.
@@ -872,7 +995,7 @@ export class CustomersService {
     // blank/null, so a customer resolved by email/document/name at checkout
     // walks away with a more complete ficha instead of one perpetually stuck
     // at whatever the very first sale happened to capture.
-    const maybeComplete = <T,>(
+    const maybeComplete = <T>(
       incomingValue: T | null | undefined,
       field:
         | 'person_type'
@@ -955,7 +1078,7 @@ export class CustomersService {
       document_number?: string;
     },
   ): Promise<{ customer_id: number; name: string; was_created: boolean }> {
-    const normalizedEmail = data.email?.toLowerCase().trim() || null;
+    const normalizedEmail = this.resolveCustomerEmail(data.email);
     const normalizedPhone = data.phone?.replace(/\s+/g, '').trim() || null;
     const normalizedDoc = this.normalizeDocument({
       type: data.document_type ?? null,
@@ -982,7 +1105,7 @@ export class CustomersService {
     if (normalizedEmail) {
       existing = await this.prisma.users.findFirst({
         where: {
-          email: { equals: normalizedEmail, mode: 'insensitive' },
+          email: emailEquals(normalizedEmail),
           store_users: { some: { store_id } },
           user_roles: { some: { roles: { name: 'customer' } } },
           // Skip archived rows so a new guest is created instead of attaching
@@ -1088,6 +1211,163 @@ export class CustomersService {
     };
   }
 
+  /**
+   * `person_type` efectivo al CREAR: el explícito del payload siempre gana; un
+   * NIT sin nombre de persona natural se infiere JURIDICA (una NIT sin nombre
+   * no puede ser natural). Compartido por `create()` y
+   * `resolveInlineCustomer()` para que ambos caminos deriven lo mismo.
+   */
+  private deriveCreatePersonType(
+    dto: CreateCustomerDto,
+    normalizedDoc: { type: string | null; number: string | null },
+  ): PersonaType | null | undefined {
+    if (dto.person_type !== undefined && dto.person_type !== null) {
+      return dto.person_type;
+    }
+    return normalizedDoc.type === 'NIT' &&
+      !!normalizedDoc.number &&
+      !dto.first_name?.trim() &&
+      !dto.last_name?.trim()
+      ? ('JURIDICA' as PersonaType)
+      : dto.person_type;
+  }
+
+  /**
+   * Cliente capturado en línea desde otro flujo (Facturas → Nueva factura).
+   *
+   * Mismo contrato que `create()` —es quien crea—, más dos reglas que el alta
+   * en línea necesita y el modal de clientes no:
+   *   1. Si ya existe un cliente no archivado en la organización con el mismo
+   *      (document_type, document_number), se REUTILIZA tal cual (sin pisar su
+   *      ficha) y se vincula a la tienda. Reintentar una factura que falló
+   *      después de crear el cliente no debe chocar contra su propio cliente.
+   *   2. Una persona jurídica (explícita o inferida por NIT sin nombres) exige
+   *      razón social: sin ella la factura saldría sin `RegistrationName`.
+   * Cualquier otro choque (p. ej. el correo ya es de otro cliente) sale de
+   * `create()` como 409 `SYS_CONFLICT_001`, nunca como 500.
+   */
+  async resolveInlineCustomer(
+    storeId: number,
+    dto: CreateCustomerDto,
+    options?: { billing_address?: InlineCustomerBillingAddressInput | null },
+  ): Promise<{ customer_id: number; was_created: boolean }> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const normalizedDoc = this.normalizeDocument({
+      type: dto.document_type ?? null,
+      number: dto.document_number ?? null,
+    });
+
+    if (normalizedDoc.number && normalizedDoc.type) {
+      // Un NIT puede llegar con el DV pegado; la ficha guarda el número sin DV.
+      const lookupNumber =
+        normalizedDoc.type === 'NIT'
+          ? (this.splitNitAndDv(
+              dto.document_number,
+              normalizedDoc.number,
+              dto.verification_digit,
+            ).number ?? normalizedDoc.number)
+          : normalizedDoc.number;
+      const existing = await this.findByDocumentInOrganization(
+        store.organization_id,
+        lookupNumber,
+        normalizedDoc.type,
+      );
+      if (existing) {
+        try {
+          await this.prisma.store_users.upsert({
+            where: {
+              user_id_store_id: { user_id: existing.id, store_id: store.id },
+            },
+            create: { user_id: existing.id, store_id: store.id },
+            update: {},
+          });
+        } catch (linkErr) {
+          this.logger.warn(
+            `resolveInlineCustomer: store link failed for customer ${existing.id} store ${store.id}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
+        return { customer_id: existing.id, was_created: false };
+      }
+    }
+
+    const derivedPersonType = this.deriveCreatePersonType(dto, normalizedDoc);
+    if (derivedPersonType === 'JURIDICA' && !dto.legal_name?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.CUST_VALIDATE_001,
+        'La razón social es obligatoria para un cliente persona jurídica (NIT).',
+        { field: 'legal_name' },
+      );
+    }
+
+    const created = await this.create(store.id, dto);
+    // 6b — el cliente NUEVO nace con la dirección fiscal de la factura que lo
+    // creó, para que la próxima factura la precargue (`billing_address`). Un
+    // cliente existente (rama de arriba) NO se toca: su ficha manda.
+    await this.persistInlineBillingAddress(
+      store.id,
+      created.id,
+      options?.billing_address ?? null,
+    );
+    return { customer_id: created.id, was_created: true };
+  }
+
+  /**
+   * Graba la dirección fiscal capturada en línea como `billing` primaria del
+   * cliente recién creado. Best-effort: la factura ya tiene su propio snapshot
+   * `customer_address`, así que un fallo aquí sólo se registra y nunca tumba
+   * el flujo que la invocó. Sin `address_line1` no se graba nada.
+   */
+  private async persistInlineBillingAddress(
+    storeId: number,
+    userId: number,
+    input: InlineCustomerBillingAddressInput | null,
+  ): Promise<void> {
+    const line1 = this.normalizeOptionalString(input?.address_line1);
+    if (!input || !line1) return;
+    try {
+      const municipality = this.normalizeOptionalString(
+        input.municipality_code,
+      );
+      await this.prisma.addresses.create({
+        data: {
+          address_line1: line1,
+          city: (this.normalizeOptionalString(input.city) ?? '').slice(0, 100),
+          state_province:
+            this.normalizeOptionalString(input.state_province)?.slice(0, 100) ??
+            null,
+          country_code: (
+            this.normalizeOptionalString(input.country_code) ?? 'CO'
+          )
+            .toUpperCase()
+            .slice(0, 3),
+          postal_code:
+            this.normalizeOptionalString(input.postal_code)?.slice(0, 20) ??
+            null,
+          municipality_code:
+            municipality && /^\d{5}$/.test(municipality) ? municipality : null,
+          type: address_type_enum.billing,
+          is_primary: true,
+          store_id: storeId,
+          organization_id: null,
+          user_id: userId,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `resolveInlineCustomer: billing address not saved for customer ${userId} store ${storeId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
   async create(storeId: number, dto: CreateCustomerDto) {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -1107,13 +1387,45 @@ export class CustomersService {
     if (effectiveEmail) {
       const existingUser = await this.prisma.users.findFirst({
         where: {
-          email: effectiveEmail,
+          email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
           // Archived customers are not "in use" — allow re-creating a new
           // customer that re-uses the same email after the old row was
           // archived (mirrors the document dedup filter in
           // findByDocumentInOrganization).
           state: { not: user_state_enum.archived },
+        },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          legal_name: true,
+          email: true,
+          phone: true,
+          document_type: true,
+          document_number: true,
+          verification_digit: true,
+          person_type: true,
+          tax_regime: true,
+          fiscal_responsibilities: true,
+          addresses: {
+            where: { type: address_type_enum.billing },
+            orderBy: [{ is_primary: 'desc' }, { id: 'desc' }],
+            take: 1,
+            select: {
+              id: true,
+              address_line1: true,
+              address_line2: true,
+              city: true,
+              state_province: true,
+              country_code: true,
+              postal_code: true,
+              municipality_code: true,
+              phone_number: true,
+              type: true,
+              is_primary: true,
+            },
+          },
         },
       });
 
@@ -1123,8 +1435,36 @@ export class CustomersService {
         // genérico "Resource conflict" en inglés.
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
-          'El correo electrónico ya está registrado en la organización',
-          { kind: 'email', value: effectiveEmail },
+          'Ya existe un cliente con ese correo; selecciónalo.',
+          {
+            kind: 'email',
+            value: effectiveEmail,
+            existing_customer_id: existingUser.id,
+            existing_customer_document_number:
+              existingUser.document_number ?? null,
+            existing_customer_document_type: existingUser.document_type ?? null,
+            // Snapshot público explícito: permite seleccionar una ficha de
+            // otra tienda, incluso sin documento, sin enlazar ni editar nada.
+            // Nunca propagar la fila users cruda (password/TOTP incluidos).
+            existing_customer: withBillingAddress({
+              id: existingUser.id,
+              first_name: existingUser.first_name ?? '',
+              last_name: existingUser.last_name ?? '',
+              legal_name: existingUser.legal_name ?? null,
+              email: existingUser.email ?? null,
+              phone: existingUser.phone ?? null,
+              document_type: existingUser.document_type ?? null,
+              document_number: existingUser.document_number ?? null,
+              verification_digit: existingUser.verification_digit ?? null,
+              person_type: existingUser.person_type ?? null,
+              tax_regime: existingUser.tax_regime ?? null,
+              fiscal_responsibilities:
+                existingUser.fiscal_responsibilities ?? [],
+              addresses: (existingUser.addresses ?? []).filter(
+                (address) => address.type === address_type_enum.billing,
+              ),
+            }),
+          },
         );
       }
     }
@@ -1189,15 +1529,7 @@ export class CustomersService {
     // NIT sin `person_type` explícito y sin nombre de persona natural, se
     // infiere JURIDICA (una NIT sin nombre no puede ser natural); el
     // `person_type` explícito del payload SIEMPRE gana sobre la inferencia.
-    const derivedPersonType: PersonaType | null | undefined =
-      dto.person_type !== undefined && dto.person_type !== null
-        ? dto.person_type
-        : normalizedDoc.type === 'NIT' &&
-            !!normalizedDoc.number &&
-            !dto.first_name?.trim() &&
-            !dto.last_name?.trim()
-          ? ('JURIDICA' as PersonaType)
-          : dto.person_type;
+    const derivedPersonType = this.deriveCreatePersonType(dto, normalizedDoc);
     this.assertPersonaDocumentCoherence(
       derivedPersonType ?? null,
       normalizedDoc.type,
@@ -1214,7 +1546,7 @@ export class CustomersService {
       ? null
       : toTitleCase(dto.last_name || '') || null;
     const formatted_legal_name = isJuridica
-      ? (dto.legal_name?.trim() || null)
+      ? dto.legal_name?.trim() || null
       : null;
 
     // NIT + verification_digit split. If the merchant typed a DV that
@@ -1225,10 +1557,7 @@ export class CustomersService {
     let finalDocumentNumber: string | null = normalizedDoc.number;
     let finalVerificationDigit: string | null = null;
 
-    if (
-      normalizedDoc.type === 'NIT' &&
-      normalizedDoc.number
-    ) {
+    if (normalizedDoc.type === 'NIT' && normalizedDoc.number) {
       const nitResult = this.splitNitAndDv(
         dto.document_number,
         normalizedDoc.number,
@@ -1369,17 +1698,14 @@ export class CustomersService {
         orderBy: { created_at: 'desc' },
         omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
-          addresses: {
-            where: { type: 'shipping' },
-            orderBy: { is_primary: 'desc' },
-          },
+          addresses: CUSTOMER_ADDRESSES_INCLUDE,
         },
       }),
       this.prisma.users.count({ where }),
     ]);
 
     return {
-      data,
+      data: data.map((u) => withBillingAddress(u)),
       meta: {
         total,
         page,
@@ -1449,14 +1775,11 @@ export class CustomersService {
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
 
-    const usersById = new Map(users.map((u) => [u.id, u]));
+    const usersById = new Map(users.map((u) => [u.id, withBillingAddress(u)]));
 
     // Preserva el orden del ranking del groupBy y adjunta order_count.
     return ranking
@@ -1487,10 +1810,7 @@ export class CustomersService {
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
 
@@ -1523,11 +1843,9 @@ export class CustomersService {
 
     const row = stats[0];
     return {
-      ...user,
+      ...withBillingAddress(user),
       total_orders: row?._count?.id ?? 0,
-      total_spend: row?._sum?.grand_total
-        ? Number(row._sum.grand_total)
-        : 0,
+      total_spend: row?._sum?.grand_total ? Number(row._sum.grand_total) : 0,
       last_order_date: row?._max?.created_at ?? null,
     };
   }
@@ -1699,6 +2017,28 @@ export class CustomersService {
 
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {
     const user = await this.findOne(storeId, id);
+    const effectiveEmail =
+      dto.email !== undefined
+        ? this.resolveCustomerEmail(dto.email)
+        : undefined;
+
+    if (effectiveEmail && user.organization_id) {
+      const emailConflict = await this.prisma.users.findFirst({
+        where: {
+          email: emailEquals(effectiveEmail),
+          organization_id: user.organization_id,
+          id: { not: user.id },
+          state: { not: user_state_enum.archived },
+        },
+        select: { id: true },
+      });
+      if (emailConflict) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un cliente con este correo en la organización',
+        );
+      }
+    }
 
     // Effective document pair to validate: payload overrides take precedence;
     // when a payload field is undefined we fall back to the current stored value.
@@ -1842,11 +2182,15 @@ export class CustomersService {
     return this.prisma.users.update({
       where: { id: user.id },
       data: {
-        first_name: firstNameUpdate !== undefined ? firstNameUpdate : (dto.first_name ?? ''),
-        last_name: lastNameUpdate !== undefined ? lastNameUpdate : (dto.last_name ?? ''),
+        first_name:
+          firstNameUpdate !== undefined
+            ? firstNameUpdate
+            : (dto.first_name ?? ''),
+        last_name:
+          lastNameUpdate !== undefined ? lastNameUpdate : (dto.last_name ?? ''),
         legal_name:
           dto.legal_name !== undefined
-            ? (dto.legal_name?.trim() || null)
+            ? dto.legal_name?.trim() || null
             : dto.person_type === 'NATURAL' && user.person_type === 'JURIDICA'
               ? null
               : undefined,
@@ -1854,9 +2198,13 @@ export class CustomersService {
         document_number:
           nextDocumentNumber !== undefined ? nextDocumentNumber : undefined,
         document_type:
-          dto.document_type !== undefined ? (normalizedDoc.type as any) : undefined,
+          dto.document_type !== undefined
+            ? (normalizedDoc.type as any)
+            : undefined,
         verification_digit:
-          nextVerificationDigit !== undefined ? nextVerificationDigit : undefined,
+          nextVerificationDigit !== undefined
+            ? nextVerificationDigit
+            : undefined,
         tax_regime:
           dto.tax_regime !== undefined
             ? (this.normalizeOptionalString(dto.tax_regime) as any)
@@ -1878,10 +2226,7 @@ export class CustomersService {
             : undefined,
         // Email opcional: si viene en el payload lo normalizamos (null cuando
         // queda vacío, sin placeholders). Si no viene (undefined) no se toca.
-        email:
-          dto.email !== undefined
-            ? dto.email?.trim().toLowerCase() || null
-            : undefined,
+        email: effectiveEmail,
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
     });
@@ -1948,18 +2293,16 @@ export class CustomersService {
       where.document_type = normalized.type;
     }
 
-    return this.prisma.users.findFirst({
+    const user = await this.prisma.users.findFirst({
       where,
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         user_roles: true,
         store_users: true,
-        addresses: {
-          where: { type: 'shipping' },
-          orderBy: { is_primary: 'desc' },
-        },
+        addresses: CUSTOMER_ADDRESSES_INCLUDE,
       },
     });
+    return user ? withBillingAddress(user) : null;
   }
 
   /**
@@ -1981,7 +2324,7 @@ export class CustomersService {
    * Conflicto de correo para `upsert_customer` (réplica de lectura de la
    * unicidad que `update`/`create` exigen). `users` NO está scopeado, así que
    * el filtro `organization_id` va escrito a mano; `excludeUserId` excluye al
-   * cliente que se está editando. El correo llega ya en minúsculas.
+   * cliente que se está editando. Tolera correos históricos con mayúsculas.
    */
   async findUserByEmailInOrganizationForAgent(
     email: string,
@@ -1990,7 +2333,7 @@ export class CustomersService {
   ): Promise<any> {
     return this.prisma.users.findFirst({
       where: {
-        email,
+        email: emailEquals(email),
         organization_id: organizationId,
         ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
       },

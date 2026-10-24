@@ -9,6 +9,7 @@ import {
   computed,
 } from '@angular/core';
 import { NgClass, CurrencyPipe } from '@angular/common';
+import { MAX_BULK_RECORDS } from '../../../../../../shared/utils/run-chunked';
 // Solo tipos. El runtime (7,2 MB) llega por `await import('xlsx')` en los dos
 // puntos que de verdad lo usan: descargar la plantilla y leer el archivo.
 import type * as XLSX from 'xlsx';
@@ -151,7 +152,7 @@ interface AnalysisResult {
                   Sube el archivo
                 </p>
                 <p class="text-[11px] text-violet-700">
-                  Excel (.xlsx, .xls) o CSV. Máx. 1000 productos por archivo.
+                  Excel (.xlsx, .xls) o CSV. Máx. 10.000 productos por archivo.
                 </p>
               </div>
             </div>
@@ -270,7 +271,7 @@ interface AnalysisResult {
               <p class="text-[11px] text-blue-800 leading-relaxed">
                 <span class="font-medium">Descarga la plantilla</span>, completa
                 los datos de tus productos y sube el archivo. Formatos: .xlsx,
-                .xls, .csv · Máx. 1000 productos.
+                .xls, .csv · Máx. 10.000 productos.
               </p>
             </div>
 
@@ -1195,8 +1196,8 @@ export class PopBulkDataModalComponent {
       );
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      this.toastService.error('El archivo excede el límite de 5 MB');
+    if (file.size > 20 * 1024 * 1024) {
+      this.toastService.error('El archivo excede el límite de 20 MB');
       return;
     }
     this.selectedFile.set(file);
@@ -1390,9 +1391,9 @@ export class PopBulkDataModalComponent {
           return;
         }
 
-        if (data.length > 1000) {
+        if (data.length > MAX_BULK_RECORDS) {
           this.toastService.error(
-            `El archivo excede el límite de 1000 items (tiene ${data.length})`,
+            `El archivo excede el límite de ${MAX_BULK_RECORDS.toLocaleString('es-CO')} items (tiene ${data.length.toLocaleString('es-CO')})`,
           );
           this.isProcessing.set(false);
           this.currentStep.set(0);

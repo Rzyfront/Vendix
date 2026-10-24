@@ -48,6 +48,8 @@ const DEFAULTS: Record<string, PaperFormat> = Object.freeze({
   withholding_practiced: 'letter',
   withholding_suffered: 'letter',
   withholding_employee_certificate: 'letter',
+  // Reporte de cierre de caja: tirilla térmica 80mm.
+  cash_session_close: 'thermal_80',
 });
 
 /**

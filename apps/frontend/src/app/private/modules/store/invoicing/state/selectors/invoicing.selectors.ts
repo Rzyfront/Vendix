@@ -113,6 +113,11 @@ export const selectResolutionsLoading = createSelector(
   (state) => state.resolutionsLoading,
 );
 
+export const selectResolutionsIncludeArchived = createSelector(
+  selectInvoicingState,
+  (state) => state.resolutionsIncludeArchived,
+);
+
 export const selectActiveResolutions = createSelector(
   selectResolutions,
   (resolutions) => resolutions.filter((r) => r.is_active),

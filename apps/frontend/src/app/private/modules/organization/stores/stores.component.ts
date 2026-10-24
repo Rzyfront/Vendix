@@ -21,8 +21,16 @@ import {
   StoreQueryDto,
   Store,
   StoreFilters,
-  StoreType} from './interfaces/store.interface';
+  StoreType,
+  OrganizationProfitLossSummary} from './interfaces/store.interface';
 import { OrganizationStoresService } from './services/organization-stores.service';
+import {
+  buildBalanceSubText,
+  buildGananciasSubText,
+  buildGastosSubText,
+  buildIncompleteCostText,
+  buildIngresosSubText,
+  hasIncompleteCost as hasIncompleteCostFn} from '../../store/dashboard/utils/profit-loss-cards.util';
 
 // Import new components
 import {
@@ -50,16 +58,8 @@ import {
   OptionsDropdownComponent,
   FilterConfig,
   FilterValues,
-  DropdownAction} from '../../../../shared/components/index';
-
-interface StatItem {
-  title: string;
-  value: string | number;
-  smallText: string;
-  iconName: string;
-  iconBgColor: string;
-  iconColor: string;
-}
+  DropdownAction,
+  IconComponent} from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-stores',
@@ -68,6 +68,7 @@ interface StatItem {
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
+    IconComponent,
     EmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
@@ -81,17 +82,58 @@ interface StatItem {
     <div class="space-y-4">
       <!-- Stats Cards -->
       <div class="stats-container">
-        @for (item of statsItems(); track item) {
-          <app-stats
-            [title]="item.title"
-            [value]="item.value"
-            [smallText]="item.smallText"
-            [iconName]="item.iconName"
-            [iconBgColor]="item.iconBgColor"
-            [iconColor]="item.iconColor"
-          ></app-stats>
-        }
+        <app-stats
+          title="Ingresos"
+          [value]="formatCurrency(profitLoss()?.cash?.income || 0)"
+          [smallText]="ingresosSubText()"
+          iconName="dollar-sign"
+          iconBgColor="bg-primary/10"
+          iconColor="text-primary"
+          [loading]="statsLoading()"
+        />
+        <app-stats
+          title="Ganancias"
+          [value]="formatCurrency(profitLoss()?.cash?.net_profit || 0)"
+          [smallText]="gananciasSubText()"
+          iconName="trending-up"
+          iconBgColor="bg-success-light"
+          iconColor="text-success"
+          [loading]="statsLoading()"
+        />
+        <app-stats
+          title="Balance"
+          [value]="formatCurrency(profitLoss()?.cash?.balance || 0)"
+          [smallText]="balanceSubText()"
+          iconName="wallet"
+          iconBgColor="bg-info-light"
+          iconColor="text-info"
+          [loading]="statsLoading()"
+        />
+        <app-stats
+          title="Gastos"
+          [value]="formatCurrency(profitLoss()?.operating_expenses || 0)"
+          [smallText]="gastosSubText()"
+          iconName="trending-down"
+          iconBgColor="bg-error-light"
+          iconColor="text-error"
+          [loading]="statsLoading()"
+        />
       </div>
+
+      @if (hasIncompleteCost()) {
+        <div
+          class="flex items-start gap-3 p-3 rounded-lg bg-warning-light border border-warning/30"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="16"
+            class="text-warning shrink-0 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            {{ incompleteCostText() }}
+          </p>
+        </div>
+      }
 
       <!-- Stores List -->
       <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
@@ -227,7 +269,27 @@ export class StoresComponent implements OnInit {
 
   readonly stores = signal<StoreListItem[]>([]);
   readonly isLoading = signal(false);
-  readonly statsItems = signal<StatItem[]>([]);
+  readonly profitLoss = signal<OrganizationProfitLossSummary | null>(null);
+  readonly statsLoading = signal(false);
+  readonly ingresosSubText = computed(() =>
+    buildIngresosSubText(this.profitLoss(), (v) => this.formatCurrency(v)),
+  );
+  readonly gananciasSubText = computed(() =>
+    buildGananciasSubText(this.profitLoss(), (v) => this.formatCurrency(v)),
+  );
+  readonly balanceSubText = computed(() =>
+    buildBalanceSubText(this.profitLoss(), (v) => this.formatCurrency(v)),
+  );
+  readonly gastosSubText = computed(() =>
+    // Preset fijo 'today' en la vista de organización: el periodo previo es 'ayer'.
+    buildGastosSubText(this.profitLoss(), (v) => this.formatCurrency(v), 'ayer'),
+  );
+  readonly hasIncompleteCost = computed(() =>
+    hasIncompleteCostFn(this.profitLoss()),
+  );
+  readonly incompleteCostText = computed(() =>
+    buildIncompleteCostText(this.profitLoss()),
+  );
   readonly searchTerm = signal('');
   readonly selectedState = signal('');
   readonly selectedStoreType = signal('');
@@ -542,63 +604,25 @@ openCreateStoreModal(): void {
   }
 
   loadStats(): void {
+    this.statsLoading.set(true);
     this.storesService
-      .getOrganizationStoreStats()
+      .getOrganizationProfitLoss('today')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response: any) => {
-          const data = response.data || {};
-
-          this.statsItems.update((_) => [
-            {
-              title: 'Total Tiendas',
-              value: data.total_stores || 0,
-              smallText: 'Registradas',
-              iconName: 'building',
-              iconBgColor: 'bg-primary/10',
-              iconColor: 'text-primary'},
-            {
-              title: 'Activas',
-              value: data.active_stores || 0,
-              smallText: 'En funcionamiento',
-              iconName: 'check-circle',
-              iconBgColor: 'bg-green-100',
-              iconColor: 'text-green-600'},
-            {
-              title: 'Total Pedidos',
-              value: this.formatNumber(data.total_orders || 0),
-              smallText: 'Procesados',
-              iconName: 'shopping-cart',
-              iconBgColor: 'bg-pink-100',
-              iconColor: 'text-pink-600'},
-            {
-              title: 'Total Ganancias',
-              value: this.formatCurrency(data.total_revenue || 0),
-              smallText: 'Ingresos totales',
-              iconName: 'dollar-sign',
-              iconBgColor: 'bg-blue-100',
-              iconColor: 'text-blue-600'},
-          ]);
+        next: (response) => {
+          this.profitLoss.set(response.data ?? null);
+          this.statsLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading stats:', error);
+          this.statsLoading.set(false);
           this.toastService.error('Error al cargar estadísticas');
         }});
   }
 
-  // Formatear número para visualización
-  private formatNumber(num: number): string {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  }
-
-  // Formatear moneda
-  private formatCurrency(amount: number): string {
-    return this.currencyService.format(amount, 0);
+  // Mismo formateador compacto que el dashboard de tienda
+  formatCurrency(value: number): string {
+    return this.currencyService.formatCompact(value);
   }
 
   refreshStores(): void {

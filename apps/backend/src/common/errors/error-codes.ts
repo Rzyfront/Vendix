@@ -5,6 +5,15 @@ export interface ErrorCodeEntry {
 }
 
 export const ErrorCodes = {
+  // Dedicated email intake; independent of API/webhook connection contracts.
+  EMAIL_RECEPTION_UNAVAILABLE: { code: 'EMAIL_RECEPTION_UNAVAILABLE', httpStatus: 503, devMessage: 'La recepción por correo no está disponible para esta tienda.' },
+  EMAIL_RECEPTION_CONSENT_REQUIRED: { code: 'EMAIL_RECEPTION_CONSENT_REQUIRED', httpStatus: 400, devMessage: 'Confirma la política vigente para activar o cambiar tu dirección.' },
+  EMAIL_RECEPTION_FISCAL_GATE: { code: 'EMAIL_RECEPTION_FISCAL_GATE', httpStatus: 403, devMessage: 'Completa la configuración fiscal de tu negocio para recibir facturas.' },
+  EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED: { code: 'EMAIL_RECEPTION_SUBSCRIPTION_BLOCKED', httpStatus: 403, devMessage: 'La suscripción no permite agregar documentos ahora.' },
+  EMAIL_RECEPTION_PAUSED: { code: 'EMAIL_RECEPTION_PAUSED', httpStatus: 409, devMessage: 'La recepción por correo está pausada.' },
+  EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
+  EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
+
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',
@@ -859,6 +868,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado',
   },
+  PROD_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'PROD_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Esta carga contiene inventario inicial: debes confirmar que eres consciente de que es una carga inicial.',
+  },
   PROD_CREATE_001: {
     code: 'PROD_CREATE_001',
     httpStatus: 400,
@@ -1636,6 +1651,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Adjustment not found',
   },
+  INV_ADJ_BULK_INITIAL_LOAD_ACK_001: {
+    code: 'INV_ADJ_BULK_INITIAL_LOAD_ACK_001',
+    httpStatus: 400,
+    devMessage:
+      'Este ajuste crea productos nuevos: debes confirmar que es una carga inicial.',
+  },
   INV_BULK_001: {
     code: 'INV_BULK_001',
     httpStatus: 400,
@@ -1644,7 +1665,7 @@ export const ErrorCodes = {
   INV_BULK_002: {
     code: 'INV_BULK_002',
     httpStatus: 400,
-    devMessage: 'Bulk upload batch size exceeded (max 1000)',
+    devMessage: 'Bulk upload batch size exceeded (max 10000)',
   },
   INV_LOCATION_NOT_IN_STORE: {
     code: 'INV_LOCATION_NOT_IN_STORE',
@@ -2191,6 +2212,35 @@ export const ErrorCodes = {
     devMessage: 'Sales orders carry no tax breakdown; cannot be invoiced',
   },
   /**
+   * Factura de venta CREADA A MANO sin correo del adquiriente.
+   *
+   * El correo es el destino del `AttachedDocument` que la norma obliga a
+   * entregar: una factura nominativa sin él se emite ante la DIAN pero el
+   * cliente nunca la recibe. Sólo lo exigen los puntos de entrada manuales
+   * (`POST store/invoicing`, `POST superadmin/.../sales-invoices` y
+   * `POST superadmin/subscriptions/fiscal/invoices`); los flujos automáticos
+   * (POS, desde orden, cuenta, pedido, contrato, SaaS) NO pasan por esta
+   * compuerta. Consumidor final (`222222222222` o venta sin adquiriente
+   * declarado) queda exento. Se lanza ANTES de numerar o escribir.
+   */
+  INVOICING_ACQUIRER_EMAIL_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_EMAIL_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente es obligatorio para crear una factura electrónica manual.',
+  },
+  /**
+   * El correo efectivo del adquiriente (el del formulario, o el heredado de la
+   * ficha del cliente / tenant) no tiene forma de correo. Mismo alcance que
+   * `INVOICING_ACQUIRER_EMAIL_REQUIRED`.
+   */
+  INVOICING_ACQUIRER_EMAIL_INVALID: {
+    code: 'INVOICING_ACQUIRER_EMAIL_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'El correo del adquiriente no es un correo válido (ej. cliente@dominio.com).',
+  },
+  /**
    * El área fiscal «invoicing» está inactiva para el tenant.
    *
    * Las dos compuertas de abajo lanzaban `ForbiddenException` a secas. Un 403
@@ -2376,6 +2426,43 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Technical key (ClTec) must be exactly 40 (SHA-1) or 64 (SHA-256) hexadecimal characters as issued by the DIAN numbering-range web service',
+  },
+  // Archivado lógico de resoluciones (invoice_resolutions.archived_at). 409: el
+  // estado actual del recurso impide la operación; el usuario puede resolverlo.
+  INVOICING_RESOLUTION_012: {
+    code: 'INVOICING_RESOLUTION_012',
+    httpStatus: 409,
+    devMessage:
+      'Resolution has in-flight documents (pending transmission or retry queue); cannot archive',
+  },
+  INVOICING_RESOLUTION_013: {
+    code: 'INVOICING_RESOLUTION_013',
+    httpStatus: 409,
+    devMessage:
+      'Resolution is wired to the platform fiscal configuration (invoice_resolution_id); cannot archive',
+  },
+  INVOICING_RESOLUTION_014: {
+    code: 'INVOICING_RESOLUTION_014',
+    httpStatus: 409,
+    devMessage:
+      'DIAN test set in progress (enablement_status=testing) on the same configuration axis; cannot archive',
+  },
+  INVOICING_RESOLUTION_015: {
+    code: 'INVOICING_RESOLUTION_015',
+    httpStatus: 409,
+    devMessage:
+      'Resolution is the note series in use; provide a replacement series to archive it (also used for an invalid or already-taken replacement prefix)',
+  },
+  INVOICING_RESOLUTION_016: {
+    code: 'INVOICING_RESOLUTION_016',
+    httpStatus: 409,
+    devMessage: 'Resolution is archived and read-only',
+  },
+  INVOICING_RESOLUTION_017: {
+    code: 'INVOICING_RESOLUTION_017',
+    httpStatus: 409,
+    devMessage:
+      'Numbering range overlaps another resolution with the same issuer NIT, prefix and document type on the platform',
   },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
@@ -3344,6 +3431,18 @@ export const ErrorCodes = {
     devMessage:
       'Credit note exceeds the remaining creditable balance of its parent invoice',
   },
+  INVOICING_NOTE_SOURCE_001: {
+    code: 'INVOICING_NOTE_SOURCE_001',
+    httpStatus: 422,
+    devMessage:
+      'Invoice note source item is missing, ambiguous, or does not belong to the corrected invoice',
+  },
+  INVOICING_NOTE_LIMIT_001: {
+    code: 'INVOICING_NOTE_LIMIT_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining source-item or invoice credit limit',
+  },
   /**
    * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
    * quedó respaldada por ningún documento fiscal emitido.
@@ -3753,6 +3852,18 @@ export const ErrorCodes = {
     code: 'DIAN_CONFIG_002',
     httpStatus: 409,
     devMessage: 'DIAN configuration already exists for this store',
+  },
+  DIAN_CONFIG_003: {
+    code: 'DIAN_CONFIG_003',
+    httpStatus: 409,
+    devMessage:
+      'No inheritable DIAN enablement exists for this configuration, or its current state does not allow inheriting one',
+  },
+  DIAN_CONFIG_004: {
+    code: 'DIAN_CONFIG_004',
+    httpStatus: 422,
+    devMessage:
+      'The software PIN does not match the one of the existing DIAN enablement for this NIT and software',
   },
   DIAN_CERT_001: {
     code: 'DIAN_CERT_001',
@@ -4566,7 +4677,7 @@ export const ErrorCodes = {
     code: 'DSP_NOTE_NOT_ELIGIBLE_001',
     httpStatus: 409,
     devMessage:
-      'La remisión no puede planillarse porque ya fue entregada, recibida, facturada o anulada.',
+      'La remisión no puede asignarse a una ruta porque ya fue entregada, recibida, facturada o anulada.',
   },
   DISPATCH_NOTE_NO_SHIPPING_ADDRESS: {
     code: 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS',
@@ -4591,6 +4702,42 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
+  },
+  DISPATCH_ROUTE_NOT_RESPONSIBLE: {
+    code: 'DISPATCH_ROUTE_NOT_RESPONSIBLE',
+    httpStatus: 403,
+    devMessage:
+      'Only the route responsible user can dispatch this route',
+  },
+  DISPATCH_ROUTE_TRACKING_FORBIDDEN: {
+    code: 'DISPATCH_ROUTE_TRACKING_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'Only the internal responsible user of an in-progress route can publish its position',
+  },
+  DISPATCH_ROUTE_TRACKING_NOT_ACTIVE: {
+    code: 'DISPATCH_ROUTE_TRACKING_NOT_ACTIVE',
+    httpStatus: 409,
+    devMessage:
+      'Route tracking is only available while the route is dispatched or in transit',
+  },
+  DISPATCH_ROUTE_CASH_SESSION_REQUIRED: {
+    code: 'DISPATCH_ROUTE_CASH_SESSION_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'The store requires a cash register: choose an open cash session to settle the route collection',
+  },
+  DISPATCH_ROUTE_CASH_SESSION_INVALID: {
+    code: 'DISPATCH_ROUTE_CASH_SESSION_INVALID',
+    httpStatus: 409,
+    devMessage:
+      'The selected cash session is not open or does not belong to this store',
+  },
+  DISPATCH_ROUTE_ALREADY_CLOSED: {
+    code: 'DISPATCH_ROUTE_ALREADY_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'The route is already closed',
   },
   DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION: {
     code: 'DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION',
@@ -4735,7 +4882,7 @@ export const ErrorCodes = {
   BULK_PROD_LIMIT_EXCEEDED: {
     code: 'BULK_PROD_LIMIT_EXCEEDED',
     httpStatus: 400,
-    devMessage: 'File exceeds maximum product limit (1000)',
+    devMessage: 'File exceeds maximum product limit (10000)',
   },
   BULK_PROD_SESSION_EXPIRED: {
     code: 'BULK_PROD_SESSION_EXPIRED',
@@ -4924,6 +5071,47 @@ export const ErrorCodes = {
     code: 'HABILITATION_SCAN_TOO_MANY_FILES',
     httpStatus: 400,
     devMessage: 'Too many files — the habilitation scanner accepts up to 3',
+  },
+
+  // Escáner IA de borrador de factura de venta («Nueva factura» → leer con IA).
+  // Nada se crea ni se emite: el resultado es un borrador para revisar.
+  INVOICE_DRAFT_SCAN_NO_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_NO_FILES',
+    httpStatus: 400,
+    devMessage: 'No file provided for the invoice draft scan',
+  },
+  INVOICE_DRAFT_SCAN_TOO_MANY_FILES: {
+    code: 'INVOICE_DRAFT_SCAN_TOO_MANY_FILES',
+    httpStatus: 400,
+    devMessage: 'Too many files — the invoice draft scanner accepts up to 6',
+  },
+  INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE: {
+    code: 'INVOICE_DRAFT_SCAN_UNSUPPORTED_TYPE',
+    httpStatus: 400,
+    devMessage:
+      'Unsupported file type — only JPEG, PNG, WebP and PDF are accepted (Word/Excel are not)',
+  },
+  INVOICE_DRAFT_SCAN_PARSE_FAIL: {
+    code: 'INVOICE_DRAFT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse the AI invoice draft response as valid JSON',
+  },
+  INVOICE_DRAFT_SCAN_AI_FAILED: {
+    code: 'INVOICE_DRAFT_SCAN_AI_FAILED',
+    httpStatus: 502,
+    devMessage: 'AI invoice draft extraction failed',
+  },
+  INVOICE_DRAFT_SCAN_NOT_READY: {
+    code: 'INVOICE_DRAFT_SCAN_NOT_READY',
+    httpStatus: 409,
+    devMessage:
+      'The invoice draft scanner AI application is missing, inactive or has no vision model linked',
+  },
+  INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN: {
+    code: 'INVOICE_DRAFT_SCAN_PLATFORM_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'The platform invoice draft scan requires a super-admin context without store',
   },
 
   // Monitoring
@@ -5195,6 +5383,11 @@ export const ErrorCodes = {
     devMessage:
       'Se requiere informacion de pago para procesar la orden completa.',
   },
+  ORD_CASH_SESSION_ORDER_STALE_001: {
+    code: 'ORD_CASH_SESSION_ORDER_STALE_001',
+    httpStatus: 409,
+    devMessage: 'La orden cambió mientras se procesaba desde el cierre de caja.',
+  },
 
   // ===== SaaS Subscriptions =====
   SUBSCRIPTION_001: {
@@ -5304,6 +5497,18 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_VALIDATION',
     httpStatus: 400,
     devMessage: 'Subscription checkout validation failed',
+  },
+  SUBSCRIPTION_ACTIVATION_START_RANGE: {
+    code: 'SUBSCRIPTION_ACTIVATION_START_RANGE',
+    httpStatus: 400,
+    devMessage:
+      'La fecha de inicio del período debe estar entre hoy menos 31 días y hoy',
+  },
+  SUBSCRIPTION_ACTIVATION_UNDERPAYMENT: {
+    code: 'SUBSCRIPTION_ACTIVATION_UNDERPAYMENT',
+    httpStatus: 400,
+    devMessage:
+      'El monto recibido es menor que el total a cobrar; marca "Aceptar pago parcial" e indica una nota',
   },
   SUBSCRIPTION_PAY_001: {
     code: 'SUBSCRIPTION_PAY_001',
@@ -6303,6 +6508,38 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // QUI-920 — guardia transaccional al cerrar caja con órdenes pendientes.
+  CASH_SESSION_PENDING_001: {
+    code: 'CASH_SESSION_PENDING_001',
+    httpStatus: 409,
+    devMessage: 'An explicit decision is required while pending orders remain',
+  },
+  CASH_SESSION_PENDING_002: {
+    code: 'CASH_SESSION_PENDING_002',
+    httpStatus: 409,
+    devMessage: 'Pending orders changed or remain after the resolved decision',
+  },
+  CASH_SESSION_PENDING_003: {
+    code: 'CASH_SESSION_PENDING_003',
+    httpStatus: 400,
+    devMessage: 'A non-empty reason is required to override pending orders',
+  },
+  CASH_SESSION_PENDING_004: {
+    code: 'CASH_SESSION_PENDING_004',
+    httpStatus: 409,
+    devMessage: 'Legacy session tracking is unavailable; an audited override is required',
+  },
+  CASH_SESSION_PENDING_005: {
+    code: 'CASH_SESSION_PENDING_005',
+    httpStatus: 409,
+    devMessage: 'Unresolved sale or refund cash movements remain for this session',
+  },
+  CASH_SESSION_PENDING_006: {
+    code: 'CASH_SESSION_PENDING_006',
+    httpStatus: 409,
+    devMessage: 'The cash session is already closed',
   },
 
   // Caja registradora — cobro sin sesión del operador

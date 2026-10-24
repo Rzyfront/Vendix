@@ -131,6 +131,7 @@ const ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 const MOVEMENT_TYPES = [
@@ -551,7 +552,7 @@ export function createInventoryTools(
       version: '1',
       domain: 'inventory',
       description:
-        'Create an inventory stock adjustment for damage, loss, theft, expiration, count variance, or manual correction. This changes the stock quantity at a specific location.',
+        'Create an inventory stock adjustment for damage, loss, theft, expiration, count variance, or manual correction. This changes the stock quantity at a specific location. When a physical count does not match the system (count variance or manual correction), prefer adjust_stock: it guides the person through reviewing the difference before proposing the change.',
       parameters: {
         type: 'object',
         properties: {

@@ -44,6 +44,11 @@ export function toDianConfigurationType(
 }
 
 export interface Invoice {
+  idempotency_replayed?: boolean;
+  /** Sólo en la respuesta de crear con `emit_immediately: true`. */
+  emission?: InvoiceEmissionOutcome | null;
+  related_invoice_id?: number | null;
+  refund_id?: number | null;
   id: number;
   organization_id: number;
   store_id: number;
@@ -855,6 +860,14 @@ export interface InvoiceResolution {
   valid_to: string;
   is_active: boolean;
   /**
+   * ISO. No nulo = resolución ARCHIVADA: inactiva, solo lectura y oculta por
+   * defecto en los listados. Las resoluciones DIAN nunca se borran.
+   */
+  archived_at?: string | null;
+  archived_by_user_id?: number | null;
+  /** Entidad contable dueña de la resolución, cuando el backend la incluye. */
+  accounting_entity_id?: number | null;
+  /**
    * Qué documento numera esta fila.
    *
    * Sin este campo, una resolución de documento soporte creada desde la UI se
@@ -935,6 +948,7 @@ export interface CreateCustomerRequest {
 }
 
 export interface CreateInvoiceDto {
+  client_request_id?: string;
   invoice_type: InvoiceType;
   customer_name?: string;
   customer_tax_id?: string;
@@ -963,6 +977,27 @@ export interface CreateInvoiceDto {
    * Espejo de `InvoiceWithholdingInputDto` del backend.
    */
   withholdings?: InvoiceWithholdingInput[];
+  /**
+   * «Emitir directamente»: tras crear, el backend valida y envía a la DIAN en
+   * la misma petición. Si la emisión falla responde 2xx con la factura y el
+   * desenlace en `Invoice.emission`; la factura nunca se pierde.
+   */
+  emit_immediately?: boolean;
+}
+
+/**
+ * Desenlace de la emisión inmediata (`emit_immediately: true`) que el backend
+ * adjunta a la factura creada. Ausente sin el flag.
+ */
+export interface InvoiceEmissionOutcome {
+  attempted: boolean;
+  success: boolean;
+  phase: 'validate' | 'send' | null;
+  status?: string | null;
+  error_code?: string | null;
+  message?: string | null;
+  http_status?: number | null;
+  details?: unknown;
 }
 
 /**
@@ -1015,6 +1050,46 @@ export interface CreateInvoiceItemDto {
   is_inclusive?: boolean;
 }
 
+/** Minimal writable line contract for credit/debit notes; fiscal data is server-derived. */
+export interface CreateInvoiceNoteItemDto {
+  source_invoice_item_id: number;
+  quantity: number;
+  unit_price: number;
+  discount_amount?: number;
+  unit_code?: string;
+}
+
+export interface InvoiceNoteContextTax {
+  tax_name: string;
+  tax_type: string;
+  tax_rate: number | string;
+  rate_basis: 'percent' | 'per_mil' | 'fraction';
+  is_inclusive: boolean;
+}
+
+export interface InvoiceNoteContextLine {
+  source_invoice_item_id: number;
+  description: string;
+  quantity: number | string;
+  unit_price: number | string;
+  /** Effective source allowance, including any allocated document allowance. */
+  discount_amount: number | string;
+  unit_code: string | null;
+  price_unit_quantity: number;
+  is_inclusive: boolean;
+  taxes: InvoiceNoteContextTax[];
+  remaining_quantity: number | string | null;
+  remaining_base: number | string | null;
+  remaining_total: number | string | null;
+}
+
+export interface InvoiceNoteContext {
+  invoice_id: number;
+  note_type: 'credit_note' | 'debit_note';
+  items: InvoiceNoteContextLine[];
+  warnings: string[];
+}
+
 export interface UpdateInvoiceDto {
   customer_name?: string;
   customer_tax_id?: string;
@@ -1063,8 +1138,9 @@ export interface CreateCreditNoteDto {
   issue_date?: string;
   currency?: string;
   notes?: string;
-  items?: CreateInvoiceItemDto[];
-  taxes?: CreateInvoiceTaxDto[];
+  items?: CreateInvoiceNoteItemDto[];
+  refund_item_sources?: { refund_item_id: number; source_invoice_item_id: number }[];
+  shipping_source_invoice_item_id?: number;
 }
 
 /** Nota débito. Mismo contrato que {@link CreateCreditNoteDto}. */
@@ -1076,8 +1152,7 @@ export interface CreateDebitNoteDto {
   issue_date?: string;
   currency?: string;
   notes?: string;
-  items?: CreateInvoiceItemDto[];
-  taxes?: CreateInvoiceTaxDto[];
+  items?: CreateInvoiceNoteItemDto[];
 }
 
 export interface CreateResolutionDto {
@@ -1185,14 +1260,15 @@ export interface DianConfig {
   configuration_type?: string | null;
   software_id: string;
   software_pin_encrypted: string; // Always '****' from API
-  certificate_s3_key: string | null;
+  /** Ya no viaja en las respuestas HTTP (SEC-L2): usar `certificate_present`. */
+  certificate_s3_key?: string | null;
   /**
-   * Sustituye a `certificate_s3_key` en la consola de tenants del super admin,
-   * que redacta la clave del objeto: nombra dónde vive el material
-   * criptográfico de un tercero y quien mira ahí no es el dueño del NIT.
-   * Ausente en el panel del comerciante, donde la clave sí viaja.
+   * Sustituye a `certificate_s3_key`: la ubicación del `.p12` no sale del
+   * backend, solo si existe.
    */
   certificate_present?: boolean;
+  /** Sustituye al ARN de KMS (`certificate_kms_key_id`): ¿la firma la custodia KMS? */
+  certificate_uses_kms?: boolean;
   certificate_password_encrypted: string | null; // Always '****' from API
   certificate_expiry: string | null;
   environment: 'test' | 'production';
@@ -1389,7 +1465,9 @@ export interface DianProductionReadiness {
     current_number: number;
     valid_from: string;
     valid_to: string;
-    technical_key: string | null;
+    /** La ClTec no viaja: solo si está cargada (y su longitud, cuando el backend la envía). */
+    technical_key_set: boolean;
+    technical_key_length?: number;
     is_habilitacion_range: boolean;
     is_expired: boolean;
     is_exhausted: boolean;
@@ -1436,4 +1514,11 @@ export interface DianEmissionStatus {
   actionable: DianReadinessCheck[];
   /** Blockers waiting on a DIAN verdict. */
   waiting_on_dian: DianReadinessCheck[];
+}
+
+/** Respuesta de `POST {rail}/resolutions/:id/archive`. */
+export interface ArchiveResolutionResult extends InvoiceResolution {
+  archived_at: string;
+  /** Id de la serie de notas creada como reemplazo, si hubo `replacement_prefix`. */
+  replacement_resolution_id: number | null;
 }

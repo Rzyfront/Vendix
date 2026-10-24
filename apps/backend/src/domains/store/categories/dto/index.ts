@@ -8,6 +8,10 @@ import {
   Min,
   IsEnum,
   IsBoolean,
+  IsIn,
+  IsArray,
+  ArrayNotEmpty,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
@@ -194,4 +198,45 @@ export class CategoryResponseDto {
     description: 'Indica si se destaca en la tienda online',
   })
   is_featured: boolean;
+}
+
+/** Tope de ids por request en la asignación masiva (vendix-bulk-operations). */
+export const MAX_ASSIGN_PRODUCT_IDS = 100;
+
+// Asignación en bloque de productos (máx. 100 por solicitud)
+export class AssignProductsDto {
+  @ApiProperty({
+    example: 'add',
+    enum: ['add', 'remove'],
+    description: 'Acción a aplicar: agregar o quitar los productos',
+  })
+  @IsIn(['add', 'remove'])
+  action: 'add' | 'remove';
+
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'IDs de los productos (máximo 100)',
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_ASSIGN_PRODUCT_IDS)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  product_ids: number[];
+}
+
+export interface AssignCategoryProductsResult {
+  added: number;
+  removed: number;
+  unchanged: number;
+}
+
+export interface CategoryAssignPreviewResult {
+  already_in_category: number;
+  to_add: number;
+}
+
+export interface CategoryProductIdsResult {
+  product_ids: number[];
+  total: number;
 }

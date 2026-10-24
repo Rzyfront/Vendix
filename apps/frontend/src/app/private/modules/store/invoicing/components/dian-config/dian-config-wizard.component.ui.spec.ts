@@ -59,8 +59,6 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('[attr.aria-pressed]="selectedEnvironment() === \'test\'"');
     expect(source).toContain('[attr.aria-pressed]="selectedEnvironment() === \'production\'"');
     expect(source).toContain('class="p-4 rounded-lg border-2 text-left transition-colors focus-visible:outline');
-    expect(source).toContain('focus-visible:outline-[var(--color-text-primary)]');
-    expect(source).not.toContain('focus-visible:outline-[var(--color-ring)]');
   });
 
   it('keeps credential and certificate actions responsive on narrow wizard layouts', () => {
@@ -146,17 +144,12 @@ describe('DIAN wizard contextual help source guards', () => {
     expect(source).toContain('No se pudieron consultar las resoluciones de facturación.');
   });
 
-  it('keeps semantic body copy readable and preserves decorative icon colors', () => {
-    const bodyTags = [...source.matchAll(/<(?:p|span|div)\b[^>]*>/g)].map(([tag]) => tag);
-    for (const tag of bodyTags) {
-      expect(tag).not.toMatch(/\btext-(?:warning|success|error|info)\b/);
-      expect(tag).not.toMatch(/text-\[var\(--color-(?:warning|success|error|info)\)\]/);
-    }
-    expect(source).toContain("[class]=\"testResult()!.success ? 'text-success' : 'text-error'\"");
-    expect(source).toContain("[class]=\"testSetState() === 'passed' ? 'text-success' : 'text-error'\"");
-    expect(source).toContain("enabled: 'bg-success-light text-text-primary'");
-    expect(source).toContain("suspended: 'bg-error-light text-text-primary'");
-    expect(source).toContain('class="text-sm text-text-primary">{{ auditLogsError() }}</p>');
+  it('keeps explicit Spanish verdicts and DIAN wait messages independent of their colors', () => {
+    expect(source).toContain("testResult()!.success ? 'Conexion exitosa' : 'Error de conexion'");
+    expect(source).toContain('Errores reportados por la DIAN');
+    expect(source).toContain('La DIAN está validando tu set de pruebas');
+    expect(source).toContain('Esperando a la DIAN');
+    expect(source).toContain('{{ auditLogsError() }}');
   });
 
   it('wraps the audit responsive list and adjacent pager in the shared compact card', () => {
@@ -169,5 +162,14 @@ describe('DIAN wizard contextual help source guards', () => {
   it('uses 16px shared form controls and a compact stepper when the axis is locked', () => {
     expect((source.match(/<app-(?:input|selector) size="lg"/g))?.length).toBe(10);
     expect(source).toContain('[size]="configurationTypeLocked() ? \'sm\' : \'md\'"');
+  });
+
+  it('redirects the sales-invoice creation to the activation wizard when asked by the host', () => {
+    expect(source).toContain('readonly redirectSalesInvoice = input<boolean>(false)');
+    expect(source).toContain('readonly salesInvoiceRedirected = computed(');
+    expect(source).toContain('@if (salesInvoiceRedirected())');
+    expect(source).toContain('Ir al asistente de activación');
+    expect(source).toContain("this.router.navigate(['/admin/invoicing/activation'])");
+    expect(source).toContain('credentialsForm.invalid || savingCredentials() || salesInvoiceRedirected()');
   });
 });

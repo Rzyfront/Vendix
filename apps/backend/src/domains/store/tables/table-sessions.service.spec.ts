@@ -324,6 +324,31 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       } as any);
     });
 
+    it('does not confirm payment or balance when the cash-session lock fails', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 0));
+      settingsService.getSettings.mockResolvedValue({
+        pos: { cash_register: { enabled: true } },
+      });
+      (service as any).cashRegisterSessionsService.getActiveSession.mockResolvedValue({
+        id: 901,
+      });
+      const cashLock = jest
+        .spyOn((service as any).cashRegisterMovementsService, 'recordSaleMovement')
+        .mockRejectedValue(new Error('cash session closed before lock'));
+
+      await expect(service.confirmPayment(sessionId, paymentId)).rejects.toThrow(
+        'cash session closed before lock',
+      );
+
+      expect(cashLock).toHaveBeenCalledWith(
+        901,
+        expect.objectContaining({ order_id: orderId, payment_id: paymentId }),
+        prismaMock,
+      );
+      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
     it('rejects with SPLIT_ACCOUNT_LOCKED and does not confirm when the order has an active financial split', async () => {
       const locked = payment('pending', 0);
       (locked.orders as any).active_financial_split_id = 4;
@@ -565,6 +590,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         guest_count: 4,
       });
       prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.$queryRaw.mockResolvedValueOnce([{ id: 515 }]);
 
       prismaMock.table_sessions.findFirst.mockResolvedValue({
         id: 77,
@@ -608,6 +634,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           data: expect.objectContaining({
             state: 'draft',
             store_id: STORE_ID,
+            origin_cash_session_id: 515,
           }),
         }),
       );
@@ -1345,6 +1372,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           }),
         }),
       );
+      expect(prismaMock.orders.create.mock.calls.at(-1)[0].data)
+        .not.toHaveProperty('origin_cash_session_id');
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
       // Session created with opened_by null (anonymous opener).
       expect(prismaMock.table_sessions.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2653,6 +2683,51 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       await expect(
         service.updateItemNotes(83, 501, 'Nota'),
       ).rejects.toThrow();
+    });
+
+    describe('updateInformalNotes (QUI-898)', () => {
+      it('guarda el texto recortado sin tocar order_items ni cocina', async () => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(findOneRow());
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+        (prismaMock.$transaction as jest.Mock).mockClear();
+
+        await service.updateInformalNotes(83, '  Cliente pidió un vaso extra  ');
+
+        expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+          where: { id: 83, store_id: STORE_ID },
+          data: expect.objectContaining({ informal_notes: 'Cliente pidió un vaso extra' }),
+        });
+        expect(prismaMock.$transaction).not.toHaveBeenCalled();
+        expect(
+          (service as any).kitchenFireService.emitTicketUpdatedEvent,
+        ).not.toHaveBeenCalled();
+      });
+
+      it.each(['', '   ', null, undefined])('normaliza %p a null', async (value) => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(findOneRow());
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+
+        await service.updateInformalNotes(83, value as any);
+
+        expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+          where: { id: 83, store_id: STORE_ID },
+          data: expect.objectContaining({ informal_notes: null }),
+        });
+      });
+
+      it('rechaza con TABLE_SESSION_CLOSED si la sesión está cerrada y no escribe', async () => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue({
+          ...findOneRow(),
+          closed_at: new Date(),
+        });
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+
+        await expect(service.updateInformalNotes(83, 'x')).rejects.toMatchObject({
+          errorCode: ErrorCodes.TABLE_SESSION_CLOSED.code,
+        });
+        expect(prismaMock.table_sessions.updateMany).not.toHaveBeenCalled();
+        expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      });
     });
   });
 });

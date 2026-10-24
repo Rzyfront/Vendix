@@ -177,6 +177,11 @@ export interface DispatchRoute {
   currency?: string | null;
   notes?: string | null;
   void_reason?: string | null;
+  settlement_cash_session_id?: number | null;
+  settlement_cash_user_id?: number | null;
+  cash_settled_at?: string | null;
+  settlement_cash_user?: { id: number; first_name?: string; last_name?: string } | null;
+  settlement_cash_session?: { id: number; register?: { name?: string } | null } | null;
   vehicle?: Vehicle | null;
   driver_user?: DriverUser | null;
   stops?: DispatchRouteStop[];
@@ -311,7 +316,21 @@ export interface CreateDispatchRouteDto {
 
 export interface CloseDispatchRouteDto {
   declared_cash: number;
+  /** Open cash-register session that receives the collection (D7/D9). */
+  cash_register_session_id?: number;
   notes?: string;
+}
+
+/** `GET /store/dispatch-routes/:id/close-options` → `data`. */
+export interface RouteCloseOptions {
+  cash_required: boolean;
+  sessions: Array<{
+    id: number;
+    register_id: number;
+    register_name: string;
+    opened_by: { id: number; name: string };
+    opened_at: string;
+  }>;
 }
 
 export interface VoidDispatchRouteDto {

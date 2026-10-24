@@ -38,6 +38,10 @@ function dependencies() {
   const documents = {
     list: jest.fn().mockResolvedValue({ data: [{ id: 1 }], total: 1, page: 1, limit: 25 }),
     findOne: jest.fn().mockResolvedValue({ id: 1, files: [] }),
+    findOneInbox: jest.fn().mockResolvedValue({ id: 1, files: [] }),
+    listInbox: jest.fn().mockResolvedValue({ data: [{ id: 1 }], total: 1, page: 1, limit: 25 }),
+    inboxSummary: jest.fn().mockResolvedValue({ new: 1, requires_review: 0, accepted: 0, reclaimed: 0, total: 1 }),
+    receptionStatus: jest.fn().mockResolvedValue({ dian_active: false, configured: false }),
     createManual: jest.fn().mockResolvedValue({ id: 1 }),
     importXml: jest.fn().mockResolvedValue({ id: 1 }),
     updateReview: jest.fn().mockResolvedValue({ id: 1 }),
@@ -67,6 +71,8 @@ function dependencies() {
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
     resolveOrganization: jest.fn().mockResolvedValue(ORG_CONTEXT),
+    resolveStoreRead: jest.fn().mockResolvedValue({ ...STORE_CONTEXT, fiscal_scope: 'ORGANIZATION' }),
+    resolveOrganizationRead: jest.fn().mockResolvedValue({ ...ORG_CONTEXT, fiscal_scope: 'ORGANIZATION' }),
   };
   const responses = {
     paginated: jest.fn((data, total, page, limit) => ({ data, total, page, limit })),
@@ -520,5 +526,67 @@ describe('received-document route controllers', () => {
     expect(Reflect.getMetadata(PATH_METADATA, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toBe('buyer-event-enablement/options');
     expect(Reflect.getMetadata(PERMISSIONS_KEY, StoreReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['invoicing:received:events:configure']);
     expect(Reflect.getMetadata(PERMISSIONS_KEY, OrganizationReceivedDocumentsController.prototype.getBuyerEventOptions)).toEqual(['organization:invoicing:received:events:configure']);
+  });
+});
+
+describe('received-document inbox read-only route wiring', () => {
+  const controllers = () => {
+    const deps = dependencies();
+    const args = [deps.documents, deps.contexts, deps.responses, deps.scans, deps.matchCandidates, deps.matchAllocations, deps.matchExpenses, deps.buyerEvents, {}] as const;
+    const store = new StoreReceivedDocumentsController(args[0] as never, args[1] as never, args[2] as never, args[3] as never, args[4] as never, args[5] as never, args[6] as never, args[7] as never, args[8] as never);
+    const organization = new OrganizationReceivedDocumentsController(args[0] as never, args[1] as never, args[2] as never, args[3] as never, args[4] as never, args[5] as never, args[6] as never, args[7] as never, args[8] as never);
+    return { deps, store, organization };
+  };
+
+  it('routes inbox list, summary and health through read-only context while preserving legacy list', async () => {
+    const { deps, store, organization } = controllers();
+    const query = { page: 1, limit: 25, sort: 'inbox' as const };
+    await store.list(query);
+    await store.inboxSummary(query);
+    await store.receptionStatus({});
+    await organization.list({ ...query, store_id: 21 });
+    await organization.inboxSummary({ ...query, store_id: 21 });
+    await organization.receptionStatus({ store_id: 21 });
+    expect(deps.contexts.resolveStoreRead).toHaveBeenCalledTimes(3);
+    expect(deps.contexts.resolveOrganizationRead).toHaveBeenCalledTimes(3);
+    expect(deps.contexts.resolveOrganizationRead).toHaveBeenCalledWith(21);
+    expect(deps.documents.listInbox).toHaveBeenCalledTimes(2);
+    expect(deps.documents.inboxSummary).toHaveBeenCalledTimes(2);
+    expect(deps.documents.receptionStatus).toHaveBeenCalledTimes(2);
+    expect(deps.contexts.resolveStore).not.toHaveBeenCalled();
+    expect(deps.contexts.resolveOrganization).not.toHaveBeenCalled();
+    await store.list({ page: 1, limit: 25 });
+    expect(deps.contexts.resolveStore).toHaveBeenCalledTimes(1);
+    expect(deps.documents.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves detail read-only without altering create/review writer context', async () => {
+    const { deps, store, organization } = controllers();
+    await store.findOne(1);
+    await organization.findOne(1, { store_id: 21 });
+    expect(deps.documents.findOneInbox).toHaveBeenCalledTimes(2);
+    expect(deps.contexts.resolveStoreRead).toHaveBeenCalledTimes(1);
+    expect(deps.contexts.resolveOrganizationRead).toHaveBeenCalledWith(21);
+    expect(deps.contexts.resolveStore).not.toHaveBeenCalled();
+    expect(deps.contexts.resolveOrganization).not.toHaveBeenCalled();
+  });
+
+  it('rejects store overrides before any safe reader is invoked', async () => {
+    const { deps, store } = controllers();
+    await expect(store.inboxSummary({ page: 1, limit: 25, store_id: 999 })).rejects.toThrow(BadRequestException);
+    await expect(store.receptionStatus({ store_id: 999 })).rejects.toThrow(BadRequestException);
+    expect(deps.contexts.resolveStoreRead).not.toHaveBeenCalled();
+    expect(deps.documents.inboxSummary).not.toHaveBeenCalled();
+    expect(deps.documents.receptionStatus).not.toHaveBeenCalled();
+  });
+
+  it('requires read permission only for safe summary/health and never applies an AI feature gate', () => {
+    for (const [controller, permission] of [[StoreReceivedDocumentsController, 'invoicing:received:read'], [OrganizationReceivedDocumentsController, 'organization:invoicing:received:read']] as const) {
+      for (const [method, path] of [['inboxSummary', 'summary'], ['receptionStatus', 'reception-status']] as const) {
+        expect(Reflect.getMetadata(PATH_METADATA, controller.prototype[method])).toBe(path);
+        expect(Reflect.getMetadata(PERMISSIONS_KEY, controller.prototype[method])).toEqual([permission]);
+        expect(Reflect.getMetadata(AI_FEATURE_KEY, controller.prototype[method])).toBeUndefined();
+      }
+    }
   });
 });

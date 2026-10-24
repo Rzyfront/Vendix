@@ -7,6 +7,7 @@ import { ProductVariantService } from './services/product-variant.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { LocationsService } from '../inventory/locations/locations.service';
+import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BulkProductUploadDto, BulkProductItemDto, ProductState } from './dto';
 import * as XLSX from 'xlsx';
@@ -63,6 +64,8 @@ describe('ProductsBulkService', () => {
     },
     stock_levels: {
       createMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     brands: {
       findFirst: jest.fn(),
@@ -108,6 +111,10 @@ describe('ProductsBulkService', () => {
 
   const mockLocationsService = {
     getDefaultLocation: jest.fn(),
+  };
+
+  const mockInventoryAdjustmentsService = {
+    createAdjustment: jest.fn(),
   };
 
   const mockUser = {
@@ -158,6 +165,10 @@ describe('ProductsBulkService', () => {
         {
           provide: LocationsService,
           useValue: mockLocationsService,
+        },
+        {
+          provide: InventoryAdjustmentsService,
+          useValue: mockInventoryAdjustmentsService,
         },
       ],
     }).compile();
@@ -441,10 +452,10 @@ describe('ProductsBulkService', () => {
     });
 
     it('should respect maximum batch size limit', async () => {
-      // MAX_BATCH_SIZE = 1000. El tope no es cosmético: cada fila abre su propia
+      // MAX_BATCH_SIZE = 10000. El tope no es cosmético: cada fila abre su propia
       // transacción en ProductsService, así que un lote sin techo agota el pool
       // de conexiones antes de terminar.
-      const largeBatch = Array.from({ length: 1001 }, (_, i) => ({
+      const largeBatch = Array.from({ length: 10001 }, (_, i) => ({
         name: `Product ${i + 1}`,
         base_price: 99.99,
         sku: `PROD-${i + 1}`,
@@ -579,13 +590,11 @@ describe('ProductsBulkService', () => {
 
       const result = await service.uploadProducts(bulkUploadDto, mockUser);
 
-      // El import de productos es CATALOG-ONLY por diseño: `stock_quantity` y
-      // `stock_by_location` están en CATALOG_ONLY_IGNORED_FIELDS y se retiran
-      // de la fila antes de armar el DTO. Razón: saldo sin fila en
-      // inventory_transactions (sin ubicación, sin capa de costo, sin usuario)
-      // es inauditable. El inventario entra por ajustes/compras, que sí llevan
-      // el libro. El servicio además reporta qué columnas ignoró en lugar de
-      // descartarlas en silencio.
+      // `stock_by_location` sigue en CATALOG_ONLY_IGNORED_FIELDS y se retira
+      // de la fila antes de armar el DTO (saldo por ubicación sin libro es
+      // inauditable). La cantidad inicial (`stock_quantity`) ya no se descarta:
+      // sólo entra por el ajuste `initial_load` con consentimiento, y nunca
+      // viaja a ProductsService.create/update.
       expect(result.results[0].status).toBe('success');
       expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
       expect(mockProductsService.create).toHaveBeenCalledWith(
@@ -918,6 +927,62 @@ describe('ProductsBulkService', () => {
     });
   });
 
+  describe('analyzeProducts — volumen (tope 10.000, lecturas agrupadas)', () => {
+    const buildCsv = (n: number) =>
+      Buffer.from(
+        '\uFEFF' +
+          [
+            'Nombre,SKU,Precio Venta',
+            ...Array.from({ length: n }, (_, i) => `P${i},S-${i},${i + 1}`),
+          ].join('\n'),
+        'utf-8',
+      );
+    const readCalls = () =>
+      [
+        mockPrismaService.products.findMany,
+        mockPrismaService.products.findFirst,
+        mockPrismaService.product_variants.findMany,
+        mockPrismaService.brands.findMany,
+        mockPrismaService.brands.findFirst,
+        mockPrismaService.categories.findMany,
+        mockPrismaService.categories.findFirst,
+        mockPrismaService.units_of_measure.findMany,
+        mockPrismaService.product_price_tier_assignments.findMany,
+      ].reduce((acc, fn) => acc + fn.mock.calls.length, 0);
+
+    const run = async (n: number) => {
+      jest.clearAllMocks();
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+      mockPrismaService.brands.findMany.mockResolvedValue([]);
+      mockPrismaService.categories.findMany.mockResolvedValue([]);
+      mockPrismaService.units_of_measure.findMany.mockResolvedValue([]);
+      mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+        [],
+      );
+      const started = Date.now();
+      const result = await service.analyzeProducts(buildCsv(n), 1);
+      return { result, calls: readCalls(), ms: Date.now() - started };
+    };
+
+    it('el número de lecturas a BD no crece con N (10 vs 1000 vs 10000 filas)', async () => {
+      const small = await run(10);
+      const mid = await run(1000);
+      const big = await run(10000);
+      expect(big.result.products).toHaveLength(10000);
+      expect(small.calls).toBeGreaterThan(0);
+      expect(mid.calls).toBe(small.calls);
+      expect(big.calls).toBe(small.calls);
+      expect(big.ms).toBeLessThan(30000);
+    }, 60000);
+
+    it('rechaza 10.001 filas', async () => {
+      await expect(
+        service.analyzeProducts(buildCsv(10001), 1),
+      ).rejects.toThrow();
+    }, 60000);
+  });
+
   describe('analyzeProducts — precio (QUI-846)', () => {
     beforeEach(() => {
       mockPrismaService.products.findMany.mockResolvedValue([]);
@@ -953,7 +1018,7 @@ describe('ProductsBulkService', () => {
       const result = await analyze(['Prod,PROD-1,"5.000"']);
       const item = result.products[0];
       expect(item.base_price).toBe(5000);
-      expect(item.status).toBe('ready');
+      expect(item.status).toBe('warning');
     });
   });
 
@@ -1071,7 +1136,7 @@ describe('ProductsBulkService', () => {
         const result = await analyze(['P,S-1,0123456789012,1000']);
         const item = result.products[0] as any;
         expect(item.barcode).toBe('0123456789012');
-        expect(item.status).toBe('ready');
+        expect(item.status).toBe('warning');
         expect(item.modified_fields).toContain('barcode');
       });
 
@@ -1080,7 +1145,7 @@ describe('ProductsBulkService', () => {
           'A,S-1,111,1000',
           'B,S-2,111,1000',
         ]);
-        expect(result.products[0].status).toBe('ready');
+        expect(result.products[0].status).toBe('warning');
         expect(codes(result.products[1])).toContain('DUPLICATE_BARCODE_IN_BATCH');
       });
 
@@ -1246,6 +1311,414 @@ describe('ProductsBulkService', () => {
         const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
         expect(rows[0]['Código de barras']).toBe('0123456789012');
       });
+    });
+  });
+
+  describe('carga inicial de inventario (Cantidad Inicial / Precio Compra)', () => {
+    const csv = (rows: string[]) =>
+      Buffer.from(
+        [
+          'Nombre,SKU,Precio Venta,Cantidad Inicial,Precio Compra',
+          ...rows,
+        ].join('\n'),
+      );
+    let s3: {
+      downloadImage: jest.Mock;
+      deleteFile: jest.Mock;
+      uploadFile: jest.Mock;
+    };
+
+    beforeEach(() => {
+      s3 = (service as any).s3Service;
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockProductsService.create.mockReset();
+      mockProductsService.create.mockImplementation(async (dto: any) => ({
+        id: 77,
+        name: dto.name,
+        sku: dto.sku,
+      }));
+      mockInventoryAdjustmentsService.createAdjustment.mockReset();
+      mockInventoryAdjustmentsService.createAdjustment.mockResolvedValue({});
+      mockLocationsService.getDefaultLocation.mockReset();
+      mockLocationsService.getDefaultLocation.mockResolvedValue({ id: 9 });
+      mockPrismaService.stock_levels.findFirst.mockResolvedValue(null);
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([]);
+      mockProductsService.update.mockReset();
+      s3.uploadFile.mockReset();
+      s3.uploadFile.mockResolvedValue('uploaded');
+    });
+
+    it('análisis: devuelve initial_load.requires_ack y cantidades/costos reales', async () => {
+      const result = await service.analyzeProducts(
+        csv(['A,SKU-A,1000,10,500', 'B,SKU-B,2000,5,', 'C,SKU-C,3000,,']),
+        1,
+      );
+      expect(result.initial_load).toEqual({
+        rows_with_quantity: 2,
+        total_units: 15,
+        requires_ack: true,
+      });
+      expect(result.products[0]).toMatchObject({
+        stock_quantity: 10,
+        cost_price: 500,
+      });
+      const codes = result.products[0].warnings.map((w: any) => w.code);
+      expect(codes).not.toContain('CATALOG_ONLY_IGNORED_FIELDS');
+    });
+
+    it('análisis: sin cantidades requires_ack es false', async () => {
+      const result = await service.analyzeProducts(csv(['A,SKU-A,1000,,']), 1);
+      expect(result.initial_load).toEqual({
+        rows_with_quantity: 0,
+        total_units: 0,
+        requires_ack: false,
+      });
+    });
+
+    it('análisis: cantidad negativa o no numérica es error de fila', async () => {
+      const result = await service.analyzeProducts(
+        csv(['A,SKU-A,1000,-3,', 'B,SKU-B,1000,abc,']),
+        1,
+      );
+      expect(result.products[0].status).toBe('error');
+      expect(result.products[1].status).toBe('error');
+      expect(result.products[0].errors.map((e: any) => e.code)).toContain(
+        'INVALID_INITIAL_QUANTITY',
+      );
+      expect(result.products[1].errors.map((e: any) => e.code)).toContain(
+        'INVALID_INITIAL_QUANTITY',
+      );
+      expect(result.initial_load.rows_with_quantity).toBe(0);
+    });
+
+    it('commit sin ack con cantidades lanza PROD_BULK_INITIAL_LOAD_ACK_001 y no escribe', async () => {
+      s3.downloadImage.mockImplementation(async (key: string) =>
+        key.endsWith('.json')
+          ? Buffer.from(JSON.stringify({ location_id: 9 }))
+          : csv(['A,SKU-A,1000,10,500']),
+      );
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser, {
+          offset: 0,
+          limit: 100,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'PROD_BULK_INITIAL_LOAD_ACK_001' });
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser),
+      ).rejects.toMatchObject({ errorCode: 'PROD_BULK_INITIAL_LOAD_ACK_001' });
+      expect(mockProductsService.create).not.toHaveBeenCalled();
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).not.toHaveBeenCalled();
+      expect(s3.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('con ack crea el producto sin stock_quantity y aplica initial_load ABSOLUTO', async () => {
+      s3.downloadImage.mockImplementation(async (key: string) =>
+        key.endsWith('.json')
+          ? Buffer.from(JSON.stringify({ location_id: 9 }))
+          : csv(['A,SKU-A,1000,10,500']),
+      );
+      const r: any = await service.uploadProductsFromSession(
+        'sid',
+        1,
+        mockUser,
+        { offset: 0, limit: 100 },
+        { initialLoadAck: true },
+      );
+      expect(r.successful).toBe(1);
+      const [createDto] = mockProductsService.create.mock.calls[0];
+      expect(createDto).not.toHaveProperty('stock_quantity');
+      expect(createDto.cost_price).toBe(500);
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          product_id: 77,
+          location_id: 9,
+          type: 'initial_load',
+          quantity_after: 10,
+          unit_cost: 500,
+          description: 'Carga inicial (carga masiva de productos)',
+        }),
+        { approvedByUserId: 1, initialLoadFallback: true },
+      );
+    });
+
+    it('si el stock actual ya es igual, no crea ajuste', async () => {
+      s3.downloadImage.mockImplementation(async (key: string) =>
+        key.endsWith('.json')
+          ? Buffer.from(JSON.stringify({ location_id: 9 }))
+          : csv(['A,SKU-A,1000,10,500']),
+      );
+      mockPrismaService.stock_levels.findFirst.mockResolvedValue({
+        quantity_on_hand: 10,
+      });
+      await service.uploadProductsFromSession(
+        'sid',
+        1,
+        mockUser,
+        { offset: 0, limit: 100 },
+        { initialLoadAck: true },
+      );
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('si el ajuste falla la fila queda en error y el mensaje indica que el producto se guardó', async () => {
+      s3.downloadImage.mockImplementation(async (key: string) =>
+        key.endsWith('.json')
+          ? Buffer.from(JSON.stringify({ location_id: 9 }))
+          : csv(['A,SKU-A,1000,10,500']),
+      );
+      mockInventoryAdjustmentsService.createAdjustment.mockRejectedValue(
+        new Error('sin capa'),
+      );
+      const r: any = await service.uploadProductsFromSession(
+        'sid',
+        1,
+        mockUser,
+        { offset: 0, limit: 100 },
+        { initialLoadAck: true },
+      );
+      expect(r.failed).toBe(1);
+      expect(r.results[0].status).toBe('error');
+      expect(r.results[0].message).toContain('El producto se guardó');
+      expect(mockProductsService.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('uploadProducts directo (sin consentimiento) ignora stock_quantity y no ajusta', async () => {
+      await service.uploadProducts(
+        {
+          products: [
+            { name: 'P', base_price: 10, sku: 'P-1', stock_quantity: 4 },
+          ],
+        } as BulkProductUploadDto,
+        mockUser,
+      );
+      expect(mockProductsService.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ stock_quantity: expect.anything() }),
+      );
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each([10, 0])(
+      'degrada existencia previa 5 y cantidad %s a count_variance sin sobrescribir costo',
+      async (quantity) => {
+        mockPrismaService.products.findFirst.mockResolvedValue({
+          id: 77,
+          sku: 'SKU-A',
+          state: 'active',
+          track_inventory: true,
+        });
+        mockProductsService.update.mockResolvedValue({ id: 77 });
+        mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+        mockPrismaService.stock_levels.findFirst.mockResolvedValue({
+          quantity_on_hand: 5,
+        });
+        const result = await service.uploadProducts(
+          {
+            products: [
+              {
+                name: 'A',
+                sku: 'SKU-A',
+                base_price: 1000,
+                stock_quantity: quantity,
+                cost_price: 900,
+              } as any,
+            ],
+          },
+          mockUser,
+          { initialLoad: true },
+        );
+        expect(result.successful).toBe(1);
+        expect(mockProductsService.update.mock.calls[0][1]).not.toHaveProperty(
+          'cost_price',
+        );
+        expect(
+          mockInventoryAdjustmentsService.createAdjustment,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'count_variance',
+            quantity_after: quantity,
+          }),
+          { approvedByUserId: 1, initialLoadFallback: true },
+        );
+        expect(
+          mockInventoryAdjustmentsService.createAdjustment.mock.calls[0][0],
+        ).not.toHaveProperty('unit_cost');
+        expect(result.results[0].message).toContain('Advertencia:');
+        expect(result.results[0].message).toContain('count_variance');
+      },
+    );
+
+    it('análisis advierte degradación y costo ignorado, y no rechaza costo no numérico de update', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 77, sku: 'SKU-A', name: 'A', state: 'active' },
+      ]);
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([
+        { product_id: 77, quantity_on_hand: 5 },
+      ]);
+      const result = await service.analyzeProducts(
+        csv(['A,SKU-A,1000,10,no-numérico']),
+        1,
+      );
+      expect(result.products[0].errors).toEqual([]);
+      expect(result.products[0].warnings.map((w: any) => w.code)).toEqual(
+        expect.arrayContaining([
+          'EXISTING_COST_IGNORED',
+          'INITIAL_LOAD_AS_COUNT_VARIANCE',
+        ]),
+      );
+    });
+
+    it('update de catálogo ignora Costo numérico o inválido sin rechazar la fila', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 77,
+        sku: 'SKU-A',
+        state: 'active',
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 77, sku: 'SKU-A', name: 'A', state: 'active' },
+      ]);
+      mockProductsService.update.mockResolvedValue({ id: 77 });
+      for (const value of ['900', 'texto']) {
+        const file = csv([`A,SKU-A,1000,,${value}`]);
+        const analysis = await service.analyzeProducts(file, 1);
+        expect(analysis.products[0].errors).toEqual([]);
+        expect(analysis.products[0].warnings.map((w: any) => w.code)).toContain(
+          'EXISTING_COST_IGNORED',
+        );
+        const result = await service.uploadProducts(
+          { products: service.parseFile(file) },
+          mockUser,
+        );
+        expect(result.successful).toBe(1);
+      }
+      for (const [, dto] of mockProductsService.update.mock.calls)
+        expect(dto).not.toHaveProperty('cost_price');
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('una carga inicial válida sobre existente conserva el costo de la entrada en el ajuste, no en el update de catálogo', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 77,
+        sku: 'SKU-A',
+        state: 'active',
+        track_inventory: true,
+      });
+      mockProductsService.update.mockResolvedValue({ id: 77 });
+      mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+      const result = await service.uploadProducts(
+        { products: service.parseFile(csv(['A,SKU-A,1000,10,500'])) },
+        mockUser,
+        { initialLoad: true },
+      );
+      expect(result.successful).toBe(1);
+      expect(mockProductsService.update.mock.calls[0][1]).not.toHaveProperty(
+        'cost_price',
+      );
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'initial_load', unit_cost: 500 }),
+        { approvedByUserId: 1, initialLoadFallback: true },
+      );
+    });
+
+    it('análisis advierte en cada producto nuevo sin costo, tenga o no cantidad inicial', async () => {
+      const result = await service.analyzeProducts(
+        csv(['A,SKU-A,1000,10,', 'B,SKU-B,1000,,', 'C,SKU-C,1000,3,0']),
+        1,
+      );
+      for (const item of result.products)
+        expect(item.warnings.map((w: any) => w.code)).toContain(
+          'MISSING_INITIAL_COST',
+        );
+    });
+
+    it('análisis usa costo vigente como fallback de una carga inicial existente sin costo en archivo', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 77, sku: 'SKU-A', name: 'A', state: 'active', cost_price: 500 }]);
+      const result = await service.analyzeProducts(csv(['A,SKU-A,1000,10,']), 1);
+      expect(result.products[0].cost_price).toBe(500);
+      expect(result.products[0].warnings.map((w: any) => w.code)).not.toContain('MISSING_INITIAL_COST');
+    });
+
+    it('fija la bodega una vez durante análisis y la conserva entre páginas aunque cambie el default', async () => {
+      const objects = new Map<string, Buffer>();
+      s3.uploadFile.mockImplementation(async (buffer: Buffer, key: string) => {
+        objects.set(key, buffer);
+        return key;
+      });
+      s3.downloadImage.mockImplementation(async (key: string) => {
+        const data = objects.get(key);
+        if (!data) throw new Error('missing');
+        return data;
+      });
+      const analysis = await service.analyzeProducts(
+        csv(['A,SKU-A,1000,10,500', 'B,SKU-B,1000,5,500']),
+        1,
+      );
+      expect(mockLocationsService.getDefaultLocation).toHaveBeenCalledTimes(1);
+      mockLocationsService.getDefaultLocation.mockResolvedValue({ id: 999 });
+      await service.uploadProductsFromSession(
+        analysis.session_id,
+        1,
+        mockUser,
+        { offset: 0, limit: 1 },
+        { initialLoadAck: true },
+      );
+      await service.uploadProductsFromSession(
+        analysis.session_id,
+        1,
+        mockUser,
+        { offset: 1, limit: 1 },
+        { initialLoadAck: true },
+      );
+      expect(mockLocationsService.getDefaultLocation).toHaveBeenCalledTimes(1);
+      expect(
+        mockInventoryAdjustmentsService.createAdjustment,
+      ).toHaveBeenCalledTimes(2);
+      for (const [dto] of mockInventoryAdjustmentsService.createAdjustment.mock
+        .calls)
+        expect(dto.location_id).toBe(9);
+    });
+
+    it('advierte si la transacción degrada la carga inicial por un cambio concurrente de stock', async () => {
+      mockInventoryAdjustmentsService.createAdjustment.mockResolvedValue({ adjustment_type: 'count_variance' });
+      const result = await service.uploadProducts({ products: service.parseFile(csv(['A,SKU-A,1000,10,500'])) }, mockUser, { initialLoad: true });
+      expect(result.successful).toBe(1);
+      expect(result.results[0].message).toContain('count_variance');
+      expect(mockInventoryAdjustmentsService.createAdjustment).toHaveBeenCalledWith(expect.objectContaining({ type: 'initial_load' }), { approvedByUserId: 1, initialLoadFallback: true });
+    });
+
+    it('sesión sin snapshot de bodega exige reanalizar, sin escribir productos', async () => {
+      s3.downloadImage.mockImplementation(async (key: string) => {
+        if (key.endsWith('.json')) throw new Error('missing');
+        return csv(['A,SKU-A,1000,10,500']);
+      });
+      await expect(
+        service.uploadProductsFromSession(
+          'sid',
+          1,
+          mockUser,
+          { offset: 0, limit: 100 },
+          { initialLoadAck: true },
+        ),
+      ).rejects.toThrow('Vuelve a analizar');
+      expect(mockProductsService.create).not.toHaveBeenCalled();
+    });
+
+    it('la plantilla incluye Cantidad Inicial y Precio Compra', () => {
+      const headers = service.getProductTemplateHeaders();
+      expect(headers).toContain('Cantidad Inicial');
+      expect(headers).toContain('Precio Compra');
     });
   });
 
@@ -1509,6 +1982,7 @@ describe('ProductsBulkService', () => {
         expect(dto.name).toBe('Camisa Roja');
         expect(dto.description).toBe('Nueva');
         expect(dto).not.toHaveProperty('store_id');
+        expect(dto).not.toHaveProperty('cost_price');
         // Ausentes en el archivo: default de creación, no el valor viejo.
         expect(dto.is_featured).toBe(false);
         expect(dto.brand_id).toBeNull();
@@ -1756,7 +2230,7 @@ describe('ProductsBulkService', () => {
         expect(result.total_products).toBe(1);
         expect(result.total_variants).toBe(2);
         const item: any = result.products[0];
-        expect(item.status).toBe('ready');
+        expect(item.status).toBe('warning');
         expect(item.variants).toHaveLength(2);
         // Hereda precio = null; con precio propio = ese precio.
         expect(item.variants[0]).toMatchObject({
@@ -1917,7 +2391,7 @@ describe('ProductsBulkService', () => {
         );
         expect(result.total_variants).toBe(0);
         expect(result.products[0].variants).toBeUndefined();
-        expect(result.products[0].status).toBe('ready');
+        expect(result.products[0].status).toBe('warning');
         expect(result.products[0].row_number).toBe(2);
       });
     });

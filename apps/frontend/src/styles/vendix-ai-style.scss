@@ -1,0 +1,831 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   Vendix AI Style — lenguaje visual único para TODO lo que hace la IA.
+   Skill: skills/vendix-ai-style/SKILL.md
+
+   Se carga desde src/styles.scss con `meta.load-css` AL FINAL del archivo, es
+   decir, después de `@tailwind base/utilities`. Ese orden importa:
+   - el preflight de Tailwind resetea `button, [type='button']` a
+     `background: transparent` con especificidad (0,1,0); estas clases tienen la
+     misma especificidad y ganan por orden.
+   - por la misma razón, una utilidad de Tailwind (`bg-*`, `p-*`) sobre el mismo
+     elemento PIERDE frente a estas clases en las propiedades que ellas fijan.
+     Las clases de identidad (`vx-ai-surface`, `vx-ai-button`, `vx-ai-text`,
+     `vx-ai-border`) sólo fijan color/fondo/sombra/borde, nunca layout: el
+     padding, radio y tamaño se siguen poniendo con Tailwind.
+
+   Las reglas son globales (sin `_ngcontent`): sirven igual dentro de cualquier
+   componente con ViewEncapsulation.Emulated. NO redefinir keyframes ni copiar
+   estas reglas en `styles:` locales.
+
+   Colores: todo deriva de los tokens de tema (`--color-primary`, `--color-info`,
+   `--color-success`), así que sigue al branding del comercio y al modo oscuro.
+   Nunca hardcodear un hex "de IA" en un componente: usar `--vx-ai-*`.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+:root {
+  /* Paleta IA: primario oscurecido → info → éxito. c1/c2 son los extremos del
+     gradiente que lleva texto blanco encima (por eso van oscurecidos); c3 es el
+     tercer tono que sólo se usa en halos/bordes, nunca bajo texto. */
+  --vx-ai-c1: color-mix(in oklab, var(--color-primary) 78%, #000);
+  --vx-ai-c2: color-mix(in oklab, var(--color-info) 88%, #000);
+  --vx-ai-c3: var(--color-success);
+  /* Acento para glows, anillos, escaneos y destellos (el primario puro). */
+  --vx-ai-accent: var(--color-primary);
+  --vx-ai-accent-2: var(--color-info);
+  /* Texto sobre superficies con gradiente IA (botón, badge sólido). */
+  --vx-ai-on: #ffffff;
+
+  /* Gradientes */
+  --vx-ai-gradient: linear-gradient(
+    110deg,
+    var(--vx-ai-c1) 0%,
+    var(--vx-ai-c2) 50%,
+    var(--vx-ai-c1) 100%
+  );
+  --vx-ai-gradient-text: linear-gradient(
+    100deg,
+    var(--vx-ai-c1) 0%,
+    var(--vx-ai-c2) 100%
+  );
+  --vx-ai-gradient-border: linear-gradient(
+    90deg,
+    var(--vx-ai-accent),
+    var(--vx-ai-accent-2),
+    var(--vx-ai-c3),
+    var(--vx-ai-accent)
+  );
+  --vx-ai-surface-bg:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in oklab, var(--vx-ai-accent) 7%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      circle at 100% 100%,
+      color-mix(in oklab, var(--vx-ai-accent-2) 6%, transparent),
+      transparent 60%
+    );
+  --vx-ai-surface-border: color-mix(
+    in oklab,
+    var(--vx-ai-accent) 22%,
+    var(--color-border)
+  );
+
+  /* Glow */
+  --vx-ai-glow:
+    0 4px 14px color-mix(in oklab, var(--vx-ai-accent) 30%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--vx-ai-accent) 18%, transparent);
+  --vx-ai-glow-strong:
+    0 6px 22px color-mix(in oklab, var(--vx-ai-accent) 42%, transparent),
+    0 0 18px color-mix(in oklab, var(--vx-ai-accent-2) 30%, transparent);
+
+  /* Shimmer: barrido blanco (sobre gradiente/imagen) y teñido (sobre superficie). */
+  --vx-ai-shimmer: linear-gradient(
+    110deg,
+    transparent 30%,
+    color-mix(in oklab, white 30%, transparent) 50%,
+    transparent 70%
+  );
+  --vx-ai-shimmer-tint: linear-gradient(
+    110deg,
+    transparent 30%,
+    color-mix(in oklab, var(--vx-ai-accent) 18%, transparent) 50%,
+    transparent 70%
+  );
+
+  /* Tiempos y medidas */
+  --vx-ai-duration-fast: 1.6s;
+  --vx-ai-duration: 2.4s;
+  --vx-ai-duration-slow: 6s;
+  --vx-ai-border-width: 1.5px;
+  /* Recorrido del escáner vertical de las escenas de análisis. */
+  --vx-ai-scan-distance: 300px;
+  /* Diámetro del halo cónico que gira detrás del icono. */
+  --vx-ai-halo-size: 280px;
+}
+
+/* Modo oscuro: el primario de dark es claro (#7ed7a5), así que el extremo del
+   gradiente se oscurece más para que el texto blanco siga leyéndose, y el glow
+   sube de alfa para notarse sobre superficies oscuras. */
+[data-theme='dark'] {
+  --vx-ai-c1: color-mix(in oklab, var(--color-primary) 52%, #000);
+  --vx-ai-c2: color-mix(in oklab, var(--color-info) 62%, #000);
+  --vx-ai-text-c1: var(--color-primary);
+  --vx-ai-text-c2: var(--color-info);
+  --vx-ai-gradient-text: linear-gradient(
+    100deg,
+    var(--vx-ai-text-c1) 0%,
+    var(--vx-ai-text-c2) 100%
+  );
+  --vx-ai-glow:
+    0 4px 16px color-mix(in oklab, var(--vx-ai-accent) 38%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--vx-ai-accent) 28%, transparent);
+  --vx-ai-glow-strong:
+    0 6px 26px color-mix(in oklab, var(--vx-ai-accent) 50%, transparent),
+    0 0 22px color-mix(in oklab, var(--vx-ai-accent-2) 40%, transparent);
+}
+
+/* ── Identidad: superficie, botón, badge, borde, texto ──────────────────── */
+
+/* Sección/tarjeta "hecha por IA": tinte radial primario+info sobre la superficie.
+   Combinar con Tailwind para padding/radio: `class="vx-ai-surface rounded-2xl p-4"`. */
+.vx-ai-surface {
+  position: relative;
+  background: var(--vx-ai-surface-bg), var(--color-surface);
+  border: 1px solid var(--vx-ai-surface-border);
+}
+
+/* Botón de acción IA: gradiente + glow; al hover el gradiente se desplaza, el
+   glow crece y un shimmer barre la superficie. Lo usa `<app-button variant="ai">`;
+   también vale sobre un `<button>` nativo. */
+.vx-ai-button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--vx-ai-on);
+  background-color: var(--vx-ai-c1);
+  background-image: var(--vx-ai-gradient);
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+  border: 1px solid color-mix(in oklab, var(--vx-ai-accent) 35%, transparent);
+  box-shadow: var(--vx-ai-glow);
+  transition:
+    background-position 0.6s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.vx-ai-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1; /* sobre el fondo del botón (isolation) y bajo su contenido */
+  background: var(--vx-ai-shimmer);
+  background-size: 250% 100%;
+  background-position: 200% 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.vx-ai-button:hover:not(:disabled):not([aria-disabled='true']) {
+  background-position: 100% 50%;
+  box-shadow: var(--vx-ai-glow-strong);
+}
+
+.vx-ai-button:hover:not(:disabled):not([aria-disabled='true'])::after {
+  opacity: 1;
+  animation: vx-ai-shimmer-sweep var(--vx-ai-duration-fast) ease-in-out infinite;
+}
+
+.vx-ai-button:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow:
+    var(--vx-ai-glow),
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px color-mix(in oklab, var(--vx-ai-accent) 55%, transparent);
+}
+
+.vx-ai-button:disabled,
+.vx-ai-button[aria-disabled='true'] {
+  box-shadow: none;
+}
+
+/* Etiqueta "IA" sólida (gradiente + texto blanco). `--soft` = tinte suave para
+   fondos densos donde la sólida grita demasiado. */
+.vx-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--vx-ai-on);
+  background-image: var(--vx-ai-gradient);
+  background-size: 200% 100%;
+  box-shadow: 0 2px 8px color-mix(in oklab, var(--vx-ai-accent) 28%, transparent);
+}
+
+.vx-ai-badge--soft {
+  color: var(--vx-ai-c1);
+  background-image: none;
+  background-color: color-mix(in oklab, var(--vx-ai-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--vx-ai-accent) 28%, transparent);
+}
+
+[data-theme='dark'] .vx-ai-badge--soft {
+  color: var(--vx-ai-accent);
+}
+
+/* Borde animado con el gradiente IA (máscara: no toca el fondo del elemento).
+   El elemento debe tener border-radius propio; el borde lo hereda. */
+.vx-ai-border {
+  position: relative;
+}
+
+.vx-ai-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: var(--vx-ai-border-width);
+  border-radius: inherit;
+  background: var(--vx-ai-gradient-border);
+  background-size: 300% 100%;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: vx-ai-border-flow var(--vx-ai-duration-slow) linear infinite;
+}
+
+/* Texto con gradiente IA. Para resaltar sólo la sílaba:
+   `Factur<span class="vx-ai-text">IA</span>`. */
+.vx-ai-text {
+  color: var(--vx-ai-c1); /* fallback sin background-clip:text */
+  background-image: var(--vx-ai-gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .vx-ai-text {
+    -webkit-text-fill-color: currentColor;
+    background-image: none;
+  }
+}
+
+/* Contenedor en carga: barrido teñido por encima del contenido (skeletons). */
+.vx-ai-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.vx-ai-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--vx-ai-shimmer-tint);
+  background-size: 200% 100%;
+  background-position: 200% 0;
+  animation: vx-ai-shimmer-sweep 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Línea de skeleton (texto pendiente). Ancho con Tailwind: `w-2/3`. */
+.vx-ai-skeleton-line {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-text-secondary) 14%, transparent);
+}
+
+/* Disco de icono IA con glow que respira (72 px). */
+.vx-ai-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 9999px;
+  color: var(--vx-ai-accent);
+  background: color-mix(in oklab, var(--vx-ai-accent) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--vx-ai-accent) 25%, transparent),
+    0 0 30px color-mix(in oklab, var(--vx-ai-accent) 35%, transparent);
+  animation: vx-ai-icon-breathe 3s ease-in-out infinite;
+}
+
+/* Pulso suave con brillo para iconos/labels "pensando". */
+.vx-ai-soft-pulse {
+  filter: drop-shadow(0 0 10px rgba(var(--color-primary-rgb), 0.42));
+  animation: vx-ai-soft-pulse var(--vx-ai-duration) ease-in-out infinite;
+}
+
+/* Punto que late (indicador "escribiendo"). */
+.vx-ai-dot-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vx-ai-accent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--vx-ai-accent) 60%, transparent);
+  animation: vx-ai-soft-pulse 1.2s ease-in-out infinite;
+}
+
+/* ── Orbit: loader compacto (núcleo + dos anillos) ─────────────────────────
+   <div class="vx-ai-orbit h-9 w-9">
+     <span class="vx-ai-orbit__core"></span>
+     <span class="vx-ai-orbit__ring"></span>
+     <span class="vx-ai-orbit__ring vx-ai-orbit__ring--delayed"></span>
+   </div> */
+.vx-ai-orbit {
+  position: relative;
+  display: inline-block;
+}
+
+.vx-ai-orbit__core {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--vx-ai-accent);
+  box-shadow: 0 0 18px color-mix(in oklab, var(--vx-ai-accent) 70%, transparent);
+  animation: vx-ai-soft-pulse 1.6s ease-in-out infinite;
+}
+
+.vx-ai-orbit__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in oklab, var(--vx-ai-accent) 55%, transparent);
+  border-top-color: transparent;
+  border-left-color: transparent;
+  animation: vx-ai-orbit-spin 1.4s linear infinite;
+}
+
+.vx-ai-orbit__ring--delayed {
+  inset: -6px;
+  border-color: color-mix(in oklab, var(--vx-ai-accent-2) 45%, transparent);
+  border-top-color: transparent;
+  border-right-color: transparent;
+  animation: vx-ai-orbit-spin 2.1s linear reverse infinite;
+}
+
+/* ── Capas holográficas (fondo de las escenas de análisis) ──────────────── */
+.vx-ai-holo-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    linear-gradient(
+      color-mix(in oklab, var(--vx-ai-accent) 18%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--vx-ai-accent) 18%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 36px 36px;
+  background-position: 0 0;
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0.9),
+    rgba(0, 0, 0, 0) 70%
+  );
+  opacity: 0.55;
+  animation: vx-ai-holo-grid-drift 8s linear infinite;
+}
+
+.vx-ai-holo-aurora {
+  position: absolute;
+  inset: -20%;
+  z-index: 0;
+  background:
+    radial-gradient(
+      circle at 30% 30%,
+      color-mix(in oklab, var(--vx-ai-accent-2) 45%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 70% 60%,
+      color-mix(in oklab, var(--vx-ai-accent) 40%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 50% 80%,
+      color-mix(in oklab, var(--vx-ai-c3) 30%, transparent),
+      transparent 55%
+    );
+  filter: blur(48px);
+  opacity: 0.5;
+  animation: vx-ai-holo-aurora-shift 9s ease-in-out infinite;
+}
+
+/* Destellos: 5 posiciones fijas (--a … --e) con fases distintas. */
+.vx-ai-sparkle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--vx-ai-accent) 80%, white);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--vx-ai-accent) 80%, transparent);
+  opacity: 0;
+  z-index: 2;
+}
+
+.vx-ai-sparkle--a {
+  top: 18%;
+  left: 22%;
+  animation: vx-ai-sparkle-twinkle 3s ease-in-out infinite;
+}
+.vx-ai-sparkle--b {
+  top: 32%;
+  right: 18%;
+  animation: vx-ai-sparkle-twinkle 3.5s ease-in-out 0.4s infinite;
+}
+.vx-ai-sparkle--c {
+  bottom: 24%;
+  left: 30%;
+  animation: vx-ai-sparkle-twinkle 4s ease-in-out 0.8s infinite;
+}
+.vx-ai-sparkle--d {
+  bottom: 18%;
+  right: 28%;
+  animation: vx-ai-sparkle-twinkle 3.2s ease-in-out 1.2s infinite;
+}
+.vx-ai-sparkle--e {
+  top: 50%;
+  left: 12%;
+  animation: vx-ai-sparkle-twinkle 3.8s ease-in-out 1.6s infinite;
+}
+
+/* ── Stage: escena "la IA está analizando" (escáneres OCR, RUT, facturas) ──
+   <div class="vx-ai-stage is-analyzing relative overflow-hidden rounded-2xl …">
+     <div class="vx-ai-holo-aurora"></div> <div class="vx-ai-holo-grid"></div>
+     <div class="vx-ai-stage__halo"></div> <div class="vx-ai-stage__scan"></div>
+     <div class="vx-ai-stage__shimmer"></div>
+     <span class="vx-ai-sparkle vx-ai-sparkle--a"></span> … --e
+     <div class="vx-ai-stage__icon"><app-icon name="sparkles" /></div>
+     <p class="vx-ai-stage__caption">…</p>
+   </div> */
+.vx-ai-stage.is-analyzing {
+  isolation: isolate;
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--vx-ai-accent) 10%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface-secondary);
+  animation: vx-ai-breathe var(--vx-ai-duration) ease-in-out infinite;
+}
+
+.vx-ai-stage__icon {
+  position: relative;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 9999px;
+  color: var(--vx-ai-accent);
+  background: color-mix(in oklab, var(--vx-ai-accent) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--vx-ai-accent) 25%, transparent),
+    0 0 30px color-mix(in oklab, var(--vx-ai-accent) 35%, transparent);
+  animation: vx-ai-icon-breathe 3s ease-in-out infinite;
+}
+
+.vx-ai-stage__caption {
+  position: relative;
+  z-index: 6;
+  color: var(--color-text-secondary);
+  animation: vx-ai-soft-pulse var(--vx-ai-duration) ease-in-out infinite;
+}
+
+.vx-ai-stage__halo,
+.vx-ai-result-stage__halo {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: var(--vx-ai-halo-size);
+  height: var(--vx-ai-halo-size);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    color-mix(in oklab, var(--vx-ai-accent) 35%, transparent),
+    color-mix(in oklab, var(--vx-ai-accent-2) 25%, transparent),
+    color-mix(in oklab, var(--vx-ai-c3) 25%, transparent),
+    color-mix(in oklab, var(--vx-ai-accent) 35%, transparent)
+  );
+  filter: blur(40px);
+  opacity: 0.45;
+  z-index: 0;
+  animation: vx-ai-halo-spin var(--vx-ai-duration-slow) linear infinite;
+}
+
+.vx-ai-stage__shimmer,
+.vx-ai-stage__scan,
+.vx-ai-result-stage__shimmer,
+.vx-ai-result-stage__scan,
+.vx-ai-result-stage__prism {
+  position: absolute;
+  pointer-events: none;
+}
+
+.vx-ai-stage__shimmer,
+.vx-ai-result-stage__shimmer {
+  inset: 0;
+  z-index: 3;
+  background: var(--vx-ai-shimmer);
+  background-size: 200% 100%;
+  background-position: 200% 0;
+  animation: vx-ai-shimmer-sweep var(--vx-ai-duration) ease-in-out infinite;
+  mix-blend-mode: overlay;
+}
+
+.vx-ai-stage__scan,
+.vx-ai-result-stage__scan {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  z-index: 4;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--vx-ai-accent) 75%, transparent),
+    transparent
+  );
+  box-shadow: 0 0 14px color-mix(in oklab, var(--vx-ai-accent) 55%, transparent);
+  animation: vx-ai-scan-vertical 2.6s ease-in-out infinite;
+}
+
+/* ── Result stage: lienzo donde aparece un resultado generado (imagen IA) ──
+   Estados: `.is-generating` (respira), `.is-error`. Hijos: __placeholder,
+   __idle, __error-state, __icon, __error-icon, __caption, __error-title,
+   __error-text, __halo, __shimmer, __scan, __prism. El escáner recorre 280 px. */
+.vx-ai-result-stage {
+  --vx-ai-scan-distance: 280px;
+  position: relative;
+  isolation: isolate;
+}
+
+.vx-ai-result-stage.is-generating {
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--vx-ai-accent) 10%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface-muted, #f8fafc);
+  animation: vx-ai-breathe var(--vx-ai-duration) ease-in-out infinite;
+}
+
+.vx-ai-result-stage.is-error {
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--color-danger, #dc2626) 8%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface-muted, #f8fafc);
+}
+
+.vx-ai-result-stage__placeholder,
+.vx-ai-result-stage__error-state,
+.vx-ai-result-stage__idle {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.vx-ai-result-stage__icon,
+.vx-ai-result-stage__error-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 9999px;
+}
+
+.vx-ai-result-stage__icon {
+  color: var(--vx-ai-accent);
+  background: color-mix(in oklab, var(--vx-ai-accent) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--vx-ai-accent) 25%, transparent),
+    0 0 30px color-mix(in oklab, var(--vx-ai-accent) 35%, transparent);
+  animation: vx-ai-icon-breathe 3s ease-in-out infinite;
+}
+
+.vx-ai-result-stage__error-icon {
+  color: var(--color-danger, #dc2626);
+  background: color-mix(in oklab, var(--color-danger, #dc2626) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--color-danger, #dc2626) 25%, transparent),
+    0 0 24px color-mix(in oklab, var(--color-danger, #dc2626) 30%, transparent);
+}
+
+.vx-ai-result-stage__caption,
+.vx-ai-result-stage__error-text {
+  max-width: 280px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.vx-ai-result-stage__caption {
+  color: var(--color-text-secondary, #64748b);
+  animation: vx-ai-soft-pulse var(--vx-ai-duration) ease-in-out infinite;
+}
+
+.vx-ai-result-stage__error-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-danger, #dc2626);
+}
+
+.vx-ai-result-stage__error-text {
+  color: var(--color-text-secondary, #64748b);
+}
+
+.vx-ai-result-stage__prism {
+  inset: 0;
+  z-index: 5;
+  background: linear-gradient(
+    120deg,
+    transparent 30%,
+    color-mix(in oklab, var(--vx-ai-accent) 14%, transparent) 45%,
+    color-mix(in oklab, var(--vx-ai-accent-2) 14%, transparent) 55%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.55;
+  background-size: 200% 100%;
+  background-position: 200% 0;
+  animation: vx-ai-shimmer-sweep 3.4s ease-in-out infinite;
+}
+
+/* ── Keyframes (únicos; no redefinir localmente) ────────────────────────── */
+@keyframes vx-ai-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 38px rgba(var(--color-primary-rgb), 0.09),
+      0 0 0 rgba(var(--color-primary-rgb), 0);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 48px rgba(var(--color-primary-rgb), 0.16),
+      0 18px 48px rgba(var(--color-primary-rgb), 0.18);
+  }
+}
+
+@keyframes vx-ai-soft-pulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes vx-ai-icon-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes vx-ai-halo-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes vx-ai-shimmer-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* El recorrido sale de --vx-ai-scan-distance del elemento animado
+   (300 px en stage, 280 px en result-stage). */
+@keyframes vx-ai-scan-vertical {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(var(--vx-ai-scan-distance, 300px));
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes vx-ai-sparkle-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes vx-ai-holo-grid-drift {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 36px 36px;
+  }
+}
+
+@keyframes vx-ai-holo-aurora-shift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(2%, -2%) scale(1.05);
+  }
+}
+
+@keyframes vx-ai-orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vx-ai-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 300% 50%;
+  }
+}
+
+/* ── Movimiento reducido: todo quieto, se conserva la apariencia estática ── */
+@media (prefers-reduced-motion: reduce) {
+  .vx-ai-button,
+  .vx-ai-button::after,
+  .vx-ai-border::before,
+  .vx-ai-shimmer::after,
+  .vx-ai-icon,
+  .vx-ai-soft-pulse,
+  .vx-ai-dot-pulse,
+  .vx-ai-orbit__core,
+  .vx-ai-orbit__ring,
+  .vx-ai-holo-grid,
+  .vx-ai-holo-aurora,
+  .vx-ai-sparkle,
+  .vx-ai-stage.is-analyzing,
+  .vx-ai-stage__icon,
+  .vx-ai-stage__caption,
+  .vx-ai-stage__halo,
+  .vx-ai-stage__shimmer,
+  .vx-ai-stage__scan,
+  .vx-ai-result-stage.is-generating,
+  .vx-ai-result-stage__icon,
+  .vx-ai-result-stage__caption,
+  .vx-ai-result-stage__halo,
+  .vx-ai-result-stage__shimmer,
+  .vx-ai-result-stage__scan,
+  .vx-ai-result-stage__prism {
+    animation: none !important;
+  }
+
+  .vx-ai-button,
+  .vx-ai-button::after {
+    transition: none !important;
+  }
+
+  .vx-ai-button:hover:not(:disabled):not([aria-disabled='true'])::after {
+    opacity: 0;
+  }
+}

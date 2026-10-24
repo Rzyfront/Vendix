@@ -64,3 +64,17 @@ export function isHabilitationNumbering(
     from >= DIAN_HABILITATION_RANGE_FROM && to <= DIAN_HABILITATION_RANGE_TO
   );
 }
+
+/**
+ * Datos PÚBLICOS del ambiente de habilitación de la DIAN, para pre-llenar el
+ * formulario de la resolución de pruebas (SETP). Son idénticos para todo
+ * contribuyente y el usuario puede editarlos antes de guardar.
+ *
+ * Fuente: fixtures del backend (`dian-direct.provider.spec.ts` para vigencia,
+ * prefijo y rango; `cufe-calculator.spec.ts` para la clave técnica).
+ */
+export const DIAN_HABILITATION_PREFIX = 'SETP';
+export const DIAN_HABILITATION_TECHNICAL_KEY =
+  'fc8eac422eba16e22ffd8c6f94b3f40a6e38162c';
+export const DIAN_HABILITATION_VALID_FROM = '2019-01-19';
+export const DIAN_HABILITATION_VALID_TO = '2030-01-19';

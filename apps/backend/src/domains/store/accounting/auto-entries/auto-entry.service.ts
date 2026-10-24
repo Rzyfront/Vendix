@@ -1227,6 +1227,7 @@ export class AutoEntryService {
       'credit_note.accepted': 'auto_return',
       'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
+      'platform_invoice.payment_received': 'auto_payment',
       'financial_account.payment_revenue': 'auto_payment',
       'financial_account.payment_receivable': 'auto_payment',
       'expense.approved': 'auto_expense',
@@ -3829,6 +3830,85 @@ export class AutoEntryService {
     });
   }
 
+
+  /**
+   * platform_invoice.payment_received: DR Caja/Bancos → CR Cuentas por Cobrar.
+   * Cobro (total o parcial) de una factura de PLATAFORMA emitida a crédito: el
+   * asiento `invoice.accepted` dejó DR 1305; cada cobro cierra esa CxC.
+   * `source_id` = id de la evidencia del pago (un asiento por cobro; los
+   * abonos parciales NO colisionan). Sin `store_id`: corre a nivel de
+   * organización con la entidad contable del payload. Fecha = `paid_at`
+   * ancla en medianoche UTC del día calendario (misma convención que
+   * `resolveEntryDate`, TZ Bogotá).
+   */
+  async onPlatformInvoicePaymentReceived(data: {
+    organization_id: number;
+    accounting_entity_id: number;
+    evidence_id: number;
+    transmission_id?: number;
+    document_number: string;
+    amount: number;
+    payment_method: string;
+    paid_at: string;
+    reference?: string | null;
+    user_id?: number | null;
+  }) {
+    const source_type = 'platform_invoice.payment_received';
+    const existing = await this.prisma
+      .withoutScope()
+      .accounting_entries.findFirst({
+        where: {
+          organization_id: data.organization_id,
+          source_type,
+          source_id: data.evidence_id,
+          accounting_entity_id: data.accounting_entity_id,
+        },
+      });
+    if (existing) {
+      this.logger.warn(
+        `Auto-entry ${source_type}#${data.evidence_id} already exists; skipping duplicate`,
+      );
+      return existing;
+    }
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(data.paid_at ?? '');
+    const entry_date = match
+      ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+      : undefined;
+
+    const cash_bank_key = this.resolveCashBankKey(data.payment_method);
+    const ref = data.reference ? ` (${data.reference})` : '';
+    const label = `Cobro factura ${data.document_number}${ref}`;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        label,
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'payment.received.accounts_receivable',
+        `Recaudo CxC ${label}`,
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type,
+      source_id: data.evidence_id,
+      organization_id: data.organization_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date,
+      description: label,
+      lines,
+      user_id: data.user_id ?? undefined,
+    });
+  }
+
   /**
    * expense.paid: Debit Accounts Payable, Credit Cash/Bank
    */
@@ -5988,16 +6068,22 @@ export class AutoEntryService {
     store_id?: number;
     cost_amount: number;
     quantity_change: number;
+    adjustment_type?: string;
     user_id?: number;
   }) {
     let lines: (AutoEntryLine | null)[];
+    const is_initial_load = data.adjustment_type === 'initial_load';
+    // Carga inicial: la contrapartida es patrimonio (3105), no faltante/sobrante.
+    const counter_key = is_initial_load
+      ? 'inventory.initial_load.equity'
+      : 'inventory.adjusted.shrinkage';
 
     if (data.quantity_change < 0) {
       // Shrinkage: DR Shrinkage, CR Inventory
       lines = await Promise.all([
         this.resolveAccountLine(
           data.organization_id,
-          'inventory.adjusted.shrinkage',
+          counter_key,
           'Inventory Shrinkage',
           data.cost_amount,
           0,
@@ -6025,7 +6111,7 @@ export class AutoEntryService {
         ),
         this.resolveAccountLine(
           data.organization_id,
-          'inventory.adjusted.shrinkage',
+          counter_key,
           'Inventory Surplus',
           0,
           data.cost_amount,
@@ -6038,7 +6124,10 @@ export class AutoEntryService {
       source_type: 'inventory.adjusted',
       source_id: data.adjustment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Inventory adjustment #${data.adjustment_id}`,
+      store_id: data.store_id,
+      description: is_initial_load
+        ? `Carga inicial de inventario #${data.adjustment_id}`
+        : `Inventory adjustment #${data.adjustment_id}`,
       lines,
       user_id: data.user_id,
     });

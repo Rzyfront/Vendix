@@ -1,18 +1,25 @@
+import {
+  discoveryPage,
+  discoveryError,
+  pageParameters,
+} from '../discovery-pagination';
 import { Logger } from '@nestjs/common';
 import { RegisteredTool } from '../interfaces/tool.interface';
 import {
   ApiCatalogService,
-  type CatalogEntry,
   type CatalogMethod,
   type CatalogField,
 } from './api-catalog.service';
 import { IRREVERSIBLE_DOMAINS } from './capability-registry.service';
 import { VexiAttachmentsService } from '../../../domains/store/vexi/vexi-attachments.service';
-import { RequestContextService } from '@common/context/request-context.service';
+import { isAgentAbort } from '../../tasks/agent-deadline';
 import {
   buildMultipartBody,
+  callerDomainScope,
   internalApiBase,
   internalAuthHeaders,
+  internalApiText,
+  internalRequestContext,
 } from './internal-http';
 
 export interface ApiBridgeDeps {
@@ -84,9 +91,34 @@ function stripMarkup(summary: string): string {
 const logger = new Logger('api-bridge');
 
 function callerScopes(): string[] {
-  const context = RequestContextService.getContext();
+  const context = internalRequestContext();
   const granted = context?.permissions;
   return granted?.length ? granted : (context?.roles ?? []);
+}
+
+/**
+ * Rechazo recuperable para una ruta fuera del dominio del token, o `null`.
+ *
+ * Sin `statusCode` y con `error_code` propio a propósito: el normalizador
+ * clasifica 401/403 como `blocked` (permiso o plan de la persona), y esto es
+ * una ruta mal elegida por el modelo — `recoverable_error` con un next_step
+ * que le dice dónde buscar la alternativa.
+ */
+function domainScopeRefusal(
+  path: string,
+): { error: string; error_code: string; next_step: string } | null {
+  const decision = callerDomainScope(path);
+  if (decision.allowed) return null;
+  const orgFromStore = decision.reason === 'store_admin_org_path';
+  return {
+    error: orgFromStore
+      ? `La ruta "${path}" es de la organización y no está disponible desde la tienda.`
+      : `La ruta "${path}" no está disponible desde la sesión actual.`,
+    error_code: 'API_BRIDGE_DOMAIN_SCOPE',
+    next_step: orgFromStore
+      ? 'Usa las rutas store/… equivalentes (búscalas con list_endpoints o list_capabilities) o una herramienta propia con search_tools; no reintentes rutas organization/….'
+      : 'Usa solo rutas que aparezcan en list_endpoints o list_capabilities para esta sesión; no reintentes esta ruta.',
+  };
 }
 
 /** The irreversibility sentence for a path, when its domain carries one. */
@@ -237,9 +269,7 @@ function validateBody(
   const provided = body ?? {};
   const known = new Map(schema.map((field) => [field.name, field]));
 
-  const unknownFields = Object.keys(provided).filter(
-    (key) => !known.has(key),
-  );
+  const unknownFields = Object.keys(provided).filter((key) => !known.has(key));
   if (unknownFields.length) {
     return `Estos datos no corresponden: ${unknownFields.join(', ')}. Los que acepta son: ${schema
       .map((field) => field.name)
@@ -262,7 +292,11 @@ function validateBody(
     ) {
       // A numeric string is what a form sends and the pipe coerces it happily;
       // only text that cannot be a number is a real problem.
-      if (typeof value !== 'string' || value.trim() === '' || Number.isNaN(Number(value))) {
+      if (
+        typeof value !== 'string' ||
+        value.trim() === '' ||
+        Number.isNaN(Number(value))
+      ) {
         return `${labelOf(key)} tiene que ser un número y llegó "${String(value)}".`;
       }
     }
@@ -383,14 +417,17 @@ export function createApiBridgeTools({
     }
 
     try {
-      const response = await fetch(`${base}/${requestPath(path)}`, {
-        method: 'GET',
-        headers: authHeaders(),
-      });
+      const { response, body } = await internalApiText(
+        `${base}/${requestPath(path)}`,
+        {
+          method: 'GET',
+          headers: authHeaders(),
+        },
+      );
 
       if (!response.ok) return null;
 
-      const parsed = JSON.parse(await response.text()) as {
+      const parsed = JSON.parse(body) as {
         data?: unknown;
       } | null;
 
@@ -399,7 +436,8 @@ export function createApiBridgeTools({
       return data && typeof data === 'object' && !Array.isArray(data)
         ? (data as Record<string, unknown>)
         : null;
-    } catch {
+    } catch (error) {
+      if (isAgentAbort(error)) throw error;
       return null;
     }
   }
@@ -415,6 +453,29 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
+          ...{
+            ...pageParameters,
+            path: {
+              type: 'string',
+              description:
+                'Ruta patrón exacta para consultar solo su contrato.',
+            },
+            method: {
+              type: 'string',
+              enum: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+              description:
+                'Verbo exacto del endpoint. Requerido para continuar field_cursor.',
+            },
+            field_cursor: {
+              type: 'string',
+              description:
+                'Cursor de campos de una ruta y verbo; úsalo junto con domain, path y method.',
+            },
+            field_limit: {
+              type: 'integer',
+              description: 'Campos de contrato por página, de 1 a 20.',
+            },
+          },
           domain: {
             type: 'string',
             description:
@@ -430,7 +491,102 @@ export function createApiBridgeTools({
       },
       handler: async (args) => {
         const scopes = callerScopes();
-        const methods = args.writable_only ? WRITE_METHODS : undefined;
+        let methods: CatalogMethod[] | undefined = args.writable_only
+          ? WRITE_METHODS
+          : undefined;
+
+        {
+          try {
+            if (args.method !== undefined) {
+              const method = String(args.method).toUpperCase();
+              if (method !== 'GET' && !isWriteMethod(method))
+                throw new Error('Verbo inválido.');
+              methods = args.writable_only && method === 'GET' ? [] : [method];
+            }
+            if (
+              args.field_cursor &&
+              (!args.path || !args.domain || !args.method)
+            )
+              throw new Error(
+                'Continúa field_cursor con domain, path y method exactos del endpoint.',
+              );
+            if (!args.domain) {
+              const page = discoveryPage(
+                catalog.domainsFor(scopes, methods),
+                args,
+                { methods },
+              );
+              return JSON.stringify({
+                domains: page.data,
+                total: page.total,
+                has_more: page.has_more,
+                cursor: page.cursor,
+                next_step:
+                  'Consulta domain para rutas; continúa con cursor para más dominios.',
+              });
+            }
+            const page = catalog.pageFor(
+              scopes,
+              {
+                domain: String(args.domain),
+                methods,
+                path: args.path ? String(args.path) : undefined,
+              },
+              args,
+            );
+            const endpoints = page.data.map((entry) => {
+              const fields = [
+                ...(entry.bodySchema ?? []).map((f) => ({
+                  ...f,
+                  location: 'body',
+                })),
+                ...(entry.querySchema ?? []).map((f) => ({
+                  ...f,
+                  location: 'query',
+                })),
+              ];
+              const fieldPage = discoveryPage(
+                fields,
+                { cursor: args.field_cursor, limit: args.field_limit },
+                [entry.path, entry.method],
+                8,
+              );
+              return {
+                path: entry.path,
+                method: entry.method,
+                requires: entry.requiredPermissions,
+                hace: entry.summary,
+                campos: fieldPage.data.filter((f) => f.location === 'body'),
+                filtros: fieldPage.data.filter((f) => f.location === 'query'),
+                fields_total: fieldPage.total,
+                fields_has_more: fieldPage.has_more,
+                field_cursor: fieldPage.cursor,
+                ...(entry.multipart
+                  ? { necesita_documento: true, campo_archivo: entry.fileField }
+                  : {}),
+                ...(documentFieldOf(entry.bodySchema)
+                  ? { acepta_documento: true }
+                  : {}),
+                contract_complete:
+                  !fieldPage.has_more &&
+                  !fields.some((f) =>
+                    ['object', 'array', 'unknown'].includes(f.type),
+                  ),
+                next_step:
+                  'Si faltan campos continúa field_cursor con domain, path y method exactos. Un object/array no describe su DTO anidado: obtiene contrato/preflight del dominio antes de proponer.',
+              };
+            });
+            return JSON.stringify({
+              domain: args.domain,
+              endpoints,
+              total: page.total,
+              has_more: page.has_more,
+              cursor: page.cursor,
+            });
+          } catch (error) {
+            return discoveryError(error);
+          }
+        }
 
         if (!args.domain) {
           return JSON.stringify({
@@ -487,6 +643,17 @@ export function createApiBridgeTools({
       parameters: {
         type: 'object',
         properties: {
+          ...{
+            result_cursor: {
+              type: 'string',
+              description:
+                'Cursor local de filas devuelto por esta misma consulta; no sustituye el cursor upstream.',
+            },
+            result_limit: {
+              type: 'integer',
+              description: 'Filas por página local, 1 a 20 (por defecto 3).',
+            },
+          },
           path: {
             type: 'string',
             description:
@@ -501,7 +668,7 @@ export function createApiBridgeTools({
         required: ['path'],
       },
       handler: async (args) => {
-        const context = RequestContextService.getContext();
+        const context = internalRequestContext();
         const token = context?.access_token;
 
         if (!token) {
@@ -521,6 +688,14 @@ export function createApiBridgeTools({
               : 'Usa list_endpoints para ver las rutas válidas.',
           });
         }
+
+        // Antes de despachar: una ruta de otro dominio (p. ej. `organization/*`
+        // con token de tienda) siempre vuelve 403 del DomainScopeGuard, y ese
+        // 403 se clasifica `blocked` → turno agotado + aviso falso de permisos
+        // (E2E g09). Es un error de ruta que el modelo corrige, no un permiso
+        // que le falte a la persona.
+        const outOfScope = domainScopeRefusal(entry.path);
+        if (outOfScope) return JSON.stringify(outOfScope);
 
         // Second, redundant permission check. The real enforcement happens in
         // the guards of the internal request below; this one only exists to
@@ -545,16 +720,15 @@ export function createApiBridgeTools({
         }
 
         try {
-          const response = await fetch(url, {
+          const { response, body } = await internalApiText(url, {
             method: 'GET',
             headers: authHeaders(),
           });
 
-          const body = await response.text();
-
           if (!response.ok) {
             return JSON.stringify({
               error: `La consulta a "${entry.path}" devolvió ${response.status}.`,
+              ...{ statusCode: response.status },
               detail: body.slice(0, 500),
               // El 400 de `forbidNonWhitelisted` nombra el parámetro sobrante y
               // ninguno de los válidos, así que el modelo entraba a adivinar:
@@ -565,17 +739,12 @@ export function createApiBridgeTools({
             });
           }
 
-          if (body.length > MAX_RESPONSE_CHARS) {
-            return JSON.stringify({
-              path: entry.path,
-              truncated: true,
-              note: `La respuesta es de ${body.length} caracteres y se truncó. Acota la consulta con parámetros (limit, fechas) para obtener el detalle.`,
-              data: body.slice(0, MAX_RESPONSE_CHARS),
-            });
-          }
-
+          // H persists the complete owner-scoped result in the agent loop BEFORE
+          // producing its recoverable envelope. Never slice JSON first, nor
+          // re-page an already bounded artifact and discard its cursor/units.
           return body;
         } catch (error: any) {
+          if (isAgentAbort(error)) throw error;
           logger.warn(
             `api-bridge call to ${entry.path} failed: ${error?.message}`,
           );
@@ -589,6 +758,8 @@ export function createApiBridgeTools({
       name: 'write_endpoint',
       version: '1',
       domain: 'api-bridge',
+      // The effect crosses HTTP: the handler states `applied` itself.
+      effectTransport: 'http',
       // NOT readOnly, and confirmation is mandatory: this is the only tool that
       // can mutate an arbitrary part of the system, so the user approves every
       // single call. The registry turns the rejection into the proposal, so no
@@ -657,6 +828,17 @@ export function createApiBridgeTools({
           };
         }
 
+        // Misma frontera de dominio que call_endpoint, antes de acuñar token:
+        // aprobar un cambio que el guard va a rechazar con 403 es pedir un sí
+        // en vano.
+        const outOfScope = domainScopeRefusal(entry.path);
+        if (outOfScope) {
+          return {
+            status: 'error' as const,
+            message: `${outOfScope.error} ${outOfScope.next_step}`,
+          };
+        }
+
         const scopes = callerScopes();
         const missing = entry.requiredPermissions.filter(
           (p) => !scopes.includes(p),
@@ -701,7 +883,10 @@ export function createApiBridgeTools({
 
         // A handle is not a document. If the model put `att_41` into the column
         // itself, the record would end up pointing at nothing.
-        if (documentField && /^att_\d+$/.test(String(body?.[documentField] ?? ''))) {
+        if (
+          documentField &&
+          /^att_\d+$/.test(String(body?.[documentField] ?? ''))
+        ) {
           return {
             status: 'error' as const,
             message: `No pongas el identificador del documento en ${labelOf(documentField)}; pásamelo en attachment_id y yo lo guardo con el registro.`,
@@ -718,8 +903,7 @@ export function createApiBridgeTools({
         // Read the record as it stands, so the card shows `de → a` instead of
         // only the new value. Skipped for POST: there is nothing to compare
         // against when the record does not exist yet.
-        const current =
-          method === 'POST' ? null : await readCurrentState(path);
+        const current = method === 'POST' ? null : await readCurrentState(path);
 
         const changes = body
           ? Object.entries(body)
@@ -765,16 +949,13 @@ export function createApiBridgeTools({
           domain: entry.domain,
           label: summary,
           ...(target ? { target: String(target) } : {}),
-          message:
-            irreversible ??
-            consequence ??
-            'Confírmalo y lo aplico.',
+          message: irreversible ?? consequence ?? 'Confírmalo y lo aplico.',
           ...(irreversible ? { irreversible: true } : {}),
           changes,
         } as any;
       },
       handler: async (args) => {
-        const context = RequestContextService.getContext();
+        const context = internalRequestContext();
         const token = context?.access_token;
 
         if (!token) {
@@ -846,16 +1027,17 @@ export function createApiBridgeTools({
             request = buildJsonRequest(args.body, method);
           }
 
-          const response = await fetch(`${base}/${requestPath(args.path)}`, {
-            method,
-            // `Content-Type` is deliberately absent for multipart: undici sets
-            // it with the boundary token it generated, and overriding it makes
-            // multer read an empty body.
-            headers: authHeaders(request.headers),
-            body: request.body,
-          });
-
-          const responseBody = await response.text();
+          const { response, body: responseBody } = await internalApiText(
+            `${base}/${requestPath(args.path)}`,
+            {
+              method,
+              // `Content-Type` is deliberately absent for multipart: undici sets
+              // it with the boundary token it generated, and overriding it makes
+              // multer read an empty body.
+              headers: authHeaders(request.headers),
+              body: request.body,
+            },
+          );
 
           if (!response.ok) {
             // The endpoint's own message is forwarded verbatim: it is the only
@@ -864,6 +1046,7 @@ export function createApiBridgeTools({
             return JSON.stringify({
               applied: false,
               status: response.status,
+              ...{ statusCode: response.status },
               detail: responseBody.slice(0, 800),
               note: 'El cambio NO se aplicó. Dile a la persona qué faltó, en sus términos, y ofrécele reintentarlo con el dato corregido.',
             });
@@ -920,6 +1103,9 @@ export function createApiBridgeTools({
             note: 'El cambio quedó aplicado. Confírmaselo en una frase y, si el módulo está en pantalla, refresca la vista con ui_refresh.',
           });
         } catch (error: any) {
+          // An aborted write can already have committed: the registry must
+          // classify handler-started uncertainty, never claim applied:false.
+          if (isAgentAbort(error)) throw error;
           logger.warn(
             `api-bridge write to ${entry.path} failed: ${error?.message}`,
           );

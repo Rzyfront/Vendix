@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -15,7 +16,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { startWith } from 'rxjs';
+import { map, startWith } from 'rxjs';
 
 import { BadgeComponent } from '../../badge/badge.component';
 import { ButtonComponent } from '../../button/button.component';
@@ -33,8 +34,10 @@ import type {
   ResolutionScannerScope,
 } from '../../dian-resolution-scanner/interfaces/resolution-scan-result.interface';
 import { DIAN_API_CONTEXT } from '../../../services/dian';
-import { toUTCDateString } from '../../../utils/date.util';
+import { toLocalDateString, toUTCDateString } from '../../../utils/date.util';
 import {
+  INTERNAL_SERIES_FORM_VALIDITY_YEARS,
+  INTERNAL_SERIES_INITIAL_RANGE,
   defaultDocumentTypeFor,
   isFiscalDocumentType,
   requirementsFor,
@@ -205,14 +208,25 @@ interface ResolutionFormControls {
           <span>{{ requirementNote() }}</span>
         </div>
 
+        @if (isInternalSeries()) {
+          <p
+            class="text-xs font-medium text-[var(--color-text-secondary)] flex items-center gap-1.5"
+          >
+            <app-icon name="info" [size]="13" class="shrink-0"></app-icon>
+            <span>Serie interna: no se valida ante la DIAN</span>
+          </p>
+        }
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <app-input
-            [label]="resolutionNumberLabel()"
-            [placeholder]="resolutionNumberPlaceholder()"
-            [required]="resolutionNumberRequired()"
-            [helperText]="resolutionNumberHelp()"
-            formControlName="resolution_number"
-          ></app-input>
+          @if (!isInternalSeries()) {
+            <app-input
+              [label]="resolutionNumberLabel()"
+              [placeholder]="resolutionNumberPlaceholder()"
+              [required]="resolutionNumberRequired()"
+              [helperText]="resolutionNumberHelp()"
+              formControlName="resolution_number"
+            ></app-input>
+          }
 
           <app-input
             type="date"
@@ -244,6 +258,16 @@ interface ResolutionFormControls {
             formControlName="range_to"
           ></app-input>
         </div>
+
+        @if (usedSeriesNotice(); as notice) {
+          <div
+            class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary flex items-start gap-1.5"
+            role="note"
+          >
+            <app-icon name="lock" [size]="13" class="shrink-0 mt-0.5"></app-icon>
+            <span>{{ notice }}</span>
+          </div>
+        }
 
         @if (rangeError(); as message) {
           <p class="text-xs text-[var(--color-error)]">{{ message }}</p>
@@ -451,7 +475,11 @@ export class DianResolutionFormComponent {
    * es explícito.
    */
   private readonly formValue = toSignal(
-    this.form.valueChanges.pipe(startWith(this.form.getRawValue())),
+    this.form.valueChanges.pipe(
+      // getRawValue: los controles bloqueados (serie usada) no están en `value`.
+      map(() => this.form.getRawValue()),
+      startWith(this.form.getRawValue()),
+    ),
     { initialValue: this.form.getRawValue() },
   );
 
@@ -506,6 +534,11 @@ export class DianResolutionFormComponent {
     requirementsFor(this.selectedDocumentType()),
   );
 
+  /** Serie interna: el backend la abre solo, sin resolución DIAN. */
+  readonly isInternalSeries = computed(
+    () => this.requirements().internal_series_prefix !== null,
+  );
+
   readonly acceptsTechnicalKey = computed(
     () => this.requirements().accepts_technical_key,
   );
@@ -555,11 +588,35 @@ export class DianResolutionFormComponent {
     return `${requirements.label}. ${range} ${key}`;
   });
 
+  /**
+   * Serie que ya emitió documentos (mismo predicado que el backend: el
+   * consecutivo nace en `range_from - 1`, así que `current >= range_from` es
+   * que ya se gastó al menos un número). Prefijo, tipo y número inicial quedan
+   * bloqueados (INVOICING_RESOLUTION_005) y el final no puede bajar de
+   * `current_number` (INVOICING_RESOLUTION_009).
+   */
+  readonly isUsedSeries = computed(() => {
+    const existing = this.resolution();
+    return (
+      existing !== null && existing.current_number >= existing.range_from
+    );
+  });
+
+  readonly usedSeriesNotice = computed<string | null>(() => {
+    const existing = this.resolution();
+    if (!existing || !this.isUsedSeries()) return null;
+    return `Esta serie ya emitió documentos (va en el consecutivo ${existing.current_number}): el prefijo, el tipo y el número inicial no se pueden cambiar. Puedes ampliar el número final, cambiar la vigencia o archivarla.`;
+  });
+
   readonly rangeError = computed<string | null>(() => {
     const value = this.formValue();
     const from = Number(value.range_from);
     const to = Number(value.range_to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+    const existing = this.resolution();
+    if (this.isUsedSeries() && existing && to < existing.current_number) {
+      return `El número final no puede ser menor que el consecutivo actual (${existing.current_number}): esos números ya se emitieron.`;
+    }
     if (to <= from) {
       return 'El número final del rango tiene que ser mayor que el inicial.';
     }
@@ -638,6 +695,20 @@ export class DianResolutionFormComponent {
    */
   private lastSeedKey: string | null = null;
 
+  /**
+   * Valores que la siembra de serie interna puso en el formulario. Permite
+   * distinguir «lo puso el código» de «lo tecleó el usuario / lo trajo el
+   * escáner» (`setValue` no marca `dirty`): sólo se sobrescribe o se limpia lo
+   * que sigue valiendo exactamente lo sembrado, o está vacío.
+   */
+  private internalSeriesSeed: {
+    prefix: string;
+    range_from: number;
+    range_to: number;
+    valid_from: string;
+    valid_to: string;
+  } | null = null;
+
   constructor() {
     // El tipo de documento gobierna qué se exige. Los validators se recalculan
     // AQUÍ y no en el template: un campo que se deja de renderizar pero conserva
@@ -664,13 +735,25 @@ export class DianResolutionFormComponent {
       }
     });
 
+    // Series internas: pre-llena prefijo, rango y vigencia al elegir el tipo.
+    // Sólo en alta; en edición nunca se toca una resolución existente. Depende
+    // únicamente de `isEdit` y del tipo; el formulario se lee/escribe sin rastrear.
+    effect(() => {
+      const isEdit = this.isEdit();
+      const prefix = this.requirements().internal_series_prefix;
+      untracked(() => this.syncInternalSeries(isEdit, prefix));
+    });
+
     // Sin permiso de escritura el formulario se ve, pero no se toca. Se
     // deshabilita el FormGroup entero en vez de esconderlo: en la consola de
     // superadmin, un operador con sólo lectura necesita poder LEER la
     // configuración del tenant al que está atendiendo por teléfono.
     effect(() => {
       const canWrite = this.capabilities().writeConfig;
-      if (canWrite && this.form.disabled) this.form.enable({ emitEvent: true });
+      if (canWrite && this.form.disabled) {
+        this.form.enable({ emitEvent: true });
+        untracked(() => this.applyUsedLock());
+      }
       if (!canWrite && this.form.enabled) this.form.disable({ emitEvent: true });
     });
 
@@ -709,6 +792,7 @@ export class DianResolutionFormComponent {
           // viaja del backend y no hay nada honesto que poner aquí.
           technical_key: '',
         });
+        this.applyUsedLock();
         return;
       }
 
@@ -720,6 +804,95 @@ export class DianResolutionFormComponent {
             ) ?? allowed[0]);
       this.form.controls.document_type.setValue(initial);
     });
+  }
+
+  /**
+   * Bloquea prefijo, tipo y número inicial de una serie usada y exige que el
+   * final no baje del consecutivo actual. Si no está usada, todo queda editable.
+   * `submit()` lee `getRawValue()`: los tres campos viajan con su valor SIN
+   * cambios, que el backend acepta (sólo rechaza si cambian).
+   */
+  private applyUsedLock(): void {
+    const { prefix, document_type, range_from, range_to } = this.form.controls;
+    const existing = this.resolution();
+    const used = existing !== null && existing.current_number >= existing.range_from;
+    if (!this.capabilities().writeConfig) return;
+    for (const control of [prefix, document_type, range_from]) {
+      if (used && control.enabled) control.disable({ emitEvent: false });
+      if (!used && control.disabled) control.enable({ emitEvent: false });
+    }
+    range_to.setValidators([
+      Validators.required,
+      Validators.min(used && existing ? Math.max(1, existing.current_number) : 1),
+    ]);
+    range_to.updateValueAndValidity({ emitEvent: true });
+  }
+
+  private syncInternalSeries(isEdit: boolean, prefix: string | null): void {
+    if (isEdit) {
+      this.internalSeriesSeed = null;
+      return;
+    }
+    const controls = this.form.controls;
+    const previous = this.internalSeriesSeed;
+
+    // Un campo se pisa sólo si está vacío o conserva el valor sembrado antes.
+    const isUntouched = <T>(current: T | null, seeded: T | undefined): boolean =>
+      current === null ||
+      current === '' ||
+      (seeded !== undefined && current === seeded);
+
+    if (prefix === null) {
+      // Salida de una serie interna: limpiar lo sembrado que nadie tocó.
+      if (!previous) return;
+      if (controls.prefix.value === previous.prefix) controls.prefix.setValue('');
+      if (controls.range_from.value === previous.range_from) {
+        controls.range_from.setValue(null);
+      }
+      if (controls.range_to.value === previous.range_to) {
+        controls.range_to.setValue(null);
+      }
+      if (controls.valid_from.value === previous.valid_from) {
+        controls.valid_from.setValue('');
+      }
+      if (controls.valid_to.value === previous.valid_to) {
+        controls.valid_to.setValue('');
+      }
+      this.internalSeriesSeed = null;
+      return;
+    }
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(now.getFullYear() + INTERNAL_SERIES_FORM_VALIDITY_YEARS);
+    const seed = {
+      prefix,
+      range_from: 1,
+      range_to: INTERNAL_SERIES_INITIAL_RANGE,
+      valid_from: toLocalDateString(now),
+      valid_to: toLocalDateString(end),
+    };
+
+    if (isUntouched(controls.prefix.value, previous?.prefix)) {
+      controls.prefix.setValue(seed.prefix);
+    }
+    if (isUntouched(controls.range_from.value, previous?.range_from)) {
+      controls.range_from.setValue(seed.range_from);
+    }
+    if (isUntouched(controls.range_to.value, previous?.range_to)) {
+      controls.range_to.setValue(seed.range_to);
+    }
+    if (isUntouched(controls.valid_from.value, previous?.valid_from)) {
+      controls.valid_from.setValue(seed.valid_from);
+    }
+    if (isUntouched(controls.valid_to.value, previous?.valid_to)) {
+      controls.valid_to.setValue(seed.valid_to);
+    }
+    // El número de resolución no existe para estos tipos: que nada oculto viaje.
+    if (controls.resolution_number.value) {
+      controls.resolution_number.setValue('');
+    }
+    this.internalSeriesSeed = seed;
   }
 
   /**
@@ -802,7 +975,13 @@ export class DianResolutionFormComponent {
 
     const payload: DianResolutionFormValue = {
       document_type: documentType,
-      resolution_number: raw.resolution_number.trim(),
+      // Serie interna en alta: el campo está oculto; el backend genera el
+      // rótulo. En edición se conserva el valor cargado: enviar '' se lee como
+      // cambio de un campo inmutable en series ya usadas.
+      resolution_number:
+        this.isInternalSeries() && !this.isEdit()
+          ? ''
+          : raw.resolution_number.trim(),
       resolution_date: raw.resolution_date,
       prefix: raw.prefix.trim(),
       range_from: Number(raw.range_from),

@@ -90,7 +90,10 @@ export class FiscalConfigChecklistService {
         prefill.legal_data?.nit_dv &&
         prefill.legal_data?.fiscal_regime,
     );
-    const dianComplete = Boolean(
+    // Única fuente de verdad: la misma regla que usa el asistente fiscal
+    // (certificado vigente + producción + habilitada).
+    const dianComplete = prefill.satisfied_steps.includes('dian_config');
+    const dianCertificateValid = Boolean(
       prefill.dian_config?.has_certificate &&
         prefill.dian_config?.certificate_expiry &&
         new Date(prefill.dian_config.certificate_expiry).getTime() >
@@ -126,15 +129,21 @@ export class FiscalConfigChecklistService {
         label: 'Configuración DIAN',
         complete: dianComplete,
         detail: dianComplete
-          ? `Certificado vigente hasta ${prefill.dian_config!.certificate_expiry}`
-          : prefill.dian_config?.has_certificate
-            ? 'El certificado digital está vencido'
-            : 'Falta cargar el certificado digital DIAN',
+          ? `Factura electrónica en producción · certificado vigente hasta ${prefill.dian_config?.certificate_expiry}`
+          : !prefill.dian_config?.has_certificate
+            ? 'Falta cargar el certificado digital DIAN'
+            : !dianCertificateValid
+              ? 'El certificado digital está vencido'
+              : 'La habilitación DIAN aún no está en producción: termina el asistente "Activar facturación electrónica"',
         link_hint: 'fiscal/dian',
         // The DIAN certificate is a hard requirement only while invoicing is
         // an active area.
         severity: invoicingActive ? 'blocker' : 'required',
-        action: this.actionFor(dianComplete, 'Configurar DIAN', 'fiscal/dian'),
+        action: this.actionFor(
+          dianComplete,
+          'Activar facturación electrónica',
+          'fiscal/dian',
+        ),
       },
       {
         key: 'puc',

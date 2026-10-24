@@ -5,11 +5,16 @@ import { map, tap, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
+import { AssignShippingMethodDto } from '../../orders/interfaces/order.interface';
 
 export interface AIStreamEvent {
   type: 'text' | 'done' | 'error';
   content?: string;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
   error?: string;
 }
 
@@ -89,6 +94,61 @@ export interface CashSessionSummary {
   /** El número que gobierna el arqueo. */
   expected_cash_total: number;
   non_cash_total: number;
+}
+
+export interface CashSessionPendingOrder {
+  id: number;
+  order_number: string;
+  state: string;
+  remaining_balance: number;
+  payment_required?: boolean;
+  payment_amount_due?: number;
+  delivery_type?: string | null;
+  all_items_delivered?: boolean;
+  shipping_method_id?: number | null;
+  shipping_cost?: number;
+  reasons: ('operational' | 'balance')[];
+  version: string | null;
+  fingerprint: string;
+}
+
+export interface CashSessionPendingOrders {
+  tracking_enabled: boolean;
+  legacy_unattributed: { status: 'untracked'; message: string } | null;
+  count: number;
+  operational_count: number;
+  balance_count: number;
+  balance_total: number;
+  fingerprint: string;
+  page: number;
+  limit: number;
+  data: CashSessionPendingOrder[];
+}
+
+export interface CashSessionFinishPreview {
+  session_id: number;
+  total: number;
+  eligible: number;
+  ineligible: number;
+  fingerprint: string;
+  eligible_fingerprint: string;
+  items: {
+    id: number;
+    order_number: string;
+    current_state: string;
+    target_state: 'finished';
+    eligible: boolean;
+    reasons: string[];
+    effects: string[];
+    version: string | null;
+    fingerprint: string;
+  }[];
+}
+
+export interface CashSessionCloseDecision {
+  pending_decision: 'resolved' | 'override';
+  pending_fingerprint: string;
+  override_reason?: string;
 }
 
 /**
@@ -176,6 +236,7 @@ export interface CashSessionCloseReport {
     difference: number | null;
   };
   outflows?: CashReportOutflow[];
+  inflows?: CashReportInflow[];
   sales_summary?: CashSessionCloseReport['sales'] & {
     cancelled?: { count: number; total: number };
   };
@@ -206,7 +267,19 @@ export interface CashReportOutflow {
   payment_method: string;
   amount: number;
   reason: string | null;
+  reference?: string | null;
+  notes?: string | null;
   user_name: string | null;
+}
+
+export interface CashReportInflow {
+  id: number;
+  at: string;
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  user_name: string | null;
+  payment_method: string;
 }
 
 /**
@@ -267,27 +340,26 @@ export class PosCashRegisterService {
 
   /** Fetch all cash registers */
   getCashRegisters(): Observable<CashRegister[]> {
-    return this.http.get<any>(this.baseUrl).pipe(
-      map((res) => res.data || []),
-    );
+    return this.http.get<any>(this.baseUrl).pipe(map((res) => res.data || []));
   }
 
   /** Fetch the user's active session from backend */
   fetchActiveSession(): Observable<CashRegisterSession | null> {
-    return this.http
-      .get<any>(`${this.baseUrl}/sessions/active`)
-      .pipe(
-        map((res) => res.data || null),
-        tap((session) => this.activeSession.set(session)),
-        catchError(() => {
-          this.activeSession.set(null);
-          return of(null);
-        }),
-      );
+    return this.http.get<any>(`${this.baseUrl}/sessions/active`).pipe(
+      map((res) => res.data || null),
+      tap((session) => this.activeSession.set(session)),
+      catchError(() => {
+        this.activeSession.set(null);
+        return of(null);
+      }),
+    );
   }
 
   /** Open a new session */
-  openSession(cash_register_id: number, opening_amount: number): Observable<CashRegisterSession> {
+  openSession(
+    cash_register_id: number,
+    opening_amount: number,
+  ): Observable<CashRegisterSession> {
     return this.http
       .post<any>(`${this.baseUrl}/sessions/open`, {
         cash_register_id,
@@ -321,6 +393,7 @@ export class PosCashRegisterService {
     actual_closing_amount: number,
     closing_notes?: string,
     expected_closing_amount_seen?: number,
+    pendingDecision?: CashSessionCloseDecision,
   ): Observable<CashRegisterSession> {
     const body: Record<string, unknown> = {
       actual_closing_amount,
@@ -328,6 +401,13 @@ export class PosCashRegisterService {
     };
     if (expected_closing_amount_seen != null) {
       body['expected_closing_amount_seen'] = expected_closing_amount_seen;
+    }
+    if (pendingDecision) {
+      body['pending_decision'] = pendingDecision.pending_decision;
+      body['pending_fingerprint'] = pendingDecision.pending_fingerprint;
+      if (pendingDecision.override_reason) {
+        body['override_reason'] = pendingDecision.override_reason;
+      }
     }
 
     return this.http
@@ -354,6 +434,78 @@ export class PosCashRegisterService {
       .pipe(map((res) => res.data));
   }
 
+  getPendingOrders(
+    session_id: number,
+    page = 1,
+    limit = 10,
+  ): Observable<CashSessionPendingOrders> {
+    return this.http
+      .get<any>(`${this.baseUrl}/sessions/${session_id}/pending-orders`, {
+        params: { page, limit },
+      })
+      .pipe(map((res) => res.data));
+  }
+
+  previewCashSessionFinish(
+    session_id: number,
+    orders: { id: number; version: string; fingerprint: string }[],
+  ): Observable<CashSessionFinishPreview> {
+    return this.http
+      .post<any>(
+        `${environment.apiUrl}/store/orders/bulk/cash-session-preview`,
+        {
+          session_id,
+          orders,
+        },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  processCashSessionOrder(
+    session_id: number,
+    order_id: number,
+    expected_version: string,
+    flow: any,
+    shipping?: {
+      shipping_method_id: number;
+      shipping_cost?: number | null;
+      shipping_rate_id?: number | null;
+      auto_calculate?: boolean;
+    },
+  ): Observable<unknown> {
+    return this.http
+      .post<any>(
+        `${environment.apiUrl}/store/orders/bulk/cash-session-process`,
+        {
+          session_id,
+          order_id,
+          expected_version,
+          flow,
+          shipping,
+        },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  finishCashSessionOrders(
+    session_id: number,
+    orders: { id: number; version: string; fingerprint: string }[],
+    fingerprint: string,
+    reason: string,
+  ): Observable<unknown> {
+    return this.http
+      .post<any>(
+        `${environment.apiUrl}/store/orders/bulk/cash-session-finish`,
+        {
+          session_id,
+          orders,
+          fingerprint,
+          reason,
+        },
+      )
+      .pipe(map((res) => res.data));
+  }
+
   /**
    * Reporte consolidado de la sesión (resumen por método, efectivo, ventas,
    * reembolsos y descuentos). Mismo dato para el cierre y para Sesiones.
@@ -375,7 +527,9 @@ export class PosCashRegisterService {
   }
 
   /** Get session history */
-  getSessionHistory(params?: any): Observable<{ data: CashRegisterSession[]; meta: any }> {
+  getSessionHistory(
+    params?: any,
+  ): Observable<{ data: CashRegisterSession[]; meta: any }> {
     return this.http
       .get<any>(`${this.baseUrl}/sessions`, { params })
       .pipe(map((res) => ({ data: res.data || [], meta: res.meta || {} })));
@@ -396,7 +550,15 @@ export class PosCashRegisterService {
   }
 
   /** Add manual cash movement (cash_in / cash_out) */
-  addMovement(session_id: number, data: { type: 'cash_in' | 'cash_out'; amount: number; reference?: string; notes?: string }): Observable<CashRegisterMovement> {
+  addMovement(
+    session_id: number,
+    data: {
+      type: 'cash_in' | 'cash_out';
+      amount: number;
+      reference?: string;
+      notes?: string;
+    },
+  ): Observable<CashRegisterMovement> {
     return this.http
       .post<any>(`${this.baseUrl}/sessions/${session_id}/movements`, data)
       .pipe(map((res) => res.data));
@@ -415,12 +577,19 @@ export class PosCashRegisterService {
     return this.http.post<any>(this.baseUrl, data).pipe(map((res) => res.data));
   }
 
-  updateRegister(id: number, data: Partial<CashRegister>): Observable<CashRegister> {
-    return this.http.put<any>(`${this.baseUrl}/${id}`, data).pipe(map((res) => res.data));
+  updateRegister(
+    id: number,
+    data: Partial<CashRegister>,
+  ): Observable<CashRegister> {
+    return this.http
+      .put<any>(`${this.baseUrl}/${id}`, data)
+      .pipe(map((res) => res.data));
   }
 
   deleteRegister(id: number): Observable<any> {
-    return this.http.delete<any>(`${this.baseUrl}/${id}`).pipe(map((res) => res.data));
+    return this.http
+      .delete<any>(`${this.baseUrl}/${id}`)
+      .pipe(map((res) => res.data));
   }
 
   /** Stream AI closing summary via SSE */
@@ -442,7 +611,10 @@ export class PosCashRegisterService {
             subscriber.complete();
           }
         } catch {
-          subscriber.next({ type: 'error', error: 'Failed to parse stream data' });
+          subscriber.next({
+            type: 'error',
+            error: 'Failed to parse stream data',
+          });
           eventSource.close();
           subscriber.complete();
         }

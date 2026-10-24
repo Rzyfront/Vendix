@@ -34,7 +34,7 @@ describe('invoicing.tools · contrato canónico T4', () => {
         getValidTransitions: jest.fn(
           (status: string) =>
             (
-              {
+              ({
                 draft: ['validated', 'cancelled'],
                 validated: ['sent', 'cancelled'],
                 sent: ['accepted', 'rejected'],
@@ -42,7 +42,7 @@ describe('invoicing.tools · contrato canónico T4', () => {
                 rejected: ['sent', 'voided'],
                 cancelled: [],
                 voided: [],
-              } as Record<string, string[]>
+              }) as Record<string, string[]>
             )[status] ?? [],
         ),
         validate: jest.fn(),
@@ -181,18 +181,16 @@ describe('invoicing.tools · contrato canónico T4', () => {
 
     it('declara requeridos del JSON Schema', () => {
       const { tools } = buildTools();
-      expect(getTool(tools, 'get_invoice_status').parameters.required).toEqual(
-        ['invoice_id'],
-      );
-      expect(getTool(tools, 'get_emit_readiness').parameters.required).toEqual(
-        ['invoice_id'],
-      );
+      expect(getTool(tools, 'get_invoice_status').parameters.required).toEqual([
+        'invoice_id',
+      ]);
+      expect(getTool(tools, 'get_emit_readiness').parameters.required).toEqual([
+        'invoice_id',
+      ]);
       expect(
         getTool(tools, 'list_invoice_resolutions').parameters.required,
       ).toEqual([]);
-      expect(getTool(tools, 'get_dian_status').parameters.required).toEqual(
-        [],
-      );
+      expect(getTool(tools, 'get_dian_status').parameters.required).toEqual([]);
     });
   });
 
@@ -370,7 +368,9 @@ describe('invoicing.tools · contrato canónico T4', () => {
         emittable: true,
         has_items: true,
         blockers: [],
-        warnings: [{ code: 'CERT_EXPIRING', message: 'Certificado por vencer' }],
+        warnings: [
+          { code: 'CERT_EXPIRING', message: 'Certificado por vencer' },
+        ],
         findings: [{ code: 'OK', message: 'Identidad válida' }],
         identity_emittable: true,
         fiscal_document_emittable: true,
@@ -522,7 +522,14 @@ describe('invoicing.tools · contrato canónico T4', () => {
   describe('get_dian_status (F-35)', () => {
     const DASHBOARD = {
       stats: { total_sent: 10, total_success: 9, total_errors: 1 },
-      recent_submissions: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }],
+      recent_submissions: [
+        { id: 1 },
+        { id: 2 },
+        { id: 3 },
+        { id: 4 },
+        { id: 5 },
+        { id: 6 },
+      ],
       certificate_status: { expires_at: '2027-01-01' },
       configs_summary: [{ id: 1, environment: 'production' }],
     };
@@ -564,7 +571,13 @@ describe('invoicing.tools · contrato canónico T4', () => {
           certificate_status: { expires_at: '2027-01-01' },
           configs_summary: [{ id: 1, environment: 'production' }],
           // Acotado a 5 para no llenar la ventana de contexto.
-          recent_submissions: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }],
+          recent_submissions: [
+            { id: 1 },
+            { id: 2 },
+            { id: 3 },
+            { id: 4 },
+            { id: 5 },
+          ],
         },
         emission_chain: {
           send_tool: 'send_invoice_dian (F-30)',
@@ -637,6 +650,8 @@ describe('invoicing.tools · contrato canónico T4', () => {
       const answer = await run(tools, 'validate_invoice', { invoice_id: 11 });
 
       expect(answer).toEqual({
+        applied: true,
+        resource_ids: { invoice_id: 11 },
         invoice_id: 11,
         invoice_number: 'FV-011',
         status: 'validated',
@@ -767,6 +782,8 @@ describe('invoicing.tools · contrato canónico T4', () => {
       const answer = await run(tools, 'send_invoice_dian', { invoice_id: 12 });
 
       expect(answer).toEqual({
+        applied: true,
+        resource_ids: { invoice_id: 12 },
         invoice_id: 12,
         invoice_number: 'FV-012',
         status: 'sent',
@@ -845,9 +862,7 @@ describe('invoicing.tools · contrato canónico T4', () => {
       });
       expect(noReady.error).toContain('no es emisible');
       expect(noReady.next_step).toContain('F-32');
-      expect(
-        blocked.deps.invoiceFlowService.send,
-      ).not.toHaveBeenCalled();
+      expect(blocked.deps.invoiceFlowService.send).not.toHaveBeenCalled();
 
       const down = chainedDeps({
         emission: { is_live: false, reason: 'certificado vencido' },
@@ -1070,6 +1085,8 @@ describe('invoicing.tools · contrato canónico T4', () => {
         order_id: 9,
       });
       expect(answer).toEqual({
+        applied: true,
+        resource_ids: { invoice_id: 21, order_id: 9 },
         invoice_id: 21,
         invoice_number: 'FV-021',
         status: 'draft',
@@ -1265,9 +1282,7 @@ describe('invoicing.tools · contrato canónico T4', () => {
     function certDeps() {
       const { deps, tools } = buildTools();
       deps.dianConfigService.getConfigById.mockResolvedValue(CONFIG);
-      deps.certificateAdapter.validateCertificate.mockResolvedValue(
-        VALIDATION,
-      );
+      deps.certificateAdapter.validateCertificate.mockResolvedValue(VALIDATION);
       deps.s3Service.uploadFile.mockResolvedValue('s3://key');
       deps.dianConfigService.updateCertificate.mockResolvedValue({
         id: 5,
@@ -1289,9 +1304,7 @@ describe('invoicing.tools · contrato canónico T4', () => {
       expect(card.target).toContain('NIT 900123456');
       expect(JSON.stringify(card)).not.toContain('s3cr3t');
       expect(JSON.stringify(card)).not.toContain(P12);
-      expect(
-        deps.certificateAdapter.validateCertificate,
-      ).toHaveBeenCalledWith({
+      expect(deps.certificateAdapter.validateCertificate).toHaveBeenCalledWith({
         p12_buffer: expect.any(Buffer),
         password: 's3cr3t',
         expected_tax_id: '900123456',
@@ -1374,9 +1387,8 @@ describe('invoicing.tools · contrato canónico T4', () => {
   // ─── Guarda transversal: irreversibilidad + esquema del emisor ────────
   describe('guarda transversal (IRREVERSIBLE_DOMAINS + PartyTaxScheme)', () => {
     it('invoicing y dian-config pertenecen a IRREVERSIBLE_DOMAINS con la frase usada', async () => {
-      const { IRREVERSIBLE_DOMAINS } = await import(
-        '../bridge/capability-registry.service'
-      );
+      const { IRREVERSIBLE_DOMAINS } =
+        await import('../bridge/capability-registry.service');
       expect(typeof IRREVERSIBLE_DOMAINS.invoicing).toBe('string');
       expect(typeof IRREVERSIBLE_DOMAINS['dian-config']).toBe('string');
 
@@ -1426,24 +1438,34 @@ describe('invoicing.tools · contrato canónico T4', () => {
     });
 
     it('PartyTaxScheme de 4 estados y TaxLevelCode colapsando a R-99-PN', async () => {
-      const { resolveDianPartyTaxScheme } = await import(
-        '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes'
-      );
-      const { toDianTaxLevelCode } = await import(
-        '../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes'
-      );
+      const { resolveDianPartyTaxScheme } =
+        await import('../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes');
+      const { toDianTaxLevelCode } =
+        await import('../../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes');
       // Guarda del contrato que F-30 proyecta: la tabla completa, no 2 casos.
       expect(
-        resolveDianPartyTaxScheme({ vat_responsible: true, inc_responsible: true }),
+        resolveDianPartyTaxScheme({
+          vat_responsible: true,
+          inc_responsible: true,
+        }),
       ).toEqual({ id: 'ZA', name: 'IVA e INC' });
       expect(
-        resolveDianPartyTaxScheme({ vat_responsible: true, inc_responsible: false }),
+        resolveDianPartyTaxScheme({
+          vat_responsible: true,
+          inc_responsible: false,
+        }),
       ).toEqual({ id: '01', name: 'IVA' });
       expect(
-        resolveDianPartyTaxScheme({ vat_responsible: false, inc_responsible: true }),
+        resolveDianPartyTaxScheme({
+          vat_responsible: false,
+          inc_responsible: true,
+        }),
       ).toEqual({ id: '04', name: 'INC' });
       expect(
-        resolveDianPartyTaxScheme({ vat_responsible: false, inc_responsible: false }),
+        resolveDianPartyTaxScheme({
+          vat_responsible: false,
+          inc_responsible: false,
+        }),
       ).toEqual({ id: 'ZZ', name: 'No aplica' });
       // O-48/O-33 no existen en facturación electrónica: colapsan a R-99-PN.
       expect(toDianTaxLevelCode(['O-48', 'O-33'])).toBe('R-99-PN');

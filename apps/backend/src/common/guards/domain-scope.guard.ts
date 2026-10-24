@@ -8,6 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@common/decorators/public.decorator';
 import { ALLOW_CROSS_DOMAIN_KEY } from '@common/decorators/allow-cross-domain.decorator';
+import { domainScopeDecision } from './domain-scope.rule';
 
 /**
  * DomainScopeGuard
@@ -34,11 +35,8 @@ import { ALLOW_CROSS_DOMAIN_KEY } from '@common/decorators/allow-cross-domain.de
 export class DomainScopeGuard implements CanActivate {
   private readonly logger = new Logger(DomainScopeGuard.name);
 
-  // Marcadores de path estrictos: /api/store/ y /api/organization/.
-  // Comparamos contra `req.path` u `originalUrl` con normalización.
-  private readonly STORE_PATH_MARKER = '/store/';
-  private readonly ORG_PATH_MARKER = '/organization/';
-  private readonly CARRIER_PATH_MARKER = '/store/carrier/';
+  // Los marcadores de path (/store/, /organization/, /store/carrier/) viven en
+  // `domain-scope.rule.ts`; acá se compara `req.path` u `originalUrl`.
 
   constructor(private readonly reflector: Reflector) {}
 
@@ -72,88 +70,39 @@ export class DomainScopeGuard implements CanActivate {
     // permitió pasar. No es responsabilidad de este guard.
     if (!user) return true;
 
-    // 4. Super-admin: bypass total. Acceso cross-domain para soporte.
-    if (user.is_super_admin === true) return true;
-
+    // 4-6. Matriz de aislamiento (super-admin, VENDIX_ADMIN, store/org,
+    // STORE_DELIVERY, carve-out de campana para customers). Vive en
+    // `domain-scope.rule.ts` porque el puente de la IA aplica la misma regla
+    // para no ofrecer ni despachar rutas que este guard va a rechazar.
     const path: string = (req.path || req.originalUrl || '').toLowerCase();
+    const decision = domainScopeDecision(user, path);
+    if (decision.allowed) return true;
 
-    // 4b. VENDIX_ADMIN (superadmin del rail plataforma) tiene acceso a los
-    // endpoints `/api/superadmin/*` (facturacion plataforma, control fiscal,
-    // configuracion global). El resto de la matriz de aislamiento sigue
-    // activa para STORE_ADMIN / ORG_ADMIN.
-    if (user.app_type === 'VENDIX_ADMIN' && path.includes('/api/superadmin/')) {
-      return true;
+    switch (decision.reason) {
+      case 'missing_app_type':
+        this.logger.warn(
+          `Token sin app_type accediendo a ${path} (user_id=${user.id}). Re-login requerido.`,
+        );
+        break;
+      case 'org_admin_store_path':
+        this.logger.warn(
+          `ORG_ADMIN (user_id=${user.id}) intentó acceder a path de store: ${path}`,
+        );
+        break;
+      case 'store_admin_org_path':
+        this.logger.warn(
+          `STORE_ADMIN (user_id=${user.id}) intentó acceder a path de organization: ${path}`,
+        );
+        break;
+      case 'delivery_outside_carrier':
+        // Contrato previo: `false` (403 genérico de Nest), sin log.
+        return false;
+      case 'non_admin_app_type':
+        this.logger.warn(
+          `app_type=${user.app_type} (user_id=${user.id}) intentó acceder a path admin: ${path}`,
+        );
+        break;
     }
-
-    const isStorePath = path.includes(this.STORE_PATH_MARKER);
-    const isOrgPath = path.includes(this.ORG_PATH_MARKER);
-
-    // 5. Path no es de un dominio gobernado por este guard → bypass.
-    // Cubre /api/auth/*, /api/ecommerce/*, /api/superadmin/*, /api/health, etc.
-    if (!isStorePath && !isOrgPath) return true;
-
-    // 6. A partir de aquí el path es /store/* o /organization/*.
-    //    Necesitamos un app_type claim válido.
-    const appType: string | undefined = user.app_type;
-
-    if (!appType) {
-      this.logger.warn(
-        `Token sin app_type accediendo a ${path} (user_id=${user.id}). Re-login requerido.`,
-      );
-      throw new ForbiddenException(
-        'Token sin app_type claim. Re-login requerido.',
-      );
-    }
-
-    if (appType === 'ORG_ADMIN' && isStorePath) {
-      this.logger.warn(
-        `ORG_ADMIN (user_id=${user.id}) intentó acceder a path de store: ${path}`,
-      );
-      throw new ForbiddenException(
-        'ORG_ADMIN no puede acceder a endpoints /store/*',
-      );
-    }
-
-    if (appType === 'STORE_ADMIN' && isOrgPath) {
-      this.logger.warn(
-        `STORE_ADMIN (user_id=${user.id}) intentó acceder a path de organization: ${path}`,
-      );
-      throw new ForbiddenException(
-        'STORE_ADMIN no puede acceder a endpoints /organization/*',
-      );
-    }
-
-    // 6b. STORE_DELIVERY: solo el namespace carrier. Blast-radius mínimo.
-    // Habilita el flujo del transportador en Vendix Repartos sin exponer el
-    // resto del árbol /store/*. El match es por substring: ningún endpoint
-    // admin sensible cuelga de /store/carrier/ (namespace nuevo).
-    if (appType === 'STORE_DELIVERY') {
-      return path.includes(this.CARRIER_PATH_MARKER);
-    }
-
-    // 6c. Customers (CUSTOMER / STORE_ECOMMERCE): bell notifications
-    //     only — el namespace /store/notifications ya filtra por store y por
-    //     `data->>'target_user_id'` (QUI-854), así que el customer solo ve sus
-    //     propias notificaciones. Sin embargo su token no autoriza las
-    //     superficies de gestión del bell (subscriptions, Web Push, vapid) ni
-    //     el resto de /store/*. Carve-out acotado a list/unread-count/stream +
-    //     mark-read/mark-all (que el servicio scopa por usuario).
-    if (appType !== 'ORG_ADMIN' && appType !== 'STORE_ADMIN') {
-      const isCustomerBellAllowed =
-        path.includes('/store/notifications') &&
-        !path.includes('/store/notifications/subscriptions') &&
-        !path.includes('/store/notifications/push');
-      if (isCustomerBellAllowed) {
-        return true;
-      }
-      this.logger.warn(
-        `app_type=${appType} (user_id=${user.id}) intentó acceder a path admin: ${path}`,
-      );
-      throw new ForbiddenException(
-        `Token app_type=${appType} no autoriza acceso a endpoints admin`,
-      );
-    }
-
-    return true;
+    throw new ForbiddenException(decision.message);
   }
 }

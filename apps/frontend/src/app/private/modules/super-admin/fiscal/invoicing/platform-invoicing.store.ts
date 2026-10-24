@@ -17,6 +17,7 @@ import {
   SubscriptionFiscalStatus,
   UpdatePlatformProfilePayload,
 } from '../../subscriptions/interfaces/fiscal-billing.interface';
+import type { ResolutionsInUseResponse } from '../../../../../shared/components/dian/resolutions-in-use.util';
 import { FiscalBillingAdminService } from '../../subscriptions/services/fiscal-billing-admin.service';
 
 /**
@@ -47,6 +48,9 @@ export class PlatformInvoicingStore {
   private readonly _resolutions = signal<PlatformResolution[]>([]);
   private readonly _loadingStatus = signal(true);
   private readonly _loadingResolutions = signal(false);
+  private readonly _includeArchived = signal(false);
+  private readonly _inUse = signal<ResolutionsInUseResponse | null>(null);
+  private readonly _loadingInUse = signal(false);
 
   // ─── Perfiles ────────────────────────────────────────────────────────────────
 
@@ -66,6 +70,11 @@ export class PlatformInvoicingStore {
   readonly resolutions = this._resolutions.asReadonly();
   readonly loadingStatus = this._loadingStatus.asReadonly();
   readonly loadingResolutions = this._loadingResolutions.asReadonly();
+  /** «Ver archivadas»: el listado se pide con `include_archived=true`. */
+  readonly includeArchived = this._includeArchived.asReadonly();
+  /** Qué serie toma hoy el generador por tipo de documento. */
+  readonly inUse = this._inUse.asReadonly();
+  readonly loadingInUse = this._loadingInUse.asReadonly();
 
   /** Hay una `dian_configurations` enlazada: sin esto no se puede emitir nada. */
   readonly configured = computed(
@@ -150,16 +159,24 @@ export class PlatformInvoicingStore {
     this._loadingStatus.set(false);
   }
 
+  setIncludeArchived(value: boolean): void {
+    if (this._includeArchived() === value) return;
+    this._includeArchived.set(value);
+    this.loadResolutions(true);
+  }
+
   loadResolutions(force = false): void {
     if (!force && this._resolutions().length > 0) return;
     this._loadingResolutions.set(true);
     this.fiscal
-      .listResolutions()
+      .listResolutions(this._includeArchived() ? { include_archived: true } : {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (rows) => {
           this._resolutions.set(rows);
           this._loadingResolutions.set(false);
+          // `in-use` depende de las mismas filas: se refresca con ellas.
+          this.loadInUse();
         },
         error: () => {
           this.toast.error(
@@ -168,6 +185,20 @@ export class PlatformInvoicingStore {
           );
           this._loadingResolutions.set(false);
         },
+      });
+  }
+
+  loadInUse(): void {
+    this._loadingInUse.set(true);
+    this.fiscal
+      .getResolutionsInUse()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this._inUse.set(data);
+          this._loadingInUse.set(false);
+        },
+        error: () => this._loadingInUse.set(false),
       });
   }
 

@@ -1,7 +1,10 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
+import type { VexiProposal } from '../store/vexi/vexi.actions';
+import type { VoiceConsentContext } from './vexi-voice-consent.model';
 import { VexiUiCommandService } from './vexi-ui-command.service';
 
 /**
@@ -35,7 +38,11 @@ interface RealtimeSessionPatch {
   audio?: { input: Record<string, unknown> };
 }
 
-interface RealtimeSessionGrant {
+export interface RealtimeSessionGrant {
+  session_id?: string;
+  session_expires_at?: string;
+  objective_id?: string;
+  agent_key?: 'vex' | 'vexi';
   client_secret: string;
   expires_at: number;
   model: string;
@@ -80,6 +87,20 @@ interface RealtimeServerEvent {
 @Injectable({ providedIn: 'root' })
 export class VexiRealtimeService {
   private readonly http = inject(HttpClient);
+  private readonly safety = inject(VexiVoiceSafetyService);
+  private readonly destroyRef = inject(DestroyRef);
+  readonly pendingProposal = signal<{
+    proposal: VexiProposal;
+    context: VoiceConsentContext;
+  } | null>(null);
+  private grant: RealtimeSessionGrant | null = null;
+  private context: { conversation_id?: number; agent_key: 'vex' | 'vexi' } = {
+    agent_key: 'vexi',
+  };
+  private generation = 0;
+  private suspended = false;
+  private sessionExpiresAt = 0;
+  private expiryTimer?: ReturnType<typeof setTimeout>;
   private readonly uiCommands = inject(VexiUiCommandService);
   private readonly baseUrl = `${environment.apiUrl}/store/vexi/realtime`;
 
@@ -100,12 +121,43 @@ export class VexiRealtimeService {
   private startedAt = 0;
   private totalTokens = 0;
 
+  constructor() {
+    if (typeof window !== 'undefined') {
+      const invalidate = () => {
+        if (this.grant?.session_id) {
+          this.pendingProposal.set(null);
+          void this.stop();
+        }
+      };
+      window.addEventListener('blur', invalidate);
+      window.addEventListener('offline', invalidate);
+      const hidden = () => {
+        if (document.visibilityState !== 'visible') invalidate();
+      };
+      document.addEventListener('visibilitychange', hidden);
+      this.destroyRef.onDestroy(() => {
+        window.removeEventListener('blur', invalidate);
+        window.removeEventListener('offline', invalidate);
+        document.removeEventListener('visibilitychange', hidden);
+        void this.stop();
+      });
+    }
+  }
+
   /**
    * Opens a voice turn. Resolves `false` when the attempt was consumed by the
    * permission prompt, so the caller can prompt for a second hold.
    */
-  async start(): Promise<boolean> {
-    if (this.pc) return true;
+  async start(context?: {
+    conversation_id?: number;
+    agent_key: 'vex' | 'vexi';
+  }): Promise<boolean> {
+    if (this.pc || this.grant) await this.stop();
+    this.safety.invalidate();
+    this.pendingProposal.set(null);
+    this.context = context ?? { agent_key: 'vexi' };
+    const generation = ++this.generation;
+    this.suspended = false;
 
     this.errorMessage.set(null);
 
@@ -113,7 +165,7 @@ export class VexiRealtimeService {
       const needsPrompt = !this.permissionResolved();
       if (needsPrompt) this.state.set('permission');
 
-      this.micStream = await navigator.mediaDevices.getUserMedia({
+      const micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -121,6 +173,11 @@ export class VexiRealtimeService {
         },
       });
       this.permissionResolved.set(true);
+      if (generation !== this.generation) {
+        micStream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
+      this.micStream = micStream;
 
       // The prompt tore the hold apart — the pointer is long gone. Release the
       // mic and let the user start a real turn.
@@ -132,12 +189,39 @@ export class VexiRealtimeService {
 
       this.state.set('connecting');
       const grant = await this.requestGrant();
-      await this.connect(grant);
+      if (generation !== this.generation) {
+        if (grant.session_id)
+          void firstValueFrom(
+            this.http.post(`${this.baseUrl}/session/close`, {
+              session_id: grant.session_id,
+              duration_seconds: 0,
+              total_tokens: 0,
+            }),
+          ).catch(() => undefined);
+        return false;
+      }
+      this.grant = grant;
+      if (grant.session_id) {
+        const expiresAt = Date.parse(grant.session_expires_at || '');
+        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
+          throw new Error('La sesión de voz venció.');
+        this.sessionExpiresAt = Math.min(expiresAt, Date.now() + 300_000);
+        this.expiryTimer = setTimeout(
+          () => {
+            this.pendingProposal.set(null);
+            void this.stop();
+          },
+          Math.max(1, this.sessionExpiresAt - Date.now() - 100),
+        );
+      }
+      await this.connect(grant, generation);
+      if (generation !== this.generation) return false;
 
       this.startedAt = Date.now();
       this.state.set('listening');
       return true;
     } catch (error) {
+      if (generation !== this.generation) return false;
       this.handleFailure(error);
       await this.stop();
       return false;
@@ -146,6 +230,13 @@ export class VexiRealtimeService {
 
   /** Ends the turn and reports the billable duration. */
   async stop(): Promise<void> {
+    this.safety.invalidate();
+    this.generation++;
+    const session_id = this.grant?.session_id;
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = undefined;
+    this.sessionExpiresAt = 0;
+    this.grant = null;
     const seconds = this.startedAt
       ? Math.round((Date.now() - this.startedAt) / 1000)
       : 0;
@@ -158,12 +249,13 @@ export class VexiRealtimeService {
 
     if (this.state() !== 'error') this.state.set('idle');
 
-    if (seconds > 0) {
+    if (seconds > 0 || session_id) {
       // Fire-and-forget: the user already released the dock, and a failed
       // accounting call must not surface as a voice error.
       try {
         await firstValueFrom(
           this.http.post(`${this.baseUrl}/session/close`, {
+            ...(session_id ? { session_id } : {}),
             duration_seconds: seconds,
             total_tokens: tokens,
           }),
@@ -174,19 +266,52 @@ export class VexiRealtimeService {
     }
   }
 
+  /** Mute both directions before challenge narration/capture. Never resume this mic implicitly. */
+  suspendForConsent(): void {
+    this.suspended = true;
+    this.send({ type: 'response.cancel' });
+    this.micStream?.getAudioTracks().forEach((track) => {
+      track.enabled = false;
+    });
+    if (this.remoteAudio) {
+      this.remoteAudio.muted = true;
+      this.remoteAudio.pause();
+    }
+  }
+
+  clearProposal(): void {
+    this.pendingProposal.set(null);
+  }
+
   // ── Connection ──────────────────────────────────────────────────────────
+
+  async voiceConsentEnabled(): Promise<boolean> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<ApiEnvelope<{ enabled: boolean }>>(
+          `${environment.apiUrl}/store/vexi/voice/confirmations/capability`,
+        ),
+      );
+      return response.data?.enabled === true;
+    } catch {
+      return false;
+    }
+  }
 
   private async requestGrant(): Promise<RealtimeSessionGrant> {
     const res = await firstValueFrom(
       this.http.post<ApiEnvelope<RealtimeSessionGrant>>(
         `${this.baseUrl}/session`,
-        {},
+        this.context.conversation_id ? this.context : {},
       ),
     );
     return res.data;
   }
 
-  private async connect(grant: RealtimeSessionGrant): Promise<void> {
+  private async connect(
+    grant: RealtimeSessionGrant,
+    generation: number,
+  ): Promise<void> {
     const pc = new RTCPeerConnection();
     this.pc = pc;
 
@@ -195,7 +320,8 @@ export class VexiRealtimeService {
     this.remoteAudio = new Audio();
     this.remoteAudio.autoplay = true;
     pc.ontrack = (event) => {
-      if (this.remoteAudio) this.remoteAudio.srcObject = event.streams[0];
+      if (generation === this.generation && this.remoteAudio)
+        this.remoteAudio.srcObject = event.streams[0];
     };
 
     for (const track of this.micStream?.getAudioTracks() ?? []) {
@@ -204,8 +330,26 @@ export class VexiRealtimeService {
 
     const channel = pc.createDataChannel('oai-events');
     this.channel = channel;
-    channel.onopen = () => this.configureSession(grant);
-    channel.onmessage = (event) => void this.onServerEvent(event);
+    channel.onopen = () => {
+      if (generation === this.generation) this.configureSession(grant);
+    };
+    channel.onmessage = (event) => {
+      if (generation === this.generation && !this.suspended)
+        void this.onServerEvent(event, generation);
+    };
+    pc.onconnectionstatechange = () => {
+      if (
+        generation === this.generation &&
+        ['disconnected', 'failed', 'closed'].includes(pc.connectionState)
+      ) {
+        this.safety.invalidate();
+        this.suspendForConsent();
+        this.state.set('error');
+        this.errorMessage.set(
+          'La conexión cambió. Abre una sesión y una propuesta nuevas.',
+        );
+      }
+    };
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -220,6 +364,10 @@ export class VexiRealtimeService {
       }),
     );
 
+    if (generation !== this.generation) {
+      pc.close();
+      return;
+    }
     await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
   }
 
@@ -239,7 +387,10 @@ export class VexiRealtimeService {
     });
   }
 
-  private async onServerEvent(event: MessageEvent): Promise<void> {
+  private async onServerEvent(
+    event: MessageEvent,
+    generation: number,
+  ): Promise<void> {
     let payload: RealtimeServerEvent;
     try {
       payload = JSON.parse(event.data as string) as RealtimeServerEvent;
@@ -249,6 +400,7 @@ export class VexiRealtimeService {
 
     switch (payload.type) {
       case 'input_audio_buffer.speech_started':
+        this.safety.invalidate();
         this.state.set('listening');
         return;
       case 'response.created':
@@ -258,7 +410,7 @@ export class VexiRealtimeService {
         this.state.set('speaking');
         return;
       case 'response.done':
-        await this.onResponseDone(payload);
+        await this.onResponseDone(payload, generation);
         return;
       case 'error':
         this.state.set('error');
@@ -270,9 +422,12 @@ export class VexiRealtimeService {
   /**
    * `response.done` carries either a finished spoken answer or a request to
    * run a tool. Tool calls are bridged to the backend, which re-checks
-   * permissions and refuses anything that mutates data.
+   * permissions and can only propose a write, never apply it.
    */
-  private async onResponseDone(payload: RealtimeServerEvent): Promise<void> {
+  private async onResponseDone(
+    payload: RealtimeServerEvent,
+    generation: number,
+  ): Promise<void> {
     this.totalTokens += payload.response?.usage?.total_tokens ?? 0;
 
     const calls = (payload.response?.output ?? []).filter(
@@ -287,11 +442,13 @@ export class VexiRealtimeService {
     this.state.set('thinking');
 
     for (const call of calls) {
+      if (generation !== this.generation || this.suspended) return;
       const output = await this.bridgeToolCall(
         call.name!,
         call.arguments,
         call.call_id!,
       );
+      if (generation !== this.generation || this.suspended) return;
       this.send({
         type: 'conversation.item.create',
         item: {
@@ -300,9 +457,25 @@ export class VexiRealtimeService {
           output,
         },
       });
+      // One proposal ends this voice turn; defer siblings instead of replacing
+      // the exact diff the human is about to review.
+      if (
+        this.grant?.session_id &&
+        this.pendingProposal()?.context.session_id === this.grant.session_id
+      )
+        break;
     }
 
-    // Nothing is spoken until the model is told to continue.
+    // A pending write is browser-only, not a license for the model to narrate an applied effect.
+    // Read the exact action/nonce through the dedicated control instead of continuing model audio.
+    if (
+      this.pendingProposal()?.context.session_id === this.grant?.session_id &&
+      this.grant?.session_id
+    ) {
+      this.suspendForConsent();
+      this.state.set('idle');
+      return;
+    }
     this.send({ type: 'response.create' });
   }
 
@@ -311,6 +484,11 @@ export class VexiRealtimeService {
     rawArgs: string | undefined,
     callId: string,
   ): Promise<string> {
+    if (this.grant?.session_id && Date.now() >= this.sessionExpiresAt) {
+      this.pendingProposal.set(null);
+      void this.stop();
+      return JSON.stringify({ error: 'La sesión de voz venció.' });
+    }
     let args: Record<string, unknown> = {};
     try {
       args = rawArgs ? (JSON.parse(rawArgs) as Record<string, unknown>) : {};
@@ -318,21 +496,91 @@ export class VexiRealtimeService {
       return JSON.stringify({ error: 'Argumentos inválidos' });
     }
 
-    // UI commands are intercepted before the network hop: they act on this
-    // browser's router and cart, and the server has neither. Navigating by
-    // voice is the natural case for these, so they are published to the voice
-    // catalog too — they just never leave the tab.
-    if (this.uiCommands.handles(name)) {
+    // OFF preserves the legacy local path. G must receive explicit server
+    // authorization before any browser UI dispatch; Vex remains denied.
+    if (this.uiCommands.handles(name) && !this.grant?.session_id) {
+      if (this.context.agent_key === 'vex')
+        return JSON.stringify({
+          error: 'Vex no puede ejecutar herramientas de interfaz.',
+        });
       return this.uiCommands.execute(name, args);
     }
 
+    const generation = this.generation;
+    const sessionId = this.grant?.session_id;
     try {
       const res = await firstValueFrom(
-        this.http.post<ApiEnvelope<{ call_id: string; output: string }>>(
-          `${this.baseUrl}/tool-call`,
-          { name, arguments: args, call_id: callId },
-        ),
+        this.http.post<
+          ApiEnvelope<{
+            call_id: string;
+            output: string;
+            ui_authorized?: boolean;
+            tools?: RealtimeToolDefinition[];
+            proposal?: {
+              proposal_id: string;
+              plan_id?: string;
+              step_id?: string;
+              tool: string;
+              arguments?: Record<string, unknown>;
+              preview?: VexiProposal['preview'];
+              preview_hash?: string;
+              expires_at?: string;
+            };
+          }>
+        >(`${this.baseUrl}/tool-call`, {
+          name,
+          arguments: args,
+          call_id: callId,
+          ...(this.grant?.session_id
+            ? { session_id: this.grant.session_id }
+            : {}),
+        }),
       );
+      if (
+        generation !== this.generation ||
+        sessionId !== this.grant?.session_id ||
+        this.suspended
+      )
+        return JSON.stringify({ error: 'Sesión interrumpida.' });
+      if (res.data.tools && this.grant) {
+        this.grant = { ...this.grant, tools: res.data.tools };
+        this.configureSession(this.grant);
+      }
+      if (
+        res.data.proposal &&
+        this.grant?.session_id &&
+        this.context.conversation_id
+      ) {
+        const proposal = res.data.proposal;
+        this.pendingProposal.set({
+          proposal: {
+            tool: proposal.tool,
+            arguments: proposal.arguments ?? args,
+            preview: proposal.preview,
+            confirmationToken: '',
+            applying: false,
+          },
+          context: {
+            conversation_id: this.context.conversation_id,
+            agent_key: this.context.agent_key,
+            channel: 'realtime',
+            session_id: this.grant.session_id,
+            proposal_id: proposal.proposal_id,
+            objective_id: this.grant.objective_id,
+            ...(proposal.plan_id
+              ? { plan_id: proposal.plan_id, step_id: proposal.step_id }
+              : {}),
+          },
+        });
+      }
+      if (this.uiCommands.handles(name) && this.grant?.session_id) {
+        if (this.context.agent_key === 'vex' || res.data.ui_authorized !== true)
+          return JSON.stringify({
+            error: 'Herramienta de interfaz no autorizada.',
+          });
+        return this.uiCommands.execute(name, args);
+      }
+      // Only the safe server output goes back to the provider. Never the proposal/token/nonce.
       return res.data.output;
     } catch (error: unknown) {
       // Surfaced to the model as data, not thrown: it should say "no puedo

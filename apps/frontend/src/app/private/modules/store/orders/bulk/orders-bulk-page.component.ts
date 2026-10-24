@@ -78,7 +78,10 @@ import {
 } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
 import { OrdersBulkService } from './orders-bulk.service';
-import { OrdersBulkPrintService } from './orders-bulk-print.service';
+import {
+  OrdersBulkPrintService,
+  describeBulkPrintOutcome,
+} from './orders-bulk-print.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { customerDisplayName } from '../../../../../shared/utils/customer-display-name.util';
 import {
@@ -206,15 +209,15 @@ const BULK_ACTIONS: BulkActionDef[] = [
     group: 'dispatch',
     label: 'Crear remisiones y asignar a ruta',
     description:
-      'Genera la remisión de cada orden y la agrega como parada a la planilla que elijas. Las órdenes que ya tengan remisión se omiten.',
-    cta: 'Elegir planilla',
+      'Genera la remisión de cada orden y la agrega como parada a la ruta que elijas. Las órdenes que ya tengan remisión se omiten.',
+    cta: 'Elegir ruta',
     icon: 'navigation',
     variant: 'outline',
     permission: 'store:orders:bulk_update',
     confirm: true,
     confirmTitle: 'Crear remisiones y asignar a ruta',
     confirmMessage:
-      '¿Crear remisiones para las órdenes seleccionadas y asignarlas como stops a la planilla elegida? Las órdenes que ya tengan remisión se omitirán.',
+      '¿Crear remisiones para las órdenes seleccionadas y asignarlas como stops a la ruta elegida? Las órdenes que ya tengan remisión se omitirán.',
   },
   {
     id: 'print',
@@ -248,7 +251,7 @@ const BULK_ACTIONS: BulkActionDef[] = [
 ];
 
 /** Título del modal para la asignación a ruta (no viene de un `BulkActionDef`). */
-const ASSIGN_ROUTE_TITLE = 'Crear remisiones y asignar a planilla';
+const ASSIGN_ROUTE_TITLE = 'Crear remisiones y asignar a ruta';
 
 /** Metadatos de presentación por grupo. El orden aquí es el orden en pantalla. */
 const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
@@ -862,7 +865,7 @@ export class OrdersBulkPageComponent {
     if (action.id === 'assign-route') {
       if (this.routes().length === 0) {
         this.toastService.warning(
-          'No hay planillas disponibles. Crea una planilla primero.',
+          'No hay rutas disponibles. Crea una ruta primero.',
         );
         return;
       }
@@ -946,56 +949,16 @@ export class OrdersBulkPageComponent {
   }
 
   /**
-   * Traduce el resultado de la impresión a lo que ve el operador.
-   *
-   * Tres desenlaces, y ninguno puede quedar mudo:
-   *
-   * 1. **Nada impreso** (`rendered === 0`) — ningún tiquete llegó al papel: o el
-   *    backend no encontró nada imprimible, o todos los lotes cayeron, o el
-   *    render se rechazó. Se muestra el mensaje REAL (`failureMessage`), que con
-   *    el contrato JSON ya es el del backend sin trucos de Blob. El texto
-   *    anterior, "Revisa los permisos y la configuración de recibos", se
-   *    disparaba ante cualquier fallo y mandaba al operador a revisar dos cosas
-   *    que casi nunca eran la causa. El discriminante era `!outcome.blob`
-   *    cuando el documento lo generaba el backend.
-   * 2. **Parcial** — se imprimió, pero el backend omitió órdenes (canceladas,
-   *    reembolsadas, inexistentes). Se imprime Y se advierte, porque un operador
-   *    que pidió 20 y recibe 17 tiene que enterarse ahí, no contando hojas.
-   * 3. **Completo** — se confirma con el conteo real de tiquetes y de hojas.
+   * Muestra el desenlace de la impresión. El texto lo arma
+   * `describeBulkPrintOutcome` (función pura, con tests); aquí solo se elige
+   * el tipo de toast.
    */
   private reportPrintOutcome(
     outcome: BulkPrintOutcome,
     requested: number,
   ): void {
-    if (outcome.rendered === 0) {
-      this.toastService.error(
-        outcome.failureMessage ??
-          'No se pudo imprimir ninguna de las órdenes seleccionadas.',
-      );
-      return;
-    }
-
-    const omitted = outcome.skipped.length + outcome.failedIds.length;
-    if (omitted === 0) {
-      this.toastService.success(
-        `${outcome.rendered} de ${requested} órdenes enviadas a la impresora ` +
-          `(${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'})`,
-      );
-      return;
-    }
-
-    // Se nombran hasta 3 órdenes concretas: la lista completa puede ser de 80
-    // y un toast no es un informe. El conteo sí es siempre el total real.
-    const detail = outcome.skipped
-      .slice(0, 3)
-      .map((s) => s.order_number ?? `#${s.id}`)
-      .join(', ');
-
-    this.toastService.warning(
-      `${outcome.rendered} de ${requested} órdenes impresas. ` +
-        `${omitted} omitidas${detail ? ` (${detail}${omitted > 3 ? '…' : ''})` : ''}: ` +
-        'canceladas, reembolsadas o no disponibles.',
-    );
+    const { level, message } = describeBulkPrintOutcome(outcome, requested);
+    this.toastService[level](message);
   }
 
   private onOperationDone(result: BulkOrdersResult, label: string): void {

@@ -206,28 +206,28 @@ const TAX_REGIME_LABELS: Record<string, string> = {
       <!-- Step 2: AI Analyzing (holographic) -->
       @if (currentStep() === 2) {
         <div
-          class="ai-stage is-analyzing relative overflow-hidden rounded-2xl border border-border min-h-[320px] flex flex-col items-center justify-center gap-4 p-6"
+          class="vx-ai-stage is-analyzing relative overflow-hidden rounded-2xl border border-border min-h-[320px] flex flex-col items-center justify-center gap-4 p-6"
         >
           <!-- Holographic background layers -->
-          <div class="ai-holo-aurora"></div>
-          <div class="ai-holo-grid"></div>
-          <div class="ai-stage__halo"></div>
-          <div class="ai-stage__scan"></div>
-          <div class="ai-stage__shimmer"></div>
-          <span class="ai-sparkle ai-sparkle--a"></span>
-          <span class="ai-sparkle ai-sparkle--b"></span>
-          <span class="ai-sparkle ai-sparkle--c"></span>
-          <span class="ai-sparkle ai-sparkle--d"></span>
-          <span class="ai-sparkle ai-sparkle--e"></span>
+          <div class="vx-ai-holo-aurora"></div>
+          <div class="vx-ai-holo-grid"></div>
+          <div class="vx-ai-stage__halo"></div>
+          <div class="vx-ai-stage__scan"></div>
+          <div class="vx-ai-stage__shimmer"></div>
+          <span class="vx-ai-sparkle vx-ai-sparkle--a"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--b"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--c"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--d"></span>
+          <span class="vx-ai-sparkle vx-ai-sparkle--e"></span>
 
           <!-- Foreground content -->
-          <div class="ai-stage__icon">
+          <div class="vx-ai-stage__icon">
             <app-icon name="sparkles" [size]="32"></app-icon>
           </div>
-          <p class="ai-stage__title relative z-10 text-base font-semibold text-text-primary">
+          <p class="vx-ai-stage__title relative z-10 text-base font-semibold text-text-primary">
             Analizando tu RUT con IA...
           </p>
-          <p class="ai-stage__caption relative z-10 max-w-[280px] text-center text-sm">
+          <p class="vx-ai-stage__caption relative z-10 max-w-[280px] text-center text-sm">
             Extrayendo NIT, razón social, régimen y responsabilidades fiscales.
           </p>
           <p class="relative z-10 max-w-[320px] text-center text-xs text-text-secondary">
@@ -424,302 +424,6 @@ const TAX_REGIME_LABELS: Record<string, string> = {
       </div>
     </app-modal>
   `,
-  styles: [
-    `
-      .ai-stage.is-analyzing {
-        isolation: isolate;
-        background:
-          radial-gradient(
-            circle at 50% 50%,
-            color-mix(in oklab, var(--color-primary) 10%, transparent),
-            transparent 70%
-          ),
-          var(--color-surface-secondary);
-        animation: ai-breathe 2.4s ease-in-out infinite;
-      }
-
-      .ai-stage__icon {
-        position: relative;
-        z-index: 6;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 72px;
-        height: 72px;
-        border-radius: 9999px;
-        color: var(--color-primary);
-        background: color-mix(in oklab, var(--color-primary) 12%, transparent);
-        box-shadow:
-          0 0 0 1px color-mix(in oklab, var(--color-primary) 25%, transparent),
-          0 0 30px color-mix(in oklab, var(--color-primary) 35%, transparent);
-        animation: ai-icon-breathe 3s ease-in-out infinite;
-      }
-
-      .ai-stage__caption {
-        position: relative;
-        z-index: 6;
-        color: var(--color-text-secondary);
-        animation: ai-soft-pulse 2.4s ease-in-out infinite;
-      }
-
-      .ai-stage__halo {
-        position: absolute;
-        inset: 50% auto auto 50%;
-        width: 280px;
-        height: 280px;
-        transform: translate(-50%, -50%);
-        border-radius: 50%;
-        background: conic-gradient(
-          from 0deg,
-          color-mix(in oklab, var(--color-primary) 35%, transparent),
-          color-mix(in oklab, var(--color-info) 25%, transparent),
-          color-mix(in oklab, var(--color-success) 25%, transparent),
-          color-mix(in oklab, var(--color-primary) 35%, transparent)
-        );
-        filter: blur(40px);
-        opacity: 0.45;
-        z-index: 0;
-        animation: ai-halo-spin 6s linear infinite;
-      }
-
-      .ai-stage__shimmer,
-      .ai-stage__scan {
-        position: absolute;
-        pointer-events: none;
-      }
-
-      .ai-stage__shimmer {
-        inset: 0;
-        z-index: 3;
-        background: linear-gradient(
-          110deg,
-          transparent 30%,
-          color-mix(in oklab, white 30%, transparent) 50%,
-          transparent 70%
-        );
-        background-size: 200% 100%;
-        background-position: 200% 0;
-        animation: ai-shimmer-sweep 2.4s ease-in-out infinite;
-        mix-blend-mode: overlay;
-      }
-
-      .ai-stage__scan {
-        left: 0;
-        right: 0;
-        top: 0;
-        height: 2px;
-        z-index: 4;
-        background: linear-gradient(
-          90deg,
-          transparent,
-          color-mix(in oklab, var(--color-primary) 75%, transparent),
-          transparent
-        );
-        box-shadow: 0 0 14px
-          color-mix(in oklab, var(--color-primary) 55%, transparent);
-        animation: ai-scan-vertical 2.6s ease-in-out infinite;
-      }
-
-      .ai-holo-grid {
-        position: absolute;
-        inset: 0;
-        z-index: 0;
-        background-image:
-          linear-gradient(
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          ),
-          linear-gradient(
-            90deg,
-            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
-            transparent 1px
-          );
-        background-size: 36px 36px;
-        background-position: 0 0;
-        mask-image: radial-gradient(
-          circle at 50% 50%,
-          rgba(0, 0, 0, 0.9),
-          rgba(0, 0, 0, 0) 70%
-        );
-        opacity: 0.55;
-        animation: ai-holo-grid-drift 8s linear infinite;
-      }
-
-      .ai-holo-aurora {
-        position: absolute;
-        inset: -20%;
-        z-index: 0;
-        background:
-          radial-gradient(
-            circle at 30% 30%,
-            color-mix(in oklab, var(--color-info) 45%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 70% 60%,
-            color-mix(in oklab, var(--color-primary) 40%, transparent),
-            transparent 55%
-          ),
-          radial-gradient(
-            circle at 50% 80%,
-            color-mix(in oklab, var(--color-success) 30%, transparent),
-            transparent 55%
-          );
-        filter: blur(48px);
-        opacity: 0.5;
-        animation: ai-holo-aurora-shift 9s ease-in-out infinite;
-      }
-
-      .ai-sparkle {
-        position: absolute;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: color-mix(in oklab, var(--color-primary) 80%, white);
-        box-shadow: 0 0 12px
-          color-mix(in oklab, var(--color-primary) 80%, transparent);
-        opacity: 0;
-        z-index: 2;
-      }
-
-      .ai-sparkle--a {
-        top: 18%;
-        left: 22%;
-        animation: ai-sparkle-twinkle 3s ease-in-out infinite;
-      }
-      .ai-sparkle--b {
-        top: 32%;
-        right: 18%;
-        animation: ai-sparkle-twinkle 3.5s ease-in-out 0.4s infinite;
-      }
-      .ai-sparkle--c {
-        bottom: 24%;
-        left: 30%;
-        animation: ai-sparkle-twinkle 4s ease-in-out 0.8s infinite;
-      }
-      .ai-sparkle--d {
-        bottom: 18%;
-        right: 28%;
-        animation: ai-sparkle-twinkle 3.2s ease-in-out 1.2s infinite;
-      }
-      .ai-sparkle--e {
-        top: 50%;
-        left: 12%;
-        animation: ai-sparkle-twinkle 3.8s ease-in-out 1.6s infinite;
-      }
-
-      @keyframes ai-breathe {
-        0%,
-        100% {
-          box-shadow:
-            inset 0 0 38px rgba(var(--color-primary-rgb), 0.09),
-            0 0 0 rgba(var(--color-primary-rgb), 0);
-        }
-        50% {
-          box-shadow:
-            inset 0 0 48px rgba(var(--color-primary-rgb), 0.16),
-            0 18px 48px rgba(var(--color-primary-rgb), 0.18);
-        }
-      }
-
-      @keyframes ai-soft-pulse {
-        0%,
-        100% {
-          opacity: 0.82;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.05);
-        }
-      }
-
-      @keyframes ai-icon-breathe {
-        0%,
-        100% {
-          transform: scale(1);
-        }
-        50% {
-          transform: scale(1.08);
-        }
-      }
-
-      @keyframes ai-halo-spin {
-        from {
-          transform: translate(-50%, -50%) rotate(0deg);
-        }
-        to {
-          transform: translate(-50%, -50%) rotate(360deg);
-        }
-      }
-
-      @keyframes ai-shimmer-sweep {
-        0% {
-          background-position: 200% 0;
-        }
-        100% {
-          background-position: -200% 0;
-        }
-      }
-
-      @keyframes ai-scan-vertical {
-        0% {
-          transform: translateY(0);
-        }
-        50% {
-          transform: translateY(300px);
-        }
-        100% {
-          transform: translateY(0);
-        }
-      }
-
-      @keyframes ai-sparkle-twinkle {
-        0%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        50% {
-          opacity: 1;
-          transform: scale(1.2);
-        }
-      }
-
-      @keyframes ai-holo-grid-drift {
-        0% {
-          background-position: 0 0;
-        }
-        100% {
-          background-position: 36px 36px;
-        }
-      }
-
-      @keyframes ai-holo-aurora-shift {
-        0%,
-        100% {
-          transform: translate(0, 0) scale(1);
-        }
-        50% {
-          transform: translate(2%, -2%) scale(1.05);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .ai-stage.is-analyzing,
-        .ai-stage__caption,
-        .ai-stage__icon,
-        .ai-stage__halo,
-        .ai-stage__shimmer,
-        .ai-stage__scan,
-        .ai-holo-grid,
-        .ai-holo-aurora,
-        .ai-sparkle {
-          animation: none !important;
-        }
-      }
-    `,
-  ],
 })
 export class RutScannerModalComponent {
   private readonly rutScannerService = inject(RutScannerService);

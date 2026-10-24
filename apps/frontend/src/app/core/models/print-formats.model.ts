@@ -14,7 +14,8 @@ export type PrintFormatType =
   | 'dispatch_route'
   | 'withholding_practiced'
   | 'withholding_suffered'
-  | 'withholding_employee_certificate';
+  | 'withholding_employee_certificate'
+  | 'cash_session_close';
 
 export type PrintPaperFormat =
   | 'thermal_80'
@@ -33,6 +34,11 @@ export interface PrintPaperConfig {
    */
   height_mm?: number;
   is_roll: boolean;
+  /**
+   * Ancho imprimible del cabezal en mm; solo rollo. Rango [ancho-16, ancho-4].
+   * Si falta, rige el de la definición del papel (80→72, 58→48).
+   */
+  printable_width_mm?: number;
   /**
    * Margen uniforme. El composer v2 prefiere los márgenes por lado
    * (`margin_top_mm`, etc.) cuando están presentes; si faltan, aplica
@@ -192,6 +198,8 @@ export interface StorePrintFormatSummary {
   engine: 'html' | 'pdf';
   is_configured: boolean;
   is_active: boolean;
+  /** true = el formato no se puede desactivar (p. ej. Cierre de Caja). */
+  always_active?: boolean;
   gateway_enabled: boolean;
   template_name: string;
   updated_at: string | null;
@@ -202,6 +210,7 @@ export interface StorePrintFormatDetail {
   name: string;
   category: string;
   is_active: boolean;
+  always_active?: boolean;
   gateway_enabled: boolean;
   is_customized: boolean;
   template_id: number | null;
@@ -234,6 +243,10 @@ export interface PrintTemplate {
 export interface PrintPreviewResponse {
   html: string;
   width_mm: number;
+  /** Ancho que el cabezal imprime de verdad (rollo); ausente en backends viejos. */
+  printable_width_mm?: number;
+  /** Ancho de contenido efectivo (papel − márgenes laterales). */
+  content_width_mm?: number;
   is_roll: boolean;
   definition: PrintFormatDefinition;
 }

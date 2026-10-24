@@ -571,6 +571,59 @@ export class FinancialAnalyticsService {
     );
   }
 
+  /**
+   * QUI-543 — canonical cash-session row. SINGLE mapper for the screen preview
+   * (`getCashSessionsReport`) and the XLSX export (`getCashSessionsForExport`):
+   * same keys as the `cash-sessions` registry entry, money as round2 numbers
+   * and dates as RAW instants (the screen serializes to ISO; the ReportBuilder
+   * renders in the store TZ). Never map these rows anywhere else.
+   */
+  private mapCashSessionRow(s: {
+    status: string;
+    opened_at: Date;
+    closed_at: Date | null;
+    opening_amount: Prisma.Decimal | number | null;
+    expected_closing_amount: Prisma.Decimal | number | null;
+    actual_closing_amount: Prisma.Decimal | number | null;
+    difference: Prisma.Decimal | number | null;
+    register?: { name: string } | null;
+    opened_by_user?: { first_name: string; last_name: string } | null;
+    closed_by_user?: { first_name: string; last_name: string } | null;
+    movements: Array<{
+      type: string;
+      amount: Prisma.Decimal | number | null;
+    }>;
+  }): CashSessionExportRow {
+    const totalSales = s.movements
+      .filter((m) => m.type === 'sale')
+      .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+    const totalExpenses = s.movements
+      .filter((m) => m.type === 'expense')
+      .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+
+    return {
+      // RAW instants — do NOT format here (emission phase renders in TZ).
+      opened_at: s.opened_at,
+      closed_at: s.closed_at ?? null,
+      register_name: s.register?.name ?? null,
+      opened_by_name: s.opened_by_user
+        ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}`
+        : null,
+      closed_by_name: s.closed_by_user
+        ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}`
+        : null,
+      opening_amount: this.round2(Number(s.opening_amount || 0)),
+      total_sales: this.round2(totalSales),
+      total_expenses: this.round2(totalExpenses),
+      expected_closing_amount: this.round2(
+        Number(s.expected_closing_amount || 0),
+      ),
+      actual_closing_amount: this.round2(Number(s.actual_closing_amount || 0)),
+      difference: this.round2(Number(s.difference || 0)),
+      status: s.status,
+    };
+  }
+
   async getCashSessionsReport(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
@@ -584,13 +637,13 @@ export class FinancialAnalyticsService {
       },
     });
 
-    // Get sessions with details
+    // QUI-543: select the SAME payload as the XLSX export so the screen maps
+    // through the shared canonical mapper (pantalla == archivo).
     const sessions = await this.prisma.cash_register_sessions.findMany({
       where: {
         opened_at: { gte: startDate, lte: endDate },
       },
       select: {
-        id: true,
         status: true,
         opened_at: true,
         closed_at: true,
@@ -598,8 +651,9 @@ export class FinancialAnalyticsService {
         expected_closing_amount: true,
         actual_closing_amount: true,
         difference: true,
-        opened_by: true,
-        closed_by: true,
+        register: { select: { name: true } },
+        opened_by_user: { select: { first_name: true, last_name: true } },
+        closed_by_user: { select: { first_name: true, last_name: true } },
         movements: {
           select: {
             type: true,
@@ -629,42 +683,10 @@ export class FinancialAnalyticsService {
       },
     });
 
-    // Movement totals across all sessions in range
-    const sessionIds = sessions.map((s) => s.id);
-    const movementTotals =
-      sessionIds.length > 0
-        ? await this.prisma.cash_register_movements.groupBy({
-            by: ['session_id'],
-            where: {
-              session_id: { in: sessionIds },
-              type: 'sale',
-            },
-            _sum: {
-              amount: true,
-            },
-          })
-        : [];
-
-    const movementMap = new Map<number | null, number>(
-      movementTotals.map((m) => [m.session_id, Number(m._sum.amount || 0)]),
-    );
-
-    const data = sessions.map((s) => {
-      const salesTotal = movementMap.get(s.id) || 0;
-
-      return {
-        session_id: s.id,
-        status: s.status,
-        opened_at: s.opened_at.toISOString(),
-        closed_at: s.closed_at ? s.closed_at.toISOString() : null,
-        opening_amount: Number(s.opening_amount || 0),
-        expected_closing_amount: Number(s.expected_closing_amount || 0),
-        actual_closing_amount: Number(s.actual_closing_amount || 0),
-        difference: Number(s.difference || 0),
-        sales_total: salesTotal,
-        total_movements: s.movements.length,
-      };
-    });
+    // QUI-543: canonical rows via the shared mapper — the same 12 keys the
+    // XLSX export emits (movement totals come from the already-fetched
+    // `movements`, so the extra groupBy round-trip is gone).
+    const data = sessions.map((s) => this.mapCashSessionRow(s));
 
     return {
       data,
@@ -1964,40 +1986,9 @@ export class FinancialAnalyticsService {
       take: 10000,
     });
 
-    return sessions.map((s): CashSessionExportRow => {
-      const salesMovements = s.movements.filter((m) => m.type === 'sale');
-      const expenseMovements = s.movements.filter((m) => m.type === 'expense');
-      const totalSales = salesMovements.reduce(
-        (sum, m) => sum + Number(m.amount || 0),
-        0,
-      );
-      const totalExpenses = expenseMovements.reduce(
-        (sum, m) => sum + Number(m.amount || 0),
-        0,
-      );
-
-      return {
-        // RAW instants — do NOT format here (emission phase renders in TZ).
-        opened_at: s.opened_at,
-        closed_at: s.closed_at ?? null,
-        register_name: s.register?.name ?? null,
-        opened_by_name: s.opened_by_user
-          ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}`
-          : null,
-        closed_by_name: s.closed_by_user
-          ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}`
-          : null,
-        opening_amount: this.round2(Number(s.opening_amount || 0)),
-        total_sales: this.round2(totalSales),
-        total_expenses: this.round2(totalExpenses),
-        expected_closing_amount: this.round2(
-          Number(s.expected_closing_amount || 0),
-        ),
-        actual_closing_amount: this.round2(Number(s.actual_closing_amount || 0)),
-        difference: this.round2(Number(s.difference || 0)),
-        status: s.status,
-      };
-    });
+    // QUI-543: shared canonical mapper — export rows are identical by
+    // construction to the screen preview rows (pantalla == archivo).
+    return sessions.map((s) => this.mapCashSessionRow(s));
   }
 
   /**

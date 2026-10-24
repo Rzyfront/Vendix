@@ -1,10 +1,11 @@
-import { SessionsService } from './sessions.service';
+import { SessionsService, humanCashReference } from './sessions.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { MovementsService } from '../movements/movements.service';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
+import { createHash } from 'node:crypto';
 
 /**
  * QUI-572 — regresión del cierre de caja contra un esperado rancio.
@@ -38,6 +39,7 @@ const OPEN_SESSION = {
   store_id: STORE_ID,
   status: 'open',
   opening_amount: OPENING_AMOUNT,
+  pending_orders_tracking_enabled: true,
 };
 
 const REPRO_MOVEMENTS = [
@@ -55,10 +57,13 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
    * la primera para validar la sesión abierta y la segunda DENTRO de la
    * transacción para devolver la sesión ya cerrada. Este helper encadena ambas.
    */
-  const stubCloseFlow = (closed: Record<string, unknown>) => {
+  const stubCloseFlow = (
+    closed: Record<string, unknown>,
+    open: Record<string, unknown> = OPEN_SESSION,
+  ) => {
     prismaMock.cash_register_sessions.findFirst
-      .mockResolvedValueOnce(OPEN_SESSION)
-      .mockResolvedValueOnce({ ...OPEN_SESSION, status: 'closed', ...closed });
+      .mockResolvedValueOnce(open)
+      .mockResolvedValueOnce({ ...open, status: 'closed', ...closed });
   };
 
   beforeEach(() => {
@@ -67,8 +72,10 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     prismaMock = {
       cash_register_sessions: {
         findFirst: jest.fn(),
+        create: jest.fn().mockResolvedValue({ id: SESSION_ID, store_id: STORE_ID, opened_by: USER_ID }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      cash_registers: { findFirst: jest.fn() },
       cash_register_movements: {
         findMany: jest.fn().mockResolvedValue(REPRO_MOVEMENTS),
         create: jest.fn().mockResolvedValue({}),
@@ -78,6 +85,13 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
           .fn()
           .mockResolvedValue({ organization_id: ORGANIZATION_ID }),
       },
+      orders: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      accounting_entry_failures: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: SESSION_ID }]),
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
     };
 
@@ -106,7 +120,457 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     );
   });
 
+  it('habilita atribución de pendientes en sesiones recién abiertas', async () => {
+    prismaMock.cash_registers.findFirst.mockResolvedValue({ id: 3, is_active: true });
+    prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+    prismaMock.cash_register_sessions.create.mockResolvedValue({
+      id: SESSION_ID,
+      store_id: STORE_ID,
+      opened_by: USER_ID,
+    });
+
+    await service.openSession({ cash_register_id: 3, opening_amount: 0 } as any);
+
+    expect(prismaMock.cash_register_sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ pending_orders_tracking_enabled: true }),
+      }),
+    );
+  });
+
+  describe('getPendingOrders — QUI-920', () => {
+    const updated_at = new Date('2026-10-06T14:30:00.000Z');
+
+    beforeEach(() => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        id: SESSION_ID,
+        store_id: STORE_ID,
+        pending_orders_tracking_enabled: true,
+      });
+      prismaMock.orders = {
+        count: jest.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(1).mockResolvedValueOnce(1),
+        aggregate: jest.fn().mockResolvedValue({
+          _sum: { remaining_balance: '125.50' },
+        }),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 101,
+            order_number: 'POS-101',
+            state: 'processing',
+            remaining_balance: '125.50',
+            updated_at,
+          },
+        ]),
+      };
+    });
+
+    it('pagina por atribución de la sesión y separa motivos sin afectar efectivo', async () => {
+      const result = await service.getPendingOrders(SESSION_ID, {
+        page: 2,
+        limit: 1,
+      } as any);
+
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenCalledWith({
+        where: { id: SESSION_ID, store_id: STORE_ID },
+        select: {
+          id: true,
+          store_id: true,
+          pending_orders_tracking_enabled: true,
+        },
+      });
+      expect(prismaMock.orders.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            store_id: STORE_ID,
+            origin_cash_session_id: SESSION_ID,
+            OR: [
+              {
+                state: {
+                  notIn: ['finished', 'delivered', 'cancelled', 'refunded'],
+                },
+              },
+              { remaining_balance: { gt: 0 } },
+              {
+                grand_total: { gt: 0 },
+                OR: [{ payment_form: { not: '2' } }, { payment_form: null }],
+                payments: {
+                  none: {
+                    state: {
+                      in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          skip: 1,
+          take: 1,
+        }),
+      );
+      expect(prismaMock.orders.aggregate).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        tracking_enabled: true,
+        count: 2,
+        operational_count: 1,
+        balance_count: 1,
+        balance_total: 125.5,
+        page: 2,
+        limit: 1,
+        data: [
+          {
+            id: 101,
+            state: 'processing',
+            remaining_balance: 125.5,
+            reasons: ['operational', 'balance'],
+            version: updated_at.toISOString(),
+          },
+        ],
+      });
+      expect(result.data[0].fingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(prismaMock.orders.findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: STORE_ID,
+            origin_cash_session_id: SESSION_ID,
+          }),
+          select: {
+            id: true,
+            state: true,
+            remaining_balance: true,
+            updated_at: true,
+            grand_total: true,
+            payment_form: true,
+            payments: { select: { state: true, amount: true } },
+            order_items: { select: { delivered_at: true, cancelled_at: true } },
+          },
+          orderBy: { id: 'asc' },
+        }),
+      );
+      expect(prismaMock.cash_register_movements.findMany).not.toHaveBeenCalled();
+    });
+
+    it('detecta pago faltante en una orden POS aunque remaining_balance sea cero', async () => {
+      const posOrder = {
+        id: 204,
+        order_number: 'POS-2026-0046',
+        state: 'processing',
+        remaining_balance: '0.00',
+        grand_total: '48000.00',
+        payment_form: '1',
+        payments: [],
+        order_items: [{ delivered_at: updated_at, cancelled_at: null }],
+        updated_at,
+      };
+      prismaMock.orders.count
+        .mockReset()
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(1);
+      prismaMock.orders.findMany
+        .mockReset()
+        .mockResolvedValueOnce([posOrder])
+        .mockResolvedValueOnce([posOrder]);
+
+      const result = await service.getPendingOrders(SESSION_ID);
+
+      expect(result).toMatchObject({
+        balance_count: 1,
+        balance_total: 48000,
+        data: [
+          {
+            order_number: 'POS-2026-0046',
+            remaining_balance: 0,
+            payment_required: true,
+            payment_amount_due: 48000,
+            all_items_delivered: true,
+            reasons: ['operational', 'balance'],
+          },
+        ],
+      });
+    });
+
+    it('cambia la huella global al cambiar una fila fuera de la página', async () => {
+      const outside_page = {
+        id: 102,
+        state: 'delivered',
+        remaining_balance: '20.00',
+        updated_at,
+      };
+      prismaMock.orders.count.mockResolvedValue(2);
+      prismaMock.orders.aggregate.mockResolvedValue({
+        _sum: { remaining_balance: '20.00' },
+      });
+      prismaMock.orders.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 101,
+            order_number: 'POS-101',
+            state: 'processing',
+            remaining_balance: '0.00',
+            updated_at,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 101,
+            state: 'processing',
+            remaining_balance: '0.00',
+            updated_at,
+          },
+          outside_page,
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 101,
+            order_number: 'POS-101',
+            state: 'processing',
+            remaining_balance: '0.00',
+            updated_at,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 101,
+            state: 'processing',
+            remaining_balance: '0.00',
+            updated_at,
+          },
+          { ...outside_page, remaining_balance: '21.00' },
+        ]);
+
+      const first = await service.getPendingOrders(SESSION_ID, {
+        page: 1,
+        limit: 1,
+      } as any);
+      const second = await service.getPendingOrders(SESSION_ID, {
+        page: 1,
+        limit: 1,
+      } as any);
+
+      expect(first.data).toEqual(second.data);
+      expect(first.fingerprint).not.toBe(second.fingerprint);
+    });
+
+    it('no consulta órdenes cuando la sesión pertenece a otra tienda', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+
+      await expect(service.getPendingOrders(SESSION_ID)).rejects.toThrow(
+        'Sesión de caja no encontrada',
+      );
+      expect(prismaMock.orders.findMany).not.toHaveBeenCalled();
+    });
+
+    it('expone estado legacy sin atribuir órdenes huérfanas', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        id: SESSION_ID,
+        store_id: STORE_ID,
+        pending_orders_tracking_enabled: false,
+      });
+      prismaMock.orders.count.mockResolvedValue(0);
+      prismaMock.orders.aggregate.mockResolvedValue({ _sum: { remaining_balance: null } });
+      prismaMock.orders.findMany.mockResolvedValue([]);
+
+      const result = await service.getPendingOrders(SESSION_ID);
+
+      expect(result.tracking_enabled).toBe(false);
+      expect(result.legacy_unattributed).toMatchObject({ status: 'untracked' });
+      expect(prismaMock.orders.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: STORE_ID,
+            origin_cash_session_id: SESSION_ID,
+          }),
+        }),
+      );
+    });
+  });
+
   describe('closeSession — candado de esperado rancio', () => {
+    const pending_order = {
+      id: 101,
+      order_number: 'POS-101',
+      state: 'processing',
+      remaining_balance: '25.50',
+      updated_at: new Date('2026-10-07T13:00:00.000Z'),
+    };
+    const pendingFingerprint = (order = pending_order) =>
+      createHash('sha256')
+        .update(
+          `${order.id}:${order.state}:${Number(order.remaining_balance).toFixed(2)}:${order.updated_at.toISOString()}\n`,
+        )
+        .digest('hex');
+
+    it('rechaza el cierre si hay un movimiento de venta diferido aún sin resolver', async () => {
+      stubCloseFlow({});
+      prismaMock.accounting_entry_failures.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 404, source_id: 101 }]);
+
+      await expect(service.closeSession(SESSION_ID, {
+        actual_closing_amount: EXPECTED_FRESH,
+      } as any)).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_005' });
+
+      expect(prismaMock.accounting_entry_failures.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            handler_key: 'deferred_sale_cash_movement_v1',
+            source_type: 'order.deferred_cash_movement',
+            resolved_at: null,
+            event_payload: { path: ['session_id'], equals: SESSION_ID },
+          }),
+        }),
+      );
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('toma el lock antes de leer movimientos y pendientes, y rechaza si falta decisión', async () => {
+      stubCloseFlow({});
+      prismaMock.orders.findMany.mockResolvedValue([pending_order]);
+
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: OPENING_AMOUNT,
+          expected_closing_amount_seen: EXPECTED_FRESH,
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_001' });
+
+      expect(prismaMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prismaMock.$queryRaw.mock.invocationCallOrder[1],
+      );
+      expect(prismaMock.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        prismaMock.cash_register_movements.findMany.mock.invocationCallOrder[0],
+      );
+      expect(prismaMock.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        prismaMock.orders.findMany.mock.invocationCallOrder[0],
+      );
+      expect(prismaMock.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('no acepta resolved si las órdenes siguen pendientes', async () => {
+      stubCloseFlow({});
+      prismaMock.orders.findMany.mockResolvedValue([pending_order]);
+
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: OPENING_AMOUNT,
+          pending_decision: 'resolved',
+          pending_fingerprint: pendingFingerprint(),
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_002' });
+      expect(prismaMock.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('aborta con fingerprint rancio sin escribir el movimiento de cierre', async () => {
+      stubCloseFlow({});
+      prismaMock.orders.findMany.mockResolvedValue([pending_order]);
+
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: OPENING_AMOUNT,
+          pending_decision: 'override',
+          pending_fingerprint: '0'.repeat(64),
+          override_reason: 'Revisado por supervisor',
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_002' });
+
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('bloquea el cierre si queda un reembolso outbox de una orden de esta sesión', async () => {
+      stubCloseFlow({});
+      prismaMock.orders.findMany.mockResolvedValue([]);
+      prismaMock.accounting_entry_failures.findMany.mockResolvedValue([
+        {
+          id: 909,
+          event_payload: {
+            order_id: 101,
+            delivery_scope: 'register_v2',
+          },
+        },
+      ]);
+
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: EXPECTED_FRESH,
+          expected_closing_amount_seen: EXPECTED_FRESH,
+          pending_decision: 'resolved',
+          pending_fingerprint: createHash('sha256').digest('hex'),
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_005' });
+
+      expect(prismaMock.accounting_entry_failures.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            handler_key: 'refund_cash_movement_v1',
+            source_type: 'refund.cash_movement',
+            event_payload: {
+              path: ['delivery_scope'],
+              equals: 'register_v2',
+            },
+          }),
+        }),
+      );
+      expect(prismaMock.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('requiere motivo y congela la auditoría al permitir override', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValueOnce(OPEN_SESSION);
+      prismaMock.orders.findMany.mockResolvedValue([pending_order]);
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: OPENING_AMOUNT,
+          pending_decision: 'override',
+          pending_fingerprint: pendingFingerprint(),
+          override_reason: '   ',
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_PENDING_003' });
+      expect(prismaMock.cash_register_movements.create).not.toHaveBeenCalled();
+
+      stubCloseFlow({});
+      const closed = await service.closeSession(SESSION_ID, {
+        actual_closing_amount: OPENING_AMOUNT,
+        expected_closing_amount_seen: EXPECTED_FRESH,
+        pending_decision: 'override',
+        pending_fingerprint: pendingFingerprint(),
+        override_reason: 'Se entrega la caja al supervisor',
+      } as any);
+
+      expect(closed.status).toBe('closed');
+      const data = prismaMock.cash_register_sessions.updateMany.mock.calls.at(-1)[0].data;
+      expect(data.summary.pending_orders_snapshot).toMatchObject({
+        version: 1,
+        status: 'tracked',
+        rows: [{ id: 101, order_number: 'POS-101', state: 'processing', remaining_balance: 25.5 }],
+        fingerprint: pendingFingerprint(),
+        decision: 'override',
+        actor_id: USER_ID,
+        override_reason: 'Se entrega la caja al supervisor',
+      });
+      expect(prismaMock.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('permite cerrar una sesión legacy sin pendientes sin motivo de excepción', async () => {
+      stubCloseFlow({}, { ...OPEN_SESSION, pending_orders_tracking_enabled: false });
+      const closed = await service.closeSession(SESSION_ID, {
+        actual_closing_amount: OPENING_AMOUNT,
+        pending_decision: 'resolved',
+        pending_fingerprint: createHash('sha256').digest('hex'),
+      } as any);
+      expect(closed.status).toBe('closed');
+      const data = prismaMock.cash_register_sessions.updateMany.mock.calls.at(-1)[0].data;
+      expect(data.summary.pending_orders_snapshot).toMatchObject({
+        status: 'untracked',
+        rows: [],
+        fingerprint: null,
+        decision: 'resolved',
+        override_reason: null,
+      });
+    });
+
     it('rechaza con 409 cuando el esperado visto por el cliente ya no coincide', async () => {
       prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
         OPEN_SESSION,
@@ -124,9 +588,8 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
         errorCode: 'CASH_SESSION_EXPECTED_STALE_001',
       });
 
-      // Lo que importa: el rechazo ocurre ANTES de abrir la transacción, así que
-      // no queda ninguna escritura a medias ni un faltante inventado.
-      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      // La lectura fresca ocurre bajo lock y el rechazo revierte la transacción.
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
       expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
     });
 
@@ -242,7 +705,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       await expect(promise).rejects.toMatchObject({
         errorCode: 'CASH_SESSION_EXPECTED_STALE_001',
       });
-      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });
 
     it('cierra igual que antes cuando el campo no llega (compatibilidad con apps/mobile)', async () => {
@@ -253,8 +716,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
         difference: actual - EXPECTED_FRESH,
       });
 
-      // Sin `expected_closing_amount_seen` el comportamiento es el de hoy:
-      // se cierra y se registra el faltante calculado contra datos frescos.
+      // El saldo esperado se obtiene dentro del lock aunque el cliente no lo envíe.
       const closed = await service.closeSession(SESSION_ID, {
         actual_closing_amount: actual,
       } as any);
@@ -413,6 +875,32 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       // valores hardcoded; el AI app debe leer esto explícitamente.
     });
 
+    it('incluye en el resumen IA todas las órdenes que quedaron pendientes', () => {
+      const section = (service as any).pendingOrdersSummarySection({
+        currency: { code: 'COP', symbol: '$' },
+        pending_orders_snapshot: {
+          status: 'tracked',
+          rows: [
+            { order_number: 'POS-2026-0033', state: 'draft', grand_total: 180000, remaining_balance: 180000 },
+            { order_number: 'POS-2026-0034', state: 'processing', grand_total: 95000, remaining_balance: 0 },
+          ],
+        },
+      });
+
+      expect(section).toContain('POS-2026-0033 · Borrador · Total $180.000 COP · Falta cobrar $180.000 COP');
+      expect(section).toContain('POS-2026-0034 · En proceso · Total $95.000 COP');
+      expect(section.match(/^- POS-/gm)).toHaveLength(2);
+    });
+
+    it('no afirma que no quedaron órdenes si la sesión no tenía seguimiento', () => {
+      const section = (service as any).pendingOrdersSummarySection({
+        pending_orders_snapshot: { status: 'untracked', rows: [] },
+      });
+
+      expect(section).toContain('No se pudo confirmar cuáles órdenes quedaron pendientes');
+      expect(section).not.toContain('No quedaron órdenes pendientes.');
+    });
+
     it('getStoreCurrency devuelve "USD" cuando SettingsService no resuelve moneda', async () => {
       // SettingsService.getStoreCurrency ya tiene try/catch interno que cae a
       // 'USD'. Este test documenta que la integración con getSessionReport
@@ -475,7 +963,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       ]);
       prismaMock.orders = {
         findMany: jest.fn().mockImplementation(async (args: any) => {
-          if (args?.where?.state) {
+          if (args?.where?.remaining_balance) {
             return [
               { remaining_balance: 30000 },
               { remaining_balance: 12500.5 },
@@ -531,10 +1019,41 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
 
       expect(report.pending_collection).toEqual({ count: 2, total: 42500.5 });
       const call = prismaMock.orders.findMany.mock.calls.find(
-        (c: any[]) => c[0]?.where?.state,
+        (c: any[]) => c[0]?.where?.origin_cash_session_id,
       );
-      expect(call[0].where.state).toEqual({ in: ['shipped', 'delivered'] });
+      expect(call[0].where.origin_cash_session_id).toBe(SESSION_ID);
       expect(call[0].where.remaining_balance).toEqual({ gt: 0.01 });
+    });
+
+    it('pending_collection cerrado reproduce la foto del cierre sin consultar órdenes actuales', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        ...OPEN_SESSION,
+        status: 'closed',
+        summary: {
+          pending_orders_snapshot: {
+            rows: [
+              { id: 1, remaining_balance: 125.5 },
+              { id: 2, remaining_balance: 0 },
+            ],
+          },
+        },
+        opened_at: new Date('2026-09-28T13:00:00Z'),
+        closed_at: new Date('2026-09-28T18:00:00Z'),
+        opened_by: USER_ID,
+        closed_by: USER_ID,
+        register: null,
+        opened_by_user: null,
+        closed_by_user: null,
+      });
+
+      const report = await service.getCloseReport(SESSION_ID);
+
+      expect(report.pending_collection).toEqual({ count: 1, total: 125.5 });
+      expect(
+        prismaMock.orders.findMany.mock.calls.some(
+          (call: any[]) => call[0]?.where?.origin_cash_session_id,
+        ),
+      ).toBe(false);
     });
   });
 
@@ -556,7 +1075,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       { id: 3, type: 'sale', amount: 40000, payment_method: 'bank_transfer', order_id: 3, session_id: SESSION_ID, created_at: T(15) },
       { id: 4, type: 'refund', amount: 5000, payment_method: 'cash', reference: 'refund:9', order_id: 1, notes: null, created_at: T(16), user: { first_name: 'Ana', last_name: 'Paz' } },
       { id: 5, type: 'refund', amount: 60000, payment_method: 'card', reference: 'payment_cancelled', order_id: 2, created_at: T(17) },
-      { id: 6, type: 'cash_out', amount: 7000, payment_method: 'cash', reference: 'Cancelación orden #X', order_id: 3, created_at: T(18) },
+      { id: 6, type: 'cash_out', amount: 7000, payment_method: 'cash', reference: 'Cancelación orden #X', notes: 'Devolución de efectivo por cancelación de la orden #X', order_id: 3, created_at: T(18) },
       { id: 7, type: 'cash_out', amount: 3000, payment_method: 'cash', reference: null, notes: 'Compra hielo', created_at: T(19) },
       { id: 8, type: 'cash_in', amount: 2000, payment_method: 'cash', created_at: T(20) },
       { id: 9, type: 'opening_balance', amount: OPENING_AMOUNT, payment_method: 'cash' },
@@ -622,6 +1141,82 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(outflows[3].reason).toBe('Compra hielo');
     });
 
+    it('outflow withdrawal expone reference y notes y conserva reason', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 10, type: 'cash_out', amount: 1500, payment_method: 'cash', reference: '  Taxi  ', notes: ' Mensajero ', created_at: T(21) },
+      ]);
+      const { outflows } = await service.getCloseReport(SESSION_ID);
+      const w = outflows.find((o) => o.id === 10)!;
+      expect(w).toMatchObject({ kind: 'withdrawal', reference: 'Taxi', notes: 'Mensajero', reason: ' Mensajero ' });
+    });
+
+    it('cash_out manual con referencia "Cancelación orden…" es retiro visible', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 12, type: 'cash_out', amount: 4000, payment_method: 'cash', reference: 'Cancelación orden de proveedor', notes: 'Anticipo devuelto', created_at: T(21) },
+      ]);
+      const report = await service.getCloseReport(SESSION_ID);
+      expect(report.outflows.find((o) => o.id === 12)).toMatchObject({
+        kind: 'withdrawal', reference: 'Cancelación orden de proveedor', notes: 'Anticipo devuelto',
+      });
+      expect(report.outflows.find((o) => o.id === 6)!.kind).toBe('cancellation');
+      expect(report.cash_breakdown).toMatchObject({ cancellations: 7000, withdrawals: 7000 });
+    });
+
+    it('referencias internas no se exponen como reference', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 11, type: 'refund', amount: 100, payment_method: 'cash', reference: 'order_cancelled', created_at: T(21) },
+      ]);
+      const { outflows } = await service.getCloseReport(SESSION_ID);
+      expect(outflows.find((o) => o.id === 4)!.reference).toBeNull(); // refund:9
+      expect(outflows.find((o) => o.id === 5)!.reference).toBeNull(); // payment_cancelled
+      expect(outflows.find((o) => o.id === 11)!.reference).toBeNull(); // order_cancelled
+      expect(outflows.find((o) => o.id === 7)!.reference).toBeNull(); // sin reference
+      expect(outflows.find((o) => o.id === 6)!.reference).toBeNull(); // cash_out legado
+      expect(humanCashReference('dispatch_route:1:stop:2')).toBeNull();
+      expect(humanCashReference('   ')).toBeNull();
+    });
+
+    it('inflows lista los cash_in con reference/notes ordenados', async () => {
+      wire(base, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { id: 21, type: 'cash_in', amount: 500, payment_method: 'cash', reference: 'Cambio', notes: 'Billetes', created_at: T(22), user: { first_name: 'Ana', last_name: 'Paz' } },
+        ...movs,
+        { id: 20, type: 'cash_in', amount: 300.456, payment_method: 'cash', reference: 'refund:3', notes: null, created_at: T(20) },
+      ]);
+      const { inflows } = await service.getCloseReport(SESSION_ID);
+      expect(inflows).toEqual([
+        { id: 8, at: T(20).toISOString(), amount: 2000, reference: null, notes: null, user_name: null, payment_method: 'cash' },
+        { id: 20, at: T(20).toISOString(), amount: 300.46, reference: null, notes: null, user_name: null, payment_method: 'cash' },
+        { id: 21, at: T(22).toISOString(), amount: 500, reference: 'Cambio', notes: 'Billetes', user_name: 'Ana Paz', payment_method: 'cash' },
+      ]);
+    });
+
+    it('sesión cerrada con snapshot viejo: enriquece reference/notes/inflows sin escribir', async () => {
+      const snapshot = {
+        outflows: [
+          { id: 7, at: T(19).toISOString(), kind: 'withdrawal', order_id: null, order_number: null, payment_method: 'cash', amount: 3000, reason: 'Compra hielo', user_name: null },
+          { id: 999, at: T(19).toISOString(), kind: 'withdrawal', order_id: null, order_number: null, payment_method: 'cash', amount: 1, reason: null, user_name: null },
+        ],
+      };
+      wire({ ...base, status: 'closed', closed_at: T(21), actual_closing_amount: 187000, expected_closing_amount: 187000, difference: 0, summary: snapshot }, [ord(1, 100000)]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue(
+        movs.map((m) => (m.id === 7 ? { ...m, reference: 'Hielo', notes: 'Compra hielo' } : m)),
+      );
+      prismaMock.cash_register_sessions.update = jest.fn();
+      const r = await service.getCloseReport(SESSION_ID);
+      expect(r.outflows[0]).toMatchObject({ id: 7, reference: 'Hielo', notes: 'Compra hielo', reason: 'Compra hielo' });
+      expect(r.outflows[1]).toMatchObject({ id: 999, reference: null, notes: null });
+      expect(r.inflows.map((i) => i.id)).toEqual([8]);
+      expect(prismaMock.cash_register_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.cash_register_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
     it('sales_summary excluye canceladas/reembolsadas y total cobrado sale de movimientos', async () => {
       wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
       const r = await service.getCloseReport(SESSION_ID);
@@ -666,7 +1261,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
         .mockResolvedValueOnce({ ...OPEN_SESSION, summary: { extra: 'keep' } })
         .mockResolvedValueOnce({ ...OPEN_SESSION, status: 'closed' });
       prismaMock.cash_register_movements.findMany.mockResolvedValue(movs);
-      prismaMock.orders = { findMany: jest.fn().mockResolvedValue([ord(1, 1)]) };
+      prismaMock.orders = { findMany: jest.fn().mockResolvedValue([]) };
       prismaMock.refunds = { findMany: jest.fn().mockResolvedValue([]) };
       await service.closeSession(SESSION_ID, { actual_closing_amount: 187000 } as any);
       const data = prismaMock.cash_register_sessions.updateMany.mock.calls[0][0].data;
@@ -675,6 +1270,7 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(data.summary.consolidated.rows[0]).toMatchObject({ method: 'cash', counted: 187000, difference: 0 });
       expect(data.summary.cash_breakdown.counted).toBe(187000);
       expect(data.summary.outflows).toHaveLength(4);
+      expect(data.summary.inflows).toHaveLength(1);
       expect(data.expected_closing_amount).toBe(187000);
     });
   });

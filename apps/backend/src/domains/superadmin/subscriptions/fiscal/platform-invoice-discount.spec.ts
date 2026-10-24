@@ -294,4 +294,59 @@ describe('createPlatformInvoice · descuento de línea (3 × 40.000 − 10.000)'
       ),
     ).toBeLessThanOrEqual(0.01);
   });
+
+  // Captura con IVA incluido: 8,5 × 40.000 = 340.000 brutos y 90.000 de
+  // descuento. El despeje deja la línea en 8,5 × 33.613,445883 (base 285.714,29)
+  // con descuento de base 75.630,25 y total 250.000 (VNDS3, rechazada por FBE01).
+  it('regresión VNDS3 (FBE01): 8,5 × 33.613,445883, descuento de base 75.630,25 e IVA 19 % incluido emite ID y factor', async () => {
+    const r = await runPrevalidation([
+      {
+        description: 'Plan anual',
+        quantity: 8.5,
+        unit_price: 40000,
+        discount_amount: 90000,
+        unit_code: 'NIU',
+        taxes: [{ tax_type: 'IVA', rate: 0.19, is_inclusive: true }],
+      },
+    ] as CreatePlatformInvoiceDto['items']);
+
+    expect(r.blockerCodes).toEqual([]);
+    expect(r.error).toBe(STOP_AFTER_PREVALIDATION);
+    expect(r.providerData.items[0].discount_amount).toBe('75630.25');
+
+    const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+    UblCommonBuilder.buildInvoiceLines(
+      doc,
+      r.providerData.items as any,
+      r.providerData.taxes,
+      'COP',
+    );
+    const xml = doc.end({ prettyPrint: false });
+    const group = xml.match(
+      /<cac:AllowanceCharge>([\s\S]*?)<\/cac:AllowanceCharge>/,
+    )![1];
+
+    expect(group).toContain('<cbc:ID>1</cbc:ID>');
+    expect(group).toContain(
+      '<cbc:MultiplierFactorNumeric>26.47</cbc:MultiplierFactorNumeric>',
+    );
+    expect(group).toContain(
+      '<cbc:BaseAmount currencyID="COP">285714.29</cbc:BaseAmount>',
+    );
+    expect(group.indexOf('<cbc:MultiplierFactorNumeric>')).toBeLessThan(
+      group.indexOf('<cbc:Amount '),
+    );
+    expect(xml).toContain(
+      '<cbc:LineExtensionAmount currencyID="COP">210084.04</cbc:LineExtensionAmount>',
+    );
+    expect(emitAndValidate(r.providerData).totals.PayableAmount).toBe('250000.00');
+  });
 });

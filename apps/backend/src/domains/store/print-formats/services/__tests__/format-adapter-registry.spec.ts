@@ -63,6 +63,7 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [
       'withholding_practiced',
       'withholding_suffered',
       'withholding_employee_certificate',
+      'cash_session_close',
     ];
     for (const format of known) {
       expect(registry.has(format)).toBe(true);
@@ -77,13 +78,13 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [
     expect(registry.get('not_a_real_format')).toBeUndefined();
   });
 
-  it('5. list() returns 16 entries and a fresh array (mutating it does not affect the registry)', () => {
+  it('5. list() returns 17 entries and a fresh array (mutating it does not affect the registry)', () => {
     const before = registry.list();
-    expect(before).toHaveLength(16);
+    expect(before).toHaveLength(17);
 
     // Caller mutates the returned array — registry must remain pristine.
     (before as unknown as { length: number }).length = 0;
-    expect(registry.list()).toHaveLength(16);
+    expect(registry.list()).toHaveLength(17);
   });
 
   it('6. defaultPaper("pos_sale_ticket") === "thermal_80" (and falls back for unknowns)', () => {

@@ -20,6 +20,7 @@ import {
 import { definitionToRegions } from '../print-canvas/canvas-region';
 import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
+import { resolvePrintGeometry } from '../../../../../../../core/lib/print-geometry';
 
 export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
 
@@ -324,6 +325,16 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
               </div>
             </div>
 
+            @if (facade.previewConfigError(); as configError) {
+              <div
+                class="mx-4 mt-3 flex items-start gap-2 px-3 py-2 rounded-lg border border-border bg-surface-secondary text-xs text-text-primary"
+                role="alert"
+              >
+                <app-icon name="alert-circle" [size]="14" class="mt-0.5 shrink-0 text-text-secondary"></app-icon>
+                <span>Configuración de papel inválida: {{ configError }}</span>
+              </div>
+            }
+
             <!-- Paper Simulation Viewport -->
             <div class="vendix-viewport-scroll" (click)="onCanvasContainerClick($event)">
               <div
@@ -338,6 +349,18 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
                   [class.is-sheet]="draft.paper.is_roll === false"
                   [style.min-height.mm]="draft.paper.is_roll === false ? paperHeightMm() : 0"
                 >
+                  @if (nonPrintableBandMm() > 0) {
+                    <div
+                      class="vendix-nonprintable-band left"
+                      aria-hidden="true"
+                      [style.width.mm]="nonPrintableBandMm()"
+                    ></div>
+                    <div
+                      class="vendix-nonprintable-band right"
+                      aria-hidden="true"
+                      [style.width.mm]="nonPrintableBandMm()"
+                    ></div>
+                  }
                   @if (facade.safePreviewHtml()) {
                     <iframe
                       #previewIframe
@@ -360,6 +383,12 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
             <div class="px-4 py-2 bg-surface-secondary border-t border-border flex items-center justify-between text-[11px] text-text-tertiary font-mono">
               <div class="flex items-center gap-3">
                 <span>Papel: {{ draft.paper.format || 'thermal_80' }} ({{ paperWidthMm() }}mm)</span>
+                @if (nonPrintableBandMm() > 0) {
+                  <span class="flex items-center gap-1.5 font-sans">
+                    <span class="vendix-nonprintable-swatch" aria-hidden="true"></span>
+                    Zona no imprimible ({{ nonPrintableBandMm() }} mm por lado)
+                  </span>
+                }
                 @if (selectedRegion(); as r) {
                   <span class="text-primary-500 font-sans font-medium">
                     Seleccionado: {{ r.label || r.kind }}
@@ -603,6 +632,41 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
         border: 1px solid #cbd5e1;
         min-height: 280px;
       }
+      .vendix-nonprintable-band {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        pointer-events: none;
+        z-index: 1;
+        background: repeating-linear-gradient(
+          135deg,
+          rgba(100, 116, 139, 0.22) 0,
+          rgba(100, 116, 139, 0.22) 3px,
+          rgba(100, 116, 139, 0.1) 3px,
+          rgba(100, 116, 139, 0.1) 6px
+        );
+      }
+      .vendix-nonprintable-band.left {
+        left: 0;
+        border-right: 1px dashed #94a3b8;
+      }
+      .vendix-nonprintable-band.right {
+        right: 0;
+        border-left: 1px dashed #94a3b8;
+      }
+      .vendix-nonprintable-swatch {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 1px solid #94a3b8;
+        background: repeating-linear-gradient(
+          135deg,
+          rgba(100, 116, 139, 0.45) 0,
+          rgba(100, 116, 139, 0.45) 2px,
+          transparent 2px,
+          transparent 4px
+        );
+      }
       .vendix-preview-iframe {
         width: 100%;
         height: 100%;
@@ -642,6 +706,24 @@ export class PrintFormatEditorComponent {
     return !draft.paper.is_roll && draft.paper.orientation === 'landscape' && height != null
       ? height
       : width;
+  });
+
+  /**
+   * Ancho (mm) de cada franja no imprimible = (papel − imprimible) / 2. Solo
+   * rollo. Usa `printable_width_mm` de la respuesta del preview si corresponde
+   * al papel actual; si no (respuesta vieja o ausente), el kernel sobre el borrador.
+   */
+  readonly nonPrintableBandMm = computed<number>(() => {
+    const paper = this.facade.draftDefinition()?.paper;
+    if (!paper) return 0;
+    const geometry = resolvePrintGeometry(paper);
+    if (!geometry.is_roll) return 0;
+    const fromPreview = this.facade.previewPrintableWidthMm();
+    const previewMatchesDraft =
+      this.facade.previewIsRoll() && this.facade.previewWidthMm() === geometry.paper_width_mm;
+    const printable =
+      fromPreview !== null && previewMatchesDraft ? fromPreview : geometry.printable_width_mm;
+    return Math.max(0, Math.round(((geometry.paper_width_mm - printable) / 2) * 100) / 100);
   });
 
   readonly paperHeightMm = computed<number>(() => {

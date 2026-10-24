@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, 
 import { AbstractControl, FormArray, FormBuilder, FormControl, FormGroup, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, finalize } from 'rxjs';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { isReceivedDocumentSafeNotice } from './received-documents.interface';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
 import type { ManualReceivedDocumentInput, ManualReceivedDocumentItemInput, ManualReceivedDocumentTaxInput, ReceivedDocument, ReceivedDocumentPaymentCondition, ReceivedDocumentReviewInput, ReceivedDocumentsScope } from './received-documents.interface';
@@ -44,11 +46,13 @@ export class ReceivedDocumentFormComponent {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(ReceivedDocumentsService);
+  private readonly toast = inject(ToastService);
   readonly scope = input.required<ReceivedDocumentsScope>();
   readonly selectedStoreId = input<number | null>(null);
   readonly document = input<ReceivedDocument | null>(null);
   readonly isOpen = model(false);
   readonly saved = output<number>();
+  readonly duplicateNotice = output<void>();
   readonly reloadRequested = output<void>();
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
@@ -103,7 +107,19 @@ export class ReceivedDocumentFormComponent {
       ? this.service.updateReview(this.scope(), doc.id, this.reviewPayload(doc, facts), this.selectedStoreId() ?? undefined)
       : this.service.createManual(this.scope(), facts, this.selectedStoreId() ?? undefined);
     this.request = request.pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.busy.set(false))).subscribe({
-      next: (response) => { this.isOpen.set(false); this.saved.emit(response.data.id); },
+      next: (response) => {
+        if (isReceivedDocumentSafeNotice(response.data)) {
+          this.toast.info(response.data.message);
+          this.isOpen.set(false);
+          this.duplicateNotice.emit();
+          return;
+        }
+        if (!Number.isSafeInteger(response.data.id) || response.data.id <= 0) {
+          this.error.set('No se pudo confirmar el documento guardado. Conservamos tus datos; consulta el buzón antes de reintentar.');
+          return;
+        }
+        this.isOpen.set(false); this.saved.emit(response.data.id);
+      },
       error: (err: unknown) => {
         const status = typeof err === 'object' && err !== null && 'status' in err ? Number((err as { status?: unknown }).status) : 0;
         if (status === 409) { this.conflict.set(true); this.error.set('El documento cambió desde que lo abriste. Recarga el detalle antes de volver a guardar; no se aplicaron cambios.'); return; }

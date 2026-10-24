@@ -268,7 +268,7 @@ export class DispatchRoutesService {
     const numbers = ineligible.map((n) => n.dispatch_number).join(', ');
     throw new VendixHttpException(
       ErrorCodes.DSP_NOTE_NOT_ELIGIBLE_001,
-      `La remisión ${numbers} no puede planillarse porque ya fue entregada, recibida, facturada o anulada.`,
+      `La remisión ${numbers} no puede asignarse a una ruta porque ya fue entregada, recibida, facturada o anulada.`,
       { dispatch_numbers: numbers },
     );
   }
@@ -382,7 +382,7 @@ export class DispatchRoutesService {
     const unique_note_ids = Array.from(new Set(note_ids));
     if (unique_note_ids.length !== note_ids.length) {
       throw new BadRequestException(
-        'Hay dispatch_note_id duplicados en la planilla',
+        'Hay dispatch_note_id duplicados en la ruta',
       );
     }
 
@@ -431,7 +431,7 @@ export class DispatchRoutesService {
     const blocking = existing_stops.filter((s) => s.status !== 'released');
     if (blocking.length > 0) {
       throw new BadRequestException(
-        `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una planilla activa (estado: ${blocking.map((s) => s.route.status).join(', ')})`,
+        `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una ruta activa (estado: ${blocking.map((s) => s.route.status).join(', ')})`,
       );
     }
 
@@ -564,7 +564,7 @@ export class DispatchRoutesService {
           attempts++;
           if (attempts >= 3) {
             throw new ConflictException(
-              'No se pudo generar un número de planilla único',
+              'No se pudo generar un número de ruta único',
             );
           }
           continue;
@@ -709,7 +709,7 @@ export class DispatchRoutesService {
       where: { id, store_id },
       include: DISPATCH_ROUTE_INCLUDE,
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
 
     // Surface `customer.is_withholding_agent` as a top-level
     // `customer_is_withholding_agent` on each stop's dispatch_note for
@@ -799,7 +799,7 @@ export class DispatchRoutesService {
         },
       },
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
 
     // State gate: only "hot" routes accept new stops. Las rutas CARRIER admiten
     // además `in_transit` (tomar-en-recorrido: el repartidor reclama otra orden
@@ -876,7 +876,7 @@ export class DispatchRoutesService {
       throw new BadRequestException(
         `Las remisiones ${blocking
           .map((s) => s.dispatch_note_id)
-          .join(', ')} ya pertenecen a una planilla activa`,
+          .join(', ')} ya pertenecen a una ruta activa`,
       );
     }
 
@@ -992,11 +992,11 @@ export class DispatchRoutesService {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
 
     if (route.status !== 'draft') {
       throw new BadRequestException(
-        'Solo se pueden editar planillas en estado borrador',
+        'Solo se pueden editar rutas en estado borrador',
       );
     }
 
@@ -1044,10 +1044,10 @@ export class DispatchRoutesService {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
     if (route.status !== 'draft') {
       throw new BadRequestException(
-        'Solo se pueden eliminar planillas en estado borrador',
+        'Solo se pueden eliminar rutas en estado borrador',
       );
     }
     // Free dispatch_notes by deleting the route (cascade deletes stops,
@@ -1361,7 +1361,7 @@ export class DispatchRoutesService {
       where: { id, store_id },
       include: MAP_STOPS_INCLUDE,
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
 
     const originAddr = route.origin_location?.addresses ?? null;
     const originLat = this.decimalToCoord(originAddr?.latitude ?? null);

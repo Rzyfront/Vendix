@@ -524,9 +524,14 @@ describe('PurchaseOrdersService.receive()', () => {
         purchase_order_items: {
           findMany: jest.fn().mockResolvedValue([]),
           deleteMany: jest.fn(),
-          create: jest.fn(),
+          createManyAndReturn: jest
+            .fn()
+            .mockImplementation(({ data }: any) =>
+              Promise.resolve(data.map((_: any, i: number) => ({ id: i + 1 }))),
+            ),
         },
         purchase_order_item_taxes: {
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
           deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         product_variants: { findMany: jest.fn().mockResolvedValue([]) },
@@ -634,7 +639,7 @@ describe('PurchaseOrdersService.receive()', () => {
       expect(tx.purchase_order_items.deleteMany).toHaveBeenCalledWith({
         where: { purchase_order_id: PO_ID },
       });
-      expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+      expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
       const dataArg = (tx.purchase_orders.update as jest.Mock).mock.calls[0][0]
         .data;
       expect(dataArg).not.toHaveProperty('items');
@@ -2261,7 +2266,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
    * métodos que `update()` toca son: `purchase_orders.findUnique`
    * (loadOrderOrFail), `product_variants.findMany`
    * (assertNoBaseLineOnVariantProduct), `purchase_order_items.deleteMany`,
-   * `purchase_order_items.create` y `purchase_orders.update`.
+   * `purchase_order_items.createManyAndReturn` y `purchase_orders.update`.
    */
   function mockDraftOrderTx() {
     const tx = {
@@ -2279,10 +2284,15 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       purchase_order_items: {
         findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({}),
+        createManyAndReturn: jest
+          .fn()
+          .mockImplementation(({ data }: any) =>
+            Promise.resolve(data.map((_: any, i: number) => ({ id: i + 1 }))),
+          ),
       },
       purchase_order_item_taxes: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     };
@@ -2306,8 +2316,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // ownDiscount = 1000 * 1 * (0.20 / 100) = 2
     // discount_total = 2 (discountPerUnit * quantity = 2 * 1)
@@ -2338,8 +2349,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // El porcentaje solo produciría 2; el monto es 4 → discount_amount gana.
     expect(createData.discount_amount).toBe(4);
@@ -2376,8 +2388,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
       ],
     } as any);
 
-    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
-    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+    expect(tx.purchase_order_items.createManyAndReturn).toHaveBeenCalledTimes(1);
+    const createData =
+      tx.purchase_order_items.createManyAndReturn.mock.calls[0][0].data[0];
 
     // El porcentaje original se persiste como provenance; NO se re-deriva.
     expect(createData.discount_percentage).toBe(20);
@@ -2389,6 +2402,63 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
 
     const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
     expect(headerData.subtotal_amount).toBe(800);
+  });
+
+  it('escritura por lotes: 2.500 líneas = 3 createManyAndReturn y los impuestos cuelgan del id de su línea', async () => {
+    const tx = mockDraftOrderTx();
+    const items = Array.from({ length: 2500 }, () => ({
+      product_id: PRODUCT_ID_LOCAL,
+      quantity: 1,
+      unit_price: 100,
+      tax_rate: 19,
+    }));
+
+    await service.update(PO_ID_LOCAL, { items } as any);
+
+    const calls = tx.purchase_order_items.createManyAndReturn.mock.calls;
+    expect(calls.map((c: any) => c[0].data.length)).toEqual([1000, 1000, 500]);
+    // Una fila de impuesto por línea, con el id (1..n) de SU línea en el lote.
+    const taxCalls = tx.purchase_order_item_taxes.createMany.mock.calls;
+    expect(taxCalls).toHaveLength(3);
+    expect(taxCalls[0][0].data).toHaveLength(1000);
+    expect(taxCalls[0][0].data[0].purchase_order_item_id).toBe(1);
+    expect(taxCalls[0][0].data[999].purchase_order_item_id).toBe(1000);
+    expect(taxCalls[2][0].data[499].purchase_order_item_id).toBe(500);
+  });
+
+  it('solo cabecera: el reparto del flete va en sentencias agrupadas (1 por 1.000 líneas), no un update por línea', async () => {
+    const tx: any = mockDraftOrderTx();
+    tx.purchase_orders.findUnique.mockResolvedValue({
+      id: PO_ID_LOCAL,
+      status: 'draft',
+      order_number: 'PO-HDR',
+      shipping_cost: 0,
+      shipping_cost_allocation: null,
+      subtotal_amount: 0,
+      tax_amount: 0,
+    });
+    tx.purchase_order_items.findMany.mockResolvedValue(
+      Array.from({ length: 1500 }, (_, i) => ({
+        id: i + 1,
+        quantity_ordered: 1,
+        unit_price_net: 100,
+        unit_cost: 100,
+        tax_amount: 0,
+      })),
+    );
+    tx.purchase_order_items.update = jest.fn();
+    tx.$executeRaw = jest.fn().mockResolvedValue(1500);
+
+    await service.update(PO_ID_LOCAL, {
+      shipping_cost: 150,
+      shipping_cost_allocation: 'prorate',
+    } as any);
+
+    expect(tx.purchase_order_items.update).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+    const first = tx.$executeRaw.mock.calls[0][0];
+    expect(first.strings.join('?')).toContain('UPDATE purchase_order_items AS p');
+    expect(first.values).toHaveLength(2000);
   });
 });
 
@@ -2654,13 +2724,15 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
 
       // Ninguna búsqueda por SKU puede ver archivados.
       const skuLookups = tx.products.findFirst.mock.calls.filter(
-        (c: any) => c[0].where.sku === 'SKU-ARCH',
+        (c: any) => c[0].where.sku?.in?.includes('SKU-ARCH'),
       );
-      expect(skuLookups).toHaveLength(2);
+      // Una sola lectura por SKU: el chequeo previo A.7 (`skuOwner`) se
+      // eliminó por redundante; la carrera la cubre el mapeo del P2002.
+      expect(skuLookups).toHaveLength(1);
       for (const [arg] of skuLookups) {
         expect(arg.where).toEqual({
           store_id: STORE_ID,
-          sku: 'SKU-ARCH',
+          sku: { in: ['SKU-ARCH'] },
           state: { not: 'archived' },
         });
       }
@@ -2673,15 +2745,19 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(tx.products.update).toBeUndefined();
     });
 
-    it('un SKU ocupado por un producto NO archivado sigue siendo PROD_SKU_COLLISION_001', async () => {
+    it('un SKU que otra petición ocupa entre la lectura y el INSERT sigue siendo PROD_SKU_COLLISION_001', async () => {
       const tx: any = mockCreateTx();
-      // `existingProduct` (1ª consulta) no lo ve; el chequeo A.7 (2ª) sí.
-      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
-      tx.products.findFirst = jest
+      // `existingProduct` no lo ve (nadie lo ocupaba al leer); el INSERT choca
+      // contra el índice único parcial porque otra petición lo tomó en medio.
+      tx.products.findFirst = jest.fn().mockResolvedValue(null);
+      tx.products.create = jest
         .fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(owner);
-      tx.products.create = jest.fn();
+        .mockRejectedValue(
+          Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+            meta: { target: ['store_id', 'sku'] },
+          }),
+        );
       prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
 
       let caught: any = null;
@@ -2693,10 +2769,23 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(caught?.errorCode).toBe('PROD_SKU_COLLISION_001');
       expect(caught.getResponse().details).toMatchObject({
         sku: 'SKU-ARCH',
-        product_id: 5,
-        is_archived: false,
+        concurrent: true,
       });
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('un SKU ocupado por un producto NO archivado une la línea a ese producto (no choca)', async () => {
+      const tx: any = mockCreateTx();
+      const owner = { id: 5, name: 'Camisa Activa', state: 'active' };
+      tx.products.findFirst = jest.fn().mockResolvedValue(owner);
+      tx.products.create = jest.fn();
+      tx.products.update = jest.fn().mockResolvedValue({ id: 5 });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.create(newProductDto() as any);
+
       expect(tx.products.create).not.toHaveBeenCalled();
+      expect(tx.products.update).toHaveBeenCalledTimes(1);
     });
 
     it('una línea nueva con código de barras ya usado se une al producto existente (sin crear)', async () => {
@@ -2775,7 +2864,8 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       tx.product_variants.findFirst = jest
         .fn()
         .mockImplementation(async ({ where }: any) =>
-          where.sku === variant.sku || where.barcode === variant.barcode
+          where.sku?.in?.includes(variant.sku) ||
+          where.barcode === variant.barcode
             ? { id: variant.id, product_id: variant.product_id }
             : null,
         );
@@ -2801,7 +2891,7 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(line.product_variant_id).toBe(VARIANT_ID);
       // La búsqueda quedó acotada a la tienda y a no archivados.
       expect(tx.product_variants.findFirst.mock.calls[0][0].where).toEqual({
-        sku: 'CAM-R-M',
+        sku: { in: ['CAM-R-M'] },
         products: { store_id: STORE_ID, state: { not: 'archived' } },
       });
     });
@@ -2967,6 +3057,438 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       arrangeCategories();
       const tx: any = await runCreate(dtoWithTaxes([1]));
       expect(tx.purchase_orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Lote grande (plan bulk-high-volume-chunking, paso 4): `resolve-lines`
+   * idempotente, tope de 10.000 líneas, tope de 100 sin resolver y número de
+   * lecturas de `create()` independiente de cuántas líneas trae la orden.
+   */
+  describe('lote grande: resolve-lines, topes y lecturas agrupadas', () => {
+    const resolvedLines = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        product_id: 1000 + i,
+        quantity: 1,
+        unit_price: 1000,
+      }));
+
+    const READ_METHODS = ['findMany', 'findFirst', 'findUnique', 'count'];
+    const countReads = (tx: any) => {
+      const perCall: Record<string, number> = {};
+      for (const [model, api] of Object.entries<any>(tx)) {
+        for (const method of READ_METHODS) {
+          const calls = api?.[method]?.mock?.calls?.length ?? 0;
+          if (calls > 0) perCall[`${model}.${method}`] = calls;
+        }
+      }
+      return {
+        total: Object.values(perCall).reduce((a, b) => a + b, 0),
+        perCall,
+      };
+    };
+
+    /** Bodega de la organización: `resolve-lines` la valida antes de abrir tx. */
+    let locationFindFirst: jest.Mock;
+    beforeEach(() => {
+      locationFindFirst = jest
+        .fn()
+        .mockResolvedValue({ id: LOCATION_ID });
+      prismaService.withoutScope = jest
+        .fn()
+        .mockReturnValue({ inventory_locations: { findFirst: locationFindFirst } });
+    });
+
+    /** Producto/variante en memoria: lo que `resolve-lines` crea, lo encuentra. */
+    function statefulCatalogTx() {
+      const tx: any = mockCreateTx();
+      const rows: any[] = [];
+      tx.products.findFirst = jest.fn(async ({ where }: any) => {
+        const skus: string[] = where.sku?.in ?? [where.sku];
+        return (
+          rows.find(
+            (r) =>
+              skus.includes(r.sku) &&
+              r.store_id === where.store_id &&
+              r.state !== 'archived',
+          ) ?? null
+        );
+      });
+      tx.products.create = jest.fn(async ({ data }: any) => {
+        const row = {
+          id: 9000 + rows.length,
+          sku: data.sku,
+          store_id: data.store_id,
+          state: data.state,
+        };
+        rows.push(row);
+        return row;
+      });
+      tx.products.update = jest.fn().mockResolvedValue({});
+      return { tx, rows };
+    }
+
+    it('resolve-lines es idempotente: la 2ª llamada no crea nada y devuelve los mismos ids', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      const dto = {
+        location_id: LOCATION_ID,
+        items: [
+          { product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1000 },
+          { product_name: 'Camisa B', sku: 'SKU-B', unit_price: 2000 },
+          { product_id: 77, quantity: 1, unit_price: 5 },
+        ],
+      };
+
+      const first = await service.resolveLines(dto as any);
+      expect(tx.products.create).toHaveBeenCalledTimes(2);
+      expect(first.items.map((r) => r.created)).toEqual([true, true, false]);
+      expect(first.items[2]).toMatchObject({ index: 2, product_id: 77 });
+
+      const second = await service.resolveLines(dto as any);
+      // Nada nuevo en el catálogo.
+      expect(tx.products.create).toHaveBeenCalledTimes(2);
+      expect(second.items.map((r) => r.created)).toEqual([false, false, false]);
+      expect(second.items.map((r) => r.product_id)).toEqual(
+        first.items.map((r) => r.product_id),
+      );
+      expect(second.items.map((r) => r.product_variant_id)).toEqual(
+        first.items.map((r) => r.product_variant_id),
+      );
+    });
+
+    it('resolve-lines: la fila que falla se informa por fila y no tumba a las demás', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          { unit_price: 1 }, // sin product_id ni product_name
+          { product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1000 },
+        ],
+      } as any);
+
+      expect(res.items[0]).toMatchObject({
+        index: 0,
+        product_id: null,
+        created: false,
+        error: { code: 'SYS_VALIDATION_001' },
+      });
+      expect(res.items[1]).toMatchObject({ index: 1, created: true });
+    });
+
+    it('resolve-lines: una colisión de SKU concurrente sale como error de fila con su código', async () => {
+      const { tx } = statefulCatalogTx();
+      tx.products.create = jest.fn().mockRejectedValue(
+        Object.assign(new Error('Unique'), {
+          code: 'P2002',
+          meta: { target: ['store_id', 'sku'] },
+        }),
+      );
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [{ product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1 }],
+      } as any);
+
+      expect(res.items[0].error?.code).toBe('PROD_SKU_COLLISION_001');
+    });
+
+    it('resolve-lines: un location_id de otra tienda se rechaza y no escribe nada', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      locationFindFirst.mockResolvedValue(null);
+
+      await expect(
+        service.resolveLines({
+          location_id: 31337,
+          items: [{ product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1 }],
+        } as any),
+      ).rejects.toThrow(/bodega/i);
+
+      // La consulta acota por organización Y por la tienda del contexto.
+      expect(locationFindFirst).toHaveBeenCalledWith({
+        where: {
+          id: 31337,
+          organization_id: ORG_ID,
+          OR: [{ store_id: STORE_ID }, { store_id: null }],
+        },
+        select: { id: true },
+      });
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+      expect(tx.products.create).not.toHaveBeenCalled();
+      expect(tx.products.update).not.toHaveBeenCalled();
+    });
+
+    it('resolve-lines: la tienda del producto nuevo es la del contexto, no la de la ubicación', async () => {
+      const { tx } = statefulCatalogTx();
+      // La ubicación diría otra tienda: no debe leerse.
+      tx.inventory_locations.findUnique = jest
+        .fn()
+        .mockResolvedValue({ store_id: 99 });
+      tx.stores = { findFirst: jest.fn(), findUnique: jest.fn() };
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [{ product_name: 'Camisa A', sku: 'SKU-A', unit_price: 1 }],
+      } as any);
+
+      expect(tx.products.create.mock.calls[0][0].data.store_id).toBe(STORE_ID);
+      expect(tx.inventory_locations.findUnique).not.toHaveBeenCalled();
+      expect(tx.stores.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('resolve-lines: un SKU existente NO se modifica (sin products.update) y devuelve sus ids', async () => {
+      const { tx, rows } = statefulCatalogTx();
+      rows.push({ id: 501, sku: 'SKU-X', store_id: STORE_ID, state: 'active' });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          {
+            product_name: 'Camisa X',
+            sku: 'SKU-X',
+            unit_price: 9999,
+            brand_name: 'Marca Nueva',
+            category_names: 'Categoria Nueva',
+          },
+        ],
+      } as any);
+
+      expect(res.items[0]).toMatchObject({
+        product_id: 501,
+        created: false,
+      });
+      expect(res.items[0].error).toBeUndefined();
+      expect(tx.products.update).not.toHaveBeenCalled();
+      expect(tx.products.create).not.toHaveBeenCalled();
+    });
+
+    it('resolve-lines: un producto padre con variantes sin variante en la línea da error de fila PO_VARIANT_001', async () => {
+      const { tx, rows } = statefulCatalogTx();
+      rows.push({ id: 502, sku: 'SKU-P', store_id: STORE_ID, state: 'active' });
+      tx.product_variants.findMany = jest
+        .fn()
+        .mockResolvedValue([{ product_id: 502 }]);
+      tx.products.findMany = jest
+        .fn()
+        .mockResolvedValue([{ id: 502, name: 'Camisa P' }]);
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [{ product_name: 'Camisa P', sku: 'SKU-P', unit_price: 1 }],
+      } as any);
+
+      expect(res.items[0].product_id).toBeNull();
+      expect(res.items[0].error?.code).toBe('PO_VARIANT_001');
+      expect(tx.products.update).not.toHaveBeenCalled();
+    });
+
+    it('resolve-lines: la categoría de impuesto inválida es error de FILA, no 400 del lote', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      const findMany = jest.fn(({ where }: any) =>
+        Promise.resolve(
+          [{ id: 1, name: 'IVA 19', tax_type: 'iva', tax_rates: [{ store_id: null }] }].filter(
+            (c) => where.id.in.includes(c.id),
+          ),
+        ),
+      );
+      prismaService.withoutScope = jest.fn().mockReturnValue({
+        inventory_locations: { findFirst: locationFindFirst },
+        tax_categories: { findMany },
+      });
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          { product_name: 'Mala', sku: 'SKU-M', unit_price: 1, tax_category_ids: [777] },
+          { product_name: 'Buena', sku: 'SKU-B', unit_price: 1, tax_category_ids: [1] },
+        ],
+      } as any);
+
+      expect(res.items[0].product_id).toBeNull();
+      expect(res.items[0].error?.message).toContain('777');
+      expect(res.items[1]).toMatchObject({ created: true });
+      expect(res.items[1].error).toBeUndefined();
+    });
+
+    it('SKU con espacios: «ABC » existente se une a ese producto y una línea nueva se crea recortada', async () => {
+      const { tx, rows } = statefulCatalogTx();
+      rows.push({ id: 503, sku: 'ABC ', store_id: STORE_ID, state: 'active' });
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          { product_name: 'Abc', sku: 'ABC ', unit_price: 1 },
+          { product_name: 'Nuevo', sku: ' NEW ', unit_price: 1 },
+        ],
+      } as any);
+
+      expect(res.items[0]).toMatchObject({ product_id: 503, created: false });
+      expect(res.items[0].error).toBeUndefined();
+      expect(tx.products.create).toHaveBeenCalledTimes(1);
+      expect(tx.products.create.mock.calls[0][0].data.sku).toBe('NEW');
+    });
+
+    it('SKU generado: dos líneas sin SKU no repiten GEN-<ms>', async () => {
+      const { tx } = statefulCatalogTx();
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [
+          { product_name: 'Sin sku A', unit_price: 1 },
+          { product_name: 'Sin sku B', unit_price: 1 },
+        ],
+      } as any);
+      const skus = tx.products.create.mock.calls.map((c: any) => c[0].data.sku);
+      expect(skus).toHaveLength(2);
+      expect(skus[0]).toMatch(/^GEN-\d+-0-/);
+      expect(skus[1]).toMatch(/^GEN-\d+-1-/);
+      expect(new Set(skus).size).toBe(2);
+    });
+
+    it('create() con 150 líneas ya resueltas nace sin error', async () => {
+      const tx = await runCreate({ ...baseDto(), items: resolvedLines(150) });
+      const data = tx.purchase_orders.create.mock.calls[0][0].data;
+      expect(data.purchase_order_items.create).toHaveLength(150);
+    });
+
+    it('10.001 líneas se rechazan en la puerta HTTP (DTO) y 10.000 pasan', async () => {
+      const { validate } = await import('class-validator');
+      const { plainToInstance } = await import('class-transformer');
+      const { CreatePurchaseOrderDto } = await import(
+        './dto/create-purchase-order.dto'
+      );
+      const itemsErrors = async (n: number) => {
+        const dto = plainToInstance(CreatePurchaseOrderDto, {
+          ...baseDto(),
+          items: resolvedLines(n),
+        });
+        const errors = await validate(dto);
+        return errors.filter((e) => e.property === 'items');
+      };
+      const tooMany = await itemsErrors(10_001);
+      expect(tooMany).toHaveLength(1);
+      expect(Object.keys(tooMany[0].constraints ?? {})).toContain(
+        'arrayMaxSize',
+      );
+      expect(await itemsErrors(10_000)).toHaveLength(0);
+    });
+
+    it('101 líneas sin resolver se rechazan con un 400 que manda a resolve-lines', async () => {
+      const dto = {
+        ...baseDto(),
+        items: Array.from({ length: 101 }, (_, i) => ({
+          product_id: 0,
+          product_name: `Producto ${i}`,
+          sku: `SKU-${i}`,
+          quantity: 1,
+          unit_price: 1000,
+        })),
+      };
+
+      let caught: any = null;
+      try {
+        await service.create(dto as any);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught?.getStatus()).toBe(400);
+      expect(caught.message).toContain('resolve-lines');
+      expect(caught.message).toContain('101');
+      // Se rechaza ANTES de abrir la transacción.
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lecturas de create() con líneas resueltas: 10 y 300 líneas leen lo mismo', async () => {
+      const small = countReads(
+        await runCreate({ ...baseDto(), items: resolvedLines(10) }),
+      );
+      jest.clearAllMocks();
+      const large = countReads(
+        await runCreate({ ...baseDto(), items: resolvedLines(300) }),
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        'lecturas create() 10 líneas:',
+        JSON.stringify(small),
+        '| 300 líneas:',
+        JSON.stringify(large),
+      );
+      expect(large.total).toBe(small.total);
+      expect(large.perCall).toEqual(small.perCall);
+    });
+
+    it('lecturas con unidad de venta: solo el override por línea crece con N', async () => {
+      const build = (n: number) => {
+        const tx: any = mockCreateTx();
+        tx.products.findMany = jest.fn(async ({ where }: any) =>
+          (where.id?.in ?? []).map((id: number) => ({
+            id,
+            store_id: STORE_ID,
+            cost_price: 100,
+            price_unit_quantity: 1,
+            is_ingredient: false,
+            is_sellable: true,
+          })),
+        );
+        tx.products.update = jest.fn().mockResolvedValue({});
+        tx.price_tiers = {
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 5, kind: 'sale_unit', units_per_package: 12 }),
+        };
+        tx.product_price_tier_assignments = {
+          updateMany: jest.fn(),
+          upsert: jest.fn(),
+          count: jest.fn().mockResolvedValue(0),
+        };
+        tx.product_price_tier_overrides = {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn(),
+          update: jest.fn(),
+        };
+        const items = resolvedLines(n).map((l) => ({
+          ...l,
+          sale_unit_name: 'Caja x12',
+          sale_unit_units_per_package: 12,
+        }));
+        prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+        return { tx, dto: { ...baseDto(), items } };
+      };
+
+      const a = build(10);
+      await service.create(a.dto as any);
+      const small = countReads(a.tx);
+      jest.clearAllMocks();
+      const b = build(300);
+      await service.create(b.dto as any);
+      const large = countReads(b.tx);
+      // eslint-disable-next-line no-console
+      console.log(
+        'lecturas con unidad de venta 10:',
+        JSON.stringify(small),
+        '| 300:',
+        JSON.stringify(large),
+      );
+
+      const growing = Object.keys(large.perCall).filter(
+        (k) => large.perCall[k] !== small.perCall[k],
+      );
+      // Lo ÚNICO que sigue siendo por línea: el override de la presentación.
+      expect(growing).toEqual(['product_price_tier_overrides.findFirst']);
+      expect(large.perCall['product_price_tier_overrides.findFirst']).toBe(300);
+      // Presentación creada UNA vez y reutilizada por las demás líneas.
+      expect(b.tx.price_tiers.create).toHaveBeenCalledTimes(1);
     });
   });
 });
@@ -3420,6 +3942,46 @@ describe('PurchaseOrdersService.persistIngredientConfigToProduct — insumos fue
   });
 });
 
+describe('PurchaseOrdersService.persistIngredientConfigToProduct — precarga con dos líneas del mismo producto', () => {
+  it('purchase_uom 5 y luego 3 sobre el mismo producto deja 3 (la precarga se actualiza)', async () => {
+    const svc: any = Object.create(PurchaseOrdersService.prototype);
+    const writes: any[] = [];
+    const tx = {
+      products: {
+        update: jest.fn(async ({ data }: any) => {
+          writes.push(data);
+          return {};
+        }),
+      },
+    };
+    const preload = {
+      products: new Map<number, any>([
+        [
+          7,
+          {
+            id: 7,
+            store_id: 10,
+            is_ingredient: true,
+            available_for_ecommerce: false,
+            is_featured: false,
+            purchase_uom_id: 3,
+            stock_uom_id: null,
+            purchase_to_stock_factor: null,
+          },
+        ],
+      ]),
+      industries: new Map<number, any>([[10, ['restaurant']]]),
+      uoms: new Map(),
+      tiers: new Map(),
+      variantCounts: new Map(),
+    };
+    await svc.persistIngredientConfigToProduct(7, { purchase_uom_id: 5 }, tx, preload);
+    await svc.persistIngredientConfigToProduct(7, { purchase_uom_id: 3 }, tx, preload);
+    expect(writes).toEqual([{ purchase_uom_id: 5 }, { purchase_uom_id: 3 }]);
+    expect(preload.products.get(7).purchase_uom_id).toBe(3);
+  });
+});
+
 describe('PurchaseOrdersService.findNewItemConflicts()', () => {
   let service: PurchaseOrdersService;
   let prismaService: any;
@@ -3584,5 +4146,280 @@ describe('PurchaseOrdersService.findNewItemConflicts()', () => {
       items: [{ line_index: 0, sku: 'X', barcode: '1' }, { line_index: 1 }],
     } as any);
     expect(res).toEqual({ conflicts: [] });
+  });
+});
+
+describe('QUI-712 — próximo pago de OC sin desfase de día por timezone', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  beforeEach(async () => {
+    prismaService = {
+      $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+      purchase_orders: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('schedule con scheduled_date medianoche UTC devuelve la misma fecha civil', async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      {
+        purchase_order_id: 1,
+        scheduled_date: new Date('2026-08-21T00:00:00Z'),
+      },
+    ]);
+    const map = await service.deriveNextPaymentDates([1]);
+    expect(map.get(1)).toEqual({ date: '2026-08-21' });
+  });
+
+  it('fallback payment_due_date medianoche UTC devuelve la misma fecha civil', async () => {
+    prismaService.purchase_orders.findMany.mockResolvedValue([
+      { id: 2, payment_due_date: new Date('2026-08-21T00:00:00Z') },
+    ]);
+    const map = await service.deriveNextPaymentDates([2]);
+    expect(map.get(2)).toEqual({ date: '2026-08-21' });
+  });
+
+  it('a las 20:00 Bogotá (ya 22/08 en UTC) vence hoy: días = 0', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-21T20:00:00-05:00'));
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      {
+        purchase_order_id: 1,
+        scheduled_date: new Date('2026-08-21T00:00:00Z'),
+      },
+    ]);
+    const result = await (service as any).decorateWithNextPaymentDate([
+      { id: 1 },
+    ]);
+    expect(result[0].next_payment_date).toBe('2026-08-21');
+    expect(result[0].next_payment_due_in_days).toBe(0);
+  });
+});
+
+
+describe('decorateWithNextPaymentDate — QUI-711', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  beforeEach(async () => {
+    prismaService = {
+      purchase_orders: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRawUnsafe: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  // Cuota planned vencida hace ~5 días (relativa para no depender del día).
+  const pastDate = () => new Date(Date.now() - 5 * 86_400_000);
+
+  it("una OC 'paid' con cuota planned pasada no tiene próximo pago", async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      { purchase_order_id: 1, scheduled_date: pastDate() },
+    ]);
+
+    const [row] = await (service as any).decorateWithNextPaymentDate([
+      { id: 1, payment_status: 'paid' },
+    ]);
+
+    expect(row.next_payment_date).toBeNull();
+    expect(row.next_payment_due_in_days).toBeNull();
+  });
+
+  it("una OC 'partial' con cuota planned conserva fecha y días (sin regresión)", async () => {
+    prismaService.$queryRawUnsafe.mockResolvedValue([
+      { purchase_order_id: 2, scheduled_date: pastDate() },
+    ]);
+
+    const [row] = await (service as any).decorateWithNextPaymentDate([
+      { id: 2, payment_status: 'partial' },
+    ]);
+
+    expect(row.next_payment_date).toEqual(expect.any(String));
+    expect(row.next_payment_due_in_days).toEqual(expect.any(Number));
+    expect(row.next_payment_due_in_days).toBeLessThan(0);
+  });
+});
+
+
+describe('QUI-713: próximo pago y pago de cuota con cuotas materializadas', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+  let tx: any;
+
+  beforeEach(async () => {
+    tx = {
+      purchase_order_payments: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }),
+        create: jest.fn().mockResolvedValue({
+          id: 77,
+          payment_date: new Date('2026-10-01T00:00:00Z'),
+        }),
+      },
+      purchase_order_payment_schedules: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      accounts_payable: { findFirst: jest.fn().mockResolvedValue(null) },
+      purchase_orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prismaService = {
+      purchase_orders: { findUnique: jest.fn(), findMany: jest.fn() },
+      $queryRawUnsafe: jest.fn(),
+      $transaction: jest.fn((cb: any) => cb(tx)),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        purchaseVatContributionProvider(),
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { logCustom: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(5);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  describe('deriveNextPaymentDates', () => {
+    it('el SQL incluye cuotas planned y materialized', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([]);
+      prismaService.purchase_orders.findMany.mockResolvedValue([]);
+
+      await service.deriveNextPaymentDates([1, 2]);
+
+      const sql: string = prismaService.$queryRawUnsafe.mock.calls[0][0];
+      expect(sql).toContain("'planned'");
+      expect(sql).toContain("'materialized'");
+      expect(sql).not.toMatch(/status\s*=\s*'planned'/);
+    });
+
+    it('con filas devuelve la primera fecha por OC', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([
+        {
+          purchase_order_id: 1,
+          scheduled_date: new Date('2026-11-05T12:00:00Z'),
+        },
+        {
+          purchase_order_id: 1,
+          scheduled_date: new Date('2026-12-05T12:00:00Z'),
+        },
+      ]);
+
+      const out = await service.deriveNextPaymentDates([1]);
+
+      expect(out.get(1)).toEqual({ date: '2026-11-05' });
+      expect(prismaService.purchase_orders.findMany).not.toHaveBeenCalled();
+    });
+
+    it('sin filas usa payment_due_date de la OC como fallback', async () => {
+      prismaService.$queryRawUnsafe.mockResolvedValue([]);
+      prismaService.purchase_orders.findMany.mockResolvedValue([
+        { id: 3, payment_due_date: new Date('2026-11-20T12:00:00Z') },
+        { id: 4, payment_due_date: null },
+      ]);
+
+      const out = await service.deriveNextPaymentDates([3, 4]);
+
+      expect(out.get(3)).toEqual({ date: '2026-11-20' });
+      expect(out.get(4)).toEqual({ date: null });
+    });
+  });
+
+  describe('registerPayment con payment_schedule_id', () => {
+    it('marca la cuota como pagada si está planned o materialized', async () => {
+      prismaService.purchase_orders.findUnique.mockResolvedValue({
+        id: 9,
+        total_amount: 1000,
+      });
+      jest
+        .spyOn(service as any, 'recalculatePaymentStatus')
+        .mockResolvedValue('partial');
+      jest
+        .spyOn(service as any, 'emitPurchaseOrderPaymentEvent')
+        .mockResolvedValue(undefined);
+
+      await service.registerPayment(9, {
+        amount: 100,
+        payment_date: '2026-10-01',
+        payment_method: 'cash',
+        payment_schedule_id: 42,
+      } as any);
+
+      const arg =
+        tx.purchase_order_payment_schedules.updateMany.mock.calls[0][0];
+      expect(arg.where.id).toBe(42);
+      expect(arg.where.purchase_order_id).toBe(9);
+      expect(arg.where.status).toEqual({ in: ['planned', 'materialized'] });
+      expect(arg.data.status).toBe('paid');
+    });
   });
 });

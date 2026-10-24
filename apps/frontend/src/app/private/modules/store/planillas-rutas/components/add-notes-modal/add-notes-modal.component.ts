@@ -87,7 +87,7 @@ interface AvailableNote {
     <app-modal
       [isOpen]="true"
       title="Agregar remisiones"
-      subtitle="Adjunta remisiones elegibles a esta planilla"
+      subtitle="Adjunta remisiones elegibles a esta ruta"
       size="lg"
       (cancel)="close.emit()"
     >

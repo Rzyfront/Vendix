@@ -1,5 +1,6 @@
 import {
   Component,
+  afterRenderEffect,
   OnInit,
   inject,
   signal,
@@ -8,9 +9,9 @@ import {
   PLATFORM_ID,
   effect,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterModule } from '@angular/router';
-import { CommonModule, DecimalPipe, DOCUMENT } from '@angular/common';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { CommonModule, DecimalPipe, DOCUMENT, ViewportScroller } from '@angular/common';
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser';
 import { isPlatformBrowser } from '@angular/common';
 import { buildVendixStructuredData } from './vendix-landing-structured-data';
@@ -31,10 +32,17 @@ import { VexiToolTraceComponent } from '../../../shared/components/vexi-dock/vex
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../environments/environment';
+import { SectorGuidesComponent } from '../guides/sector-guides.component';
+import { SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
 import {
   PublicPlansService,
   PublicPlan,
 } from '../../pricing/services/public-plans.service';
+import {
+  ROI_ASSUMPTIONS,
+  estimateAnnualSavings,
+  referenceAnnualPrice,
+} from './roi-calculator';
 import {
   StoreIndustry,
   STORE_INDUSTRIES,
@@ -274,11 +282,28 @@ const COMMERCIAL_CAMPAIGN_PARAMS = [
     HeroLiveDashboardComponent,
     VexiAvatarComponent,
     VexiToolTraceComponent,
+    SectorGuidesComponent,
   ],
   templateUrl: './vendix-landing.component.html',
   styleUrls: ['./vendix-landing.component.scss'],
 })
 export class VendixLandingComponent implements OnInit {
+  readonly sectorGuidesEnabled = SECTOR_GUIDES_ENABLED;
+
+  private readonly landingRoute = inject(ActivatedRoute);
+  private readonly landingScroller = inject(ViewportScroller);
+  private readonly landingFragment = toSignal(this.landingRoute.fragment, {
+    initialValue: this.landingRoute.snapshot.fragment,
+  });
+  // Guide links return to sections that do not exist until the landing renders.
+  private readonly landingFragmentScroll = afterRenderEffect(() => {
+    const fragment = this.landingFragment();
+    if (fragment === 'precios-section' ||
+        (fragment === 'guias' && this.sectorGuidesEnabled)) {
+      this.landingScroller.scrollToAnchor(fragment);
+    }
+  });
+
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly sanitizer = inject(DomSanitizer);
@@ -518,8 +543,8 @@ export class VendixLandingComponent implements OnInit {
     manufacturing: {
       value: 'manufacturing',
       title: 'Manufactura & Producción',
-      tag: 'MANUFACTURA & TALLERES DE PRODUCCIÓN',
-      headline: 'Fórmulas de producción, órdenes de taller y costeo real',
+      tag: 'MANUFACTURA & PRODUCCIÓN',
+      headline: 'Fórmulas, órdenes de producción y costeo real',
       description:
         'Calcula con precisión el costo unitario de fabricación sumando materia prima, mano de obra e insumos. Genera órdenes de producción con descuento automático de inventario por etapa productiva.',
       feature1: {
@@ -572,7 +597,7 @@ export class VendixLandingComponent implements OnInit {
     { value: 'gym', label: 'Gimnasios & Fitness', icon: 'activity' },
     { value: 'beauty', label: 'Servicios & Belleza', icon: 'sparkles' },
     { value: 'service', label: 'Consultoría', icon: 'briefcase' },
-    { value: 'manufacturing', label: 'Manufactura & Taller', icon: 'boxes' },
+    { value: 'manufacturing', label: 'Manufactura & Producción', icon: 'boxes' },
     { value: 'construction', label: 'Contratistas & Obra', icon: 'building-2' },
   ];
 
@@ -630,8 +655,7 @@ export class VendixLandingComponent implements OnInit {
       .filter((p) => p.billing_cycle === 'monthly')
       .map((p) => Number(p.base_price))
       .filter((n) => Number.isFinite(n) && n > 0);
-    const min = prices.length > 0 ? Math.min(...prices) : null;
-    const json = JSON.stringify(buildVendixStructuredData(min));
+    const json = JSON.stringify(buildVendixStructuredData(prices));
 
     let script = this.document.getElementById('vendix-jsonld');
     if (!script) {
@@ -767,18 +791,19 @@ export class VendixLandingComponent implements OnInit {
     return Math.round(((full - paid) / full) * 100);
   }
 
-  // ROI Savings Calculator Computed
-  readonly annualSavings = computed(() => {
-    const stores = this.storeCount();
-    const invoices = this.invoicesCount();
-    // Legacy competitor costs:
-    // Legacy POS (~$180.000 COP/mo per store) + DIAN folios (~$280 COP/invoice) + web store plugin (~$90.000 COP/mo)
-    const annualLegacy = stores * 180000 * 12 + invoices * 280 * 12 + 90000 * 12;
-    // Vendix Pro annual plan: ~$95.200 COP/mo ($1.142.400/yr) includes up to 3 stores & unlimited DIAN
-    const annualVendix =
-      stores <= 3 ? 1142400 : 1142400 + (stores - 3) * 350000;
-    return Math.max(0, annualLegacy - annualVendix);
-  });
+  // ROI Savings Calculator: compara contra el precio anual real publicado de
+  // Empresarial Pro (GET /api/public/plans). Sin planes no muestra cifra.
+  readonly roiAssumptions = ROI_ASSUMPTIONS;
+  readonly roiVendixAnnualPrice = computed(() =>
+    referenceAnnualPrice(this.sellablePlans()),
+  );
+  readonly annualSavings = computed(() =>
+    estimateAnnualSavings(
+      this.storeCount(),
+      this.invoicesCount(),
+      this.roiVendixAnnualPrice(),
+    ),
+  );
 
   ngOnInit(): void {
     this.initializeCommercialAnalytics();

@@ -8,6 +8,7 @@ datasource db {
 }
 
 model users {
+  invoice_resolutions_archived invoice_resolutions[] @relation("invoice_resolutions_archived_by")
   financial_split_creations order_financial_splits[] @relation("financial_split_creator")
   financial_accounts order_financial_accounts[] @relation("financial_account_customer")
   id                         Int                          @id @default(autoincrement())
@@ -59,6 +60,9 @@ model users {
   received_document_match_allocations_created received_document_match_allocations[] @relation("received_document_match_allocations_created_by")
   received_document_match_allocations_revoked received_document_match_allocations[] @relation("received_document_match_allocations_revoked_by")
   received_document_events_acted received_document_events[] @relation("received_document_events_actor")
+  document_reception_email_inboxes_created document_reception_email_inboxes[] @relation("email_inboxes_created_by")
+  document_reception_email_inboxes_updated document_reception_email_inboxes[] @relation("email_inboxes_updated_by")
+  document_reception_email_messages_archived document_reception_email_messages[] @relation("email_messages_archived_by")
   document_reception_connections_created document_reception_connections[] @relation("document_reception_connections_created_by")
   fiscal_tax_credits_created fiscal_tax_credits[]           @relation("fiscal_tax_credits_created_by")
   fiscal_tax_payments_created fiscal_tax_payments[]         @relation("fiscal_tax_payments_created_by")
@@ -219,6 +223,8 @@ model users {
   dispatch_routes_as_dispatcher      dispatch_routes[]             @relation("dispatch_routes_dispatcher")
   dispatch_routes_as_voided_by       dispatch_routes[]             @relation("dispatch_routes_voided_by")
   dispatch_routes_as_closed_by       dispatch_routes[]             @relation("dispatch_routes_closed_by")
+  dispatch_routes_as_settlement_cash_user dispatch_routes[]        @relation("dispatch_routes_settlement_cash_user")
+  dispatch_route_positions           dispatch_route_positions[]
   dispatch_routes_as_released_by     dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
   // Carrier Pool (Repartos Fase B4) — órdenes reclamadas por este repartidor.
   orders_claimed_by_carrier          orders[]                      @relation("orders_claimed_by_carrier")
@@ -674,6 +680,8 @@ model organizations {
   received_tax_qualifications   received_tax_qualifications[]
   received_tax_effects          received_tax_effects[] @relation("received_tax_effects_organization")
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -950,6 +958,8 @@ model stores {
   received_tax_qualifications received_tax_qualifications[]
   received_tax_effects        received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits           fiscal_tax_credits[]
   fiscal_tax_payments          fiscal_tax_payments[]
@@ -1065,8 +1075,9 @@ model stores {
   menu_availability_windows menu_availability_windows[]
 
   // Dispatch Routes & Vehicles
-  dispatch_routes dispatch_routes[]
-  vehicles        vehicles[]
+  dispatch_routes          dispatch_routes[]
+  dispatch_route_positions dispatch_route_positions[]
+  vehicles                 vehicles[]
 
   // Print Formats Hub
   store_print_format_configs store_print_format_configs[]
@@ -1612,6 +1623,7 @@ model orders {
   service_session_id                              Int?
   service_version                                 Int                       @default(1)
   store_id                                        Int
+  origin_cash_session_id                          Int?
   customer_id                                     Int?
   // ADR-9 (CP-POLLO-ARABE-727 A.3): alias de cliente en venta anónima/física.
   // `customer_id` y `customer_alias` son mutuamente excluyentes — el CHECK
@@ -1707,6 +1719,7 @@ model orders {
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?                @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  origin_cash_session                            cash_register_sessions?    @relation("orders_origin_cash_session", fields: [origin_cash_session_id, store_id], references: [id, store_id], onDelete: Restrict, onUpdate: NoAction)
   users                                           users?                    @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
@@ -1750,6 +1763,9 @@ model orders {
   // converted into this order (recovered, not abandoned).
   carts_converted carts[] @relation("cart_converted_order")
 
+  order_review                order_reviews?
+  product_reviews             reviews[]
+
   @@unique([store_id, order_number])
   @@unique([store_id, id])
   @@unique([id, service_session_id])
@@ -1758,8 +1774,7 @@ model orders {
   @@index([store_id, dispatch_pool_at])
   @@index([store_id, created_by_user_id])
   @@index([shipping_tax_rate_id])
-  order_review                order_reviews?
-  product_reviews             reviews[]
+  @@index([store_id, origin_cash_session_id, state])
 }
 
 model order_installments {
@@ -4834,6 +4849,7 @@ enum adjustment_type_enum {
   expiration
   count_variance
   manual_correction
+  initial_load
 }
 
 // `reserved_for_id` NO es único por sí solo: es un id de otra tabla y sólo
@@ -5731,6 +5747,19 @@ model ai_agents {
 model ai_engine_logs {
   id                Int      @id @default(autoincrement())
   request_id        String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Optional phase-A correlations. Historical rows and billing counters stay intact.
+  trace_id                 String? @db.Uuid
+  span_id                  String? @db.Uuid
+  objective_id             String? @db.Uuid
+  conversation_id          String? @db.VarChar(100)
+  turn_id                  String? @db.Uuid
+  provider_call_id         String? @db.Uuid
+  attempt_id               String? @db.Uuid
+  tool_call_id             String? @db.Uuid
+  external_request_id_hash String? @db.VarChar(64)
+  usage_observed           Json?
+  cost_source              String? @db.VarChar(32)
+  telemetry_metadata       Json?
   app_key           String?  @db.VarChar(100)
   config_id         Int?
   organization_id   Int?
@@ -5755,7 +5784,55 @@ model ai_engine_logs {
   @@index([app_key])
   @@index([created_at])
   @@index([config_id])
+  @@index([request_id, created_at])
+  @@index([trace_id, created_at])
 }
+
+// System-owned observability sink. Tenant delegates filter by store/org; no store endpoint.
+// Explicit system scope has no tenant ids and cannot be seen by a tenant-scoped delegate.
+model ai_agent_trace_spans {
+  span_id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  trace_id              String    @db.Uuid
+  parent_span_id        String?   @db.Uuid
+  request_id            String    @db.Uuid
+  objective_id          String?   @db.Uuid
+  conversation_id       String?   @db.VarChar(100)
+  turn_id               String?   @db.Uuid
+  provider_call_id      String?   @db.Uuid
+  attempt_id            String?   @db.Uuid
+  tool_call_id          String?   @db.Uuid
+  scope_kind            String    @db.VarChar(10)
+  system_purpose        String?   @db.VarChar(32)
+  organization_id       Int?
+  store_id              Int?
+  user_id               Int?
+  surface               String?   @db.VarChar(20)
+  agent                 String?   @db.VarChar(20)
+  kind                  String    @db.VarChar(32)
+  status                String    @default("started") @db.VarChar(20)
+  outcome               String?   @db.VarChar(32)
+  error_code            String?   @db.VarChar(100)
+  started_at            DateTime  @default(now()) @db.Timestamptz(6)
+  ended_at              DateTime? @db.Timestamptz(6)
+  duration_ms           Int?
+  // Unknown usage/cost is NULL, including provider failures without a receipt.
+  prompt_tokens         Int?
+  completion_tokens     Int?
+  cache_read_tokens     Int?
+  cache_creation_tokens Int?
+  // Canonical aggregation MUST filter kind='provider_attempt'. Other kinds stay NULL.
+  cost_usd              Decimal?  @db.Decimal(12, 8)
+  attributes            Json      @default("{}")
+  created_at            DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([trace_id, started_at])
+  @@index([store_id, created_at])
+  @@index([organization_id, created_at])
+  @@index([request_id, created_at])
+  @@index([provider_call_id])
+  @@index([kind, created_at])
+}
+
 
 enum ai_conversation_status_enum {
   active
@@ -5795,6 +5872,7 @@ model ai_conversations {
   updated_at      DateTime                    @default(now()) @db.Timestamp(6)
 
   messages ai_messages[]
+  objectives ai_agent_objectives[]
 
   @@index([store_id])
   @@index([store_id, user_id])
@@ -5892,6 +5970,7 @@ model ai_agent_tasks {
   organization_id Int
   user_id         Int
   conversation_id Int?
+  objective_id    String?   @db.Uuid
   goal            String    @db.Text
   plan            Json?
   status          String    @default("queued") @db.VarChar(20)
@@ -5901,12 +5980,143 @@ model ai_agent_tasks {
   created_at      DateTime  @default(now()) @db.Timestamp(6)
   finished_at     DateTime? @db.Timestamp(6)
 
+  tool_results ai_agent_tool_results[]
+  objective ai_agent_objectives? @relation(fields: [objective_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([objective_id])
   @@index([store_id])
   @@index([store_id, status])
   @@index([job_id])
 }
 
+
+/// D1 durable fact/checkpoint authority; a queue job is not an objective.
+model ai_agent_objectives {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id              Int
+  organization_id       Int
+  user_id               Int
+  conversation_id       Int
+  agent_id              String?  @db.VarChar(100)
+  legacy_plan_id        String   @db.VarChar(100)
+  goal                  String   @db.Text
+  plan                  Json?
+  entities              Json     @default("[]")
+  step_hashes           Json?
+  next_step             String?  @db.Text
+  semantic_status       String   @default("active") @db.VarChar(32)
+  version               Int      @default(1)
+  lease_generation      Int      @default(0)
+  lease_until           DateTime? @db.Timestamptz(6)
+  budget                Json
+  authority_snapshot    Json     @default("[]")
+  requires_revalidation Boolean  @default(true)
+  expires_at            DateTime @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  conversation ai_conversations @relation(fields: [conversation_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tasks        ai_agent_tasks[]
+  results      ai_agent_tool_results[]
+  effects      ai_agent_effects[]
+
+  @@unique([store_id, organization_id, user_id, conversation_id, legacy_plan_id], map: "ai_agent_objectives_legacy_uq")
+  @@unique([id, store_id, organization_id, user_id], map: "ai_agent_objectives_scope_uq")
+  @@index([store_id, organization_id, user_id, conversation_id], map: "ai_agent_objectives_owner_conversation_idx")
+  @@index([store_id, organization_id, user_id, semantic_status, expires_at], map: "ai_agent_objectives_owner_status_expiry_idx")
+}
+
+/// Full bounded JSON artifacts, recoverable by owner/objective/call; not a display summary.
+model ai_agent_tool_results {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id         Int
+  organization_id  Int
+  user_id          Int
+  objective_id     String   @db.Uuid
+  task_id          Int?
+  tool_call_id     String   @db.VarChar(200)
+  tool_name        String   @db.VarChar(200)
+  tool_version     String   @db.VarChar(50)
+  args_hash        String   @db.VarChar(64)
+  receipt          Json
+  data             Json?
+  pagination       Json?
+  freshness        String   @db.VarChar(20)
+  resource_ids     Json
+  evidence_refs    Json
+  lease_generation Int?
+  stale_lease      Boolean  @default(false)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  task ai_agent_tasks? @relation(fields: [task_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence_effects ai_agent_effects[]
+  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_tool_results_objective_scope_fkey")
+
+  @@unique([objective_id, tool_call_id])
+  @@index([store_id, organization_id, user_id, objective_id, created_at, id], map: "ai_agent_tool_results_owner_page_idx")
+  @@index([task_id])
+}
+
+/// Intention-before-dispatch + domain identity; a consumed approval token is not exactly-once.
+model ai_agent_effects {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id           Int
+  organization_id    Int
+  user_id            Int
+  objective_id       String   @db.Uuid
+  operation_id       String   @unique @db.VarChar(200)
+  proposal_hash      String   @db.VarChar(64)
+  step_id            String   @db.VarChar(200)
+  status             String   @default("proposed") @db.VarChar(20)
+  domain_receipt     Json?
+  domain_reference   String?  @db.VarChar(300)
+  evidence_result_id String?  @db.Uuid
+  history            Json     @default("[]")
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
+
+  @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
+  @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
+  @@index([evidence_result_id])
+}
+
+/// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.
+/// Source is authenticated ciphertext only; no plaintext accessor or business cascade.
+model ai_agent_script_runs {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id          Int
+  organization_id   Int
+  user_id           Int
+  objective_id      String    @db.Uuid
+  source_hash       String    @db.VarChar(64)
+  source_ciphertext Bytes
+  source_nonce      Bytes
+  source_auth_tag   Bytes
+  source_key_id     String    @db.VarChar(16)
+  policy_digest     String    @db.VarChar(71)
+  runtime_digest    String    @db.VarChar(71)
+  limits            Json
+  manifest          Json
+  calls             Json      @default("[]")
+  outcome           String    @default("running") @db.VarChar(20)
+  usage             Json      @default("{}")
+  lease_until       DateTime  @db.Timestamptz(6)
+  expires_at        DateTime  @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  finished_at       DateTime? @db.Timestamptz(6)
+
+  @@index([store_id, organization_id, user_id, created_at], map: "ai_agent_script_runs_owner_created_idx")
+  @@index([store_id, organization_id, user_id, objective_id], map: "ai_agent_script_runs_owner_objective_idx")
+  @@index([lease_until], map: "ai_agent_script_runs_admission_idx")
+  @@index([store_id, lease_until], map: "ai_agent_script_runs_store_admission_idx")
+  @@index([expires_at], map: "ai_agent_script_runs_retention_idx")
+}
+
 model ai_embeddings {
+  knowledge_scope String                       @default("store") @db.Text
   id              Int                          @id @default(autoincrement())
   store_id        Int
   organization_id Int
@@ -5918,8 +6128,36 @@ model ai_embeddings {
   created_at      DateTime                     @default(now()) @db.Timestamp(6)
   updated_at      DateTime                     @default(now()) @db.Timestamp(6)
 
+  @@index([knowledge_scope, store_id, organization_id, entity_type], map: "ai_embeddings_knowledge_scope_idx")
   @@unique([store_id, entity_type, entity_id])
   @@index([store_id, entity_type])
+}
+
+// Platform documents are release-owned, not tenant-editable agent memory.
+model ai_knowledge_documents {
+  id                    Int       @id @default(autoincrement())
+  document_key          String    @unique @db.VarChar(250)
+  entity_type           String    @db.VarChar(50)
+  knowledge_scope       String    @default("global") @db.Text
+  store_id              Int?
+  organization_id       Int?
+  canonical_name        String    @db.VarChar(150)
+  version               String    @db.VarChar(50)
+  content               String    @db.Text
+  lexical_text          String    @db.Text
+  search_vector         Unsupported("tsvector")? @default(dbgenerated())
+  metadata              Json
+  content_hash          String    @db.VarChar(64)
+  indexed_hash          String?   @db.VarChar(64)
+  embedding_fingerprint String?   @db.VarChar(64)
+  release_hash          String    @db.VarChar(64)
+  status                String    @default("pending") @db.VarChar(20)
+  active                Boolean   @default(false)
+  error_code            String?   @db.VarChar(80)
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([knowledge_scope, entity_type, active, status], map: "ai_knowledge_documents_scope_status_idx")
 }
 
 // ── Help Center ──────────────────────────────────────────────────
@@ -6066,6 +6304,8 @@ model videos {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
+  /// Idempotencia de creación manual por tienda. Único parcial mantenido en SQL.
+  client_request_id String? @db.Uuid
   financial_account_id Int?
   financial_account order_financial_accounts? @relation(fields: [financial_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   @@index([financial_account_id])
@@ -6238,6 +6478,9 @@ model invoices {
   /// (100 % del histórico). Restrict: un refund con NC vinculada no se
   /// elimina — los refunds nunca se borran, sólo cambian de estado.
   refund_id                        Int?
+  /// Marca durable de reserva de saldo de crédito para una nota en proceso.
+  /// NULL para notas débito, facturas y notas sin reserva activa.
+  credit_limit_reserved_at         DateTime?                       @db.Timestamp(6)
   /// D.1 (DB-05, ADR-03) — contrato de obra que origina ESTE documento
   /// (FB-08 `POST /contracts/:id/invoice`). Nullable: el 100 % del historico
   /// factura ordenes o captura manual y sigue intacto. La unicidad "un
@@ -6413,9 +6656,14 @@ model invoice_items {
   ///
   /// NULL = línea normal, no AIU — que es el 100% del histórico.
   aiu_component           aiu_component_enum?
+  /// Línea de factura de origen de una nota de corrección. SET NULL al borrar
+  /// la fuente para conservar la nota y su snapshot fiscal independiente.
+  source_invoice_item_id  Int?
   created_at              DateTime?           @default(now()) @db.Timestamp(6)
 
   invoice         invoices          @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  source_invoice_item invoice_items? @relation("InvoiceNoteSource", fields: [source_invoice_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  note_correction_items invoice_items[] @relation("InvoiceNoteSource")
   product         products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   /// Tributos que declaran gravar ESTA línea. Ver `invoice_taxes.invoice_item_id`:
@@ -6425,6 +6673,7 @@ model invoice_items {
   invoice_taxes   invoice_taxes[]
 
   @@index([invoice_id])
+  @@index([source_invoice_item_id])
 }
 
 model invoice_taxes {
@@ -6534,10 +6783,21 @@ model invoice_resolutions {
   technical_key_fingerprint String?                   @db.VarChar(64)
   created_at                DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                 @default(now()) @db.Timestamp(6)
+  /// Archivado lógico (nunca hay borrado físico). `null` = no archivada. Una fila
+  /// archivada SIGUE ocupando su prefijo en los únicos parciales, así una serie
+  /// `NC` archivada no se reabre como `NC1`.
+  ///
+  /// El índice parcial `idx_invoice_resolutions_archived`
+  /// `(accounting_entity_id, document_type) WHERE archived_at IS NULL` existe en
+  /// SQL (migración 20261022120000) y NO se declara aquí: Prisma no soporta
+  /// índices parciales. Un `migrate dev` generado puede proponer su DROP; rechazarlo.
+  archived_at               DateTime?                 @db.Timestamp(6)
+  archived_by_user_id       Int?
 
   organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?             @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  archived_by       users?              @relation("invoice_resolutions_archived_by", fields: [archived_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "invoice_resolutions_archived_by_user_id_fkey")
   invoices          invoices[]
 
   @@index([store_id, is_active])
@@ -6739,6 +6999,8 @@ model accounting_entities {
   received_tax_qualifications   received_tax_qualifications[]
   received_tax_effects          received_tax_effects[]
   received_document_match_allocations received_document_match_allocations[]
+  document_reception_email_inboxes document_reception_email_inboxes[]
+  document_reception_email_messages document_reception_email_messages[]
   document_reception_connections document_reception_connections[]
   fiscal_tax_credits             fiscal_tax_credits[]
   fiscal_tax_payments            fiscal_tax_payments[]
@@ -7315,6 +7577,11 @@ model dian_configurations {
   /// circular self-FK is a chicken-and-egg problem Postgres can't express in a
   /// CHECK. Nullable on purpose so every historical row stays at NULL.
   inherited_from_dian_configuration_id Int?
+  /// Fila hermana (mismo NIT + software_id + configuration_type) cuya habilitación
+  /// DIAN (set de pruebas aprobado / enabled) esta fila heredó en vez de repetir el
+  /// set. NULL = la habilitación se ganó en esta misma fila. Ortogonal al puntero de
+  /// certificado de arriba. SetNull: borrar la fuente nunca borra a la heredera.
+  enablement_inherited_from_id         Int?
   environment                          dian_environment_enum                @default(test)
   enablement_status                    dian_enablement_status_enum          @default(not_started)
   test_set_id                          String?                              @db.VarChar(100)
@@ -7336,6 +7603,8 @@ model dian_configurations {
   /// inheritor has its OWN cert bytes in S3 and its OWN enablement_status.
   inherited_from_config dian_configurations?           @relation("dian_config_inheritance", fields: [inherited_from_dian_configuration_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   inherited_by_configs  dian_configurations[]          @relation("dian_config_inheritance")
+  enablement_inherited_from dian_configurations?       @relation("dian_config_enablement_inheritance", fields: [enablement_inherited_from_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  enablement_inherited_by   dian_configurations[]      @relation("dian_config_enablement_inheritance")
   received_buyer_event_enablements received_buyer_event_enablements[]
 
   @@index([store_id])
@@ -7343,6 +7612,7 @@ model dian_configurations {
   @@index([accounting_entity_id, configuration_type])
   @@index([operation_mode, environment, enablement_status])
   @@index([inherited_from_dian_configuration_id])
+  @@index([enablement_inherited_from_id])
 }
 
 /// QUI-657 — documentos de identidad que un tenant SIN certificado de firma
@@ -8332,6 +8602,7 @@ model cash_register_sessions {
   opened_by               Int
   closed_by               Int?
   status                  cash_register_session_status_enum @default(open)
+  pending_orders_tracking_enabled Boolean                    @default(false)
   opened_at               DateTime                          @default(now()) @db.Timestamp(6)
   closed_at               DateTime?                         @db.Timestamp(6)
   opening_amount          Decimal                           @db.Decimal(12, 2)
@@ -8349,7 +8620,10 @@ model cash_register_sessions {
   opened_by_user users                     @relation("cash_register_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
   closed_by_user users?                    @relation("cash_register_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
   movements      cash_register_movements[]
+  origin_orders  orders[]                          @relation("orders_origin_cash_session")
+  settled_dispatch_routes dispatch_routes[]        @relation("dispatch_routes_settlement_cash_session")
 
+  @@unique([id, store_id])
   @@index([store_id, status])
   @@index([cash_register_id, status])
   @@index([opened_by, status])
@@ -10445,6 +10719,7 @@ enum print_format_type_enum {
   withholding_practiced
   withholding_suffered
   withholding_employee_certificate
+  cash_session_close
 }
 
 model print_templates {
@@ -11092,6 +11367,39 @@ model platform_settings {
   updated_at         DateTime @default(now()) @db.Timestamp(6)
 }
 
+/// Clientes EXTERNOS de la plataforma: adquirientes a los que Vendix factura
+/// electrónicamente desde el riel super-admin y que no son tenants (stores /
+/// organizations / users). Se alimenta con un upsert al emitir
+/// `POST superadmin/subscriptions/fiscal/sales-invoices` con
+/// `customer.kind = 'external'`, para que el buscador del picker
+/// (`customers/search`, kind `customer`) los ofrezca en la siguiente factura.
+/// Tabla global (sin organization_id/store_id): pertenece a la plataforma.
+model platform_customers {
+  id                      Int       @id @default(autoincrement())
+  /// Código DIAN del documento: '31' NIT, '13' CC, '22' CE, '41' pasaporte...
+  document_type           String    @db.VarChar(10)
+  tax_id                  String    @db.VarChar(50)
+  tax_id_dv               String?   @db.VarChar(1)
+  legal_name              String    @db.VarChar(255)
+  /// '1' Persona Jurídica / '2' Persona Natural (cbc:AdditionalAccountID).
+  person_type             String?   @db.VarChar(1)
+  /// '48' responsable de IVA / '49' no responsable.
+  tax_regime_code         String?   @db.VarChar(10)
+  fiscal_responsibilities String[]  @default([])
+  email                   String?   @db.VarChar(255)
+  phone                   String?   @db.VarChar(50)
+  address_line            String?   @db.VarChar(255)
+  city                    String?   @db.VarChar(100)
+  city_code               String?   @db.VarChar(10)
+  department_code         String?   @db.VarChar(10)
+  last_invoiced_at        DateTime? @db.Timestamp(6)
+  created_at              DateTime  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@unique([document_type, tax_id], map: "platform_customers_document_type_tax_id_key")
+  @@index([tax_id], map: "platform_customers_tax_id_idx")
+}
+
 /// Audit row that records when a single organization consumed its
 /// platform-wide auto-trial. The UNIQUE constraint on `organization_id`
 /// is the enforcement primitive that makes "one trial per org, ever"
@@ -11398,6 +11706,9 @@ model table_sessions {
   /// que el mesero la libere explícitamente (closed_at sigue independiente).
   paid_at     DateTime? @db.Timestamp(6)
   guest_count Int?
+  /// QUI-898: notas informales del mesero sobre la mesa (texto libre). No afectan
+  /// cuenta, inventario ni KDS; se conservan al cerrar la sesión (historial).
+  informal_notes String? @db.Text
   created_at  DateTime? @default(now()) @db.Timestamp(6)
   updated_at  DateTime? @default(now()) @db.Timestamp(6)
 
@@ -11767,10 +12078,17 @@ model dispatch_routes {
   closed_by_user_id            Int?
   voided_by_user_id            Int?
   created_by_user_id           Int?
+  // Caja con la que se liquidó el recaudo al cerrar la ruta (trazabilidad).
+  settlement_cash_session_id   Int?
+  settlement_cash_user_id      Int?
+  cash_settled_at              DateTime?                  @db.Timestamp(6)
   created_at                   DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at                   DateTime?                  @default(now()) @db.Timestamp(6)
 
   store              stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  settlement_cash_session cash_register_sessions? @relation("dispatch_routes_settlement_cash_session", fields: [settlement_cash_session_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  settlement_cash_user    users?                  @relation("dispatch_routes_settlement_cash_user", fields: [settlement_cash_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  positions          dispatch_route_positions[]
   vehicle            vehicles?              @relation(fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   driver_user        users?                 @relation("dispatch_routes_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dispatched_by_user users?                 @relation("dispatch_routes_dispatcher", fields: [dispatched_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
@@ -11788,6 +12106,29 @@ model dispatch_routes {
   @@index([driver_user_id])
   @@index([shipping_method_id])
   @@index([external_carrier_supplier_id])
+  @@index([settlement_cash_session_id])
+}
+
+// Tracking GPS del encargado de una planilla de ruta en curso.
+model dispatch_route_positions {
+  id          BigInt    @id @default(autoincrement())
+  store_id    Int
+  route_id    Int
+  user_id     Int
+  lat         Decimal   @db.Decimal(10, 7)
+  lng         Decimal   @db.Decimal(10, 7)
+  accuracy    Decimal?  @db.Decimal(8, 2)
+  heading     Decimal?  @db.Decimal(6, 2)
+  speed       Decimal?  @db.Decimal(8, 2)
+  recorded_at DateTime  @db.Timestamp(6)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores          @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  route dispatch_routes @relation(fields: [route_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user  users           @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([route_id, recorded_at])
+  @@index([store_id])
 }
 
 model dispatch_route_stops {
@@ -12423,6 +12764,96 @@ model received_tax_effects {
   @@index([qualification_id], map: "received_tax_effects_qualification_idx")
 }
 
+/// One operational inbox per store; fiscal authority may belong to the organization.
+model document_reception_email_inboxes {
+  id                      Int       @id @default(autoincrement())
+  organization_id         Int
+  store_id                Int       @unique(map: "doc_email_inboxes_store_key")
+  accounting_entity_id    Int
+  local_part              String    @unique(map: "doc_email_inboxes_local_part_key") @db.VarChar(64)
+  domain                  String    @db.VarChar(255)
+  environment             String    @db.VarChar(20)
+  enabled                 Boolean   @default(false)
+  version                 Int       @default(1)
+  created_by              Int
+  updated_by              Int
+  policy_version          String    @db.VarChar(100)
+  policy_accepted_at      DateTime  @db.Timestamp(6)
+  first_valid_received_at DateTime? @db.Timestamp(6)
+  last_email_at           DateTime? @db.Timestamp(6)
+  last_valid_received_at  DateTime? @db.Timestamp(6)
+  last_error_code         String?   @db.VarChar(100)
+  created_at              DateTime  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_org_fkey")
+  store             stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_store_fkey")
+  accounting_entity accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_entity_fkey")
+  creator           users                @relation("email_inboxes_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_creator_fkey")
+  updater           users                @relation("email_inboxes_updated_by", fields: [updated_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_inboxes_updater_fkey")
+  messages          document_reception_email_messages[]
+
+  @@index([organization_id, enabled], map: "doc_email_inboxes_org_enabled_idx")
+  @@index([accounting_entity_id], map: "doc_email_inboxes_entity_idx")
+  @@index([created_by], map: "doc_email_inboxes_creator_idx")
+  @@index([updated_by], map: "doc_email_inboxes_updater_idx")
+}
+
+/// Durable transport ledger. Tenant/address snapshots survive address rotation.
+model document_reception_email_messages {
+  id                    Int       @id @default(autoincrement())
+  inbox_id              Int
+  organization_id       Int
+  store_id              Int
+  accounting_entity_id  Int
+  local_part            String    @db.VarChar(64)
+  domain                String    @db.VarChar(255)
+  environment           String    @db.VarChar(20)
+  recipient_alias       String    @db.VarChar(320)
+  ses_message_id        String    @db.VarChar(255)
+  sns_message_id        String?   @db.VarChar(255)
+  /// Untrusted RFC Message-ID is only a signal, never an idempotency key.
+  rfc_message_id_hash   String?   @db.VarChar(64)
+  raw_bucket            String    @db.VarChar(255)
+  raw_key               String    @db.VarChar(1024)
+  raw_sha256            String?   @db.VarChar(64)
+  raw_bytes             Int?
+  received_at           DateTime  @db.Timestamp(6)
+  processed_at          DateTime? @db.Timestamp(6)
+  status                String    @default("received") @db.VarChar(30)
+  reason_code           String?   @db.VarChar(100)
+  retryable             Boolean   @default(false)
+  attempt_count         Int       @default(0)
+  processing_token      String?   @db.VarChar(64)
+  processing_started_at DateTime? @db.Timestamp(6)
+  version               Int       @default(1)
+  sender                String?   @db.VarChar(255)
+  subject               String?   @db.VarChar(255)
+  /// At most 40 metadata-only results and 128 KiB; no bytes/body/hidden document IDs.
+  parts                 Json      @default("[]")
+  gmail_code_encrypted   String?   @db.Text
+  gmail_code_expires_at  DateTime? @db.Timestamp(6)
+  gmail_challenge_alias  String?   @db.VarChar(320)
+  archived_at           DateTime? @db.Timestamp(6)
+  archived_by           Int?
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  inbox             document_reception_email_inboxes @relation(fields: [inbox_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_inbox_fkey")
+  organization      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_org_fkey")
+  store             stores                          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_store_fkey")
+  accounting_entity accounting_entities             @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_entity_fkey")
+  archiver          users?                          @relation("email_messages_archived_by", fields: [archived_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_email_messages_archiver_fkey")
+
+  @@unique([environment, ses_message_id, recipient_alias], map: "doc_email_messages_transport_key")
+  @@index([store_id, received_at, id], map: "doc_email_messages_store_received_idx")
+  @@index([store_id, status, archived_at, received_at], map: "doc_email_messages_store_status_idx")
+  @@index([organization_id, store_id], map: "doc_email_messages_org_store_idx")
+  @@index([accounting_entity_id], map: "doc_email_messages_entity_idx")
+  @@index([inbox_id, received_at], map: "doc_email_messages_inbox_received_idx")
+  @@index([archived_by], map: "doc_email_messages_archiver_idx")
+}
+
 model document_reception_connections {
   id                    Int       @id @default(autoincrement())
   /// Optimistic configuration/cursor version; database check enforces >= 1.
@@ -12851,4 +13282,52 @@ model service_reminder_logs {
   @@unique([store_id, customer_id, product_id, source_order_id])
   @@index([store_id, status])
   @@map("service_reminder_logs")
+}
+
+/// F runtime procedural guidance. Global rows have NO tenant provenance.
+model ai_agent_recipes {
+  id Int @id @default(autoincrement())
+  identity_key String @unique @db.VarChar(64)
+  knowledge_scope String @db.VarChar(10)
+  store_id Int?
+  organization_id Int?
+  user_id Int?
+  recipe_key String @db.VarChar(160)
+  version String @db.VarChar(80)
+  template Json
+  content_hash String @db.VarChar(64)
+  status String @default("candidate") @db.VarChar(20)
+  source_trace_ids Json @default("[]")
+  source_objective_ids Json @default("[]")
+  source_evidence_refs Json @default("[]")
+  source_script_refs Json @default("[]")
+  review Json?
+  review_history Json @default("[]")
+  approved_at DateTime? @db.Timestamptz(6)
+  expires_at DateTime? @db.Timestamptz(6)
+  usage_count Int @default(0)
+  success_count Int @default(0)
+  failure_count Int @default(0)
+  invalidation_count Int @default(0)
+  last_failure_code String? @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  @@index([store_id,organization_id,user_id,status,expires_at], map: "ai_agent_recipes_owner_idx")
+  @@index([knowledge_scope,status,expires_at], map: "ai_agent_recipes_global_idx")
+}
+
+/// Private feedback even when recipe_id refers to a curated global recipe.
+model ai_agent_recipe_events {
+  id Int @id @default(autoincrement())
+  recipe_id Int
+  store_id Int
+  organization_id Int
+  user_id Int
+  objective_id String @db.Uuid
+  event_key String @unique @db.VarChar(64)
+  kind String @db.VarChar(16)
+  code String? @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  @@index([store_id,organization_id,user_id,objective_id],map:"ai_agent_recipe_events_owner_idx")
+  @@index([recipe_id,created_at],map:"ai_agent_recipe_events_recipe_idx")
 }

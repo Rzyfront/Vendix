@@ -12,6 +12,11 @@ import {
   TECHNICAL_KEY_LENGTHS,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
+import {
+  findActiveResolution,
+  findDormantInternalSeries,
+  lockResolutionSeries,
+} from './resolution-selection.util';
 import { RANGE_BOUND } from '../resolutions/dto/create-resolution.dto';
 
 type FiscalDocumentType =
@@ -36,22 +41,61 @@ type GenerateNextNumberOptions =
     };
 
 /**
- * Cuántos consecutivos se dan de alta —y se añaden al ampliar— en una serie
- * interna. No hay tope legal que respetar: el bloque existe solo para que el
- * `range_to` sea un número legible en pantalla y para que ampliar sea un evento
- * ocasional en el log, no uno por documento.
+ * `range_to` con el que se ABRE una serie interna. Es deliberadamente holgado:
+ * la autoampliación (`INTERNAL_SERIES_BLOCK`) queda como red de seguridad que
+ * casi nunca debería dispararse, y el comerciante jamás ve su numeración
+ * bloqueada ni un `range_to` que crezca de a poco. Sigue muy por debajo de
+ * `RANGE_BOUND`, así que no choca con el tope que valida el resto del sistema.
+ */
+export const INTERNAL_SERIES_INITIAL_RANGE = 10_000_000;
+
+/**
+ * Paso de la autoampliación de una serie interna: cuántos consecutivos se
+ * añaden al `range_to` cuando se agota. NO es el tamaño de apertura (ver
+ * {@link INTERNAL_SERIES_INITIAL_RANGE}); no hay tope legal que respetar, el
+ * bloque solo evita que ampliar sea un evento por documento.
  */
 export const INTERNAL_SERIES_BLOCK = 1000;
 
 /**
- * Vigencia que se le pone a una serie interna, en años.
+ * Años que se suman a `valid_from` para llenar `valid_to`.
  *
- * `valid_from`/`valid_to` existen porque una Autorización de Numeración DIAN
- * caduca. Una serie interna no caduca: ponerle un año haría que el consecutivo
- * de las notas se bloqueara solo el día del aniversario, que es exactamente el
- * bloqueo que este código existe para quitar.
+ * Una serie interna NO caduca: `valid_from`/`valid_to` existen porque una
+ * Autorización de Numeración DIAN sí lo hace, y ponerle un año real haría que el
+ * consecutivo de las notas se bloqueara solo el día del aniversario, que es
+ * exactamente el bloqueo que este código existe para quitar. `valid_to` es una
+ * columna NOT NULL, así que este valor (100 años) solo la llena con una fecha que en la
+ * práctica nunca llega.
  */
 export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
+
+/** Rótulo interno (no una autorización DIAN) de la serie con ese prefijo. */
+export const internalSeriesResolutionNumber = (prefix: string): string =>
+  `INTERNA-${prefix}`;
+
+/** `valid_to` de una serie interna abierta o reactivada en `now`. */
+export const internalSeriesValidTo = (now: Date): Date => {
+  const valid_to = new Date(now);
+  valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+  return valid_to;
+};
+
+/**
+ * Valores con los que se abre una serie interna NUEVA. Fuente única de verdad:
+ * la usan tanto `provisionInternalSeries` (emisión) como la vista previa de
+ * `InvoicingService.peekInternalSeries`, para que no puedan divergir.
+ */
+export const buildInternalSeriesDefaults = (prefix: string, now: Date) => ({
+  resolution_number: internalSeriesResolutionNumber(prefix),
+  prefix,
+  range_from: 1,
+  range_to: INTERNAL_SERIES_INITIAL_RANGE,
+  current_number: 0,
+  valid_from: now,
+  valid_to: internalSeriesValidTo(now),
+  is_active: true,
+  technical_key: null as string | null,
+});
 
 @Injectable()
 export class InvoiceNumberGenerator {
@@ -107,28 +151,14 @@ export class InvoiceNumberGenerator {
 
     const client = this.prisma.withoutScope();
     const updated = await client.$transaction(async (tx: any) => {
-      const lockKey = `invoice_resolution:${accounting_entity_id}:${document_type}`;
-      // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
-      // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
-      // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
-      await tx.$executeRawUnsafe(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        lockKey,
-      );
-
-      const where = {
-        accounting_entity_id,
-        document_type,
-        is_active: true,
-        valid_from: { lte: new Date() },
-        valid_to: { gte: new Date() },
-        ...(normalized.resolution_id && { id: normalized.resolution_id }),
-      };
+      await lockResolutionSeries(tx, { accounting_entity_id, document_type });
 
       const resolution =
-        (await tx.invoice_resolutions.findFirst({
-          where,
-          orderBy: { created_at: 'desc' },
+        (await findActiveResolution(tx, {
+          accounting_entity_id,
+          document_type,
+          now: new Date(),
+          resolution_id: normalized.resolution_id,
         })) ??
         (await this.provisionInternalSeries(tx, {
           accounting_entity_id,
@@ -381,12 +411,11 @@ export class InvoiceNumberGenerator {
     if (!prefix) return null;
 
     const now = new Date();
-    const valid_to = new Date(now);
-    valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+    const defaults = buildInternalSeriesDefaults(prefix, now);
 
-    const dormant = await tx.invoice_resolutions.findFirst({
-      where: { accounting_entity_id, document_type },
-      orderBy: { created_at: 'desc' },
+    const dormant = await findDormantInternalSeries(tx, {
+      accounting_entity_id,
+      document_type,
     });
 
     if (dormant) {
@@ -397,8 +426,41 @@ export class InvoiceNumberGenerator {
 
       return tx.invoice_resolutions.update({
         where: { id: dormant.id },
-        data: { is_active: true, valid_from: now, valid_to },
+        data: {
+          is_active: true,
+          valid_from: now,
+          valid_to: defaults.valid_to,
+        },
       });
+    }
+
+    // El prefijo por defecto puede estar ocupado por una serie ARCHIVADA (la
+    // búsqueda de arriba la excluye). Los únicos parciales `(entidad, prefijo,
+    // tipo)` no distinguen archivadas: crear aquí chocaría con P2002, y
+    // reactivarla reabriría `NC1`. Ninguna de las dos: se rechaza con un
+    // mensaje accionable y sin asignar numeración.
+    const occupying = await tx.invoice_resolutions.findFirst({
+      where: {
+        accounting_entity_id,
+        document_type,
+        prefix: defaults.prefix,
+      },
+      select: { id: true, archived_at: true },
+    });
+
+    if (occupying) {
+      const label = requirementsFor(document_type).label;
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_RESOLUTION_MISSING,
+        `La serie de «${label}» con prefijo ${defaults.prefix} está archivada y no se puede reabrir. ` +
+          'Crea una serie de notas nueva en Facturación → Resoluciones. No se asignó numeración.',
+        {
+          document_type,
+          document_label: label,
+          accounting_entity_id,
+          archived_resolution_id: occupying.id,
+        },
+      );
     }
 
     const created = await tx.invoice_resolutions.create({
@@ -410,24 +472,24 @@ export class InvoiceNumberGenerator {
         // Rótulo interno, no una autorización. Misma convención que
         // `ResolutionsService.resolveResolutionNumber`, que la eligió por lo
         // mismo: la columna es NOT NULL y no hay número DIAN que poner.
-        resolution_number: `INTERNA-${prefix}`,
+        resolution_number: defaults.resolution_number,
         resolution_date: now,
-        prefix,
-        range_from: 1,
-        range_to: INTERNAL_SERIES_BLOCK,
-        current_number: 0,
-        valid_from: now,
-        valid_to,
-        is_active: true,
+        prefix: defaults.prefix,
+        range_from: defaults.range_from,
+        range_to: defaults.range_to,
+        current_number: defaults.current_number,
+        valid_from: defaults.valid_from,
+        valid_to: defaults.valid_to,
+        is_active: defaults.is_active,
         // Sin ClTec: `accepts_technical_key: false`. Escribirle una haría que
         // `invoice-flow.service.ts` la inyectara y el CUDE se firmara con la
         // clave equivocada en vez de con el Software-PIN.
-        technical_key: null,
+        technical_key: defaults.technical_key,
       },
     });
 
     this.logger.log(
-      `Opened internal series ${prefix}1-${INTERNAL_SERIES_BLOCK} for ${document_type} ` +
+      `Opened internal series ${prefix}1-${INTERNAL_SERIES_INITIAL_RANGE} for ${document_type} ` +
         `(resolution #${created.id}, accounting entity ${accounting_entity_id})`,
     );
 

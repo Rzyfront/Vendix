@@ -10,6 +10,9 @@ import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { BullModule } from '@nestjs/bullmq';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import { DianConfigService } from '../../../store/invoicing/dian-config/dian-config.service';
+import { DianNumberingRangeService } from '../../../store/invoicing/dian-config/dian-numbering-range.service';
+import { InvoiceProviderModule } from '../../../store/invoicing/providers/invoice-provider.module';
 import { DianHabilitationScannerService } from '../../../store/invoicing/dian-config/dian-habilitation-scanner.service';
 
 @Module({
@@ -18,6 +21,8 @@ import { DianHabilitationScannerService } from '../../../store/invoicing/dian-co
     PrismaModule,
     S3Module,
     DianDirectModule,
+    // Exporta `FiscalProductionReadinessService`, que necesita `DianConfigService`.
+    InvoiceProviderModule,
     // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
     // `DianTestService` en sus providers, porque Nest instancia el servicio una
     // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
@@ -30,6 +35,10 @@ import { DianHabilitationScannerService } from '../../../store/invoicing/dian-co
     FiscalScopeService,
     ManualCertificateIssuerAdapter,
     DianTestService,
+    // Servicios de tienda reutilizados por los endpoints de readiness/rangos/
+    // promoción; la guarda de scope y propiedad vive en `OrgDianConfigService`.
+    DianConfigService,
+    DianNumberingRangeService,
     // Mismo servicio que la tienda: `AIEngineModule` es @Global, así que basta
     // declararlo como provider en cada módulo que lo inyecta.
     DianHabilitationScannerService,

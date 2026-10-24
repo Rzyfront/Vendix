@@ -44,12 +44,16 @@ import {
   CreatePlatformInvoiceDto,
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
+  RegisterPlatformInvoicePaymentDto,
   RetrySubscriptionFiscalDto,
   SubscriptionFiscalQueryDto,
   UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
+import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 
 /** Accepted by the resolution scanner; anything else is rejected before the AI. */
 const SCAN_ALLOWED_MIME_TYPES = [
@@ -69,6 +73,7 @@ export class SubscriptionFiscalController {
     private readonly responseService: ResponseService,
     private readonly resolutionScanner: ResolutionScannerService,
     private readonly aiScanJobService: AiScanJobService,
+    private readonly paymentsService: PlatformInvoicePaymentsService,
   ) {}
 
   @Get('status')
@@ -461,6 +466,44 @@ export class SubscriptionFiscalController {
     return this.responseService.success(data, 'Platform invoice detail retrieved');
   }
 
+  /** Pagos registrados de una factura de plataforma (más reciente primero). */
+  @Get('platform-invoices/:id/payments')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'List payments of a platform invoice' })
+  async listPlatformInvoicePayments(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const detail = await this.fiscalService.getPlatformInvoiceDetail(id);
+    if (!detail) {
+      throw new NotFoundException('Platform invoice not found');
+    }
+    return this.responseService.success(
+      detail.invoice.payments,
+      'Platform invoice payments retrieved',
+    );
+  }
+
+  /** Registra el cobro de una factura de plataforma (cartera). */
+  @Post('platform-invoices/:id/payments')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Register a payment against a platform invoice' })
+  async registerPlatformInvoicePayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegisterPlatformInvoicePaymentDto,
+  ): Promise<any> {
+    // El detalle valida entidad contable + organización de plataforma: un id
+    // ajeno responde 404 antes de tocar cartera.
+    const existing = await this.fiscalService.getPlatformInvoiceDetail(id);
+    if (!existing) {
+      throw new NotFoundException('Platform invoice not found');
+    }
+    const userId = RequestContextService.getUserId() ?? null;
+    await this.paymentsService.registerPayment(id, dto, userId);
+    const data = await this.fiscalService.getPlatformInvoiceDetail(id);
+    return this.responseService.success(data, 'Platform invoice payment registered');
+  }
+
   /**
    * XML firmado de la factura de plataforma. Ruta propia y no un campo del
    * detalle: el documento pesa entre 100 y 500 KB y el detalle se abre para
@@ -499,6 +542,16 @@ export class SubscriptionFiscalController {
     summary: 'Create a platform invoice (services not tied to subscription)',
   })
   async createPlatformInvoice(@Body() dto: CreatePlatformInvoiceDto): Promise<any> {
+    // Creación MANUAL: correo del adquiriente obligatorio (salvo consumidor
+    // final). Va en el controller y no en `createPlatformInvoice` porque ese
+    // método también lo invoca la fachada V1, que ya juzgó el correo efectivo
+    // (form → ficha del tenant) antes de llegar aquí.
+    assertManualAcquirerEmail({
+      email_candidates: [dto.customer?.email],
+      document_type: dto.customer?.document_type,
+      document_number: dto.customer?.tax_id,
+      name: dto.customer?.legal_name,
+    });
     const result = await this.fiscalService.createPlatformInvoice(dto);
     return this.responseService.created(result, 'Platform invoice created');
   }
@@ -511,6 +564,19 @@ export class SubscriptionFiscalController {
   ): Promise<any> {
     const data = await this.fiscalService.listResolutions(query);
     return this.responseService.success(data, 'Platform resolutions retrieved');
+  }
+
+  @Get('resolutions/in-use')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary: 'Resolution currently in use per document type (platform)',
+  })
+  async listResolutionsInUse(): Promise<any> {
+    const data = await this.fiscalService.listResolutionsInUse();
+    return this.responseService.success(
+      data,
+      'Platform resolutions in use retrieved',
+    );
   }
 
   /**
@@ -594,11 +660,24 @@ export class SubscriptionFiscalController {
   @HttpCode(HttpStatus.OK)
   @Permissions('superadmin:subscriptions:fiscal:write')
   @ApiOperation({
-    summary:
-      'Delete a pristine platform DIAN resolution (used ones must be deactivated)',
+    summary: 'Archive a platform DIAN resolution (no physical delete)',
   })
   async deleteResolution(@Param('id', ParseIntPipe) id: number): Promise<any> {
     const result = await this.fiscalService.deleteResolution(id);
-    return this.responseService.success(result, 'Platform resolution deleted');
+    return this.responseService.success(result, 'Platform resolution archived');
+  }
+
+  @Post('resolutions/:id/archive')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary: 'Archive a platform DIAN resolution (optional replacement series)',
+  })
+  async archiveResolution(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ArchiveResolutionDto,
+  ): Promise<any> {
+    const result = await this.fiscalService.archiveResolution(id, dto);
+    return this.responseService.success(result, 'Platform resolution archived');
   }
 }

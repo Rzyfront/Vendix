@@ -118,6 +118,18 @@ export class SplitAccountPaymentService {
     return { order, account };
   }
 
+  /** Keep lock ordering aligned with cash-session close: session before order. */
+  private async lockOpenCashSession(
+    tx: any,
+    sessionId: number,
+    storeId: number,
+  ): Promise<void> {
+    const rows =
+      await tx.$queryRaw`SELECT id FROM cash_register_sessions WHERE id = ${sessionId} AND store_id = ${storeId} AND status = 'open' FOR UPDATE`;
+    if (!rows.length)
+      this.reject('La sesión de caja cambió; vuelve a intentar el pago.');
+  }
+
   async pay(orderId: number, accountId: number, dto: SplitAccountPayDto) {
     const { store_id, user_id } = this.context();
     if (!user_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -196,6 +208,10 @@ export class SplitAccountPaymentService {
       : null;
     const reserved = await this.prisma
       .$transaction(async (tx: any) => {
+        // The cash close path locks the session before its orders. Preserve
+        // that order here to avoid a payment/close deadlock.
+        if (cashSession)
+          await this.lockOpenCashSession(tx, cashSession.id, store_id);
         const { order, account } = await this.lockedAccount(
           tx,
           orderId,
@@ -238,12 +254,6 @@ export class SplitAccountPaymentService {
         // original — después del replay por idempotencia, que no crea dinero
         // y por tanto no exige sesión.
         await this.sessions.assertSessionForSales(user_id);
-        if (cashSession) {
-          const open =
-            await tx.$queryRaw`SELECT id FROM cash_register_sessions WHERE id = ${cashSession.id} AND store_id = ${store_id} AND status = 'open' FOR UPDATE`;
-          if (!open.length)
-            this.reject('La sesión de caja cambió; vuelve a intentar el pago.');
-        }
         const method = await tx.store_payment_methods.findFirst({
           where: {
             id: dto.store_payment_method_id,
@@ -544,6 +554,10 @@ export class SplitAccountPaymentService {
       if (cashSessionId && !cashSession)
         this.reject('No se encuentra la caja original del pago.');
       const result = await this.prisma.$transaction(async (tx: any) => {
+        // Webhook/retry reconciliation can create the cash movement. Acquire
+        // and validate the original session lock before locking the order.
+        if (cashSession)
+          await this.lockOpenCashSession(tx, cashSession.id, store_id);
         const { order, account } = await this.lockedAccount(
           tx,
           payment.order_id,

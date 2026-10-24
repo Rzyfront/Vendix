@@ -380,6 +380,42 @@ export function createVexBlockTools({
             description:
               'Solo markdown: máximo de caracteres por fragmento (por defecto 3000). Puede devolver menos para mantener la respuesta acotada.',
           },
+          ...{
+            cursor: {
+              type: 'string',
+              maxLength: 400,
+              description:
+                'Cursor devuelto por este lector. Continúa la misma instantánea/proyección sin repetir consultas.',
+            },
+            columns: {
+              type: 'array',
+              maxItems: 32,
+              minItems: 1,
+              items: {
+                type: 'string',
+                pattern: '^[a-zA-Z_][a-zA-Z0-9_]{0,99}$',
+              },
+              description:
+                'Solo tabla: campos directos a devolver. No admite rutas, expresiones ni SQL.',
+            },
+            aggregate: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                field: {
+                  type: 'string',
+                  pattern: '^[a-zA-Z_][a-zA-Z0-9_]{0,99}$',
+                },
+                function: {
+                  type: 'string',
+                  enum: ['sum', 'avg', 'count', 'min', 'max'],
+                },
+              },
+              required: ['field', 'function'],
+              description:
+                'Solo tabla: resumen servidor de TODAS las filas guardadas, no solo la página.',
+            },
+          },
         },
         required: ['block_id'],
       },
@@ -398,6 +434,11 @@ export function createVexBlockTools({
                 args.text_limit === undefined
                   ? undefined
                   : Number(args.text_limit),
+              ...{
+                cursor: args.cursor,
+                columns: args.columns,
+                aggregate: args.aggregate,
+              },
             },
           );
           return JSON.stringify(

@@ -29,6 +29,29 @@ export const EMBEDDABLE_ENTITY_TYPES = [
  * exposes and the agent is told to use for "how do I" questions.
  */
 
+/** Same opts for every `embed` job, single or bulk. */
+const EMBED_JOB_OPTIONS = {
+  attempts: 2,
+  backoff: { type: 'exponential' as const, delay: 3000 },
+  removeOnComplete: { count: 500 },
+  removeOnFail: { count: 100 },
+};
+
+/** Searchable text of a product; shared by single and bulk indexing. */
+export function composeProductEmbeddingContent(parts: {
+  name: string;
+  description?: string | null;
+  category?: string | null;
+}): string {
+  return [
+    parts.name,
+    parts.description || '',
+    parts.category ? `Category: ${parts.category}` : '',
+  ]
+    .filter(Boolean)
+    .join('. ');
+}
+
 @Injectable()
 export class EmbeddingEventsListener {
   private readonly logger = new Logger(EmbeddingEventsListener.name);
@@ -66,6 +89,68 @@ export class EmbeddingEventsListener {
     category?: string;
   }) {
     await this.enqueueEmbedding(event, 'product', event.product_id);
+  }
+
+  /**
+   * One event per batch (bulk edit, bulk category/brand assignment). The products are
+   * re-read here, always filtered by the event's `store_id`, and queued with a single
+   * `addBulk`; the queue is what throttles the actual embedding work.
+   */
+  @OnEvent('products.bulk_updated')
+  async handleProductsBulkUpdated(event: {
+    store_id: number;
+    organization_id: number;
+    product_ids: number[];
+  }) {
+    try {
+      if (!event?.store_id || !event?.organization_id) return;
+      const ids = [...new Set(event.product_ids ?? [])];
+      if (ids.length === 0) return;
+
+      const products = await this.prisma.products.findMany({
+        where: {
+          store_id: event.store_id,
+          id: { in: ids },
+          state: { not: 'archived' },
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          product_categories: {
+            take: 1,
+            orderBy: { category_id: 'asc' },
+            select: { categories: { select: { name: true } } },
+          },
+        },
+      });
+
+      const jobs = products
+        .map((product) => ({
+          name: 'embed',
+          data: {
+            store_id: event.store_id,
+            organization_id: event.organization_id,
+            entity_type: 'product',
+            entity_id: product.id,
+            content: composeProductEmbeddingContent({
+              name: product.name,
+              description: product.description,
+              category: product.product_categories[0]?.categories?.name,
+            }),
+          },
+          opts: EMBED_JOB_OPTIONS,
+        }))
+        .filter((job) => job.data.content.trim());
+
+      if (jobs.length === 0) return;
+      await this.embeddingQueue.addBulk(jobs);
+      this.logger.log(`Enqueued ${jobs.length} product embeddings (bulk)`);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to enqueue bulk product embeddings: ${error?.message}`,
+      );
+    }
   }
 
   @OnEvent('product.deleted')
@@ -322,13 +407,7 @@ export class EmbeddingEventsListener {
     entityType: string,
     entityId: number,
   ): Promise<void> {
-    const content = [
-      event.name,
-      event.description || '',
-      event.category ? `Category: ${event.category}` : '',
-    ]
-      .filter(Boolean)
-      .join('. ');
+    const content = composeProductEmbeddingContent(event);
 
     try {
       await this.embeddingQueue.add(
@@ -340,12 +419,7 @@ export class EmbeddingEventsListener {
           entity_id: entityId,
           content,
         },
-        {
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 3000 },
-          removeOnComplete: { count: 500 },
-          removeOnFail: { count: 100 },
-        },
+        EMBED_JOB_OPTIONS,
       );
       this.logger.log(`Enqueued embedding for ${entityType}:${entityId}`);
     } catch (error: any) {

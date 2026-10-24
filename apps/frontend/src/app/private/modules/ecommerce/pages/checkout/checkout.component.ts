@@ -29,6 +29,7 @@ import {
   cartItemToLineView,
 } from '../../components/order-line-item/order-line-item.component';
 import { cartLineKey } from '../../utils/cart-line-key.util';
+import { sumGrossSubtotal } from '../../utils/gross-subtotal.util';
 import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -4033,19 +4034,24 @@ export class CheckoutComponent implements OnInit {
       subtotal?: number;
       tax_amount?: number;
       discount_amount?: number;
+      shipping_cost?: number;
+      subtotal_gross?: number;
       items?: Array<{
         name: string;
         variant_sku: string | null;
         quantity: number;
         total_price: number;
+        unit_price_gross?: number;
+        total_price_gross?: number;
+        cancelled_at?: string | null;
       }>;
     },
     /**
      * checkout-whatsapp-location-fallback: extends the message with the
      * pending-shipping context when the order was created via
      * `submitWhatsappFallbackOrder()`. Omitted (or `pendingShipping: false`)
-     * on the normal `?channel=whatsapp` flow — the message body is then
-     * byte-identical to before this parameter existed.
+     * on the normal `?channel=whatsapp` flow, where the message lists the gross
+     * lines, then `*Envío:*` / `*Descuento:*` when present, then the Total.
      */
     opts?: {
       pendingShipping: boolean;
@@ -4074,9 +4080,27 @@ export class CheckoutComponent implements OnInit {
     const itemLines = (order.items ?? [])
       .map(
         (i) =>
-          `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(Number(i.total_price))}`,
+          `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(Number(i.total_price_gross ?? i.total_price))}`,
       )
       .join('\n');
+    // Subtotal con impuesto incluido (lo que vio el cliente). Nunca neto.
+    const grossSubtotal =
+      order.subtotal_gross != null
+        ? Number(order.subtotal_gross)
+        : order.items?.length
+          ? sumGrossSubtotal(order.items)
+          : Number(order.subtotal ?? 0) + Number(order.tax_amount ?? 0);
+    const shippingCost = Number(order.shipping_cost ?? 0);
+    const discountAmount = Number(order.discount_amount ?? 0);
+    // Flujo normal: productos + envío − descuento = Total.
+    const totalsLines = opts?.pendingShipping
+      ? ''
+      : [
+          shippingCost > 0 ? `*Envío:* ${fmt(shippingCost)}` : '',
+          discountAmount > 0 ? `*Descuento:* -${fmt(discountAmount)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
     const guest = this.guest_checkout_data;
     const customerName =
       this.is_authenticated() || !guest
@@ -4100,8 +4124,8 @@ export class CheckoutComponent implements OnInit {
         : `Hola! Acabo de comprar en *${storeName}* 🛒`;
     // checkout-whatsapp-location-fallback: extra block with contact/address/
     // notes/pending-shipping totals, only when the order was created via the
-    // location fallback. Empty string when `opts` is omitted, so the message
-    // below is byte-identical to the pre-existing normal WhatsApp flow.
+    // location fallback. Empty string when `opts` is omitted; the normal flow
+    // then shows gross lines, `*Envío:*`/`*Descuento:*` and the Total.
     const pendingLines = opts?.pendingShipping
       ? [
           opts.contactName ? `*Cliente:* ${opts.contactName}` : '',
@@ -4118,15 +4142,8 @@ export class CheckoutComponent implements OnInit {
             : '',
           opts.notes ? `*Notas:* ${opts.notes}` : '',
           `*Envío:* por definir con la tienda`,
-          order.subtotal != null
-            ? `*Subtotal:* ${fmt(Number(order.subtotal))}`
-            : '',
-          order.tax_amount != null
-            ? `*Impuestos:* ${fmt(Number(order.tax_amount))}`
-            : '',
-          order.discount_amount
-            ? `*Descuento:* -${fmt(Number(order.discount_amount))}`
-            : '',
+          `*Subtotal:* ${fmt(grossSubtotal)}`,
+          discountAmount > 0 ? `*Descuento:* -${fmt(discountAmount)}` : '',
         ]
           .filter(Boolean)
           .join('\n')
@@ -4136,6 +4153,7 @@ export class CheckoutComponent implements OnInit {
         `*Pedido:* ${order.order_number}\n\n` +
         (itemLines ? `*Productos:*\n${itemLines}\n\n` : '') +
         (pendingLines ? `${pendingLines}\n\n` : '') +
+        (totalsLines ? `${totalsLines}\n\n` : '') +
         `${opts?.pendingShipping ? '*Total (sin envío):*' : '*Total:*'} ${fmt(Number(order.total))}\n\n` +
         (opts?.pendingShipping
           ? `*Motivo:* No pudimos ubicarme en el mapa\n\n`

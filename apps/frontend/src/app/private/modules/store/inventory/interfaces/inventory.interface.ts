@@ -335,7 +335,8 @@ export type AdjustmentType =
   | 'theft'
   | 'expiration'
   | 'count_variance'
-  | 'manual_correction';
+  | 'manual_correction'
+  | 'initial_load';
 
 export interface InventoryAdjustment {
   id: number;

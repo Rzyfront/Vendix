@@ -36,6 +36,12 @@ describe('InvoiceFlowService · desglose de tributos por línea', () => {
       new FiscalDocumentValidator(),
       {} as any,
       {} as any,
+      {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } as any,
     );
 
   /** Línea del payload UBL, con lo mínimo que `dianLineExtension` necesita. */

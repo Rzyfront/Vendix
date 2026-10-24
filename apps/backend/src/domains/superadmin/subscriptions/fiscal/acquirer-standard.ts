@@ -19,7 +19,7 @@
  *   - `label_hint`: 'razon_social' si NIT, 'nombre_completo' si cedula o
  *     pasaporte. El campo de "Nombre" del wizard lo usa para decidir que
  *     etiqueta mostrar (decision del producto 2026-08-26).
- *   - `person_type_resolved`: para cedula/pasaporte se fija en '1' (Natural)
+ *   - `person_type_resolved`: para cedula/pasaporte se fija en '2' (Natural)
  *     sin posibilidad de cambio; para NIT respeta lo registrado o exige
  *     seleccion si viene null. Es la decision del mismo bloque: selector
  *     explicito solo si NIT.
@@ -49,13 +49,32 @@ import { computeNitDv } from '../../../../common/utils/nit.util';
 /** Documentos que llevan DV en Colombia. Solo NIT, por ahora. */
 const DOCUMENT_TYPES_WITH_DV = new Set(['NIT', 'nit', '31']);
 
-/** Cedula y pasaporte: documento de persona natural, sin DV. */
+/**
+ * Documentos de persona natural, sin DV. Incluye los CÓDIGOS DIAN que emiten
+ * `PlatformTenantsService` y el form ('11' RC, '12' TI, '13' CC, '21' TE,
+ * '22' CE, '41' pasaporte, '42' doc. extranjero, '47' PEP, '48' PPT, '91'
+ * NUIP) además de las etiquetas legadas.
+ */
 const DOCUMENT_TYPES_NATURAL = new Set([
   'CC',
   'CE',
   'PA',
+  'TI',
+  'RC',
+  'PEP',
+  'PPT',
+  'DIE',
+  'NUIP',
+  '11',
+  '12',
   '13',
+  '21',
   '22',
+  '41',
+  '42',
+  '47',
+  '48',
+  '91',
   'pet',
   'cedula',
 ]);
@@ -71,6 +90,9 @@ export interface RawAcquirer {
     line?: string | null;
     city?: string | null;
     department_code?: string | null;
+    /** Código DANE del municipio — así lo expone `PlatformTenantsService`. */
+    city_code?: string | null;
+    /** Alias legado del código DANE. */
     municipality_code?: string | null;
   } | null;
   /**
@@ -105,7 +127,11 @@ export interface EnrichedAcquirer extends RawAcquirer {
   /** Etiqueta dinamica que el formulario debe usar para el campo "Nombre". */
   label_hint: AcquirerLabelHint;
 
-  /** Persona fijada/derivada ('1'=Natural, '2'=Juridica, `null`=indeterminado). */
+  /**
+   * Persona fijada/derivada en la convención DIAN de `cbc:AdditionalAccountID`
+   * que usa el emisor de plataforma: '1' = Jurídica, '2' = Natural, `null` =
+   * indeterminado.
+   */
   person_type_resolved: '1' | '2' | null;
 
   /** `true` si la direccion tiene codigo DANE de municipio (F.5). */
@@ -148,20 +174,26 @@ export function enrichAcquirerForStandard(raw: RawAcquirer): EnrichedAcquirer {
   const label_hint: AcquirerLabelHint = is_nit ? 'razon_social' : 'nombre_completo';
 
   // Persona:
-  //  - cedula/pasaporte -> SIEMPRE Natural ('1'), sin posibilidad de cambio
+  //  - cedula/pasaporte -> SIEMPRE Natural ('2' en la convención DIAN
+  //    AdditionalAccountID: 1 = Jurídica, 2 = Natural), sin posibilidad de
+  //    cambio. Antes se fijaba '1' (invertido: declaraba Jurídica).
   //  - NIT -> respetar lo registrado; si null, dejar null para que la UI exija
   let person_type_resolved: '1' | '2' | null;
   if (is_natural_doc) {
-    person_type_resolved = '1';
+    person_type_resolved = '2';
   } else if (is_nit) {
     person_type_resolved = person_type === '1' || person_type === '2' ? person_type : null;
   } else {
     person_type_resolved = person_type === '1' || person_type === '2' ? person_type : null;
   }
 
-  // Municipio DANE: la direccion trae codigo DANE en `address.municipality_code`.
+  // Municipio DANE: los tenants lo exponen como `address.city_code`
+  // (`municipality_code` queda como alias legado). Antes solo se leia el alias,
+  // que ningun tenant trae, y el panel F.5 se disparaba siempre.
   // Si no esta (solo nombre de ciudad), el panel F.5 se dispara para sanear.
-  const municipality_complete = Boolean(address?.municipality_code);
+  const municipality_complete = Boolean(
+    address?.city_code ?? address?.municipality_code,
+  );
 
   return {
     ...raw,

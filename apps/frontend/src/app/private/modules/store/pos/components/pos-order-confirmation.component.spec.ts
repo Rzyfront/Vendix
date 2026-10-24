@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Component, input, output, signal } from '@angular/core';
 import { of } from 'rxjs';
 import { Store } from '@ngrx/store';
@@ -22,6 +23,7 @@ class ModalStub {
   readonly showCloseButton = input(true);
   readonly title = input('');
   readonly subtitle = input('');
+  readonly dialog = input(false);
   readonly closed = output<void>();
 }
 
@@ -239,6 +241,53 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
       { id: 1, name: 'Producto Test', quantity: 1, unit_price: 50000, total_price: 50000, tax_amount: 7984 },
     ],
   };
+
+  // QUI-746: el modal de confirmación se expone como diálogo accesible.
+  it('abre el app-modal con dialog activado', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+
+    const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+    expect(modal.dialog()).toBe(true);
+  });
+
+  // QUI-833: el botón Email era un mock; se eliminó del modal.
+  it('no expone el botón Email', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+
+    expect((component as any).emailReceipt).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('[title="Enviar por Email"]')).toBeNull();
+  });
+
+  it('muestra Despachar para domicilio cobrado aunque no venga isShippingSale', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      ...sampleOrder,
+      state: 'processing',
+      delivery_type: 'home_delivery',
+    });
+    fixture.detectChanges();
+
+    expect(component.derivedIsShippingSale()).toBe(true);
+    expect(component.derivedModalTitle()).toBe('¡Pedido con Envío!');
+    expect(fixture.nativeElement.textContent).toContain('Despachar');
+  });
+
+  it('no muestra Despachar para un borrador de domicilio', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      ...sampleOrder,
+      state: 'draft',
+      delivery_type: 'home_delivery',
+    });
+    fixture.detectChanges();
+
+    expect(component.derivedIsShippingSale()).toBe(false);
+    expect(fixture.nativeElement.textContent).not.toContain('Despachar');
+  });
 
   it('1. Venta sin FE dispara auto-impresion inmediata', async () => {
     mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(true));

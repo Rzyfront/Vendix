@@ -8,6 +8,10 @@ import {
   Min,
   IsEnum,
   IsBoolean,
+  IsIn,
+  IsArray,
+  ArrayNotEmpty,
+  ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -132,4 +136,67 @@ export class BrandQueryDto {
   @IsOptional()
   @IsString()
   sort_order?: 'asc' | 'desc' = 'desc';
+}
+
+/** Tope de ids por request en la asignación masiva (vendix-bulk-operations). */
+export const MAX_ASSIGN_PRODUCT_IDS = 100;
+
+// Asignación en bloque de productos (máx. 100 por solicitud)
+export class AssignProductsDto {
+  @ApiProperty({
+    example: 'add',
+    enum: ['add', 'remove'],
+    description: 'Acción a aplicar: agregar o quitar los productos',
+  })
+  @IsIn(['add', 'remove'])
+  action: 'add' | 'remove';
+
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'IDs de los productos (máximo 100)',
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_ASSIGN_PRODUCT_IDS)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  product_ids: number[];
+}
+
+// Vista previa de asignación a una marca (no escribe nada)
+export class PreviewAssignProductsDto {
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'IDs de los productos (máximo 100)',
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_ASSIGN_PRODUCT_IDS)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  product_ids: number[];
+}
+
+export interface BrandMovedFrom {
+  brand_id: number;
+  brand_name: string;
+  count: number;
+}
+
+export interface AssignBrandProductsResult {
+  added: number;
+  removed: number;
+  unchanged: number;
+  moved_from_brands: BrandMovedFrom[];
+}
+
+export interface BrandProductIdsResult {
+  product_ids: number[];
+  total: number;
+}
+
+export interface BrandAssignPreviewResult {
+  already_in_brand: number;
+  without_brand: number;
+  to_move: Array<BrandMovedFrom & { product_ids: number[] }>;
 }

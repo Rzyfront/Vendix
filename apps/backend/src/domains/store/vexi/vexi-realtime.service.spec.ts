@@ -1,4 +1,7 @@
 import { VexiRealtimeService } from './vexi-realtime.service';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { ToolRouterService } from '../../../ai-engine/tools/tool-router.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 
 describe('VexiRealtimeService', () => {
   let service: VexiRealtimeService;
@@ -302,5 +305,1026 @@ describe('VexiRealtimeService', () => {
     it('truncates fractional seconds', () => {
       expect(ttl({ client_secret_ttl_seconds: 90.7 })).toBe(90);
     });
+  });
+});
+
+describe('VexiRealtimeService G session authority', () => {
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  const confirmationToken = '22222222-2222-4222-8222-222222222222';
+  const objectiveId = '33333333-3333-4333-8333-333333333333';
+  const context = {
+    user_id: 3,
+    organization_id: 2,
+    store_id: 1,
+    roles: ['owner'],
+    permissions: ['catalog:read', 'catalog:write'],
+    is_owner: true,
+    is_super_admin: false,
+  };
+  let savedFlag: string | undefined;
+  let savedRouting: string | undefined;
+  let service: VexiRealtimeService;
+  let registry: AIToolRegistry;
+  let consent: Record<string, jest.Mock>;
+  let authorityService: Record<string, jest.Mock>;
+  let handler: jest.Mock;
+  let preview: jest.Mock;
+  let read: jest.Mock;
+  let router: ToolRouterService;
+  let subscription: { consumeAIQuota: jest.Mock };
+  let session: any;
+  let authority: any;
+  const run = <T>(fn: () => T) =>
+    RequestContextService.runIsolated(context, fn);
+
+  beforeEach(() => {
+    handler = jest.fn().mockResolvedValue('{"applied":true}');
+    preview = jest.fn().mockResolvedValue({
+      status: 'ok',
+      target: 'Producto QA',
+      changes: [
+        { field: 'name', label: 'Nombre', before: 'Antes', after: 'Después' },
+      ],
+    });
+    read = jest.fn().mockResolvedValue('{"id":7,"name":"Producto QA"}');
+    registry = new AIToolRegistry({
+      issue: jest.fn().mockResolvedValue(confirmationToken),
+      redeem: jest.fn().mockResolvedValue('ok'),
+    } as any);
+    registry.registerMany([
+      {
+        name: 'read_product',
+        version: '1',
+        domain: 'products',
+        readOnly: true,
+        description: 'Leer',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'integer' } },
+          required: ['id'],
+        },
+        requiredPermissions: ['catalog:read'],
+        handler: read,
+      },
+      {
+        name: 'change_product',
+        version: '1',
+        domain: 'products',
+        requiresConfirmation: true,
+        description: 'Cambiar',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'integer' }, name: { type: 'string' } },
+          required: ['id', 'name'],
+        },
+        requiredPermissions: ['catalog:write'],
+        preview,
+        handler,
+      },
+      {
+        name: 'write_without_preview',
+        version: '1',
+        domain: 'products',
+        requiresConfirmation: true,
+        description: 'No preview',
+        parameters: { type: 'object', properties: {} },
+        handler,
+      },
+      {
+        name: 'unclassified',
+        version: '1',
+        domain: 'products',
+        description: 'No read flag',
+        parameters: { type: 'object', properties: {} },
+        handler,
+      },
+      {
+        name: 'ui_navigate',
+        version: '1',
+        domain: 'ui',
+        clientSide: true,
+        description: 'Navegar',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'propose_plan',
+        version: '1',
+        domain: 'planning',
+        readOnly: true,
+        description: 'Plan',
+        parameters: { type: 'object', properties: {} },
+        handler,
+      },
+      {
+        name: 'search_tools',
+        version: '1',
+        domain: 'discovery',
+        readOnly: true,
+        description: 'Buscar',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+        },
+        handler,
+      },
+      {
+        name: 'search_playbooks',
+        version: '1',
+        domain: 'playbooks',
+        readOnly: true,
+        description: 'Buscar procesos',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+        },
+        handler,
+      },
+      {
+        name: 'load_playbook',
+        version: '1',
+        domain: 'playbooks',
+        readOnly: true,
+        description: 'Leer proceso',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string' }, version: { type: 'string' } },
+          required: ['id', 'version'],
+        },
+        handler,
+      },
+    ]);
+    authority = {
+      conversation_id: 9,
+      agent_key: 'vexi',
+      objective_id: objectiveId,
+      step_id: 'plan:abc:1',
+      goal: 'Revisar producto QA',
+      plan: null,
+      authorizedDefinitions: registry.getAvailableDefinitions(
+        context.permissions,
+      ),
+    };
+    router = new ToolRouterService(registry, {
+      rank: jest.fn(async (_query, docs) => ({
+        names: docs.map((d) => d.name),
+        degraded: [],
+      })),
+    } as any);
+    session = {
+      sessionId,
+      conversationId: 9,
+      agentKey: 'vexi',
+      objectiveId,
+      stepId: authority.step_id,
+      userId: 3,
+      organizationId: 2,
+      storeId: 1,
+      expiresAt: Date.now() + 300000,
+      revision: 0,
+      playbookTokens: 0,
+      channel: 'realtime',
+      tools: registry
+        .getAll()
+        .map((tool) => ({ name: tool.name, version: tool.version })),
+      routing: router.createSession(authority.goal, 'initial'),
+    };
+    consent = {
+      createSession: jest.fn().mockResolvedValue({
+        session_id: sessionId,
+        expires_at: new Date(session.expiresAt).toISOString(),
+      }),
+      validateSession: jest.fn().mockImplementation(async (id: string) => {
+        const current = RequestContextService.asyncLocalStorage.getStore();
+        if (
+          id !== sessionId ||
+          current?.user_id !== session.userId ||
+          current?.organization_id !== session.organizationId ||
+          current?.store_id !== session.storeId ||
+          session.expiresAt <= Date.now()
+        )
+          throw new Error('session_unavailable');
+        return JSON.parse(JSON.stringify(session));
+      }),
+      updateSessionCatalog: jest
+        .fn()
+        .mockImplementation(
+          async (_id, tools, routing, revision, playbookTokens, binding) => {
+            if (revision !== session.revision)
+              throw new Error('session_changed');
+            session = {
+              ...session,
+              tools,
+              routing: routing ?? session.routing,
+              revision: revision + 1,
+              ...(binding ? { stepId: binding.stepId } : {}),
+              playbookTokens: playbookTokens ?? session.playbookTokens,
+            };
+            return session;
+          },
+        ),
+      registerProposal: jest.fn().mockResolvedValue({
+        session_id: sessionId,
+        proposal_id: 'public-proposal',
+        preview_hash: 'hash',
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      }),
+      closeSession: jest.fn().mockResolvedValue(undefined),
+      closeSessionForBilling: jest
+        .fn()
+        .mockImplementation(async (id: string) => {
+          const current = RequestContextService.asyncLocalStorage.getStore();
+          if (
+            id !== sessionId ||
+            current?.user_id !== session.userId ||
+            current?.store_id !== session.storeId ||
+            current?.organization_id !== session.organizationId ||
+            session.channel !== 'realtime'
+          )
+            throw new Error('session_unavailable');
+          return JSON.parse(JSON.stringify(session));
+        }),
+    };
+    authorityService = {
+      resolveAuthority: jest.fn().mockImplementation(async () => authority),
+      prepareAuthority: jest.fn().mockImplementation(async () => authority),
+      runAuthorized: jest
+        .fn()
+        .mockImplementation(async (fresh, callback) => callback(fresh)),
+      executePlanningTool: jest.fn().mockResolvedValue('{"ok":true}'),
+      recordResult: jest.fn().mockResolvedValue(undefined),
+    };
+    subscription = { consumeAIQuota: jest.fn().mockResolvedValue(undefined) };
+    service = new VexiRealtimeService(
+      {} as any,
+      {} as any,
+      registry,
+      subscription as any,
+      consent as any,
+      authorityService as any,
+      router,
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('rejects arbitrary legacy calls ON before any registry dispatch', async () => {
+    await expect(
+      run(() => service.executeToolCall('read_product', { id: 7 })),
+    ).rejects.toThrow('session not found');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('requires the owned conversation before any provider request', async () => {
+    const fetch = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('provider must not be called'));
+    await expect(run(() => service.createSession({}))).rejects.toThrow(
+      'Selecciona una conversación',
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(consent.createSession).not.toHaveBeenCalled();
+  });
+
+  it('creates a versioned server catalog and keeps provider expiry separate from session expiry', async () => {
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+        model_id: 'current-model',
+      },
+      instructions: 'Persona actual',
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test', expires_at: 123456 }),
+    } as Response);
+    const result = await run(() =>
+      service.createSession({ conversation_id: 9, agent_key: 'vexi' }),
+    );
+    expect(result).toMatchObject({
+      session_id: sessionId,
+      expires_at: 123456,
+      session_expires_at: new Date(session.expiresAt).toISOString(),
+      conversation_id: 9,
+      agent_key: 'vexi',
+      objective_id: objectiveId,
+      model: 'current-model',
+    });
+    expect(result.tools.map((tool) => tool.name)).toContain('change_product');
+    expect(result.tools.map((tool) => tool.name)).not.toContain(
+      'write_without_preview',
+    );
+    expect(result.tools.map((tool) => tool.name)).not.toContain('unclassified');
+    expect(consent.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 9,
+        agentKey: 'vexi',
+        objectiveId,
+        channel: 'realtime',
+        tools: expect.arrayContaining([
+          { name: 'change_product', version: '1' },
+        ]),
+      }),
+    );
+    expect(authorityService.prepareAuthority).toHaveBeenCalledWith(
+      9,
+      'vexi',
+      undefined,
+    );
+    expect(result.instructions).toContain('Persona actual');
+    expect(result.instructions).toContain('SOLO preparan una propuesta');
+    expect(result.instructions).not.toContain(confirmationToken);
+  });
+
+  it('keeps Vex UI out of a new grant independently of a misconfigured agent row', async () => {
+    authority.agent_key = 'vex';
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+      },
+      instructions: null,
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test' }),
+    } as Response);
+    const result = await run(() =>
+      service.createSession({ conversation_id: 9, agent_key: 'vex' }),
+    );
+    expect(result.tools.map((tool) => tool.name)).not.toContain('ui_navigate');
+  });
+
+  // Hard rule («el mecánico»): an AUTHORIZED tool the model calls without it
+  // being loaded is loaded into the session (CAS + session.update catalog) and
+  // runs in the same turn under the same gates; unauthorized stays a 404.
+  it('loads and runs an authorized unoffered read in the same turn, returning the new catalog', async () => {
+    session.tools = session.tools.filter(
+      (tool: any) => tool.name !== 'read_product',
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(consent.updateSessionCatalog).toHaveBeenCalledTimes(1);
+    expect(result.tools?.map((tool) => tool.name)).toContain('read_product');
+    expect(session.tools.map((tool: any) => tool.name)).toContain(
+      'read_product',
+    );
+    expect(session.routing.unloadedAuthorizedCalls).toBe(1);
+  });
+
+  it('L3: a routing session persisted by #934 (no loaded/used) loads the unoffered tool without a TypeError', async () => {
+    session.tools = session.tools.filter(
+      (tool: any) => tool.name !== 'read_product',
+    );
+    session.routing = {
+      query: authority.goal,
+      signature: 'legacy',
+      dependencies: [],
+      unloadedAuthorizedCalls: 0,
+    };
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.tools?.map((tool) => tool.name)).toContain('read_product');
+    expect(session.routing.loaded).toContain('read_product');
+    expect(session.routing.used).toContain('read_product');
+    expect(session.routing.unloadedAuthorizedCalls).toBe(1);
+  });
+
+  it('an authorized unoffered write only becomes a proposal (consent still required)', async () => {
+    session.tools = [];
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'Otro',
+      }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(result.proposal).toMatchObject({ proposal_id: 'public-proposal' });
+    expect(JSON.parse(result.output)).toMatchObject({ applied: false });
+    expect(result.tools?.map((tool) => tool.name)).toContain('change_product');
+  });
+
+  it.each([
+    ['vex', 'ui_navigate'],
+    ['vexi', 'ghost_tool'],
+  ])(
+    'still rejects an unoffered tool outside the %s voice scope (%s)',
+    async (agentKey, name) => {
+      session.tools = [];
+      session.agentKey = agentKey;
+      authority.agent_key = agentKey;
+      await expect(
+        run(() =>
+          service.executeSessionToolCall(sessionId, name, {
+            id: 7,
+            name: 'Otro',
+          }),
+        ),
+      ).rejects.toThrow('not offered');
+      expect(consent.updateSessionCatalog).not.toHaveBeenCalled();
+      expect(preview).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  it('voice routing uses the real agent_key (Vex by voice gets the Vex core)', async () => {
+    authority.agent_key = 'vex';
+    const create = jest.spyOn(router, 'createSession');
+    jest.spyOn(service as any, 'resolveVoiceSetup').mockResolvedValue({
+      config: {
+        sdk_type: 'openai_compatible',
+        api_key_ref: 'sk-test',
+        settings: {},
+      },
+      instructions: null,
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ephemeral-test' }),
+    } as Response);
+    await run(() =>
+      service.createSession({ conversation_id: 9, agent_key: 'vex' }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      [],
+      'vex',
+    );
+  });
+
+  it.each([{ user_id: 999 }, { organization_id: 999 }, { store_id: 999 }])(
+    'rejects another principal binding %j',
+    async (foreign) => {
+      await expect(
+        RequestContextService.runIsolated({ ...context, ...foreign }, () =>
+          service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+        ),
+      ).rejects.toThrow('session_unavailable');
+      expect(authorityService.resolveAuthority).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an expired or pipeline session', async () => {
+    session.expiresAt = Date.now() - 1;
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('session_unavailable');
+    session.expiresAt = Date.now() + 60000;
+    session.channel = 'pipeline';
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('session not found');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('rejects a changed release version before dispatch', async () => {
+    session.tools.find((tool: any) => tool.name === 'read_product').version =
+      'old';
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('Cambió la herramienta');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds current authority for each read and cannot retain revoked access', async () => {
+    await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    authority.authorizedDefinitions = [];
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('current voice scope');
+    expect(authorityService.resolveAuthority).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the real registry under narrowed explicit ALS rather than the request role fallback', async () => {
+    authorityService.runAuthorized.mockImplementation(async (fresh, callback) =>
+      RequestContextService.runIsolated(
+        { ...context, permissions: [], roles: [] },
+        () => callback(fresh),
+      ),
+    );
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('Insufficient permissions');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(['objective_id', 'step_id'])(
+    'rejects changed durable %s',
+    async (key) => {
+      authority[key] = 'another';
+      await expect(
+        run(() =>
+          service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+        ),
+      ).rejects.toThrow('Cambió el objetivo');
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it('creates an exact proposal through the real registry without mutating or exposing its token to the model', async () => {
+    const execute = jest.spyOn(registry, 'executeTool');
+    const args = {
+      id: 7,
+      name: 'Después',
+      confirmation_token: confirmationToken,
+    };
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', args),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith('change_product', args, {
+      proposalOnly: true,
+      conversationId: 9,
+    });
+    expect(result.proposal).toMatchObject({
+      proposal_id: 'public-proposal',
+      arguments: args,
+    });
+    expect(result.proposal?.confirmation_token).toBeUndefined();
+    expect(result.output).not.toContain(confirmationToken);
+    expect(result.output).not.toContain('confirmation_token');
+    expect(JSON.parse(result.output)).toMatchObject({
+      status: 'pending_confirmation',
+      applied: false,
+    });
+    expect(consent.registerProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: 'change_product',
+        toolVersion: '1',
+        arguments: args,
+        confirmationToken,
+      }),
+    );
+  });
+
+  it('new arguments or repeated voice calls never redeem a browser-supplied token', async () => {
+    await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'A',
+        confirmation_token: confirmationToken,
+      }),
+    );
+    await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'B',
+        confirmation_token: confirmationToken,
+      }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(consent.registerProposal).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists the same single-step Vex approval identity before registering voice consent', async () => {
+    session.agentKey = 'vex';
+    authority.agent_key = 'vex';
+    const plans = {
+      persistVoiceWriteProposal: jest
+        .fn()
+        .mockResolvedValue({ planId: 'approval-plan', stepId: 's1' }),
+    };
+    service = new VexiRealtimeService(
+      {} as any,
+      {} as any,
+      registry,
+      subscription as any,
+      consent as any,
+      authorityService as any,
+      router,
+      undefined,
+      undefined,
+      plans as any,
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'Después',
+      }),
+    );
+    expect(plans.persistVoiceWriteProposal).toHaveBeenCalledWith(
+      9,
+      'change_product',
+      { id: 7, name: 'Después' },
+      await preview.mock.results[0].value,
+    );
+    expect(consent.registerProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: 'approval-plan',
+        actionLabel: 'cambiar Producto QA Nombre',
+      }),
+    );
+    expect(result.proposal).toMatchObject({
+      plan_id: 'approval-plan',
+      step_id: 's1',
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it.each(['write_without_preview', 'unclassified'])(
+    'does not offer/execute unsafe %s classifications',
+    async (name) => {
+      await expect(
+        run(() => service.executeSessionToolCall(sessionId, name, {})),
+      ).rejects.toThrow('current voice scope');
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses Vex UI even if a forged stored catalog includes it', async () => {
+    session.agentKey = 'vex';
+    authority.agent_key = 'vex';
+    await expect(
+      run(() => service.executeSessionToolCall(sessionId, 'ui_navigate', {})),
+    ).rejects.toThrow('current voice scope');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('authorizes Vexi UI without falsely reporting that it ran', async () => {
+    const execute = jest.spyOn(registry, 'executeTool');
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'ui_navigate', {}),
+    );
+    expect(result.ui_authorized).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({
+      status: 'ui_authorized',
+      applied: false,
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid arguments away from registry preview and mutation', async () => {
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', { id: 7 }),
+    );
+    expect(JSON.parse(result.output).error_code).toBe('INVALID_ARGS');
+    expect(preview).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('keeps an impossible preview out of consent registration', async () => {
+    preview.mockResolvedValue({
+      status: 'error',
+      target: 'Producto QA',
+      message: 'No existe',
+    });
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'change_product', {
+        id: 7,
+        name: 'X',
+      }),
+    );
+    expect(result.proposal).toBeUndefined();
+    expect(JSON.parse(result.output)).toMatchObject({
+      status: 'blocked',
+      applied: false,
+    });
+    expect(consent.registerProposal).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes secret-bearing structured read output before the provider and D1 checkpoint', async () => {
+    read.mockResolvedValue(
+      JSON.stringify({
+        id: 7,
+        confirmation_token: confirmationToken,
+        nested: {
+          client_secret: 'secret',
+          expected_phrase: 'nonce spoken',
+          value: 2,
+        },
+      }),
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(JSON.parse(result.output)).toEqual({ id: 7, nested: { value: 2 } });
+    expect(authorityService.recordResult).toHaveBeenCalledWith(
+      authority,
+      'read_product',
+      { id: 7 },
+      result.output,
+      undefined,
+    );
+  });
+
+  it('fails closed rather than returning the original unsanitized deeply nested output', async () => {
+    let nested: any = { confirmation_token: confirmationToken };
+    for (let i = 0; i < 80; i++) nested = { child: nested };
+    read.mockResolvedValue(JSON.stringify(nested));
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(JSON.parse(result.output).error_code).toBe(
+      'VOICE_OUTPUT_UNAVAILABLE',
+    );
+    expect(result.output).not.toContain(confirmationToken);
+  });
+
+  it('pins conversation args before registry dispatch', async () => {
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', {
+          id: 7,
+          conversation_id: 99,
+        }),
+      ),
+    ).rejects.toThrow('conversation not found');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('uses the same planning hook and never a stateless registry planning stub', async () => {
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'propose_plan', {}),
+    );
+    expect(result.output).toBe('{"ok":true}');
+    expect(authorityService.executePlanningTool).toHaveBeenCalledWith(
+      authority,
+      'propose_plan',
+      {},
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('rebinds the current step after planning so a second tool works in the same live session', async () => {
+    authority.step_id = null;
+    session.stepId = null;
+    const expiresAt = session.expiresAt;
+    authorityService.executePlanningTool.mockImplementation(async () => {
+      authority = { ...authority, step_id: 'plan:abc:1' };
+      return '{"ok":true}';
+    });
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'propose_plan', {}),
+    );
+    expect(result.tools).toBeDefined();
+    expect(session.stepId).toBe('plan:abc:1');
+    expect(session.revision).toBe(1);
+    expect(session.expiresAt).toBe(expiresAt);
+    expect(session.objectiveId).toBe(objectiveId);
+    await run(() =>
+      service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+  it('does not auto-rebind an externally changed step', async () => {
+    authority.step_id = 'plan:other:2';
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('Cambió el objetivo o el paso');
+    expect(consent.updateSessionCatalog).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('fails closed on a concurrent session CAS while planning advances the step', async () => {
+    authorityService.executePlanningTool.mockImplementation(async () => {
+      authority = { ...authority, step_id: 'plan:abc:2' };
+      return '{"ok":true}';
+    });
+    consent.updateSessionCatalog.mockRejectedValue(
+      new Error('session_changed'),
+    );
+    await expect(
+      run(() => service.executeSessionToolCall(sessionId, 'propose_plan', {})),
+    ).rejects.toThrow('session_changed');
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('uses the existing router and CAS-swaps only currently authorized definitions', async () => {
+    jest.spyOn(router, 'search').mockResolvedValue('{"expanded":true}');
+    jest.spyOn(router, 'select').mockResolvedValue({
+      definitions: authority.authorizedDefinitions.filter(
+        (d: any) => d.function.name === 'read_product',
+      ),
+      operationalCount: 1,
+      coreCount: 0,
+      loadedCount: 1,
+      retrievalSource: 'lexical',
+      degraded: [],
+      catalogHash: 'hash',
+    });
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'search_tools', {
+        query: 'read_product',
+      }),
+    );
+    expect(result.tools?.map((tool) => tool.name)).toEqual(['read_product']);
+    expect(consent.updateSessionCatalog).toHaveBeenCalledWith(
+      sessionId,
+      [{ name: 'read_product', version: '1' }],
+      expect.any(Object),
+      0,
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('loads C through its scoped session with shared D1 pins and persists a bounded Redis budget', async () => {
+    const handle = { session_kind: 'playbook-turn' };
+    const pins = [
+      { id: 'inventory-replenishment', version: '1', hash: 'hash' },
+    ];
+    const value = {
+      id: 'inventory-replenishment',
+      version: '1',
+      hash: 'hash',
+      section: { id: 'prepare', body: 'Guía curada', steps: [] },
+    };
+    const playbooks = {
+      createSession: jest.fn().mockReturnValue(handle),
+      refreshAuthorization: jest.fn(),
+      load: jest.fn().mockReturnValue(value),
+      getActiveToolDependencies: jest.fn().mockReturnValue(['read_product']),
+      searchHybrid: jest.fn(),
+    };
+    const objectives = { listPlaybookPins: jest.fn().mockResolvedValue(pins) };
+    service = new VexiRealtimeService(
+      {} as any,
+      {} as any,
+      registry,
+      subscription as any,
+      consent as any,
+      authorityService as any,
+      router,
+      playbooks as any,
+      objectives as any,
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'load_playbook', {
+        id: 'inventory-replenishment',
+        version: '1',
+      }),
+    );
+    expect(JSON.parse(result.output)).toEqual(value);
+    expect(playbooks.createSession).toHaveBeenCalledWith({
+      scope: { store_id: 1, organization_id: 2, user_id: 3 },
+      authorizedDefinitions: expect.any(Array),
+      activePins: pins,
+    });
+    expect(objectives.listPlaybookPins).toHaveBeenCalledWith(objectiveId);
+    expect(consent.updateSessionCatalog).toHaveBeenCalledWith(
+      sessionId,
+      expect.any(Array),
+      expect.objectContaining({ dependencies: ['read_product'] }),
+      0,
+      Buffer.byteLength(JSON.stringify(value)),
+    );
+    expect(authorityService.recordResult).toHaveBeenCalledWith(
+      authority,
+      'load_playbook',
+      { id: 'inventory-replenishment', version: '1' },
+      result.output,
+      undefined,
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('does not reset the persisted playbook budget on a worker-local handle miss', async () => {
+    session.playbookTokens = 1999;
+    const playbooks = {
+      createSession: jest
+        .fn()
+        .mockReturnValue({ session_kind: 'playbook-turn' }),
+      refreshAuthorization: jest.fn(),
+      load: jest.fn().mockReturnValue({ section: { body: 'No budget reset' } }),
+      getActiveToolDependencies: jest.fn(),
+    };
+    service = new VexiRealtimeService(
+      {} as any,
+      {} as any,
+      registry,
+      subscription as any,
+      consent as any,
+      authorityService as any,
+      router,
+      playbooks as any,
+      { listPlaybookPins: jest.fn().mockResolvedValue([]) } as any,
+    );
+    const result = await run(() =>
+      service.executeSessionToolCall(sessionId, 'load_playbook', {
+        id: 'inventory-replenishment',
+        version: '1',
+      }),
+    );
+    expect(JSON.parse(result.output).error_code).toBe(
+      'PLAYBOOK_BUDGET_EXHAUSTED',
+    );
+    expect(result.output).not.toContain('No budget reset');
+    expect(consent.updateSessionCatalog).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a playbook response after a stale catalog CAS', async () => {
+    const playbooks = {
+      createSession: jest
+        .fn()
+        .mockReturnValue({ session_kind: 'playbook-turn' }),
+      refreshAuthorization: jest.fn(),
+      load: jest.fn().mockReturnValue({ id: 'doc' }),
+      getActiveToolDependencies: jest.fn().mockReturnValue([]),
+    };
+    service = new VexiRealtimeService(
+      {} as any,
+      {} as any,
+      registry,
+      subscription as any,
+      consent as any,
+      authorityService as any,
+      router,
+      playbooks as any,
+      { listPlaybookPins: jest.fn().mockResolvedValue([]) } as any,
+    );
+    consent.updateSessionCatalog.mockRejectedValue(
+      new Error('session_changed'),
+    );
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'load_playbook', {
+          id: 'inventory-replenishment',
+          version: '1',
+        }),
+      ),
+    ).rejects.toThrow('session_changed');
+    expect(authorityService.recordResult).not.toHaveBeenCalled();
+  });
+
+  it('uses a stable server session id when closing the billing loop', async () => {
+    await run(() => service.closeSession(sessionId, 13));
+    expect(subscription.consumeAIQuota).toHaveBeenCalledWith(
+      1,
+      'realtime_voice',
+      13,
+      `vexi-voice-${sessionId}`,
+    );
+    expect(consent.closeSessionForBilling).toHaveBeenCalledWith(sessionId);
+    expect(consent.closeSession).not.toHaveBeenCalled();
+  });
+
+  it('allows a scoped late billing close without reviving expired tool authority', async () => {
+    session.expiresAt = Date.now() - 1;
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toThrow('session_unavailable');
+    await run(() => service.closeSession(sessionId, 300));
+    expect(subscription.consumeAIQuota).toHaveBeenCalledWith(
+      1,
+      'realtime_voice',
+      300,
+      `vexi-voice-${sessionId}`,
+    );
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('does not charge twice after the core atomic close has been consumed', async () => {
+    consent.closeSessionForBilling
+      .mockResolvedValueOnce(session)
+      .mockRejectedValueOnce(new Error('session_unavailable'));
+    await run(() => service.closeSession(sessionId, 10));
+    await expect(
+      run(() => service.closeSession(sessionId, 10)),
+    ).rejects.toThrow('session_unavailable');
+    expect(subscription.consumeAIQuota).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not charge a foreign or pipeline session through the realtime close', async () => {
+    await expect(
+      RequestContextService.runIsolated({ ...context, store_id: 999 }, () =>
+        service.closeSession(sessionId, 10),
+      ),
+    ).rejects.toThrow('session_unavailable');
+    session.channel = 'pipeline';
+    await expect(
+      run(() => service.closeSession(sessionId, 10)),
+    ).rejects.toThrow('session_unavailable');
+    expect(subscription.consumeAIQuota).not.toHaveBeenCalled();
   });
 });

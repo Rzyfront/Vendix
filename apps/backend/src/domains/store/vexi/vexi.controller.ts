@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Logger,
+  Optional,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   UploadedFile,
@@ -25,15 +27,35 @@ import {
 } from '../subscriptions/guards/ai-access.guard';
 import { ApplyConfirmationDto } from './dto/apply-confirmation.dto';
 import { UiResultDto, UploadAttachmentDto } from './dto/ui-result.dto';
-import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
+import { VexiSurfaceEnabledGuard } from './guards/vexi-surface-enabled.guard';
+import { VexiVoiceConfirmationService } from './vexi-voice-confirmation.service';
+import {
+  VoiceConsentProposal,
+  VoiceConsentAudit,
+} from './vexi-voice-consent.service';
+import {
+  CreateVoiceConsentSessionDto,
+  VoiceConsentChallengeDto,
+  ConsumeVoiceConsentDto,
+  ApplyVoiceConsentProposalDto,
+  CloseVoiceConsentSessionDto,
+} from './dto/voice-consent.dto';
 import { VexiAttachmentsService } from './vexi-attachments.service';
 import { VexiUiChannelService } from './vexi-ui-channel.service';
 import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
 import { VexiSpeechService } from './vexi-speech.service';
 import { VexiPlanStateService } from './vexi-plan-state.service';
+import {
+  clientSafeReceipt,
+  USER_NOTICES,
+} from '../../../ai-engine/agent-execution.contract';
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  ResumeAgentObjectiveDto,
+  RejectAgentObjectiveProposalDto,
+} from './dto/resume-agent-objective.dto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
 /**
@@ -52,7 +74,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
  * omissions.
  */
 @Controller('store/vexi')
-@UseGuards(RolesGuard, VexiEnabledGuard)
+@UseGuards(RolesGuard, VexiSurfaceEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class VexiController {
   private readonly logger = new Logger(VexiController.name);
@@ -69,6 +91,8 @@ export class VexiController {
     private readonly embeddingBackfill: EmbeddingBackfillService,
     private readonly speech: VexiSpeechService,
     private readonly planState: VexiPlanStateService,
+    @Optional()
+    private readonly voiceConfirmations?: VexiVoiceConfirmationService,
   ) {}
 
   /**
@@ -105,12 +129,78 @@ export class VexiController {
    * `StoreOperationsGuard`, which gates every write under `/api/store/**`.
    */
   @Post('confirmations/apply')
-  async applyConfirmation(@Body() dto: ApplyConfirmationDto) {
-    const output = await this.toolRegistry.executeTool(
-      dto.tool,
-      dto.arguments as Record<string, any>,
-      { confirmationToken: dto.confirmation_token },
+  async applyConfirmation(
+    @Body() dto: ApplyConfirmationDto,
+    voice?: {
+      proposal: Readonly<VoiceConsentProposal>;
+      audit?: VoiceConsentAudit;
+    },
+  ) {
+    if (voice) await this.voiceConfirmations!.validate(voice.proposal);
+    const voiceEffectStepId = voice
+      ? await this.voiceConfirmations!.effectStepId(voice.proposal)
+      : undefined;
+    const execution = await this.planState.applyDurableEffect(
+      {
+        conversationId: dto.conversation_id,
+        ...(voiceEffectStepId && { stepId: voiceEffectStepId }),
+        ...(voice?.audit && { consent: voice.audit }),
+        tool: dto.tool,
+        args: dto.arguments,
+      },
+      () => {
+        const dispatch = () =>
+          this.toolRegistry.executeTool(
+            dto.tool,
+            dto.arguments as Record<string, any>,
+            {
+              confirmationToken: dto.confirmation_token,
+              ...(voice && { expectedPreviewHash: voice.proposal.previewHash }),
+            },
+          );
+        return voice
+          ? this.voiceConfirmations!.runAuthorized(voice.proposal, dispatch)
+          : dispatch();
+      },
     );
+    const { output, result } = execution;
+    if (
+      result &&
+      (result.status !== 'ok' || result.effect_status !== 'applied')
+    ) {
+      const uncertain =
+        result.status === 'unknown_effect' ||
+        result.effect_status !== 'not_applied';
+      // `next_action` is guidance for the model; the bubble, the voice and the
+      // plan step show a catalog line (same boundary as vex.controller).
+      const notice = uncertain
+        ? USER_NOTICES.unknown_effect
+        : USER_NOTICES.apply_failed;
+      // Voice shares the click path's persisted semantic outcome, not just its
+      // successful receipt sink. No applied activity/quota/narration below.
+      const voicePlanState = voice
+        ? await this.voiceConfirmations!.recordResult(voice.proposal, {
+            outcome: uncertain ? 'unknown' : 'failed',
+            error: notice,
+          })
+        : null;
+      return this.responseService.success(
+        {
+          tool: dto.tool,
+          output,
+          summary: notice,
+          execution: clientSafeReceipt(result),
+          ...(voice?.proposal.agentKey === 'vex' && {
+            step_status: uncertain ? 'unknown' : 'failed',
+            plan_status: uncertain ? 'unknown_effect' : 'partially_applied',
+            ...(voicePlanState && typeof voicePlanState === 'object'
+              ? voicePlanState
+              : {}),
+          }),
+        },
+        'Resultado pendiente de verificación',
+      );
+    }
 
     // Recorded HERE and not in the agent loop, because this is the only place an
     // applied write exists. The loop persists the PROPOSAL; the approval arrives on
@@ -121,6 +211,7 @@ export class VexiController {
       tool: dto.tool,
       args: dto.arguments,
       output,
+      ...(voice?.proposal.agentKey === 'vex' && { agent_key: 'vex' }),
     });
 
     // The sentence the tool wrote about its own change, which is what the person
@@ -152,6 +243,11 @@ export class VexiController {
       conversationId: dto.conversation_id,
       summary,
     });
+    const voicePlanState = voice
+      ? await this.voiceConfirmations!.recordResult(voice.proposal, {
+          outcome: 'applied',
+        })
+      : null;
 
     // Voice mode only. A spoken approval that answers only in writing leaves the
     // person waiting for a reply they were never going to hear, which is exactly
@@ -166,11 +262,17 @@ export class VexiController {
       // La moneda va también acá porque el resumen de una escritura es
       // justamente donde aparecen los montos: "subí el precio de la Coca a
       // $3.500" es el caso típico de este camino, no la excepción.
-      const [params, currency] = await Promise.all([
-        this.speech.resolveParams(),
-        this.speech.resolveCurrency(),
-      ]);
-      audio = await this.speech.synthesize(summary, params, currency);
+      try {
+        const [params, currency] = await Promise.all([
+          this.speech.resolveParams(),
+          this.speech.resolveCurrency(),
+        ]);
+        audio = await this.speech.synthesize(summary, params, currency);
+      } catch {
+        this.logger.warn(
+          'El cambio quedó aplicado; el acuse de voz no está disponible.',
+        );
+      }
     }
 
     return this.responseService.success(
@@ -178,12 +280,100 @@ export class VexiController {
         tool: dto.tool,
         output,
         summary,
+        ...(result && { execution: result }),
+        ...(voicePlanState && typeof voicePlanState === 'object'
+          ? voicePlanState
+          : {}),
         ...(audio && {
           audio_base64: audio.audioBase64,
           content_type: audio.contentType,
         }),
       },
       'Cambio aplicado',
+    );
+  }
+
+  // G endpoints choose the agent toggle from the server-bound conversation.
+  @Get('voice/confirmations/capability')
+  voiceConsentCapability() {
+    return this.responseService.success(this.voiceConfirmations!.capability());
+  }
+
+  @Post('voice/confirmations/session')
+  async createVoiceConsentSession(@Body() dto: CreateVoiceConsentSessionDto) {
+    return this.responseService.success(
+      await this.voiceConfirmations!.session(dto),
+    );
+  }
+
+  @Post('voice/confirmations/transcribe')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('realtime_voice')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 1024 * 1024, files: 1 } }),
+  )
+  async transcribeAgentVoice(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: CreateVoiceConsentSessionDto,
+  ) {
+    return this.responseService.success(
+      await this.voiceConfirmations!.transcribeTurn(dto, file),
+    );
+  }
+
+  @Post('voice/confirmations/challenge')
+  async createVoiceConsentChallenge(@Body() dto: VoiceConsentChallengeDto) {
+    return this.responseService.success(
+      await this.voiceConfirmations!.challenge(dto),
+    );
+  }
+
+  @Post('voice/confirmations/consent')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('realtime_voice')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async consentVoiceProposal(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: ConsumeVoiceConsentDto,
+  ) {
+    return this.voiceConfirmations!.consentAudio(dto, file, (proposal, audit) =>
+      this.applyConfirmation(
+        {
+          tool: proposal.tool,
+          arguments: proposal.arguments,
+          confirmation_token: proposal.confirmationToken,
+          conversation_id: proposal.conversationId,
+          speak: dto.speak === true,
+        },
+        { proposal, audit },
+      ),
+    );
+  }
+
+  @Post('voice/confirmations/apply')
+  async applyVoiceProposalWithClick(@Body() dto: ApplyVoiceConsentProposalDto) {
+    return this.voiceConfirmations!.applyClick(dto, (proposal) =>
+      this.applyConfirmation(
+        {
+          tool: proposal.tool,
+          arguments: proposal.arguments,
+          confirmation_token: proposal.confirmationToken,
+          conversation_id: proposal.conversationId,
+          speak: dto.speak === true,
+        },
+        { proposal },
+      ),
+    );
+  }
+
+  @Post('voice/confirmations/cancel')
+  async cancelVoiceConsent(@Body() dto: CloseVoiceConsentSessionDto) {
+    return this.responseService.success(
+      await this.voiceConfirmations!.cancel(dto.session_id),
     );
   }
 
@@ -320,6 +510,44 @@ export class VexiController {
       'Capacidades de Vexi para este usuario',
     );
   }
+
+  /** Progress only. No route below starts inference or changes the work budget. */
+  @Get('objectives/:id')
+  async getObjective(@Param('id', ParseUUIDPipe) id: string) {
+    return this.responseService.success(
+      await this.planState.getObjectiveProgress(id),
+      'Estado del objetivo',
+    );
+  }
+
+  @Post('objectives/:id/resume')
+  async resumeObjective(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResumeAgentObjectiveDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.resumeObjective(id, {
+        expected_version: dto.expected_version,
+        allow_expired: dto.confirm_expired === true,
+      }),
+      'Objetivo seleccionado; requiere revalidación antes de continuar',
+    );
+  }
+
+  @Post('objectives/:id/reject-proposal')
+  async rejectObjectiveProposal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectAgentObjectiveProposalDto,
+  ) {
+    return this.responseService.success(
+      await this.planState.rejectObjectiveProposal(id, dto.expected_version),
+      'Propuesta rechazada; no se aplicó ningún cambio',
+    );
+  }
+
+  // `GET objectives/:id/results` y `.../results/:resultId` viven en
+  // `VexiObjectiveResultsController`: el @Roles de esta clase le negaba al
+  // cajero la lectura de sus propios artefactos (ver ese archivo).
 
   /** State of a background task, for the panel's task strip. */
   @Get('tasks/:id')

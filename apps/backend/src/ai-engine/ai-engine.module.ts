@@ -1,3 +1,16 @@
+import { ProceduralMemoryService } from './memory/procedural-memory.service';
+import { RecipeQualityService } from './memory/recipe-quality.service';
+import { RecipeRepository } from './memory/recipe.repository';
+import { RecipeMinerProcessor } from './memory/recipe-miner.processor';
+
+import { createProceduralRecipeTools } from './tools/domains/recipe.tools';
+import { AgentVerifierService } from './tasks/agent-verifier.service';
+import { SandboxBrokerService } from './sandbox/sandbox-broker.service';
+import { SandboxClientService } from './sandbox/sandbox-client.service';
+import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
+import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
+
+import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -5,9 +18,17 @@ import { ApiCatalogService } from './tools/bridge/api-catalog.service';
 import { createApiBridgeTools } from './tools/bridge/api-bridge.tools';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
+import { AgentTraceService } from './observability/agent-trace.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
+import { ToolRouterService } from './tools/tool-router.service';
+import { ToolCatalogIndexerService } from './tools/tool-catalog-indexer.service';
+import { createDiscoveryTools } from './tools/domains/discovery.tools';
+import { PlaybookLoaderService } from './playbooks/playbook-loader.service';
+import { PlaybookService } from './playbooks/playbook.service';
+import { createPlaybookTools } from './tools/domains/playbook.tools';
+
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { createSearchTools } from './tools/domains/search.tools';
 import { uiTools } from './tools/domains/ui.tools';
@@ -24,6 +45,10 @@ import { createCapabilityTools } from './tools/bridge/capability.tools';
 import { createPlanningTools } from './tools/domains/planning.tools';
 import { createReportTools } from './tools/domains/reports.tools';
 import { AIAgentProcessor } from './queue/processors/ai-agent.processor';
+import { AgentObjectiveRepository } from './tasks/agent-objective.repository';
+import { AgentTaskContextService } from './tasks/agent-task-context.service';
+import { AgentEvidenceService } from './tasks/agent-evidence.service';
+import { AgentDurableSessionService } from './tasks/agent-durable-session.service';
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
 
@@ -56,8 +81,26 @@ import { S3Service } from '../common/services/s3.service';
   providers: [
     AIEngineService,
     AILoggingService,
+    AgentTraceService,
     AIAgentService,
+    AgentObjectiveRepository,
+    AgentTaskContextService,
+    AgentEvidenceService,
+    AgentDurableSessionService,
+    AgentVerifierService,
+    ProceduralMemoryService,
+    RecipeQualityService,
+    RecipeRepository,
+    RecipeMinerProcessor,
+    SandboxBrokerService,
+    SandboxClientService,
+    SandboxPolicyService,
+    SandboxAuditRepository,
     AIToolRegistry,
+    ToolRouterService,
+    ToolCatalogIndexerService,
+    PlaybookLoaderService,
+    PlaybookService,
     // Provided here rather than in VexiModule even though the class lives in
     // that folder: AIToolRegistry depends on it, and importing VexiModule into
     // this @Global() module would close a cycle (VexiModule imports this one).
@@ -84,10 +127,20 @@ import { S3Service } from '../common/services/s3.service';
     AIAgentProcessor,
   ],
   exports: [
+    AgentObjectiveRepository,
+    AgentTaskContextService,
+    AgentEvidenceService,
+    AgentDurableSessionService,
+    AgentVerifierService,
     AIEngineService,
     AILoggingService,
+    AgentTraceService,
     AIAgentService,
     AIToolRegistry,
+    ToolRouterService,
+    ToolCatalogIndexerService,
+    PlaybookLoaderService,
+    PlaybookService,
     VexiConfirmationService,
     VexiAttachmentsService,
     VexiUiChannelService,
@@ -107,9 +160,14 @@ export class AIEngineModule implements OnModuleInit {
     private readonly toolbox: AiToolboxService,
     private readonly attachments: VexiAttachmentsService,
     private readonly s3: S3Service,
+    private readonly sandbox: SandboxBrokerService,
   ) {}
 
   onModuleInit() {
+    this.toolRegistry.registerMany(createProceduralRecipeTools());
+    this.toolRegistry.registerMany(createCodeExecutionTools(this.sandbox));
+    this.toolRegistry.registerMany(createPlaybookTools());
+    this.toolRegistry.registerMany(createDiscoveryTools());
     this.toolRegistry.registerMany(
       createSearchTools({ embeddingService: this.embeddingService }),
     );

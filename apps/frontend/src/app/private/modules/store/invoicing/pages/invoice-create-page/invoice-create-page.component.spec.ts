@@ -5,13 +5,25 @@ import type {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
+import type { Customer } from '../../../customers/models/customer.model';
 import {
+  addressPayloadToAcquirerAddress,
+  buildInlineCustomerFromForm,
+  customerInvoiceAddress,
+  customerNeedsFullRecord,
+  customerToAcquirerPrefill,
+  externalIdentityToInlineCustomer,
+  fillEmptyAcquirerFields,
+  missingAcquirerEmissionFields,
+  unwrapCustomerResponse,
+  type AcquirerEmissionState,
   aiuDocumentFingerprint,
   aiuLineTaxableShare,
   applyAiuMarkingToRows,
   buildAiuSummaryRows,
   deriveAiuTotals,
   isAiuOperation,
+  isDocumentLikeTerm,
   isLocalRequirement,
   localRequirement,
   mergeRequirementsByTarget,
@@ -23,7 +35,25 @@ import {
   type AiuAutoApplyState,
   type AiuContratoSplit,
   type SubmitHintState,
+  INVOICE_MAX_LINES,
+  dropRowMarkField,
+  isCapturedInvoiceLine,
+  planInvoiceDraft,
+  type InvoiceDraftPlanContext,
+  withEmitImmediately,
+  resolveEmissionResult,
+  invoiceDetailNavigation,
 } from './invoice-create-page.component';
+import {
+  countDraftFilledFields,
+  facturiaFilledHeadline,
+} from '../../utils/invoice-draft-mapping';
+import type { CreateInvoiceDto } from '../../interfaces/invoice.interface';
+import type {
+  DraftField,
+  InvoiceDraftLine,
+  InvoiceDraftScanResult,
+} from '../../interfaces/invoice-draft-scan.interface';
 
 /**
  * Paso 1 del plan AIU — `deriveAiuTotals`, probado donde es PURO.
@@ -965,5 +995,757 @@ describe('invoice-create-page · requisitos locales con destino', () => {
     const focus = localRequirement('a', 'A', 'r', 'x');
     const nav = localRequirement('b', 'B', 'r', 'x', { kind: 'navigate' });
     expect(mergeRequirementsByTarget([focus], [nav]).length).toBe(2);
+  });
+});
+
+describe('invoice-create-page · isDocumentLikeTerm (consulta RUES del adquiriente)', () => {
+  it('reconoce documentos con o sin puntos, guion de DV o espacios', () => {
+    expect(isDocumentLikeTerm('900123456')).toBe(true);
+    expect(isDocumentLikeTerm('900.123.456-8')).toBe(true);
+    expect(isDocumentLikeTerm(' 1020 304 050 ')).toBe(true);
+  });
+
+  it('no consulta RUES por nombres, correos ni documentos de menos de 5 dígitos', () => {
+    expect(isDocumentLikeTerm('Tecnicell')).toBe(false);
+    expect(isDocumentLikeTerm('compras@tecnicell.co')).toBe(false);
+    expect(isDocumentLikeTerm('1234')).toBe(false);
+  });
+});
+
+describe('invoice-create-page · customerToAcquirerPrefill (precarga del adquiriente)', () => {
+  const base = (overrides: Partial<Customer> = {}): Customer => ({
+    id: 42,
+    email: 'compras@acme.co',
+    first_name: '',
+    last_name: '',
+    legal_name: 'ACME S.A.S.',
+    phone: '6015550000',
+    document_type: 'NIT',
+    document_number: '900123456',
+    verification_digit: '8',
+    fiscal_responsibilities: ['O-13'],
+    tax_regime: 'COMUN',
+    person_type: 'JURIDICA',
+    ...overrides,
+  });
+
+  it('prefiere la dirección de facturación y no pega la ciudad a la línea', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        billing_address: {
+          id: 1,
+          address_line1: 'Cra 10 # 20-30',
+          address_line2: 'Of. 401',
+          city: 'Medellín',
+          state_province: 'Antioquia',
+          municipality_code: '05001',
+        },
+        addresses: [
+          { id: 2, address_line1: 'Calle 1', city: 'Bogotá', municipality_code: '11001' },
+        ],
+      }),
+    );
+    expect(prefill.customer_address).toBe('Cra 10 # 20-30, Of. 401');
+    expect(prefill.customer_municipality_code).toBe('05001');
+    expect(prefill.customer_city_name).toBe('Medellín');
+    expect(prefill.customer_department_name).toBe('Antioquia');
+  });
+
+  it('cae a la primera dirección de envío sin facturación', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        billing_address: null,
+        addresses: [
+          { id: 2, address_line1: 'Calle 1 # 2-3', city: 'Bogotá', state_province: 'Bogotá D.C.', municipality_code: '11001' },
+        ],
+      }),
+    );
+    expect(prefill.customer_address).toBe('Calle 1 # 2-3');
+    expect(prefill.customer_municipality_code).toBe('11001');
+  });
+
+  it('rellena identidad, régimen, responsabilidades y contacto de la ficha', () => {
+    const prefill = customerToAcquirerPrefill(base());
+    expect(prefill.customer_id).toBe(42);
+    expect(prefill.customer_name).toBe('ACME S.A.S.');
+    expect(prefill.customer_document_type).toBe('31');
+    expect(prefill.customer_tax_id).toBe('900123456');
+    expect(prefill.customer_verification_digit).toBe('8');
+    expect(prefill.customer_person_type).toBe('JURIDICA');
+    expect(prefill.customer_tax_regime).toBe('COMUN');
+    expect(prefill.customer_fiscal_responsibilities).toEqual(['O-13']);
+    expect(prefill.customer_email).toBe('compras@acme.co');
+    expect(prefill.customer_phone).toBe('6015550000');
+    expect(prefill.customer_address).toBe('');
+  });
+
+  it('persona sin tipo guardado: natural con cédula, nombre por nombres', () => {
+    const prefill = customerToAcquirerPrefill(
+      base({
+        legal_name: null,
+        first_name: 'Keilin',
+        last_name: 'Sierra',
+        document_type: 'CC',
+        person_type: null,
+        phone: null,
+        addresses: [{ id: 3, address_line1: 'Mz 4 Casa 2', phone_number: '3001112233' }],
+      }),
+    );
+    expect(prefill.customer_person_type).toBe('NATURAL');
+    expect(prefill.customer_name).toBe('Keilin Sierra');
+    expect(prefill.customer_phone).toBe('3001112233');
+  });
+
+  it('pide la ficha completa sólo si falta dirección o municipio', () => {
+    expect(customerNeedsFullRecord(base())).toBe(true);
+    expect(
+      customerNeedsFullRecord(
+        base({ billing_address: { id: 1, address_line1: 'x', municipality_code: '' } }),
+      ),
+    ).toBe(true);
+    expect(
+      customerNeedsFullRecord(
+        base({ billing_address: { id: 1, address_line1: 'x', municipality_code: '05001' } }),
+      ),
+    ).toBe(false);
+    expect(customerInvoiceAddress(base())).toBeNull();
+  });
+});
+
+describe('invoice-create-page · fillEmptyAcquirerFields / unwrapCustomerResponse', () => {
+  it('sólo completa lo vacío y nunca toca customer_id', () => {
+    const prefill = customerToAcquirerPrefill({
+      id: 7,
+      email: 'a@b.co',
+      first_name: 'Ana',
+      last_name: 'Ruiz',
+      document_type: 'CC',
+      document_number: '1020304050',
+      billing_address: { id: 1, address_line1: 'Cra 1', city: 'Cali', municipality_code: '76001' },
+    });
+    const patch = fillEmptyAcquirerFields(
+      {
+        customer_id: 7,
+        customer_email: 'escrito@mano.co',
+        customer_address: '',
+        customer_municipality_code: null,
+        customer_fiscal_responsibilities: [],
+      },
+      prefill,
+    );
+    expect(patch['customer_id']).toBeUndefined();
+    expect(patch['customer_email']).toBeUndefined();
+    expect(patch['customer_address']).toBe('Cra 1');
+    expect(patch['customer_municipality_code']).toBe('76001');
+    expect(patch['customer_fiscal_responsibilities']).toBeUndefined();
+  });
+
+  it('acepta la ficha a secas o envuelta en data', () => {
+    expect(unwrapCustomerResponse({ id: 3, email: '' })?.id).toBe(3);
+    expect(unwrapCustomerResponse({ data: { id: 4 } })?.id).toBe(4);
+    expect(unwrapCustomerResponse({ success: false })).toBeNull();
+    expect(unwrapCustomerResponse(null)).toBeNull();
+  });
+});
+
+describe('invoice-create-page · missingAcquirerEmissionFields (validación en pantalla)', () => {
+  const state = (overrides: Partial<AcquirerEmissionState> = {}): AcquirerEmissionState => ({
+    customer_id: null,
+    customer_name: '',
+    customer_tax_id: '',
+    customer_document_type: '31',
+    customer_address: '',
+    customer_municipality_code: '',
+    customer_email: 'compras@acme.co',
+    isExport: false,
+    ...overrides,
+  });
+  const fields = (s: AcquirerEmissionState) =>
+    missingAcquirerEmissionFields(s).map((missing) => missing.field);
+
+  it('consumidor final (sin documento) no exige nada', () => {
+    expect(fields(state())).toEqual([]);
+  });
+
+  it('con documento y sin ficha exige nombre, dirección y municipio', () => {
+    expect(fields(state({ customer_tax_id: '900123456' }))).toEqual([
+      'customer_name',
+      'customer_address',
+      'customer_municipality_code',
+    ]);
+  });
+
+  it('con ficha vinculada el nombre lo pone el servidor; la dirección sigue', () => {
+    expect(
+      fields(state({ customer_id: 9, customer_tax_id: '900123456', customer_address: 'Cra 1' })),
+    ).toEqual(['customer_municipality_code']);
+  });
+
+  it('dirección completa con municipio no deja faltantes', () => {
+    expect(
+      fields(
+        state({
+          customer_tax_id: '900123456',
+          customer_name: 'ACME',
+          customer_address: 'Cra 1',
+          customer_municipality_code: '05001',
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('municipio sin dirección pide la dirección; sin tipo de documento lo pide', () => {
+    expect(fields(state({ customer_municipality_code: '05001' }))).toEqual([
+      'customer_address',
+    ]);
+    expect(
+      fields(
+        state({
+          customer_tax_id: '1',
+          customer_name: 'X',
+          customer_document_type: '',
+          customer_address: 'a',
+          customer_municipality_code: '05001',
+        }),
+      ),
+    ).toEqual(['customer_document_type']);
+  });
+
+  it('exportación no exige dirección ni municipio DANE', () => {
+    expect(
+      fields(state({ customer_tax_id: '900123456', customer_name: 'ACME', isExport: true })),
+    ).toEqual([]);
+  });
+
+  describe('correo del adquiriente (obligatorio en captura manual)', () => {
+    const complete = (overrides: Partial<AcquirerEmissionState> = {}) =>
+      state({
+        customer_tax_id: '900123456',
+        customer_name: 'ACME',
+        customer_address: 'Cra 1',
+        customer_municipality_code: '05001',
+        ...overrides,
+      });
+
+    it('adquiriente con documento sin correo ⇒ bloquea con «Requerido para emitir»', () => {
+      const missing = missingAcquirerEmissionFields(complete({ customer_email: '' }));
+      expect(missing.map((m) => m.field)).toEqual(['customer_email']);
+      expect(missing[0].label).toBe('Correo del adquiriente');
+      expect(missing[0].reason).toContain('Requerido para emitir');
+    });
+
+    it('correo en blanco (sólo espacios) cuenta como ausente', () => {
+      expect(fields(complete({ customer_email: '   ' }))).toEqual(['customer_email']);
+    });
+
+    it('cliente vinculado sin correo también lo exige (la ficha no lo trae)', () => {
+      expect(
+        fields(complete({ customer_id: 9, customer_name: '', customer_email: null })),
+      ).toEqual(['customer_email']);
+    });
+
+    it('consumidor final sin documento queda exento', () => {
+      expect(fields(state({ customer_email: '' }))).toEqual([]);
+    });
+
+    it('consumidor final con el documento genérico 222222222222 queda exento', () => {
+      expect(
+        fields(complete({ customer_tax_id: '222222222222', customer_email: '' })),
+      ).toEqual([]);
+    });
+
+    it('con correo no aparece', () => {
+      expect(fields(complete())).toEqual([]);
+    });
+  });
+});
+
+describe('invoice-create-page · alta inline del adquiriente', () => {
+  it('RUES jurídica → base con razón social y sigla del documento', () => {
+    const inline = externalIdentityToInlineCustomer({
+      source: 'rues',
+      document_type: 'NIT',
+      document_number: '900123456',
+      verification_digit: '8',
+      person_type: 'JURIDICA',
+      legal_name: 'ACME S.A.S.',
+      first_name: null,
+      last_name: null,
+      registration_status: 'ACTIVA',
+      is_active: true,
+      last_renewed_year: 2026,
+      chamber: 'Bogotá',
+      source_updated_at: null,
+    });
+    expect(inline.legal_name).toBe('ACME S.A.S.');
+    expect(inline.document_type).toBe('NIT');
+    expect(inline.person_type).toBe('JURIDICA');
+    expect(inline.first_name).toBe('');
+  });
+
+  it('la pantalla manda: correo, régimen y documento salen del formulario; vacíos se omiten', () => {
+    const result = buildInlineCustomerFromForm(
+      {
+        first_name: '',
+        last_name: '',
+        legal_name: 'ACME S.A.S.',
+        document_type: 'NIT',
+        document_number: '900123456',
+        verification_digit: '8',
+        person_type: 'JURIDICA',
+        ciiu_code: '4711',
+      },
+      {
+        customer_name: 'ACME SAS',
+        customer_person_type: 'JURIDICA',
+        customer_email: 'compras@acme.co',
+        customer_phone: '',
+        customer_tax_regime: '',
+        customer_fiscal_responsibilities: ['O-13'],
+      },
+      { taxIdBase: '900123456', dv: '8', isNit: true },
+    );
+    expect(result.legal_name).toBe('ACME SAS');
+    expect(result.email).toBe('compras@acme.co');
+    expect('phone' in result).toBe(false);
+    expect('tax_regime' in result).toBe(false);
+    expect(result.fiscal_responsibilities).toEqual(['O-13']);
+    expect(result.ciiu_code).toBe('4711');
+    expect(result.verification_digit).toBe('8');
+  });
+
+  it('cédula: persona natural, sin DV, nombre corregido va entero', () => {
+    const result = buildInlineCustomerFromForm(
+      { first_name: 'Keilin', last_name: 'Sierra', document_type: 'CC', person_type: 'NATURAL' },
+      { customer_name: 'Keilin Luz Sierra Toro', customer_person_type: 'JURIDICA' },
+      { taxIdBase: '1118860902', dv: '', isNit: false },
+    );
+    expect(result.person_type).toBe('NATURAL');
+    expect(result.verification_digit).toBeNull();
+    expect(result.first_name).toBe('Keilin Luz Sierra Toro');
+    expect(result.last_name).toBe('');
+    expect(result.document_number).toBe('1118860902');
+  });
+
+  it('nombre sin cambios conserva nombres y apellidos separados', () => {
+    const result = buildInlineCustomerFromForm(
+      { first_name: 'Keilin', last_name: 'Sierra', person_type: 'NATURAL' },
+      { customer_name: 'Keilin Sierra' },
+      { taxIdBase: '1118860902', dv: '', isNit: false },
+    );
+    expect(result.first_name).toBe('Keilin');
+    expect(result.last_name).toBe('Sierra');
+  });
+
+  it('dirección del modal de alta: líneas sin ciudad, municipio y nombres', () => {
+    expect(
+      addressPayloadToAcquirerAddress({
+        address_line1: 'Cra 10 # 20-30',
+        address_line2: null,
+        city: 'Medellín',
+        state_province: 'Antioquia',
+        municipality_code: '05001',
+      }),
+    ).toEqual({
+      customer_address: 'Cra 10 # 20-30',
+      customer_municipality_code: '05001',
+      customer_city_name: 'Medellín',
+      customer_department_name: 'Antioquia',
+    });
+  });
+});
+
+/**
+ * «Cargar documentos» (escáner IA) — `planInvoiceDraft`, probado donde es
+ * PURO, y aplicado sobre un `FormGroup` real con los MISMOS nombres de
+ * control que `invoiceForm`. El componente de página no se instancia aquí por
+ * lo mismo que el resto de este spec (harness completo de store y servicios);
+ * lo que se custodia es que el plan escribe los controles correctos y deja
+ * las marcas «IA»/«Revisar» donde corresponde.
+ */
+describe('invoice-create-page · planInvoiceDraft (borrador IA)', () => {
+  const field = <T>(value: T | null, confidence = 95): DraftField<T> => ({
+    value,
+    confidence,
+    warning: null,
+  });
+  const empty = <T>(): DraftField<T> => field<T>(null, 0);
+
+  const iva19: TaxOption = { id: 1, name: 'IVA 19%', rate: 19, tax_type: 'iva' };
+
+  const draftLine = (
+    description: string,
+    quantity: number,
+    unitPrice: number,
+    taxRate: number,
+  ): InvoiceDraftLine => ({
+    description: field(description),
+    quantity: field(quantity),
+    unit_price: field(unitPrice),
+    discount_percent: empty<number>(),
+    tax_rate: field(taxRate),
+    sku: null,
+    product_id: null,
+    product_variant_id: null,
+    match_status: 'none',
+    match_confidence: 0,
+  });
+
+  const sample = (): InvoiceDraftScanResult => ({
+    acquirer: {
+      document_type: field('NIT'),
+      document_number: field('900123456'),
+      verification_digit: empty<string>(),
+      person_type: field<'NATURAL' | 'JURIDICA'>('JURIDICA'),
+      name: field('Constructora Andina SAS'),
+      // Confianza baja ⇒ «Revisar».
+      email: field('compras@andina.co', 40),
+      phone: empty<string>(),
+      address_line: field('Cra 10 # 20-30'),
+      city_name: field('Bogotá'),
+      department_name: field('Bogotá D.C.'),
+      municipality_code: field('11001'),
+      tax_regime: empty<string>(),
+      fiscal_responsibilities: empty<string[]>(),
+      existing_customer_id: null,
+    },
+    invoice: {
+      issue_date: field('2026-10-14'),
+      due_date: empty<string>(),
+      currency: field('COP'),
+      reference: field('OC-77'),
+      notes: field('Anticipo del 50 %'),
+    },
+    payment: {
+      payment_form: field<'cash' | 'credit'>('credit'),
+      payment_term_days: field(30),
+      payment_method_hint: field('transferencia'),
+    },
+    lines: [
+      draftLine('Diseño estructural', 1, 1000000, 19),
+      // 7 % no existe en el catálogo ⇒ sin impuesto y «Revisar: impuesto».
+      draftLine('Visita técnica', 2, 150000, 7),
+    ],
+    totals: { subtotal: 1300000, tax_total: 190000, total: 1490000, consistent: false },
+    note_applied: 'Se facturó el 50 % del anticipo.',
+    missing_fields: ['acquirer.phone'],
+    requires_review: ['lines.1.unit_price'],
+    extraction_notes: null,
+    documents_scanned: 2,
+  });
+
+  const ctx = (
+    overrides: Partial<InvoiceDraftPlanContext> = {},
+  ): InvoiceDraftPlanContext => ({
+    today: '2026-10-14',
+    currentNotes: '',
+    notesLimit: 500,
+    foreignCurrencies: ['USD', 'EUR'],
+    taxes: [iva19],
+    currentItems: [{ description: '', unit_price: 0, product_id: null }],
+    maxLines: INVOICE_MAX_LINES,
+    descriptionLimit: 300,
+    ...overrides,
+  });
+
+  /** Los controles de `invoiceForm` que toca el borrador, con sus nombres reales. */
+  const buildForm = (): FormGroup =>
+    new FormGroup({
+      customer_id: new FormControl<number | null>(null),
+      customer_name: new FormControl(''),
+      customer_document_type: new FormControl('31'),
+      customer_tax_id: new FormControl(''),
+      customer_verification_digit: new FormControl(''),
+      customer_person_type: new FormControl('JURIDICA'),
+      customer_tax_regime: new FormControl(''),
+      customer_fiscal_responsibilities: new FormControl<string[]>([]),
+      customer_email: new FormControl(''),
+      customer_phone: new FormControl(''),
+      customer_address: new FormControl(''),
+      customer_municipality_code: new FormControl(''),
+      customer_city_name: new FormControl(''),
+      customer_department_name: new FormControl(''),
+      issue_date: new FormControl('2026-10-14'),
+      due_date: new FormControl({ value: '2026-10-14', disabled: true }),
+      payment_form: new FormControl('1'),
+      payment_means_code: new FormControl('10'),
+      notes: new FormControl(''),
+      use_foreign_currency: new FormControl(false),
+      foreign_currency: new FormControl(''),
+      items: new FormArray<FormGroup>([]),
+    });
+
+  const lineGroup = () =>
+    new FormGroup({
+      product_id: new FormControl<number | null>(null),
+      product_name: new FormControl(''),
+      description: new FormControl(''),
+      quantity: new FormControl(1),
+      unit_price: new FormControl(0),
+      discount_amount: new FormControl(0),
+      taxes: new FormControl<TaxSelection[]>([]),
+    });
+
+  it('precarga adquiriente, cabecera, pago y líneas en los controles reales', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+    const form = buildForm();
+
+    // Mismo orden que la página: patch → syncDueDate (habilita en crédito) → vencimiento.
+    form.patchValue({ ...plan.acquirer.patch, customer_id: null });
+    form.patchValue(plan.invoice.patch);
+    form.get('due_date')!.enable();
+    form.get('due_date')!.setValue(plan.invoice.dueDate);
+    const items = form.get('items') as FormArray<FormGroup>;
+    if (plan.replaceLines) items.clear();
+    for (const line of plan.lines) {
+      const group = lineGroup();
+      group.patchValue(line.value);
+      items.push(group);
+    }
+
+    const raw = form.getRawValue();
+    expect(raw.customer_document_type).toBe('31');
+    expect(raw.customer_tax_id).toBe('900123456');
+    expect(raw.customer_name).toBe('Constructora Andina SAS');
+    expect(raw.customer_address).toBe('Cra 10 # 20-30');
+    expect(raw.customer_municipality_code).toBe('11001');
+    expect(raw.customer_city_name).toBe('Bogotá');
+    expect(raw.payment_form).toBe('2');
+    expect(raw.due_date).toBe('2026-11-13');
+    expect(raw.payment_means_code).toBe('47');
+    expect(raw.notes).toContain('Anticipo del 50 %');
+    expect(raw.notes).toContain('Referencia: OC-77');
+    // COP no enciende la conversión.
+    expect(raw.use_foreign_currency).toBe(false);
+
+    expect(plan.replaceLines).toBe(true);
+    expect(items.length).toBe(2);
+    expect(items.at(0).get('description')!.value).toBe('Diseño estructural');
+    expect(items.at(0).get('unit_price')!.value).toBe(1000000);
+    expect(items.at(0).get('taxes')!.value[0].tax_rate_id).toBe(1);
+    expect(items.at(1).get('quantity')!.value).toBe(2);
+    expect(items.at(1).get('taxes')!.value).toEqual([]);
+
+    // La base del alta inline lleva la sigla, que la pantalla no expone.
+    expect(plan.inlineBase.document_type).toBe('NIT');
+    expect(plan.inlineBase.legal_name).toBe('Constructora Andina SAS');
+  });
+
+  it('marca lo leído como IA y lo dudoso como Revisar (pending gana)', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+
+    expect(plan.headerMarks['customer_name']).toBe('ai');
+    expect(plan.headerMarks['customer_tax_id']).toBe('ai');
+    expect(plan.headerMarks['payment_form']).toBe('ai');
+    expect(plan.headerMarks['due_date']).toBe('ai');
+    expect(plan.headerMarks['notes']).toBe('ai');
+    // Confianza 40 < 75: lo escribió la IA, pero hay que revisarlo.
+    expect(plan.headerMarks['customer_email']).toBe('pending');
+    // `missing_fields` del backend.
+    expect(plan.headerMarks['customer_phone']).toBe('pending');
+
+    const [first, second] = plan.lines;
+    expect(first.mark.ai).toEqual(
+      jasmine.arrayContaining(['description', 'quantity', 'unit_price', 'taxes']),
+    );
+    expect(first.mark.pending).toEqual([]);
+    expect(second.mark.pending).toEqual(
+      jasmine.arrayContaining(['taxes', 'unit_price']),
+    );
+    expect(second.mark.note).toContain('7 %');
+  });
+
+  it('borrador sin correo del adquiriente ⇒ el correo queda en «Revisar»', () => {
+    const draft = sample();
+    draft.acquirer = { ...draft.acquirer, email: empty<string>() };
+    const plan = planInvoiceDraft(draft, ctx());
+    expect(plan.headerMarks['customer_email']).toBe('pending');
+    // Y el faltante bloquea la emisión mientras siga vacío.
+    expect(
+      missingAcquirerEmissionFields({
+        customer_id: null,
+        customer_name: plan.acquirer.patch['customer_name'],
+        customer_tax_id: plan.acquirer.patch['customer_tax_id'],
+        customer_document_type: plan.acquirer.patch['customer_document_type'],
+        customer_address: plan.acquirer.patch['customer_address'],
+        customer_municipality_code: plan.acquirer.patch['customer_municipality_code'],
+        customer_email: plan.acquirer.patch['customer_email'] ?? '',
+        isExport: false,
+      }).map((m) => m.field),
+    ).toEqual(['customer_email']);
+  });
+
+  it('el aviso nombra pendientes, nota aplicada y totales que no cuadran', () => {
+    const { notice } = planInvoiceDraft(sample(), ctx());
+    expect(notice.documents).toBe(2);
+    expect(notice.pending).toEqual(
+      jasmine.arrayContaining(['Teléfono del adquiriente', 'Línea 2: precio unitario']),
+    );
+    expect(notice.noteApplied).toBe('Se facturó el 50 % del anticipo.');
+    expect(notice.totalsInconsistent).toBe(true);
+    expect(notice.documentTotal).toBe(1490000);
+  });
+
+  it('el aviso trae el N de «FacturIA completó N campos» (adquiriente como nuevo)', () => {
+    const plan = planInvoiceDraft(sample(), ctx());
+    expect(plan.notice.filled).toBe(plan.filled.filled);
+    expect(plan.notice.filled).toBeGreaterThan(0);
+    // Cliente existente: el adquiriente sale de la ficha y no cuenta.
+    const withoutAcquirer = countDraftFilledFields(plan, { includeAcquirer: false });
+    expect(withoutAcquirer.filled).toBe(plan.filled.filled - plan.filled.acquirer);
+    expect(facturiaFilledHeadline(plan.notice.filled)).toBe(
+      `FacturIA completó ${plan.notice.filled} campos · revisa los marcados`,
+    );
+  });
+
+  it('con líneas capturadas AGREGA al final y respeta el tope', () => {
+    const plan = planInvoiceDraft(
+      sample(),
+      ctx({
+        currentItems: [
+          { description: 'Línea del operador', unit_price: 5000, product_id: null },
+          { description: '', unit_price: 0, product_id: null },
+        ],
+        maxLines: 2,
+      }),
+    );
+    expect(plan.replaceLines).toBe(false);
+    // Una capturada ocupa un lugar de dos: cabe una sola leída.
+    expect(plan.lines.length).toBe(1);
+    expect(plan.droppedLines).toBe(1);
+    expect(plan.notice.unresolved.join(' ')).toContain('no se cargaron');
+  });
+
+  it('retenciones leídas ⇒ filas sufridas; con filas ya capturadas no se tocan; conteo del aviso', () => {
+    const draft: InvoiceDraftScanResult = {
+      ...sample(),
+      withholdings: [
+        {
+          type: field('retefuente' as const),
+          rate: field(4),
+          concept_hint: 'Servicios',
+        },
+      ],
+    };
+    const concepts = [
+      { id: 9, label: '2307 · Servicios', name: 'Servicios', ratePercent: 4, type: 'retefuente' },
+    ];
+    const plan = planInvoiceDraft(draft, ctx({ withholdingConcepts: concepts }));
+    expect(plan.withholdings).toEqual([
+      jasmine.objectContaining({ concept_id: 9, role: 'suffered', rate: 4 }),
+    ]);
+    expect(plan.filled.withholdings).toBe(1);
+    expect(plan.filled.filled).toBe(
+      plan.filled.acquirer + plan.filled.document + plan.filled.lines + 1,
+    );
+    expect(plan.filled.lines).toBeGreaterThan(0);
+
+    const kept = planInvoiceDraft(
+      draft,
+      ctx({ withholdingConcepts: concepts, currentWithholdings: 1 }),
+    );
+    expect(kept.withholdings).toEqual([]);
+    expect(kept.notice.unresolved.join(' ')).toContain('ya tiene retenciones');
+  });
+
+  it('isCapturedInvoiceLine: descripción, precio o producto cuentan como trabajo', () => {
+    expect(isCapturedInvoiceLine({ description: '', unit_price: 0, product_id: null })).toBe(false);
+    expect(isCapturedInvoiceLine({ description: ' x ' })).toBe(true);
+    expect(isCapturedInvoiceLine({ unit_price: 10 })).toBe(true);
+    expect(isCapturedInvoiceLine({ product_id: 7 })).toBe(true);
+  });
+
+  it('dropRowMarkField suelta el campo editado y la fila cuando no queda nada', () => {
+    const mark = { ai: ['description'], pending: ['taxes'], note: 'n' };
+    expect(dropRowMarkField(mark, 'taxes')).toEqual({
+      ai: ['description'],
+      pending: [],
+      note: 'n',
+    });
+    expect(dropRowMarkField({ ai: ['description'], pending: [] }, 'description')).toBeNull();
+  });
+});
+
+/**
+ * «Emitir directamente» y aviso de FacturIA, probados donde son PUROS (la
+ * página exige el harness completo del store; ver la nota del primer bloque).
+ */
+describe('invoice-create-page · «Emitir directamente» (emit_immediately)', () => {
+  const payload = {
+    invoice_type: 'sales_invoice',
+    issue_date: '2026-10-14',
+    items: [],
+  } as unknown as CreateInvoiceDto;
+
+  it('apagado: el payload sale igual, sin la clave', () => {
+    const out = withEmitImmediately(payload, false);
+    expect(out).toBe(payload);
+    expect('emit_immediately' in out).toBeFalse();
+  });
+
+  it('encendido: agrega emit_immediately=true sin mutar el original', () => {
+    const out = withEmitImmediately(payload, true);
+    expect(out.emit_immediately).toBeTrue();
+    expect(out.items).toBe(payload.items);
+    expect('emit_immediately' in payload).toBeFalse();
+  });
+
+  it('sin emission (o no intentada) ⇒ flujo de siempre', () => {
+    expect(resolveEmissionResult(undefined)).toEqual({ kind: 'none' });
+    expect(resolveEmissionResult(null)).toEqual({ kind: 'none' });
+    expect(
+      resolveEmissionResult({ attempted: false, success: false, phase: null }),
+    ).toEqual({ kind: 'none' });
+  });
+
+  it('emission.success ⇒ «emitted»', () => {
+    expect(
+      resolveEmissionResult({ attempted: true, success: true, phase: null, status: 'sent' }),
+    ).toEqual({ kind: 'emitted' });
+  });
+
+  it('emission.success === false ⇒ advertencia con el motivo del backend', () => {
+    expect(
+      resolveEmissionResult({
+        attempted: true,
+        success: false,
+        phase: 'send',
+        message: 'La DIAN no respondió a tiempo.',
+      }),
+    ).toEqual({
+      kind: 'failed',
+      message: 'La factura se creó pero no se pudo emitir: La DIAN no respondió a tiempo.',
+    });
+  });
+
+  it('fallo sin mensaje ⇒ advertencia genérica que invita a reintentar', () => {
+    const result = resolveEmissionResult({
+      attempted: true,
+      success: false,
+      phase: 'validate',
+      message: '  ',
+    });
+    expect(result.kind).toBe('failed');
+    expect(result.kind === 'failed' && result.message).toBe(
+      'La factura se creó pero no se pudo emitir. Ábrela para reintentar la emisión.',
+    );
+  });
+
+  it('el detalle de la factura creada se abre en el listado con ?invoiceId=', () => {
+    expect(invoiceDetailNavigation(321)).toEqual({
+      commands: ['/admin/invoicing/invoices'],
+      extras: { queryParams: { invoiceId: 321 } },
+    });
+  });
+});
+
+describe('invoice-create-page · aviso de FacturIA', () => {
+  it('N campos, singular y cero sin la palabra «borrador»', () => {
+    expect(facturiaFilledHeadline(12)).toBe('FacturIA completó 12 campos · revisa los marcados');
+    expect(facturiaFilledHeadline(1)).toBe('FacturIA completó 1 campo · revisa los marcados');
+    const zero = facturiaFilledHeadline(0);
+    expect(zero).toContain('FacturIA');
+    expect(zero.toLowerCase()).not.toContain('borrador');
+    expect(facturiaFilledHeadline(Number.NaN)).toBe(zero);
   });
 });

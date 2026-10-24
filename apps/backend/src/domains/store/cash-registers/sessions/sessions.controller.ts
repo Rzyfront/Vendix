@@ -102,6 +102,16 @@ export class SessionsController {
     return this.response_service.success(report);
   }
 
+  @Get(':id/pending-orders')
+  @Permissions('store:cash_registers:read')
+  async getPendingOrders(
+    @Param('id') id: string,
+    @Query() query: QuerySessionDto,
+  ) {
+    const result = await this.sessions_service.getPendingOrders(+id, query);
+    return this.response_service.success(result);
+  }
+
   @Post(':id/close')
   @Permissions('store:cash_registers:close_session')
   @HttpCode(HttpStatus.OK)

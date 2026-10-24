@@ -87,6 +87,7 @@ import { DispatchRouteDataProvider } from './providers/dispatch-route.provider';
 import { WithholdingPracticedDataProvider } from './providers/withholding-practiced.provider';
 import { WithholdingSufferedDataProvider } from './providers/withholding-suffered.provider';
 import { WithholdingEmployeeCertificateDataProvider } from './providers/withholding-employee.provider';
+import { CashSessionCloseDataProvider } from './providers/cash-session-close.provider';
 // [print-fiscal-gate] — `FiscalProductionReadinessService` se aloja en
 // `invoicing/providers` y se exporta vía `InvoiceProviderModule`. Sin este
 // import, Nest no resuelve la inyección de `PrintFiscalGateService` en este
@@ -176,6 +177,8 @@ import { DispatchNotePdfModule } from '../dispatch-notes/pdf/dispatch-note-pdf.m
     WithholdingPracticedDataProvider,
     WithholdingSufferedDataProvider,
     WithholdingEmployeeCertificateDataProvider,
+    // Reporte de cierre de caja — `SessionsService` se resuelve vía ModuleRef.
+    CashSessionCloseDataProvider,
   ],
   // BE-E5 (E.5): exportar `FiscalInvoicePdfRenderService` para que
   // `InvoiceDeliveryModule` (reenvío de facturas, `POST /:id/deliver`) pueda
@@ -218,6 +221,7 @@ export class PrintFormatsModule implements OnModuleInit {
     private readonly withholdingPracticedProvider: WithholdingPracticedDataProvider,
     private readonly withholdingSufferedProvider: WithholdingSufferedDataProvider,
     private readonly withholdingEmployeeCertificateProvider: WithholdingEmployeeCertificateDataProvider,
+    private readonly cashSessionCloseProvider: CashSessionCloseDataProvider,
   ) {}
 
   onModuleInit() {
@@ -252,5 +256,6 @@ export class PrintFormatsModule implements OnModuleInit {
     this.registry.register(this.withholdingPracticedProvider);
     this.registry.register(this.withholdingSufferedProvider);
     this.registry.register(this.withholdingEmployeeCertificateProvider);
+    this.registry.register(this.cashSessionCloseProvider);
   }
 }

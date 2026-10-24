@@ -76,6 +76,9 @@ import { isHabilitationNumbering } from '../../../../../../shared/utils/habilita
                   >
                     {{ resolution.is_active ? 'Activa' : 'Inactiva' }}
                   </app-badge>
+                  @if (resolution.archived_at) {
+                    <app-badge variant="neutral" size="xs">Archivada</app-badge>
+                  }
                   @if (isTestNumbering(resolution)) {
                     <!--
                       «invoice_resolutions» no guarda el entorno, así que sin
@@ -102,6 +105,7 @@ import { isHabilitationNumbering } from '../../../../../../shared/utils/habilita
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0">
+                @if (!resolution.archived_at) {
                 <button
                   (click)="editResolution(resolution)"
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-secondary)] transition-colors text-text-secondary hover:text-primary"
@@ -109,13 +113,7 @@ import { isHabilitationNumbering } from '../../../../../../shared/utils/habilita
                 >
                   <app-icon name="edit" [size]="14"></app-icon>
                 </button>
-                <button
-                  (click)="onDeleteResolution(resolution.id)"
-                  class="p-1.5 rounded-lg hover:bg-error-light transition-colors text-text-secondary hover:text-error"
-                  title="Eliminar"
-                >
-                  <app-icon name="trash-2" [size]="14"></app-icon>
-                </button>
+                }
               </div>
             </div>
           }
@@ -188,9 +186,5 @@ export class ResolutionsComponent {
   editResolution(resolution: InvoiceResolution): void {
     this.selectedResolution.set(resolution);
     this.isCreateModalOpen.set(true);
-  }
-
-  onDeleteResolution(id: number): void {
-    this.store.dispatch(InvoicingActions.deleteResolution({ id }));
   }
 }

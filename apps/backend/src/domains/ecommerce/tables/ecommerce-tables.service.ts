@@ -1,3 +1,4 @@
+import { resolveOrderLinePrintedGross } from 'src/domains/store/taxes/utils/final-price.util';
 import {
   Inject,
   Injectable,
@@ -147,6 +148,12 @@ export interface BillItemView {
    * (§5.3: sin este dato no hay con qué explicar la diferencia).
    */
   tax_amount: number;
+  /**
+   * Aditivo (U2-H1) — marca de línea cancelada (soft cancel). La línea sigue
+   * en la lista, pero el cliente debe excluirla del Subtotal: los totales de
+   * cabecera (`grand_total`, `balance_due`) ya la excluyen.
+   */
+  cancelled_at: Date | null;
   /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
@@ -1014,6 +1021,7 @@ export class EcommerceTablesService {
         price_unit_quantity: true,
         variant_image_url: true,
         notes: true,
+        cancelled_at: true,
         products: {
           select: {
             product_images: {
@@ -1042,19 +1050,24 @@ export class EcommerceTablesService {
         const signedImageUrl = rawImageUrl
           ? ((await this.s3Service.signUrl(rawImageUrl)) ?? null)
           : null;
-        // C.8 (ADR-06 fallback en lectura): `final_unit_price ?? (unit_price
-        // + COALESCE(tax_amount_item,0) / line_units)`. `getBill` nunca
-        // escribe `final_unit_price` (F-005), así que este fallback es el
-        // camino normal, no la excepción.
+        // C.8 (ADR-06): `final_unit_price` si está poblado; si no, delega al
+        // util canónico `resolveOrderLinePrintedGross` (`tax_amount_item` es
+        // impuesto POR UNIDAD de precio, ADR-10). `getBill` nunca escribe
+        // `final_unit_price` (F-005), así que el util es el camino normal.
         const netUnit = Number(it.unit_price);
         const netTotal = Number(it.total_price);
-        const lineUnits = Number(it.price_unit_quantity ?? it.quantity ?? 1) || 1;
-        const grossUnit =
-          it.final_unit_price != null
-            ? Number(it.final_unit_price)
-            : netUnit + Number(it.tax_amount_item ?? 0) / lineUnits;
-        const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(it.quantity ?? 0);
-        const lineTotalGross = Math.round(grossUnit * multiplier * 100) / 100;
+        let grossUnit: number;
+        let lineTotalGross: number;
+        if (it.final_unit_price != null) {
+          grossUnit = Number(it.final_unit_price);
+          const multiplier =
+            netUnit !== 0 ? netTotal / netUnit : Number(it.quantity ?? 0);
+          lineTotalGross = Math.round(grossUnit * multiplier * 100) / 100;
+        } else {
+          const printed = resolveOrderLinePrintedGross(it);
+          grossUnit = printed.gross_unit_price;
+          lineTotalGross = printed.gross_total_price;
+        }
         return {
           name: it.product_name,
           quantity: it.quantity,
@@ -1067,6 +1080,7 @@ export class EcommerceTablesService {
           // calculado arriba y la base (`total`). Nunca negativo por
           // redondeo (tasa 0% ⇒ grossUnit === netUnit ⇒ 0).
           tax_amount: Math.max(Math.round((lineTotalGross - netTotal) * 100) / 100, 0),
+          cancelled_at: it.cancelled_at ?? null,
           image_url: signedImageUrl,
           notes: it.notes ?? null,
         };

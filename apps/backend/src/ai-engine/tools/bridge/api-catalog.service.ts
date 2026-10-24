@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common/constants';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { getMetadataStorage } from 'class-validator';
+import { discoveryPage } from '../discovery-pagination';
+import { callerDomainScope } from './internal-http';
 import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.decorator';
 
 /**
@@ -357,20 +359,36 @@ export class ApiCatalogService implements OnApplicationBootstrap {
   /**
    * Endpoints the given scopes may call. Fail-closed: an endpoint declaring
    * permissions the caller lacks is not listed, so the model never learns
-   * about surfaces this user cannot reach.
+   * about surfaces this user cannot reach. Same for routes outside the
+   * caller's domain scope (`DomainScopeGuard`), read from the request context.
    */
   listFor(
     scopes: string[],
     area?: string,
     domain?: string,
     methods?: CatalogMethod[],
+    /**
+     * Solo para validar contra el catálogo completo de la release (playbooks):
+     * esa lectura no es de ningún llamante y no debe depender del contexto.
+     */
+    options: { ignoreDomainScope?: boolean } = {},
   ): CatalogEntry[] {
     return this.entries.filter((e) => {
       if (area && e.area !== area) return false;
       if (domain && e.domain !== domain) return false;
       if (methods && !methods.includes(e.method)) return false;
-      return e.requiredPermissions.every((p) => scopes.includes(p));
+      if (!e.requiredPermissions.every((p) => scopes.includes(p))) return false;
+      // Fuera del dominio del token (p. ej. `organization/*` con token de
+      // tienda) el guard responde 403 aunque sobren permisos: no se ofrece.
+      return options.ignoreDomainScope || callerDomainScope(e.path).allowed;
     });
+  }
+
+  pageFor(scopes: string[], filters: { area?: string; domain?: string; methods?: CatalogMethod[]; path?: string }, args: { cursor?: unknown; limit?: unknown }) {
+    const authorized = this.listFor(scopes, filters.area, filters.domain, filters.methods)
+      .filter((entry) => !filters.path || entry.path === this.normalize(filters.path))
+      .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+    return discoveryPage(authorized, args, filters);
   }
 
   /**

@@ -368,8 +368,11 @@ export class InventoryService {
   // BULK ADJUSTMENTS
   // ============================================================
 
-  downloadAdjustmentTemplate(location_id?: number): Observable<Blob> {
-    let params = new HttpParams();
+  downloadAdjustmentTemplate(
+    location_id?: number,
+    mode: 'example' | 'existing' = 'existing',
+  ): Observable<Blob> {
+    let params = new HttpParams().set('mode', mode);
     if (location_id) params = params.set('location_id', location_id.toString());
 
     return this.http
@@ -396,6 +399,63 @@ export class InventoryService {
       .post<ApiResponse<any>>(
         `${this.base_url}/adjustments/bulk/upload`,
         form_data,
+      )
+      .pipe(catchError(this.handleError));
+  }
+
+  /** Analiza el archivo y abre una sesión (S3) sin aplicar ajustes. */
+  analyzeBulkAdjustments(
+    file: File,
+    location_id: number,
+    adjustment_type?: string,
+    description?: string,
+  ): Observable<ApiResponse<any>> {
+    const form_data = new FormData();
+    form_data.append('file', file);
+    form_data.append('location_id', location_id.toString());
+    if (adjustment_type) form_data.append('adjustment_type', adjustment_type);
+    if (description) form_data.append('description', description);
+
+    return this.http
+      .post<ApiResponse<any>>(
+        `${this.base_url}/adjustments/bulk/analyze`,
+        form_data,
+      )
+      .pipe(catchError(this.handleError));
+  }
+
+  /** Una página (<=100 filas) del commit de sesión de ajustes. */
+  uploadBulkAdjustmentsSessionPage(
+    session_id: string,
+    location_id: number,
+    offset: number,
+    limit: number,
+    adjustment_type?: string,
+    description?: string,
+    initial_load_ack?: boolean,
+  ): Observable<ApiResponse<any>> {
+    const body: Record<string, unknown> = {
+      session_id,
+      location_id,
+      offset,
+      limit,
+    };
+    if (adjustment_type) body['adjustment_type'] = adjustment_type;
+    if (description) body['description'] = description;
+    if (initial_load_ack) body['initial_load_ack'] = true;
+
+    return this.http
+      .post<ApiResponse<any>>(
+        `${this.base_url}/adjustments/bulk/upload-session`,
+        body,
+      )
+      .pipe(catchError(this.handleError));
+  }
+
+  cancelBulkAdjustmentSession(session_id: string): Observable<ApiResponse<any>> {
+    return this.http
+      .delete<ApiResponse<any>>(
+        `${this.base_url}/adjustments/bulk/session/${session_id}`,
       )
       .pipe(catchError(this.handleError));
   }

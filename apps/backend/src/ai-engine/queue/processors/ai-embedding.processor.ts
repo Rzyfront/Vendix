@@ -1,25 +1,34 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, Optional, forwardRef } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { EmbeddingService } from '../../embeddings/embedding.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { AIEmbeddingJob } from '../interfaces/ai-queue.interface';
+import { ToolCatalogIndexerService } from '../../tools/tool-catalog-indexer.service';
+import { AIEmbeddingJob, AIKnowledgeIndexJob } from '../interfaces/ai-queue.interface';
 
 @Processor('ai-embedding')
 export class AIEmbeddingProcessor extends WorkerHost {
   private readonly logger = new Logger(AIEmbeddingProcessor.name);
 
-  constructor(private readonly embeddingService: EmbeddingService) {
+  constructor(private readonly embeddingService: EmbeddingService,
+    @Optional() @Inject(forwardRef(() => ToolCatalogIndexerService)) private readonly knowledgeIndexer?: ToolCatalogIndexerService) {
     super();
   }
 
   async process(
     job: Job<
       | AIEmbeddingJob
+      | AIKnowledgeIndexJob
       | { store_id: number; entity_type: string; entity_id: number }
     >,
   ): Promise<void> {
     const jobName = job.name;
+
+    if (jobName === 'index-knowledge') {
+      if (!this.knowledgeIndexer) throw new Error('KNOWLEDGE_INDEXER_UNAVAILABLE');
+      await this.knowledgeIndexer.indexBatch(job.data as AIKnowledgeIndexJob);
+      return;
+    }
 
     if (jobName === 'delete-embedding') {
       const data = job.data as {
@@ -37,6 +46,8 @@ export class AIEmbeddingProcessor extends WorkerHost {
       );
       return;
     }
+
+    if (jobName !== 'embed') throw new Error('UNKNOWN_EMBEDDING_JOB');
 
     // Default: generate and store embedding
     const data = job.data as AIEmbeddingJob;

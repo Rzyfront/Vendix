@@ -1,4 +1,8 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { AssignProductsDto } from './dto';
 // The categories domain throws typed VendixHttpException (CAT_*): the HTTP
 // status now travels in the error code, not in the exception class.
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
@@ -49,8 +53,18 @@ describe('CategoriesService', () => {
     },
     product_categories: {
       count: jest.fn(),
+      findMany: jest.fn(),
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
     },
+    products: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    $transaction: jest.fn((fn: any) => fn(mockPrismaService)),
   };
+
+  const mockEventEmitter = { emit: jest.fn() };
 
   const mockAccessValidationService = {
     validateStoreAccess: jest.fn(),
@@ -88,6 +102,7 @@ describe('CategoriesService', () => {
           provide: AccessValidationService,
           useValue: mockAccessValidationService,
         },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
@@ -230,7 +245,7 @@ describe('CategoriesService', () => {
       const result = await service.findAll(query);
 
       expect(result).toEqual({
-        data: categories,
+        data: categories.map((c) => ({ ...c, product_count: 0 })),
         meta: { total: 2, page: 1, limit: 10, totalPages: 1 },
       });
       expect(mockPrismaService.categories.findMany).toHaveBeenCalledWith({
@@ -238,7 +253,7 @@ describe('CategoriesService', () => {
         skip: 0,
         take: 10,
         orderBy: { name: 'asc' },
-        include: { stores: true },
+        include: { stores: true, _count: expect.anything() },
       });
     });
 
@@ -265,7 +280,7 @@ describe('CategoriesService', () => {
       const result = await service.findAll(query);
 
       expect(result).toEqual({
-        data: categories,
+        data: categories.map((c) => ({ ...c, product_count: 0 })),
         meta: { total: 6, page: 2, limit: 5, totalPages: 2 },
       });
       expect(mockPrismaService.categories.findMany).toHaveBeenCalledWith({
@@ -273,7 +288,7 @@ describe('CategoriesService', () => {
         skip: 5,
         take: 5,
         orderBy: { created_at: 'desc' },
-        include: { stores: true },
+        include: { stores: true, _count: expect.anything() },
       });
     });
 
@@ -297,7 +312,7 @@ describe('CategoriesService', () => {
       const result = await service.findAll(query);
 
       expect(result).toEqual({
-        data: categories,
+        data: categories.map((c) => ({ ...c, product_count: 0 })),
         meta: { total: 1, page: 1, limit: 10, totalPages: 1 },
       });
       expect(mockPrismaService.categories.findMany).toHaveBeenCalledWith({
@@ -311,7 +326,7 @@ describe('CategoriesService', () => {
         skip: 0,
         take: 10,
         orderBy: { name: 'asc' },
-        include: { stores: true },
+        include: { stores: true, _count: expect.anything() },
       });
     });
 
@@ -335,7 +350,7 @@ describe('CategoriesService', () => {
       const result = await service.findAll(query);
 
       expect(result).toEqual({
-        data: categories,
+        data: categories.map((c) => ({ ...c, product_count: 0 })),
         meta: { total: 1, page: 1, limit: 10, totalPages: 1 },
       });
       expect(mockPrismaService.categories.findMany).toHaveBeenCalledWith({
@@ -343,7 +358,7 @@ describe('CategoriesService', () => {
         skip: 0,
         take: 10,
         orderBy: { name: 'asc' },
-        include: { stores: true },
+        include: { stores: true, _count: expect.anything() },
       });
     });
   });
@@ -674,6 +689,377 @@ describe('CategoriesService', () => {
       await expect(
         service.update(categoryId, updateCategoryDto, user),
       ).rejects.toThrow('Category name/slug already exists in this store');
+    });
+  });
+
+  describe('findAll product_count', () => {
+    it('exposes the non-archived product count per category', async () => {
+      mockPrismaService.categories.findMany.mockResolvedValue([
+        { id: 1, name: 'A', image_url: null, _count: { product_categories: 4 } },
+        { id: 2, name: 'B', image_url: null, _count: { product_categories: 0 } },
+      ]);
+      mockPrismaService.categories.count.mockResolvedValue(2);
+
+      const result = await service.findAll({});
+
+      expect(result.data.map((c: any) => c.product_count)).toEqual([4, 0]);
+      expect(result.data[0]).not.toHaveProperty('_count');
+      expect(mockPrismaService.categories.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            _count: {
+              select: {
+                product_categories: {
+                  where: { products: { state: { not: 'archived' } } },
+                },
+              },
+            },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('assignProducts', () => {
+    const activeProducts = (ids: number[]) =>
+      ids.map((id) => ({ id, brand_id: null, state: 'active' }));
+
+    beforeEach(() => {
+      mockPrismaService.categories.findFirst.mockResolvedValue({ id: 5 });
+      mockPrismaService.product_categories.findMany.mockReset();
+      mockPrismaService.product_categories.createMany.mockReset();
+      mockPrismaService.product_categories.deleteMany.mockReset();
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.updateMany.mockReset();
+    });
+
+    it('add inserts with skipDuplicates and counts existing as unchanged', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(
+        activeProducts([1, 2, 3]),
+      );
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 2 },
+      ]);
+      mockPrismaService.product_categories.createMany.mockResolvedValue({
+        count: 2,
+      });
+
+      const result = await service.assignProducts(5, {
+        action: 'add',
+        product_ids: [1, 2, 3, 3],
+      });
+
+      expect(result).toEqual({ added: 2, removed: 0, unchanged: 1 });
+      expect(
+        mockPrismaService.product_categories.createMany,
+      ).toHaveBeenCalledWith({
+        data: [
+          { product_id: 1, category_id: 5 },
+          { product_id: 3, category_id: 5 },
+        ],
+        skipDuplicates: true,
+      });
+      expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [1, 3] }, store_id: 1 },
+        data: { updated_at: expect.any(Date) },
+      });
+      expect(
+        mockPrismaService.product_categories.deleteMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('remove deletes only that category relation', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(
+        activeProducts([1, 2]),
+      );
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 1 },
+      ]);
+      mockPrismaService.product_categories.deleteMany.mockResolvedValue({
+        count: 1,
+      });
+
+      const result = await service.assignProducts(5, {
+        action: 'remove',
+        product_ids: [1, 2],
+      });
+
+      expect(result).toEqual({ added: 0, removed: 1, unchanged: 1 });
+      expect(
+        mockPrismaService.product_categories.deleteMany,
+      ).toHaveBeenCalledWith({
+        where: { category_id: 5, product_id: { in: [1] } },
+      });
+      expect(mockPrismaService.products.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [1] }, store_id: 1 },
+        data: { updated_at: expect.any(Date) },
+      });
+    });
+
+    it('does not bump updated_at when nothing changed', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(activeProducts([1]));
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 1 },
+      ]);
+
+      const result = await service.assignProducts(5, {
+        action: 'add',
+        product_ids: [1],
+      });
+
+      expect(result).toEqual({ added: 0, removed: 0, unchanged: 1 });
+      expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('emite UN products.bulk_updated con los ids realmente cambiados', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(
+        activeProducts([1, 2, 3]),
+      );
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 2 },
+      ]);
+      mockPrismaService.product_categories.createMany.mockResolvedValue({
+        count: 2,
+      });
+
+      await service.assignProducts(5, {
+        action: 'add',
+        product_ids: [1, 2, 3],
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'products.bulk_updated',
+        { store_id: 1, organization_id: 1, product_ids: [1, 3] },
+      );
+    });
+
+    it('no emite si no cambió nada (0 cambiados)', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(activeProducts([1]));
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 1 },
+      ]);
+
+      await service.assignProducts(5, { action: 'add', product_ids: [1] });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('no emite si la transacción falla', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(activeProducts([1]));
+      mockPrismaService.product_categories.findMany.mockResolvedValue([]);
+      mockPrismaService.product_categories.createMany.mockRejectedValue(
+        new Error('boom'),
+      );
+
+      await expect(
+        service.assignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toThrow('boom');
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing/other-store products without writing', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue(activeProducts([1]));
+
+      await expect(
+        service.assignProducts(5, { action: 'add', product_ids: [1, 99] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: { invalid_product_ids: [99] },
+        }),
+      });
+      expect(
+        mockPrismaService.product_categories.createMany,
+      ).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects archived products on add but allows them on remove', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, brand_id: null, state: 'archived' },
+      ]);
+      await expect(
+        service.assignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 1 },
+      ]);
+      mockPrismaService.product_categories.deleteMany.mockResolvedValue({
+        count: 1,
+      });
+      await expect(
+        service.assignProducts(5, { action: 'remove', product_ids: [1] }),
+      ).resolves.toEqual({ added: 0, removed: 1, unchanged: 0 });
+    });
+
+    it('throws CAT_FIND_001 when the category is missing or archived', async () => {
+      mockPrismaService.categories.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.assignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'CAT_FIND_001' }),
+      });
+      expect(mockPrismaService.categories.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 5, store_id: 1, state: { not: 'archived' } },
+        }),
+      );
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('previewAssignProducts', () => {
+    beforeEach(() => {
+      mockPrismaService.categories.findFirst.mockResolvedValue({ id: 5 });
+      mockPrismaService.product_categories.findMany.mockReset();
+      mockPrismaService.product_categories.createMany.mockReset();
+      mockPrismaService.product_categories.deleteMany.mockReset();
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.updateMany.mockReset();
+    });
+
+    it('rechaza productos de otra tienda sin escribir', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, state: 'active' },
+      ]);
+      await expect(
+        service.previewAssignProducts(5, {
+          action: 'add',
+          product_ids: [1, 99],
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'PROD_FIND_001',
+          details: { invalid_product_ids: [99] },
+        }),
+      });
+      expect(
+        mockPrismaService.product_categories.createMany,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockPrismaService.product_categories.deleteMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('devuelve cuántos ya están y cuántos se agregarían', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, state: 'active' },
+        { id: 2, state: 'active' },
+        { id: 3, state: 'active' },
+      ]);
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 2 },
+      ]);
+      await expect(
+        service.previewAssignProducts(5, {
+          action: 'add',
+          product_ids: [1, 2, 3],
+        }),
+      ).resolves.toEqual({ already_in_category: 1, to_add: 2 });
+    });
+
+    it('lanza CAT_FIND_001 si la categoría no existe', async () => {
+      mockPrismaService.categories.findFirst.mockResolvedValue(null);
+      await expect(
+        service.previewAssignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'CAT_FIND_001' }),
+      });
+    });
+  });
+
+  describe('AssignProductsDto', () => {
+    const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+    it('acepta 100 ids y rechaza 101 (arrayMaxSize)', () => {
+      const ok = validateSync(
+        plainToInstance(AssignProductsDto, {
+          action: 'add',
+          product_ids: range(100),
+        }),
+      );
+      expect(ok).toHaveLength(0);
+      const bad = validateSync(
+        plainToInstance(AssignProductsDto, {
+          action: 'add',
+          product_ids: range(101),
+        }),
+      );
+      expect(bad[0].constraints).toHaveProperty('arrayMaxSize');
+    });
+  });
+
+  describe('getProductIds', () => {
+    it('returns non-archived member ids and total', async () => {
+      mockPrismaService.categories.findFirst.mockResolvedValue({ id: 5 });
+      mockPrismaService.product_categories.findMany.mockResolvedValue([
+        { product_id: 3 },
+        { product_id: 7 },
+      ]);
+
+      await expect(service.getProductIds(5)).resolves.toEqual({
+        product_ids: [3, 7],
+        total: 2,
+      });
+      expect(
+        mockPrismaService.product_categories.findMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          category_id: 5,
+          products: { state: { not: 'archived' } },
+        },
+        select: { product_id: true },
+      });
+    });
+
+    it('throws CAT_FIND_001 for an unknown category', async () => {
+      mockPrismaService.categories.findFirst.mockResolvedValue(null);
+      await expect(service.getProductIds(5)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+    });
+  });
+
+  describe('assignProducts tenant isolation', () => {
+    it('scopes categories and products lookups with the context store_id', async () => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
+      mockPrismaService.categories.findFirst.mockResolvedValue({ id: 5 });
+      mockPrismaService.products.findMany.mockReset();
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, brand_id: null, state: 'active' },
+      ]);
+      mockPrismaService.product_categories.findMany.mockResolvedValue([]);
+      mockPrismaService.product_categories.createMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await service.assignProducts(5, { action: 'add', product_ids: [1] });
+
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [1] }, store_id: 7 } }),
+      );
+      expect(mockPrismaService.categories.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 5, store_id: 7, state: { not: 'archived' } },
+        }),
+      );
+    });
+
+    it('throws STORE_CONTEXT_001 without a store in context', async () => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined);
+      mockPrismaService.products.findMany.mockReset();
+
+      await expect(
+        service.assignProducts(5, { action: 'add', product_ids: [1] }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STORE_CONTEXT_001' }),
+      });
+      await expect(service.getProductIds(5)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
     });
   });
 });

@@ -80,6 +80,10 @@ export interface TrigramFilterSet {
   readonly posOptimized?: boolean | null;
   readonly brandId?: number | null;
   readonly categoryId?: number | null;
+  /** true: solo productos sin marca (`brand_id IS NULL`). */
+  readonly withoutBrand?: boolean | null;
+  /** true: solo productos sin ninguna categoría (`product_categories` vacío). */
+  readonly withoutCategory?: boolean | null;
   readonly trackInventory?: boolean | null;
   readonly productType?: string | null;
   readonly requiresBooking?: boolean | null;
@@ -188,6 +192,18 @@ export function buildTrigramFilterClauses(
     clauses.push(
       `EXISTS (SELECT 1 FROM public.product_categories pc WHERE pc.product_id = p.id AND pc.category_id = ${acc.push(f.categoryId)}::int)`,
     );
+  }
+  if (f.withoutBrand !== undefined && f.withoutBrand !== null) {
+    assertBoolean(f.withoutBrand, 'withoutBrand');
+    if (f.withoutBrand) clauses.push(`p.brand_id IS NULL`);
+  }
+  if (f.withoutCategory !== undefined && f.withoutCategory !== null) {
+    assertBoolean(f.withoutCategory, 'withoutCategory');
+    if (f.withoutCategory) {
+      clauses.push(
+        `NOT EXISTS (SELECT 1 FROM public.product_categories pc WHERE pc.product_id = p.id)`,
+      );
+    }
   }
   if (f.trackInventory !== undefined && f.trackInventory !== null) {
     assertBoolean(f.trackInventory, 'trackInventory');

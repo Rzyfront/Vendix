@@ -1,0 +1,125 @@
+:host {
+  display: block;
+}
+.guides,
+.guide-page {
+  color: var(--color-text-primary, #0f172a);
+  background: var(--color-background, #f8f9ff);
+}
+.guides {
+  padding: 4rem 1rem;
+}
+.guides-container {
+  max-width: 72rem;
+  margin: auto;
+}
+.guides-heading {
+  text-align: center;
+  max-width: 48rem;
+  margin: 0 auto 2rem;
+}
+.guides-eyebrow,
+.guide-category {
+  color: var(--color-primary, #15803d);
+  font-weight: 700;
+}
+.guides-eyebrow {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.guides h2 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0.8rem 0;
+}
+.guides p {
+  line-height: 1.65;
+}
+.guides-heading > p:last-child,
+.guide-card-body > p:not(.guide-category),
+.guide-cta p {
+  color: var(--color-text-secondary, #475569);
+}
+.guides-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+.guide-card {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #dbe8e1);
+  border-radius: 1.25rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.guide-card img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+.guide-card-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  align-items: flex-start;
+}
+.guide-category {
+  border: 1px solid var(--color-border, #dbe8e1);
+  border-radius: 2rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+.guide-card h3,
+.guide-cta h3 {
+  font-size: 1.5rem;
+  font-weight: 750;
+  line-height: 1.3;
+  margin: 0 0 0.8rem;
+}
+.guide-card a {
+  margin-top: auto;
+  padding-top: 1rem;
+  color: var(--color-primary, #15803d);
+  font-weight: 700;
+  min-height: 44px;
+}
+.guide-cta {
+  margin-top: 1.75rem;
+  padding: 1.5rem;
+  border-radius: 1.25rem;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #dbe8e1);
+  display: flex;
+  gap: 1.25rem;
+  flex-direction: column;
+}
+.guide-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.85rem 1.25rem;
+  border-radius: 0.75rem;
+  color: var(--color-on-primary, #fff);
+  background: var(--color-primary, #15803d);
+  font-weight: 700;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+a:focus-visible {
+  outline: 3px solid var(--color-primary, #15803d);
+  outline-offset: 5px;
+}
+@media (min-width: 768px) {
+  .guides-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .guide-cta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}

@@ -22,6 +22,7 @@ import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service'
 import { AuditResource } from '../../../common/audit/audit.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { resolveKitchenMode } from './kitchen-mode.util';
+import { closeSupersededKitchenRows } from './kitchen-superseded-rows.util';
 
 /**
  * Puerto mínimo de OrderFlowService que necesita cocina para mantener
@@ -3237,6 +3238,24 @@ export class KitchenFireService {
           updated_at: new Date(),
         },
       });
+    }
+
+    // QUI-892: cerrar (solo estado) las filas viejas de reenvíos previos de
+    // las líneas entregadas, para que sus tickets no bloqueen la orden.
+    try {
+      const closedTickets = await closeSupersededKitchenRows(
+        this.prisma,
+        Array.from(
+          new Set<number>(deliveredItems.map((it: any) => it.order_item_id)),
+        ),
+      );
+      for (const closedId of closedTickets) {
+        if (closedId !== ticketId) await this.emitTicketUpdatedEvent(closedId);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `QUI-892: no se pudieron cerrar filas superadas del ticket ${ticketId}: ${(err as Error).message}`,
+      );
     }
 
     const full = await this.getTicketForStore(ticketId);

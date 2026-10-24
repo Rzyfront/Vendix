@@ -53,11 +53,11 @@ export type InputSize = 'sm' | 'md' | 'lg';
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
       @if (label()) {
-        <div class="label-with-tooltip">
+        <div [class]="labelClasses + ' label-with-tooltip'">
           <label [for]="inputId()" [class]="labelClasses">
             <span>{{ label() }}</span>
             @if (required()) {
-              <span class="text-[var(--color-text-primary)] ml-1" aria-hidden="true">*</span>
+              <span class="text-[var(--color-destructive)] ml-1" aria-hidden="true">*</span>
             }
           </label>
           @if (tooltipText()) {
@@ -68,7 +68,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
             >
               <button
                 type="button"
-                class="help-icon inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)]"
+                class="help-icon"
                 [attr.aria-label]="'Ayuda para ' + label()"
               >
                 <app-icon name="help-circle" [size]="14"></app-icon>
@@ -119,7 +119,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
         @if (type() === 'password') {
           <button
             type="button"
-            class="password-visibility-toggle absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-primary)] transition-colors duration-200 hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+            class="password-visibility-toggle absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
             [disabled]="isDisabled()"
             (click)="togglePasswordVisibility()"
             [attr.aria-label]="
@@ -181,7 +181,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
 
       <!-- Helper text -->
       @if (helperText() && !getValidationError()) {
-        <p class="mt-2 text-sm text-[var(--color-text-primary)]">
+        <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
           {{ helperText() }}
         </p>
       }
@@ -189,7 +189,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <!-- Error message -->
       @if (getValidationError()) {
         <p
-          class="mt-2 text-sm text-[var(--color-text-primary)]"
+          class="mt-2 text-sm text-[var(--color-destructive)]"
           [id]="errorId()"
         >
           {{ getValidationError() }}
@@ -233,7 +233,12 @@ export type InputSize = 'sm' | 'md' | 'lg';
       }
 
       .help-icon {
-        color: var(--color-text-primary);
+        padding: 0;
+        border: 0;
+        background: none;
+        font: inherit;
+        line-height: 0;
+        color: var(--color-text-muted);
         cursor: help;
         position: relative;
         display: inline-flex;
@@ -241,7 +246,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       }
 
       .help-icon:hover {
-        color: var(--color-text-primary);
+        color: var(--color-primary);
       }
     `,
   ],
@@ -363,7 +368,7 @@ export class InputComponent implements ControlValueAccessor {
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
-        'text-[var(--color-text-primary)]',
+        'text-[var(--color-text-muted)]',
         this.customLabelClass(),
       ]
         .filter(Boolean)
@@ -390,11 +395,7 @@ export class InputComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'focus-visible:outline',
-      'focus-visible:outline-2',
-      'focus-visible:outline-offset-2',
-      'focus-visible:outline-[var(--color-text-primary)]',
-      'placeholder:text-[var(--color-text-primary)]',
+      'placeholder:text-text-muted',
     ];
 
     // Clases de validación por estado
@@ -404,13 +405,13 @@ export class InputComponent implements ControlValueAccessor {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'bg-[rgba(var(--color-error-rgb),0.1)]',
+        'bg-[rgba(239,68,68,0.1)]',
       ];
     } else if (control?.valid && control?.touched && control?.value) {
       stateClasses = [
         'border-[var(--color-primary)]',
         'focus:border-[var(--color-primary)]',
-        'bg-[rgba(var(--color-success-rgb),0.1)]',
+        'bg-[rgba(126,215,165,0.1)]',
       ];
     } else {
       stateClasses = [
@@ -431,7 +432,7 @@ export class InputComponent implements ControlValueAccessor {
       : basePadding[this.size()].pl;
     const rightPadding =
       this.suffixIcon() || this.type() === 'password'
-        ? ['pr-12']
+        ? ['pr-10']
         : basePadding[this.size()].pr;
 
     let variantClasses: string[];
@@ -455,7 +456,7 @@ export class InputComponent implements ControlValueAccessor {
         'focus:bg-[var(--color-surface)]',
         'focus:shadow-[0_0_0_2px_var(--color-ring)]',
         control?.invalid && control?.touched
-          ? 'focus:shadow-[0_0_0_2px_rgba(var(--color-error-rgb),0.3)]'
+          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
           : '',
       ];
     } else {

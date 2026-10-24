@@ -1,3 +1,4 @@
+import { resolveOrderLinePrintedGross } from 'src/domains/store/taxes/utils/final-price.util';
 import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -27,6 +28,7 @@ import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/
 import { resolveAcquirerRail } from '../validators/acquirer-rail.resolver';
 import { normalizeAcquirerDocumentType } from '../utils/acquirer-identity.resolver';
 import { normalizeNit } from '@common/utils/nit.util';
+import { normalizeEmail } from '@common/utils/email.util';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
@@ -108,7 +110,7 @@ export class InvoiceDataRequestsService {
         last_name: customerData?.last_name || null,
         document_type: customerData?.document_type || null,
         document_number: customerData?.document_number || null,
-        email: customerData?.email || null,
+        email: normalizeEmail(customerData?.email ?? '') || null,
         phone: customerData?.phone || null,
         status: 'pending',
         expires_at: expiresAt,
@@ -197,16 +199,10 @@ export class InvoiceDataRequestsService {
   }
 
   /**
-   * C.8 (CP-pos-exclusive-tax-double-charge, ADR-06, FB-15) — `unit_price`/
-   * `total_price` siguen en la BASE (R-1: ningún lector viejo cambia de
-   * magnitud). El bruto viaja en campos ADITIVOS nuevos, derivado con el
-   * mismo fallback textual del ADR: `final_unit_price` si ya está poblado,
-   * si no `unit_price + tax_amount_item / line_units`. Mismo cálculo puro
-   * que `account.service.ts#deriveLineGross` — duplicado a propósito (no
-   * importado): ese archivo vive en el dominio `ecommerce/account` y este
-   * en `store/invoicing`, y ya hay una segunda copia local en
-   * `ecommerce-tables.service.ts` por la misma razón de no cruzar dominios
-   * para una función de 6 líneas.
+   * C.8 (ADR-06, FB-15) — `unit_price`/`total_price` siguen en la BASE (R-1).
+   * El bruto viaja en campos aditivos: `final_unit_price` si está poblado; si
+   * no, delega al util canónico `resolveOrderLinePrintedGross`
+   * (`tax_amount_item` es impuesto POR UNIDAD de precio, ADR-10).
    */
   private deriveLineGross(item: {
     unit_price: any;
@@ -215,19 +211,24 @@ export class InvoiceDataRequestsService {
     final_unit_price?: any;
     price_unit_quantity?: any;
     quantity: any;
+    weight?: any;
   }): { unit_price_gross: number; line_total_gross: number } {
-    const netUnit = Number(item.unit_price ?? 0);
-    const netTotal = Number(item.total_price ?? 0);
-    const lineUnits = Number(item.price_unit_quantity ?? item.quantity ?? 1) || 1;
-    const grossUnit =
-      item.final_unit_price != null
-        ? Number(item.final_unit_price)
-        : netUnit + Number(item.tax_amount_item ?? 0) / lineUnits;
-    const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
-    const grossTotal = Math.round(grossUnit * multiplier * 100) / 100;
+    if (item.final_unit_price != null) {
+      const netUnit = Number(item.unit_price ?? 0);
+      const netTotal = Number(item.total_price ?? 0);
+      const grossUnit = Number(item.final_unit_price);
+      const multiplier =
+        netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
+      return {
+        unit_price_gross: Math.round(grossUnit * 100) / 100,
+        line_total_gross: Math.round(grossUnit * multiplier * 100) / 100,
+      };
+    }
+    const { gross_unit_price, gross_total_price } =
+      resolveOrderLinePrintedGross(item);
     return {
-      unit_price_gross: Math.round(grossUnit * 100) / 100,
-      line_total_gross: grossTotal,
+      unit_price_gross: gross_unit_price,
+      line_total_gross: gross_total_price,
     };
   }
 
@@ -438,7 +439,9 @@ export class InvoiceDataRequestsService {
           item.products?.preparation_time_minutes ??
           null,
         image_url: item.products?.product_images?.[0]?.image_url
-          ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
+          ? await this.s3Service.signUrl(
+              item.products.product_images[0].image_url,
+            )
           : null,
         variant_image_url: item.variant_image_url
           ? await this.s3Service.signUrl(item.variant_image_url)
@@ -450,9 +453,7 @@ export class InvoiceDataRequestsService {
     // (variante ?? producto ?? default tienda) — coherente con el paso 5.
     const prep_minutes_max = items.length
       ? Math.max(
-          ...items.map(
-            (item) => item.preparation_time_minutes ?? defaultPrep,
-          ),
+          ...items.map((item) => item.preparation_time_minutes ?? defaultPrep),
         )
       : defaultPrep;
 
@@ -670,15 +671,12 @@ export class InvoiceDataRequestsService {
       throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
     }
 
-    const TTL_SECONDS =
-      InvoiceDataRequestsService.RECEIPT_URL_TTL_SECONDS;
+    const TTL_SECONDS = InvoiceDataRequestsService.RECEIPT_URL_TTL_SECONDS;
     const [url, head] = await Promise.all([
       this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
       this.s3Service.headObject(payment.receipt_s3_key),
     ]);
-    const expires_at = new Date(
-      Date.now() + TTL_SECONDS * 1000,
-    ).toISOString();
+    const expires_at = new Date(Date.now() + TTL_SECONDS * 1000).toISOString();
 
     return { url, expires_at, content_type: head?.contentType ?? null };
   }
@@ -711,8 +709,18 @@ export class InvoiceDataRequestsService {
     // R8-F1 — sin comprobantes tardíos sobre estados terminales: la orden
     // ya se cerró o el pago ya se resolvió y el recibo no cambiaría nada.
     // Mismo código que el gate de método (400, mensaje ES al guest).
-    const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished', 'delivered'];
-    const TERMINAL_PAYMENT_STATES = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    const TERMINAL_ORDER_STATES = [
+      'cancelled',
+      'refunded',
+      'finished',
+      'delivered',
+    ];
+    const TERMINAL_PAYMENT_STATES = [
+      'succeeded',
+      'captured',
+      'refunded',
+      'cancelled',
+    ];
     if (TERMINAL_ORDER_STATES.includes(request.order?.state as string)) {
       throw new VendixHttpException(
         ErrorCodes.PAY_VALIDATE_001,
@@ -886,7 +894,7 @@ export class InvoiceDataRequestsService {
         last_name: dto.last_name,
         document_type: dto.document_type,
         document_number: dto.document_number,
-        email: dto.email,
+        email: dto.email == null ? dto.email : normalizeEmail(dto.email),
         phone: dto.phone,
         status: 'submitted',
         submitted_at: new Date(),
@@ -1142,7 +1150,11 @@ export class InvoiceDataRequestsService {
           this.logger.log(
             `Invoice data request #${requestId}: backfilled document_type='${submitted_type}' onto existing customer #${customer.id} (documento=${request.document_number}), que no lo tenía declarado.`,
           );
-        } else if (existing_type && submitted_type && existing_type !== submitted_type) {
+        } else if (
+          existing_type &&
+          submitted_type &&
+          existing_type !== submitted_type
+        ) {
           throw new VendixHttpException(
             ErrorCodes.INVOICING_DATA_REQUEST_005,
             `El cliente con documento ${request.document_number} ya está registrado con tipo de documento '${existing_type}', y el formulario declaró '${submitted_type}'. Verifica manualmente cuál es el correcto antes de continuar.`,
@@ -1170,7 +1182,11 @@ export class InvoiceDataRequestsService {
       if (!customer) {
         // Find customer role
         const customerRole = await this.prisma.roles.findFirst({
-          where: { name: 'customer', organization_id: null, is_system_role: true },
+          where: {
+            name: 'customer',
+            organization_id: null,
+            is_system_role: true,
+          },
         });
 
         if (!customerRole) {
@@ -1185,8 +1201,8 @@ export class InvoiceDataRequestsService {
         customer = await this.prisma.users.create({
           data: {
             email:
-              request.email ||
-              `invoice_${request.token}@placeholder.vendix.com`,
+              normalizeEmail(request.email ?? '') ||
+              normalizeEmail(`invoice_${request.token}@placeholder.vendix.com`),
             password: hashedPassword,
             first_name: request.first_name || '',
             last_name: request.last_name || '',
@@ -1380,10 +1396,7 @@ export class InvoiceDataRequestsService {
 
         if (is_nit && raw_document_number) {
           const nit_result = normalizeNit(raw_document_number);
-          if (
-            nit_result.provided_dv !== null &&
-            nit_result.dv_mismatch
-          ) {
+          if (nit_result.provided_dv !== null && nit_result.dv_mismatch) {
             throw new VendixHttpException(
               ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
               `El dígito de verificación '${nit_result.provided_dv}' no corresponde al NIT '${nit_result.number}': el módulo 11 de la DIAN da '${nit_result.dv}'. Corrige el documento del comprador antes de continuar.`,
@@ -1391,8 +1404,7 @@ export class InvoiceDataRequestsService {
             );
           }
           final_document_number = nit_result.number || raw_document_number;
-          final_verification_digit =
-            nit_result.dv || final_verification_digit;
+          final_verification_digit = nit_result.dv || final_verification_digit;
         }
 
         await this.prisma.invoices.update({
@@ -1401,10 +1413,8 @@ export class InvoiceDataRequestsService {
             customer_id: customerId,
             customer_name: `${request.first_name} ${request.last_name}`,
             customer_tax_id: final_document_number,
-            customer_document_type:
-              linked_customer?.document_type ?? undefined,
-            customer_verification_digit:
-              final_verification_digit ?? undefined,
+            customer_document_type: linked_customer?.document_type ?? undefined,
+            customer_verification_digit: final_verification_digit ?? undefined,
             customer_person_type: linked_customer?.person_type ?? undefined,
             customer_email: linked_customer?.email ?? undefined,
             customer_phone: linked_customer?.phone ?? undefined,

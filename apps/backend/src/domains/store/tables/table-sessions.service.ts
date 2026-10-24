@@ -53,6 +53,8 @@ export interface TableSessionView {
   opened_at: Date;
   closed_at: Date | null;
   guest_count: number | null;
+  /** QUI-898 — notas informales del mesero; no afectan cuenta/inventario/KDS. */
+  informal_notes: string | null;
   /** Only present in the response that creates a session, never persisted. */
   previous_table_status?: table_status_enum;
   /**
@@ -404,6 +406,25 @@ export class TableSessionsService {
     const safeCurrency =
       args.currency || (await this.settingsService.getStoreCurrency()) || 'COP';
 
+    // A POS-opened table check belongs to the cashier session that was open
+    // when the table was opened. Lock the same session row used by cash close
+    // so the order cannot be created concurrently with a closing snapshot.
+    // Anonymous QR checks have no cashier session and remain unattributed.
+    let originCashSessionId: number | null = null;
+    if (args.channel === 'pos' && args.openedBy != null) {
+      const openCashSessions = await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id
+        FROM cash_register_sessions
+        WHERE store_id = ${args.storeId}
+          AND opened_by = ${args.openedBy}
+          AND status = 'open'
+        ORDER BY opened_at DESC, id DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      originCashSessionId = openCashSessions[0]?.id ?? null;
+    }
+
     const orderNumber = `T-${Date.now()}-${Math.floor(Math.random() * 1000)
       .toString()
       .padStart(3, '0')}`;
@@ -422,6 +443,9 @@ export class TableSessionsService {
         state: 'draft',
         channel: args.channel,
         delivery_type: args.deliveryType,
+        ...(originCashSessionId != null
+          ? { origin_cash_session_id: originCashSessionId }
+          : {}),
         currency: safeCurrency,
         subtotal_amount: 0,
         tax_amount: 0,
@@ -2623,6 +2647,34 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  // ------------------------------------------------------- informal notes
+  /**
+   * QUI-898 — Guarda las notas informales (texto libre) de una mesa activa.
+   * Solo toca `table_sessions.informal_notes`: no afecta orden, totales,
+   * inventario ni KDS, y no emite eventos. Se conservan al cerrar la sesión.
+   */
+  async updateInformalNotes(
+    sessionId: number,
+    informalNotes?: string | null,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireStoreContext();
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    const clean = informalNotes?.trim() || null;
+
+    await this.prisma.table_sessions.updateMany({
+      where: { id: sessionId, store_id: storeId },
+      data: { informal_notes: clean, updated_at: new Date() },
+    });
+
+    this.logger.log(`Table informal notes updated: session=${sessionId}`);
+
+    return this.findOne(sessionId);
+  }
+
   // ------------------------------------------------------------ customer
   /**
    * Assign (or detach) the customer of the draft order backing an open
@@ -2915,6 +2967,16 @@ export class TableSessionsService {
           );
         }
       }
+      // Adquirir el lock de caja antes de mutar pagos/saldos mantiene el
+      // orden sesión → pago/orden que usa el cierre.
+      await this.recordStaffCashMovement({
+        storeId,
+        userId,
+        orderId: payment.orders.id,
+        paymentId: payment.id,
+        amount: Number(payment.amount),
+        paymentMethod: methodType,
+      }, tx);
 
       // 5. Transition + balance update.
       await tx.payments.update({
@@ -3048,22 +3110,6 @@ export class TableSessionsService {
         },
       );
 
-      // 7c. Cash-register movement (staff arqueo). Mirror of the POS
-      //     `PaymentsService.recordCashRegisterMovement`: only if the staff
-      //     user has an OPEN cash session and the settings gate allows it.
-      //     Runs ONLY on a real transition (guarded by `!result.noop`), so a
-      //     webhook/idempotent re-confirm never double-counts the arqueo. A
-      //     missing session or disabled gate is a SILENT skip — it must NEVER
-      //     block the already-committed payment confirmation.
-      await this.recordStaffCashMovement({
-        storeId,
-        userId,
-        orderId: result.orderId,
-        paymentId: result.payment_id,
-        amount: result.amount,
-        paymentMethod: result.methodType,
-      });
-
       this.logger.log(
         `[confirmPayment] payment ${result.payment_id} confirmed by staff ${userId} on session ${sessionId}`,
       );
@@ -3089,11 +3135,8 @@ export class TableSessionsService {
    * cash-register ↔ ledger reconciliation.
    *
    * Business rule: with `pos.cash_register.enabled`, EVERY method is recorded
-   * (the arqueo still counts only cash). `confirmPayment` already ran
-   * `assertSessionForSales`, so a missing session here is an anomaly and is
-   * logged as error. This helper never throws and never blocks the
-   * already-committed payment confirmation (called after the COMMIT and only
-   * on a real transition, i.e. `!result.noop`).
+   * (the arqueo still counts only cash). This helper runs in the payment tx
+   * before the payment update; failures escape so both writes roll back.
    */
   private async recordStaffCashMovement(args: {
     storeId: number;
@@ -3102,48 +3145,35 @@ export class TableSessionsService {
     paymentId: number;
     amount: number;
     paymentMethod: string;
-  }): Promise<void> {
+  }, tx: Prisma.TransactionClient): Promise<void> {
     const { storeId, userId, orderId, paymentId, amount, paymentMethod } = args;
-    try {
-      if (amount <= 0) return;
+    if (amount <= 0) return;
 
-      // 1. Feature gate — same key the POS reads.
-      const settings = await this.settingsService.getSettings();
-      const crSettings = settings.pos?.cash_register;
-      if (!crSettings?.enabled) return;
+    // 1. Feature gate — same key the POS reads.
+    const settings = await this.settingsService.getSettings();
+    const crSettings = settings.pos?.cash_register;
+    if (!crSettings?.enabled) return;
 
-      // 2. Open cash session for THIS staff user (store-scoped via context).
-      const session = await this.cashRegisterSessionsService.getActiveSession(
-        userId,
-      );
-      if (!session) {
-        this.logger.error(
-          `[confirmPayment] no open cash session for user ${userId} despite gate; movement NOT recorded (order ${orderId}, payment ${paymentId})`,
-        );
-        return;
-      }
-
-      await this.cashRegisterMovementsService.recordSaleMovement(session.id, {
-        store_id: storeId,
-        user_id: userId,
-        amount,
-        payment_method: paymentMethod,
-        order_id: orderId,
-        payment_id: paymentId,
-      });
-
-      this.logger.log(
-        `[confirmPayment] cash-register sale movement recorded for session ${session.id}, order ${orderId}, payment ${paymentId}`,
-      );
-    } catch (error) {
-      // Never let a cash-register failure surface to the confirmation — the
-      // payment is already committed. Log and move on (mirror of the POS).
-      this.logger.error(
-        `[confirmPayment] error recording cash-register movement for order ${orderId}, payment ${paymentId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+    // 2. Open cash session for THIS staff user (store-scoped via context).
+    const session = await this.cashRegisterSessionsService.getActiveSession(
+      userId,
+    );
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
     }
+
+    await this.cashRegisterMovementsService.recordSaleMovement(session.id, {
+      store_id: storeId,
+      user_id: userId,
+      amount,
+      payment_method: paymentMethod,
+      order_id: orderId,
+      payment_id: paymentId,
+    }, tx);
+
+    this.logger.log(
+      `[confirmPayment] cash-register sale movement recorded for session ${session.id}, order ${orderId}, payment ${paymentId}`,
+    );
   }
 
   /**

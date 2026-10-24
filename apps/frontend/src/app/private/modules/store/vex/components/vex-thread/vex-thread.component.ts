@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
+import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
 import { VexBlockTableComponent } from '../vex-blocks/vex-block-table.component';
@@ -34,15 +35,12 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
     VexPlanCardComponent,
   ],
   template: `
-    <div
-      #scroller
-      class="h-full overflow-y-auto"
-      role="log"
-      aria-live="polite"
-    >
+    <div #scroller class="h-full overflow-y-auto" role="log" aria-live="polite">
       <div class="max-w-3xl mx-auto w-full px-4 py-4 flex flex-col gap-6">
         @if (store.loading_thread()) {
-          <div class="flex items-center justify-center gap-2 py-8 text-[var(--color-text-secondary)]">
+          <div
+            class="flex items-center justify-center gap-2 py-8 text-[var(--color-text-secondary)]"
+          >
             <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
             <span class="text-sm">Abriendo conversación…</span>
           </div>
@@ -101,9 +99,22 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                 @if (message.plan) {
                   <vendix-vex-plan-card
                     [plan]="message.plan"
+                    [conversationId]="store.activeNumericId()"
+                    [objectiveId]="store.active_objective()?.id"
+                    (voiceApplied)="
+                      store.acceptVoiceReceipt(
+                        message.id,
+                        message.plan.plan_id,
+                        $event
+                      )
+                    "
                     [busy]="store.busy_plan_id() === message.plan.plan_id"
-                    (approve)="store.approvePlan(message.id, message.plan.plan_id)"
-                    (cancel)="store.cancelPlan(message.id, message.plan.plan_id)"
+                    (approve)="
+                      store.approvePlan(message.id, message.plan.plan_id)
+                    "
+                    (cancel)="
+                      store.cancelPlan(message.id, message.plan.plan_id)
+                    "
                     (stepApprove)="
                       store.approveStep(
                         message.id,
@@ -121,9 +132,25 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                   >
                     {{ message.error }}
                   </p>
+                  @if (message.restart_suggested) {
+                    <button
+                      type="button"
+                      class="self-start rounded-full border border-[var(--color-border)] px-3 py-1 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover,rgba(0,0,0,0.04))]"
+                      (click)="store.newConversation()"
+                    >
+                      {{ restartLabel }}
+                    </button>
+                  }
                 }
-                @if (message.streaming && !message.content && !(message.blocks?.length)) {
-                  <div class="flex items-center gap-1 py-1" aria-label="Vex está escribiendo">
+                @if (
+                  message.streaming &&
+                  !message.content &&
+                  !message.blocks?.length
+                ) {
+                  <div
+                    class="flex items-center gap-1 py-1"
+                    aria-label="Vex está escribiendo"
+                  >
                     <span
                       class="w-2 h-2 rounded-full bg-[var(--color-text-secondary)] animate-bounce"
                     ></span>
@@ -138,6 +165,14 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
               </div>
             </div>
           }
+        }
+        @if (store.stream_progress()) {
+          <p
+            role="status"
+            class="text-sm text-center text-[var(--color-text-secondary)]"
+          >
+            {{ store.stream_progress() }}
+          </p>
         }
         @if (store.is_agent_typing()) {
           <div class="flex justify-center">
@@ -158,6 +193,7 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 })
 export class VexThreadComponent {
   readonly store = inject(VexChatStore);
+  protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
 
@@ -182,7 +218,10 @@ export class VexThreadComponent {
     return typeof content === 'string' ? content : '';
   }
 
-  onBlockInteraction(block: VexUiBlock, interaction: VexBlockInteraction): void {
+  onBlockInteraction(
+    block: VexUiBlock,
+    interaction: VexBlockInteraction,
+  ): void {
     this.store.sendBlockInteraction(block.block_id, interaction);
   }
 }

@@ -1,5 +1,5 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
-import { formatPercentFromFraction } from '../components/report-viewer/report-viewer.component';
+import { formatPercentFromFraction } from './report-formatters';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },
@@ -13,7 +13,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
   { id: 'payments', label: 'Pagos', description: 'Reporte de pagos recibidos: método, estado, reembolsos, caja y comprobante', icon: 'credit-card', color: 'var(--color-primary)' },
-  { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
+  { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, rutas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -1746,10 +1746,10 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     // recalcula (B.2). Montos de despacho, no de P&L: no tratarlos como ingreso.
     id: 'dispatch-planillas',
     category: 'dispatch',
-    title: 'Planillas',
-    description: 'Planillas de ruta con conductor, vehículo, paradas y varianza de caja',
+    title: 'Rutas',
+    description: 'Rutas con conductor, vehículo, paradas y varianza de caja',
     detailedDescription:
-      'Una línea por planilla: conductor, placa, paradas, total por recaudar vs recaudado, efectivo declarado y diferencia de caja. Útil para liquidar rutas y detectar descuadres.',
+      'Una línea por ruta: conductor, placa, paradas, total por recaudar vs recaudado, efectivo declarado y diferencia de caja. Útil para liquidar rutas y detectar descuadres.',
     icon: 'clipboard-list',
     route: '/admin/reports/dispatch/dispatch-planillas',
     requiresDateRange: true,
@@ -1757,7 +1757,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     type: 'list' as ReportType,
     trackKey: 'route_number',
     columns: [
-      { key: 'route_number', header: 'Planilla', type: 'text' },
+      { key: 'route_number', header: 'Ruta', type: 'text' },
       { key: 'planned_date', header: 'Fecha', type: 'date' },
       { key: 'status', header: 'Estado', type: 'text' },
       { key: 'conductor_nombre', header: 'Conductor', type: 'text' },
@@ -1768,11 +1768,11 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'declared_cash', header: 'Efectivo Declarado', type: 'currency', footer: 'sum' },
       { key: 'cash_variance', header: 'Diferencia', type: 'currency', footer: 'sum' },
     ],
-    exportFilename: 'planillas_despacho',
+    exportFilename: 'rutas_despacho',
     stats: [
       { key: 'total_collected', label: 'Total Recaudado', type: 'currency', icon: 'dollar-sign' },
       { key: 'cash_variance', label: 'Diferencia Total', type: 'currency', icon: 'alert-triangle' },
-      { key: '_count', label: 'Planillas', type: 'number', icon: 'clipboard-list' },
+      { key: '_count', label: 'Rutas', type: 'number', icon: 'clipboard-list' },
     ],
     dataEndpoint: 'store/analytics/dispatch/planillas',
     exportEndpoint: 'store/analytics/dispatch/planillas/export',

@@ -15,7 +15,8 @@
         "build:prod": "ng build --configuration production",
         "// ----- CODE QUALITY -----": "",
         "lint": "ng lint",
-        "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\""
+        "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\"",
+        "build:marketing-preview": "ng build --configuration production,marketing-preview"
     },
     "private": true,
     "dependencies": {
@@ -43,7 +44,7 @@
         "lucide-angular": "^0.544.0",
         "maplibre-gl": "^6.12.0",
         "marked": "^17.0.1",
-        "ngx-echarts": "^21.0.0",
+        "ngx-echarts": "^20.0.0",
         "qrcode": "^1.5.4",
         "rxjs": "~7.8.0",
         "tailwindcss": "^3.4.0",

@@ -7,6 +7,8 @@ import { AccessValidationService } from '@common/services/access-validation.serv
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
+import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
+import { LocationsService } from '../inventory/locations/locations.service';
 import {
   BulkProductUploadDto,
   BulkProductItemDto,
@@ -17,6 +19,7 @@ import {
   BulkValidationResultDto,
   BulkUploadTemplateDto,
   BulkProductAnalysisResultDto,
+  BulkInitialLoadSummaryDto,
   BulkProductAnalysisItemDto,
   BulkVariantAnalysisItemDto,
   BulkValidationMessage,
@@ -51,15 +54,13 @@ interface BarcodeOwner {
 @Injectable()
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
-  private readonly MAX_BATCH_SIZE = 1000;
+  private readonly MAX_BATCH_SIZE = 10000;
   private readonly MAX_BARCODE_LENGTH = 64;
   private readonly NULL_MARKER = '__NULL__';
   private readonly CATALOG_ONLY_IGNORED_FIELDS = new Set([
-    'stock_quantity',
     'stock_by_location',
     'warehouse_code',
     'warehouse_name',
-    'cost_price',
     'profit_margin',
     'min_stock_level',
     'max_stock_level',
@@ -105,6 +106,42 @@ export class ProductsBulkService {
   private readonly ORPHAN_VARIANT_KEY = '__orphan_variant';
   private readonly IGNORED_FIELDS_KEY = '__ignored_fields';
   private readonly VARIANT_ATTR_SLOTS = [1, 2, 3];
+
+  private readonly INITIAL_LOAD_DESCRIPTION =
+    'Carga inicial (carga masiva de productos)';
+
+  private readonly INITIAL_LOAD_AS_COUNT_VARIANCE =
+    'La cantidad inicial se aplicará como diferencia de conteo (count_variance): la carga inicial solo permite entradas positivas con existencia previa en 0. Se conserva el costo actual.';
+
+  private initialLoadLocationKey(storeId: number, sessionId: string): string {
+    return `tmp/bulk-products/${storeId}/${sessionId}.initial-load.json`;
+  }
+
+  private async readSessionInitialLoadLocation(
+    storeId: number,
+    sessionId: string,
+    products: Record<string, any>[],
+  ): Promise<number | undefined> {
+    if (!products.some((p) => this.hasInitialLoadQuantity(p))) return undefined;
+    try {
+      const data = JSON.parse(
+        (
+          await this.s3Service.downloadImage(
+            this.initialLoadLocationKey(storeId, sessionId),
+          )
+        ).toString('utf8'),
+      );
+      if (Number.isInteger(data.location_id) && data.location_id > 0) {
+        return data.location_id;
+      }
+    } catch {
+      // No elegir otra bodega silenciosamente si la sesión es anterior al
+      // snapshot, expiró o no se puede leer su metadata.
+    }
+    throw new BadRequestException(
+      'No se pudo recuperar la bodega de esta sesión. Vuelve a analizar el archivo antes de cargar inventario.',
+    );
+  }
 
   private readonly CATALOG_ONLY_IGNORED_FIELD_LABELS: Record<string, string> = {
     stock_quantity: 'Cantidad inicial',
@@ -313,6 +350,8 @@ export class ProductsBulkService {
     private readonly productsService: ProductsService,
     private readonly accessValidationService: AccessValidationService,
     private readonly s3Service: S3Service,
+    private readonly inventoryAdjustmentsService: InventoryAdjustmentsService,
+    private readonly locationsService: LocationsService,
   ) {}
 
   private normalizeBooleanValue(value: any): boolean {
@@ -455,6 +494,17 @@ export class ProductsBulkService {
               return;
             }
 
+            // Un SKU numérico (p. ej. 675493067) llega como number desde Excel;
+            // todo el flujo lo trata como texto (toLowerCase, match exacto).
+            if (key === 'sku' || key === 'parent_sku') {
+              product[key] =
+                typeof val === 'number' && Number.isInteger(val)
+                  ? val.toFixed(0)
+                  : strVal;
+              hasData = true;
+              return;
+            }
+
             if (key === 'barcode') {
               const coerced = this.coerceBarcodeCell(val);
               if (coerced.error) {
@@ -480,21 +530,45 @@ export class ProductsBulkService {
                 // la previsualización y la escritura rechacen la fila en vez
                 // de persistir un precio 0 (QUI-846). Las columnas de dinero
                 // que el importador ignora (Costo) no bloquean la fila.
-                if (!this.CATALOG_ONLY_IGNORED_FIELD_LABELS[key]) {
-                  const label =
-                    key === 'base_price'
-                      ? 'El precio de venta'
+                const label =
+                  key === 'base_price'
+                    ? 'El precio de venta'
+                    : key === 'cost_price'
+                      ? 'El precio de compra'
                       : 'El precio de oferta';
-                  const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
-                  cellErrors.push({
-                    code: 'INVALID_PRICE',
-                    message: `${label} no es un número válido. Escribe solo dígitos y separadores, por ejemplo 5000 o 5.000.`,
-                    field: key,
-                  });
-                  product[this.CELL_ERRORS_KEY] = cellErrors;
-                }
+                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                cellErrors.push({
+                  code: 'INVALID_PRICE',
+                  message: `${label} no es un número válido. Escribe solo dígitos y separadores, por ejemplo 5000 o 5.000.`,
+                  field: key,
+                });
+                product[this.CELL_ERRORS_KEY] = cellErrors;
               } else {
                 product[key] = parsed;
+              }
+              hasData = true;
+              return;
+            }
+
+            if (key === 'stock_quantity') {
+              // Cantidad inicial: estricta. Un texto no numérico no se descarta
+              // en silencio (el usuario creería que cargó inventario): queda
+              // como error de celda y la fila se rechaza en análisis y commit.
+              const qty =
+                typeof val === 'number'
+                  ? val
+                  : Number(strVal.replace(/\s/g, '').replace(',', '.'));
+              if (Number.isFinite(qty)) {
+                product[key] = qty;
+              } else {
+                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                cellErrors.push({
+                  code: 'INVALID_INITIAL_QUANTITY',
+                  message:
+                    'La cantidad inicial no es un número válido. Escribe solo dígitos, por ejemplo 12 o 3,5.',
+                  field: 'stock_quantity',
+                });
+                product[this.CELL_ERRORS_KEY] = cellErrors;
               }
               hasData = true;
               return;
@@ -756,6 +830,126 @@ export class ProductsBulkService {
     );
   }
 
+  /**
+   * Cantidad inicial de una fila ya parseada: `null` si la celda venía vacía
+   * (o con el marcador NULL), el número si es válido, `NaN` si no es numérica.
+   */
+  private readInitialQuantity(product: Record<string, any>): number | null {
+    const raw = product?.stock_quantity;
+    if (raw === undefined || raw === null || raw === '') return null;
+    if (raw === this.NULL_MARKER) return null;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  /** Precio Compra de la fila como costo unitario de la carga (>= 0), o null. */
+  private resolveInitialCost(product: Record<string, any>): number | null {
+    const raw = product?.cost_price;
+    if (raw === undefined || raw === null || raw === this.NULL_MARKER) {
+      return null;
+    }
+    const parsed = parseMoneyCell(raw);
+    return parsed !== null && parsed >= 0 ? parsed : null;
+  }
+
+  /** Producto físico sin variantes en el archivo y sin `Controla Inventario = no`. */
+  private isInitialLoadCandidate(product: Record<string, any>): boolean {
+    if (product?.[this.ORPHAN_VARIANT_KEY]) return false;
+    if (Array.isArray(product.variants) && product.variants.length > 0) {
+      return false;
+    }
+    const type = this.cleanCellText(product.product_type).toLowerCase();
+    if (type === 'servicio' || type === 'service') return false;
+    const tracked = product.track_inventory;
+    if (
+      tracked !== undefined &&
+      tracked !== null &&
+      tracked !== '' &&
+      tracked !== this.NULL_MARKER &&
+      !this.normalizeBooleanValue(tracked)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  /** Fila con cantidad inicial válida (>= 0) que el commit cargaría. */
+  private hasInitialLoadQuantity(product: Record<string, any>): boolean {
+    const qty = this.readInitialQuantity(product);
+    return (
+      qty !== null &&
+      Number.isFinite(qty) &&
+      qty >= 0 &&
+      this.isInitialLoadCandidate(product)
+    );
+  }
+
+  private summarizeInitialLoad(products: any[]): BulkInitialLoadSummaryDto {
+    let rows = 0;
+    let units = 0;
+    for (const p of products) {
+      if (!this.hasInitialLoadQuantity(p)) continue;
+      rows++;
+      units += this.readInitialQuantity(p) as number;
+    }
+    return {
+      rows_with_quantity: rows,
+      total_units: units,
+      requires_ack: rows > 0,
+    };
+  }
+
+  /** Lanza PROD_BULK_INITIAL_LOAD_ACK_001 si hay cantidades y no hubo consentimiento. */
+  private assertInitialLoadAck(products: any[], ack: boolean | undefined): void {
+    if (ack === true) return;
+    if (this.summarizeInitialLoad(products).requires_ack) {
+      throw new VendixHttpException(ErrorCodes.PROD_BULK_INITIAL_LOAD_ACK_001);
+    }
+  }
+
+  /**
+   * Aplica una cantidad ABSOLUTA: initial_load solo con existencia 0 y entrada
+   * positiva; en cualquier otro caso usa count_variance, sin cambiar el costo.
+   * `createAdjustment` abre su transacción y emite el evento contable tras el
+   * commit. Si el stock actual ya coincide, no hace nada.
+   */
+  private async applyInitialLoadAdjustment(params: {
+    productId: number;
+    quantity: number;
+    unitCost: number | null;
+    locationId: number;
+    userId: number | undefined;
+  }): Promise<boolean> {
+    const current = await this.prisma.stock_levels.findFirst({
+      where: {
+        product_id: params.productId,
+        product_variant_id: null,
+        location_id: params.locationId,
+      },
+      select: { quantity_on_hand: true },
+    });
+    const quantityBefore = Number(current?.quantity_on_hand ?? 0);
+    const initialLoad = quantityBefore === 0 && params.quantity > 0;
+    if (quantityBefore === params.quantity) return !initialLoad;
+
+    const adjustment = await this.inventoryAdjustmentsService.createAdjustment(
+      {
+        product_id: params.productId,
+        location_id: params.locationId,
+        type: initialLoad ? 'initial_load' : 'count_variance',
+        quantity_after: params.quantity,
+        ...(initialLoad &&
+        params.unitCost !== null &&
+        params.unitCost !== undefined
+          ? { unit_cost: params.unitCost }
+          : {}),
+        description: this.INITIAL_LOAD_DESCRIPTION,
+      } as any,
+      { approvedByUserId: params.userId, initialLoadFallback: true },
+    );
+    return !initialLoad || adjustment.adjustment_type === 'count_variance';
+  }
+
   private stripCatalogOnlyIgnoredFields(
     product: Record<string, any>,
   ): string[] {
@@ -826,6 +1020,27 @@ export class ProductsBulkService {
       throw new VendixHttpException(ErrorCodes.BULK_PROD_LIMIT_EXCEEDED);
     }
 
+    // Snapshot durable por sesión, compartido por análisis y todas las páginas.
+    // No volver a resolver el default en cada commit: podría cambiar a mitad
+    // del archivo y repartir el inventario entre bodegas distintas.
+    let initialLoadLocationId: number | undefined;
+    const initialStockByProduct = new Map<number, number>();
+    if (products.some((p) => this.hasInitialLoadQuantity(p))) {
+      const location = await this.locationsService.getDefaultLocation(storeId);
+      if (!location?.id) throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+      initialLoadLocationId = Number(location.id);
+      const stocks = await this.prisma.stock_levels.findMany({
+        where: { location_id: initialLoadLocationId, product_variant_id: null },
+        select: { product_id: true, quantity_on_hand: true },
+      });
+      for (const stock of stocks) {
+        initialStockByProduct.set(
+          stock.product_id,
+          Number(stock.quantity_on_hand),
+        );
+      }
+    }
+
     // 2. Pre-fetch existing products by SKU for this store
     const existingProducts = await this.prisma.products.findMany({
       // Incluye archivados: un SKU de archivo que coincide con un archivado
@@ -839,11 +1054,12 @@ export class ProductsBulkService {
         slug: true,
         state: true,
         updated_at: true,
+        cost_price: true,
       },
     });
     const skuMap = new Map<
       string,
-      { id: number; name: string; archived: boolean; ts: number }
+      { id: number; name: string; archived: boolean; ts: number; cost: number }
     >();
     // Solo dueños NO archivados: un archivado no ocupa el slug.
     const slugMap = new Map<string, { id: number; name: string }>();
@@ -863,7 +1079,13 @@ export class ProductsBulkService {
             archived &&
             (ts > prev.ts || (ts === prev.ts && p.id > prev.id)));
         if (wins) {
-          skuMap.set(key, { id: p.id, name: p.name, archived, ts });
+          skuMap.set(key, {
+            id: p.id,
+            name: p.name,
+            archived,
+            ts,
+            cost: Number(p.cost_price ?? 0),
+          });
         }
       }
       if (p.slug && !archived) {
@@ -939,6 +1161,12 @@ export class ProductsBulkService {
           ? product[this.CELL_ERRORS_KEY]
           : [];
       const parsedBasePrice = parseMoneyCell(product.base_price);
+      const parsedCostPrice =
+        product.cost_price === undefined ||
+        product.cost_price === this.NULL_MARKER
+          ? null
+          : parseMoneyCell(product.cost_price);
+      const initialQty = this.readInitialQuantity(product);
       const item: BulkProductAnalysisItemDto = {
         // Fila real de la hoja (la agrupación de variantes ya no la preserva
         // por posición); `i + 2` solo para filas que no pasaron por parseFile.
@@ -952,7 +1180,7 @@ export class ProductsBulkService {
             : undefined,
         product_type: 'physical',
         base_price: parsedBasePrice ?? 0,
-        cost_price: 0,
+        cost_price: parsedCostPrice !== null && parsedCostPrice >= 0 ? parsedCostPrice : 0,
         stock_quantity: 0,
         track_inventory: undefined,
         brand_name: undefined,
@@ -998,9 +1226,35 @@ export class ProductsBulkService {
       if (ignoredCatalogFields.length > 0) {
         item.warnings.push({
           code: 'CATALOG_ONLY_IGNORED_FIELDS',
-          message: `Se ignoraron columnas exclusivas de inventario/compra (${this.formatIgnoredCatalogFields(ignoredCatalogFields)}). Las entradas, salidas y costos reales de inventario se gestionan desde Inventario > POP.`,
+          message: `Se ignoraron columnas exclusivas de inventario (${this.formatIgnoredCatalogFields(ignoredCatalogFields)}). Estas columnas no se cargan desde aquí; las ubicaciones, mínimos y lotes se gestionan desde Inventario.`,
           field: ignoredCatalogFields[0],
         });
+      }
+
+      // Cantidad inicial (carga inicial de inventario): sólo aplica a producto
+      // físico sin variantes que controla inventario.
+      if (initialQty !== null) {
+        if (!Number.isFinite(initialQty)) {
+          // La celda no numérica ya viaja como error de celda desde parseFile.
+        } else if (initialQty < 0) {
+          item.errors.push({
+            code: 'INVALID_INITIAL_QUANTITY',
+            message: 'La cantidad inicial no puede ser negativa',
+            field: 'stock_quantity',
+          });
+        } else if (
+          Array.isArray(product.variants) &&
+          product.variants.length > 0
+        ) {
+          item.warnings.push({
+            code: 'INITIAL_QUANTITY_NOT_FOR_VARIANTS',
+            message:
+              'La cantidad inicial no aplica a productos con variantes; usa el ajuste masivo con el SKU de cada variante',
+            field: 'stock_quantity',
+          });
+        } else if (this.isInitialLoadCandidate(product)) {
+          item.stock_quantity = initialQty;
+        }
       }
 
       // Validate required fields
@@ -1018,13 +1272,9 @@ export class ProductsBulkService {
           field: 'sku',
         });
       }
-      // Celda de precio con texto no numérico: error de fila (no se degrada a
-      // un warning que dejaría pasar el producto con precio 0).
-      for (const cellError of cellErrors) {
-        item.errors.push(cellError);
-      }
-
-      const hasPriceCellError = cellErrors.some((e) => e.field === 'base_price');
+      const hasPriceCellError = cellErrors.some(
+        (e) => e.field === 'base_price',
+      );
       if (!hasPriceCellError && parsedBasePrice === null) {
         item.errors.push({
           code: 'MISSING_PRICE',
@@ -1072,6 +1322,56 @@ export class ProductsBulkService {
             });
           }
         }
+      }
+
+      const hasInventoryQuantity = this.hasInitialLoadQuantity(product);
+      const quantityBefore =
+        item.existing_product_id === undefined
+          ? 0
+          : (initialStockByProduct.get(item.existing_product_id) ?? 0);
+      const validInitialLoad =
+        hasInventoryQuantity && quantityBefore === 0 && (initialQty ?? 0) > 0;
+      const ignoreExistingCost = item.action !== 'create' && !validInitialLoad;
+      if (
+        ignoreExistingCost &&
+        (product.cost_price !== undefined ||
+          cellErrors.some((e) => e.field === 'cost_price'))
+      ) {
+        item.warnings.push({
+          code: 'EXISTING_COST_IGNORED',
+          message:
+            'Se ignoró Precio Compra: el costo de productos existentes solo se modifica con una carga inicial válida (existencia 0 y entrada positiva).',
+          field: 'cost_price',
+        });
+        item.cost_price = skuMap.get(item.sku.toLowerCase())?.cost ?? 0;
+      }
+      for (const cellError of cellErrors) {
+        if (ignoreExistingCost && cellError.field === 'cost_price') continue;
+        item.errors.push(cellError);
+      }
+      if (hasInventoryQuantity && !validInitialLoad) {
+        item.warnings.push({
+          code: 'INITIAL_LOAD_AS_COUNT_VARIANCE',
+          message: this.INITIAL_LOAD_AS_COUNT_VARIANCE,
+          field: 'stock_quantity',
+        });
+      }
+      const catalogCost = skuMap.get(item.sku.toLowerCase())?.cost ?? 0;
+      const effectiveCost = ignoreExistingCost
+        ? catalogCost
+        : this.resolveInitialCost(product) ?? catalogCost;
+      if (validInitialLoad) item.cost_price = effectiveCost;
+      if (
+        (item.action === 'create' || hasInventoryQuantity) &&
+        item.product_type === 'physical' &&
+        effectiveCost <= 0
+      ) {
+        item.warnings.push({
+          code: 'MISSING_INITIAL_COST',
+          message:
+            'No se informó un Precio Compra mayor a 0. Los productos nuevos sin costo quedarán valorados en 0; revisa el costo antes de confirmar la carga.',
+          field: 'cost_price',
+        });
       }
 
       // Paridad con create: el slug es único entre productos NO archivados
@@ -1365,6 +1665,13 @@ export class ProductsBulkService {
       s3Key,
       'application/octet-stream',
     );
+    if (initialLoadLocationId !== undefined) {
+      await this.s3Service.uploadFile(
+        Buffer.from(JSON.stringify({ location_id: initialLoadLocationId })),
+        this.initialLoadLocationKey(storeId, sessionId),
+        'application/json',
+      );
+    }
 
     // 8. Return analysis result
     return {
@@ -1375,6 +1682,7 @@ export class ProductsBulkService {
       with_warnings: withWarnings,
       with_errors: withErrors,
       products: analysisItems,
+      initial_load: this.summarizeInitialLoad(products),
     };
   }
 
@@ -1746,6 +2054,7 @@ export class ProductsBulkService {
     storeId: number,
     user: any,
     page?: { offset?: number; limit?: number },
+    options: { initialLoadAck?: boolean } = {},
   ): Promise<BulkUploadResultDto | BulkUploadSessionResultDto> {
     const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
 
@@ -1761,7 +2070,10 @@ export class ProductsBulkService {
     // ante una excepción se conserva para poder reintentar la página.
     if (page && (page.offset !== undefined || page.limit !== undefined)) {
       const offset = page.offset ?? 0;
-      const limit = Math.min(page.limit ?? MAX_BULK_UPLOAD_PAGE, MAX_BULK_UPLOAD_PAGE);
+      const limit = Math.min(
+        page.limit ?? MAX_BULK_UPLOAD_PAGE,
+        MAX_BULK_UPLOAD_PAGE,
+      );
 
       const all = this.parseFile(fileBuffer);
       const total = all.length;
@@ -1774,15 +2086,34 @@ export class ProductsBulkService {
         );
       }
 
+      // Consentimiento sobre el archivo COMPLETO (no sobre la página): se
+      // exige en cualquier página, antes de escribir nada.
+      this.assertInitialLoadAck(all, options.initialLoadAck);
+
+      const initialLoadLocationId = await this.readSessionInitialLoadLocation(
+        storeId,
+        sessionId,
+        all,
+      );
+
       const result = await this.uploadProducts(
         { products: all.slice(offset, offset + limit) },
         user,
-        { rowOffset: offset },
+        {
+          rowOffset: offset,
+          initialLoad: options.initialLoadAck === true,
+          initialLoadLocationId,
+        },
       );
       const done = offset + limit >= total;
       if (done) {
         try {
           await this.s3Service.deleteFile(s3Key);
+          if (initialLoadLocationId !== undefined) {
+            await this.s3Service.deleteFile(
+              this.initialLoadLocationKey(storeId, sessionId),
+            );
+          }
         } catch (e) {
           // Silent cleanup failure
         }
@@ -1790,14 +2121,31 @@ export class ProductsBulkService {
       return { ...result, total, offset, limit, done };
     }
 
+    // Fuera del try: si falta el consentimiento el archivo temporal se conserva
+    // para que el cliente reintente con `initial_load_ack`.
+    const products = this.parseFile(fileBuffer);
+    this.assertInitialLoadAck(products, options.initialLoadAck);
+    const initialLoadLocationId = await this.readSessionInitialLoadLocation(
+      storeId,
+      sessionId,
+      products,
+    );
+
     try {
-      const products = this.parseFile(fileBuffer);
-      const result = await this.uploadProducts({ products }, user);
+      const result = await this.uploadProducts({ products }, user, {
+        initialLoad: options.initialLoadAck === true,
+        initialLoadLocationId,
+      });
       return result;
     } finally {
       // Clean up temp file
       try {
         await this.s3Service.deleteFile(s3Key);
+        if (initialLoadLocationId !== undefined) {
+          await this.s3Service.deleteFile(
+            this.initialLoadLocationKey(storeId, sessionId),
+          );
+        }
       } catch (e) {
         // Silent cleanup failure
       }
@@ -1811,6 +2159,9 @@ export class ProductsBulkService {
     const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
     try {
       await this.s3Service.deleteFile(s3Key);
+      await this.s3Service.deleteFile(
+        this.initialLoadLocationKey(storeId, sessionId),
+      );
     } catch (e) {
       // File may not exist, silently ignore
     }
@@ -1843,6 +2194,11 @@ export class ProductsBulkService {
       'Peso',
       'En Oferta',
       'Precio Oferta',
+      // Carga inicial de inventario (opcionales). "Cantidad Inicial" es el
+      // saldo ABSOLUTO de la ubicación por defecto y exige consentimiento al
+      // confirmar la carga; "Precio Compra" es el costo del producto.
+      'Cantidad Inicial',
+      'Precio Compra',
       // Unidades (QUI-648). Una fila sin estas columnas se importa con los
       // valores de siempre, así que las plantillas viejas siguen sirviendo.
       'Unidad de stock',
@@ -2020,6 +2376,8 @@ export class ProductsBulkService {
               Peso: 0.8,
               'En Oferta': 'no',
               'Precio Oferta': 0,
+              'Cantidad Inicial': 24,
+              'Precio Compra': 52000,
             },
             {
               Nombre: 'Leche Entera 1L',
@@ -2041,6 +2399,8 @@ export class ProductsBulkService {
               Peso: 1.05,
               'En Oferta': 'no',
               'Precio Oferta': 0,
+              'Cantidad Inicial': 120,
+              'Precio Compra': 3800,
             },
             {
               Nombre: 'Frutas Orgánicas Mix 1kg',
@@ -2197,7 +2557,9 @@ export class ProductsBulkService {
       }
 
       const baseHeaders = this.getProductTemplateHeaders();
-      const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
+      // 'Precio Compra' ya viaja en los encabezados base. El export NO rellena
+      // 'Cantidad Inicial' (re-subirlo no debe re-cargar inventario).
+      const extraHeaders = ['Cantidad Actual', 'Tiene Imagen'];
       const headers = [...baseHeaders, ...extraHeaders];
 
       const rows: Record<string, any>[] = [];
@@ -2717,7 +3079,11 @@ export class ProductsBulkService {
   async uploadProducts(
     bulkUploadDto: BulkProductUploadDto,
     user: any,
-    options: { rowOffset?: number } = {},
+    options: {
+      rowOffset?: number;
+      initialLoad?: boolean;
+      initialLoadLocationId?: number;
+    } = {},
   ): Promise<BulkUploadResultDto> {
     const { products } = bulkUploadDto;
     const rowOffset = options.rowOffset ?? 0;
@@ -2739,6 +3105,23 @@ export class ProductsBulkService {
     // Una sola lectura del catálogo para todo el lote: son dos docenas de
     // filas globales y resolverlas por producto sería una consulta por fila.
     const uomCatalog = await this.loadUomCatalogByCode();
+
+    // Carga inicial: sólo con consentimiento (`options.initialLoad`). La
+    // Las sesiones reutilizan el snapshot del análisis. El método directo
+    // resuelve el default solo una vez por lote.
+    const initialLoadEnabled =
+      options.initialLoad === true &&
+      (products as any[]).some((p) => this.hasInitialLoadQuantity(p));
+    let initialLoadLocationId: number | null =
+      options.initialLoadLocationId ?? null;
+    if (initialLoadEnabled && initialLoadLocationId === null) {
+      const defaultLocation =
+        await this.locationsService.getDefaultLocation(storeId);
+      if (!defaultLocation?.id) {
+        throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+      }
+      initialLoadLocationId = Number(defaultLocation.id);
+    }
 
     const results: BulkUploadItemResultDto[] = [];
     let successful = 0;
@@ -2769,6 +3152,7 @@ export class ProductsBulkService {
         (productData as any)[this.ROW_NUMBER_KEY] ??
         rowOffset + rowIndex + 2;
       try {
+        const rowWarnings: string[] = [];
         // Variante huérfana (su SKU Padre no está en el archivo): el análisis
         // ya la marcó como error; el commit no crea un producto con ella.
         if ((productData as any)[this.ORPHAN_VARIANT_KEY]) {
@@ -2792,7 +3176,7 @@ export class ProductsBulkService {
           (productData as any)[this.CELL_ERRORS_KEY] as
             | { field?: string; message: string }[]
             | undefined
-        )?.find((e) => e.field === 'barcode');
+        )?.find((e) => e.field === 'barcode' || e.field === 'stock_quantity');
         if (barcodeCellError) {
           throw new BadRequestException(barcodeCellError.message);
         }
@@ -2806,6 +3190,32 @@ export class ProductsBulkService {
           seenVariantSkus,
           variantDbCtx,
         );
+
+        // La cantidad inicial NUNCA viaja a ProductsService.create/update: el
+        // stock entra sólo por el ajuste `initial_load`. Se lee y se retira de
+        // la fila antes de armar cualquier DTO.
+        const rawInitialQty = this.readInitialQuantity(productData as any);
+        const fileInitialCandidate = this.isInitialLoadCandidate(
+          productData as any,
+        );
+        delete (productData as any).stock_quantity;
+        if (
+          options.initialLoad === true &&
+          rawInitialQty !== null &&
+          (!Number.isFinite(rawInitialQty) || rawInitialQty < 0)
+        ) {
+          throw new BadRequestException(
+            'La cantidad inicial debe ser un número mayor o igual a 0',
+          );
+        }
+        const initialQty =
+          initialLoadEnabled &&
+          initialLoadLocationId !== null &&
+          rawInitialQty !== null &&
+          fileInitialCandidate
+            ? rawInitialQty
+            : null;
+        const initialCost = this.resolveInitialCost(productData as any);
 
         const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
           productData as any,
@@ -2850,12 +3260,105 @@ export class ProductsBulkService {
 
         let resultProduct;
 
+        // Elegibilidad final de la carga inicial (producto existente incluido):
+        // servicios y productos que no controlan inventario ignoran la
+        // cantidad; un producto con variantes en la BD la rechaza ANTES de
+        // escribir (stock base en un producto con variantes queda en una fila
+        // muerta, QUI-486).
+        let loadQty: number | null = initialQty;
+        if (loadQty !== null && existingProduct) {
+          const fileTracked = (productData as any).track_inventory;
+          const tracked =
+            fileTracked !== undefined &&
+            fileTracked !== null &&
+            fileTracked !== this.NULL_MARKER
+              ? this.normalizeBooleanValue(fileTracked)
+              : ((existingProduct as any).track_inventory ?? true);
+          const fileType = (productData as any).product_type;
+          const isService =
+            fileType !== undefined && fileType !== null
+              ? fileType === 'service'
+              : (existingProduct as any).product_type === 'service';
+          if (!tracked || isService) {
+            loadQty = null;
+          } else {
+            const dbVariant = await this.prisma.product_variants.findMany({
+              where: { product_id: existingProduct.id },
+              select: { id: true },
+              take: 1,
+            });
+            if ((dbVariant ?? []).length > 0) {
+              throw new BadRequestException(
+                'La cantidad inicial no aplica a productos con variantes; usa el ajuste masivo con el SKU de cada variante',
+              );
+            }
+          }
+        }
+        const currentStock =
+          loadQty !== null && existingProduct
+            ? await this.prisma.stock_levels.findFirst({
+                where: {
+                  product_id: existingProduct.id,
+                  product_variant_id: null,
+                  location_id: initialLoadLocationId,
+                },
+                select: { quantity_on_hand: true },
+              })
+            : null;
+        const validInitialLoad =
+          loadQty !== null &&
+          loadQty > 0 &&
+          Number(currentStock?.quantity_on_hand ?? 0) === 0;
+        const costCellError = (
+          (productData as any)[this.CELL_ERRORS_KEY] as
+            | { field?: string; message: string }[]
+            | undefined
+        )?.find((e) => e.field === 'cost_price');
+        if (costCellError && (!existingProduct || validInitialLoad)) {
+          throw new BadRequestException(costCellError.message);
+        }
+        if (existingProduct) {
+          if (
+            !validInitialLoad &&
+            ((productData as any).cost_price !== undefined || costCellError)
+          ) {
+            rowWarnings.push(
+              'Se ignoró Precio Compra y se conservó el costo del producto existente.',
+            );
+          }
+          // El catálogo no modifica el costo de existentes, ni al reactivar.
+          // Una carga inicial válida lo lleva al circuito de valoración del ajuste.
+          delete (productData as any).cost_price;
+        }
+        const applyInitialLoad = async (productId: number) => {
+          if (loadQty === null || initialLoadLocationId === null) return;
+          try {
+            const degraded = await this.applyInitialLoadAdjustment({
+              productId,
+              quantity: loadQty,
+              unitCost: initialCost,
+              locationId: initialLoadLocationId,
+              userId: user?.id,
+            });
+            if (degraded) rowWarnings.push(this.INITIAL_LOAD_AS_COUNT_VARIANCE);
+          } catch (adjustError: any) {
+            const detail =
+              typeof adjustError?.message === 'string'
+                ? adjustError.message
+                : 'error desconocido';
+            throw new BadRequestException(
+              `El producto se guardó, pero no se pudo registrar la carga inicial de inventario: ${detail}`,
+            );
+          }
+        };
+
         if (existingProduct && existingProduct.state === 'archived') {
           resultProduct = await this.reactivateArchivedProduct(
             existingProduct,
             productData,
             storeId,
           );
+          await applyInitialLoad(existingProduct.id);
 
           results.push({
             product: resultProduct,
@@ -2887,6 +3390,7 @@ export class ProductsBulkService {
             productData.variants,
             productData.base_price,
           );
+          await applyInitialLoad(existingProduct.id);
 
           results.push({
             product: resultProduct,
@@ -2903,6 +3407,9 @@ export class ProductsBulkService {
             storeId,
           );
           resultProduct = await this.productsService.create(createProductDto);
+          if (loadQty !== null && resultProduct?.id !== undefined) {
+            await applyInitialLoad(Number(resultProduct.id));
+          }
 
           results.push({
             product: resultProduct,
@@ -2910,6 +3417,11 @@ export class ProductsBulkService {
             action: 'create',
             message: 'Producto creado exitosamente',
           });
+        }
+
+        if (rowWarnings.length > 0) {
+          results[results.length - 1].message +=
+            ` Advertencia: ${rowWarnings.join(' ')}`;
         }
 
         successful++;
@@ -3463,6 +3975,9 @@ export class ProductsBulkService {
           : undefined,
       is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
+      // Precio Compra: se persiste en el producto. `stock_quantity` NUNCA se
+      // mapea aquí: el stock entra sólo por el ajuste `initial_load`.
+      cost_price: this.resolveInitialCost(product as any) ?? undefined,
       state: product.state,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
@@ -3609,7 +4124,8 @@ export class ProductsBulkService {
    * Regla: parte de `mapToCreateProductDto` (lo que trae el archivo se aplica)
    * y todo campo que ese mapper gestiona y el archivo NO trae vuelve al valor
    * por defecto de creación (`@default` de `model products`; nullable sin
-   * default => null; listas => []). Nunca se conserva lo viejo del archivado.
+   * default => null; listas => []). El costo es la excepción: lo administra
+   * Inventario y se conserva hasta que una entrada válida lo recalcule.
    * Sin `store_id`: `productsService.update` no lo acepta ni lo necesita.
    * El stock no se toca (al archivar quedó en 0).
    */
@@ -3619,6 +4135,7 @@ export class ProductsBulkService {
     const {
       store_id: _omit,
       variants: _variants,
+      cost_price: _inventoryCost,
       ...fromFile
     } = this.mapToCreateProductDto(product, 0);
     const defaults: Record<string, any> = {

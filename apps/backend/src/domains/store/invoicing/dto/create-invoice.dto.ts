@@ -14,6 +14,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -503,6 +504,11 @@ export class CreateInvoiceTaxDto {
 }
 
 export class CreateInvoiceDto {
+  /** Misma clave UUID en todos los reintentos del borrador, incluso tras timeout. */
+  @IsOptional()
+  @IsUUID()
+  client_request_id?: string;
+
   @IsIn([
     'sales_invoice',
     'purchase_invoice',
@@ -602,7 +608,7 @@ export class CreateInvoiceDto {
     {},
     {
       message:
-        'customer_email debe ser un correo válido (ej. cliente@dominio.com). Es la dirección a la que se entrega la factura electrónica; déjalo vacío si no la tienes.',
+        'customer_email debe ser un correo válido (ej. cliente@dominio.com). Es la dirección a la que se entrega la factura electrónica.',
     },
   )
   @MaxLength(255, {
@@ -1239,4 +1245,31 @@ export class CreateInvoiceDto {
   @ValidateNested({ each: true })
   @Type(() => CreateInvoiceTaxDto)
   taxes?: CreateInvoiceTaxDto[];
+
+  /**
+   * Emitir en el mismo request: crear el borrador y, acto seguido, correr
+   * «Validar» + «Enviar» (`InvoiceFlowService.validate` + `send`, los mismos
+   * métodos de los botones del detalle). Ver `ManualInvoiceEmissionService`.
+   *
+   * Opcional, default `false`: sin él la creación queda en borrador y la
+   * respuesta es idéntica a la de siempre. Un fallo de emisión NUNCA tumba la
+   * creación: la factura vuelve 2xx con `emission.success=false` y el error.
+   *
+   * POR QUÉ EL `@Transform` LEE `obj[key]`: con `enableImplicitConversion`
+   * (pipe global) el string `'false'` llegaría como `true` —`Boolean('false')`—
+   * y dispararía una emisión DIAN que nadie pidió. Se lee el valor CRUDO:
+   * `true`/`'true'` → true, `false`/`'false'` → false, cualquier otra cosa se
+   * deja tal cual para que `@IsBoolean()` la rechace con 400.
+   *
+   * Sólo en la creación: `UpdateInvoiceDto` lo omite (un PATCH no emite).
+   */
+  @IsOptional()
+  @Transform(({ obj, key }: TransformFnParams) => {
+    const raw = obj?.[key];
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    return raw;
+  })
+  @IsBoolean({ message: 'emit_immediately debe ser verdadero o falso.' })
+  emit_immediately?: boolean;
 }

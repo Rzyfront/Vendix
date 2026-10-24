@@ -98,17 +98,18 @@ export class StoreLegalDocumentsService {
       throw new BadRequestException('Store context required');
     }
 
-    // Verificar si ya existe esa versión para esta tienda
+    // Verificar si ya existe esa versión para este tipo de documento en la tienda
     const existing = await this.globalPrisma.legal_documents.findFirst({
       where: {
         version: dto.version,
         store_id: storeId,
+        document_type: dto.document_type as any,
       },
     });
 
     if (existing) {
       throw new BadRequestException(
-        `Document version ${dto.version} already exists for this store`,
+        `Ya existe la versión ${dto.version} para este tipo de documento en la tienda`,
       );
     }
 

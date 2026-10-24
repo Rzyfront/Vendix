@@ -11,6 +11,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PaymentError, PaymentErrorCodes } from '../../payments/utils/payment-errors';
 import { PaymentType } from './dto';
 import { Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import {
   createPrismaMock,
   mockRequestContext,
@@ -844,15 +845,15 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
 });
 
 describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
-  const pendingItems = [
-    { order_item_id: 11, status: 'ready', quantity: 2, variant_label: 'Grande', order_item: { product_name: 'Hamburguesa' } },
-    { order_item_id: 12, status: 'in_preparation', quantity: 1, variant_label: null, order_item: { product_name: 'Papas' } },
+  // QUI-892: el bloqueo se calcula sobre la ÚLTIMA fila de cada línea no cancelada.
+  const pendingLines = [
+    { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'ready', quantity: 2, variant_label: 'Grande' }] },
+    { id: 12, product_name: 'Papas', kitchen_ticket_items: [{ status: 'in_preparation', quantity: 1, variant_label: null }] },
   ];
 
-  const harness = (state: string, items: typeof pendingItems) => {
+  const harness = (state: string, lines: any[]) => {
     const prisma: any = {
-      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
-      order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: { findMany: jest.fn().mockResolvedValue(lines) },
     };
     const service = new OrderFlowService(
       prisma, {} as any, {} as any, {} as any, {} as any,
@@ -867,7 +868,7 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
   it.each(['processing', 'delivered'])(
     'rechaza finalizar desde %s con lista de platos accionable',
     async (state) => {
-      const { service, prisma, updateState } = harness(state, pendingItems);
+      const { service, prisma, updateState } = harness(state, pendingLines);
       await expect(service.confirmDelivery(1)).rejects.toMatchObject({
         errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
         response: expect.objectContaining({
@@ -879,8 +880,8 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
           },
         }),
       });
-      expect(prisma.kitchen_ticket_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { kitchen_ticket: { order_id: 1 }, status: { notIn: ['delivered', 'cancelled'] } },
+      expect(prisma.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ order_id: 1, cancelled_at: null }),
       }));
       expect(updateState).not.toHaveBeenCalled();
     },
@@ -895,10 +896,28 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
     },
   );
 
+  it('QUI-892: línea con fila vieja pendiente y última delivered NO bloquea', async () => {
+    // La query ya trae solo la última fila (orderBy id desc, take 1): la vieja no llega.
+    const { service, updateState } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'delivered', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).resolves.toMatchObject({ state: 'finished' });
+    expect(updateState).toHaveBeenCalled();
+  });
+
+  it('QUI-892: línea reenviada con última fila pending sí bloquea', async () => {
+    const { service } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'pending', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).rejects.toMatchObject({
+      errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+  });
+
   it('no consulta cocina ni muta un estado no finalizable', async () => {
-    const { service, prisma, updateState } = harness('refunded', pendingItems);
+    const { service, prisma, updateState } = harness('refunded', pendingLines);
     await expect(service.confirmDelivery(1)).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(prisma.order_items.findMany).not.toHaveBeenCalled();
     expect(updateState).not.toHaveBeenCalled();
   });
 });
@@ -5161,16 +5180,25 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
       payments: {
         create: jest.fn(async () => ({ id: 501 })),
       },
+      cash_register_movements: { update: jest.fn(async () => ({})) },
       order_installments: {
         findFirst: jest.fn(async () => null),
         findMany: jest.fn(async () => []),
         update: jest.fn(async () => ({})),
       },
     };
+    prismaMock.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prismaMock));
     const eventEmitter: any = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
+    const settingsService: any = {
+      getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }),
+    };
+    const sessionsService: any = {
+      assertSessionForSales: jest.fn(),
+      getActiveSession: jest.fn().mockResolvedValue({ id: 77 }),
+    };
     const service = new OrderFlowService(
-      prismaMock, eventEmitter, {} as any,
-      { assertSessionForSales: jest.fn() } as any, {} as any,
+      prismaMock, eventEmitter, settingsService,
+      sessionsService, {} as any,
       {} as any, {} as any, {} as any, {} as any,
     );
     jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
@@ -5375,6 +5403,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
       payments: {
         create: jest.fn(async () => ({ id: 501 })),
       },
+      cash_register_movements: { update: jest.fn(async () => ({})) },
       order_installments: {
         findFirst: jest.fn(async () => null),
         findMany: jest.fn(async () => []),
@@ -5390,7 +5419,8 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
       assertSessionForSales: jest.fn(async () => undefined),
       getActiveSession: jest.fn(async () => ({ id: SESSION_B })),
     };
-    const movements = { recordSaleMovement: jest.fn(async () => ({})) };
+    const movements = { recordSaleMovement: jest.fn(async () => ({ id: 900 })) };
+    prismaMock.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prismaMock));
     const service = new OrderFlowService(
       prismaMock,
       { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
@@ -5412,9 +5442,6 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
 
     // Abono parcial (60 de 100): registra pago y movimiento sin finish.
     const result = await service.registerCreditPayment(1, CREDIT_DTO);
-    // `recordPayOrderCashMovement` es fire-and-forget: vaciar microtareas.
-    await new Promise((resolve) => setImmediate(resolve));
-
     expect(result.payment_recorded).toBe(true);
     expect(result.finished).toBe(false);
     expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
@@ -5426,9 +5453,57 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
         amount: 60,
         payment_method: 'cash',
         user_id: USER_B,
-        payment_id: 501,
       }),
+      prismaMock,
     );
+    expect(prismaMock.cash_register_movements.update).toHaveBeenCalledWith({
+      where: { id: 900 },
+      data: { payment_id: 501 },
+    });
+  });
+});
+
+describe('OrderFlowService.createLegPayments — caja atómica F-006', () => {
+  it('no crea pagos cuando falla el lock de la sesión de caja', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: 7 });
+    const tx: any = {
+      payments: { create: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
+      cash_register_movements: { update: jest.fn() },
+    };
+    const prisma: any = { $transaction: jest.fn((callback: (tx: any) => unknown) => callback(tx)) };
+    const movements = {
+      recordSaleMovement: jest.fn().mockRejectedValue(new Error('cash session closed')),
+    };
+    const service = new OrderFlowService(
+      prisma,
+      { emit: jest.fn() } as any,
+      { getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }) } as any,
+      { getActiveSession: jest.fn().mockResolvedValue({ id: 77 }) } as any,
+      movements as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    const leg: any = {
+      store_payment_method_id: 1,
+      amount: 60,
+      is_cash: true,
+      display_name: 'Efectivo',
+      accounting_method: 'Efectivo',
+    };
+
+    await expect((service as any).createLegPayments(1, 'COP', [leg], 0, {
+      storeId: 4,
+      paymentMethodTypes: { 1: 'cash' },
+    })).rejects.toThrow('cash session closed');
+
+    expect(movements.recordSaleMovement).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({ order_id: 1, amount: 60, user_id: 7 }),
+      tx,
+    );
+    expect(tx.payments.create).not.toHaveBeenCalled();
   });
 });
 
@@ -5697,13 +5772,14 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       include: { system_payment_method: true },
     });
 
-    // Un movimiento de caja por tramo, cada uno con su payment_id.
+    // Un movimiento por tramo se crea dentro de la misma transacción; el id
+    // del pago se enlaza al movimiento antes del commit.
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      1, 4, 1, 20000, 'cash', 101,
+      1, 4, 1, 20000, 'cash', undefined, h.prismaMock,
     );
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      2, 4, 1, 80000, 'bank_transfer', 102,
+      2, 4, 1, 80000, 'bank_transfer', undefined, h.prismaMock,
     );
 
     // Orden saldada: Σ = total ⇒ finished con saldo 0.
@@ -5891,7 +5967,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       h.prismaMock.store_payment_methods.findMany,
     ).not.toHaveBeenCalled();
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', 101);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', undefined, h.prismaMock);
     expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 0 });
     expect(result).not.toHaveProperty('payments');
 
@@ -6513,6 +6589,22 @@ describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de env�
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
     expect(payOrder).not.toHaveBeenCalled();
+  });
+
+  it('exige cobrar el saldo restante aunque ya exista un pago parcial', async () => {
+    const { service } = buildService();
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      ...orderRow('pickup', 'processing'),
+      grand_total: 100,
+      remaining_balance: 40,
+      payment_form: '1',
+      payments: [{ state: 'succeeded', amount: 60 }],
+    });
+
+    const error: any = await service.fastTrackOrder(1, {} as any).catch((e) => e);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_FAST_TRACK_PAYMENT_REQUIRED_001');
   });
 });
 
@@ -7195,7 +7287,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       expect.anything(),
     );
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', 51);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', undefined, h.prismaMock);
     expect(h.emitter.emitAsync).toHaveBeenCalledTimes(1);
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
@@ -7220,7 +7312,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       bank_account_id: null,
     });
     expectNoVoidOf51(h);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', 51);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7272,7 +7364,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
         data: expect.objectContaining({ state: 'pending_payment' }),
       }),
     );
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', 51);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', undefined, h.prismaMock);
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7316,8 +7408,8 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     expect(result.payments).toHaveLength(2);
     expect(result.payments[0]).toEqual(expect.objectContaining({ id: 51 }));
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', 51);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', 101);
+    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', undefined, h.prismaMock);
     const received = h.emitter.emitAsync.mock.calls
       .filter(([name]: any[]) => name === 'payment.received')
       .map(([, payload]: any[]) => payload.payment_id);
@@ -7390,7 +7482,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ state: 'cancelled' }),
     });
     expect(h.prismaMock.payments.findFirst).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', 101);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
   });
 
   it('WhatsApp/contra entrega en pending_payment con remaining_balance > 0 → el parcial se respeta', async () => {
@@ -7428,7 +7520,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ total_paid: 30000, remaining_balance: 70000 }),
     });
     expect(h.updateOrderState).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', 101);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', undefined, h.prismaMock);
   });
 
   it('finish bloqueado tras confirmar en sitio → la fila 51 vuelve a pending intacta (no se anula)', async () => {
@@ -7515,7 +7607,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       }),
     });
     // En caja entra lo cobrado (100000), no lo recibido (120000).
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', 51);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
     expect(h.updateOrderState).toHaveBeenCalledWith(
       1,
       'processing',
@@ -7939,6 +8031,157 @@ describe('getAvailableActions / canConfirmDelivery — saldo pendiente', () => {
     const order = { grand_total: 100, remaining_balance: 100, payment_form: '1', payments: [] as any[] };
     expect(getUnpaidBalanceForFinish(order)).toBe(100);
     expect(getUnpaidBalanceForFinish(order, 0)).toBe(0);
+  });
+});
+
+describe('OrderFlowService.finishCashSessionOrders — lote atómico de cierre', () => {
+  const version = '2026-10-07T12:00:00.000Z';
+  const selection = (ids: number[]) => ids.map((id) => {
+    const fingerprint = createHash('sha256')
+      .update(`${id}:created:0.00:${version}`).digest('hex');
+    return { id, version, fingerprint };
+  });
+  const selectionHash = (items: Array<{ id: number; fingerprint: string }>) =>
+    createHash('sha256')
+      .update(`8:${items.map((item) => `${item.id}:${item.fingerprint}`).sort().join('|')}`)
+      .digest('hex');
+
+  const harness = (count = 2, failOnStockCall?: number) => {
+    let committed = false;
+    const committedStates = new Map<number, string>();
+    const pendingStates = new Map<number, string>();
+    let stockCalls = 0;
+    const events: string[] = [];
+    const rows = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      store_id: 4,
+      origin_cash_session_id: 8,
+      order_number: `ORD-${index + 1}`,
+      state: 'created',
+      remaining_balance: 0,
+      grand_total: 0,
+      payment_form: '1',
+      updated_at: new Date(version),
+      shipping_method_id: null,
+      stores: { organization_id: 3, industries: [] },
+      payments: [],
+      order_items: [],
+    }));
+    const tx: any = {
+      $queryRaw: jest.fn(async () => [{ id: 8 }]),
+      orders: {
+        findMany: jest.fn(async () => rows),
+        update: jest.fn(async ({ where, data }: any) => {
+          pendingStates.set(where.id, data.state);
+          return { ...rows[where.id - 1], ...data };
+        }),
+      },
+    };
+    const prisma: any = {
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => {
+        const result = await callback(tx);
+        for (const [id, state] of pendingStates) committedStates.set(id, state);
+        committed = true;
+        return result;
+      }),
+    };
+    const emitter: any = {
+      emit: jest.fn((name: string) => {
+        expect(committed).toBe(true);
+        events.push(name);
+      }),
+    };
+    const stock: any = {
+      commitOrderDelivery: jest.fn(async (_id: number, opts: any) => {
+        stockCalls += 1;
+        if (stockCalls === failOnStockCall) throw new Error('stock commit failed');
+        opts.afterCommit.push(() => events.push('stock.updated'));
+        return { totalCost: 10 };
+      }),
+    };
+    const history: any = { record: jest.fn(async () => null) };
+    const service = new OrderFlowService(
+      prisma, emitter, {} as any, {} as any, {} as any, {} as any, {} as any,
+      stock, {} as any, undefined, undefined, undefined, undefined, undefined,
+      undefined, history,
+    );
+    return { service, prisma, tx, stock, history, emitter, events, committedStates, pendingStates, rows };
+  };
+
+  it('revierte el lote completo cuando falla el commit de inventario de la segunda orden', async () => {
+    const h = harness(2, 2);
+    const items = selection([1, 2]);
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: selectionHash(items), reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toThrow('stock commit failed');
+    expect(h.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(h.pendingStates).toEqual(new Map([[1, 'finished']]));
+    expect(h.committedStates.size).toBe(0);
+    expect(h.emitter.emit).not.toHaveBeenCalled();
+    expect(h.events).toEqual([]);
+  });
+
+  it('rechaza una orden que no pertenece a la sesión y no cambia ninguna', async () => {
+    const h = harness(1);
+    const items = selection([1, 2]);
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: selectionHash(items), reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toBeInstanceOf(VendixHttpException);
+    expect(h.stock.commitOrderDelivery).not.toHaveBeenCalled();
+    expect(h.pendingStates.size).toBe(0);
+  });
+
+  it('rechaza una versión/fingerprint por orden obsoleta antes de cualquier mutación', async () => {
+    const h = harness(2);
+    const items = selection([1, 2]);
+    items[0].fingerprint = 'f'.repeat(64);
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: selectionHash(items), reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toBeInstanceOf(VendixHttpException);
+    expect(h.stock.commitOrderDelivery).not.toHaveBeenCalled();
+    expect(h.pendingStates.size).toBe(0);
+  });
+
+  it('publica eventos sólo después del commit exitoso y permite reintento idempotente', async () => {
+    const h = harness(2);
+    const items = selection([1, 2]);
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: selectionHash(items), reason: 'Cierre de caja', actorId: 9,
+    })).resolves.toMatchObject({ finished: 2, idempotent: false });
+    expect(h.emitter.emit).toHaveBeenCalledTimes(4);
+    expect(h.events).toContain('stock.updated');
+    expect(h.history.record).toHaveBeenCalledTimes(2);
+    h.rows.forEach((row: any) => { row.state = 'finished'; });
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: selectionHash(items), reason: 'Cierre de caja', actorId: 9,
+    })).resolves.toMatchObject({ finished: 0, idempotent: true });
+    expect(h.stock.commitOrderDelivery).toHaveBeenCalledTimes(2);
+    expect(h.history.record).toHaveBeenCalledTimes(2);
+    expect(h.emitter.emit).toHaveBeenCalledTimes(4);
+  });
+
+  it('rechaza lote vacío, mayor a 100 y fingerprint de selección manipulado', async () => {
+    const h = harness();
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: [], expectedFingerprint: 'x',
+      reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toBeInstanceOf(BadRequestException);
+    const tooMany = selection(Array.from({ length: 101 }, (_, index) => index + 1));
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: tooMany,
+      expectedFingerprint: selectionHash(tooMany), reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toBeInstanceOf(BadRequestException);
+    const items = selection([1, 2]);
+    await expect(h.service.finishCashSessionOrders({
+      storeId: 4, sessionId: 8, selected: items,
+      expectedFingerprint: '0'.repeat(64), reason: 'Cierre de caja', actorId: 9,
+    })).rejects.toBeInstanceOf(VendixHttpException);
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
   });
 });
 

@@ -9,7 +9,9 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -172,6 +174,18 @@ export function validateTaxInclusiveMap(
 }
 
 /**
+ * Forma sintáctica de una subcuenta PUC colombiana (`products.account_code`).
+ * Solo dígitos, 4 a 20. Definida aquí (módulo hoja) y re-exportada por el barrel
+ * `./index` (que hace `export *` de este archivo) para no romper imports ni
+ * crear el ciclo del barrel. La documentación completa vive junto a su uso en
+ * `UpdateProductDto`.
+ */
+export const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
+
+export const PUC_ACCOUNT_CODE_MESSAGE =
+  'La cuenta contable debe ser un código PUC numérico de 4 a 20 dígitos (por ejemplo 413550). No admite puntos, guiones ni espacios.';
+
+/**
  * Tope duro de productos por lote. El `ValidationPipe` global lo aplica vía
  * `@ArrayMaxSize`, y el endpoint de ids por filtro lo reutiliza para marcar
  * `capped` en vez de truncar la selección en silencio.
@@ -292,6 +306,9 @@ export class BulkEditableChangesDto {
   @Type(() => Boolean)
   track_inventory?: boolean;
 
+  // ===== Reposición (umbrales, no stock) =====
+  // Son umbrales de alerta/compra: NO mueven existencias ni escriben
+  // `inventory_movements`. Null o '' = limpiar el umbral.
   @IsOptional()
   @IsInt({ message: 'El stock mínimo debe ser un número entero' })
   @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
@@ -299,9 +316,46 @@ export class BulkEditableChangesDto {
   min_stock_level?: number | null;
 
   @IsOptional()
+  @IsInt({ message: 'El stock máximo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock máximo no puede ser negativo' })
+  max_stock_level?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'El punto de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El punto de reorden no puede ser negativo' })
+  reorder_point?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'La cantidad de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'La cantidad de reorden no puede ser negativa' })
+  reorder_quantity?: number | null;
+
+  @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   requires_serial_numbers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_batch_tracking?: boolean;
+
+  /** Subcuenta PUC de ingreso. Null = limpiar (vuelve a la cuenta por defecto). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(PUC_ACCOUNT_CODE_REGEX, { message: PUC_ACCOUNT_CODE_MESSAGE })
+  account_code?: string | null;
+
+  /** Estación de cocina (KDS). Null = KDS por defecto de la tienda. */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  kds_id?: number | null;
 
   // ===== Precios =====
   @IsOptional()
@@ -370,12 +424,21 @@ export class BulkEditableChangesDto {
   };
 
   // ===== UoM (FKs al catálogo global units_of_measure) =====
-  // El factor purchase→stock NO se acepta del cliente: el backend lo deriva de
-  // `factor_to_base` del catálogo, así que `purchase_to_stock_factor` no entra.
+  // `purchase_to_stock_factor` SÍ entra, con una regla: el backend deriva el
+  // factor de `factor_to_base` del catálogo cuando la pareja de unidades
+  // efectiva es de la misma dimensión, así que en ese caso la fila se marca
+  // error (se cambian las unidades, no el factor). Solo se aplica tal cual
+  // cuando no hay pareja de UoM o es "contenido por envase" (count→mass/volume).
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   stock_uom_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'El factor de compra debe ser un entero de al menos 1' })
+  purchase_to_stock_factor?: number;
 
   @IsOptional()
   @IsInt()
@@ -392,6 +455,24 @@ export class BulkEditableChangesDto {
   @Type(() => Number)
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
+
+  // ===== Reservas / domicilio / venta suelta =====
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0)
+  @Max(10080)
+  buffer_minutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_eligible_for_home_service?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  offer_loose_unit?: boolean;
 
   // ===== Servicio =====
   @IsOptional()

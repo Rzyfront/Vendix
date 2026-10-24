@@ -23,14 +23,30 @@ import { IconComponent } from '../icon/icon.component';
           <strong>{{ title() }}</strong>
           <span>{{ detail() }}</span>
         </div>
-        <a
-          class="fiscal-banner__cta"
-          routerLink="/admin/fiscal/wizard"
-          [queryParams]="{ areas: pendingAreas().join(',') }"
-        >
-          Configurar
-          <app-icon name="chevron-right" [size]="14" />
-        </a>
+        @if (hasInvoicing()) {
+          <a class="fiscal-banner__cta" [routerLink]="invoicingRoute()">
+            Activar facturación electrónica
+            <app-icon name="chevron-right" [size]="14" />
+          </a>
+          @if (otherAreas().length > 0) {
+            <a
+              class="fiscal-banner__cta fiscal-banner__cta--secondary"
+              routerLink="/admin/fiscal/wizard"
+              [queryParams]="{ areas: otherAreas().join(',') }"
+            >
+              Configurar otras áreas
+            </a>
+          }
+        } @else {
+          <a
+            class="fiscal-banner__cta"
+            routerLink="/admin/fiscal/wizard"
+            [queryParams]="{ areas: pendingAreas().join(',') }"
+          >
+            Configurar
+            <app-icon name="chevron-right" [size]="14" />
+          </a>
+        }
         <button
           type="button"
           class="fiscal-banner__dismiss"
@@ -94,6 +110,11 @@ import { IconComponent } from '../icon/icon.component';
         white-space: nowrap;
       }
 
+      .fiscal-banner__cta--secondary {
+        color: var(--color-text-secondary);
+        font-weight: 500;
+      }
+
       .fiscal-banner__dismiss {
         width: 2rem;
         height: 2rem;
@@ -123,6 +144,18 @@ export class FiscalObligationBannerComponent {
   private readonly authFacade = inject(AuthFacade);
 
   readonly pendingAreas = this.authFacade.pendingFiscalObligations;
+
+  readonly hasInvoicing = computed(() => this.pendingAreas().includes('invoicing'));
+  /** Organización con fiscal_scope=STORE: la DIAN se gestiona por tienda. */
+  readonly invoicingRoute = computed(() =>
+    this.authFacade.selectedAppType() === 'ORG_ADMIN' &&
+    this.authFacade.fiscalScope() === 'STORE'
+      ? '/admin/invoicing/dian-config'
+      : '/admin/invoicing/activation',
+  );
+  readonly otherAreas = computed(() =>
+    this.pendingAreas().filter((area: FiscalArea) => area !== 'invoicing'),
+  );
 
   readonly title = computed(() => {
     const labels = this.areaLabels();

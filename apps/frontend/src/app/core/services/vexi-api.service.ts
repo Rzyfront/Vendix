@@ -1,7 +1,82 @@
+import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
+import type {
+  VoiceConsentContext,
+  VoiceConsentReceipt,
+} from './vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, throwError } from 'rxjs';
+import { voiceClickRequest } from './vexi-voice-consent.model';
+import {
+  VexiReplayCursor,
+  replayEventSource,
+  replayStreamUrl,
+} from './vexi-stream-transport';
 import { environment } from '../../../environments/environment';
+
+/** Optional D0 metadata. Older servers/flags OFF keep the existing wire shape. */
+export interface VexiToolExecution {
+  schema_version: '1';
+  status:
+    | 'ok'
+    | 'recoverable_error'
+    | 'blocked'
+    | 'pending_confirmation'
+    | 'needs_user_input'
+    | 'unknown_effect';
+  error_code: string | null;
+  retryable: boolean;
+  /** Solo para el modelo; nunca se muestra. */
+  next_action?: string | null;
+  effect_status:
+    | 'not_applicable'
+    | 'unverified'
+    | 'not_applied'
+    | 'pending'
+    | 'applied'
+    | 'unknown';
+  freshness: 'observed' | 'unknown' | 'truncated';
+  /** La lectura se resumió por tamaño; sigue siendo una lectura válida. */
+  compacted?: boolean;
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+}
+
+export interface VexiExecutionSummary {
+  schema_version: '1';
+  error_code?: string;
+  outcome:
+    | 'partial'
+    | 'blocked'
+    | 'pending_confirmation'
+    | 'needs_user_input'
+    | 'unknown_effect'
+    | 'failed'
+    | 'cancelled';
+  /** Solo para el modelo; el backend deja de enviarlo y nunca se muestra. */
+  next_action?: string;
+  evidence_refs: string[];
+  resource_ids: Record<string, string | number>;
+}
+
+/** D1 is optional on the wire: legacy servers and the default-OFF flag omit it. */
+export interface VexiObjective {
+  id: string;
+  conversation_id: number;
+  goal: string;
+  semantic_status: string;
+  version: number;
+  expires_at: string;
+  requires_revalidation?: boolean;
+  next_step?: unknown;
+  budget?: Record<string, unknown>;
+}
+
+export interface ResumeVexiObjective {
+  expected_version: number;
+  /** Explicit choice for THIS objective, never inferred from a generic "sigue". */
+  confirm_expired?: boolean;
+}
 
 export interface AIConversation {
   id: number;
@@ -37,6 +112,8 @@ export interface SendMessageResponse {
     role: string;
     content: string;
     tokens_used: number;
+    execution?: VexiExecutionSummary;
+    objective?: VexiObjective;
   };
 }
 
@@ -62,6 +139,7 @@ export interface VexiUiContext {
 export interface VexiStreamChunk {
   type:
     | 'text'
+    | 'progress'
     | 'tool_call'
     | 'tool_result'
     | 'done'
@@ -74,12 +152,15 @@ export interface VexiStreamChunk {
     // The turn ran out of budget with work pending; open a continuation turn.
     | 'plan_continue';
   content?: string;
+  replay?: VexiReplayCursor;
+  reconcile_required?: boolean;
   tool?: {
     id: string;
     name: string;
     arguments?: Record<string, unknown>;
     summary?: string;
     failed?: boolean;
+    execution?: VexiToolExecution;
   };
   usage?: {
     promptTokens: number;
@@ -87,6 +168,8 @@ export interface VexiStreamChunk {
     totalTokens: number;
   };
   error?: string;
+  execution?: VexiExecutionSummary;
+  objective?: VexiObjective;
   /** Playback order of an `audio` frame. Assigned when the segment was cut. */
   index?: number;
   audio_base64?: string;
@@ -165,6 +248,26 @@ export interface PaginatedConversations {
 @Injectable({ providedIn: 'root' })
 export class VexiApiService {
   private http = inject(HttpClient);
+  private readonly voiceSafety = inject(VexiVoiceSafetyService);
+  private readonly replayStreams = new Set<string>();
+
+  canReplayStream(streamId: string): boolean {
+    return this.replayStreams.has(streamId);
+  }
+
+  streamTurn(
+    conversationId: number,
+    streamId: string,
+  ): Observable<VexiStreamChunk> {
+    return replayEventSource<VexiStreamChunk>(
+      streamId,
+      (cursor) =>
+        replayStreamUrl(this.getStreamUrl(conversationId, streamId), cursor),
+      this.canReplayStream(streamId),
+      undefined,
+      () => this.voiceSafety.invalidate(),
+    );
+  }
   private baseUrl = `${environment.apiUrl}/store/ai-chat`;
 
   createConversation(data: {
@@ -188,10 +291,10 @@ export class VexiApiService {
     // page object. Reading `res.data.data` yields `undefined`, which then
     // poisons the reducer (`[conv, ...undefined]` → "not iterable").
     return this.http
-      .get<{ data: AIConversation[]; meta: PaginatedConversations['meta'] }>(
-        `${this.baseUrl}/conversations`,
-        { params: params as any },
-      )
+      .get<{
+        data: AIConversation[];
+        meta: PaginatedConversations['meta'];
+      }>(`${this.baseUrl}/conversations`, { params: params as any })
       .pipe(
         map((res) => ({
           data: res.data ?? [],
@@ -216,18 +319,64 @@ export class VexiApiService {
     content: string,
   ): Observable<SendMessageResponse> {
     return this.http
-      .post<{ data: SendMessageResponse }>(
-        `${this.baseUrl}/conversations/${conversationId}/messages`,
-        { content },
-      )
+      .post<{
+        data: SendMessageResponse;
+      }>(`${this.baseUrl}/conversations/${conversationId}/messages`, {
+        content,
+      })
       .pipe(map((res) => res.data));
   }
 
   archiveConversation(id: number): Observable<AIConversation> {
     return this.http
-      .patch<{ data: AIConversation }>(
-        `${this.baseUrl}/conversations/${id}/archive`,
-        {},
+      .patch<{
+        data: AIConversation;
+      }>(`${this.baseUrl}/conversations/${id}/archive`, {})
+      .pipe(map((res) => res.data));
+  }
+
+  /** Reads durable progress only. GET never starts or resumes inference. */
+  getObjective(
+    id: string,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .get<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Reopens state under current guards; it neither approves a write nor resets budget. */
+  resumeObjective(
+    id: string,
+    choice: ResumeVexiObjective,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .post<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}/resume`,
+        choice,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Explicit rejection releases durable approval wait; it never spends a write token. */
+  rejectObjectiveProposal(
+    id: string,
+    expectedVersion: number,
+    surface: 'vexi' | 'vex' = 'vexi',
+  ): Observable<VexiObjective> {
+    return this.http
+      .post<{
+        data: VexiObjective;
+      }>(
+        `${environment.apiUrl}/store/${surface}/objectives/${encodeURIComponent(id)}/reject-proposal`,
+        { expected_version: expectedVersion },
       )
       .pipe(map((res) => res.data));
   }
@@ -250,7 +399,7 @@ export class VexiApiService {
     continuation?: 'approved' | 'rejected' | 'resume',
   ): Observable<string> {
     return this.http
-      .post<{ data: { stream_id: string } }>(
+      .post<{ data: { stream_id: string; replay_enabled?: boolean } }>(
         `${this.baseUrl}/conversations/${conversationId}/stream-intent`,
         {
           // With a continuation the server composes the instruction and stores
@@ -273,7 +422,18 @@ export class VexiApiService {
           skip_user_message: skipUserMessage ? true : undefined,
         },
       )
-      .pipe(map((res) => res.data.stream_id));
+      .pipe(
+        map((res) => {
+          if (res.data.replay_enabled === true) {
+            if (this.replayStreams.size >= 32)
+              this.replayStreams.delete(
+                this.replayStreams.values().next().value!,
+              );
+            this.replayStreams.add(res.data.stream_id);
+          }
+          return res.data.stream_id;
+        }),
+      );
   }
 
   /**
@@ -294,10 +454,9 @@ export class VexiApiService {
     }
 
     return this.http
-      .post<{ data: VexiAttachment }>(
-        `${environment.apiUrl}/store/vexi/attachments`,
-        form,
-      )
+      .post<{
+        data: VexiAttachment;
+      }>(`${environment.apiUrl}/store/vexi/attachments`, form)
       .pipe(map((res) => res.data));
   }
 
@@ -340,10 +499,11 @@ export class VexiApiService {
    */
   getActivity(limit = 50): Observable<VexiActivityEntry[]> {
     return this.http
-      .get<{ data: VexiActivityEntry[] }>(
-        `${environment.apiUrl}/store/vexi/activity`,
-        { params: { limit: String(limit) } },
-      )
+      .get<{
+        data: VexiActivityEntry[];
+      }>(`${environment.apiUrl}/store/vexi/activity`, {
+        params: { limit: String(limit) },
+      })
       .pipe(map((res) => (Array.isArray(res.data) ? res.data : [])));
   }
 
@@ -364,6 +524,7 @@ export class VexiApiService {
     output: string;
     /** The tool's own sentence about what it changed. Null when it wrote none. */
     summary?: string | null;
+    execution?: VexiToolExecution;
     /** Present only when `speak` was asked for and the synthesis succeeded. */
     audio_base64?: string;
     content_type?: string;
@@ -374,27 +535,58 @@ export class VexiApiService {
           tool: string;
           output: string;
           summary?: string | null;
+          execution?: VexiToolExecution;
           audio_base64?: string;
           content_type?: string;
         };
-      }>(
-        `${environment.apiUrl}/store/vexi/confirmations/apply`,
-        {
-          tool,
-          arguments: args,
-          confirmation_token: confirmationToken,
-          // Sent so the applied change lands in the audit trail. The approval is a
-          // request of its own, outside the turn, so this is the only thing that
-          // ties the change back to what the person asked for.
-          ...(conversationId ? { conversation_id: conversationId } : {}),
-          // Asks for the acknowledgement as audio too. Omitted rather than sent
-          // as false so a chat-mode approval's body is unchanged, and it carries
-          // no text: the server speaks the summary the tool produced, so this can
-          // never become a general text-to-speech surface.
-          ...(speak ? { speak: true } : {}),
-        },
-      )
+      }>(`${environment.apiUrl}/store/vexi/confirmations/apply`, {
+        tool,
+        arguments: args,
+        confirmation_token: confirmationToken,
+        // Sent so the applied change lands in the audit trail. The approval is a
+        // request of its own, outside the turn, so this is the only thing that
+        // ties the change back to what the person asked for.
+        ...(conversationId ? { conversation_id: conversationId } : {}),
+        // Asks for the acknowledgement as audio too. Omitted rather than sent
+        // as false so a chat-mode approval's body is unchanged, and it carries
+        // no text: the server speaks the summary the tool produced, so this can
+        // never become a general text-to-speech surface.
+        ...(speak ? { speak: true } : {}),
+      })
       .pipe(map((res) => res.data));
+  }
+
+  /** Explicit human click only. Original opaque identity survives voice cancellation; server owns the token. */
+  applyDisplayedVoiceProposal(
+    context: VoiceConsentContext,
+    speak?: boolean,
+  ): Observable<VoiceConsentReceipt> {
+    const request = voiceClickRequest(context);
+    if (!request)
+      return throwError(
+        () => new Error('La propuesta venció. Solicita una nueva.'),
+      );
+    return this.applyVoiceProposal(
+      request.session_id,
+      request.proposal_id,
+      speak,
+    );
+  }
+
+  applyVoiceProposal(
+    session_id: string,
+    proposal_id: string,
+    speak?: boolean,
+  ): Observable<VoiceConsentReceipt> {
+    return this.http
+      .post<{
+        data: VoiceConsentReceipt;
+      }>(`${environment.apiUrl}/store/vexi/voice/confirmations/apply`, {
+        session_id,
+        proposal_id,
+        ...(speak ? { speak: true } : {}),
+      })
+      .pipe(map((response) => response.data));
   }
 
   /**

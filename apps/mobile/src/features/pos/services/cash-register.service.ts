@@ -66,6 +66,68 @@ export interface CashRegisterMovement {
   order?: { id: number; order_number: string };
 }
 
+export interface CashSessionSummary {
+  opening: number;
+  expected_cash_total: number;
+  sales_total: number;
+  sales_count: number;
+  sales_by_method: { method: string; count: number; total: number }[];
+  cash_sales: number;
+  cash_in: number;
+  cash_out: number;
+  cash_refunds: number;
+  non_cash_total: number;
+}
+
+export interface CashSessionPendingOrder {
+  id: number;
+  order_number: string;
+  state: string;
+  remaining_balance: number;
+  reasons: ('operational' | 'balance')[];
+  version: string | null;
+  fingerprint: string;
+}
+
+export interface CashSessionPendingOrders {
+  tracking_enabled: boolean;
+  legacy_unattributed: { status: 'untracked'; message: string } | null;
+  count: number;
+  operational_count: number;
+  balance_count: number;
+  balance_total: number;
+  fingerprint: string;
+  page: number;
+  limit: number;
+  data: CashSessionPendingOrder[];
+}
+
+export interface CashSessionFinishPreview {
+  session_id: number;
+  total: number;
+  eligible: number;
+  ineligible: number;
+  fingerprint: string;
+  eligible_fingerprint: string;
+  items: {
+    id: number;
+    order_number: string;
+    current_state: string;
+    target_state: 'finished';
+    eligible: boolean;
+    reasons: string[];
+    effects: string[];
+    version: string | null;
+    fingerprint: string;
+  }[];
+}
+
+export interface CashSessionCloseDecision {
+  pending_decision: 'resolved' | 'override';
+  pending_fingerprint: string;
+  override_reason?: string;
+}
+
 function unwrap<T>(response: { data: T | { data: T } }): T {
   const d = response.data as { data?: T };
   if (d && typeof d === 'object' && 'data' in d && d.data !== undefined) {
@@ -113,13 +175,64 @@ export const CashRegisterService = {
     sessionId: number,
     actualClosingAmount: number,
     closingNotes?: string,
+    expectedClosingAmountSeen?: number,
+    pendingDecision?: CashSessionCloseDecision,
   ): Promise<CashRegisterSession> {
     const endpoint = Endpoints.STORE.CASH_REGISTERS.SESSION_CLOSE.replace(':id', String(sessionId));
     const res = await apiClient.post(endpoint, {
       actual_closing_amount: actualClosingAmount,
       closing_notes: closingNotes,
+      ...(expectedClosingAmountSeen != null
+        ? { expected_closing_amount_seen: expectedClosingAmountSeen }
+        : {}),
+      ...(pendingDecision ?? {}),
     });
     return unwrap<CashRegisterSession>(res);
+  },
+
+  /** Resumen de efectivo que gobierna el cierre; incluye el esperado más fresco. */
+  async getCashSummary(sessionId: number): Promise<CashSessionSummary> {
+    const res = await apiClient.get(`/store/cash-registers/sessions/${sessionId}/cash-summary`);
+    return unwrap<CashSessionSummary>(res);
+  },
+
+  /** Lista y huella global de las órdenes originadas en esta sesión. */
+  async getPendingOrders(
+    sessionId: number,
+    page = 1,
+    limit = 10,
+  ): Promise<CashSessionPendingOrders> {
+    const res = await apiClient.get(
+      `/store/cash-registers/sessions/${sessionId}/pending-orders`,
+      { params: { page, limit } },
+    );
+    return unwrap<CashSessionPendingOrders>(res);
+  },
+
+  async previewCashSessionFinish(
+    sessionId: number,
+    orders: { id: number; version: string; fingerprint: string }[],
+  ): Promise<CashSessionFinishPreview> {
+    const res = await apiClient.post('/store/orders/bulk/cash-session-preview', {
+      session_id: sessionId,
+      orders,
+    });
+    return unwrap<CashSessionFinishPreview>(res);
+  },
+
+  async finishCashSessionOrders(
+    sessionId: number,
+    orders: { id: number; version: string; fingerprint: string }[],
+    fingerprint: string,
+    reason: string,
+  ): Promise<unknown> {
+    const res = await apiClient.post('/store/orders/bulk/cash-session-finish', {
+      session_id: sessionId,
+      orders,
+      fingerprint,
+      reason,
+    });
+    return unwrap<unknown>(res);
   },
 
   /** Suspende la sesión activa. */

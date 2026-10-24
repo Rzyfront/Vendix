@@ -36,17 +36,40 @@ describe('AccountService#deriveLineGross — fallback ADR-06', () => {
     const result = deriveLineGross({
       unit_price: 100,
       total_price: 200, // 100 × 2 (neto, DB-01)
-      tax_amount_item: 38, // IVA de LA LÍNEA completa (2 unidades al 19%)
+      tax_amount_item: 19, // IVA POR UNIDAD de precio (ADR-10), 19%
       final_unit_price: null,
       quantity: 2,
     });
 
-    // ADR-06: final_unit_price ausente ⇒ unit_price + tax_amount_item/line_units.
-    // line_units cae a `quantity` (no hay price_unit_quantity): 100 + 38/2 = 119.
+    // final_unit_price ausente ⇒ util canónico: impuesto de línea = 19 × 2 = 38;
+    // unitario bruto = 100 + 38/2 = 119.
     expect(result.unit_price_gross).toBe(119);
-    // multiplier = netTotal/netUnit = 200/100 = 2 (misma relación que ya
-    // vincula total_price con unit_price en la fila, DB-01): 119 × 2 = 238.
+    // total bruto = 200 + 38 = 238.
     expect(result.line_total_gross).toBe(238);
+  });
+
+  it('neto 100, impuesto 19/u, qty 3 => 119 / 357 (no subestima con qty > 1)', () => {
+    const result = deriveLineGross({
+      unit_price: 100,
+      total_price: 300,
+      tax_amount_item: 19,
+      final_unit_price: null,
+      quantity: 3,
+    });
+    expect(result.unit_price_gross).toBe(119);
+    expect(result.line_total_gross).toBe(357);
+  });
+
+  it('tax_amount_item null (pre-ADR-08) => bruto = neto', () => {
+    const result = deriveLineGross({
+      unit_price: 100,
+      total_price: 300,
+      tax_amount_item: null,
+      final_unit_price: null,
+      quantity: 3,
+    });
+    expect(result.unit_price_gross).toBe(100);
+    expect(result.line_total_gross).toBe(300);
   });
 
   it('usa final_unit_price directo cuando SÍ está poblado (no recalcula por encima del valor ya persistido)', () => {

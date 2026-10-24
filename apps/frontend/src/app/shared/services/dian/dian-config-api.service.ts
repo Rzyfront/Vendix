@@ -8,6 +8,7 @@ import {
   DianEmissionStatus,
   InvoiceResolution,
 } from '../../../private/modules/store/invoicing/interfaces/invoice.interface';
+import type { ResolutionsInUseResponse } from '../../components/dian/resolutions-in-use.util';
 
 /**
  * Qué puede escribir el host que monta el wizard de habilitación.
@@ -24,6 +25,12 @@ export interface DianApiCapabilities {
   readonly runTestSet: boolean;
   /** Promover la configuración a producción. */
   readonly promoteToProduction: boolean;
+  /**
+   * Heredar la habilitación de un software ya habilitado. El endpoint sólo
+   * existe en el carril de TIENDA: los hosts que no lo declaran (organización,
+   * super admin) quedan en `undefined`, que se lee como «no».
+   */
+  readonly inheritEnablement?: boolean;
 }
 
 export const ALL_DIAN_CAPABILITIES: DianApiCapabilities = {
@@ -31,7 +38,29 @@ export const ALL_DIAN_CAPABILITIES: DianApiCapabilities = {
   uploadCertificate: true,
   runTestSet: true,
   promoteToProduction: true,
+  inheritEnablement: true,
 };
+
+/** Por qué una configuración NO puede heredar la habilitación. */
+export type DianEnablementInheritanceReason =
+  | 'already_enabled'
+  | 'already_inherited'
+  | 'no_source'
+  | 'not_own_software';
+
+/**
+ * Respuesta de `GET dian-config/:id/enablement-inheritance` (carril tienda).
+ * Sólo se ofrece heredar cuando `available` es `true`.
+ */
+export interface DianEnablementInheritance {
+  available: boolean;
+  reason?: DianEnablementInheritanceReason;
+  source_enablement_status?: 'enabled' | 'test_set_passed';
+  target_environment?: 'production' | 'test';
+  issuer_nit: string;
+  software_id: string;
+  legal_notice: string;
+}
 
 export interface DianApiContext {
   /** Base sin barra final, relativa a `environment.apiUrl`. Ej: `store/invoicing`. */
@@ -82,6 +111,8 @@ export interface DianNumberingRangeLocal {
   current_number: number;
   is_active: boolean;
   document_type: string;
+  /** ISO; no nulo cuando la resolución local fue archivada (solo lectura). */
+  archived_at?: string | null;
 }
 
 export type DianNumberingRangeStatus = 'in_sync' | 'differs' | 'missing_local';
@@ -151,6 +182,8 @@ export interface DianNumberingRangeLocalOnly {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  /** ISO; no nulo cuando la resolución local fue archivada (solo lectura). */
+  archived_at?: string | null;
 }
 
 export interface DianNumberingRangesResponse {
@@ -286,9 +319,24 @@ export class DianConfigApiService {
 
   // ── Resolutions ───────────────────────────────────────────
 
-  getResolutions(): Observable<ApiResponse<InvoiceResolution[]>> {
+  /**
+   * Qué numeración toma hoy el generador, por tipo de documento. Va por
+   * `{rail}/resolutions/in-use`, así que sirve igual a la tienda y a la
+   * consola de tenants (el rail lo resuelve `DIAN_API_CONTEXT`).
+   */
+  getResolutionsInUse(): Observable<ApiResponse<ResolutionsInUseResponse>> {
+    return this.http.get<ApiResponse<ResolutionsInUseResponse>>(
+      this.getApiUrl('resolutions/in-use'),
+    );
+  }
+
+  /** Por defecto el backend oculta las archivadas; `include_archived` las trae. */
+  getResolutions(
+    includeArchived = false,
+  ): Observable<ApiResponse<InvoiceResolution[]>> {
     return this.http.get<ApiResponse<InvoiceResolution[]>>(
       this.getApiUrl('resolutions'),
+      includeArchived ? { params: { include_archived: 'true' } } : {},
     );
   }
 
@@ -454,6 +502,31 @@ export class DianConfigApiService {
   promoteDianToProduction(config_id: number): Observable<any> {
     return this.http.post(
       this.getApiUrl(`dian-config/${config_id}/promote-to-production`),
+      {},
+    );
+  }
+
+  /**
+   * Si esta configuración puede heredar la habilitación de un software que ya
+   * la tiene. Es una LECTURA. Sólo existe en el carril de tienda
+   * (`capabilities().inheritEnablement`).
+   */
+  getEnablementInheritance(
+    config_id: number,
+  ): Observable<ApiResponse<DianEnablementInheritance>> {
+    return this.http.get<ApiResponse<DianEnablementInheritance>>(
+      this.getApiUrl(`dian-config/${config_id}/enablement-inheritance`),
+    );
+  }
+
+  /**
+   * Hereda la habilitación (sin repetir el set de pruebas). Errores:
+   * `DIAN_CONFIG_003` (no heredable) y `DIAN_CONFIG_004` (el PIN guardado no
+   * coincide con el del software habilitado).
+   */
+  inheritEnablement(config_id: number): Observable<any> {
+    return this.http.post(
+      this.getApiUrl(`dian-config/${config_id}/inherit-enablement`),
       {},
     );
   }

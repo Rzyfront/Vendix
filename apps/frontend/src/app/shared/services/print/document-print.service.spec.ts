@@ -157,7 +157,9 @@ describe('DocumentPrintService Print Formats gates', () => {
 
     expect(result?.documents).toBe(1);
     expect(gateway.getFormatDetail).not.toHaveBeenCalled();
-    expect((service as any).sendToPrinter).toHaveBeenCalledWith('<html>ticket</html>');
+    expect((service as any).sendToPrinter).toHaveBeenCalledWith(
+      service.withGatewayPrintGuard('<html>ticket</html>'),
+    );
   });
 
   it('does not bypass an inactive format with the local dispatch fallback after HTTP 403', async () => {
@@ -316,15 +318,29 @@ describe('DocumentPrintService Print Formats gates', () => {
 
     (service as any).sendToPrinter.calls.reset();
     await service.printGatewayHtml('<html><head><title>legacy</title></head></html>', 0);
-    expect((service as any).sendToPrinter).toHaveBeenCalledOnceWith(
-      '<html><head><title>legacy</title></head></html>',
-    );
+    expect((service as any).sendToPrinter).toHaveBeenCalledTimes(1);
+    const legacySent = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+    expect(legacySent).toContain('<title>legacy</title>');
+    expect(legacySent).toContain('data-vx-print-guard');
   });
 
   it('rejects multi-copy gateway HTML without a body instead of cloning full documents', async () => {
     await expectAsync(service.printGatewayHtml('<html><head></head></html>', 2))
       .toBeRejectedWithError(/no <body>/i);
     expect((service as any).sendToPrinter).not.toHaveBeenCalled();
+  });
+
+  it('rejects, instead of resolving silently, when the print iframe has no document', async () => {
+    (service as any).sendToPrinter.and.callThrough();
+    const iframe = window.document.createElement('iframe');
+    Object.defineProperty(iframe, 'contentDocument', { value: null });
+    Object.defineProperty(iframe, 'contentWindow', { value: null });
+    spyOn(window.document, 'createElement').and.returnValue(iframe);
+
+    await expectAsync(
+      service.printGatewayHtml('<html><head></head><body><p>A</p></body></html>', 1),
+    ).toBeRejectedWithError('No se pudo preparar el documento de impresión.');
+    expect(iframe.isConnected).toBeFalse();
   });
 
   it('preserves replacement-token sequences literally when expanding body content', async () => {
@@ -336,5 +352,61 @@ describe('DocumentPrintService Print Formats gates', () => {
     const sentHtml = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
     expect(sentHtml.match(/\$& \$` \$' \$\$/g)?.length).toBe(3);
     expect(sentHtml.match(/<head>/gi)?.length).toBe(1);
+  });
+
+  describe('print geometry', () => {
+    const withPrinting = (printing: Record<string, unknown>) =>
+      settings.receipts.and.returnValue({ printing });
+
+    it('resolves thermal_80 to a 72 mm content width and emits it in the HTML', () => {
+      withPrinting({ pos_ticket: { format: 'thermal_80', copies: 1 } });
+      const config = service.resolveConfig('pos_ticket');
+      expect(config.paperWidthMm).toBe(80);
+      expect(config.widthMm).toBe(80);
+      expect(config.contentWidthMm).toBe(72);
+      const html = service.buildDocumentHtml(config, '<p>x</p>');
+      expect(html).toContain('width: 72mm');
+      expect(html).toContain('class="vx-print-root"');
+    });
+
+    it('resolves thermal_58 to a 48 mm content width', () => {
+      withPrinting({ pos_ticket: { format: 'thermal_58', copies: 1 } });
+      const config = service.resolveConfig('pos_ticket');
+      expect(config.contentWidthMm).toBe(48);
+      expect(service.buildDocumentHtml(config, '<p>x</p>')).toContain('width: 48mm');
+    });
+
+    it('honours a stored printable_width_mm on a roll', () => {
+      withPrinting({ pos_ticket: { format: 'thermal_80', printable_width_mm: 64, copies: 1 } });
+      const config = service.resolveConfig('pos_ticket');
+      expect(config.printableWidthMm).toBe(64);
+      expect(config.contentWidthMm).toBe(64);
+      expect(service.buildDocumentHtml(config, '<p>x</p>')).toContain('width: 64mm');
+    });
+
+    it('never lets a sheet margin go below 5 mm', () => {
+      withPrinting({ sales_order: { format: 'a4', margin_mm: 0, copies: 1 } });
+      const config = service.resolveConfig('sales_order');
+      expect(config.margins.top).toBeGreaterThanOrEqual(5);
+      expect(config.margins.right).toBeGreaterThanOrEqual(5);
+      expect(config.margins.bottom).toBeGreaterThanOrEqual(5);
+      expect(config.margins.left).toBeGreaterThanOrEqual(5);
+    });
+
+    it('buildDocumentHtml carries the base overflow guard', () => {
+      withPrinting({ pos_ticket: { format: 'thermal_80', copies: 1 } });
+      const html = service.buildDocumentHtml(service.resolveConfig('pos_ticket'), '<p>x</p>');
+      expect(html).toContain('table-layout: fixed');
+      expect(html).toContain('<meta charset="utf-8">');
+      expect(html).toContain('box-sizing: border-box');
+    });
+
+    it('injects the gateway guard once, without touching @page', () => {
+      const html = '<html><head><style>@page{size:80mm auto;margin:0 4mm}</style></head><body><p>a</p></body></html>';
+      const once = service.withGatewayPrintGuard(html);
+      expect(once).toContain('@page{size:80mm auto;margin:0 4mm}');
+      expect(once.match(/data-vx-print-guard/g)?.length).toBe(1);
+      expect(service.withGatewayPrintGuard(once)).toBe(once);
+    });
   });
 });

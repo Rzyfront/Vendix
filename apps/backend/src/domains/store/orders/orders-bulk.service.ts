@@ -1,16 +1,26 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { OrdersService } from './orders.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import {
   PRINT_FORMATS,
   PrintFormat,
 } from '../settings/interfaces/store-settings.interface';
-import { order_state_enum } from '@prisma/client';
+import { order_state_enum, Prisma } from '@prisma/client';
 import { VALID_TRANSITIONS } from './order-flow/order-flow.service';
+import {
+  computePendingOrderFingerprint,
+  describeKitchenHandoffBlocker,
+  getUnpaidBalanceForFinish,
+  kitchenHandoffBlocker,
+} from './order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import {
   BulkAssignRouteDto,
   BulkPrintOrdersDto,
@@ -22,7 +32,52 @@ import {
   BulkOrdersResultDto,
   BulkPrintResultDto,
   BulkPrintSkippedOrderDto,
+  CashSessionFinishPreviewDto,
+  CashSessionFinishDto,
+  CashSessionProcessOrderDto,
+  CashSessionFinishPreviewItemDto,
+  CashSessionFinishPreviewResultDto,
 } from './dto/bulk-orders.dto';
+
+interface CashPreviewOrderRow {
+  id: number;
+  store_id: number;
+  origin_cash_session_id: number | null;
+  order_number: string;
+  state: order_state_enum;
+  remaining_balance: Prisma.Decimal | number | string | null;
+  grand_total: unknown;
+  payment_form: string | null;
+  updated_at: Date | null;
+  shipping_method_id: number | null;
+  delivery_type: string | null;
+  dispatch_fulfillment: string;
+  payments: Array<{ state: string; amount: unknown }>;
+  order_items: Array<{
+    id: number;
+    product_id: number | null;
+    product_variant_id: number | null;
+    quantity: unknown;
+    product_name: string | null;
+    cancelled_at: Date | null;
+    skip_kds: boolean | null;
+    inventory_committed: boolean;
+    products: {
+      product_type: string;
+      track_inventory: boolean;
+      requires_serial_numbers: boolean;
+    } | null;
+    product_variants: { track_inventory_override: boolean | null } | null;
+    kitchen_ticket_items: Array<{ status: string }>;
+  }>;
+  stores: { industries: unknown };
+}
+
+interface CashPreviewRequestOrder {
+  id: number;
+  version: string;
+  fingerprint: string;
+}
 
 /**
  * Etiquetas en español de los estados de orden, para los mensajes del dry-run.
@@ -122,9 +177,336 @@ export class OrdersBulkService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly orderFlowService: OrderFlowService,
+    private readonly ordersService: OrdersService,
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchRoutesService: DispatchRoutesService,
+    private readonly stockValidator: StockValidatorService,
   ) {}
+
+  /**
+   * Preview de finalización para el cierre de caja. Solo acepta órdenes que
+   * siguen en la unión autoritativa de pendientes de esa sesión y cuyas
+   * versiones coinciden con el GET previo. Es estrictamente de lectura.
+   */
+  async previewCashSessionFinish(
+    dto: CashSessionFinishPreviewDto,
+  ): Promise<CashSessionFinishPreviewResultDto> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { id: dto.session_id, store_id },
+      select: { id: true, store_id: true },
+    });
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+    }
+
+    const requested = dto.orders as CashPreviewRequestOrder[];
+    const ids = requested.map((row) => row.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+    }
+
+    const terminalStates: order_state_enum[] = [
+      order_state_enum.finished,
+      order_state_enum.delivered,
+      order_state_enum.cancelled,
+      order_state_enum.refunded,
+    ];
+    const rows = (await this.prisma.orders.findMany({
+      where: {
+        id: { in: ids },
+        store_id: session.store_id,
+        origin_cash_session_id: session.id,
+        OR: [
+          { state: { notIn: terminalStates } },
+          { remaining_balance: { gt: 0 } },
+        ],
+      },
+      select: {
+        id: true,
+        store_id: true,
+        origin_cash_session_id: true,
+        order_number: true,
+        state: true,
+        remaining_balance: true,
+        grand_total: true,
+        payment_form: true,
+        updated_at: true,
+        shipping_method_id: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        payments: { select: { state: true, amount: true } },
+        stores: { select: { industries: true } },
+        order_items: {
+          where: { cancelled_at: null },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            quantity: true,
+            product_name: true,
+            cancelled_at: true,
+            skip_kds: true,
+            inventory_committed: true,
+            products: {
+              select: {
+                product_type: true,
+                track_inventory: true,
+                requires_serial_numbers: true,
+              },
+            },
+            product_variants: { select: { track_inventory_override: true } },
+            kitchen_ticket_items: {
+              orderBy: { id: 'desc' },
+              take: 1,
+              select: { status: true },
+            },
+          },
+        },
+      },
+    })) as CashPreviewOrderRow[];
+
+    const byId = new Map(rows.map((row) => [row.id, row] as const));
+    const validatedRows: CashPreviewOrderRow[] = [];
+    for (const requestedRow of requested) {
+      const row = byId.get(requestedRow.id);
+      if (!row) {
+        // Un ID de otra sesión/tienda y uno ya finalizado son indistinguibles
+        // para el cliente; se rechaza todo el lote sin revelar datos ajenos.
+        throw new VendixHttpException(
+          ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
+        );
+      }
+      const version = row.updated_at?.toISOString() ?? null;
+      const currentFingerprint = this.cashPendingOrderFingerprint(row, version);
+      if (
+        version !== requestedRow.version ||
+        currentFingerprint !== requestedRow.fingerprint
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
+        );
+      }
+      validatedRows.push(row);
+    }
+
+    const items: CashSessionFinishPreviewItemDto[] = [];
+    for (const row of validatedRows) {
+      const reasons: string[] = [];
+      const latestVersion = row.updated_at?.toISOString() ?? null;
+      const rowFingerprint = this.cashPendingOrderFingerprint(
+        row,
+        latestVersion,
+      );
+      const from = row.state as order_state_enum;
+
+      if (
+        !(VALID_TRANSITIONS[from] ?? []).includes(order_state_enum.finished)
+      ) {
+        reasons.push('La orden no tiene una transición canónica a finalizada.');
+      }
+      if (['finished', 'delivered', 'cancelled', 'refunded'].includes(from)) {
+        reasons.push('La orden está en un estado terminal.');
+      }
+
+      const unpaid = Math.max(
+        Number(row.remaining_balance ?? 0),
+        getUnpaidBalanceForFinish({
+          grand_total: row.grand_total as any,
+          remaining_balance: row.remaining_balance as any,
+          payment_form: row.payment_form,
+          payments: row.payments as any,
+        }),
+      );
+      if (unpaid > 0.01) {
+        reasons.push(`Saldo pendiente de ${unpaid.toFixed(2)}.`);
+      }
+
+      const lines = row.order_items.map((line) => ({
+        ...line,
+        products: line.products
+          ? { product_type: line.products.product_type }
+          : null,
+        kitchen_ticket_items: line.kitchen_ticket_items,
+      }));
+      const kitchenBlocker = kitchenHandoffBlocker(lines as any, {
+        isRestaurant: storeIsRestaurant(row.stores?.industries as any),
+      });
+      if (kitchenBlocker) {
+        reasons.push(
+          describeKitchenHandoffBlocker(kitchenBlocker) ??
+            `El plato "${kitchenBlocker.itemName}" aún no está entregado por cocina.`,
+        );
+      }
+
+      // La finalización del flujo puede cerrar el despacho; no se aprueba una
+      // orden con envío asignado hasta que el estado de entrega sea explícito.
+      if (
+        ['home_delivery', 'direct_delivery'].includes(
+          row.delivery_type ?? '',
+        ) &&
+        row.shipping_method_id != null &&
+        from !== order_state_enum.delivered
+      ) {
+        reasons.push(
+          'El envío asignado aún no está confirmado como entregado.',
+        );
+      }
+
+      const inventoryLines = row.order_items
+        .filter((line) => !line.inventory_committed)
+        .map((line) => ({
+          product_id: line.product_id,
+          product_variant_id: line.product_variant_id,
+          quantity: Number(line.quantity),
+          product_name: line.product_name ?? undefined,
+        }));
+      const missingIdentity = inventoryLines.some(
+        (line) => !Number.isInteger(line.product_id) || !(line.quantity > 0),
+      );
+      if (missingIdentity) {
+        reasons.push(
+          'No se puede verificar el inventario de una o más líneas.',
+        );
+      } else {
+        const serializedUncommitted = row.order_items.some(
+          (line) =>
+            !line.inventory_committed &&
+            line.products?.requires_serial_numbers === true,
+        );
+        if (serializedUncommitted) {
+          reasons.push(
+            'No se puede confirmar de forma segura la disponibilidad de seriales antes del commit.',
+          );
+        }
+        try {
+          const policy = await this.stockValidator.resolveInventoryPolicy(
+            row.store_id,
+          );
+          await this.stockValidator.assertLinesAvailable(
+            inventoryLines as any,
+            {
+              orderId: row.id,
+              allowOversell: policy.allowOversell,
+            },
+          );
+        } catch (error: any) {
+          reasons.push(
+            error?.message || 'No se pudo verificar el inventario disponible.',
+          );
+        }
+      }
+
+      items.push({
+        id: row.id,
+        order_number: row.order_number,
+        current_state: from,
+        target_state: 'finished',
+        eligible: reasons.length === 0,
+        reasons,
+        effects: [
+          'Transición canónica de estado a finalizada con auditoría.',
+          ...(inventoryLines.length
+            ? ['Commit de inventario pendiente según las líneas de la orden.']
+            : []),
+          'Publicación de eventos del ciclo de vida después del commit.',
+        ],
+        version: latestVersion,
+        fingerprint: rowFingerprint,
+      });
+    }
+
+    const fingerprint = createHash('sha256')
+      .update(
+        `${session.id}:${items
+          .map((item) => `${item.id}:${item.fingerprint}`)
+          .sort()
+          .join('|')}`,
+      )
+      .digest('hex');
+    const eligible = items.filter((item) => item.eligible).length;
+    const eligible_fingerprint = createHash('sha256')
+      .update(
+        `${session.id}:${items
+          .filter((item) => item.eligible)
+          .map((item) => `${item.id}:${item.fingerprint}`)
+          .sort()
+          .join('|')}`,
+      )
+      .digest('hex');
+    return {
+      session_id: session.id,
+      total: items.length,
+      eligible,
+      ineligible: items.length - eligible,
+      fingerprint,
+      eligible_fingerprint,
+      items,
+    };
+  }
+
+  async processCashSessionOrder(dto: CashSessionProcessOrderDto) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: {
+        id: dto.session_id,
+        store_id: storeId,
+        status: 'open',
+        pending_orders_tracking_enabled: true,
+      },
+      select: { id: true },
+    });
+    const order = await this.prisma.orders.findFirst({
+      where: {
+        id: dto.order_id,
+        store_id: storeId,
+        origin_cash_session_id: dto.session_id,
+      },
+      select: { id: true, updated_at: true, state: true },
+    });
+    if (
+      !session ||
+      !order
+    ) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+    }
+    if (order.updated_at?.toISOString() !== dto.expected_version) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CASH_SESSION_ORDER_STALE_001,
+      );
+    }
+    if (dto.shipping)
+      await this.ordersService.assignShipping(order.id, dto.shipping);
+    return this.orderFlowService.fastTrackOrder(order.id, dto.flow);
+  }
+
+  /** Aplica la selección confirmada por el preview mediante el seam atómico
+   * de OrderFlowService. Este endpoint nunca cae en el bulkTransition parcial. */
+  async finishCashSessionOrders(dto: CashSessionFinishDto) {
+    const storeId = RequestContextService.getStoreId();
+    const actorId = RequestContextService.getUserId();
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    if (!actorId) throw new UnauthorizedException();
+
+    return this.orderFlowService.finishCashSessionOrders({
+      storeId,
+      sessionId: dto.session_id,
+      selected: dto.orders,
+      expectedFingerprint: dto.fingerprint,
+      reason: dto.reason,
+      actorId,
+    });
+  }
+
+  private cashPendingOrderFingerprint(
+    row: Pick<CashPreviewOrderRow, 'id' | 'state' | 'remaining_balance'>,
+    version: string | null,
+  ): string {
+    return computePendingOrderFingerprint(row, version);
+  }
 
   // ─── Transition ────────────────────────────────────────────────────
 
@@ -148,7 +530,11 @@ export class OrdersBulkService {
         await this.orderFlowService.forceOrderState(id, dto.targetState, {
           reason,
         });
-        results.push({ id, status: 'ok', message: `Orden ${id} → ${dto.targetState}` });
+        results.push({
+          id,
+          status: 'ok',
+          message: `Orden ${id} → ${dto.targetState}`,
+        });
         successful++;
       } catch (error: any) {
         failed++;
@@ -352,10 +738,7 @@ export class OrdersBulkService {
 
       // `pickup` está exento: el cliente retira en tienda, la remisión
       // documenta el handover y no necesita dirección de entrega.
-      if (
-        order.delivery_type !== 'pickup' &&
-        !this.hasShippingAddress(order)
-      ) {
+      if (order.delivery_type !== 'pickup' && !this.hasShippingAddress(order)) {
         return {
           ...base,
           status: 'error' as const,
@@ -380,7 +763,7 @@ export class OrdersBulkService {
       return {
         ...base,
         status: 'ok' as const,
-        message: `Se creará la remisión (${pending} ${pending === 1 ? 'unidad' : 'unidades'} pendientes) y se asignará a la planilla`,
+        message: `Se creará la remisión (${pending} ${pending === 1 ? 'unidad' : 'unidades'} pendientes) y se asignará a la ruta`,
       };
     });
 
@@ -427,9 +810,7 @@ export class OrdersBulkService {
    * tolerante a fallos: si una orden no produce remisión, se reporta como
    * `failed` y las demás siguen.
    */
-  async bulkAssignRoute(
-    dto: BulkAssignRouteDto,
-  ): Promise<BulkOrdersResultDto> {
+  async bulkAssignRoute(dto: BulkAssignRouteDto): Promise<BulkOrdersResultDto> {
     const results: BulkOrderResultItemDto[] = [];
     let successful = 0;
     let failed = 0;
@@ -470,7 +851,7 @@ export class OrdersBulkService {
         results.push({
           id: row.order_id,
           status: 'ok',
-          message: `Remisión ${row.dispatch_number} creada y asignada a planilla ${dto.route_id}`,
+          message: `Remisión ${row.dispatch_number} creada y asignada a ruta ${dto.route_id}`,
         });
       } else if (row.status === 'skipped') {
         // Idempotente: ya estaba aplicado (batch_key). Lo contamos como ok.
@@ -505,7 +886,7 @@ export class OrdersBulkService {
         } as any);
       } catch (error: any) {
         this.logger.warn(
-          `bulkAssignRoute: remisiones creadas pero addStops a planilla ${dto.route_id} falló: ${error?.message}`,
+          `bulkAssignRoute: remisiones creadas pero addStops a ruta ${dto.route_id} falló: ${error?.message}`,
         );
         // Las remisiones ya existen (efecto deseado: la orden está remitida),
         // pero NO quedaron en la planilla. Se advierte en cada fila ok para que
@@ -515,7 +896,7 @@ export class OrdersBulkService {
           if (r.status === 'ok' && okOrderIds.has(r.id)) {
             r.message =
               (r.message ?? '') +
-              ` | ADVERTENCIA: no se pudo asignar a la planilla ${dto.route_id}: ${error?.message ?? 'error desconocido'}`;
+              ` | ADVERTENCIA: no se pudo asignar a la ruta ${dto.route_id}: ${error?.message ?? 'error desconocido'}`;
           }
         }
       }

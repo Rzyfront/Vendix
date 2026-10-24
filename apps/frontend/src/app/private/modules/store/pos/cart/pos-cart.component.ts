@@ -1108,6 +1108,7 @@ import {
       title="Nota de la orden"
       size="sm"
       (closed)="orderNoteModalOpen.set(false)"
+      [dialog]="true"
     >
       <div class="space-y-2">
         <textarea
@@ -1156,6 +1157,7 @@ import {
       [title]="'Nota para cocina: ' + (itemNoteTarget()?.product?.name ?? '')"
       size="sm"
       (closed)="closeItemNote()"
+      [dialog]="true"
     >
       <div class="space-y-2">
         <textarea
@@ -1215,6 +1217,7 @@ import {
       size="sm"
       [centered]="true"
       (closed)="closeCouponModal()"
+      [dialog]="true"
     >
       <div class="space-y-4">
         @if (getAppliedCoupon(); as coupon) {

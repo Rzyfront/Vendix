@@ -15,6 +15,10 @@ export { createSettingsAdminTools } from './domains/settings-admin.tools';
 export { createFinanceOpsTools } from './domains/finance-ops.tools';
 export { createCustomerTools } from './domains/customers.tools';
 export { createProductTools } from './domains/products.tools';
+export {
+  createCategoryTools,
+  createBrandTools,
+} from './domains/catalog-taxonomy.tools';
 export { createVariantTools } from './domains/variants.tools';
 export { createPaymentTools } from './domains/payments.tools';
 export { createPurchasingTools } from './domains/purchasing.tools';
@@ -59,3 +63,11 @@ export type {
 export { uiTools } from './domains/ui.tools';
 
 export * from './interfaces/tool.interface';
+
+export { createDiscoveryTools } from './domains/discovery.tools';
+export { ToolRouterService } from './tool-router.service';
+
+export { createPlaybookTools } from './domains/playbook.tools';
+export { createCodeExecutionTools } from './domains/code-execution.tools';
+
+export { createProceduralRecipeTools } from './domains/recipe.tools';

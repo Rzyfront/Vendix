@@ -132,6 +132,13 @@ export interface PaperDefinition {
    * documento. Para hoja, el alto fijo del pliego.
    */
   height_mm: number | null;
+  /**
+   * Ancho imprimible en mm (fuente única del ancho de contenido). Rollo:
+   * 576 puntos @203dpi = 72 mm en 80 mm; 384 puntos = 48 mm en 58 mm
+   * (algunas Xprinter de 512 puntos ~ 64 mm). Hoja: width_mm - 10
+   * (5 mm por lado).
+   */
+  printable_width_mm: number;
   /** Margen físico en mm. Ignorado en rollo (no hay margen de página). */
   margin_mm: number;
   /** Multiplica cada font size para mantener legibilidad en papel estrecho. */
@@ -175,6 +182,7 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     code: 'letter',
     label: 'Carta (8.5 × 11 in)',
     width_mm: 215.9,
+    printable_width_mm: 205.9,
     height_mm: 279.4,
     margin_mm: 14.11, // 40 pt del builder
     font_scale: 1,
@@ -189,6 +197,7 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     code: 'a4',
     label: 'A4 (210 × 297 mm)',
     width_mm: 210,
+    printable_width_mm: 200,
     height_mm: 297,
     margin_mm: 14.11, // 40 pt del builder
     font_scale: 1,
@@ -203,8 +212,9 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     code: 'half_letter',
     label: 'Media carta (5.5 × 8.5 in)',
     width_mm: 215.9,
+    printable_width_mm: 205.9,
     height_mm: 139.7,
-    margin_mm: 4.94, // 14 pt del builder — más estrecho a propósito
+    margin_mm: 4.94, // histórico 14 pt; el builder hoy usa max(14 pt, 5 mm)
     font_scale: 0.66,
     is_roll: false,
     qr_min_side_mm: QR_MIN_SIDE_MM,
@@ -217,8 +227,9 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     code: 'thermal_80',
     label: 'Térmico 80 mm',
     width_mm: 80,
+    printable_width_mm: 72,
     height_mm: null, // se mide por documento
-    margin_mm: 3.53, // 10 pt del builder
+    margin_mm: 3.53, // histórico; el builder deriva el lateral de resolvePrintGeometry (4 mm)
     font_scale: 0.82,
     is_roll: true,
     qr_min_side_mm: QR_MIN_SIDE_MM,
@@ -231,8 +242,9 @@ export const PAPER_DEFINITIONS: Record<PrintFormat, PaperDefinition> = {
     code: 'thermal_58',
     label: 'Térmico 58 mm',
     width_mm: 58,
+    printable_width_mm: 48,
     height_mm: null,
-    margin_mm: 2.47, // 7 pt del builder
+    margin_mm: 2.47, // histórico; el builder deriva el lateral de resolvePrintGeometry (5 mm)
     font_scale: 0.74,
     is_roll: true,
     qr_min_side_mm: QR_MIN_SIDE_MM,

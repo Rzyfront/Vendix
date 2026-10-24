@@ -92,7 +92,7 @@ interface AvailableNote {
   template: `
     <app-modal
       [isOpen]="true"
-      title="Nueva Planilla de Despacho"
+      title="Nueva Ruta"
       size="lg"
       (cancel)="close.emit()"
     >
@@ -172,7 +172,7 @@ interface AvailableNote {
                       <label
                         class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
                       >
-                        Conductor
+                        Encargado / conductor
                         <span
                           class="text-[var(--color-danger)]"
                           aria-label="obligatorio"
@@ -189,6 +189,9 @@ interface AvailableNote {
                           Selecciona un conductor de tu tienda.
                         </p>
                       }
+                      <p class="text-xs text-[var(--color-text-muted)] mt-1">
+                        Si el encargado es usuario del sistema, solo él podrá despachar la ruta y se compartirá su ubicación en tiempo real mientras esté en curso. Si es externo, cualquiera con permiso puede despachar y no hay rastreo.
+                      </p>
                     </div>
                     <div>
                       <label
@@ -626,7 +629,7 @@ interface AvailableNote {
             [showTextWhileLoading]="true"
             (clicked)="submit()"
           >
-            Crear planilla
+            Crear ruta
           </app-button>
         </div>
       }

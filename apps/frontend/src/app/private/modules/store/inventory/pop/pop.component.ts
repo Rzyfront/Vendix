@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, tap } from 'rxjs/operators';
+import { catchError, last, map, retry, switchMap, tap } from 'rxjs/operators';
 
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 
@@ -60,6 +60,19 @@ import {
 import { resolveCartHeaderDiscount } from './utils/scan-header-discount.util';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
+  PopBulkProgressComponent,
+  PopBulkProgressState,
+  PopBulkRowError,
+} from './components/pop-bulk-progress.component';
+import {
+  DEFAULT_BULK_CHUNK_SIZE,
+  runChunked,
+} from '../../../../../shared/utils/run-chunked';
+import {
+  AsyncJobStatus,
+  pollAsyncJob,
+} from '../../../../../core/utils/async-job-poll.util';
+import {
   InvoiceScanResult,
   InvoiceMatchResult,
   MatchedLineItem,
@@ -74,6 +87,7 @@ import {
   PopShippingAllocation,
 } from './interfaces';
 import {
+  AddToPopCartRequest,
   PopProductConfigResult,
   PopProductModalResult,
 } from './interfaces/pop-cart.interface';
@@ -116,6 +130,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
     PopCheckoutShellComponent,
     PopOrderConfirmationModalComponent,
     InvoiceScannerModalComponent,
+    PopBulkProgressComponent,
   ],
   template: `
     <div
@@ -322,6 +337,13 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (isOpenChange)="showInvoiceScanner.set($event)"
       (confirmed)="onInvoiceScanConfirmed($event)"
     ></app-invoice-scanner-modal>
+
+    <!-- Avance de las fases largas de una compra grande (resolver / recibir). -->
+    <app-pop-bulk-progress
+      [state]="bulkProgress()"
+      (retry)="onBulkProgressRetry()"
+      (dismiss)="onBulkProgressDismiss()"
+    ></app-pop-bulk-progress>
   `,
   styles: [
     `
@@ -445,6 +467,23 @@ export class PopComponent implements OnInit, OnDestroy {
   isMobile = signal(false);
   showCartModal = signal(false);
   isProcessingOrder = signal(false);
+
+  /** Panel de avance de la resolución por lotes y de la recepción por job. */
+  readonly bulkProgress = signal<PopBulkProgressState | null>(null);
+  /** Acción que «Reintentar» del panel vuelve a lanzar (confirmar o borrador). */
+  private bulkRetryAction: (() => void) | null = null;
+  /**
+   * Líneas nuevas ya resueltas por `resolve-lines`, por id de línea del carrito.
+   * El carrito NO se muta (conserva `prebulk_data`, que alimenta la
+   * clasificación insumo/venta y la unidad de venta): el id resuelto se
+   * superpone al payload de creación. Sobrevive a un reintento: lo resuelto no
+   * se vuelve a enviar.
+   */
+  private readonly resolvedLines = new Map<
+    string,
+    { product_id: number; product_variant_id: number | null }
+  >();
+  private conflictsSub: Subscription | null = null;
 
   showOrderConfirmModal = signal(false);
   confirmOrderAction: 'create' | 'create-receive' = 'create';
@@ -1356,7 +1395,9 @@ export class PopComponent implements OnInit, OnDestroy {
   onBulkDataReceived(items: any[]): void {
     if (!items || items.length === 0) return;
 
-    let addedCount = 0;
+    // Se acumulan y se agregan de una vez: un solo set del carrito y un solo
+    // cálculo de resumen (fila por fila era O(N²) con 10.000 filas).
+    const requests: AddToPopCartRequest[] = [];
 
     items.forEach((row) => {
       const normalizedRow = this.normalizeBulkRow(row);
@@ -1507,8 +1548,7 @@ export class PopComponent implements OnInit, OnDestroy {
         is_active: true,
       };
 
-      this.popCartService
-        .addToCart({
+      requests.push({
           product: dummyProduct,
           quantity: quantity,
           unit_cost: unit_cost,
@@ -1535,15 +1575,16 @@ export class PopComponent implements OnInit, OnDestroy {
             is_on_sale: isOnSale,
             sale_price: salePrice,
           },
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-
-      addedCount++;
+        });
     });
 
-    if (addedCount > 0) {
+    if (requests.length > 0) {
+      this.popCartService
+        .addPrebulkItems(requests)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
       this.toastService.success(
-        `Se importaron ${addedCount} productos al carrito`,
+        `Se importaron ${requests.length} productos al carrito`,
       );
     } else {
       this.toastService.warning(
@@ -1901,6 +1942,18 @@ export class PopComponent implements OnInit, OnDestroy {
     // reabrirlo `loadOrder` no restaura la marca y se enviaría con IVA 0.
     if (this.blockSubmitIfTaxUnconfirmed()) return;
     this.pendingAction.set(null);
+
+    // Más de 100 líneas nuevas: se resuelven por lotes antes de crear el
+    // borrador. Con 100 o menos emite `true` de inmediato y nada cambia.
+    this._resolveNewLines$(state, () => this.onSaveAsDraft())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((resolved) => {
+        if (resolved) this._saveDraftResolved();
+      });
+  }
+
+  private _saveDraftResolved(): void {
+    const state = this.popCartService.currentState;
     const draftState = { ...state, status: 'draft' as const };
     const userId = this.authFacade.getUserId() || 0;
 
@@ -1909,6 +1962,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPurchaseToStockFactor(request, draftState);
     // QUI-648: unidad de venta configurada en el modal.
     this.attachSaleUnitConfig(request, draftState);
+    // Líneas nuevas ya resueltas por lotes: viajan con su product_id.
+    this._applyResolvedLines(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1981,6 +2036,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.costPreview.set(null);
     this.costPreviewError.set(null);
     this.newItemConflicts.set([]);
+    // Una apertura nueva re-resuelve: el carrito pudo cambiar desde la última.
+    this.resolvedLines.clear();
 
     this.pendingAction.set(null);
     this.showCartModal.set(false);
@@ -2272,19 +2329,31 @@ export class PopComponent implements OnInit, OnDestroy {
     });
     if (items.length === 0) return;
 
-    this.purchaseOrdersService
-      .getNewItemConflicts(items)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.newItemConflicts.set(
-            response.success ? (response.data?.conflicts ?? []) : [],
+    // El backend admite 100 líneas por request: se envía por lotes, en serie, y
+    // se unen los conflictos de todos. Informativo: un fallo no bloquea y se
+    // conserva lo que ya se encontró.
+    this.conflictsSub?.unsubscribe();
+    this.conflictsSub = runChunked(
+      items,
+      (chunk) =>
+        this.purchaseOrdersService
+          .getNewItemConflicts(chunk)
+          .pipe(
+            map((response) =>
+              response.success ? (response.data?.conflicts ?? []) : [],
+            ),
+          ),
+      DEFAULT_BULK_CHUNK_SIZE,
+    )
+      .pipe(last(), takeUntilDestroyed(this.destroyRef))
+      .subscribe((progress) => {
+        if (progress.failedAt !== undefined) {
+          console.warn(
+            '[POP] new-item-conflicts falló (no bloquea)',
+            progress.error,
           );
-        },
-        error: (err) => {
-          console.warn('[POP] new-item-conflicts falló (no bloquea)', err);
-          this.newItemConflicts.set([]);
-        },
+        }
+        this.newItemConflicts.set(progress.results.flat());
       });
   }
 
@@ -2400,6 +2469,18 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Más de 100 líneas nuevas: se resuelven por lotes antes de crear la OC.
+    // Con 100 o menos emite `true` de inmediato y el flujo es el de siempre.
+    this._resolveNewLines$(state, () => this.onOrderConfirmed())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((resolved) => {
+        if (resolved) this._submitOrderResolved();
+        else this.isProcessingOrder.set(false);
+      });
+  }
+
+  private _submitOrderResolved(): void {
+    const state = this.popCartService.currentState;
     const userId = this.authFacade.getUserId() || 0;
     // QUI-645: baja al carrito el margen/precio fijado en el modal para los
     // productos nuevos, antes de armar el payload.
@@ -2414,6 +2495,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPurchaseToStockFactor(request, state);
     // QUI-648: unidad de venta configurada en el modal.
     this.attachSaleUnitConfig(request, state);
+    // Líneas nuevas ya resueltas por lotes: viajan con su product_id.
+    this._applyResolvedLines(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(
       switchMap((response) => {
@@ -2487,6 +2570,24 @@ export class PopComponent implements OnInit, OnDestroy {
    * toasts claros. Si la OC ya existe, limpia carrito y navega igual.
    */
   private _executeCreateReceivePay(doReceive: boolean, doPay: boolean): void {
+    // Un reintento de recepción ya tiene OC: no hay nada que resolver.
+    if (this.pendingReceptionOrder()) {
+      this._runCreateReceivePay(doReceive, doPay);
+      return;
+    }
+    // Más de 100 líneas nuevas: se resuelven por lotes antes de crear la OC.
+    // Con 100 o menos emite `true` de inmediato y el flujo es el de siempre.
+    this._resolveNewLines$(this.popCartService.currentState, () =>
+      this.onOrderConfirmed(),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((resolved) => {
+        if (resolved) this._runCreateReceivePay(doReceive, doPay);
+        else this.isProcessingOrder.set(false);
+      });
+  }
+
+  private _runCreateReceivePay(doReceive: boolean, doPay: boolean): void {
     const state = this.popCartService.currentState;
 
     // Snapshot del total del carrito ANTES de limpiar: respaldo del monto de
@@ -2503,8 +2604,16 @@ export class PopComponent implements OnInit, OnDestroy {
     // carrito) o si falló la creación (conservar carrito para reintentar).
     let createdOrder: any = pendingOrder;
 
+    // Reintento: se RELEE la OC del servidor para saber qué falta recibir
+    // (una recepción grande pudo quedar parcial). Si la relectura falla se usa
+    // la foto recordada y se pide la recepción completa, como antes.
     const order$: Observable<any> = pendingOrder
-      ? of(pendingOrder)
+      ? this.purchaseOrdersService.getPurchaseOrderById(pendingOrder.id).pipe(
+          map((response: any) =>
+            response?.success && response.data ? response.data : pendingOrder,
+          ),
+          catchError(() => of(pendingOrder)),
+        )
       : this._createApprovedOrder$(state);
 
     this.toastService.info(
@@ -2523,7 +2632,7 @@ export class PopComponent implements OnInit, OnDestroy {
           // original viaja junto al marcador de etapa: descartarlo dejaba al
           // operador con un mensaje genérico y el motivo real solo en consola.
           const reception$: Observable<unknown> = doReceive
-            ? this._buildReceptionViaDispatch$(order).pipe(
+            ? this._buildReceptionViaDispatch$(order, !!pendingOrder).pipe(
                 catchError((err) =>
                   throwError(() => ({ stage: 'receive' as const, err })),
                 ),
@@ -2779,6 +2888,174 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Más de 100 líneas NUEVAS (`product_id` vacío): `create` las rechaza, así
+   * que se resuelven antes con `resolve-lines`, de a 100, en serie y con
+   * progreso. Emite `true` cuando se puede crear la OC y `false` cuando el
+   * operador tiene que decidir (el panel queda con el motivo).
+   *
+   *  - Con 100 líneas nuevas o menos no hace nada y emite `true` síncrono.
+   *  - Una fila con `error` detiene la cadena: se listan los errores por fila y
+   *    NO se crea la OC.
+   *  - Un fallo HTTP de un lote ofrece «Reintentar»: lo ya resuelto queda en
+   *    `resolvedLines` y no se repite (además el endpoint es idempotente).
+   */
+  private _resolveNewLines$(
+    state: PopCartState,
+    retryAction: () => void,
+  ): Observable<boolean> {
+    const isNew = (item: PopCartItem): boolean =>
+      !!item.is_prebulk && !item.product?.id;
+    const totalNew = state.items.reduce((n, it) => n + (isNew(it) ? 1 : 0), 0);
+    if (totalNew <= DEFAULT_BULK_CHUNK_SIZE) return of(true);
+
+    // El margen/precio fijado en el modal de confirmación entra a `prebulk_data`
+    // ANTES de enviar: el producto nace ya con ese precio.
+    this.applyNewProductPricing();
+    const userId = this.authFacade.getUserId() || 0;
+    const request = cartToPurchaseOrderRequest(state, userId, undefined);
+    this.attachPurchaseToStockFactor(request, state);
+    this.attachSaleUnitConfig(request, state);
+
+    const pending = state.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => isNew(item) && !this.resolvedLines.has(item.id));
+    if (pending.length === 0) return of(true);
+
+    const alreadyResolved = totalNew - pending.length;
+    const rowErrors: PopBulkRowError[] = [];
+    this.bulkRetryAction = retryAction;
+    this.bulkProgress.set({
+      kind: 'resolve',
+      status: 'running',
+      label: 'Resolviendo productos',
+      unit: 'productos',
+      processed: alreadyResolved,
+      total: totalNew,
+    });
+
+    return runChunked(
+      pending,
+      (chunk) =>
+        this.purchaseOrdersService
+          .resolveLines({
+            location_id: request.location_id,
+            order_type: request.order_type as 'retail' | 'ingredient',
+            prices_include_tax: request.prices_include_tax,
+            items: chunk.map(({ index }) => request.items[index]),
+          })
+          .pipe(
+            map((response) => {
+              const results = response?.data?.items ?? [];
+              chunk.forEach(({ item, index }, i) => {
+                const result = results.find((r) => r.index === i) ?? results[i];
+                if (result && !result.error && result.product_id) {
+                  this.resolvedLines.set(item.id, {
+                    product_id: result.product_id,
+                    product_variant_id: result.product_variant_id ?? null,
+                  });
+                  return;
+                }
+                rowErrors.push({
+                  row: index + 1,
+                  label: item.prebulk_data?.code || item.prebulk_data?.name || '',
+                  message:
+                    result?.error?.message ||
+                    'El servidor no devolvió el producto de esta fila.',
+                });
+              });
+              // Lo resuelto de este lote ya quedó anotado; el error detiene la
+              // cadena (runChunked lo reporta como `failedAt`).
+              if (rowErrors.length > 0) throw new Error('resolve-lines: filas con error');
+              return results;
+            }),
+          ),
+      DEFAULT_BULK_CHUNK_SIZE,
+    ).pipe(
+      tap((p) => {
+        if (p.failedAt !== undefined) return;
+        this.bulkProgress.update((cur) =>
+          cur ? { ...cur, processed: alreadyResolved + p.processed } : cur,
+        );
+      }),
+      last(),
+      map((p) => {
+        if (p.failedAt === undefined) {
+          this.bulkProgress.set(null);
+          this.bulkRetryAction = null;
+          return true;
+        }
+        const processed = alreadyResolved + p.processed;
+        if (rowErrors.length > 0) {
+          this.bulkProgress.set({
+            kind: 'resolve',
+            status: 'blocked',
+            label: 'Resolviendo productos',
+            unit: 'productos',
+            processed,
+            total: totalNew,
+            message:
+              'La orden NO se creó. Corrige estas filas y vuelve a confirmar.',
+            rowErrors,
+            canRetry: false,
+          });
+          this.toastService.error(
+            `${rowErrors.length} fila(s) no se pudieron resolver. La orden no se creó.`,
+          );
+          return false;
+        }
+        this.bulkProgress.set({
+          kind: 'resolve',
+          status: 'blocked',
+          label: 'Resolviendo productos',
+          unit: 'productos',
+          processed,
+          total: totalNew,
+          message: `Falló el lote ${p.chunkIndex + 1} de ${p.chunkCount}: ${extractApiErrorMessage(p.error)}. Los ${processed} ya resueltos no se repiten.`,
+          canRetry: true,
+        });
+        return false;
+      }),
+    );
+  }
+
+  /** Superpone el `product_id` resuelto por lotes a las líneas nuevas del payload. */
+  private _applyResolvedLines(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    if (this.resolvedLines.size === 0) return;
+    const newProductFields = [
+      'product_name', 'sku', 'barcode', 'product_description', 'product_type',
+      'track_inventory', 'min_stock_level', 'pricing_type', 'tax_category_ids',
+      'state', 'weight', 'available_for_ecommerce', 'is_featured',
+      'allow_pos_price_override', 'has_multiple_price_tiers', 'base_price',
+      'profit_margin', 'is_on_sale', 'sale_price', 'brand_name',
+      'category_names', 'is_ingredient', 'is_sellable',
+    ];
+    request.items.forEach((reqItem, i) => {
+      const cartItem = state.items[i];
+      const resolved = cartItem && this.resolvedLines.get(cartItem.id);
+      if (!resolved) return;
+      const target = reqItem as any;
+      target.product_id = resolved.product_id;
+      target.product_variant_id = resolved.product_variant_id ?? undefined;
+      newProductFields.forEach((field) => delete target[field]);
+    });
+  }
+
+  onBulkProgressRetry(): void {
+    const action = this.bulkRetryAction;
+    this.bulkProgress.set(null);
+    this.bulkRetryAction = null;
+    action?.();
+  }
+
+  onBulkProgressDismiss(): void {
+    this.bulkProgress.set(null);
+    this.bulkRetryAction = null;
+  }
+
+  /**
    * A.10 — aprueba la OC recién creada por la VÍA CORRECTA.
    *
    * El payload de creación mandaba `status: 'approved'` y el backend lo
@@ -2833,6 +3110,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.attachPurchaseToStockFactor(request, state);
     // QUI-648: unidad de venta configurada en el modal.
     this.attachSaleUnitConfig(request, state);
+    // Líneas nuevas ya resueltas por lotes: viajan con su product_id.
+    this._applyResolvedLines(request, state);
 
     return this.purchaseOrdersService.createPurchaseOrder(request).pipe(
       switchMap((response) =>
@@ -2906,8 +3185,25 @@ export class PopComponent implements OnInit, OnDestroy {
    * están definidos, para no forzar el path de pricing en el backend cuando el
    * operador ancla el costo (sin override).
    */
-  private _buildReceptionViaDispatch$(order: any): Observable<unknown> {
-    const orderItems = order.purchase_order_items || [];
+  private _buildReceptionViaDispatch$(
+    order: any,
+    pendingOnly = false,
+  ): Observable<unknown> {
+    let orderItems: any[] = order.purchase_order_items || [];
+    if (pendingOnly) {
+      // Reintento: solo lo pendiente (pedido - recibido). Una línea sin
+      // pendiente se omite; si no queda ninguna, no hay nada que recibir y la
+      // cadena sigue al pago y a la relectura del estado.
+      orderItems = orderItems
+        .map((item: any) => ({
+          ...item,
+          quantity_ordered:
+            (Number(item.quantity_ordered) || 0) -
+            (Number(item.quantity_received) || 0),
+        }))
+        .filter((item: any) => item.quantity_ordered > 0);
+      if (orderItems.length === 0) return of(null);
+    }
 
     // Overrides de precio/margen keyed por `${product_id}-${variant_id || 0}`
     // (mismo shape que usa el modal de confirmación).
@@ -2961,6 +3257,89 @@ export class PopComponent implements OnInit, OnDestroy {
         this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn)),
       ),
       switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+      // Más de 100 líneas: el backend recibe en segundo plano y devuelve el
+      // job. Se espera con poll y barra; con 100 o menos no viene y todo sigue
+      // igual que antes.
+      switchMap((received) => {
+        const jobId = (received as { po_receive_job_id?: string } | null)
+          ?.po_receive_job_id;
+        return jobId ? this._waitReceiveJob$(jobId, order) : of(received);
+      }),
+    );
+  }
+
+  /**
+   * Poll del job de recepción (cada 2 s) con barra «Recibiendo N de M líneas».
+   * `completed` continúa la cadena (pago y relectura del estado). `failed` o
+   * agotar la espera lanzan un mensaje: la etapa `receive` deja la OC creada y
+   * recordada, sin pagar.
+   */
+  private _waitReceiveJob$(jobId: string, order: any): Observable<unknown> {
+    const failure: { value: { message: string; batch_index: number } | null } = {
+      value: null,
+    };
+    this.bulkRetryAction = null;
+    this.bulkProgress.set({
+      kind: 'receive',
+      status: 'running',
+      label: 'Recibiendo',
+      unit: 'líneas',
+      processed: 0,
+      total: 0,
+    });
+
+    const poll$ = () =>
+      this.purchaseOrdersService.getReceiveJob(jobId).pipe(
+        // Un fallo de red del poll no es un fallo del job: se reintenta.
+        retry({ count: 3, delay: 2000 }),
+        map((response): AsyncJobStatus<{ purchase_order_id: number; status: string }> => {
+          const job = response.data;
+          this.bulkProgress.update((cur) =>
+            cur
+              ? {
+                  ...cur,
+                  processed: job.progress?.processed_lines ?? cur.processed,
+                  total: job.progress?.total_lines ?? cur.total,
+                }
+              : cur,
+          );
+          if (job.error) failure.value = job.error;
+          return {
+            status: job.state,
+            result: job.result,
+            error: job.error?.message,
+          };
+        }),
+      );
+
+    return pollAsyncJob(poll$, {
+      intervalMs: 2_000,
+      // 100 lotes de 100 líneas: se espera más que el trabajo real del worker.
+      timeoutMs: 30 * 60 * 1000,
+    }).pipe(
+      tap(() => this.bulkProgress.set(null)),
+      switchMap((job) => {
+        if (job.status === 'completed') return of(job.result ?? null);
+        const batch = failure.value
+          ? ` (lote ${failure.value.batch_index + 1})`
+          : '';
+        return throwError(
+          () =>
+            `La recepción se detuvo${batch}: ${job.error || 'error desconocido'}. ` +
+            `La orden ${order?.order_number ?? '#' + order?.id} quedó creada y parcialmente recibida; reintenta para continuar.`,
+        );
+      }),
+      catchError((err) => {
+        this.bulkProgress.set(null);
+        if (typeof err === 'string') return throwError(() => err);
+        if (err?.name === 'TimeoutError') {
+          return throwError(
+            () =>
+              'La recepción sigue en segundo plano y tardó más de lo esperado. Revisa el estado de la orden antes de reintentar.',
+          );
+        }
+        return throwError(() => err);
+      }),
     );
   }
 

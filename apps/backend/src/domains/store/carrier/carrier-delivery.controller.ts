@@ -27,6 +27,7 @@ import {
   CloseDispatchRouteDto,
   ReorderStopsDto,
 } from '../dispatch-routes/dto';
+import { PublishPositionsDto } from '../dispatch-routes/tracking/dto/publish-positions.dto';
 import { UpdateDispatchNoteAddressDto } from '../dispatch-notes/dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -134,6 +135,15 @@ export class CarrierDeliveryController {
     return this.responseService.success(result, 'Ruta despachada');
   }
 
+  /** Publicar la posición GPS del repartidor en MI ruta en curso. */
+  @Post('route/tracking/positions')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:carrier:dispatch')
+  async publishPositions(@Body() dto: PublishPositionsDto) {
+    const result = await this.carrierService.publishPositions(dto);
+    return this.responseService.success(result, 'Posición publicada');
+  }
+
   /** Iniciar una parada de MI ruta (pending → in_progress). */
   @Post('route/stops/:stopId/start')
   @HttpCode(HttpStatus.OK)
@@ -229,7 +239,7 @@ export class CarrierDeliveryController {
       total,
       page,
       limit,
-      'Historial de planillas',
+      'Historial de rutas',
     );
   }
 
@@ -238,6 +248,6 @@ export class CarrierDeliveryController {
   @Permissions('store:carrier:route:read')
   async getMyRouteById(@Param('id', ParseIntPipe) id: number) {
     const result = await this.carrierService.getMyRouteById(id);
-    return this.responseService.success(result, 'Detalle de planilla');
+    return this.responseService.success(result, 'Detalle de ruta');
   }
 }

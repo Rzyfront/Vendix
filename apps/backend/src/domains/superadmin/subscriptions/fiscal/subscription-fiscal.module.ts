@@ -47,6 +47,7 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
  * DI de Nest y seria mas dificil de probar.
  */
 import { InvoicingModule } from '../../../store/invoicing/invoicing.module';
+import { CustomersModule } from '../../../store/customers/customers.module';
 import { ProfilesModule, PROFILE_READER } from '../../../store/invoicing/profiles/profiles.module';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
@@ -61,6 +62,7 @@ import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
 import { PlatformDianEventsService } from './platform-dian-events.service';
 import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
+import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 
 @Module({
   imports: [
@@ -81,6 +83,10 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     // los exports de un módulo dos niveles abajo. Importar ProfilesModule
     // explícitamente lo resuelve sin abrir el grafo a más ciclos.
     ProfilesModule,
+    // CustomersModule exporta ExternalIdentityLookupService (RUES/SECOP/RNT)
+    // para `customers/lookup/external` del riel plataforma. Sin ciclo:
+    // CustomersModule no importa este módulo.
+    CustomersModule,
   ],
   controllers: [
     SubscriptionFiscalController,
@@ -141,6 +147,8 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     // hasta C.5.5 (wrapper org-scoped sobre InvoicePdfBuilder del riel
     // tienda, con S3 key prefix 'platform/' en vez de 'stores/'). Ver ADR-8.
     PlatformInvoicePdfService,
+    // Cartera: cobros de facturas de plataforma + evento contable.
+    PlatformInvoicePaymentsService,
   ],
   exports: [SubscriptionFiscalService],
 })

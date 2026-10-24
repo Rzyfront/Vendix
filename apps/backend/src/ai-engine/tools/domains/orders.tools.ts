@@ -733,7 +733,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
       domain: 'orders',
       readOnly: true,
       description:
-        'Estado de la caja registradora: si hay una sesión abierta, quién la abrió, con cuánto base, y el arqueo esperado en el momento (ventas del turno por método de pago, entradas y salidas de efectivo, devoluciones y el efectivo que debería haber en el cajón). Úsala para "¿está abierta la caja?", "¿cuánto llevamos hoy en caja?", "¿cuánto efectivo debería tener?" o antes de que el usuario intente cobrar y se tope con que no hay turno abierto. El efectivo esperado que devuelve es la cifra autoritativa del cierre: no la recalcules.',
+        'Estado de la caja registradora: si hay una sesión abierta, quién la abrió, con cuánto base, y el arqueo esperado en el momento (ventas del turno por método de pago, entradas y salidas de efectivo, devoluciones y el efectivo que debería haber en el cajón). Úsala para "¿está abierta la caja?", "¿cuánto llevamos hoy en caja?", "¿cuánto efectivo debería tener?" o antes de que el usuario intente cobrar y se tope con que no hay turno abierto. El efectivo esperado que devuelve es la cifra autoritativa del cierre: no la recalcules. Para analizar un cierre ya hecho (contado vs esperado, diferencia, salidas de efectivo) usa get_cash_session_close_report.',
       parameters: {
         type: 'object',
         properties: {
@@ -751,6 +751,20 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
         },
       },
       requiredPermissions: ['store:cash_registers:read'],
+      // Vocabulario coloquial del arqueo: el nombre de la tool está en inglés y
+      // el router B es léxico (ver CASH_ANALYSIS_SYNONYMS en cash-register.tools).
+      discovery: {
+        synonyms: [
+          'arqueo de caja',
+          'cuadre de caja',
+          'descuadre de caja',
+          'la caja no me dio',
+          'faltante de caja',
+          'sobrante de caja',
+          'cuanto efectivo hay en caja',
+        ],
+        dependencies: ['get_cash_session_close_report'],
+      },
       handler: async (args, context) => {
         if (!context.store_id) return noStore('el estado de caja');
 

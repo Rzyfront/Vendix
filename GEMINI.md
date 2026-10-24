@@ -25,6 +25,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
 | -- | `vendix-address-geocoding` |
+| -- | `vendix-agent-durable-tasks` |
+| -- | `vendix-agent-evals-observability` |
+| -- | `vendix-agent-execution-contract` |
+| -- | `vendix-agent-playbooks` |
+| -- | `vendix-agent-procedural-memory` |
+| -- | `vendix-agent-sandbox-security` |
+| -- | `vendix-agent-voice-consent` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -32,6 +39,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-ai-platform-core` |
 | -- | `vendix-ai-queue` |
 | -- | `vendix-ai-streaming` |
+| -- | `vendix-ai-style` |
+| -- | `vendix-ai-tool-routing` |
 | -- | `vendix-analytics-metrics` |
 | -- | `vendix-angular-forms` |
 | -- | `vendix-app-architecture` |
@@ -87,11 +96,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new AI scan kind to the generic ai-scan queue | `vendix-ai-queue` |
 | Adding a new RUT responsibility code to forms, scanners or seeds | `vendix-dian-issuer-identity` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
+| Adding a new paper format to print formats | `vendix-print-geometry` |
+| Adding a new print route or PDF builder for rolls | `vendix-print-geometry` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
 | Adding a stream-intent handshake to an SSE endpoint | `vendix-ai-streaming` |
 | Adding a validate-before-mutate stock guard on an order/kitchen path | `vendix-inventory-stock` |
 | Adding a write tool that needs user confirmation | `vendix-ai-agent-tools` |
+| Adding an AI scanning, analyzing or generating animation in the frontend | `vendix-ai-style` |
 | Adding an exportEndpoint to the report registry | `vendix-report-xlsx` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding bulk operations to a module (orders, purchases, products) | `vendix-bulk-operations` |
@@ -117,6 +129,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or changing a frontend analytics cache key | `vendix-analytics-metrics` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
+| Adding or changing runtime agent playbooks | `vendix-agent-playbooks` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing Vex UI blocks (vex_render_*, vex_block_*) | `vendix-vex-agent` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
@@ -147,10 +160,23 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Cambiando TRUST_PROXY_HOPS o el valor de trust proxy de Express | `vendix-trust-proxy-chain` |
 | Cambiando la topología de red de producción (nginx, Route53, CloudFront) | `vendix-trust-proxy-chain` |
+| Changing AgentPlan storage, objective leases or resume semantics | `vendix-agent-durable-tasks` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
+| Changing ToolExecutionResult or semantic tool outcomes | `vendix-agent-execution-contract` |
+| Changing Vex/Vexi spoken consent or voice confirmation challenges | `vendix-agent-voice-consent` |
+| Changing agent sandbox isolation, limits or deployment adapter | `vendix-agent-sandbox-security` |
+| Changing agent verification, recovery or audited read scheduling | `vendix-agent-durable-tasks` |
+| Changing durable agent objectives, checkpoints or effect ledger | `vendix-agent-durable-tasks` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
+| Changing playbook loading, contracts, packaging or verifiers | `vendix-agent-playbooks` |
+| Changing recipe quality review, publication or quarantine | `vendix-agent-procedural-memory` |
+| Changing run_readonly_script or the sandbox RPC broker | `vendix-agent-sandbox-security` |
+| Changing runtime procedural recipes or recipe mining | `vendix-agent-procedural-memory` |
+| Changing successful-tool quotas or bounded agent recovery | `vendix-agent-execution-contract` |
+| Changing the domain-scope rule shared by DomainScopeGuard and the agent API bridge | `vendix-ai-tool-routing` |
 | Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
+| Changing tool routing, search_tools or the global tool knowledge catalog | `vendix-ai-tool-routing` |
 | Changing whole-plan approval or plan tokens (PlanApprovalService) | `vendix-vex-agent` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
@@ -166,6 +192,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Commitear o empujar en un árbol de trabajo compartido con otras sesiones | `vendix-known-errors` |
+| Comparing agent prompt tokens or pass rate between a baseline and a candidate backend | `vendix-agent-golden-conversations` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
 | Computing revenue, COGS, gross/net profit, margin or break-even | `vendix-analytics-metrics` |
@@ -228,6 +255,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging a profit or margin that looks too high | `vendix-analytics-metrics` |
 | Debugging a shipping rate excluded or missing because the buyer address could not be geocoded | `vendix-shipping-distance-pricing` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
+| Debugging a ticket cut at the sides | `vendix-print-geometry` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
 | Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
@@ -284,6 +312,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
 | Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
+| Editing print formats, print templates, thermal ticket layout or paper geometry | `vendix-print-geometry` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing search cutover, rank weights, or trigram SQL | `vendix-smart-search` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
@@ -293,6 +322,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | El dev server cae en bucle o el dist queda inconsistente | `vendix-known-errors` |
 | Enabling or configuring Vex for a store (Agentes IA settings) | `vendix-vex-agent` |
+| Enabling realtime write proposals or dedicated approval audio capture | `vendix-agent-voice-consent` |
 | Escribir o revisar una migración de base de datos | `vendix-known-errors` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -314,6 +344,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
+| Highlighting the IA syllable or an AI feature name with gradient text | `vendix-ai-style` |
 | Implementing AI streaming | `vendix-ai-streaming` |
 | Implementing ControlValueAccessor (CVA) in custom form components | `vendix-zoneless-signals` |
 | Implementing ControlValueAccessor in frontend components | `vendix-angular-forms` |
@@ -328,8 +359,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa) | `vendix-restaurant-table-qr` |
 | Importing parent/child rows (product variants via SKU Padre) from an XLSX bulk file | `vendix-bulk-operations` |
+| Indexing platform tool knowledge or changing its global namespace | `vendix-ai-tool-routing` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
+| Instrumenting Vex/Vexi traces or provider attempts | `vendix-agent-evals-observability` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Interpretar un error de compilación de TypeScript, SWC, ngc o tsc | `vendix-known-errors` |
@@ -382,6 +415,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Purging or deleting old plan files | `purge-plans` |
 | Querying analytics by date range or bucketing a time series | `vendix-analytics-metrics` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
+| Raising bulk caps or chunking high-volume uploads (10k) | `vendix-bulk-operations` |
 | Ranking search results by relevance | `vendix-smart-search` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
@@ -412,6 +446,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
+| Running or changing agentic evaluation datasets and graders | `vendix-agent-evals-observability` |
+| Running or extending the Vex/Vexi golden-conversations E2E suite | `vendix-agent-golden-conversations` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
@@ -424,6 +460,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
 | Splitting withholding across multi-tender payment legs | `vendix-auto-entries` |
+| Styling AI buttons, badges, sections or loading states | `vendix-ai-style` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |

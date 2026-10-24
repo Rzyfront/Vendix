@@ -415,3 +415,49 @@ export interface SaveDraftRequest {
     unit_cost: number;
   }>;
 }
+
+// ============================================================
+// Compras de alto volumen (hasta 10.000 líneas)
+// ============================================================
+
+/** Cuerpo de `POST store/orders/purchase-orders/resolve-lines` (≤100 líneas). */
+export interface ResolvePurchaseOrderLinesRequest {
+  location_id?: number;
+  order_type?: 'retail' | 'ingredient';
+  prices_include_tax?: boolean;
+  items: Partial<PurchaseOrderItemRequest>[];
+}
+
+/** Resultado por fila de `resolve-lines` (HTTP 200 con detalle por fila). */
+export interface ResolveLineResult {
+  index: number;
+  product_id: number | null;
+  product_variant_id: number | null;
+  created: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface ResolvePurchaseOrderLinesResponse {
+  items: ResolveLineResult[];
+}
+
+/** `data` de `PATCH :id/receive/async` (202). */
+export interface ReceiveAsyncResponse {
+  job_id: string;
+  total_lines: number;
+  batches_total: number;
+}
+
+/** `data` de `GET receive-jobs/:jobId`. */
+export interface ReceiveJobStatus {
+  job_id: string;
+  state: 'waiting' | 'active' | 'completed' | 'failed';
+  progress: {
+    processed_lines: number;
+    total_lines: number;
+    batches_done: number;
+    batches_total: number;
+  };
+  result?: { purchase_order_id: number; status: string };
+  error?: { message: string; batch_index: number; failed_at_line: number };
+}

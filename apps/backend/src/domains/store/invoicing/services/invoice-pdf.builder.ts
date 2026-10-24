@@ -6,6 +6,7 @@ import { PDFDocument } from '@common/pdf/pdfkit';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { assertSafeTimezone } from '@common/utils/store-timezone.util';
 import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
+import { resolvePrintGeometry } from '../../print-formats/lib/print-geometry';
 
 export interface InvoicePdfData {
   // Emisor
@@ -258,6 +259,18 @@ export interface PdfLayout {
   money?: Intl.NumberFormat;
 }
 
+/**
+ * Margen lateral térmico en pt, derivado del kernel `resolvePrintGeometry`
+ * (ancho de papel - ancho imprimible, redondeado hacia arriba en mm). Así el
+ * contenido nunca excede el área imprimible del cabezal: 72 mm en 80 mm y
+ * 48 mm en 58 mm.
+ */
+const rollMarginPt = (format: 'thermal_80' | 'thermal_58'): number =>
+  resolvePrintGeometry({ format }).margins.left * MM;
+
+/** Hoja: el margen lateral nunca baja de 5 mm (mínimo del kernel). */
+const MIN_SHEET_MARGIN_PT = 5 * MM;
+
 export const GEOMETRY: Record<
   PrintFormat,
   // `bottom_reserve` queda fuera: no es geometría del papel sino una decisión de
@@ -291,7 +304,7 @@ export const GEOMETRY: Record<
     // to ~514 pt at letter density — more than the whole sheet — so a 2-item
     // sale spilled onto a second page. `moveDown` is measured in the current
     // font size, so scaling the type down compresses the vertical rhythm too.
-    margin: 14,
+    margin: Math.max(14, MIN_SHEET_MARGIN_PT),
     roll: false,
     font_scale: 0.66,
     footer_gap: 0.3,
@@ -300,7 +313,7 @@ export const GEOMETRY: Record<
     width: 80 * MM,
     // Replaced by the measured content height; see `generate`.
     height: 0,
-    margin: 10,
+    margin: rollMarginPt('thermal_80'),
     roll: true,
     font_scale: 0.82,
     footer_gap: 0.8,
@@ -308,7 +321,7 @@ export const GEOMETRY: Record<
   thermal_58: {
     width: 58 * MM,
     height: 0,
-    margin: 7,
+    margin: rollMarginPt('thermal_58'),
     roll: true,
     font_scale: 0.74,
     footer_gap: 0.8,

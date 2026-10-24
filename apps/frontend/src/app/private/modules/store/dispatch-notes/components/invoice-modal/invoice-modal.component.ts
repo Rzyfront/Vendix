@@ -125,6 +125,23 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </span>
           </div>
 
+          @if (shippingCost() > 0) {
+            <div class="flex items-center justify-between">
+              <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Envío</span>
+              <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)]">
+                {{ formatCurrency(shippingCost()) }}
+              </span>
+            </div>
+            @if (shippingTax() > 0) {
+              <div class="flex items-center justify-between pl-4">
+                <span class="text-xs text-[var(--color-text-secondary)]">Incluye {{ shippingTaxName() }}</span>
+                <span class="text-xs text-[var(--color-text-secondary)]">
+                  {{ formatCurrency(shippingTax()) }}
+                </span>
+              </div>
+            }
+          }
+
           <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
             <span class="text-[var(--fs-base)] font-[var(--fw-semibold)] text-[var(--color-text-primary)]">Total</span>
             <span class="text-[var(--fs-lg)] font-[var(--fw-bold)] text-[var(--color-text-primary)]">
@@ -192,6 +209,9 @@ export class InvoiceModalComponent {
   readonly invoiced = output<void>();
 
   readonly items = computed(() => this.dispatchNote().dispatch_note_items || []);
+  readonly shippingCost = computed(() => Number(this.dispatchNote().shipping_cost) || 0);
+  readonly shippingTax = computed(() => Number(this.dispatchNote().order?.shipping_tax_amount) || 0);
+  readonly shippingTaxName = computed(() => this.dispatchNote().order?.shipping_tax_name || 'impuesto');
 
   hasDiscount(): boolean {
     return (Number(this.dispatchNote().discount_amount) || 0) > 0;

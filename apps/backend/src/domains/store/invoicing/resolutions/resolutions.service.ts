@@ -19,6 +19,29 @@ import {
   type FiscalRequirementViolation,
 } from '../fiscal-document-requirements';
 import { assertTechnicalKeyShape } from '../utils/technical-key.util';
+import {
+  deactivateOtherActiveSeries,
+  isSingleActiveDocumentType,
+  lockResolutionSeries,
+} from '../utils/resolution-selection.util';
+import { buildResolutionsInUse } from '../utils/resolutions-in-use.util';
+import { archiveResolutionInTx } from '../utils/resolution-archive.util';
+import { ArchiveResolutionDto } from './dto/archive-resolution.dto';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+} from '../utils/invoice-number-generator';
+import { assertNoCrossTenantNumberingOverlap } from '../utils/cross-tenant-numbering-guard.util';
+
+/**
+ * Tope de años hacia adelante de `valid_to`: las series internas (notas) se
+ * abren con vigencia de INTERNAL_SERIES_VALIDITY_YEARS; el resto, el default.
+ */
+function validToMaxYearsAhead(document_type: string): number | undefined {
+  return isSingleActiveDocumentType(document_type)
+    ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+    : undefined;
+}
 
 /**
  * Qué tiene que hacer el comerciante para cerrar cada incumplimiento del
@@ -39,7 +62,11 @@ export const CORRECCION_POR_VIOLACION: Record<
 };
 
 /** Campos que fijan la identidad fiscal de una resolución ante la DIAN. */
-type CamposInmutables = 'prefix' | 'document_type' | 'range_from' | 'resolution_number';
+type CamposInmutables =
+  | 'prefix'
+  | 'document_type'
+  | 'range_from'
+  | 'resolution_number';
 
 export const ROTULO_CAMPO_INMUTABLE: Record<CamposInmutables, string> = {
   prefix: 'prefijo',
@@ -76,11 +103,29 @@ export class ResolutionsService {
     return context;
   }
 
-  async findAll() {
+  async findAll(include_archived = false) {
     const rows = await this.prisma.invoice_resolutions.findMany({
+      ...(include_archived ? {} : { where: { archived_at: null } }),
       orderBy: { created_at: 'desc' },
     });
     return rows.map(toPublicResolution);
+  }
+
+  /**
+   * Resolución en uso por tipo de documento para la entidad contable del
+   * contexto. Misma regla que el generador de consecutivos.
+   */
+  async findInUse() {
+    const context = this.getContext();
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
+    return buildResolutionsInUse(this.prisma.withoutScope(), {
+      accounting_entity_id: accounting_entity.id,
+      now: new Date(),
+    });
   }
 
   /**
@@ -131,7 +176,9 @@ export class ResolutionsService {
       dto.resolution_date,
     );
     const valid_from = parsePlausibleFiscalDate('válida desde', dto.valid_from);
-    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to);
+    const valid_to = parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+      max_years_ahead: validToMaxYearsAhead(document_type),
+    });
     this.assertValidityWindow(valid_from, valid_to);
 
     const context = this.getContext();
@@ -177,39 +224,86 @@ export class ResolutionsService {
       );
     }
 
-    const resolution = await this.prisma.invoice_resolutions.create({
-      data: {
-        organization_id: context.organization_id,
-        store_id: context.store_id,
-        accounting_entity_id: accounting_entity.id,
-        document_type,
-        resolution_number: this.resolveResolutionNumber(
-          dto.resolution_number,
-          dto.prefix,
-        ),
-        resolution_date,
-        prefix: dto.prefix,
-        range_from: dto.range_from,
-        range_to: dto.range_to,
-        current_number: dto.range_from - 1, // Start just before range_from
-        valid_from,
-        valid_to,
-        is_active: dto.is_active ?? true,
-        // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
-        // huella. Escribir sólo `technical_key` es lo que dejó la columna
-        // cifrada en NULL desde que se creó.
-        ...this.technicalKeyVault.sealForWrite(technical_key),
-      },
-    });
+    // El cliente scopeado no expone `$transaction`: el alta y la cascada van por
+    // `withoutScope()` con la entidad contable ya resuelta del contexto.
+    const { resolution, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Serializa contra activaciones concurrentes y contra la emisión (misma
+        // llave que el generador de consecutivos).
+        if (isSingleActiveDocumentType(document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+          });
+        }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango solapado.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          lock_in_transaction: true,
+          accounting_entity_id: accounting_entity.id,
+          document_type,
+          prefix: dto.prefix,
+          range_from: dto.range_from,
+          range_to: dto.range_to,
+        });
+        const resolution = await tx.invoice_resolutions.create({
+          data: {
+            organization_id: context.organization_id,
+            store_id: context.store_id,
+            accounting_entity_id: accounting_entity.id,
+            document_type,
+            resolution_number: this.resolveResolutionNumber(
+              dto.resolution_number,
+              dto.prefix,
+            ),
+            resolution_date,
+            prefix: dto.prefix,
+            range_from: dto.range_from,
+            range_to: dto.range_to,
+            current_number: dto.range_from - 1, // Start just before range_from
+            valid_from,
+            valid_to,
+            is_active: dto.is_active ?? true,
+            // Las tres columnas de la ClTec se escriben juntas — claro, cifrado y
+            // huella. Escribir sólo `technical_key` es lo que dejó la columna
+            // cifrada en NULL desde que se creó.
+            ...this.technicalKeyVault.sealForWrite(technical_key),
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): activar esta apaga
+        // las demás, en la MISMA transacción que el alta.
+        const deactivated_resolution_ids = resolution.is_active
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: accounting_entity.id,
+              document_type,
+              keep_id: resolution.id,
+            })
+          : [];
+        return { resolution, deactivated_resolution_ids };
+      });
 
     this.logger.log(
       `Resolution ${resolution.resolution_number} created (prefix: ${resolution.prefix}, range: ${resolution.range_from}-${resolution.range_to})`,
     );
-    return toPublicResolution(resolution);
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Resolution #${resolution.id} (${document_type}) activated: deactivated previous active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
+    return { ...toPublicResolution(resolution), deactivated_resolution_ids };
   }
 
   async update(id: number, dto: UpdateResolutionDto) {
     const current = await this.findOneInternal(id);
+
+    // Archivada = solo lectura: primero que cualquier otra validación.
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
 
     // `current_number` arranca en `range_from - 1`. Alcanzar `range_from`
     // significa que la DIAN ya vio un consecutivo salido de este rango —incluido
@@ -229,7 +323,10 @@ export class ResolutionsService {
       ) {
         inmutables.push('document_type');
       }
-      if (dto.range_from !== undefined && dto.range_from !== current.range_from) {
+      if (
+        dto.range_from !== undefined &&
+        dto.range_from !== current.range_from
+      ) {
         inmutables.push('range_from');
       }
       if (
@@ -259,14 +356,25 @@ export class ResolutionsService {
       dto.document_type !== undefined
         ? this.normalizeDocumentType(dto.document_type)
         : (current.document_type as FiscalDocumentType);
+    // Factura -> nota (serie interna): la fila hereda ClTec y número DIAN de la
+    // factura y la UI oculta el campo. Una serie interna no lleva ninguno de los
+    // dos: la ClTec resultante es null y el número toma el rótulo interno.
+    const becomes_internal_series =
+      isSingleActiveDocumentType(next_document_type) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType) &&
+      dto.technical_key === undefined;
     const next_resolution_number =
       dto.resolution_number !== undefined
         ? dto.resolution_number
-        : current.resolution_number;
+        : becomes_internal_series
+          ? internalSeriesResolutionNumber(dto.prefix ?? current.prefix)
+          : current.resolution_number;
     const next_technical_key =
       dto.technical_key !== undefined
         ? dto.technical_key
-        : current.technical_key;
+        : becomes_internal_series
+          ? null
+          : current.technical_key;
 
     // Los requisitos por tipo se re-juzgan SOLO si el PATCH toca alguno de los
     // campos que los deciden. Alternar `is_active` tiene que funcionar siempre:
@@ -327,7 +435,9 @@ export class ResolutionsService {
       ? parsePlausibleFiscalDate('válida desde', dto.valid_from)
       : current.valid_from;
     const next_valid_to = dto.valid_to
-      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to)
+      ? parsePlausibleFiscalDate('válida hasta', dto.valid_to, {
+          max_years_ahead: validToMaxYearsAhead(next_document_type),
+        })
       : current.valid_to;
     if (dto.valid_from !== undefined || dto.valid_to !== undefined) {
       this.assertValidityWindow(next_valid_from, next_valid_to, {
@@ -362,48 +472,111 @@ export class ResolutionsService {
         this.technicalKeyVault.sealForWrite(patched_technical_key)),
     };
 
-    const updated = await this.prisma.invoice_resolutions.update({
-      where: { id },
-      data: update_data,
-    });
+    if (becomes_internal_series) {
+      if (dto.resolution_number === undefined) {
+        update_data.resolution_number = next_resolution_number;
+      }
+      Object.assign(update_data, this.technicalKeyVault.sealForWrite(null));
+    }
+
+    // Una fila sin consumo lleva `current_number = range_from - 1` por
+    // construcción. Si el piso se mueve hay que re-sembrar el cursor: si se queda
+    // en el piso viejo, el siguiente documento sale con un número que el rango
+    // nuevo ya no cubre.
+    if (
+      !consumed &&
+      dto.range_from !== undefined &&
+      dto.range_from !== current.range_from
+    ) {
+      update_data.current_number = dto.range_from - 1;
+    }
+
+    // Sin `$transaction` en el cliente scopeado: `findOneInternal` ya validó que
+    // `id` pertenece al tenant, y la cascada filtra por su misma entidad.
+    const { updated, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        if (isSingleActiveDocumentType(next_document_type)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: next_document_type,
+          });
+        }
+        if (
+          dto.prefix !== undefined ||
+          dto.range_from !== undefined ||
+          dto.range_to !== undefined ||
+          dto.document_type !== undefined
+        ) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            lock_in_transaction: true,
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: next_document_type,
+            prefix: dto.prefix || current.prefix,
+            range_from: next_range_from,
+            range_to: next_range_to,
+            exclude_resolution_id: id,
+          });
+        }
+        const updated = await tx.invoice_resolutions.update({
+          where: { id },
+          data: update_data,
+        });
+        // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
+        // (pasa de inactiva a activa, o cambia de tipo estando activa). Editar
+        // el rango/vigencia de la nota ya activa no apaga nada.
+        const transitioned =
+          current.is_active === false ||
+          next_document_type !== current.document_type;
+        const deactivated_resolution_ids = updated.is_active && transitioned
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: current.accounting_entity_id,
+              document_type: next_document_type,
+              keep_id: id,
+            })
+          : [];
+        return { updated, deactivated_resolution_ids };
+      });
 
     this.logger.log(`Resolution #${id} updated`);
-    return toPublicResolution(updated);
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Resolution #${id} (${next_document_type}) active: deactivated other active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
+    return { ...toPublicResolution(updated), deactivated_resolution_ids };
   }
 
+  /**
+   * Archivado lógico (nunca hay borrado físico). `findOneInternal` valida el
+   * tenant con el cliente scopeado; la transacción corre sin scope porque el
+   * util toma el advisory lock de la serie y toca otras tablas.
+   */
+  async archive(id: number, dto: ArchiveResolutionDto) {
+    const current = await this.findOneInternal(id);
+
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id: current.organization_id,
+        }),
+      );
+
+    this.logger.log(`Resolution #${id} archived`);
+    return {
+      ...toPublicResolution(archived),
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
+
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
   async remove(id: number) {
-    const resolution = await this.findOneInternal(id);
-
-    // Check if resolution has been used
-    const usage_count = await this.prisma.invoices.count({
-      where: { resolution_id: id },
-    });
-
-    if (usage_count > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${usage_count} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: usage_count },
-      );
-    }
-
-    // `current_number` starts at range_from - 1. Reaching range_from means the
-    // DIAN already saw a consecutive from this range — for instance a habilitación
-    // test set, which burns numbers without writing rows in `invoices`. Deleting
-    // the row would erase the only record of which numbers were consumed.
-    if (resolution.current_number >= resolution.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${resolution.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: resolution.current_number },
-      );
-    }
-
-    await this.prisma.invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Resolution #${id} deleted`);
+    return this.archive(id, {});
   }
 
   // ---------------------------------------------------------------------------
@@ -462,7 +635,7 @@ export class ResolutionsService {
     prefix: string,
   ): string {
     const declarado = resolution_number?.trim();
-    return declarado ? declarado : `INTERNA-${prefix}`;
+    return declarado ? declarado : internalSeriesResolutionNumber(prefix);
   }
 
   /**

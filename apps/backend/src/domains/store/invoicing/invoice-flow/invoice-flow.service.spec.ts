@@ -242,6 +242,12 @@ describe('InvoiceFlowService support documents', () => {
         fiscalDocument as any,
         technicalKeyVault as any,
         numberGenerator as any,
+        {
+          assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+          reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+          ensureForSend: jest.fn().mockResolvedValue(undefined),
+          transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+        } as any,
       ),
       prisma,
       configClient,
@@ -1361,6 +1367,12 @@ describe('InvoiceFlowService.persistWithholdingBatches — enlace de la sufrida 
       {} as any,
       {} as any,
       {} as any,
+      {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } as any,
     );
     return { service, prisma, withholdingFlow };
   };
@@ -1453,6 +1465,12 @@ describe('InvoiceFlowService.getDraftEmitReadiness (motor único)', () => {
       {} as any,
       { reveal: jest.fn().mockReturnValue(null) } as any,
       {} as any,
+      {
+        assertNoteBeforeNumbering: jest.fn().mockResolvedValue(undefined),
+        reserveValidation: jest.fn(async (id: number) => ({ id, status: 'validated' })),
+        ensureForSend: jest.fn().mockResolvedValue(undefined),
+        transition: jest.fn(async (id: number, data: Record<string, unknown>) => ({ id, ...data })),
+      } as any,
       options.readiness,
     );
     jest

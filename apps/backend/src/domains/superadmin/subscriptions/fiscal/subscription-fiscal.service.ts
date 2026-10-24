@@ -1,3 +1,12 @@
+import {
+  PlatformInvoicePaymentsService,
+  derivePlatformInvoiceState,
+  normalizeDueDate,
+} from './platform-invoice-payments.service';
+import {
+  redactDianConfigForHttp,
+  stripNotePhase,
+} from '../../../store/invoicing/dian-config/dian-config-redaction.util';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -19,12 +28,32 @@ import { InvoiceCalculatorService } from '../../../store/invoicing/services/invo
 import { DianTotalsValidator } from '../../../store/invoicing/providers/dian-direct/xml/dian-totals.validator';
 import { UBL_NAMESPACES } from '../../../store/invoicing/providers/dian-direct/xml/xml-namespaces';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
+import { toPublicResolution } from '../../../store/invoicing/resolutions/resolutions.service';
+import { assertNoCrossTenantNumberingOverlap } from '../../../store/invoicing/utils/cross-tenant-numbering-guard.util';
+import { buildResolutionsInUse } from '../../../store/invoicing/utils/resolutions-in-use.util';
+import {
+  deactivateOtherActiveSeries,
+  findActiveResolution,
+  isSingleActiveDocumentType,
+  lockResolutionSeries,
+} from '../../../store/invoicing/utils/resolution-selection.util';
+import {
+  INTERNAL_SERIES_VALIDITY_YEARS,
+  internalSeriesResolutionNumber,
+  internalSeriesValidTo,
+} from '../../../store/invoicing/utils/invoice-number-generator';
+import { CORRECCION_POR_VIOLACION } from '../../../store/invoicing/resolutions/resolutions.service';
+import { archiveResolutionInTx } from '../../../store/invoicing/utils/resolution-archive.util';
+import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
 // la forma de una ClTec no puede tener dos definiciones, o el carril que valida
 // con la laxa emite lo que el otro rechaza.
 import {
   isWellFormedTechnicalKey,
   normalizeTechnicalKey,
+  requirementsFor,
+  validateResolutionDraft,
+  type FiscalDocumentType,
   TECHNICAL_KEY_LENGTHS,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../../../store/invoicing/fiscal-document-requirements';
@@ -571,6 +600,9 @@ export class SubscriptionFiscalService {
     // `invoice.accepted` y `AccountingEventsListener` resuelve el subflujo
     // `invoicing` + las cuentas PUC; no usamos el `EventEmitter` de Node.
     private readonly eventEmitter: EventEmitter2,
+    // Cartera de la factura (pagos, saldo, estado de cobro) para el detalle.
+    // El servicio de pagos NO depende de este: sin ciclo de inyección.
+    private readonly platformPayments: PlatformInvoicePaymentsService,
   ) {}
 
   async getStatus() {
@@ -595,7 +627,7 @@ export class SubscriptionFiscalService {
     return {
       settings,
       dian_config: config ? this.maskConfig(config) : null,
-      resolution,
+      resolution: resolution ? toPublicResolution(resolution) : null,
       stats: { accepted, errors, pending },
       suggested: await this.buildSuggestedConfig(),
       // Bounded reading of the habilitación batch, so the page shows the current
@@ -1309,14 +1341,7 @@ export class SubscriptionFiscalService {
    * El recuento y la razón viajan aparte, vía `buildNotePhaseView`.
    */
   private stripNotePhase(last_test_result: unknown): unknown {
-    if (!last_test_result || typeof last_test_result !== 'object') {
-      return last_test_result;
-    }
-    const { note_phase: _omitted, ...rest } = last_test_result as Record<
-      string,
-      any
-    >;
-    return rest;
+    return stripNotePhase(last_test_result);
   }
 
   private async runInPlatformContext<T>(
@@ -3369,6 +3394,7 @@ export class SubscriptionFiscalService {
                 subtotal: Number(subtotal),
                 tax_amount: Number(taxAmount),
                 total: Number(total),
+                discount_total: Number(computed.discountTotal),
               },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
@@ -3890,43 +3916,75 @@ export class SubscriptionFiscalService {
     const invoiceNumber = transmission.document_number;
     const issuedAt = transmission.accepted_at ?? transmission.created_at ?? new Date();
     const issuedIso = issuedAt instanceof Date ? issuedAt.toISOString() : String(issuedAt);
-    const dueIso = new Date(
-      new Date(issuedIso).getTime() + 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const metaExtras = (snapshot?.metadata ?? null) as unknown as
+      | Record<string, unknown>
+      | null;
+
+    // Vencimiento: el que se FIRMÓ (snapshot). Solo si el snapshot no lo trae
+    // (facturas anteriores) se cae a emisión + 7 días.
+    const dueDate =
+      normalizeDueDate(metaExtras?.['due_date']) ??
+      normalizeDueDate(
+        new Date(new Date(issuedIso).getTime() + 7 * 24 * 60 * 60 * 1000),
+      );
+
+    const state = derivePlatformInvoiceState(
+      transmission.dian_status,
+      transmission.transmission_status,
+    );
+
+    const lineDiscountCents = (Array.isArray(items) ? items : []).reduce(
+      (acc: number, it: any) => acc + Math.round(Number(it?.discount_amount ?? 0) * 100),
+      0,
+    );
+    const snapshotDiscount = (totals as any)?.discount_total;
+    const discountAmount =
+      snapshotDiscount !== undefined && snapshotDiscount !== null
+        ? Number(snapshotDiscount).toFixed(2)
+        : (lineDiscountCents / 100).toFixed(2);
+
+    const collection = await this.platformPayments.summarize({
+      transmissionId: transmission.id,
+      total: totals.total ?? 0,
+      dueDate,
+      state,
+    });
+
     const synthetic = {
       id: transmission.id,
       invoice_number: invoiceNumber,
-      state: 'custom_emitted',
+      invoice_type: 'sales_invoice',
+      state,
       issued_at: issuedIso,
-      due_at: dueIso,
+      due_at: dueDate,
       period_start: periodStart ?? issuedIso,
       period_end: periodEnd ?? issuedIso,
       subtotal: String(totals.subtotal ?? 0),
       tax_amount: String(totals.tax_amount ?? 0),
       total: String(totals.total ?? 0),
-      amount_paid: '0',
+      amount_paid: collection.amount_paid,
+      balance_due: collection.balance_due,
+      collection_status: collection.collection_status,
+      payments: collection.payments,
       currency,
       line_items: items,
+      items,
+      discount_amount: discountAmount,
     };
 
     // FB-13: la UI del rail tienda pide estos campos en `invoice.*`.
-    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`
-    // (kind ya validado en la lectura) para que el detail page del rail
-    // plataforma renderice con la misma forma que el rail tienda.
-    // `snapshot.metadata` es Prisma.JsonValue (string|number|boolean|object|array);
-    // casteamos via unknown para leer campos arbitrarios sin revalidation por
-    // linea.
-    const metaExtras = (snapshot?.metadata ?? null) as unknown as
-      | Record<string, unknown>
-      | null;
+    // Se sincronizan desde el snapshot del evidence `platform_invoice_snapshot`.
     const syntheticWithExtras = {
       ...synthetic,
-      customer: customer ?? null,
+      customer: this.normalizePlatformInvoiceCustomer(customer),
       payment_form: (metaExtras?.['payment_form'] as string | null) ?? null,
       payment_means_code: (metaExtras?.['payment_means_code'] as string | null) ?? null,
-      due_date: dueIso,
+      due_date: dueDate,
       operation_type: (metaExtras?.['operation_type'] as string | null) ?? null,
-      aiu_contract_object: (metaExtras?.['aiur_contract_object'] as string | null) ?? null,
+      aiu_contract_object:
+        (metaExtras?.['aiu_contract_object'] as string | null) ??
+        (metaExtras?.['aiur_contract_object'] as string | null) ??
+        null,
       global_discount_amount: (metaExtras?.['global_discount_amount'] as number | null) ?? null,
       withholding_amount: (metaExtras?.['withholding_amount'] as number | null) ?? null,
       exchange_rate: (metaExtras?.['exchange_rate'] as number | null) ?? null,
@@ -3988,6 +4046,53 @@ export class SubscriptionFiscalService {
             email: customer.email ?? null,
           }
         : null,
+    };
+  }
+
+  /** Cliente del snapshot en la forma plana que consume el detalle. */
+  private normalizePlatformInvoiceCustomer(raw: any): {
+    name: string | null;
+    document_type: string | null;
+    document_number: string | null;
+    verification_digit: string | null;
+    person_type: string | null;
+    tax_regime_code: string | null;
+    tax_responsibilities: string[];
+    email: string | null;
+    phone: string | null;
+    address_line: string | null;
+    city: string | null;
+    department: string | null;
+    country: string | null;
+  } | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const str = (v: unknown): string | null =>
+      v === undefined || v === null || v === '' ? null : String(v);
+    const addr = raw.address && typeof raw.address === 'object' ? raw.address : null;
+    const addressLine =
+      typeof raw.address === 'string'
+        ? raw.address
+        : (raw.address_line ??
+          (addr
+            ? [addr.address_line ?? addr.address_line1 ?? addr.line, addr.address_line2]
+                .filter(Boolean)
+                .join(' ')
+            : null));
+    const resp = raw.tax_responsibilities ?? raw.fiscal_responsibilities;
+    return {
+      name: str(raw.name ?? raw.legal_name),
+      document_type: str(raw.document_type),
+      document_number: str(raw.document_number ?? raw.tax_id),
+      verification_digit: str(raw.verification_digit ?? raw.tax_id_dv),
+      person_type: str(raw.person_type),
+      tax_regime_code: str(raw.tax_regime_code),
+      tax_responsibilities: Array.isArray(resp) ? resp.map(String) : [],
+      email: str(raw.email),
+      phone: str(raw.phone),
+      address_line: str(addressLine),
+      city: str(raw.city ?? addr?.city),
+      department: str(raw.department ?? raw.department_name ?? addr?.department ?? addr?.state),
+      country: str(raw.country ?? raw.country_code ?? addr?.country),
     };
   }
 
@@ -4210,6 +4315,9 @@ export class SubscriptionFiscalService {
       store_id: null,
       accounting_entity_id,
     };
+    if (!query.include_archived) {
+      where.archived_at = null;
+    }
     if (query.document_type) {
       where.document_type = query.document_type;
     }
@@ -4227,7 +4335,7 @@ export class SubscriptionFiscalService {
 
     // The model has no env column; surface the platform env so the UI can group.
     const data = rows.map((row) => ({
-      ...row,
+      ...toPublicResolution(row),
       environment: platformEnv,
     }));
 
@@ -4239,6 +4347,22 @@ export class SubscriptionFiscalService {
       : data;
 
     return filtered;
+  }
+
+  /**
+   * Qué resolución usa hoy la plataforma para cada tipo de documento. Misma
+   * regla que el generador (`resolution-selection.util`); la única diferencia es
+   * `sales_invoice`, que no toma "la más reciente" sino la configurada en
+   * `settings.invoice_resolution_id` (sin configurar -> `source: 'none'`).
+   */
+  async listResolutionsInUse() {
+    const accounting_entity_id = await this.resolvePlatformAccountingEntityId();
+    const settings = await this.getSettings();
+    return buildResolutionsInUse(this.prisma.withoutScope(), {
+      accounting_entity_id,
+      now: new Date(),
+      sales_invoice_resolution_id: settings.invoice_resolution_id ?? null,
+    });
   }
 
   /**
@@ -4273,6 +4397,7 @@ export class SubscriptionFiscalService {
         accounting_entity_id: args.accountingEntityId,
         document_type: args.documentType,
         is_active: true,
+        archived_at: null,
         valid_from: { lte: now },
         valid_to: { gte: now },
       },
@@ -4297,14 +4422,14 @@ export class SubscriptionFiscalService {
     //   (ClTec utilizable, validada por `isWellFormedTechnicalKey`).
     // - support_document: NO requiere ClTec; siempre es emitible.
     // Devolvemos el flag `emittable` para que el form muestre advertencia.
-    const techKeyShape: Record<string, unknown> = {};
-    for (const row of rows) {
+    // El fingerprint (SHA-256 de la ClTec) solo se usa aquí para decidir; NO
+    // viaja en la respuesta: correlaciona resoluciones que comparten clave.
+    const data = rows.map(({ technical_key_fingerprint, ...row }) => {
       let emittable = true;
       let cltecStatus: 'present' | 'absent' | 'invalid' = 'absent';
 
       if (args.documentType === 'sales_invoice') {
-        const fingerprint = row.technical_key_fingerprint;
-        if (!fingerprint) {
+        if (!technical_key_fingerprint) {
           emittable = false;
           cltecStatus = 'absent';
         } else {
@@ -4318,20 +4443,18 @@ export class SubscriptionFiscalService {
         cltecStatus = 'absent'; // support_document: irrelevante
       }
 
-      techKeyShape[row.id] = { emittable, cltecStatus, fingerprint: row.technical_key_fingerprint ?? null };
-      // Adjuntamos `emittable` y `cltec_status` al row sin mutar la select.
-      (row as any).emittable = emittable;
-      (row as any).cltec_status = cltecStatus;
-    }
+      return { ...row, emittable, cltec_status: cltecStatus };
+    });
 
     return {
-      data: rows,
+      data,
       meta: {
         document_type: args.documentType,
-        total: rows.length,
+        total: data.length,
         // El caller puede ordenar/filtrar en cliente.
-        rejected_for_missing_cltec: rows.filter(
-          (r) => (r as any).cltec_status === 'absent' && args.documentType === 'sales_invoice',
+        rejected_for_missing_cltec: data.filter(
+          (r) =>
+            r.cltec_status === 'absent' && args.documentType === 'sales_invoice',
         ).length,
       },
     };
@@ -4392,9 +4515,7 @@ export class SubscriptionFiscalService {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_RESOLUTION_007,
         `Ya existe una resolución con prefijo "${dto.prefix}" para ${
-          duplicate.document_type === 'sales_invoice'
-            ? 'factura de venta'
-            : 'documento soporte'
+          requirementsFor(duplicate.document_type as FiscalDocumentType).label
         } (número ${duplicate.resolution_number}${
           duplicate.is_active ? '' : ', desactivada'
         }). La DIAN autoriza el prefijo por NIT, así que no puede repetirse: edita esa resolución o usa otro prefijo.`,
@@ -4407,50 +4528,108 @@ export class SubscriptionFiscalService {
       );
     }
 
+    // Series internas (notas): no son una autorización DIAN, así que no llevan
+    // ClTec y su número de resolución es un rótulo interno. Mismo contrato que
+    // el carril tienda (`requirementsFor` / `validateResolutionDraft`).
+    const isInternalSeries = isSingleActiveDocumentType(dto.document_type);
+    const resolutionNumber =
+      dto.resolution_number ??
+      (isInternalSeries
+        ? internalSeriesResolutionNumber(dto.prefix)
+        : `PLATFORM-${dto.prefix}-${Date.now()}`);
+    if (isInternalSeries) {
+      this.assertInternalSeriesRequirements({
+        document_type: dto.document_type as FiscalDocumentType,
+        resolution_number: resolutionNumber,
+        technical_key: dto.technical_key,
+      });
+    }
+
     const now = new Date();
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
     const validTo = dto.valid_to
       ? new Date(dto.valid_to)
-      : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
+      : isInternalSeries
+        ? internalSeriesValidTo(now)
+        : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
     const resolutionDate = dto.resolution_date
       ? new Date(dto.resolution_date)
       : now;
 
     assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
     assertPlausibleFiscalDate('válida desde', validFrom);
-    assertPlausibleFiscalDate('válida hasta', validTo);
-
-    const created = await this.prisma.withoutScope().invoice_resolutions.create({
-      data: {
-        organization_id: await this.resolvePlatformOrganizationId(),
-        store_id: null,
-        accounting_entity_id: accountingEntityId,
-        document_type: dto.document_type as PlatformResolutionDocumentType,
-        resolution_number: dto.resolution_number ?? `PLATFORM-${dto.prefix}-${Date.now()}`,
-        resolution_date: resolutionDate,
-        prefix: dto.prefix,
-        range_from: dto.rango_inicial,
-        range_to: dto.rango_final,
-        current_number: dto.rango_inicial - 1,
-        valid_from: validFrom,
-        valid_to: validTo,
-        is_active: true,
-        // Validada y normalizada, igual que en los carriles de tienda y de
-        // organización. Este es el tercero y el último que faltaba: la consola
-        // de super admin no pasa por el mismo `ValidationPipe` (entra por
-        // `TenantContextRunner`), así que lo que no exija el servicio no lo
-        // exige nadie — y una ClTec mal copiada quema un consecutivo autorizado
-        // que no se recupera.
-        ...this.technicalKeyVault.sealForWrite(
-          assertTechnicalKeyShape(dto.technical_key, {
-            prefix: dto.prefix,
-          }),
-        ),
-      },
+    assertPlausibleFiscalDate('válida hasta', validTo, {
+      max_years_ahead: isInternalSeries
+        ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+        : undefined,
     });
 
+    const organizationId = await this.resolvePlatformOrganizationId();
+    const { created, deactivated_resolution_ids } = await this.prisma
+      .withoutScope()
+      .$transaction(async (tx: any) => {
+        // Serializa contra activaciones concurrentes y contra la emisión (misma
+        // llave que el generador de consecutivos).
+        if (isInternalSeries) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: accountingEntityId,
+            document_type: dto.document_type,
+          });
+        }
+        // Guarda entre cuentas: mismo NIT emisor + prefijo + tipo con rango
+        // solapado. Dentro de la transacción y con el advisory lock, igual que
+        // el carril tienda, para serializar altas simultáneas.
+        await assertNoCrossTenantNumberingOverlap(tx, {
+          accounting_entity_id: accountingEntityId,
+          document_type: dto.document_type,
+          prefix: dto.prefix,
+          range_from: dto.rango_inicial,
+          range_to: dto.rango_final,
+          lock_in_transaction: true,
+        });
+        const created = await tx.invoice_resolutions.create({
+          data: {
+            organization_id: organizationId,
+            store_id: null,
+            accounting_entity_id: accountingEntityId,
+            document_type: dto.document_type as PlatformResolutionDocumentType,
+            resolution_number: resolutionNumber,
+            resolution_date: resolutionDate,
+            prefix: dto.prefix,
+            range_from: dto.rango_inicial,
+            range_to: dto.rango_final,
+            current_number: dto.rango_inicial - 1,
+            valid_from: validFrom,
+            valid_to: validTo,
+            is_active: true,
+            // Validada y normalizada, igual que en los carriles de tienda y de
+            // organización. Este es el tercero y el último que faltaba: la
+            // consola de super admin no pasa por el mismo `ValidationPipe`
+            // (entra por `TenantContextRunner`), así que lo que no exija el
+            // servicio no lo exige nadie — y una ClTec mal copiada quema un
+            // consecutivo autorizado que no se recupera.
+            ...this.technicalKeyVault.sealForWrite(
+              assertTechnicalKeyShape(dto.technical_key, {
+                prefix: dto.prefix,
+              }),
+            ),
+          },
+        });
+        // Una sola serie de notas activa por (entidad, tipo): activar esta apaga
+        // las demás, en la MISMA transacción que el alta.
+        const deactivated_resolution_ids = created.is_active
+          ? await deactivateOtherActiveSeries(tx, {
+              accounting_entity_id: accountingEntityId,
+              document_type: dto.document_type,
+              keep_id: created.id,
+            })
+          : [];
+        return { created, deactivated_resolution_ids };
+      });
+
     return {
-      ...created,
+      ...toPublicResolution(created),
+      deactivated_resolution_ids,
       environment: dto.environment,
     };
   }
@@ -4467,6 +4646,13 @@ export class SubscriptionFiscalService {
    */
   async updateResolution(id: number, dto: UpdatePlatformResolutionDto) {
     const current = await this.findPlatformResolution(id);
+    if (current.archived_at) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_016,
+        'La resolución está archivada y es de solo lectura.',
+        { resolution_id: id },
+      );
+    }
     const issued = current._count.invoices;
     // `current_number` starts at range_from - 1, so reaching range_from means
     // at least one number left the building.
@@ -4505,6 +4691,8 @@ export class SubscriptionFiscalService {
     }
 
     const nextPrefix = dto.prefix ?? current.prefix;
+    const nextDocumentType = (dto.document_type ??
+      current.document_type) as FiscalDocumentType;
     const nextRangeFrom = dto.rango_inicial ?? current.range_from;
     const nextRangeTo = dto.rango_final ?? current.range_to;
 
@@ -4546,9 +4734,7 @@ export class SubscriptionFiscalService {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_007,
           `Ya existe una resolución con prefijo "${nextPrefix}" para ${
-            duplicate.document_type === 'sales_invoice'
-              ? 'factura de venta'
-              : 'documento soporte'
+            requirementsFor(duplicate.document_type as FiscalDocumentType).label
           } (número ${duplicate.resolution_number}${
             duplicate.is_active ? '' : ', desactivada'
           }). El prefijo se autoriza por NIT y no puede repetirse.`,
@@ -4592,10 +4778,38 @@ export class SubscriptionFiscalService {
     }
     if (dto.valid_to !== undefined) {
       const nextValidTo = new Date(dto.valid_to);
-      assertPlausibleFiscalDate('válida hasta', nextValidTo);
+      assertPlausibleFiscalDate('válida hasta', nextValidTo, {
+        max_years_ahead: isSingleActiveDocumentType(nextDocumentType)
+          ? INTERNAL_SERIES_VALIDITY_YEARS + 1
+          : undefined,
+      });
       data.valid_to = nextValidTo;
     }
+    const becomesInternalSeries =
+      isSingleActiveDocumentType(nextDocumentType) &&
+      !isSingleActiveDocumentType(current.document_type as FiscalDocumentType);
+    if (becomesInternalSeries && dto.technical_key === undefined) {
+      // Factura -> nota: la fila hereda ClTec y número DIAN de la factura. Una
+      // serie interna no lleva ninguno de los dos: se validan los requisitos con
+      // la clave actual y, si pasan (o tras limpiarla), se rotulan como internos.
+      const internalNumber =
+        dto.resolution_number ?? internalSeriesResolutionNumber(nextPrefix);
+      this.assertInternalSeriesRequirements({
+        document_type: nextDocumentType,
+        resolution_number: internalNumber,
+        technical_key: null,
+      });
+      data.resolution_number = internalNumber;
+      Object.assign(data, this.technicalKeyVault.sealForWrite(null));
+    }
     if (dto.technical_key !== undefined) {
+      if (isSingleActiveDocumentType(nextDocumentType)) {
+        this.assertInternalSeriesRequirements({
+          document_type: nextDocumentType,
+          resolution_number: dto.resolution_number ?? current.resolution_number,
+          technical_key: dto.technical_key,
+        });
+      }
       // Las TRES columnas se escriben juntas o la fila queda apuntando a dos
       // claves a la vez, y `reveal()` —que prefiere la cifrada— devolvería la
       // anterior. `sealForWrite` devuelve siempre las tres, incluso en `null`.
@@ -4616,51 +4830,133 @@ export class SubscriptionFiscalService {
       data.current_number = nextRangeFrom - 1;
     }
 
-    const updated = await this.prisma
+    // Guarda entre cuentas: solo si el PATCH mueve prefijo, rango o tipo. Se
+    // ejecuta dentro de la transacción, con el advisory lock.
+    const needsCrossTenantGuard =
+      dto.prefix !== undefined ||
+      dto.document_type !== undefined ||
+      dto.rango_inicial !== undefined ||
+      dto.rango_final !== undefined;
+
+    // Una sola serie de notas activa por (entidad, tipo): solo en TRANSICIÓN
+    // (pasa de inactiva a activa, o cambia de tipo estando activa). Editar el
+    // rango/vigencia de la nota ya activa no apaga nada.
+    const { updated, deactivated_resolution_ids } = await this.prisma
       .withoutScope()
-      .invoice_resolutions.update({ where: { id }, data });
+      .$transaction(async (tx: any) => {
+        if (isSingleActiveDocumentType(nextDocumentType)) {
+          await lockResolutionSeries(tx, {
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: nextDocumentType,
+          });
+        }
+        if (needsCrossTenantGuard) {
+          await assertNoCrossTenantNumberingOverlap(tx, {
+            accounting_entity_id: current.accounting_entity_id,
+            document_type: dto.document_type ?? current.document_type,
+            prefix: dto.prefix ?? current.prefix,
+            range_from: nextRangeFrom,
+            range_to: nextRangeTo,
+            exclude_resolution_id: id,
+            lock_in_transaction: true,
+          });
+        }
+        const updated = await tx.invoice_resolutions.update({
+          where: { id },
+          data,
+        });
+        const transitioned =
+          current.is_active === false ||
+          nextDocumentType !== current.document_type;
+        const deactivated_resolution_ids =
+          updated.is_active && transitioned
+            ? await deactivateOtherActiveSeries(tx, {
+                accounting_entity_id: current.accounting_entity_id,
+                document_type: nextDocumentType,
+                keep_id: id,
+              })
+            : [];
+        return { updated, deactivated_resolution_ids };
+      });
 
     const settings = await this.getSettings();
     this.logger.log(
       `Platform resolution ${id} updated (${Object.keys(data).join(', ') || 'no-op'})`,
     );
+    if (deactivated_resolution_ids.length > 0) {
+      this.logger.log(
+        `Platform resolution #${id} (${nextDocumentType}) active: deactivated other active series ${deactivated_resolution_ids.join(', ')}`,
+      );
+    }
 
-    return { ...updated, environment: settings.environment };
+    return {
+      ...toPublicResolution(updated),
+      deactivated_resolution_ids,
+      environment: settings.environment,
+    };
   }
 
   /**
-   * Delete a platform resolution, but only while it is pristine.
-   *
-   * A resolution that already numbered a document is fiscal evidence: deleting
-   * it would orphan the trail of which numbers were reported under which DIAN
-   * authorization. Those get deactivated, never removed.
+   * Contrato de requisitos por tipo (`fiscal-document-requirements.ts`) para las
+   * series internas de nota: sin ClTec (su CUDE lleva el Software-PIN). Mismo
+   * criterio e `INVOICING_RESOLUTION_008` que el carril tienda.
    */
-  async deleteResolution(id: number) {
+  private assertInternalSeriesRequirements(draft: {
+    document_type: FiscalDocumentType;
+    resolution_number?: string | null;
+    technical_key?: string | null;
+  }): void {
+    const violations = validateResolutionDraft(draft);
+    if (violations.length === 0) return;
+    const requirements = requirementsFor(draft.document_type);
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_RESOLUTION_008,
+      violations
+        .map(
+          (violation) =>
+            `${violation.message} ${CORRECCION_POR_VIOLACION[violation.code]}`,
+        )
+        .join(' '),
+      {
+        document_type: draft.document_type,
+        document_label: requirements.label,
+        key_algorithm: requirements.key_algorithm,
+        violations: violations.map(({ field, code }) => ({ field, code })),
+      },
+    );
+  }
+
+  /**
+   * Archiva (soft delete) una resolución de plataforma. Nunca se borra: la
+   * validación (en vuelo, cableada, set de pruebas, serie de notas) y la serie
+   * de reemplazo las resuelve `archiveResolutionInTx`.
+   */
+  async archiveResolution(id: number, dto: ArchiveResolutionDto) {
     const current = await this.findPlatformResolution(id);
 
-    if (current._count.invoices > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución tiene ${current._count.invoices} documento(s) emitido(s). Desactívala en vez de borrarla.`,
-        { resolution_id: id, issued_invoices: current._count.invoices },
+    const { archived, replacement } = await this.prisma
+      .withoutScope()
+      .$transaction((tx) =>
+        archiveResolutionInTx(tx, {
+          resolution: current,
+          user_id: RequestContextService.getContext()?.user_id ?? null,
+          now: new Date(),
+          replacement_prefix: dto.replacement_prefix,
+          organization_id: current.organization_id,
+        }),
       );
-    }
-    if (current.current_number >= current.range_from) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_RESOLUTION_003,
-        `La resolución ya consumió numeración ante la DIAN (va en ${current.current_number}). Desactívala en vez de borrarla.`,
-        { resolution_id: id, current_number: current.current_number },
-      );
-    }
 
-    await this.assertResolutionNotWired(id, 'borrar');
+    this.logger.log(`Platform resolution ${id} archived`);
+    return {
+      ...toPublicResolution(archived),
+      environment: (await this.getSettings()).environment,
+      replacement_resolution_id: replacement?.id ?? null,
+    };
+  }
 
-    await this.prisma.withoutScope().invoice_resolutions.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Platform resolution ${id} deleted`);
-    return { id, deleted: true };
+  /** `DELETE` conserva su ruta pero archiva (sin reemplazo). */
+  async deleteResolution(id: number) {
+    return this.archiveResolution(id, {});
   }
 
   /**
@@ -5090,6 +5386,7 @@ export class SubscriptionFiscalService {
         accounting_entity_id: accountingEntityId,
         document_type: 'sales_invoice',
         is_active: true,
+        archived_at: null,
       },
     });
     if (!resolution) {
@@ -5173,13 +5470,15 @@ export class SubscriptionFiscalService {
     });
   }
 
+  /**
+   * Mismo saneo que tienda y organización (SEC-L1): sin `certificate_s3_key`,
+   * ARN de KMS ni id de la fila fuente de la herencia, y sin `note_phase` en
+   * `last_test_result` / `enablement_evidence`. `has_certificate` es lo que
+   * lee el panel de plataforma.
+   */
   private maskConfig(config: any) {
     return {
-      ...config,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
+      ...redactDianConfigForHttp(config),
       has_certificate: !!config.certificate_s3_key,
     };
   }
@@ -5374,16 +5673,17 @@ export class SubscriptionFiscalService {
     // que está emitiendo contra la que eligió.
     const resolutionIdToFind =
       preferredResolutionId ?? settings.invoice_resolution_id;
-    const resolution = await tx.invoice_resolutions.findFirst({
-      where: {
-        id: resolutionIdToFind,
-        accounting_entity_id: settings.accounting_entity_id,
-        document_type: 'sales_invoice',
-        is_active: true,
-        valid_from: { lte: new Date() },
-        valid_to: { gte: new Date() },
-      },
-    });
+    // Sin id configurado ni pedido NO se cae a "la más reciente": la plataforma
+    // factura solo contra la resolución nombrada (la regla compartida filtra por
+    // `id` solo si viene).
+    const resolution = resolutionIdToFind
+      ? await findActiveResolution(tx, {
+          accounting_entity_id: settings.accounting_entity_id!,
+          document_type: 'sales_invoice',
+          now: new Date(),
+          resolution_id: resolutionIdToFind,
+        })
+      : null;
     if (!resolution) {
       if (
         preferredResolutionId !== undefined &&

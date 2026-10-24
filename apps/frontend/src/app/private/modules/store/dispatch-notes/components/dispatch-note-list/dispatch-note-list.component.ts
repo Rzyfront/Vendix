@@ -247,7 +247,7 @@ export class DispatchNoteListComponent {
     },
     {
       key: 'dispatch_route_stops',
-      label: 'Planilla',
+      label: 'Ruta',
       priority: 2,
       transform: (_value: any, row: DispatchNote) =>
         this.activeRouteLabel(row),
@@ -374,7 +374,7 @@ export class DispatchNoteListComponent {
       },
       {
         key: 'dispatch_route_stops',
-        label: 'Planilla',
+        label: 'Ruta',
         transform: (_val: any, item: DispatchNote) =>
           this.activeRouteLabel(item),
         icon: 'truck',

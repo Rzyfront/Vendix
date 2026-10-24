@@ -10,9 +10,8 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { DatePipe } from '@angular/common';
-import { EMPTY, interval } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
+import { EMPTY, forkJoin, fromEvent, interval } from 'rxjs';
+import { catchError, filter, switchMap } from 'rxjs/operators';
 import {
   FormBuilder,
   FormGroup,
@@ -31,6 +30,9 @@ import {
   CashRegisterSession,
   CashSessionSummary,
   CashSessionCloseReport,
+  CashSessionPendingOrder,
+  CashSessionPendingOrders,
+  CashSessionCloseDecision,
 } from '../services/pos-cash-register.service';
 import {
   CashSessionReportComponent,
@@ -38,8 +40,11 @@ import {
 } from './cash-session-report.component';
 import { CashSessionReportPrintService } from '../services/cash-session-report-print.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
+import { RouterLink } from '@angular/router';
+import { PaymentMethodsService } from '../../settings/payments/services/payment-methods.service';
+import { StorePaymentMethod, PaymentMethodState } from '../../settings/payments/interfaces/payment-methods.interface';
+import { OrderCompleteModalComponent, OrderCompletionSubmission } from '../../orders/components/order-complete-modal.component';
 // F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
 // `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) > 0.01`
 // tolera EXACTAMENTE 1 centavo; la traducción fiel es
@@ -53,6 +58,26 @@ const SUMMARY_POLL_MS = 10_000;
 const AMOUNT_TOLERANCE_CENTS = 2;
 
 const EXPECTED_STALE_CODE = 'CASH_SESSION_EXPECTED_STALE_001';
+const STALE_ORDER_CODE = 'ORD_CASH_SESSION_ORDER_STALE_001';
+
+const CASH_CLOSE_ERROR_MESSAGES: Record<string, string> = {
+  CASH_SESSION_EXPECTED_STALE_001: 'El efectivo esperado cambió. Revisa el resumen actualizado y vuelve a contar.',
+  CASH_SESSION_PENDING_001: 'Revisa las órdenes pendientes antes de cerrar la caja.',
+  CASH_SESSION_PENDING_002: 'Las órdenes pendientes cambiaron. Actualiza la lista y revísala de nuevo.',
+  CASH_SESSION_PENDING_003: 'Escribe el motivo para cerrar con órdenes pendientes.',
+  CASH_SESSION_PENDING_004: 'No pudimos validar las órdenes de esta sesión. Actualiza la lista e intenta de nuevo.',
+  CASH_SESSION_PENDING_005: 'Hay movimientos de venta o reembolso pendientes de registrar. Espera un momento y vuelve a intentar.',
+  CASH_SESSION_PENDING_006: 'La caja ya está cerrada. Actualiza la sesión.',
+};
+
+function cashCloseErrorMessage(err: unknown, fallback: string): string {
+  const { code, status } = extractApiError(err);
+  if (code && CASH_CLOSE_ERROR_MESSAGES[code]) return CASH_CLOSE_ERROR_MESSAGES[code];
+  if (status === 0) return 'No hay conexión con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+  if (status === 401) return 'Tu sesión venció. Inicia sesión de nuevo.';
+  if (status === 403) return 'No tienes permiso para realizar esta acción.';
+  return fallback;
+}
 
 /**
  * `details.expected_now` del envelope 409 del backend, si vino utilizable.
@@ -70,7 +95,6 @@ function staleExpectedNow(err: unknown): number | null {
   selector: 'app-pos-session-close-modal',
   standalone: true,
   imports: [
-    DatePipe,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
@@ -78,6 +102,8 @@ function staleExpectedNow(err: unknown): number | null {
     IconComponent,
     CurrencyPipe,
     CashSessionReportComponent,
+    RouterLink,
+    OrderCompleteModalComponent,
   ],
   template: `
     <app-modal
@@ -87,23 +113,13 @@ function staleExpectedNow(err: unknown): number | null {
       [size]="'md'"
       [showCloseButton]="true"
       [dialog]="true"
+      [title]="closedSession() ? 'Caja cerrada' : 'Cerrar caja'"
+      [subtitle]="closedSession() ? 'Sesión #' + closedSession()!.id : (session()?.register?.name || 'Caja')"
     >
       <!-- Header -->
       <div slot="header" class="sc-header">
         <div class="sc-header-icon">
           <app-icon name="lock" [size]="20"></app-icon>
-        </div>
-        <div>
-          @if (closedSession(); as closed) {
-            <h2 class="sc-title">Caja cerrada</h2>
-            <p class="sc-subtitle">Sesión #{{ closed.id }}</p>
-          } @else {
-            <h2 class="sc-title">Cerrar Caja</h2>
-            <p class="sc-subtitle">
-              {{ session()?.register?.name || 'Caja' }} — Abierta
-              {{ session()?.opened_at | date: 'shortTime' }}
-            </p>
-          }
         </div>
       </div>
 
@@ -154,6 +170,138 @@ function staleExpectedNow(err: unknown): number | null {
             </div>
           }
         } @else {
+        @if (pendingOrders(); as pending) {
+          @if (pending.count > 0 || pendingChanged() || pendingError()) {
+          <section class="sc-pending" aria-labelledby="sc-pending-title">
+            <div class="sc-pending-heading">
+              <app-icon name="alert-triangle" [size]="18"></app-icon>
+              <div>
+                <h3 id="sc-pending-title">Órdenes pendientes de esta sesión</h3>
+                <p aria-live="polite" aria-atomic="true">
+                  {{ pending.count }} {{ pending.count === 1 ? 'orden' : 'órdenes' }} pendientes
+                  @if (pending.balance_count > 0) {
+                    · falta cobrar {{ pending.balance_total | currency: 0 }}
+                  }
+                </p>
+              </div>
+            </div>
+            <p class="sc-pending-note">El dinero que falta por cobrar no se cuenta en el efectivo de la caja.</p>
+            @if (pendingError()) {
+              <p class="sc-pending-error" role="alert">No pudimos cargar las órdenes pendientes.</p>
+              <app-button variant="outline" size="sm" (clicked)="refreshCloseState()">
+                Reintentar
+              </app-button>
+            }
+            @if (pendingChanged()) {
+              <div class="sc-pending-changed" role="alert" aria-live="assertive">
+                Las órdenes pendientes cambiaron. Revisa la lista actual antes de cerrar.
+                <app-button variant="outline-warning" size="sm" (clicked)="acknowledgePendingChanges()">
+                  Revisé las órdenes actuales
+                </app-button>
+              </div>
+            }
+            @if (pending.count > 0) {
+              <button
+                type="button"
+                class="sc-pending-toggle"
+                [attr.aria-expanded]="pendingExpanded()"
+                (click)="togglePendingExpanded()"
+              >
+                {{ pendingExpanded() ? 'Ocultar órdenes' : 'Ver órdenes pendientes' }}
+              </button>
+              @if (pendingExpanded()) {
+                @if (pendingLoading()) {
+                  <p class="sc-pending-loading" role="status">Actualizando órdenes…</p>
+                }
+                <div class="sc-pending-list" aria-label="Lista de órdenes pendientes">
+                  <label class="sc-pending-select-all">
+                    <input
+                      type="checkbox"
+                      [checked]="areAllPendingOrdersSelected()"
+                      [disabled]="pendingActionBusy()"
+                      (change)="onSelectAllPendingChange($event)"
+                    />
+                    <span>Seleccionar órdenes para finalizar (hasta 100 por vez)</span>
+                  </label>
+                  @for (order of pending.data; track order.id) {
+                    <article class="sc-pending-row">
+                      <label class="sc-pending-select">
+                        <input
+                          type="checkbox"
+                          [checked]="isPendingOrderSelected(order.id)"
+                          [disabled]="order.version === null || pendingActionBusy()"
+                          [attr.aria-label]="'Seleccionar orden ' + order.order_number"
+                          (change)="onPendingSelectionChange($event, order)"
+                        />
+                        <span>Seleccionar</span>
+                      </label>
+                      <div class="sc-pending-order">
+                        <strong>{{ order.order_number }}</strong>
+                        <span class="sc-order-state">{{ orderStateLabel(order.state) }}</span>
+                        @if (order.reasons.includes('operational')) {
+                          <span class="sc-reason">Por finalizar</span>
+                        }
+                        @if (order.reasons.includes('balance')) {
+                          <span class="sc-reason">Falta cobrar {{ (order.payment_amount_due ?? order.remaining_balance) | currency: 0 }}</span>
+                        }
+                        <a
+                          [routerLink]="['/admin/orders', order.id]"
+                          [attr.aria-label]="'Ver detalle de orden ' + order.order_number"
+                        >Abrir</a>
+                      </div>
+                    </article>
+                  }
+                </div>
+                @if (pending.count > pending.limit) {
+                  <div class="sc-pending-pagination" aria-label="Paginación de órdenes pendientes">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="pending.page <= 1 || pendingLoading()"
+                      (clicked)="loadPendingPage(pending.page - 1)"
+                    >Anterior</app-button>
+                    <span>Página {{ pending.page }} de {{ pendingPageCount() }}</span>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="pending.page >= pendingPageCount() || pendingLoading()"
+                      (clicked)="loadPendingPage(pending.page + 1)"
+                    >Siguiente</app-button>
+                  </div>
+                }
+                @if (selectedPendingOrders().length > 0) {
+                  <p class="sc-pending-selected" aria-live="polite">
+                    {{ selectedPendingOrders().length }} órdenes seleccionadas
+                  </p>
+                  <app-button
+                    variant="secondary"
+                    size="sm"
+                    [disabled]="pendingActionBusy()"
+                    (clicked)="finalizeSelectedOrders()"
+                  >
+                    Completar {{ selectedPendingOrders().length }} órdenes
+                  </app-button>
+                }
+              }
+            }
+          </section>
+          }
+        }
+        <app-order-complete-modal
+          [isOpen]="finishWorkflowOpen()"
+          (isOpenChange)="onFinishModalOpenChange($event)"
+          [order]="finishWorkflowCurrent()"
+          [paymentMethods]="finishPaymentMethods()"
+          [sequence]="finishWorkflowIndex() + 1"
+          [completed]="finishWorkflowCompleted()"
+          [total]="finishWorkflowOrders().length"
+          [busy]="finishWorkflowBusy()"
+          [error]="finishWorkflowError()"
+          [failures]="finishWorkflowFailures()"
+          (submitted)="processCurrentFinishOrder($event)"
+          (skip)="skipFailedFinishOrder()"
+        />
+
         <!-- Session summary cards -->
         @if (session()) {
           <div class="sc-cards">
@@ -295,6 +443,7 @@ function staleExpectedNow(err: unknown): number | null {
             [size]="'md'"
             [required]="true"
             [prefixIcon]="true"
+            helperText="Escribe el efectivo que contaste. Si contaste cero, escribe 0."
             [error]="getFieldError('actual_closing_amount')"
             (inputBlur)="onFieldBlur('actual_closing_amount')"
           ></app-input>
@@ -335,7 +484,7 @@ function staleExpectedNow(err: unknown): number | null {
             [variant]="expectedChanged() ? 'outline-warning' : 'primary'"
             size="md"
             (clicked)="onClose()"
-            [disabled]="!form.valid || submitting() || refreshing()"
+            [disabled]="!canClose()"
           >
             <app-icon name="lock" [size]="16" slot="icon" ></app-icon>
             @if (submitting()) {
@@ -349,6 +498,31 @@ function staleExpectedNow(err: unknown): number | null {
             }
           </app-button>
         }
+      </div>
+    </app-modal>
+    <app-modal
+      [isOpen]="pendingCloseWarning() !== null"
+      (isOpenChange)="onPendingWarningOpenChange($event)"
+      [size]="'sm'"
+      [centered]="true"
+      [dialog]="true"
+      [showCloseButton]="false"
+      [closeOnBackdrop]="false"
+      [closeOnEscape]="false"
+      title="Órdenes pendientes"
+    >
+      <div class="sc-pending-confirm">
+        <app-icon name="warning" [size]="56" class="sc-pending-confirm-icon"></app-icon>
+        <p>
+          Hay {{ pendingCloseWarning()?.count }}
+          {{ pendingCloseWarning()?.count === 1 ? 'orden pendiente' : 'órdenes pendientes' }}
+          de esta sesión. Si cierras la caja, seguirán pendientes y no se sumarán al efectivo esperado.
+        </p>
+        <p>¿Deseas cerrar la caja de todas formas?</p>
+      </div>
+      <div slot="footer" class="sc-footer">
+        <app-button variant="outline" size="md" (clicked)="cancelPendingClose()">Volver</app-button>
+        <app-button variant="outline-warning" size="md" (clicked)="confirmPendingClose()">Cerrar caja</app-button>
       </div>
     </app-modal>
   `,
@@ -393,6 +567,19 @@ function staleExpectedNow(err: unknown): number | null {
       flex-direction: column;
       gap: 20px;
     }
+
+    .sc-pending-confirm {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 4px;
+      text-align: center;
+      color: var(--color-text-primary);
+    }
+
+    .sc-pending-confirm p { margin: 0; }
+    .sc-pending-confirm-icon { color: var(--color-warning-600); }
 
     .sc-cards {
       display: grid;
@@ -554,6 +741,166 @@ function staleExpectedNow(err: unknown): number | null {
       gap: 16px;
     }
 
+    .sc-pending {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--color-error-200);
+      border-radius: 14px;
+      background: var(--color-error-50);
+      color: var(--color-text-primary);
+    }
+
+    .sc-pending-heading {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      color: var(--color-error-700);
+    }
+
+    .sc-pending-heading h3 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .sc-pending-heading p {
+      margin: 2px 0 0;
+      font-size: 13px;
+    }
+
+    .sc-pending-note {
+      margin: 0;
+      color: var(--color-neutral-700);
+      font-size: 12px;
+    }
+
+    .sc-pending-error,
+    .sc-pending-changed {
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--color-warning-300);
+      border-radius: 10px;
+      background: var(--color-warning-50);
+      color: var(--color-warning-800);
+      font-size: 13px;
+    }
+
+    .sc-pending-changed {
+      display: flex;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .sc-pending-toggle {
+      min-height: 44px;
+      align-self: flex-start;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .sc-pending-toggle:focus-visible,
+    .sc-pending-select-all input:focus-visible,
+    .sc-pending-select input:focus-visible,
+    .sc-pending-order a:focus-visible {
+      outline: 3px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+
+    .sc-pending-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .sc-pending-select-all {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .sc-pending-select-all input {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      accent-color: var(--color-primary);
+    }
+
+    .sc-pending-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 4px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface);
+    }
+
+    .sc-pending-select {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 44px;
+      font-size: 12px;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .sc-pending-select input {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      accent-color: var(--color-primary);
+    }
+
+    .sc-pending-order {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      overflow-x: auto;
+      white-space: nowrap;
+      font-size: 12px;
+      scrollbar-width: thin;
+    }
+
+    .sc-order-state { color: var(--color-text-secondary); }
+
+    .sc-pending-order a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      color: var(--color-primary);
+      font-weight: 600;
+      text-decoration: underline;
+    }
+
+    .sc-reason { color: var(--color-warning-800); }
+
+    .sc-pending-pagination {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+    }
+
     .sc-diff {
       display: flex;
       align-items: center;
@@ -613,8 +960,15 @@ function staleExpectedNow(err: unknown): number | null {
 
     .sc-footer {
       display: flex;
+      flex-wrap: wrap;
       justify-content: flex-end;
       gap: 8px;
+    }
+
+    @media (max-width: 420px) {
+      .sc-footer app-button {
+        flex: 1 1 100%;
+      }
     }
   `],
 })
@@ -627,6 +981,35 @@ export class PosSessionCloseModalComponent {
 
   readonly submitting = signal(false);
   readonly difference = signal<number | null>(null);
+  readonly pendingOrders = signal<CashSessionPendingOrders | null>(null);
+  readonly pendingLoading = signal(false);
+  readonly pendingError = signal(false);
+  readonly pendingExpanded = signal(false);
+  readonly pendingPage = signal(1);
+  readonly pendingFingerprint = signal<string | null>(null);
+  readonly pendingSeenFingerprint = signal<string | null>(null);
+  readonly pendingChanged = signal(false);
+  readonly pendingCloseWarning = signal<{ count: number; expectedSeen: number; fingerprint: string } | null>(null);
+  readonly selectedPending = signal<Record<number, CashSessionPendingOrder>>({});
+  readonly pendingActionBusy = computed(
+    () => this.pendingLoading() || this.finishWorkflowBusy(),
+  );
+  readonly finishWorkflowOpen = signal(false);
+  readonly finishWorkflowBusy = signal(false);
+  readonly finishWorkflowOrders = signal<CashSessionPendingOrder[]>([]);
+  readonly finishWorkflowIndex = signal(0);
+  readonly finishWorkflowCompleted = signal(0);
+  readonly finishWorkflowError = signal('');
+  readonly finishWorkflowFailures = signal<string[]>([]);
+  readonly finishPaymentMethods = signal<StorePaymentMethod[]>([]);
+  readonly finishWorkflowCurrent = computed(() => this.finishWorkflowOrders()[this.finishWorkflowIndex()] ?? null);
+  readonly selectedPendingOrders = computed(() =>
+    Object.values(this.selectedPending()),
+  );
+  readonly pendingPageCount = computed(() => {
+    const pending = this.pendingOrders();
+    return pending ? Math.max(1, Math.ceil(pending.count / pending.limit)) : 1;
+  });
 
   /** Resumen autoritativo del backend. Nunca se recalcula acá. */
   readonly summary = signal<CashSessionSummary | null>(null);
@@ -655,10 +1038,11 @@ export class PosSessionCloseModalComponent {
   private cashRegisterService = inject(PosCashRegisterService);
   private toastService = inject(ToastService);
   private reportPrint = inject(CashSessionReportPrintService);
+  private paymentMethodsService = inject(PaymentMethodsService);
 
   constructor() {
     this.form = this.fb.group({
-      actual_closing_amount: [0, [Validators.required, Validators.min(0)]],
+      actual_closing_amount: [null, [Validators.required, Validators.min(0)]],
       closing_notes: [''],
     });
 
@@ -676,8 +1060,18 @@ export class PosSessionCloseModalComponent {
           this.staleFrom.set(null);
           this.refreshing.set(false);
           this.submitting.set(false);
-          this.form.reset({ actual_closing_amount: 0, closing_notes: '' });
-          this.loadSummary();
+          this.pendingOrders.set(null);
+          this.pendingLoading.set(false);
+          this.pendingError.set(false);
+          this.pendingExpanded.set(false);
+          this.pendingPage.set(1);
+          this.pendingFingerprint.set(null);
+          this.pendingSeenFingerprint.set(null);
+          this.pendingChanged.set(false);
+          this.pendingCloseWarning.set(null);
+          this.selectedPending.set({});
+          this.form.reset({ actual_closing_amount: null, closing_notes: '' });
+          this.refreshCloseState();
         });
       }
     });
@@ -694,30 +1088,369 @@ export class PosSessionCloseModalComponent {
         switchMap(() => {
           const session = this.session();
           return session && !this.closedSession()
-            ? this.cashRegisterService
-                .getCashSummary(session.id)
-                .pipe(catchError(() => EMPTY))
+            ? forkJoin({
+                summary: this.cashRegisterService.getCashSummary(session.id),
+                pending: this.cashRegisterService.getPendingOrders(
+                  session.id,
+                  this.pendingPage(),
+                ),
+              }).pipe(catchError(() => EMPTY))
             : EMPTY;
         }),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((next) => this.applySummary(next));
+      .subscribe((next) => {
+        this.pendingLoading.set(false);
+        this.pendingError.set(false);
+        this.applySummary(next.summary);
+        this.applyPendingOrders(next.pending);
+      });
+
+    if (typeof window !== 'undefined') {
+      fromEvent(window, 'focus')
+        .pipe(
+          filter(() => this.isOpen() && !this.closedSession()),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe(() => this.refreshCloseState());
+    }
   }
 
-  private loadSummary(): void {
+  refreshCloseState(options: { afterPendingOrderProcessing?: boolean } = {}): void {
     const session = this.session();
     if (!session) return;
+    this.pendingLoading.set(true);
+    this.pendingError.set(false);
+    forkJoin({
+      summary: this.cashRegisterService.getCashSummary(session.id),
+      pending: this.cashRegisterService.getPendingOrders(
+        session.id,
+        this.pendingPage(),
+      ),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ summary, pending }) => {
+          this.pendingLoading.set(false);
+          this.applySummary(summary);
+          this.applyPendingOrders(pending);
+          if (options.afterPendingOrderProcessing) {
+            // Completar órdenes puede registrar pagos en efectivo y cambiar el
+            // esperado. Es un cambio provocado desde este mismo modal: adopta
+            // el resumen fresco, actualiza la lista y exige un nuevo conteo
+            // físico antes de permitir cerrar.
+            this.countedAgainst.set(summary.expected_cash_total);
+            this.staleFrom.set(null);
+            this.pendingSeenFingerprint.set(pending.fingerprint);
+            this.pendingChanged.set(false);
+            this.selectedPending.set({});
+            this.form.get('actual_closing_amount')?.reset(null);
+            this.toastService.info(
+              'Resumen actualizado. Vuelve a contar el efectivo antes de cerrar.',
+            );
+          }
+        },
+        error: (err) => {
+          this.pendingLoading.set(false);
+          this.pendingError.set(true);
+          this.toastService.error(cashCloseErrorMessage(err, 'No pudimos cargar las órdenes pendientes.'));
+        },
+      });
+  }
 
-    // Un fallo acá NO limpia el resumen ya pintado: se usa también para
-    // recargar el desglose después de un 409, y borrarlo se llevaría el banner
-    // que le está avisando al operario.
+  private applyPendingOrders(next: CashSessionPendingOrders): void {
+    const previous = this.pendingFingerprint();
+    this.pendingOrders.set(next);
+    this.pendingFingerprint.set(next.fingerprint);
+    if (this.pendingSeenFingerprint() === null) {
+      this.pendingSeenFingerprint.set(next.fingerprint);
+    } else if (previous !== next.fingerprint) {
+      this.pendingChanged.set(true);
+      this.selectedPending.set({});
+    }
+    if (next.count === 0 && next.tracking_enabled) {
+      this.pendingCloseWarning.set(null);
+    }
+  }
+
+  acknowledgePendingChanges(): void {
+    const fingerprint = this.pendingFingerprint();
+    if (fingerprint === null) return;
+    this.pendingSeenFingerprint.set(fingerprint);
+    this.pendingChanged.set(false);
+  }
+
+  canClose(): boolean {
+    const pending = this.pendingOrders();
+    const hasSummary = this.summary() !== null;
+    if (
+      !this.form.valid ||
+      !hasSummary ||
+      !pending ||
+      this.submitting() ||
+      this.refreshing() ||
+      this.pendingLoading() ||
+      this.pendingChanged()
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  togglePendingExpanded(): void {
+    this.pendingExpanded.update((expanded) => !expanded);
+    if (this.pendingExpanded()) this.loadPendingPage(this.pendingPage());
+  }
+
+  loadPendingPage(page: number): void {
+    const session = this.session();
+    if (!session || page < 1 || page > this.pendingPageCount()) return;
+    this.pendingPage.set(page);
+    this.pendingLoading.set(true);
+    this.pendingError.set(false);
     this.cashRegisterService
-      .getCashSummary(session.id)
-      .pipe(
-        catchError(() => EMPTY),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((next) => this.applySummary(next));
+      .getPendingOrders(session.id, page)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (pending) => {
+          this.pendingLoading.set(false);
+          this.applyPendingOrders(pending);
+        },
+        error: (err) => {
+          this.pendingLoading.set(false);
+          this.pendingError.set(true);
+          this.toastService.error(cashCloseErrorMessage(err, 'No pudimos cargar las órdenes pendientes.'));
+        },
+      });
+  }
+
+  isPendingOrderSelected(order_id: number): boolean {
+    return Object.hasOwn(this.selectedPending(), order_id);
+  }
+
+  areAllPendingOrdersSelected(): boolean {
+    const count = this.pendingOrders()?.count ?? 0;
+    return count > 0 && this.selectedPendingOrders().length >= Math.min(count, 100);
+  }
+
+  orderStateLabel(state: string): string {
+    const labels: Record<string, string> = {
+      draft: 'Borrador',
+      pending: 'Pendiente',
+      pending_payment: 'Pago pendiente',
+      processing: 'En proceso',
+      shipped: 'Enviada',
+      delivered: 'Entregada',
+      finished: 'Finalizada',
+      cancelled: 'Cancelada',
+      refunded: 'Reembolsada',
+    };
+    return labels[state.toLowerCase()] ?? state;
+  }
+
+  onSelectAllPendingChange(event: Event): void {
+    const checkbox = event.currentTarget as HTMLInputElement;
+    const checked = checkbox.checked;
+    if (!checked) {
+      this.selectedPending.set({});
+      return;
+    }
+
+    const session = this.session();
+    const pending = this.pendingOrders();
+    if (!session || !pending || pending.count === 0 || this.pendingActionBusy()) return;
+
+    this.pendingLoading.set(true);
+    this.cashRegisterService.getPendingOrders(session.id, 1, 100)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.pendingLoading.set(false);
+          if (result.fingerprint !== pending.fingerprint) {
+            this.toastService.warning('Las órdenes cambiaron. Actualiza la lista e inténtalo de nuevo.');
+            this.refreshCloseState();
+            return;
+          }
+          this.selectedPending.set(
+            Object.fromEntries(result.data.filter((order) => order.version !== null).map((order) => [order.id, order])),
+          );
+          if (pending.count > result.data.length) {
+            this.toastService.warning(
+              `Puedes finalizar hasta ${result.data.length} órdenes por vez. Después podrás seleccionar las demás.`,
+            );
+          }
+        },
+        error: (err) => {
+          this.pendingLoading.set(false);
+          checkbox.checked = false;
+          this.toastService.error(cashCloseErrorMessage(err, 'No pudimos seleccionar las órdenes. Inténtalo de nuevo.'));
+        },
+      });
+  }
+
+  onPendingSelectionChange(event: Event, order: CashSessionPendingOrder): void {
+    const checked = (event.currentTarget as HTMLInputElement).checked;
+    if (checked && !this.isPendingOrderSelected(order.id) && this.selectedPendingOrders().length >= 100) {
+      (event.currentTarget as HTMLInputElement).checked = false;
+      this.toastService.warning('Puedes finalizar hasta 100 órdenes por vez.');
+      return;
+    }
+    this.selectedPending.update((selected) => {
+      const next = { ...selected };
+      if (checked) next[order.id] = order;
+      else delete next[order.id];
+      return next;
+    });
+  }
+
+  finalizeSelectedOrders(): void {
+    const orders = this.selectedPendingOrders();
+    if (!this.pendingOrders() || !this.session() || orders.length === 0 || this.pendingActionBusy()) return;
+    if (orders.some((order) => order.version === null)) {
+      this.toastService.warning('No pudimos verificar una orden. Actualiza la lista e inténtalo de nuevo.');
+      this.refreshCloseState();
+      return;
+    }
+    this.finishWorkflowOrders.set(orders);
+    this.finishWorkflowIndex.set(0);
+    this.finishWorkflowCompleted.set(0);
+    this.finishWorkflowError.set('');
+    this.finishWorkflowFailures.set([]);
+    this.finishWorkflowOpen.set(true);
+    this.paymentMethodsService.getStorePaymentMethods({ state: PaymentMethodState.ENABLED, page: 1, limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          const methods = Array.isArray(result)
+            ? result
+            : Array.isArray(result?.data)
+              ? result.data
+              : Array.isArray((result as any)?.data?.data)
+                ? (result as any).data.data
+                : [];
+          this.finishPaymentMethods.set(
+            methods.filter((method: StorePaymentMethod) => method.state === PaymentMethodState.ENABLED),
+          );
+        },
+        error: () => this.finishPaymentMethods.set([]),
+      });
+  }
+
+  processCurrentFinishOrder(submission: OrderCompletionSubmission): void {
+    const order = this.finishWorkflowCurrent();
+    if (!order || this.finishWorkflowBusy()) return;
+    const session = this.session();
+    if (!session) return;
+    if (order.version === null) {
+      this.finishWorkflowError.set(
+        `${order.order_number} no tiene una versión actual. Actualiza las órdenes antes de continuar.`,
+      );
+      this.refreshCloseState();
+      return;
+    }
+    this.finishWorkflowBusy.set(true);
+    this.finishWorkflowError.set('');
+    this.cashRegisterService.processCashSessionOrder(session.id, order.id, order.version, submission.flow, submission.shipping)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result: unknown) => {
+          const finalState = (result as { state?: string } | null)?.state;
+          if (finalState !== 'finished') {
+            this.finishWorkflowBusy.set(false);
+            this.finishWorkflowError.set(
+              `${order.order_number} quedó despachada y sigue pendiente de entrega. Confirma la entrega cuando el cliente reciba el pedido.`,
+            );
+            return;
+          }
+          this.advanceFinishWorkflow();
+        },
+        error: (err) => {
+          this.finishWorkflowBusy.set(false);
+          const { code } = extractApiError(err);
+          if (code === STALE_ORDER_CODE || code === EXPECTED_STALE_CODE) {
+            this.reloadCurrentFinishOrder(session.id, order);
+            return;
+          }
+          this.finishWorkflowError.set(
+            code === 'ORD_FAST_TRACK_PAYMENT_REQUIRED_001'
+              ? 'Selecciona un método de pago y registra el saldo pendiente para continuar.'
+              : extractApiError(err).message || `No se pudo completar ${order.order_number}.`,
+          );
+        },
+      });
+  }
+
+  private reloadCurrentFinishOrder(
+    sessionId: number,
+    order: CashSessionPendingOrder,
+  ): void {
+    this.cashRegisterService
+      .getPendingOrders(sessionId, 1, 100)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (latest) => {
+          const refreshedOrder = latest.data.find((candidate) => candidate.id === order.id);
+          if (!refreshedOrder) {
+            this.finishWorkflowError.set(
+              `${order.order_number} ya no aparece entre las órdenes pendientes. Actualiza la lista antes de continuar.`,
+            );
+            this.refreshCloseState();
+            return;
+          }
+          this.finishWorkflowOrders.update((orders) =>
+            orders.map((candidate) =>
+              candidate.id === refreshedOrder.id ? refreshedOrder : candidate,
+            ),
+          );
+          this.finishWorkflowError.set('');
+          this.toastService.info(
+            `${order.order_number} cambió. Revisa el resumen actualizado y vuelve a procesarla.`,
+          );
+          this.refreshCloseState();
+        },
+        error: () => {
+          this.finishWorkflowError.set(
+            `No pudimos actualizar ${order.order_number}. Actualiza las órdenes e inténtalo de nuevo.`,
+          );
+        },
+      });
+  }
+
+  skipFailedFinishOrder(): void {
+    const order = this.finishWorkflowCurrent();
+    if (!order || this.finishWorkflowBusy() || !this.finishWorkflowError()) return;
+    this.finishWorkflowFailures.update((items) => [...items, `${order.order_number}: ${this.finishWorkflowError()}`]);
+    this.advanceFinishWorkflow(false);
+  }
+
+  private advanceFinishWorkflow(success = true): void {
+    this.finishWorkflowBusy.set(false);
+    if (success) this.finishWorkflowCompleted.update((count) => count + 1);
+    this.finishWorkflowIndex.update((index) => index + 1);
+    this.finishWorkflowError.set('');
+    const next = this.finishWorkflowCurrent();
+    if (!next) {
+      this.selectedPending.set({});
+      this.refreshCloseState({ afterPendingOrderProcessing: true });
+      const failed = this.finishWorkflowFailures();
+      if (failed.length) this.toastService.warning(`${this.finishWorkflowCompleted()} órdenes procesadas; ${failed.length} quedaron pendientes.`);
+    }
+  }
+
+  onFinishModalOpenChange(open: boolean): void {
+    if (!open) this.closeFinishWorkflow();
+    else this.finishWorkflowOpen.set(true);
+  }
+
+  closeFinishWorkflow(): void {
+    if (this.finishWorkflowBusy()) return;
+    this.finishWorkflowOpen.set(false);
+    if (this.finishWorkflowCompleted() > 0 || this.finishWorkflowFailures().length > 0) this.refreshCloseState();
+  }
+
+  private httpStatus(err: unknown): number | null {
+    const value = (err as { status?: unknown } | null)?.status;
+    return typeof value === 'number' ? value : null;
   }
 
   /**
@@ -777,8 +1510,12 @@ export class PosSessionCloseModalComponent {
   }
 
   onClose() {
-    if (!this.form.valid || !this.session()) return;
+    if (!this.canClose() || !this.session()) return;
     if (this.submitting() || this.refreshing()) return;
+    if (this.pendingChanged()) {
+      this.toastService.warning('Revisa y confirma las órdenes pendientes actuales antes de cerrar.');
+      return;
+    }
 
     // Estado de confirmación explícita: el operario ya vio el banner con la
     // cifra nueva y decidió cerrar igual, así que ADOPTA ese monto como el que
@@ -792,16 +1529,35 @@ export class PosSessionCloseModalComponent {
 
     this.refreshing.set(true);
 
-    // Revalidar contra el backend ANTES de enviar. El polling puede llegar
-    // hasta 10s tarde; esto cierra la ventana entre el último refresco y el
-    // click.
-    this.cashRegisterService
-      .getCashSummary(this.session()!.id)
+    // Revalidar efectivo y la huella de toda la lista ANTES de enviar. El
+    // polling puede llegar hasta 10s tarde; esto cierra la ventana entre el
+    // último refresco y el click.
+    const seenFingerprint = this.pendingSeenFingerprint();
+    forkJoin({
+      summary: this.cashRegisterService.getCashSummary(this.session()!.id),
+      pending: this.cashRegisterService.getPendingOrders(
+        this.session()!.id,
+        this.pendingPage(),
+      ),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (fresh) => {
+        next: ({ summary: fresh, pending }) => {
           const counted = this.countedAgainst();
           this.applySummary(fresh);
+          this.applyPendingOrders(pending);
+
+          if (
+            seenFingerprint === null ||
+            pending.fingerprint !== seenFingerprint ||
+            this.pendingChanged()
+          ) {
+            this.refreshing.set(false);
+            this.toastService.warning(
+              'Las órdenes pendientes cambiaron. Revisa la lista actual y vuelve a cerrar.',
+            );
+            return;
+          }
 
           // `counted == null` significa que el resumen nunca cargó, así que el
           // operario jamás vio un esperado: no hay nada "rancio", pero tampoco
@@ -829,18 +1585,54 @@ export class PosSessionCloseModalComponent {
             return;
           }
 
-          this.submitClose(counted);
+          if (pending.count > 0) {
+            this.refreshing.set(false);
+            this.pendingCloseWarning.set({
+              count: pending.count,
+              expectedSeen: counted,
+              fingerprint: pending.fingerprint,
+            });
+            return;
+          }
+
+          const pendingDecision: CashSessionCloseDecision = {
+            pending_decision: 'resolved',
+            pending_fingerprint: pending.fingerprint,
+          };
+          this.submitClose(counted, pendingDecision);
         },
         // Nunca enviamos a ciegas: si no podemos confirmar el esperado, no hay
         // cierre.
         error: (err) => {
           this.refreshing.set(false);
-          this.toastService.error(extractApiErrorMessage(err));
+          this.toastService.error(cashCloseErrorMessage(err, 'No pudimos actualizar el efectivo y las órdenes pendientes.'));
         },
       });
   }
 
-  private submitClose(expectedSeen: number): void {
+  onPendingWarningOpenChange(open: boolean): void {
+    if (!open) this.pendingCloseWarning.set(null);
+  }
+
+  cancelPendingClose(): void {
+    this.pendingCloseWarning.set(null);
+  }
+
+  confirmPendingClose(): void {
+    const warning = this.pendingCloseWarning();
+    if (!warning || this.submitting()) return;
+    this.pendingCloseWarning.set(null);
+    this.submitClose(warning.expectedSeen, {
+      pending_decision: 'override',
+      pending_fingerprint: warning.fingerprint,
+      override_reason: 'Cierre confirmado por el usuario desde el aviso de órdenes pendientes.',
+    });
+  }
+
+  private submitClose(
+    expectedSeen: number,
+    pendingDecision: CashSessionCloseDecision,
+  ): void {
     this.submitting.set(true);
 
     const { actual_closing_amount, closing_notes } = this.form.value;
@@ -848,9 +1640,10 @@ export class PosSessionCloseModalComponent {
     this.cashRegisterService
       .closeSession(
         this.session()!.id,
-        actual_closing_amount,
+        Number(actual_closing_amount),
         closing_notes,
         expectedSeen,
+        pendingDecision,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -873,7 +1666,7 @@ export class PosSessionCloseModalComponent {
     this.submitting.set(false);
     this.refreshing.set(false);
 
-    const { code, message } = extractApiError(err);
+    const { code } = extractApiError(err);
 
     // El backend rechazó el cierre porque su cálculo fresco ya no coincide con
     // el esperado que declaramos. El modal NO se cierra: se muestra el banner
@@ -896,16 +1689,28 @@ export class PosSessionCloseModalComponent {
 
       // Traer el desglose completo (ventas por método, entradas, salidas) que
       // el envelope del 409 no incluye.
-      this.loadSummary();
+      this.refreshCloseState();
 
-      this.toastService.warning(
-        message ??
-          'El efectivo esperado cambió mientras contabas. Revisa el resumen actualizado antes de cerrar.',
-      );
+      this.toastService.warning(cashCloseErrorMessage(
+        err,
+        'El efectivo esperado cambió mientras contabas. Revisa el resumen actualizado antes de cerrar.',
+      ));
       return;
     }
 
-    this.toastService.error(extractApiErrorMessage(err));
+    if (
+      code?.includes('PENDING') ||
+      this.httpStatus(err) === 409
+    ) {
+      this.refreshCloseState();
+      this.toastService.warning(cashCloseErrorMessage(
+        err,
+        'Las órdenes o el efectivo cambiaron. Revisa la información actualizada antes de cerrar.',
+      ));
+      return;
+    }
+
+    this.toastService.error(cashCloseErrorMessage(err, 'No se pudo cerrar la caja. Inténtalo de nuevo.'));
   }
 
   /** Carga (o reintenta) el reporte consolidado de la sesión recién cerrada. */

@@ -12,6 +12,9 @@ import { RouteFlowController } from './route-flow/route-flow.controller';
 import { CashSettlementService } from './route-flow/cash-settlement.service';
 import { PdfExportService } from './route-flow/pdf-export.service';
 import { RouteSheetScannerService } from './route-flow/route-sheet-scanner.service';
+import { RouteTrackingService } from './tracking/route-tracking.service';
+import { RouteTrackingSseService } from './tracking/route-tracking-sse.service';
+import { RouteTrackingController } from './tracking/route-tracking.controller';
 import { RouteNumberGenerator } from './utils/route-number-generator';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -42,6 +45,7 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     DispatchRoutesController,
     VehiclesController,
     RouteFlowController,
+    RouteTrackingController,
   ],
   providers: [
     DispatchRoutesService,
@@ -51,8 +55,15 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     PdfExportService,
     RouteSheetScannerService,
     RouteNumberGenerator,
+    RouteTrackingService,
+    RouteTrackingSseService,
   ],
-  exports: [DispatchRoutesService, VehiclesService, RouteFlowService],
+  exports: [
+    DispatchRoutesService,
+    VehiclesService,
+    RouteFlowService,
+    RouteTrackingService,
+  ],
 })
 export class DispatchRoutesModule implements OnModuleInit {
   constructor(

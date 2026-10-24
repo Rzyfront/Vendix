@@ -1,5 +1,10 @@
 /* You can add global styles to this file, and also import other style files */
 
+/* `sass:meta` para cargar parciales EN SU POSICIÓN (load-css al final del
+   archivo), en vez de `@import` deprecado o `@use` que los emitiría antes del
+   preflight de Tailwind. */
+@use 'sass:meta';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -2150,3 +2155,9 @@ html:has(body > .waybox-modal:not([hidden])) body {
   overflow: auto !important;
   height: auto !important;
 }
+
+/* ── Vendix AI Style ──
+   Va al final a propósito: debe quedar después de `@tailwind base` (el preflight
+   resetea el fondo de <button>) y de las utilidades. Ver
+   src/styles/vendix-ai-style.scss y skills/vendix-ai-style/SKILL.md. */
+@include meta.load-css('styles/vendix-ai-style');

@@ -82,6 +82,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { findLinesAwaitingKitchenDelivery } from '../kitchen-fire/kitchen-superseded-rows.util';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import {
@@ -2265,6 +2266,114 @@ export class PaymentsService {
               ]
             : [];
 
+        // La venta, sus pagos y los movimientos de caja comparten la misma
+        // transacción. El lock de sesión serializa este write con el cierre:
+        // si el cierre gana, esta transacción ve la sesión cerrada y falla;
+        // si el pago gana, el movimiento queda visible antes del cierre.
+        const cashRegisterSettings = (settings as any)?.pos?.cash_register;
+        const successfulLegPayments: any[] =
+          payment?.leg_payments?.length > 0
+            ? payment.leg_payments
+            : payment
+              ? [payment]
+              : [];
+        if (
+          !createPosPaymentDto.is_draft &&
+          cashRegisterSettings?.enabled &&
+          order?.id
+        ) {
+          const movementLegs: Array<{
+            payment: any;
+            paymentMethod: string;
+          }> = [];
+
+          for (const paymentLeg of successfulLegPayments) {
+            if (
+              (paymentLeg?.state ?? paymentLeg?.status) !== 'succeeded' ||
+              Number(paymentLeg?.amount ?? 0) <= 0
+            ) {
+              continue;
+            }
+            const methodId =
+              paymentLeg.store_payment_method_id ??
+              createPosPaymentDto.store_payment_method_id;
+            const method = methodId
+              ? await tx.store_payment_methods.findFirst({
+                  where: { id: methodId, store_id: order.store_id },
+                  include: {
+                    system_payment_method: {
+                      select: { type: true, processing_mode: true },
+                    },
+                  },
+                })
+              : null;
+            const methodType = method?.system_payment_method?.type;
+            const processingMode =
+              method?.system_payment_method?.processing_mode;
+            // La contra entrega la recauda el repartidor; wallet/Wompi
+            // quedan en la pasarela. Mantiene la política del helper previo.
+            if (
+              processingMode === 'ON_DELIVERY' ||
+              methodType === 'cash_on_delivery' ||
+              methodType === 'wompi' ||
+              methodType === 'wallet'
+            ) {
+              continue;
+            }
+            movementLegs.push({
+              payment: paymentLeg,
+              paymentMethod: methodType || 'cash',
+            });
+          }
+
+          if (movementLegs.length > 0) {
+            const session = await tx.cash_register_sessions.findFirst({
+              where: {
+                store_id: order.store_id,
+                opened_by: user.id,
+                status: 'open',
+              },
+              select: { id: true },
+            });
+            if (session) {
+              const lockedSessions = await tx.$queryRaw<Array<{ id: number }>>`
+                SELECT id
+                FROM cash_register_sessions
+                WHERE id = ${session.id}
+                  AND store_id = ${order.store_id}
+                  AND status = 'open'
+                FOR UPDATE
+              `;
+              if (lockedSessions.length === 0) {
+                throw new VendixHttpException(
+                  ErrorCodes.CASH_SESSION_REQUIRED_001,
+                  'La caja ya no está abierta para registrar el pago.',
+                );
+              }
+
+              for (const { payment: paymentLeg, paymentMethod } of movementLegs) {
+                await tx.cash_register_movements.create({
+                  data: {
+                    session_id: session.id,
+                    store_id: order.store_id,
+                    user_id: user.id,
+                    type: 'sale',
+                    amount: Number(paymentLeg.amount),
+                    payment_method: paymentMethod,
+                    order_id: order.id,
+                    payment_id: paymentLeg.id ?? null,
+                  },
+                });
+              }
+            } else {
+              throw new VendixHttpException(
+                ErrorCodes.CASH_SESSION_REQUIRED_001,
+                'No hay una caja abierta para registrar el pago.',
+              );
+            }
+          }
+        }
+
         // Plan KDS fire-flows (B5): refresh the in-memory `order`
         // so the response carries the post-payments state (e.g.
         // `processing` when the auto-fire created a kitchen
@@ -2655,38 +2764,7 @@ export class PaymentsService {
         };
       }
 
-      // Record cash register movement AFTER transaction commit (non-critical)
       if (result.success) {
-        // Multimétodo: un movimiento por tramo, cada uno contra su propio
-        // método. Escalar/digital/crédito: una sola llamada idéntica a la de
-        // hoy (el override del método cae al escalar del DTO).
-        const cashTargets =
-          result._leg_payments?.length > 0
-            ? result._leg_payments
-            : [result.payment];
-        for (const cashTarget of cashTargets) {
-          this.recordCashRegisterMovement(
-            {
-              ...createPosPaymentDto,
-              store_payment_method_id:
-                (
-                  cashTarget as
-                    | { store_payment_method_id?: number }
-                    | undefined
-                )?.store_payment_method_id ??
-                createPosPaymentDto.store_payment_method_id,
-            },
-            result.order,
-            cashTarget,
-            user,
-          ).catch((err) => {
-            this.logger.error(
-              `Failed to record cash register movement: ${err.message}`,
-              err.stack,
-            );
-          });
-        }
-
         // Create order installments for credit sales
         if (!createPosPaymentDto.requires_payment && result.order?.id) {
           this.createOrderInstallments(createPosPaymentDto, result.order).catch(
@@ -5631,12 +5709,13 @@ export class PaymentsService {
     // end up with two orders (the session's draft + the POS payment
     // order) and the cashier would have to reconcile them by hand.
     if (dto.table_session_id != null) {
-      return await this.applyPosPaymentToTableSession(
+      const tableResult = await this.applyPosPaymentToTableSession(
         tx,
         dto,
         user,
         dtoStoreId,
       );
+      return { ...tableResult, created: false };
     }
 
     // QUI-535: the restaurant POS now sends `table_id` instead of a
@@ -5669,7 +5748,11 @@ export class PaymentsService {
         user,
         dtoStoreId,
       );
-      return { ...paid, previousTableStatus: resolvedSession.previousTableStatus };
+      return {
+        ...paid,
+        previousTableStatus: resolvedSession.previousTableStatus,
+        created: false,
+      };
     }
 
     // An adopted POS cart already has an order. Claim that row inside the
@@ -6031,6 +6114,29 @@ export class PaymentsService {
           orderData.customer_id = null;
         }
 
+        // Fijar el origen sólo para una orden nueva de POS. La fila de sesión
+        // queda bloqueada hasta el commit, de modo que el cierre no pueda
+        // adelantarse entre la captura del origen y la creación de la orden.
+        // Los borradores de mesa retornan arriba; los carritos adoptados no
+        // reciben este campo y conservan su origen existente (o null).
+        let originCashSessionId: number | null = null;
+        if (!existingOrder && Number.isSafeInteger(user?.id)) {
+          const lockedSessions = await tx.$queryRaw<Array<{ id: number }>>`
+            SELECT id
+            FROM cash_register_sessions
+            WHERE store_id = ${dtoStoreId}
+              AND opened_by = ${user.id}
+              AND status = 'open'
+            ORDER BY opened_at DESC, id DESC
+            LIMIT 1
+            FOR UPDATE
+          `;
+          originCashSessionId = lockedSessions[0]?.id ?? null;
+          if (originCashSessionId != null) {
+            orderData.origin_cash_session_id = originCashSessionId;
+          }
+        }
+
         // Adopted carts persist their item edits through the orders endpoint.
         // Keep those item ids (and their dependent tax/inventory rows); only
         // refresh the header from this checkout and reuse the existing id.
@@ -6183,6 +6289,9 @@ export class PaymentsService {
 
         return {
           order,
+          // Internal discriminator for transaction callers; never part of
+          // the public POS response. Table close-outs return false above.
+          created: !existingOrder,
           // QUI-431 — se propaga al caller para reutilizar la detección de
           // serializados en el gate de inventario y la máquina de estados.
           hasSerialized: await this.orderHasSerializedItems(
@@ -6805,9 +6914,9 @@ export class PaymentsService {
    * For POS without payment (credit sale): stays in 'created'
    */
   /**
-   * F2-guard helper — true when the order still has kitchen items the cook
-   * has not handed off (`kitchen_ticket_items.status NOT IN
-   * ('delivered','cancelled')`). Mirrors `OrderFlowService.hasPendingKitchenItems`
+   * F2-guard helper — true when the LATEST kitchen row of some non-cancelled
+   * line is not `delivered`/`cancelled` (QUI-892: older rows superseded by a
+   * resend do not count). Mirrors `OrderFlowService.hasPendingKitchenItems`
    * but runs on the payment `$transaction` client so it sees uncommitted
    * writes from this same POS payment. Scope-safe: `kitchen_ticket_items` is
    * auto-scoped through `kitchen_ticket.store_id` in StorePrismaService, and
@@ -6817,13 +6926,7 @@ export class PaymentsService {
     tx: any,
     orderId: number,
   ): Promise<boolean> {
-    const pendingCount = await tx.kitchen_ticket_items.count({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-    });
-    return pendingCount > 0;
+    return (await findLinesAwaitingKitchenDelivery(tx, orderId)).length > 0;
   }
 
   private async updateOrderPaymentStatus(
@@ -7191,121 +7294,6 @@ export class PaymentsService {
     );
   }
 
-  /**
-   * Record a cash register movement when the feature is enabled.
-   * Silently skips if feature is disabled or no active session exists.
-   */
-  private async recordCashRegisterMovement(
-    dto: CreatePosPaymentDto,
-    order: any,
-    payment: any,
-    user: any,
-  ) {
-    try {
-      // store_id is guaranteed by processPosPayment which copies it from
-      // RequestContext before any downstream call. Re-assert here so the
-      // cash-register movement is never recorded against a null store.
-      if (dto.store_id == null) {
-        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
-      }
-      const dtoStoreId: number = dto.store_id;
-
-      const settings = await this.settingsService.getSettings();
-      const cr_settings = (settings as any)?.pos?.cash_register;
-      this.logger.debug(
-        `[CashRegister] cr_settings.enabled=${cr_settings?.enabled}`,
-      );
-      if (!cr_settings?.enabled) return;
-
-      // Find active session for this user
-      const session = await this.sessionsService.getActiveSession(user.id);
-      this.logger.debug(
-        `[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`,
-      );
-      if (!session) {
-        this.logger.error(
-          `[CashRegister] No open session for user ${user.id}; sale movement NOT recorded (gate should have blocked)`,
-        );
-        return;
-      }
-
-      const order_id = order?.id;
-      const payment_id = payment?.id;
-      const amount = Number(payment?.amount || order?.total_amount || 0);
-      this.logger.debug(
-        `[CashRegister] order_id=${order_id}, payment_id=${payment_id}, amount=${amount}`,
-      );
-      if (!order_id || amount <= 0) return;
-
-      // Paso 7 (Fase 2): una promesa de cobro no es dinero en caja — el
-      // cajero nunca lo tuvo. Solo los pagos `succeeded` directos escriben
-      // `sale`. La proyección post-commit expone el estado como `status`
-      // (`p.state ?? p.status`); las filas crudas lo traen como `state`.
-      const paymentState = payment?.state ?? payment?.status;
-      if (paymentState !== 'succeeded') {
-        this.logger.debug(
-          `[CashRegister] Skipping movement for payment ${payment_id ?? 'unknown'} (order ${order_id}): state is '${paymentState ?? 'unknown'}', not 'succeeded'`,
-        );
-        return;
-      }
-
-      // Resolve the actual system payment method type (cash, card, etc.)
-      // payment.payment_method contains the display_name, not the system type
-      let payment_method = 'cash';
-      if (dto.store_payment_method_id) {
-        const method = await this.prisma.store_payment_methods.findFirst({
-          where: { id: dto.store_payment_method_id },
-          include: {
-            system_payment_method: {
-              select: { type: true, processing_mode: true },
-            },
-          },
-        });
-        // Contra entrega: el efectivo entra en la calle, no en ESTA caja. Con
-        // `track_non_cash_payments` activo el movimiento se registraba igual
-        // (el tipo no es 'cash', pero ese ajuste lo dejaba pasar) e inflaba el
-        // esperado del cierre de caja con dinero que el cajero nunca tuvo.
-        if (this.isOnDeliveryMethod(dto.store_payment_method_id, method)) {
-          this.logger.debug(
-            `[CashRegister] Skipping ON_DELIVERY movement (order ${order_id}): the courier collects it on the route`,
-          );
-          return;
-        }
-        payment_method = method?.system_payment_method?.type || 'cash';
-      }
-
-      // Paso 7 (Fase 2): Wompi/wallet quedan fuera de caja por decisión del
-      // dueño — el dinero vive en la pasarela, sin cajero que lo cuadre.
-      // Aplica aunque el pago ya esté `succeeded` (p. ej. débito wallet
-      // multimétodo liquidado en banda).
-      if (payment_method === 'wompi' || payment_method === 'wallet') {
-        this.logger.debug(
-          `[CashRegister] Skipping ${payment_method} movement (order ${order_id}): la pasarela queda fuera de caja`,
-        );
-        return;
-      }
-
-      // Todo método se registra (el arqueo esperado sigue contando solo efectivo).
-
-      await this.movementsService.recordSaleMovement(session.id, {
-        store_id: dtoStoreId,
-        user_id: user.id,
-        amount,
-        payment_method,
-        order_id,
-        payment_id,
-      });
-      this.logger.log(
-        `[CashRegister] Sale movement recorded for session ${session.id}, order ${order_id}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `[CashRegister] Error recording movement: ${error.message}`,
-        error.stack,
-      );
-    }
-  }
-
   // --------------------------------------------------------------------
   // C3 — staff-confirmed payment helper
   // --------------------------------------------------------------------
@@ -7331,8 +7319,8 @@ export class PaymentsService {
    * This helper does NOT:
    *   - close the order (the order lifecycle is owned by callers).
    *   - close the table session (the session lifecycle is owned by callers).
-   *   - write to `cash_register_movements` (run AFTER commit by the caller
-   *     using `recordCashRegisterMovement`, mirroring the POS fresh-sale flow).
+   *   - write to `cash_register_movements`; callers that confirm payments
+   *     must coordinate that movement with their own transaction boundary.
    *
    * It is intentionally `public` so future cross-module consumers (e.g.
    * `TableSessionsService.confirmPayment`) can call it without re-implementing

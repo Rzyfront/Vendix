@@ -456,23 +456,6 @@ export class ThemeService {
       this.applyMonocromoScale();
     }
 
-    if (normalized !== 'monocromo') {
-      const finalPrimary =
-        this.asHex(getComputedStyle(root).getPropertyValue('--color-primary')) ||
-        basePrimary;
-      // El secundario necesita su propio contraste: con un primario claro el
-      // texto "on-primary" sale oscuro y quedaba ilegible sobre el secundario
-      // oscuro (botones "Finalizar"/"Cancelar" negro sobre negro).
-      const finalSecondary =
-        this.asHex(getComputedStyle(root).getPropertyValue('--color-secondary'));
-      this.setCssVariables({
-        '--color-text-on-primary': ColorUtils.pickForeground(finalPrimary),
-        ...(finalSecondary
-          ? { '--color-text-on-secondary': ColorUtils.pickForeground(finalSecondary) }
-          : {}),
-      });
-    }
-
     root.setAttribute('data-theme-preset', normalized);
   }
 

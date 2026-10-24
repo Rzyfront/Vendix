@@ -612,7 +612,7 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/dispatch-notes',
         },
         {
-          label: 'Planillas de Ruta',
+          label: 'Rutas',
           icon: 'truck',
           route: '/admin/orders/planillas',
         },
@@ -927,6 +927,15 @@ export class StoreAdminLayoutComponent {
           icon: 'clipboard-list',
           route: '/admin/fiscal',
           requiredFiscalScope: 'STORE',
+        },
+        {
+          label: 'Activar facturación electrónica',
+          icon: 'zap',
+          route: '/admin/invoicing/activation',
+          // Same panel_ui key as "Facturación" (explicit key, not label-joined).
+          panelUiKey: 'invoicing',
+          requiredFiscalScope: 'STORE',
+          hiddenWhenFiscalAreaActive: 'invoicing',
         },
         {
           label: 'Facturación',

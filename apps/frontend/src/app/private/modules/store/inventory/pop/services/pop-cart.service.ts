@@ -789,184 +789,210 @@ export class PopCartService {
    * Process add to cart
    */
   private processAddToCart(request: AddToPopCartRequest): PopCartState {
+    return this.processAddManyToCart([request]);
+  }
+
+  /**
+   * Agrega N solicitudes con UNA sola construcción de estado: mismo orden y
+   * misma fusión de duplicados que N llamadas sucesivas a `addToCart`, pero un
+   * único `calculateSummary` (antes cada fila recalculaba sobre todo el
+   * carrito: O(N²) con 10.000 filas).
+   *
+   * Orden: cada línea nueva entra al FRENTE, así que la última solicitud queda
+   * primera. Una línea que fusiona con una existente se actualiza en su lugar.
+   */
+  private processAddManyToCart(requests: AddToPopCartRequest[]): PopCartState {
     const currentState = this.currentState;
+    // Líneas nuevas en orden de llegada (se invierten al final) y la base
+    // original, copiada sólo si alguna solicitud fusiona con una existente.
+    const added: PopCartItem[] = [];
+    let base = currentState.items;
+    let baseCopied = false;
 
-    // For pre-bulk items, always add as new (no duplicate check)
-    if (request.is_prebulk) {
-      const newItem: PopCartItem = {
-        id: this.generateItemId(),
-        product: request.product,
-        quantity: request.quantity,
-        unit_cost: request.unit_cost,
-        // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
-        // descuento; el alta manual sigue en 0. La normalización
-        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount, 2),
-        // Paridad escáner: el MONTO viaja crudo. No pasa por
-        // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
-        // 0..100 con hasta 2 decimales; aplicarlo a pesos truncaría la cifra de la factura.
-        discount_amount: request.discount_amount,
-        // IVA cycle (F1/F3): defaults sembrados salvo override del request
-        // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
-        // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
-        // silencioso: queda null y la línea pide confirmar el impuesto.
-        tax_rate: request.tax_rate ?? null,
-        tax_needs_review:
-          !!request.tax_needs_review ||
-          this.needsTaxReview(request.tax_rate, request.taxes),
-        tax_type: request.tax_type ?? 'iva',
-        prices_include_tax: request.prices_include_tax,
-        taxes: request.taxes,
-        subtotal: 0,
-        tax_amount: 0,
-        total: 0,
-        lot_info: request.lot_info,
-        notes: request.notes,
-        is_prebulk: true,
-        prebulk_data: request.prebulk_data,
-        // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
-        purchase_uom_id: request.purchase_uom_id ?? null,
-        stock_uom_id: request.stock_uom_id ?? null,
-        addedAt: new Date(),
-      };
-      this.recalculateItemTotals(
-        newItem,
-        currentState.prices_include_tax,
-        currentState.has_vat,
-      );
-      const updatedItems = [newItem, ...currentState.items];
-      return {
-        ...currentState,
-        items: updatedItems,
-        summary: this.calculateSummary(updatedItems),
-        updatedAt: new Date(),
-      };
-    }
+    for (const request of requests) {
+      // Pre-bulk: siempre línea nueva (sin chequeo de duplicados).
+      if (request.is_prebulk) {
+        added.push(this.buildCartItem(request, currentState));
+        continue;
+      }
 
-    // For regular products, check if already in cart (same product + same variant)
-    const existingItemIndex = currentState.items.findIndex(
-      (item) =>
+      // Productos regulares: mismo producto + misma variante ya en el carrito.
+      const matches = (item: PopCartItem) =>
         item.product.id === request.product.id &&
         !item.is_prebulk &&
-        (item.variant?.id ?? null) === (request.variant?.id ?? null),
-    );
+        (item.variant?.id ?? null) === (request.variant?.id ?? null);
 
-    let updatedItems: PopCartItem[];
-
-    if (existingItemIndex >= 0) {
-      // Update existing item
-      const existingItem = currentState.items[existingItemIndex];
-      const newQuantity = existingItem.quantity + request.quantity;
-
-      // QUI-661 + escáner de facturas (Fase 4): un re-escaneo, o una factura que
-      // repite el mismo producto en dos renglones, TRAE discount / unit_cost /
-      // tax_rate / tax_type / prices_include_tax en el request. Si los ignoramos
-      // se acumulan cantidad sin reescribir el descuento ni la tasa — la línea
-      // termina sin el descuento comercial que la factura aplicó, y el IVA se
-      // calcula contra la tasa equivocada.
-      //
-      // Criterio: el ÚLTIMO escaneo gana. Es lo que el operador acaba de
-      // revisar y aprobar en el modal, y es coherente con el comportamiento del
-      // POS cuando un mismo producto pasa dos veces por la caja: el precio más
-      // reciente pisa al anterior. Si una factura trae dos renglones con
-      // precios distintos, este criterio acepta la última lectura como verdad.
-      updatedItems = [...currentState.items];
-      updatedItems[existingItemIndex] = {
-        ...existingItem,
-        quantity: newQuantity,
-        unit_cost: request.unit_cost ?? existingItem.unit_cost,
-        // CP-ORC-POP-MODAL-DISCOUNT-001: el ÚLTIMO escaneo gana, pero pasa
-        // por el normalizador para que un payload con NaN/Infinity no
-        // pise el descuento de la línea con un 0 silencioso.
-        discount:
-          request.discount !== undefined
-            ? this.normalizeDiscount(request.discount, 2)
-            : existingItem.discount,
-        // Paridad escáner: el descuento en DINERO sigue exactamente el mismo
-        // patrón que `discount` / `unit_cost` / `tax_rate`. Sin esta línea el
-        // `...existingItem` de arriba conservaba el monto del escaneo ANTERIOR
-        // mientras la cantidad sí se actualizaba — la línea quedaba con el
-        // descuento de un renglón y la cantidad de dos.
-        discount_amount:
-          request.discount_amount !== undefined
-            ? request.discount_amount
-            : existingItem.discount_amount,
-        tax_rate: request.tax_rate ?? existingItem.tax_rate,
-        // La revisión sólo sigue pendiente si ni el request ni la línea
-        // previa traían una tasa.
-        tax_needs_review: request.tax_needs_review
-          ? true
-          : request.tax_rate != null || (request.taxes?.length ?? 0) > 0
-            ? false
-            : existingItem.tax_needs_review,
-        tax_type: request.tax_type ?? existingItem.tax_type,
-        prices_include_tax:
-          request.prices_include_tax !== undefined
-            ? request.prices_include_tax
-            : existingItem.prices_include_tax,
-        // QUI-855: último escaneo gana también para multi-impuesto.
-        taxes: request.taxes !== undefined ? request.taxes : existingItem.taxes,
-        lot_info: request.lot_info || existingItem.lot_info,
-        notes: request.notes || existingItem.notes,
-        contentPerPackage:
-          request.contentPerPackage ?? existingItem.contentPerPackage,
-      };
-      this.recalculateItemTotals(
-        updatedItems[existingItemIndex],
-        currentState.prices_include_tax,
-        currentState.has_vat,
-      );
-    } else {
-      // Add new item
-      const newItem: PopCartItem = {
-        id: this.generateItemId(),
-        product: request.product,
-        variant: request.variant,
-        quantity: request.quantity,
-        unit_cost: request.unit_cost,
-        // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
-        // descuento; el alta manual sigue en 0. La normalización
-        // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
-        discount: this.normalizeDiscount(request.discount, 2),
-        // Paridad escáner: el MONTO en pesos viaja crudo (ver rama prebulk).
-        discount_amount: request.discount_amount,
-        // IVA cycle (F1/F3): defaults salvo override del request (escáner).
-        // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
-        // silencioso: queda null y la línea pide confirmar el impuesto.
-        tax_rate: request.tax_rate ?? null,
-        tax_needs_review:
-          !!request.tax_needs_review ||
-          this.needsTaxReview(request.tax_rate, request.taxes),
-        tax_type: request.tax_type ?? 'iva',
-        prices_include_tax: request.prices_include_tax,
-        taxes: request.taxes,
-        subtotal: 0,
-        tax_amount: 0,
-        total: 0,
-        lot_info: request.lot_info,
-        notes: request.notes,
-        is_prebulk: false,
-        // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
-        purchase_uom_id: request.purchase_uom_id ?? null,
-        stock_uom_id: request.stock_uom_id ?? null,
-        // Contenido por envase (factor manual count→masa/volumen) — flujo configure.
-        contentPerPackage: request.contentPerPackage,
-        addedAt: new Date(),
-      };
-      this.recalculateItemTotals(
-        newItem,
-        currentState.prices_include_tax,
-        currentState.has_vat,
-      );
-      updatedItems = [newItem, ...currentState.items];
+      // Lo más reciente primero, como en el carrito resultante.
+      let addedIndex = -1;
+      for (let i = added.length - 1; i >= 0; i--) {
+        if (matches(added[i])) {
+          addedIndex = i;
+          break;
+        }
+      }
+      if (addedIndex >= 0) {
+        added[addedIndex] = this.mergeIntoExistingItem(
+          added[addedIndex],
+          request,
+          currentState,
+        );
+        continue;
+      }
+      const baseIndex = base.findIndex(matches);
+      if (baseIndex >= 0) {
+        if (!baseCopied) {
+          base = [...base];
+          baseCopied = true;
+        }
+        base[baseIndex] = this.mergeIntoExistingItem(
+          base[baseIndex],
+          request,
+          currentState,
+        );
+        continue;
+      }
+      added.push(this.buildCartItem(request, currentState));
     }
 
+    const updatedItems = [...added.reverse(), ...base];
     return {
       ...currentState,
       items: updatedItems,
       summary: this.calculateSummary(updatedItems),
       updatedAt: new Date(),
     };
+  }
+
+  /**
+   * Alta masiva de líneas NUEVAS (importación): un solo `set` del carrito y un
+   * solo `calculateSummary`. Equivale a llamar `addToCart` por cada solicitud.
+   */
+  addPrebulkItems(requests: AddToPopCartRequest[]): Observable<PopCartState> {
+    if (requests.length === 0) return of(this.currentState);
+    this._loading.set(true);
+
+    return of(requests).pipe(
+      map((reqs) => this.processAddManyToCart(reqs)),
+      tap((newState) => {
+        this._cartState.set(newState);
+        this._loading.set(false);
+      }),
+      catchError((error) => {
+        this._loading.set(false);
+        return throwError(() => error);
+      }),
+    );
+  }
+
+  /** Construye una línea NUEVA del carrito (prebulk o producto regular). */
+  private buildCartItem(
+    request: AddToPopCartRequest,
+    currentState: PopCartState,
+  ): PopCartItem {
+    const isPrebulk = !!request.is_prebulk;
+    const newItem: PopCartItem = {
+      id: this.generateItemId(),
+      product: request.product,
+      ...(isPrebulk ? {} : { variant: request.variant }),
+      quantity: request.quantity,
+      unit_cost: request.unit_cost,
+      // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
+      // descuento; el alta manual sigue en 0. La normalización
+      // (porcentaje 0..100 con hasta 2 decimales, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+      discount: this.normalizeDiscount(request.discount, 2),
+      // Paridad escáner: el MONTO viaja crudo. No pasa por
+      // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
+      // 0..100 con hasta 2 decimales; aplicarlo a pesos truncaría la cifra de la factura.
+      discount_amount: request.discount_amount,
+      // IVA cycle (F1/F3): defaults sembrados salvo override del request
+      // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
+      // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
+      // silencioso: queda null y la línea pide confirmar el impuesto.
+      tax_rate: request.tax_rate ?? null,
+      tax_needs_review:
+        !!request.tax_needs_review ||
+        this.needsTaxReview(request.tax_rate, request.taxes),
+      tax_type: request.tax_type ?? 'iva',
+      prices_include_tax: request.prices_include_tax,
+      taxes: request.taxes,
+      subtotal: 0,
+      tax_amount: 0,
+      total: 0,
+      lot_info: request.lot_info,
+      notes: request.notes,
+      is_prebulk: isPrebulk,
+      ...(isPrebulk ? { prebulk_data: request.prebulk_data } : {}),
+      // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
+      purchase_uom_id: request.purchase_uom_id ?? null,
+      stock_uom_id: request.stock_uom_id ?? null,
+      // Contenido por envase (factor manual count→masa/volumen) — flujo configure.
+      ...(isPrebulk ? {} : { contentPerPackage: request.contentPerPackage }),
+      addedAt: new Date(),
+    };
+    this.recalculateItemTotals(
+      newItem,
+      currentState.prices_include_tax,
+      currentState.has_vat,
+    );
+    return newItem;
+  }
+
+  /**
+   * Fusiona una solicitud con una línea existente (mismo producto + variante).
+   *
+   * QUI-661 + escáner de facturas (Fase 4): un re-escaneo, o una factura que
+   * repite el mismo producto en dos renglones, TRAE discount / unit_cost /
+   * tax_rate / tax_type / prices_include_tax en el request. Criterio: el
+   * ÚLTIMO escaneo gana (lo que el operador acaba de revisar y aprobar).
+   */
+  private mergeIntoExistingItem(
+    existingItem: PopCartItem,
+    request: AddToPopCartRequest,
+    currentState: PopCartState,
+  ): PopCartItem {
+    const merged: PopCartItem = {
+      ...existingItem,
+      quantity: existingItem.quantity + request.quantity,
+      unit_cost: request.unit_cost ?? existingItem.unit_cost,
+      // CP-ORC-POP-MODAL-DISCOUNT-001: el ÚLTIMO escaneo gana, pero pasa
+      // por el normalizador para que un payload con NaN/Infinity no
+      // pise el descuento de la línea con un 0 silencioso.
+      discount:
+        request.discount !== undefined
+          ? this.normalizeDiscount(request.discount, 2)
+          : existingItem.discount,
+      // Paridad escáner: el descuento en DINERO sigue el mismo patrón que
+      // `discount` / `unit_cost` / `tax_rate`.
+      discount_amount:
+        request.discount_amount !== undefined
+          ? request.discount_amount
+          : existingItem.discount_amount,
+      tax_rate: request.tax_rate ?? existingItem.tax_rate,
+      // La revisión sólo sigue pendiente si ni el request ni la línea
+      // previa traían una tasa.
+      tax_needs_review: request.tax_needs_review
+        ? true
+        : request.tax_rate != null || (request.taxes?.length ?? 0) > 0
+          ? false
+          : existingItem.tax_needs_review,
+      tax_type: request.tax_type ?? existingItem.tax_type,
+      prices_include_tax:
+        request.prices_include_tax !== undefined
+          ? request.prices_include_tax
+          : existingItem.prices_include_tax,
+      // QUI-855: último escaneo gana también para multi-impuesto.
+      taxes: request.taxes !== undefined ? request.taxes : existingItem.taxes,
+      lot_info: request.lot_info || existingItem.lot_info,
+      notes: request.notes || existingItem.notes,
+      contentPerPackage:
+        request.contentPerPackage ?? existingItem.contentPerPackage,
+    };
+    this.recalculateItemTotals(
+      merged,
+      currentState.prices_include_tax,
+      currentState.has_vat,
+    );
+    return merged;
   }
 
   /**

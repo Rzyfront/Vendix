@@ -688,6 +688,7 @@ export class AdjustmentCreateModalComponent {
       expiration: 'EXPIRED',
       count_variance: 'INV_COUNT',
       manual_correction: 'OTHER',
+      initial_load: 'INITIAL_LOAD',
     };
     return map[type] || '';
   }
@@ -700,6 +701,7 @@ export class AdjustmentCreateModalComponent {
       expiration: 'Vencido',
       count_variance: 'Conteo',
       manual_correction: 'Correccion',
+      initial_load: 'Carga inicial',
     };
     return labels[type] || type;
   }

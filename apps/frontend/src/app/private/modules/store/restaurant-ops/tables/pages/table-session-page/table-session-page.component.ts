@@ -206,6 +206,18 @@ export class TableSessionPageComponent implements OnInit {
   readonly removingItemId = signal<number | null>(null);
   /** Order-item id whose note is currently being updated. */
   readonly updatingNoteItemId = signal<number | null>(null);
+  /** QUI-898 — borrador local de las notas de la mesa (null = sin editar). */
+  readonly informalNotesDraft = signal<string | null>(null);
+  readonly isSavingInformalNotes = signal(false);
+  readonly informalNotesMaxLength = 2000;
+  readonly informalNotesText = computed(
+    () => this.informalNotesDraft() ?? this.session()?.informal_notes ?? '',
+  );
+  readonly informalNotesDirty = computed(
+    () =>
+      this.informalNotesText().trim() !==
+      (this.session()?.informal_notes ?? '').trim(),
+  );
   /**
    * D.4 — objetivo del modal compartido "Destino del plato" (solo preparados;
    * el resto conserva el flujo confirm+prompt). `null` = modal cerrado.
@@ -1325,6 +1337,39 @@ export class TableSessionPageComponent implements OnInit {
               );
             },
           });
+      });
+  }
+
+  onInformalNotesInput(event: Event): void {
+    this.informalNotesDraft.set((event.target as HTMLTextAreaElement).value);
+  }
+
+  /** QUI-898 — guarda las notas informales de la mesa. */
+  saveInformalNotes(): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isClosed() || this.isSavingInformalNotes()) return;
+    if (!this.informalNotesDirty()) return;
+
+    const trimmed = this.informalNotesText().trim();
+    this.isSavingInformalNotes.set(true);
+    this.tablesService
+      .updateInformalNotes(sessionId, trimmed || null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (s) => {
+          this.isSavingInformalNotes.set(false);
+          this.session.set(s);
+          this.informalNotesDraft.set(null);
+          this.toastService.success(
+            trimmed ? 'Notas de la mesa guardadas' : 'Notas de la mesa eliminadas',
+          );
+        },
+        error: (err: unknown) => {
+          this.isSavingInformalNotes.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al guardar las notas de la mesa',
+          );
+        },
       });
   }
 

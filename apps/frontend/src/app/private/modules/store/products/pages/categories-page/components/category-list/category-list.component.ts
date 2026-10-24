@@ -60,6 +60,7 @@ export class CategoryListComponent {
   readonly delete = output<ProductCategory>();
   readonly toggleState = output<ProductCategory>();
   readonly toggleFeatured = output<ProductCategory>();
+  readonly manageProducts = output<ProductCategory>();
   readonly sort = output<{
     column: string;
     direction: 'asc' | 'desc' | null;
@@ -148,6 +149,12 @@ export class CategoryListComponent {
       },
     },
     {
+      key: 'product_count',
+      label: 'Productos',
+      priority: 2,
+      defaultValue: '0',
+    },
+    {
       key: 'state',
       label: 'Estado',
       priority: 1,
@@ -168,6 +175,13 @@ export class CategoryListComponent {
         icon: 'pencil',
         variant: 'info',
         action: (item: ProductCategory) => this.edit.emit(item),
+      });
+      actions.push({
+        label: 'Productos',
+        icon: 'package',
+        variant: 'primary',
+        tooltip: 'Asignar productos a esta categoría',
+        action: (item: ProductCategory) => this.manageProducts.emit(item),
       });
       actions.push({
         label: (item: ProductCategory) =>
@@ -218,6 +232,7 @@ export class CategoryListComponent {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: string) => (val === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
+      { key: 'product_count', label: 'Productos', icon: 'package' },
       {
         key: 'is_featured',
         label: 'Destacada',

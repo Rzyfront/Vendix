@@ -1,6 +1,7 @@
 import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
+import { INVOICE_DRAFT_OCR_APPLICATION } from './invoice-draft-ocr.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -544,7 +545,7 @@ REGLAS:
       // in the same message as the image (handled by the scanner service).
       prompt_template: null,
     },
-        {
+    {
       key: 'rut_scanner',
       ai_feature_category: 'async_queue',
       name: 'Escaner de RUT (Identidad Fiscal)',
@@ -744,6 +745,10 @@ RULES:
       // DianHabilitationScannerService.scanHabilitationDocuments()).
       prompt_template: null,
     },
+    // Escáner IA de borrador de factura de venta (kind `invoice_draft` de la
+    // cola ai-scan). Prompt en su propio archivo; mismo texto en la migración
+    // 20261014050000_invoice_draft_ocr_app.
+    INVOICE_DRAFT_OCR_APPLICATION,
     {
       key: 'route_sheet_ocr',
       ai_feature_category: 'async_queue',
@@ -1607,6 +1612,24 @@ Productos más vendidos (solo para inspirar el copy de products_grid, NO listarl
 
 Genera el JSON de la landing page por defecto siguiendo el esquema exacto del system prompt.`,
     },
+    // Índice semántico del catálogo de herramientas de Vex/Vexi (plataforma,
+    // sin tenant). App separada de product_embeddings por contrato de
+    // KnowledgeEmbeddingService; mismo texto en la migración
+    // 20261020100000_agent_knowledge_embeddings_app.
+    {
+      key: 'agent_knowledge_embeddings',
+      ai_feature_category: 'rag_embeddings',
+      name: 'Embeddings del catálogo de herramientas del agente',
+      description:
+        'Vectoriza las fichas de herramientas y procesos de Vex/Vexi para la carga dinámica de herramientas por búsqueda semántica',
+      output_format: 'embedding',
+      model_type: 'embedding' as ai_model_type_enum,
+      temperature: null,
+      max_tokens: null,
+      is_active: true,
+      system_prompt: null,
+      prompt_template: null,
+    },
   ];
 
   let appsCreated = 0;
@@ -1706,7 +1729,21 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of [
+      'invoice_ocr',
+      'received_document_ocr',
+      'invoice_ocr_ingredient',
+      'invoice_ocr_revalidate',
+      'expense_invoice_ocr',
+      'payment_receipt_ocr',
+      'rut_scanner',
+      'dian_resolution_scanner',
+      'dian_habilitation_scanner',
+      'route_sheet_ocr',
+      'member_roster_ocr',
+      'inventory_count_ocr',
+      'invoice_draft_ocr',
+    ]) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1740,6 +1777,8 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
   ]);
 
   await linkVoiceAppsWhenAvailable(client);
+
+  await linkKnowledgeEmbeddingAppWhenAvailable(client);
 
   await linkTextAppsWhenNoDefault(client, apps);
 
@@ -1795,6 +1834,48 @@ async function linkVoiceAppsWhenAvailable(client: PrismaClient) {
     } catch {
       console.log(`    Could not link ${appKey} to a ${modelType} config`);
     }
+  }
+}
+
+/**
+ * agent_knowledge_embeddings must ride a 1536-d text-embedding-3-small config
+ * (KnowledgeEmbeddingService rejects anything else). Links only when unset.
+ */
+async function linkKnowledgeEmbeddingAppWhenAvailable(client: PrismaClient) {
+  const appKey = 'agent_knowledge_embeddings';
+  try {
+    const app = await client.ai_engine_applications.findUnique({
+      where: { key: appKey },
+      select: { config_id: true },
+    });
+    if (!app) return;
+    if (app.config_id != null) {
+      console.log(`    Skipped link ${appKey} (config_id already set)`);
+      return;
+    }
+    const config = await client.ai_engine_configs.findFirst({
+      where: {
+        model_type: 'embedding',
+        is_active: true,
+        model_id: {
+          in: ['text-embedding-3-small', 'openai/text-embedding-3-small'],
+        },
+      },
+      orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+    });
+    if (!config) {
+      console.log(
+        `    No active text-embedding-3-small config yet — ${appKey} stays unlinked`,
+      );
+      return;
+    }
+    await client.ai_engine_applications.update({
+      where: { key: appKey },
+      data: { config_id: config.id },
+    });
+    console.log(`    Linked ${appKey} → ${config.label} (#${config.id})`);
+  } catch {
+    console.log(`    Could not link ${appKey} to an embedding config`);
   }
 }
 
@@ -1880,9 +1961,25 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'received_document_ocr', 'invoice_ocr_ingredient', 'invoice_ocr_revalidate', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'dian_habilitation_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set([
+      'invoice_ocr',
+      'received_document_ocr',
+      'invoice_ocr_ingredient',
+      'invoice_ocr_revalidate',
+      'expense_invoice_ocr',
+      'payment_receipt_ocr',
+      'rut_scanner',
+      'dian_resolution_scanner',
+      'dian_habilitation_scanner',
+      'route_sheet_ocr',
+      'member_roster_ocr',
+      'inventory_count_ocr',
+      'invoice_draft_ocr',
+    ]);
     const textAppKeys = apps
-      .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
+      .filter(
+        (app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key),
+      )
       .map((app) => app.key);
 
     for (const key of textAppKeys) {

@@ -9,6 +9,7 @@ import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/up
 import { CertificateValidationResult } from '../../../store/invoicing/dian-config/certificates/certificate-issuer.interface';
 import { certificateNitMatches } from '../../../store/invoicing/dian-config/certificates/nit-match.util';
 import { findInheritableCertificate } from '../../../store/invoicing/dian-config/certificates/inheritance.util';
+import { redactDianConfigForHttp } from '../../../store/invoicing/dian-config/dian-config-redaction.util';
 
 /**
  * Organization-level twin of the store DIAN config service.
@@ -39,14 +40,15 @@ export class OrgDianConfigService {
     return context.organization_id;
   }
 
+  /**
+   * Frontera HTTP de la fila `dian_configurations`. Además de enmascarar PIN y
+   * contraseña, la herencia de habilitación no expone el id de la fila fuente
+   * (puede ser de OTRA cuenta): `enablement_inherited_from_id` se sustituye por
+   * `enablement_inherited` y `enablement_evidence.inheritance.from_dian_configuration_id`
+   * se elimina. La columna y la auditoría no se tocan.
+   */
   private maskSensitiveFields(config: any) {
-    return {
-      ...config,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
-    };
+    return redactDianConfigForHttp(config);
   }
 
   private onlyDigits(value?: string | null): string {
@@ -96,6 +98,39 @@ export class OrgDianConfigService {
     }
 
     return this.maskSensitiveFields(config);
+  }
+
+  /**
+   * Guarda multi-tenant de los endpoints que delegan en los servicios de TIENDA
+   * (readiness, rangos, promoción, resultados de pruebas). Esos servicios, bajo
+   * contexto de organización con `fiscal_scope=STORE`, pierden el filtro de
+   * tenant; por eso la delegación solo se permite cuando la organización opera
+   * con configuración DIAN consolidada (`fiscal_scope=ORGANIZATION`).
+   */
+  async assertOrganizationFiscalScope(): Promise<number> {
+    const organization_id = this.requireOrganizationId();
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope !== 'ORGANIZATION') {
+      throw new BadRequestException(
+        'DIAN configuration is managed per store for this organization.',
+      );
+    }
+    return organization_id;
+  }
+
+  /**
+   * Exige scope ORGANIZATION y que la configuración sea propia de la
+   * organización (`organization_id` del contexto y `store_id IS NULL`).
+   * Otra organización o una fila anclada a tienda responden 404.
+   */
+  async assertOrgOwnedConfig(id: number): Promise<void> {
+    await this.assertOrganizationFiscalScope();
+    const config = await this.getConfigById(id);
+    if (config.store_id !== null && config.store_id !== undefined) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
   }
 
   /**

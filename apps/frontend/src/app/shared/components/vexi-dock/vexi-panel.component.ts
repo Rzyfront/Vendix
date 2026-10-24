@@ -17,6 +17,14 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
 import {
+  vexiOutcomeText,
+  vexiTaskExecution,
+} from '../../../core/store/vexi/vexi-execution.utils';
+import {
+  VEXI_RESTART_LABEL,
+  vexiConflictFromNotice,
+} from '../../../core/store/vexi/vexi-user-copy.utils';
+import {
   VexiApiService,
   VexiAttachment,
 } from '../../../core/services/vexi-api.service';
@@ -282,6 +290,21 @@ const SUGGESTIONS: readonly string[] = [
           <!-- Guarded here as well as inside the component: an empty block
                element is still a flex item and would leave a phantom gap in
                the transcript on every turn that used no tools. -->
+          @if (streamingProgress()) {
+            <div
+              role="status"
+              class="text-sm text-[var(--color-text-secondary)]"
+            >
+              {{ streamingProgress() }}
+              <button
+                type="button"
+                class="underline ml-2 min-h-10 px-2"
+                (click)="facade.cancelStream()"
+              >
+                Detener respuesta
+              </button>
+            </div>
+          }
           @if (toolSteps().length) {
             <app-vexi-tool-trace [steps]="toolSteps()" />
           }
@@ -289,6 +312,8 @@ const SUGGESTIONS: readonly string[] = [
           @if (pendingProposal(); as proposal) {
             <app-vexi-confirmation-card
               [proposal]="proposal"
+              [voiceContext]="proposal.voiceContext || consentContext()"
+              (voiceApplied)="facade.acceptVoiceReceipt($event)"
               (approve)="confirmProposal()"
               (reject)="rejectProposal()"
             />
@@ -310,9 +335,7 @@ const SUGGESTIONS: readonly string[] = [
                 <app-vexi-avatar [expression]="'thinking'" />
               </span>
               <div class="vexi-msg vexi-msg--assistant vexi-msg--working">
-                <span
-                  class="vexi-msg--typing"
-                  aria-hidden="true"
+                <span class="vexi-msg--typing" aria-hidden="true"
                   ><span></span><span></span><span></span
                 ></span>
                 <!-- The phrase is what makes a fifteen-second turn tolerable:
@@ -331,6 +354,15 @@ const SUGGESTIONS: readonly string[] = [
                empty-handed and what to try next. -->
           @if (error()) {
             <p class="vexi-panel__notice" role="status">{{ noticeText() }}</p>
+            @if (conversationConflict()) {
+              <button
+                type="button"
+                class="vexi-panel__restart"
+                (click)="newConversation()"
+              >
+                {{ restartLabel }}
+              </button>
+            }
           }
         </div>
       </div>
@@ -404,60 +436,66 @@ const SUGGESTIONS: readonly string[] = [
             [attr.aria-pressed]="voiceRecording()"
             aria-label="Mantén presionado para hablar"
           >
-            <app-icon [name]="voiceRecording() ? 'square' : 'mic'" [size]="26" />
+            <app-icon
+              [name]="voiceRecording() ? 'square' : 'mic'"
+              [size]="26"
+            />
           </button>
           <p class="vexi-voice__hint">{{ voiceHint() }}</p>
         </div>
       } @else {
-      <form class="vexi-panel__composer" (submit)="send($event)">
-        <!-- Un solo input de archivo para las dos vías. El atributo capture no se pone
+        <form class="vexi-panel__composer" (submit)="send($event)">
+          <!-- Un solo input de archivo para las dos vías. El atributo capture no se pone
              aquí: en escritorio convierte el botón en una cámara inexistente y
              el diálogo de archivos deja de abrirse. En móvil el propio selector
              ofrece la cámara, que es el camino que la persona ya conoce. -->
-        <input
-          #filePicker
-          type="file"
-          class="vexi-panel__file-input"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
-          (change)="onFilePicked($event)"
-          aria-hidden="true"
-          tabindex="-1"
-        />
-        <button
-          type="button"
-          class="vexi-panel__attach"
-          [disabled]="isUploading()"
-          (click)="openFilePicker()"
-          aria-label="Adjuntar documento"
-          title="Adjuntar una factura, un recibo o una foto"
-        >
-          <app-icon [name]="isUploading() ? 'loader' : 'paperclip'" [size]="18" />
-        </button>
-        <!-- Never disabled while sending. A disabled input cannot hold focus,
+          <input
+            #filePicker
+            type="file"
+            class="vexi-panel__file-input"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+            (change)="onFilePicked($event)"
+            aria-hidden="true"
+            tabindex="-1"
+          />
+          <button
+            type="button"
+            class="vexi-panel__attach"
+            [disabled]="isUploading()"
+            (click)="openFilePicker()"
+            aria-label="Adjuntar documento"
+            title="Adjuntar una factura, un recibo o una foto"
+          >
+            <app-icon
+              [name]="isUploading() ? 'loader' : 'paperclip'"
+              [size]="18"
+            />
+          </button>
+          <!-- Never disabled while sending. A disabled input cannot hold focus,
              so the browser blurs it the instant the flag flips and nothing
              hands the caret back when it re-enables — the cursor simply left
              the conversation on every message. Staying enabled also lets the
              next question be typed while Vexi is still answering; the send()
              method is what refuses to fire a second turn. -->
-        <input
-          #composer
-          class="vexi-panel__input"
-          name="vexiMessage"
-          autocomplete="off"
-          placeholder="Pregúntale a Vexi…"
-          aria-label="Mensaje para Vexi"
-          [value]="draft()"
-          (input)="onDraftInput($event)"
-        />
-        <button
-          type="submit"
-          class="vexi-panel__send"
-          [disabled]="!canSend()"
-          aria-label="Enviar"
-        >
-          <app-icon name="send" [size]="18" />
-        </button>
-      </form>
+          <input
+            #composer
+            class="vexi-panel__input"
+            name="vexiMessage"
+            autocomplete="off"
+            placeholder="Pregúntale a Vexi…"
+            aria-label="Mensaje para Vexi"
+            [value]="draft()"
+            (input)="onDraftInput($event)"
+          />
+          <button
+            type="submit"
+            class="vexi-panel__send"
+            [disabled]="!canSend()"
+            aria-label="Enviar"
+          >
+            <app-icon name="send" [size]="18" />
+          </button>
+        </form>
       }
 
       <!-- La segunda barra va acá, FUERA del @if que alterna los dos composers
@@ -872,6 +910,18 @@ const SUGGESTIONS: readonly string[] = [
         font-size: 0.8rem;
         color: var(--color-text-secondary, #6b7280);
         font-style: italic;
+      }
+
+      .vexi-panel__restart {
+        align-self: flex-start;
+        margin-top: 4px;
+        padding: 4px 10px;
+        font-size: 0.8rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-border, #e5e7eb);
+        background: transparent;
+        color: var(--color-text-primary, #111827);
+        cursor: pointer;
       }
 
       .vexi-msg--working {
@@ -1308,7 +1358,7 @@ const SUGGESTIONS: readonly string[] = [
   ],
 })
 export class VexiPanelComponent {
-  private readonly facade = inject(VexiFacade);
+  protected readonly facade = inject(VexiFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly scroller =
     viewChild.required<ElementRef<HTMLElement>>('scroller');
@@ -1364,11 +1414,25 @@ export class VexiPanelComponent {
   protected readonly messages = this.facade.messages;
   protected readonly activeConversationId = this.facade.activeConversationId;
   protected readonly streamingContent = this.facade.streamingContent;
+  protected readonly streamingProgress = this.facade.streamingProgress;
   protected readonly isSending = this.facade.isSending;
   protected readonly error = this.facade.error;
   protected readonly toolSteps = this.facade.toolSteps;
   protected readonly pendingProposal = this.facade.pendingProposal;
   protected readonly activeTask = this.facade.activeTask;
+  protected readonly consentContext = computed(() => {
+    const conversation_id = this.activeConversationId();
+    return conversation_id
+      ? {
+          conversation_id,
+          agent_key: 'vexi' as const,
+          channel: 'pipeline' as const,
+          ...(this.facade.objective()?.id
+            ? { objective_id: this.facade.objective()!.id }
+            : {}),
+        }
+      : null;
+  });
 
   protected readonly sidebarOpen = signal(false);
 
@@ -1412,9 +1476,11 @@ export class VexiPanelComponent {
       return this.voice.errorMessage() ?? 'Algo salió mal con el micrófono.';
     }
     if (this.voiceRecording()) return 'Te escucho…';
-    if (this.voice.state() === 'transcribing') return 'Entendiendo lo que dijiste…';
+    if (this.voice.state() === 'transcribing')
+      return 'Entendiendo lo que dijiste…';
     if (this.voiceSpeaking()) return 'Hablando';
     if (this.pendingProposal()) return 'Esperando tu confirmación';
+    if (this.streamingProgress()) return this.streamingProgress();
     if (this.isSending()) return 'Pensando…';
     return 'Mantén presionado el micrófono y habla';
   });
@@ -1461,7 +1527,8 @@ export class VexiPanelComponent {
   });
 
   protected readonly taskIcon = computed(() =>
-    this.taskFailed()
+    this.taskFailed() ||
+    (this.taskIsDone() && vexiTaskExecution(this.activeTask()?.result))
       ? 'alert-circle'
       : this.taskIsDone()
         ? 'check-circle'
@@ -1488,6 +1555,9 @@ export class VexiPanelComponent {
       return `No pude terminar ${goal}. ${task.error ?? ''}`.trim();
     }
     if (this.taskIsDone()) {
+      const execution = vexiTaskExecution(task.result);
+      if (execution)
+        return `Resultado para revisar: ${goal}. ${vexiOutcomeText(execution)}`;
       return `Terminé: ${goal}. Te lo cuento en la campana.`;
     }
     return `Trabajando en segundo plano: ${goal}`;
@@ -1555,13 +1625,26 @@ export class VexiPanelComponent {
    * here is a genuine breakdown — network, session, provider — and those all
    * come down to the same advice.
    */
+  /** A blocked or busy conversation: the notice offers a fresh one. */
+  protected readonly conversationConflict = computed(() =>
+    vexiConflictFromNotice(this.error()),
+  );
+
+  protected readonly restartLabel = VEXI_RESTART_LABEL;
+
   protected readonly noticeText = computed(() => {
+    // Already human copy from the closed catalog; shown as-is.
+    if (this.conversationConflict()) return this.error() ?? '';
     const raw = (this.error() ?? '').toLowerCase();
 
     if (raw.includes('network') || raw.includes('conex')) {
       return 'Se me cayó la conexión a mitad de camino. Vuelve a intentarlo en un momento.';
     }
-    if (raw.includes('401') || raw.includes('unauthor') || raw.includes('sesi')) {
+    if (
+      raw.includes('401') ||
+      raw.includes('unauthor') ||
+      raw.includes('sesi')
+    ) {
       return 'Tu sesión venció. Vuelve a entrar y seguimos donde quedamos.';
     }
     return 'No pude completar eso. Inténtalo otra vez, o dímelo de otra forma y lo busco por otro lado.';
@@ -1584,7 +1667,8 @@ export class VexiPanelComponent {
         id: message.id,
         role: message.role as 'user' | 'assistant',
         text: message.content,
-        html: message.role === 'assistant' ? markdownToHtml(message.content) : '',
+        html:
+          message.role === 'assistant' ? markdownToHtml(message.content) : '',
       })),
   );
 
@@ -1604,6 +1688,7 @@ export class VexiPanelComponent {
   protected readonly statusLine = computed(() => {
     if (this.pendingProposal()) return 'Esperando tu confirmación';
     if (this.streamingContent()) return 'Respondiendo…';
+    if (this.streamingProgress()) return this.streamingProgress();
     if (this.isSending()) return 'Pensando…';
     return 'Tu copiloto de tienda';
   });
@@ -1718,7 +1803,8 @@ export class VexiPanelComponent {
    * number that makes them actionable. Anything else falls back to advice.
    */
   private uploadFailureText(error: unknown): string {
-    const message = (error as { error?: { message?: unknown } })?.error?.message;
+    const message = (error as { error?: { message?: unknown } })?.error
+      ?.message;
 
     return typeof message === 'string' && message.trim()
       ? message

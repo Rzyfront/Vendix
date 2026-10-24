@@ -29,6 +29,8 @@ import {
 } from '@common/utils/search-score.util';
 import { PosSearchPathService } from '../../settings/pos-smart-search/pos-search-path.service';
 import { Prisma } from '@prisma/client';
+import { CostingService } from '../shared/services/costing.service';
+import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
 
 /**
  * D.1 — Set de recall del picker de ajustes: PARIDAD con el OR legacy
@@ -67,6 +69,7 @@ export interface BatchAdjustmentInput {
   batch_id?: number;
   type: string;
   quantity_after: number;
+  unit_cost?: number;
   reason_code?: string;
   description?: string;
 }
@@ -85,6 +88,13 @@ export interface AdjustmentTransactionResult {
   adjustment: InventoryAdjustment;
   quantity_change: number;
   cost_amount: number;
+  adjustment_type: string;
+}
+
+interface AdjustmentCreationOptions {
+  approvedByUserId?: number;
+  /** Solo importadores: una carga inicial obsoleta se convierte en conteo. */
+  initialLoadFallback?: boolean;
 }
 
 export type BatchAdjustmentOutcome =
@@ -156,6 +166,8 @@ export class InventoryAdjustmentsService {
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
     private searchPath: PosSearchPathService,
+    private costingService: CostingService,
+    private costingMethodResolver: CostingMethodResolverService,
   ) {}
 
   /**
@@ -169,7 +181,7 @@ export class InventoryAdjustmentsService {
    */
   async createAdjustment(
     data: CreateAdjustmentDto,
-    options: { approvedByUserId?: number } = {},
+    options: AdjustmentCreationOptions = {},
   ): Promise<InventoryAdjustment> {
     const { organizationId, userId } = this.resolveAdjustmentActor();
 
@@ -231,7 +243,7 @@ export class InventoryAdjustmentsService {
   async createAdjustmentInTransaction(
     prismaTx: any,
     data: CreateAdjustmentDto,
-    options: { approvedByUserId?: number } = {},
+    options: AdjustmentCreationOptions = {},
   ): Promise<AdjustmentTransactionResult> {
     const { organizationId, userId } = this.resolveAdjustmentActor();
 
@@ -256,9 +268,19 @@ export class InventoryAdjustmentsService {
       'expiration',
       'count_variance',
       'manual_correction',
+      'initial_load',
     ];
     if (!validTypes.includes(data.type)) {
       throw new BadRequestException(`Invalid adjustment type: ${data.type}`);
+    }
+
+    // Serializa cargas iniciales concurrentes, incluso si todavía no existe
+    // stock_level. La segunda petición debe observar el saldo ya confirmado.
+    if (data.type === 'initial_load') {
+      await prisma.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `inventory-initial:${organizationId}:${locationId}:${productId}:${variantId ?? 'base'}`,
+      );
     }
 
     let quantityBefore: number;
@@ -287,6 +309,16 @@ export class InventoryAdjustmentsService {
       quantityBefore = batch.quantity - batch.quantity_used;
       quantityChange = quantityAfter - quantityBefore;
 
+      data = {
+        ...data,
+        type: this.resolveInitialLoadType(
+          data.type,
+          quantityBefore,
+          quantityChange,
+          options.initialLoadFallback,
+        ),
+      };
+
       // Actualizar el lote
       const newQuantity = batch.quantity + quantityChange;
       if (newQuantity < batch.quantity_used) {
@@ -313,13 +345,25 @@ export class InventoryAdjustmentsService {
         },
       });
 
-      if (!currentStockLevel) {
+      if (!currentStockLevel && data.type !== 'initial_load') {
         throw new VendixHttpException(ErrorCodes.INV_FIND_001);
       }
 
-      quantityBefore = currentStockLevel.quantity_on_hand;
+      // `initial_load` sobre un producto sin fila de stock en la bodega: la
+      // fila la crea `updateStock` (getOrCreateStockLevel); antes era 0.
+      quantityBefore = currentStockLevel?.quantity_on_hand ?? 0;
       quantityChange = quantityAfter - quantityBefore;
     }
+
+    data = {
+      ...data,
+      type: this.resolveInitialLoadType(
+        data.type,
+        quantityBefore,
+        quantityChange,
+        options.initialLoadFallback,
+      ),
+    };
 
     // 3. Crear registro de ajuste
     const adjustment = await prisma.inventory_adjustments.create({
@@ -353,13 +397,51 @@ export class InventoryAdjustmentsService {
     // movido; y cada ajuste consumía dos conexiones del pool a la vez. Pasarle
     // el handle mete las dos escrituras en el mismo comprobante, que es lo que
     // el código siempre pareció hacer.
+    //
+    // `initial_load` con entrada: se costea como una recepción (capa de costo +
+    // nuevo CPP), con el mismo patrón de `MovementsService`. El `unit_cost` que
+    // recibe `updateStock` es el NUEVO promedio; `movement_unit_cost` es el
+    // costo de esta entrada.
+    let entryCost: number | undefined;
+    let costedUnitCost: number | undefined;
+    const isInitialLoadEntry =
+      data.type === 'initial_load' && quantityChange > 0;
+    if (isInitialLoadEntry) {
+      entryCost = await this.resolveInitialLoadEntryCost(
+        prisma,
+        productId,
+        variantId,
+        data.unit_cost,
+      );
+      const costing_method =
+        await this.costingMethodResolver.resolveCostingMethod(
+          organizationId,
+          RequestContextService.getStoreId() ?? undefined,
+        );
+      const costResult = await this.costingService.calculateCostOnReceipt(
+        {
+          product_id: productId,
+          variant_id: variantId ?? undefined,
+          location_id: locationId,
+          quantity_received: quantityChange,
+          unit_cost: entryCost,
+          costing_method,
+        },
+        prisma,
+      );
+      costedUnitCost = costResult?.new_cost_per_unit ?? entryCost;
+    }
+
     const stockUpdate = await this.stockLevelManager.updateStock(
       {
         product_id: productId,
         variant_id: variantId ?? undefined,
         location_id: locationId,
         quantity_change: quantityChange,
-        movement_type: 'adjustment',
+        movement_type: isInitialLoadEntry ? 'initial' : 'adjustment',
+        ...(isInitialLoadEntry
+          ? { unit_cost: costedUnitCost, movement_unit_cost: entryCost }
+          : {}),
         reason: `Adjustment: ${data.type}${batchId ? ` (Batch ID: ${batchId})` : ''} - ${data.description || 'No description'}`,
         user_id: userId || undefined,
         create_movement: true,
@@ -372,8 +454,60 @@ export class InventoryAdjustmentsService {
     return {
       adjustment: this.mapAdjustmentResponse(adjustment),
       quantity_change: quantityChange,
-      cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
+      cost_amount: isInitialLoadEntry
+        ? quantityChange * (entryCost ?? 0)
+        : Number(stockUpdate.cost_snapshot?.total_cost || 0),
+      adjustment_type: data.type,
     };
+  }
+
+  private resolveInitialLoadType(
+    type: AdjustmentType,
+    quantityBefore: number,
+    quantityChange: number,
+    allowFallback = false,
+  ): AdjustmentType {
+    if (
+      type === 'initial_load' &&
+      (quantityBefore !== 0 || quantityChange <= 0)
+    ) {
+      if (allowFallback) return 'count_variance';
+      throw new BadRequestException(
+        'Carga inicial solo permitida con cantidad actual 0 y una entrada positiva; usa diferencia de conteo para modificar existencias.',
+      );
+    }
+    return type;
+  }
+
+  /**
+   * Costo de entrada de una carga inicial:
+   * `unit_cost` explícito → costo de la variante → costo del producto → 0.
+   */
+  private async resolveInitialLoadEntryCost(
+    prisma: any,
+    productId: number,
+    variantId: number | null,
+    explicit?: number,
+  ): Promise<number> {
+    if (explicit != null && Number.isFinite(Number(explicit))) {
+      return Number(explicit);
+    }
+    let variantCost: unknown = null;
+    if (variantId) {
+      const variant = await prisma.product_variants.findFirst({
+        where: { id: variantId },
+        select: { cost_price: true },
+      });
+      variantCost = variant?.cost_price ?? null;
+    }
+    if (variantCost != null && Number(variantCost) > 0) {
+      return Number(variantCost);
+    }
+    const product = await prisma.products.findFirst({
+      where: { id: productId },
+      select: { cost_price: true },
+    });
+    return Number(product?.cost_price ?? 0);
   }
 
   /**
@@ -405,6 +539,7 @@ export class InventoryAdjustmentsService {
           adjustment_id: result.adjustment.id,
           organization_id: organizationId,
           store_id: result.adjustment.inventory_locations?.store_id,
+          adjustment_type: result.adjustment_type,
           quantity_change: result.quantity_change,
           cost_amount,
           user_id: userId,
@@ -461,6 +596,7 @@ export class InventoryAdjustmentsService {
         batch_id: item.batch_id,
         type: item.type as AdjustmentType,
         quantity_after: item.quantity_after,
+        unit_cost: item.unit_cost,
         reason_code: item.reason_code,
         description: item.description,
       });
@@ -489,8 +625,13 @@ export class InventoryAdjustmentsService {
     }
     return settled
       .filter(
-        (entry): entry is { index: number; ok: true; adjustment: InventoryAdjustment } =>
-          entry.ok,
+        (
+          entry,
+        ): entry is {
+          index: number;
+          ok: true;
+          adjustment: InventoryAdjustment;
+        } => entry.ok,
       )
       .map((entry) => entry.adjustment);
   }
@@ -507,6 +648,7 @@ export class InventoryAdjustmentsService {
   async batchCreateAndCompleteSettled(
     locationId: number,
     items: BatchAdjustmentInput[],
+    options: { initialLoadFallback?: boolean } = {},
   ): Promise<BatchAdjustmentOutcome[]> {
     const userIdRaw = RequestContextService.getUserId();
     const userId = userIdRaw ? Number(userIdRaw) : null;
@@ -523,10 +665,16 @@ export class InventoryAdjustmentsService {
             batch_id: item.batch_id,
             type: item.type as AdjustmentType,
             quantity_after: item.quantity_after,
+            unit_cost: item.unit_cost,
             reason_code: item.reason_code,
             description: item.description,
           },
-          { approvedByUserId: userId ?? undefined },
+          {
+            approvedByUserId: userId ?? undefined,
+            ...(options.initialLoadFallback
+              ? { initialLoadFallback: true }
+              : {}),
+          },
         );
         outcomes.push({ index, ok: true, adjustment });
       } catch (error) {

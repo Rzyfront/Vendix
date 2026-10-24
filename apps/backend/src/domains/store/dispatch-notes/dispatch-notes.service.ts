@@ -106,6 +106,8 @@ const DISPATCH_NOTE_INCLUDE = {
       id: true,
       order_number: true,
       state: true,
+      shipping_tax_amount: true,
+      shipping_tax_name: true,
     },
   },
   invoice: {
@@ -2902,7 +2904,7 @@ export class DispatchNotesService {
           attempts++;
           if (attempts >= 3) {
             throw new ConflictException(
-              'No se pudo generar un número de planilla único',
+              'No se pudo generar un número de ruta único',
             );
           }
           continue;

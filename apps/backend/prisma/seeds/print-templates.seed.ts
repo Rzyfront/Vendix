@@ -6,7 +6,7 @@ export interface PrintFormatDefinitionSeed {
     format: 'thermal_80' | 'thermal_58' | 'a4' | 'letter' | 'half_letter';
     width_mm: number;
     is_roll: boolean;
-    margin_mm: number;
+    margin_mm?: number;
     copies: number;
     orientation?: 'portrait' | 'landscape';
   };
@@ -709,6 +709,32 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
         { id: 'col_rate', key: 'rate', label: 'Tarifa %', enabled: true, width_percent: 15, align: 'center', format: 'percent' },
         { id: 'col_base', key: 'base_amount', label: 'Base', enabled: true, width_percent: 25, align: 'right', format: 'currency' },
       ],
+    },
+  },
+  {
+    format_type: 'cash_session_close',
+    name: 'Cierre de Caja Térmico (80mm)',
+    description: 'Reporte de cierre de caja para rollo térmico: resumen, medios de pago, movimientos y diferencia',
+    definition: {
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        copies: 1,
+      },
+      styles: {
+        font_family: 'Arial, Helvetica, sans-serif',
+        font_size_base_pt: 8.5,
+        primary_color: '#000000',
+        header_alignment: 'center',
+        compact_mode: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado de la Tienda', enabled: true, order: 1 },
+        { id: 'sec_cash_report', type: 'cash_session_report', title: 'Cierre de Caja', enabled: true, order: 2 },
+        { id: 'sec_footer', type: 'footer', title: 'Pie del Reporte', enabled: true, order: 3 },
+      ],
+      columns: [],
     },
   },
 ];

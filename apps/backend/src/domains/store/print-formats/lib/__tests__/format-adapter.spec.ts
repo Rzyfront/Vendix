@@ -22,14 +22,14 @@ import { ALL_ADAPTERS } from '../adapters';
 import { defaultPaperFor } from '../default-paper';
 
 describe('FormatAdapter (P7 — adapter contract)', () => {
-  it('1. exposes exactly 16 adapter records (one per print_format_type_enum value)', () => {
-    expect(ALL_ADAPTERS).toHaveLength(16);
+  it('1. exposes exactly 17 adapter records (one per print_format_type_enum value)', () => {
+    expect(ALL_ADAPTERS).toHaveLength(17);
     // Sanity: every enum value should be accounted for, and only for
     // those enum values. The registry's Map size matches by construction.
     const adapterFormatTypes = new Set(
       ALL_ADAPTERS.map((a) => a.formatType),
     );
-    expect(adapterFormatTypes.size).toBe(16);
+    expect(adapterFormatTypes.size).toBe(17);
     for (const t of PRINT_FORMAT_TYPES) {
       expect(adapterFormatTypes.has(t)).toBe(true);
     }

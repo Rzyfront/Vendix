@@ -210,3 +210,14 @@ export class UpdateOrderItemNotesDto {
   @MaxLength(200)
   notes?: string;
 }
+
+/**
+ * QUI-898 — DTO para las notas informales de la sesión de mesa (texto libre).
+ * Vacío o null limpia la nota.
+ */
+export class UpdateTableSessionInformalNotesDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  informal_notes?: string | null;
+}

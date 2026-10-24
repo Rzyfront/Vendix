@@ -16,6 +16,10 @@ describe('defaultPaperFor (P7 — paper fallback)', () => {
     expect(defaultPaperFor('dispatch_ticket')).toBe('thermal_80');
   });
 
+  it('1a-bis. thermal_80 default — cash_session_close', () => {
+    expect(defaultPaperFor('cash_session_close')).toBe('thermal_80');
+  });
+
   it('1b. a4 default — dispatch_note', () => {
     expect(defaultPaperFor('dispatch_note')).toBe('a4');
   });

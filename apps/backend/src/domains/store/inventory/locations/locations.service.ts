@@ -245,6 +245,7 @@ export class LocationsService {
         is_active: true,
         type: 'warehouse', // Priorizar warehouses
       },
+      orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
     });
 
     // Si no hay warehouse, buscar cualquier ubicación del store
@@ -254,6 +255,7 @@ export class LocationsService {
           store_id: storeId,
           is_active: true,
         },
+        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
       });
     }
 
@@ -272,6 +274,7 @@ export class LocationsService {
             is_active: true,
             type: 'warehouse',
           },
+          orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
         });
 
         // Si no hay warehouse, buscar cualquier ubicación de la organización
@@ -282,6 +285,7 @@ export class LocationsService {
               store_id: null,
               is_active: true,
             },
+            orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
           });
         }
       }

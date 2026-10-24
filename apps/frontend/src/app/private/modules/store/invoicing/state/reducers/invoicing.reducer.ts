@@ -279,9 +279,9 @@ export const invoicingReducer = createReducer(
     ),
   })),
 
-  on(InvoicingActions.deleteResolutionSuccess, (state, { id }) => ({
+  on(InvoicingActions.setResolutionsIncludeArchived, (state, { include_archived }) => ({
     ...state,
-    resolutions: state.resolutions.filter((r) => r.id !== id),
+    resolutionsIncludeArchived: include_archived,
   })),
 
   // ── DIAN Configs ────────────────────────────────────────

@@ -329,13 +329,21 @@ export class FiscalStatusService {
       satisfied.add('legal_data');
     }
 
-    // dian_config: requires an uploaded certificate that is still valid (not
-    // expired). `has_certificate` is derived from `certificate_s3_key`.
+    // dian_config: el estado REAL de habilitación es la única fuente de verdad.
+    // El paso solo cuenta como satisfecho cuando la config de factura de venta
+    // tiene certificado vigente (no vencido; `has_certificate` deriva de
+    // `certificate_s3_key`) Y ya está en producción y habilitada
+    // (`environment === 'production'` y `enablement_status === 'enabled'`).
+    // Así `fiscal_status.invoicing.state` solo puede pasar a ACTIVE cuando el
+    // estado real de `dian_configurations` lo respalda; el asistente fiscal ya
+    // no es una segunda fuente de verdad.
     if (
       sources.dian_config &&
       sources.dian_config.has_certificate &&
       sources.dian_config.certificate_expiry &&
-      new Date(sources.dian_config.certificate_expiry).getTime() > Date.now()
+      new Date(sources.dian_config.certificate_expiry).getTime() > Date.now() &&
+      sources.dian_config.environment === 'production' &&
+      sources.dian_config.enablement_status === 'enabled'
     ) {
       satisfied.add('dian_config');
     }
@@ -561,8 +569,11 @@ export class FiscalStatusService {
     organization_id: number,
     store_id: number | null,
   ): Promise<FiscalWizardPrefill['dian_config']> {
-    const config = await client.dian_configurations.findFirst({
-      where: this.tenantWhere(organization_id, store_id),
+    // Lee primero la config de FACTURA DE VENTA (`invoicing`); si no hay,
+    // cae a la consulta previa (cualquier tipo) por compatibilidad.
+    const tenant_where = this.tenantWhere(organization_id, store_id);
+    const query_args = {
+      where: tenant_where,
       orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
       select: {
         id: true,
@@ -587,7 +598,12 @@ export class FiscalStatusService {
         // `20260813140000_dian_config_inherited_from`).
         inherited_from_dian_configuration_id: true,
       },
-    });
+    };
+    const config =
+      (await client.dian_configurations.findFirst({
+        ...query_args,
+        where: { ...tenant_where, configuration_type: 'invoicing' },
+      })) ?? (await client.dian_configurations.findFirst(query_args));
     if (!config) return null;
 
     // QUI-679 review fix #5: el banner "este cert viene de tu habilitación

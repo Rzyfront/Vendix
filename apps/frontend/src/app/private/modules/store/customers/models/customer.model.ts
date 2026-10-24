@@ -33,6 +33,13 @@ export interface Customer {
     state?: 'active' | 'inactive';
     /** Dirección de envío primaria (backend la incluye solo en `findOne`). */
     addresses?: CustomerAddress[];
+    /**
+     * Dirección de FACTURACIÓN (`addresses.type = 'billing'`), la que declara
+     * la factura electrónica del adquiriente. Opcional y retrocompatible:
+     * `GET /store/customers`, `/:id` y `/lookup` la incluyen cuando existe;
+     * `null`/ausente ⇒ quien factura cae a `addresses[0]` (envío).
+     */
+    billing_address?: CustomerAddress | null;
 }
 
 /** Subset de `addresses` que devuelve `GET /store/customers/:id`. */

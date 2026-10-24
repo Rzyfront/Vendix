@@ -1,4 +1,5 @@
 import type { SubscriptionFiscalEnvironment } from '../../subscriptions/interfaces/fiscal-billing.interface';
+import type { SelectorOption } from '../../../../../shared/components';
 
 /**
  * Vocabulario compartido por las 4 pestañas de Facturación de plataforma.
@@ -51,6 +52,8 @@ export const TRANSMISSION_STATUS_OPTIONS = [
 export const RESOLUTION_DOCUMENT_TYPE_OPTIONS = [
   { value: 'sales_invoice', label: 'Factura electrónica' },
   { value: 'support_document', label: 'Documento soporte' },
+  { value: 'credit_note', label: 'Nota crédito' },
+  { value: 'debit_note', label: 'Nota débito' },
 ];
 
 // ── Validadores ────────────────────────────────────────────────────────────
@@ -113,9 +116,160 @@ export function transmissionStatusBadgeClasses(status?: string | null): string {
   return 'bg-warning-light text-warning border-warning';
 }
 
+// ── Adquiriente: documento, persona y régimen ──────────────────────────────
+
+export const DOCUMENT_TYPE_OPTIONS: SelectorOption[] = [
+  { value: '31', label: 'NIT (Número de Identificación Tributaria)' },
+  { value: '13', label: 'Cédula de Ciudadanía (CC)' },
+  { value: '22', label: 'Cédula de Extranjería (CE)' },
+  { value: '41', label: 'Pasaporte' },
+];
+
+export const PERSON_TYPE_OPTIONS: SelectorOption[] = [
+  { value: '1', label: 'Persona Jurídica' },
+  { value: '2', label: 'Persona Natural' },
+];
+
+export const TAX_REGIME_OPTIONS: SelectorOption[] = [
+  { value: '48', label: 'Responsable de IVA (Régimen Común)' },
+  { value: '49', label: 'No Responsable de IVA (Régimen Simplificado)' },
+];
+
+/** Etiqueta corta del tipo de documento DIAN ('31' → 'NIT'). */
+export function documentTypeLabel(code?: string | number | null): string {
+  switch (code == null ? '' : String(code)) {
+    case '31':
+      return 'NIT';
+    case '13':
+      return 'Cédula de ciudadanía';
+    case '22':
+      return 'Cédula de extranjería';
+    case '41':
+      return 'Pasaporte';
+    case '':
+      return '—';
+    default:
+      return String(code);
+  }
+}
+
+/** '1' → Persona jurídica, '2' → Persona natural. */
+export function personTypeLabel(code?: string | number | null): string {
+  switch (code == null ? '' : String(code)) {
+    case '1':
+      return 'Persona jurídica';
+    case '2':
+      return 'Persona natural';
+    case '':
+      return '—';
+    default:
+      return String(code);
+  }
+}
+
+/** '48' → Responsable de IVA, '49' → No responsable de IVA. */
+export function taxRegimeLabel(code?: string | number | null): string {
+  switch (code == null ? '' : String(code)) {
+    case '48':
+      return 'Responsable de IVA';
+    case '49':
+      return 'No responsable de IVA';
+    case '':
+      return '—';
+    default:
+      return String(code);
+  }
+}
+
+// ── Cobro (cartera) de la factura ──────────────────────────────────────────
+
+export const COLLECTION_STATUS_OPTIONS = [
+  { value: '', label: 'Todos los cobros' },
+  { value: 'overdue', label: 'Vencidas' },
+  { value: 'pending', label: 'Pendientes' },
+  { value: 'partial', label: 'Parciales' },
+  { value: 'paid', label: 'Pagadas' },
+];
+
+export function collectionStatusLabel(status?: string | null): string {
+  switch (status) {
+    case 'paid':
+      return 'Pagada';
+    case 'partial':
+      return 'Parcial';
+    case 'pending':
+      return 'Pendiente';
+    case 'overdue':
+      return 'Vencida';
+    default:
+      return '—';
+  }
+}
+
+/** Mapa de tono para las columnas con `badge` del listado. */
+export const COLLECTION_STATUS_COLOR_MAP: Record<string, string> = {
+  paid: 'success',
+  partial: 'warning',
+  pending: 'secondary',
+  overdue: 'error',
+};
+
+export function collectionStatusBadgeClasses(status?: string | null): string {
+  if (status === 'paid') return 'bg-success-light text-success border-success';
+  if (status === 'overdue') return 'bg-error-light text-error border-error';
+  if (status === 'partial') {
+    return 'bg-warning-light text-warning border-warning';
+  }
+  return 'bg-surface text-text-secondary border-border';
+}
+
+// ── Pagos registrados ──────────────────────────────────────────────────────
+
+export const PAYMENT_METHOD_OPTIONS: SelectorOption[] = [
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'bank_transfer', label: 'Transferencia' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'other', label: 'Otro' },
+];
+
+export function paymentMethodLabel(method?: string | null): string {
+  switch (method) {
+    case 'cash':
+      return 'Efectivo';
+    case 'bank_transfer':
+      return 'Transferencia';
+    case 'card':
+      return 'Tarjeta';
+    case 'other':
+      return 'Otro';
+    default:
+      return method ?? '—';
+  }
+}
+
+export function paymentMethodBadgeClasses(_method?: string | null): string {
+  // Un solo acento: el medio de pago no lleva color propio.
+  return 'bg-surface text-text-secondary border-border';
+}
+
+// ── Fechas date-only ───────────────────────────────────────────────────────
+
+/**
+ * 'YYYY-MM-DD' (o ISO que empieza así) → 'DD/MM/YYYY' SIN pasar por `Date`:
+ * construir un `Date` desde una fecha sin hora la interpreta en UTC o local
+ * según el motor y corre el día en zonas con offset negativo.
+ */
+export function formatDateOnly(value?: string | null): string {
+  if (!value) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : value;
+}
+
 export function resolutionDocTypeLabel(type: string): string {
   if (type === 'sales_invoice') return 'Factura';
   if (type === 'support_document') return 'Doc. soporte';
+  if (type === 'credit_note') return 'Nota crédito';
+  if (type === 'debit_note') return 'Nota débito';
   return type;
 }
 
@@ -179,6 +333,8 @@ export function evidenceTypeLabel(type?: string | null): string {
       return 'Código QR';
     case 'dian_response':
       return 'Respuesta DIAN';
+    case 'payment_receipt':
+      return 'Recibo de pago';
     default:
       return type ?? '—';
   }

@@ -10,8 +10,13 @@ import {
   Query,
   Req,
   Res,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
+import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -47,8 +52,19 @@ import {
   CreatePlatformSupportDocumentDto,
 } from './dto/subscription-fiscal.dto';
 import { PlatformInvoicingService } from './platform-invoicing.service';
-import { PlatformTenantsService } from './platform-tenants.service';
+import { PlatformTenantsService, TenantKind } from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+import { ExternalIdentityLookupService } from '../../../store/customers/external-identity/external-identity-lookup.service';
+import { ExternalCustomerLookupDto } from '../../../store/customers/dto/external-customer-lookup.dto';
+import { InvoiceDraftScannerService } from '../../../store/invoicing/invoice-draft-scan/invoice-draft-scanner.service';
+import { ScanInvoiceDraftDto } from '../../../store/invoicing/invoice-draft-scan/dto/scan-invoice-draft.dto';
+import {
+  enqueueInvoiceDraftScan,
+  INVOICE_DRAFT_SCAN_UPLOAD_MAX_COUNT,
+  INVOICE_DRAFT_SCAN_UPLOAD_OPTIONS,
+} from '../../../store/invoicing/invoice-draft-scan/invoice-draft-scan-files.util';
+
+const TENANT_KINDS: readonly TenantKind[] = ['store', 'organization', 'user', 'customer'];
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.2 + B.3
@@ -65,7 +81,9 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
  *   - GET   /invoices/:id/emit-readiness         (FB-06)
  *   - POST  /transmissions/:id/retry             (FB-09)
  *   - GET   /resolutions-for-emission            (FB-05)
- *   - GET   /customers/search?q=&kind=           (FB-03)
+ *   - POST  /sales-invoices/scan-draft/async     (escáner IA de borrador)
+ *   - GET   /customers/search?q=&kind=           (FB-03; kind customer = platform_customers)
+ *   - GET   /customers/lookup/external           (RUES/SECOP/RNT)
  *   - GET   /customers/:kind/:id                 (FB-04)
  *   - GET   /invoices/:id/aiu-settings           (FB-14)
  *   - POST  /invoices/:id/exchange-rate          (FB-10)
@@ -77,8 +95,8 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 class SearchTenantsQueryDto {
   @IsOptional()
-  @IsIn(['store', 'organization', 'user'])
-  kind?: 'store' | 'organization' | 'user';
+  @IsIn(['store', 'organization', 'user', 'customer'])
+  kind?: TenantKind;
 
   @IsOptional()
   @IsString()
@@ -124,6 +142,10 @@ class ListPlatformInvoicesQueryDto {
   q?: string;
 
   @IsOptional()
+  @IsIn(['overdue', 'pending', 'partial', 'paid'])
+  collection_status?: 'overdue' | 'pending' | 'partial' | 'paid';
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -151,6 +173,9 @@ export class PlatformInvoicingController {
     private readonly delivery: PlatformDeliveryService,
     private readonly dianEvents: PlatformDianEventsService,
     private readonly invoicePdf: PlatformInvoicePdfService,
+    private readonly externalIdentityLookup: ExternalIdentityLookupService,
+    private readonly invoiceDraftScanner: InvoiceDraftScannerService,
+    private readonly aiScanJobs: AiScanJobService,
   ) {}
 
   /**
@@ -192,6 +217,7 @@ export class PlatformInvoicingController {
       status: query.status ?? null,
       documentType: query.document_type ?? null,
       q: query.q ?? null,
+      collectionStatus: query.collection_status ?? null,
       page: query.page ?? 1,
       limit: query.limit ?? 25,
     });
@@ -257,6 +283,42 @@ export class PlatformInvoicingController {
       dto,
     });
     return this.responseService.created(data, this.emissionMessage(data));
+  }
+
+  /**
+   * Escáner IA de borrador de factura del riel plataforma (vendedor: Vendix).
+   * Reutiliza el kind `invoice_draft` de la cola `ai-scan` con
+   * `params.context = 'platform'`: moneda COP, líneas libres (sin catálogo) y
+   * `acquirer.existing_acquirer` contra tenants + `platform_customers`. Solo
+   * encola (202 `{ job_id }`); el resultado se consulta en
+   * `GET ai-scan-jobs/:jobId`. Sin AiAccessGuard ni ModuleFlowGuard: no hay
+   * tienda ni suscripción que gatear; el handler exige super-admin sin tienda.
+   */
+  @Post('sales-invoices/scan-draft/async')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @UseInterceptors(
+    FilesInterceptor(
+      'files',
+      INVOICE_DRAFT_SCAN_UPLOAD_MAX_COUNT,
+      INVOICE_DRAFT_SCAN_UPLOAD_OPTIONS,
+    ),
+  )
+  @ApiOperation({
+    summary:
+      'Encolar escaneo IA de borrador de factura de plataforma; poll GET /ai-scan-jobs/:jobId',
+  })
+  async scanSalesInvoiceDraftAsync(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() dto: ScanInvoiceDraftDto,
+  ): Promise<any> {
+    const { job_id } = await enqueueInvoiceDraftScan(
+      { scanner: this.invoiceDraftScanner, aiScanJobs: this.aiScanJobs },
+      files,
+      dto?.note,
+      'platform',
+    );
+    return this.responseService.success({ job_id }, 'Escaneo encolado');
   }
 
   /**
@@ -392,6 +454,27 @@ export class PlatformInvoicingController {
   }
 
   /**
+   * Consulta en vivo a fuentes públicas (RUES, SECOP II, SECOP Integrado, RNT)
+   * para precargar un adquiriente externo. Misma lógica y misma respuesta que
+   * `GET store/customers/lookup/external` (delegada en
+   * `ExternalIdentityLookupService`, sin copia). Lectura pura; nunca 5xx por
+   * caída de la fuente (`unavailable: true`).
+   *
+   * Declarada ANTES de `customers/:kind/:id`: Express resuelve por orden de
+   * registro y `lookup/external` encajaría como `:kind/:id`.
+   */
+  @Get('customers/lookup/external')
+  @Permissions('superadmin:fiscal:invoicing')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Consultar identidad pública (RUES/SECOP/RNT) de un adquiriente externo',
+  })
+  async lookupExternalCustomer(@Query() query: ExternalCustomerLookupDto): Promise<any> {
+    const result = await this.externalIdentityLookup.lookup(query.document_number);
+    return this.responseService.success(result);
+  }
+
+  /**
    * Lookup directo de un tenant por id + kind.
    */
   @Get('customers/:kind/:id')
@@ -400,9 +483,16 @@ export class PlatformInvoicingController {
     summary: 'Detalle fiscal de un tenant del rail plataforma',
   })
   async getTenantByKindAndId(
-    @Param('kind') kind: 'store' | 'organization',
+    @Param('kind') kind: TenantKind,
     @Param('id', ParseIntPipe) id: number,
   ): Promise<any> {
+    // Un kind desconocido caía a la rama `organization` del servicio.
+    if (!TENANT_KINDS.includes(kind)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_TENANT_NOT_FOUND,
+        `Tipo de destinatario desconocido: ${kind}`,
+      );
+    }
     const prisma = this.platformInvoicing['prisma'];
     const identity = await this.resolvePlatformIdentity();
     const data = await this.tenants.getTenantByKindAndId(prisma, {

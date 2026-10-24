@@ -70,7 +70,9 @@ interface PaymentFailedEventPayload {
  * 409 from the controller and were stuck.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
-  draft: ['pending_payment', 'trial', 'active', 'no_plan'],
+  // QUI-677: the RNC-40 cleanup cron (SubscriptionDraftCleanupJob) cancels
+  // abandoned drafts, so `draft -> cancelled` must be legal.
+  draft: ['pending_payment', 'trial', 'active', 'no_plan', 'cancelled'],
   // Recovery checkouts initiated from grace/suspended store the prior state
   // in `pending_revert_state`. cancelPendingChange uses that field to roll
   // back, so pending_payment must be able to transition back to those
@@ -199,6 +201,11 @@ export interface EnsureOperationalContext {
    * top of it.
    */
   periodEnd?: Date;
+  /**
+   * Ancla explícita del inicio del período; solo se usa junto con `periodEnd`
+   * al reconstruir la ventana. Sin ella el inicio es "ahora".
+   */
+  periodStart?: Date;
   /**
    * Plan whose `billing_cycle` governs the derived period length. Purely a
    * READ: `ensureOperational` never mutates `plan_id` / `paid_plan_id` —
@@ -1184,7 +1191,8 @@ export class SubscriptionStateService {
         requestedPeriodEnd: ctx.periodEnd,
       });
 
-      data.current_period_start = now;
+      data.current_period_start =
+        ctx.periodEnd && ctx.periodStart ? ctx.periodStart : now;
       data.current_period_end = window.periodEnd;
       data.next_billing_at = window.periodEnd;
 

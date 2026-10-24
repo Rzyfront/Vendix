@@ -1,4 +1,5 @@
 import type { tax_type_enum } from '@prisma/client';
+import type { DocumentEmailWarning } from './document-email-reception.interface';
 
 export type ReceivedDocumentType =
   | 'invoice'
@@ -10,6 +11,62 @@ export type ReceivedDocumentPaymentCondition = 'cash' | 'credit' | 'unknown';
 export type StructuralValidationStatus = 'pending' | 'valid' | 'needs_review' | 'invalid';
 export type SignatureValidationStatus = 'unsigned' | 'not_verified';
 export type DianValidationStatus = 'not_checked';
+
+export interface ReceivedDocumentXmlUuid {
+  value: string | null;
+  scheme_id: string | null;
+  scheme_name: string | null;
+}
+
+/** Raw fiscal attributes for channel-specific preflight; no authenticity is established. */
+export interface ReceivedDocumentFiscalMetadata {
+  root: string;
+  profile_execution_id: string | null;
+  document_type_code: string | null;
+  uuid: ReceivedDocumentXmlUuid;
+  receiver_company_id: {
+    value: string | null;
+    scheme_name: string | null;
+    scheme_id: string | null;
+  };
+  container?: {
+    profile_execution_id: string | null;
+    uuid: ReceivedDocumentXmlUuid;
+  };
+}
+
+export interface DetailedReceivedDocument {
+  normalized: NormalizedReceivedDocument;
+  fiscal: ReceivedDocumentFiscalMetadata;
+  /** Complete decoded source, not a DOM serialization or an extracted substring. */
+  commercial_xml: string | null;
+  /** Embedded source strings remain unverified evidence. */
+  application_responses: string[];
+  /** References/codes read from the same validated DOM; never authentication or legal acceptance. */
+  application_response_evidence?: Array<{ document_key: string | null; response_code: string | null }>;
+}
+
+/** Internal-only package produced after bounded attachment and fiscal preflight. */
+export interface PreparedEmailEvidence {
+  role: 'container' | 'commercial' | 'dian_receipt' | 'representation' | 'zip';
+  bytes: Buffer;
+  filename: string;
+  mime_type: string;
+  sha256: string;
+  encoding?: 'utf-8' | 'iso-8859-1';
+}
+
+export interface PreparedEmailDocument {
+  parsed: DetailedReceivedDocument;
+  evidence: PreparedEmailEvidence[];
+  email_message_id: number;
+  warnings: DocumentEmailWarning[];
+  receipt_evidence: {
+    included: boolean;
+    reference_matches: boolean;
+    response_code: string | null;
+  };
+}
 
 export interface ReceivedDocumentTax {
   tax_type: tax_type_enum | 'unclassified';

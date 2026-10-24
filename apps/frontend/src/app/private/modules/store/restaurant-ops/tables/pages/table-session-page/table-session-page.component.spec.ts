@@ -1,5 +1,8 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { PosPreCuentaPrintService } from '../../../../pos/services/pos-pre-cuenta-print.service';
 import { ActivatedRoute, Router } from '@angular/router';
 import { of, Subject } from 'rxjs';
 import { TableSessionPageComponent } from './table-session-page.component';
@@ -65,7 +68,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession', 'getFinancialSplit']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'updateInformalNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession', 'getFinancialSplit']);
     api.getFinancialSplit.and.returnValue(of(null));
     settings = signal<unknown>(null);
     floorTables = signal<Table[]>([]);
@@ -80,6 +83,9 @@ describe('TableSessionPageComponent waiter delivery', () => {
       imports: [TableSessionPageComponent],
       providers: [
         provideZonelessChangeDetection(),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: PosPreCuentaPrintService, useValue: jasmine.createSpyObj('PosPreCuentaPrintService', ['print']) },
         { provide: TablesService, useValue: api },
         { provide: KitchenTicketsService, useValue: kitchen },
         { provide: KdsSseService, useValue: kdsSse },
@@ -267,6 +273,37 @@ describe('TableSessionPageComponent waiter delivery', () => {
     });
 
     expect(component.waiterName()).toBeNull();
+  });
+
+  describe('informal notes (QUI-898)', () => {
+    it('saves trimmed text via updateInformalNotes and updates the session', () => {
+      component.session.set(session([]));
+      const updated = { ...session([]), informal_notes: 'Botella $50.000' };
+      api.updateInformalNotes.and.returnValue(of(updated));
+
+      component.informalNotesDraft.set('  Botella $50.000  ');
+      expect(component.informalNotesDirty()).toBeTrue();
+      component.saveInformalNotes();
+
+      expect(api.updateInformalNotes).toHaveBeenCalledOnceWith(7, 'Botella $50.000');
+      expect(component.session()).toEqual(updated);
+      expect(component.informalNotesDraft()).toBeNull();
+      expect(component.informalNotesDirty()).toBeFalse();
+      expect(toast.success).toHaveBeenCalled();
+    });
+
+    it('does not call the service when nothing changed', () => {
+      component.session.set({ ...session([]), informal_notes: 'igual' });
+      component.saveInformalNotes();
+      expect(api.updateInformalNotes).not.toHaveBeenCalled();
+    });
+
+    it('is not editable when the session is closed', () => {
+      component.session.set({ ...session([]), closed_at: '2026-09-23T12:10:00Z' });
+      component.informalNotesDraft.set('algo');
+      component.saveInformalNotes();
+      expect(api.updateInformalNotes).not.toHaveBeenCalled();
+    });
   });
 
   describe('openEditItemNote', () => {

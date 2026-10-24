@@ -1,0 +1,16 @@
+'use strict';
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const html = fs.readFileSync(path.join(root, 'dist/marketing-preview/browser/index.html'), 'utf8');
+assert.match(html, /<h1[\s>]/i, 'Preview must contain an H1 in initial HTML');
+assert.match(html, /<app-vendix-landing[\s>]/i, 'Reuse the real landing component');
+assert.match(html, /noindex, nofollow/, 'Preview must not be indexable');
+assert.match(html, /ngSkipHydration/i, 'Normal CSR entry must not hydrate a different server tree');
+assert.doesNotMatch(html, /<app-sector-guides[\s>]/i, 'Guides stay unpublished');
+const links = html.match(/<a\b[^>]*href=/gi) || [];
+assert.ok(links.length >= 3, 'Initial HTML needs navigable links');
+const neutral = fs.readFileSync(path.join(root, 'dist/vendix/browser/index.html'), 'utf8');
+assert.doesNotMatch(neutral, /<app-vendix-landing[\s>]/i, 'Shared production root must remain neutral');
+console.log('Separate marketing HTML has H1, links and noindex; shared shell remains neutral.');

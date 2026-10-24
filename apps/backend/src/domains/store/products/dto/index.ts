@@ -44,7 +44,11 @@ export * from './product-enums';
 // El normalizador del mapa vive en el módulo hoja de bulk-edit (NO importar
 // valores desde este barrel: ver la cabecera de `product-enums.ts` y de
 // `bulk-edit-products.dto.ts` para el porqué del ciclo con swc).
-import { normalizeTaxInclusiveMapKeys } from './bulk-edit-products.dto';
+import {
+  normalizeTaxInclusiveMapKeys,
+  PUC_ACCOUNT_CODE_MESSAGE,
+  PUC_ACCOUNT_CODE_REGEX,
+} from './bulk-edit-products.dto';
 
 /**
  * Forma sintáctica de una subcuenta PUC colombiana (`products.account_code`,
@@ -73,10 +77,9 @@ import { normalizeTaxInclusiveMapKeys } from './bulk-edit-products.dto';
  * `PROD_ACCOUNT_CODE_NOT_FOUND_001`, `PROD_ACCOUNT_CODE_INACTIVE_001` o
  * `PROD_ACCOUNT_CODE_NOT_POSTABLE_001`.
  */
-export const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
-
-export const PUC_ACCOUNT_CODE_MESSAGE =
-  'La cuenta contable debe ser un código PUC numérico de 4 a 20 dígitos (por ejemplo 413550). No admite puntos, guiones ni espacios.';
+// `PUC_ACCOUNT_CODE_REGEX` y `PUC_ACCOUNT_CODE_MESSAGE` se DEFINEN en
+// `./bulk-edit-products.dto` (módulo hoja, para evitar el ciclo con el barrel)
+// y salen por el `export *` del final de este archivo.
 
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
@@ -1257,6 +1260,18 @@ export class UpdateProductDto {
   tax_inclusive_map?: Record<string, boolean>;
 }
 
+/**
+ * Transform estricto para booleanos de query: lee el valor crudo (`obj[key]`)
+ * porque con `enableImplicitConversion`, `Boolean('false')` sería `true`.
+ */
+const strictBooleanQuery = ({ obj, key }: { obj: any; key: string }) => {
+  const raw = obj?.[key];
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return raw;
+};
+
 export class ProductQueryDto {
   // B.1 (F-039, ADR-09): `@Min(1)` paridad catálogo — `?page=0` era skip
   // negativo (5xx). Sin `@Max`: bulk pagina con limit grande vía `/ids`.
@@ -1344,6 +1359,23 @@ export class ProductQueryDto {
   @IsInt()
   @Min(1)
   brand_id?: number;
+
+  /**
+   * Filtra a productos sin ninguna categoría asignada (`product_categories`
+   * vacío). Solo `true` activa el filtro; `'false'`/ausente no lo aplican.
+   * El `@Transform` lee `obj[key]` (cadena cruda): con
+   * `enableImplicitConversion`, `Boolean('false')` sería `true`.
+   */
+  @IsOptional()
+  @Transform(strictBooleanQuery)
+  @IsBoolean()
+  without_category?: boolean;
+
+  /** Filtra a productos sin marca (`brand_id` nulo). Mismo contrato que `without_category`. */
+  @IsOptional()
+  @Transform(strictBooleanQuery)
+  @IsBoolean()
+  without_brand?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -2357,6 +2389,15 @@ export class BulkUploadSessionDto {
   @Min(1)
   @Max(MAX_BULK_UPLOAD_PAGE)
   limit?: number;
+
+  /**
+   * Consentimiento explícito de carga inicial de inventario. Obligatorio
+   * (`true`) cuando el archivo trae filas con "Cantidad Inicial"; sin él el
+   * commit se rechaza (PROD_BULK_INITIAL_LOAD_ACK_001) sin escribir nada.
+   */
+  @IsOptional()
+  @IsBoolean()
+  initial_load_ack?: boolean;
 }
 
 export class BulkUploadItemResultDto {

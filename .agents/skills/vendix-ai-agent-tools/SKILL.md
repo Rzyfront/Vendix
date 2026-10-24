@@ -9,7 +9,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.2"
+  version: "3.3"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -234,3 +234,14 @@ Rules for the pattern:
 - `vendix-ai-embeddings-rag`
 - `vendix-mcp-server`
 - `vendix-inventory-stock`
+
+## G voice proposal/consent
+## Standard autonomy operation
+
+Autonomy is always active in code; stop Vex/Vexi through its existing general
+control, not environment switches. Sandbox availability requires the actual isolated
+runtime/supervisor/configuration and source encryption key. Missing dependencies
+yield an unavailable recoverable result; other tools remain usable. Recipe mining
+is active independently of the signing key; publication without
+`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
+the tool/process catalog; missing embeddings degrade to authorized lexical search.

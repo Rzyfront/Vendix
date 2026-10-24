@@ -8,6 +8,23 @@ import { ModuleTabsShellComponent } from '../../../../shared/components/module-t
 
 export const invoicingRoutes: Routes = [
     {
+        // ASISTENTE DE ACTIVACIÓN: ruta propia y HERMANA del shell — no hija.
+        //
+        // Va ANTES del shell porque Angular resuelve por orden y la ruta del
+        // shell capturaría el segmento antes de llegar aquí.
+        //
+        // Fuera del shell a propósito, igual que `invoices/new`: el asistente
+        // pinta su propio `app-sticky-header` y anidado dentro de
+        // `ModuleTabsShellComponent` quedarían dos cabeceras sticky apiladas.
+        // No necesita NgRx: habla con `DianConfigApiService` directamente.
+        // URL final: `/admin/invoicing/activation`.
+        path: 'activation',
+        loadComponent: () =>
+            import('./components/activation-wizard/activation-wizard.component').then(
+                (m) => m.ActivationWizardComponent,
+            ),
+    },
+    {
         // CAPTURA DE FACTURA: ruta propia, y HERMANA del shell — no hija.
         //
         // Va PRIMERO porque Angular resuelve por orden y la ruta del shell
@@ -92,7 +109,7 @@ export const invoicingRoutes: Routes = [
                 },
                 {
                     id: 'received-documents',
-                    label: 'Documentos recibidos',
+                    label: 'Buzón de facturas',
                     description: 'Documentos de proveedores pendientes de revisión, conciliación y reconocimiento fiscal.',
                     icon: 'inbox',
                     route: '/admin/invoicing/received-documents',

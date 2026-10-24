@@ -406,14 +406,32 @@ export class FiscalActivationWizardService {
   }
 
   async finalize(): Promise<FiscalStatusReadResult> {
+    return this.postFinalize(
+      this.selectedAreas()[0] ?? 'invoicing',
+      this.selectedAreas(),
+    );
+  }
+
+  /**
+   * Finaliza UNA sola área sin depender de `selectedAreas()`. Lo usa el
+   * asistente de activación de facturación para cerrar `invoicing` cuando la
+   * habilitación DIAN real ya está en producción (única fuente de verdad).
+   */
+  async finalizeArea(area: FiscalArea): Promise<FiscalStatusReadResult> {
+    return this.postFinalize(area, [area]);
+  }
+
+  private async postFinalize(
+    area: FiscalArea,
+    selectedAreas: FiscalArea[],
+  ): Promise<FiscalStatusReadResult> {
     this.submitting.set(true);
     this.error.set(null);
     this.finalizeMissingSteps.set({});
     try {
-      const area = this.selectedAreas()[0] ?? 'invoicing';
       const result = await firstValueFrom(
         this.http.post(`${this.baseUrl()}/${area}/finalize`, {
-          selected_areas: this.selectedAreas(),
+          selected_areas: selectedAreas,
           ...this.storeContext(),
         }),
       );

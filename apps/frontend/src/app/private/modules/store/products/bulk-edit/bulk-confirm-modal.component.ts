@@ -57,6 +57,7 @@ import {
 } from '../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import type { SelectorOption } from '../../../../../shared/components/index';
 import {
   PRODUCT_SAVE_ERROR_MAP,
   mapBackendErrorToRequirements,
@@ -106,6 +107,8 @@ export class BulkConfirmModalComponent {
   readonly changes = input<BulkEditableChanges>({});
   /** Resuelve nombres cuando un lote cae y el backend no devuelve fichas. */
   readonly resolveName = input<ProductNameResolver | undefined>(undefined);
+  /** Estaciones KDS (value = id) para mostrar el nombre en vez del id. */
+  readonly kdsOptions = input<readonly SelectorOption[]>([]);
 
   /** La edición terminó (con o sin fallos). La página recarga el listado. */
   readonly applied = output<BulkEditResult>();
@@ -315,6 +318,25 @@ export class BulkConfirmModalComponent {
         return 'Por defecto (tienda)';
       }
       return `${value} uds`;
+    }
+
+    if (field === 'kds_id' && (value === null || value === undefined)) {
+      return 'KDS por defecto';
+    }
+    if (field === 'kds_id') {
+      const match = this.kdsOptions().find(
+        (option) => String(option.value) === String(value),
+      );
+      if (match) return match.label;
+    }
+    if (field === 'account_code' && (value === null || value === undefined || value === '')) {
+      return 'Cuenta por defecto';
+    }
+    if (
+      ['max_stock_level', 'reorder_point', 'reorder_quantity'].includes(field) &&
+      (value === null || value === undefined || value === '')
+    ) {
+      return 'Sin definir';
     }
 
     if (value === null || value === undefined || value === '') {

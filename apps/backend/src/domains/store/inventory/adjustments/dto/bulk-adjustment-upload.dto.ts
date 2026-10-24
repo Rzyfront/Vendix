@@ -4,6 +4,10 @@ import {
   IsOptional,
   IsString,
   IsIn,
+  IsBoolean,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -14,6 +18,7 @@ const VALID_ADJUSTMENT_TYPES = [
   'expiration',
   'count_variance',
   'manual_correction',
+  'initial_load',
 ] as const;
 
 export class BulkAdjustmentUploadDto {
@@ -38,9 +43,12 @@ export class BulkAdjustmentItemResultDto {
   product_name?: string;
   status: 'success' | 'error';
   message?: string;
+  warnings?: string[];
   quantity_before?: number;
   quantity_after?: number;
   quantity_change?: number;
+  /** `created` cuando la fila creó un producto nuevo (carga inicial). */
+  action?: 'created' | 'adjusted';
 }
 
 export class BulkAdjustmentUploadResultDto {
@@ -49,4 +57,71 @@ export class BulkAdjustmentUploadResultDto {
   successful: number;
   failed: number;
   results: BulkAdjustmentItemResultDto[];
+}
+
+/** Tope de filas por página al confirmar una sesión de ajuste masivo. */
+export const MAX_BULK_ADJUSTMENT_UPLOAD_PAGE = 100;
+
+/**
+ * Body de `POST store/inventory/adjustments/bulk/upload-session`. Sin
+ * `offset`/`limit` se confirma el archivo completo (modo legacy); con alguno
+ * se procesa solo la página `[offset, offset + limit)`. `location_id` (y
+ * opcionalmente tipo/descripción globales) viajan aquí porque el archivo no
+ * los contiene.
+ */
+export class BulkAdjustmentUploadSessionDto extends BulkAdjustmentUploadDto {
+  @IsString()
+  @IsNotEmpty()
+  session_id: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_BULK_ADJUSTMENT_UPLOAD_PAGE)
+  limit?: number;
+
+  /**
+   * Confirmación explícita de que las filas con SKU vacío crean productos
+   * nuevos como carga inicial. Sin `true` el commit se rechaza si hay alguna.
+   */
+  @IsOptional()
+  @IsBoolean()
+  initial_load_ack?: boolean;
+}
+
+export class BulkAdjustmentUploadSessionResultDto extends BulkAdjustmentUploadResultDto {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
+}
+
+export class BulkAdjustmentAnalysisResultDto {
+  session_id: string;
+  total: number;
+  valid: number;
+  failed: number;
+  errors: { row_number: number; sku: string; message: string }[];
+  warnings: { row_number: number; sku: string; message: string }[];
+  initial_load_rows: number;
+  /** Filas que crearán un producto nuevo. */
+  new_products: number;
+  /** De ellas, las que no traen SKU y se autogenerará. */
+  auto_sku: number;
+  /** `true` si hay productos nuevos: el commit exige `initial_load_ack`. */
+  requires_initial_load_ack: boolean;
+  /** Muestra de las filas nuevas (máx. 50). */
+  new_product_rows: {
+    row_number: number;
+    sku: string | null;
+    name: string;
+    quantity: number;
+  }[];
 }

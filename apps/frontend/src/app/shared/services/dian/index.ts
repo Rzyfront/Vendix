@@ -4,7 +4,12 @@ export {
   ALL_DIAN_CAPABILITIES,
   DIAN_NUMBERING_RANGE_APPLY_MAX,
 } from './dian-config-api.service';
-export type { DianApiCapabilities, DianApiContext } from './dian-config-api.service';
+export type {
+  DianApiCapabilities,
+  DianApiContext,
+  DianEnablementInheritance,
+  DianEnablementInheritanceReason,
+} from './dian-config-api.service';
 export type {
   DianNumberingRange,
   DianNumberingRangeApplyItem,

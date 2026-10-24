@@ -1,5 +1,24 @@
 export interface AILogEntry {
   request_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  objective_id?: string;
+  conversation_id?: string;
+  turn_id?: string;
+  provider_call_id?: string;
+  attempt_id?: string;
+  tool_call_id?: string;
+  external_request_id_hash?: string;
+  /** Legacy numeric columns stay compatible; this preserves unknown as null. */
+  usage_observed?: {
+    prompt_tokens: number | null;
+    completion_tokens: number | null;
+    cache_read_tokens: number | null;
+    cache_creation_tokens: number | null;
+  };
+  /** Canonical traced cost is ONLY on provider_attempt spans, never this row. */
+  cost_source?: 'logical_summary';
+  telemetry_metadata?: Record<string, string | number | boolean | null>;
   app_key?: string;
   config_id?: number;
   organization_id?: number;

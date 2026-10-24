@@ -15,6 +15,7 @@ import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
@@ -34,10 +35,9 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto) {
+    const email = normalizeEmail(createUserDto.email);
     // A1: unicidad de email para cuentas staff/owner (no-customer).
-    await this.staffProvisioning.assertEmailAvailableForStaff(
-      createUserDto.email,
-    );
+    await this.staffProvisioning.assertEmailAvailableForStaff(email);
 
     if (!createUserDto.organization_id) {
       throw new BadRequestException('organization_id is required');
@@ -59,7 +59,7 @@ export class UsersService {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const user = await tx.users.create({
         data: {
-          email: createUserDto.email,
+          email,
           first_name: formatted_first_name,
           last_name: formatted_last_name,
           username: createUserDto.username,
@@ -214,25 +214,44 @@ export class UsersService {
   async update(id: number, updateUserDto: UpdateUserDto) {
     const user = await this.prisma.users.findUnique({
       where: { id },
+      include: { user_roles: { include: { roles: true } } },
     });
 
     if (!user) {
       throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
-    // Check if email is being changed and if it already exists
-    if (updateUserDto.email && updateUserDto.email !== user.email) {
-      const existingUser = await this.prisma.users.findFirst({
-        where: { email: updateUserDto.email },
-      });
-
-      if (existingUser) {
-        throw new ConflictException('Email already exists');
-      }
-    }
-
     // Hash password if it's being updated
     const updateData = { ...updateUserDto };
+    if (typeof updateUserDto.email === 'string') {
+      const email = normalizeEmail(updateUserDto.email);
+      updateData.email = email;
+      const isCustomer =
+        user.user_roles.length > 0 &&
+        user.user_roles.every(
+          (assignment) => assignment.roles?.name === 'customer',
+        );
+      if (!isCustomer) {
+        await this.staffProvisioning.assertEmailAvailableForStaff(email, {
+          excludeUserId: id,
+        });
+      }
+      // Customers can share an email across organizations, but not within
+      // the organization being edited. A casing-only edit is not a new identity.
+      if (email !== normalizeEmail(user.email ?? '')) {
+        const existingUser = await this.prisma.users.findFirst({
+          where: {
+            email: emailEquals(email),
+            organization_id:
+              updateUserDto.organization_id ?? user.organization_id,
+            id: { not: id },
+          },
+        });
+        if (existingUser) {
+          throw new ConflictException('Email already exists');
+        }
+      }
+    }
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }

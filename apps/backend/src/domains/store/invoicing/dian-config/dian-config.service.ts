@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { timingSafeEqual } from 'crypto';
 import { S3Service } from '../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -33,7 +34,10 @@ import {
   isBlockingCheck,
   isActionableCheck,
 } from '../providers/fiscal-production-readiness.service';
+import { looksLikeVerdict } from './test-set-wait.util';
+import { toPublicResolution } from '../resolutions/resolutions.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
+import { redactDianConfigForHttp } from './dian-config-redaction.util';
 import {
   DIAN_CONFIGURATION_TYPES,
   defaultDocumentTypeFor,
@@ -114,14 +118,18 @@ export class DianConfigService {
     return value;
   }
 
+  /**
+   * Frontera HTTP de la fila `dian_configurations`. Además de enmascarar PIN y
+   * contraseña, la herencia de habilitación no expone el id de la fila fuente
+   * (puede ser de OTRA cuenta): `enablement_inherited_from_id` se sustituye por
+   * `enablement_inherited` y `enablement_evidence.inheritance.from_dian_configuration_id`
+   * se elimina. La columna y la auditoría no se tocan. Además (SEC-L2) no sale
+   * la ubicación del `.p12` ni el ARN de KMS (`certificate_present` /
+   * `certificate_uses_kms`) ni el `note_phase` con XML firmados. Ver
+   * `redactDianConfigForHttp`.
+   */
   private maskSensitiveFields(config: any) {
-    return {
-      ...config,
-      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted: config.certificate_password_encrypted
-        ? '****'
-        : null,
-    };
+    return redactDianConfigForHttp(config);
   }
 
   private onlyDigits(value?: string | null): string {
@@ -946,7 +954,7 @@ export class DianConfigService {
       label: 'Resolución de numeración de producción vigente',
       satisfied: production_resolutions.length > 0,
       action:
-        'Solicita la Autorización de Numeración de Facturación en Muisca y registra su prefijo, rango y clave técnica. El rango SETP de habilitación no sirve para facturar.',
+        'Solicita la Autorización de Numeración de Facturación en Muisca y registra su prefijo, rango y clave técnica. El rango SETP de habilitación no sirve para facturar. Se sincroniza en el paso 5 · Resoluciones de producción.',
       owner: 'tenant',
     };
 
@@ -983,8 +991,11 @@ export class DianConfigService {
       ready: missing.length === 0,
       checks,
       missing,
+      // La ClTec alimenta el CUFE: no sale en claro de este reporte (lo sirven
+      // los carriles de tienda, organización y plataforma). `toPublicResolution`
+      // la sustituye por `technical_key_set` y `technical_key_length`.
       resolutions: resolutions.map((r) => ({
-        ...r,
+        ...toPublicResolution(r),
         is_habilitacion_range: isHabilitacionResolution(r.prefix),
         is_expired: r.valid_to < now,
         is_exhausted: r.current_number >= r.range_to,
@@ -1237,6 +1248,323 @@ export class DianConfigService {
     return this.maskSensitiveFields(updated);
   }
 
+  // ===================================================================
+  // Herencia de habilitación DIAN
+  //
+  // Las tiendas demo emiten con el software y el NIT dueño del software de la
+  // plataforma. Si otra `dian_configurations` con el mismo nit + software_id +
+  // configuration_type ya está habilitada, la nueva hereda esa evidencia y no
+  // repite el set de pruebas. La fuente NUNCA se expone al cliente.
+  // ===================================================================
+
+  private buildInheritanceLegalNotice(nit: string): string {
+    return (
+      `Los documentos electrónicos (factura, notas crédito/débito y demás) que se ` +
+      `emitan con esta configuración quedan a nombre del NIT ${nit}, dueño del ` +
+      `software, y son legalmente válidos ante la DIAN.`
+    );
+  }
+
+  private evidenceHasPassed(record: unknown): boolean {
+    if (!looksLikeVerdict(record)) return false;
+    const data = record as Record<string, any>;
+    return data?.dian_response?.success === true || data?.success === true;
+  }
+
+  /**
+   * Busca (SOLO lectura, cruzando tenants a propósito) la configuración cuya
+   * habilitación puede heredarse. Devuelve la fila completa: el llamador decide
+   * qué exponer.
+   */
+  private async findEnablementSource(target: {
+    id: number;
+    nit: string;
+    nit_dv: string | null;
+    software_id: string;
+    configuration_type: any;
+  }) {
+    const digits = this.onlyDigits(target.nit);
+    const software_id = (target.software_id ?? '').trim();
+    if (!digits || !software_id) return null;
+
+    const raw = (target.nit ?? '').trim();
+    const dv = (target.nit_dv ?? '').trim();
+    const nit_variants = Array.from(
+      new Set([
+        raw,
+        digits,
+        ...(dv ? [`${digits}-${dv}`, `${digits}${dv}`] : []),
+      ]),
+    );
+
+    const candidates = await this.prisma.withoutScope().dian_configurations.findMany({
+      where: {
+        id: { not: target.id },
+        nit: { in: nit_variants },
+        software_id,
+        configuration_type: target.configuration_type,
+        operation_mode: 'own_software',
+        enablement_status: { in: ['enabled', 'test_set_passed'] },
+      },
+      select: {
+        id: true,
+        nit: true,
+        nit_dv: true,
+        software_id: true,
+        software_pin_encrypted: true,
+        configuration_type: true,
+        environment: true,
+        enablement_status: true,
+        enablement_evidence: true,
+        enablement_inherited_from_id: true,
+        test_set_id: true,
+      },
+      take: 50,
+    });
+
+    const rank = (c: (typeof candidates)[number]) =>
+      c.enablement_status === 'enabled' && c.environment === 'production'
+        ? 0
+        : c.enablement_status === 'enabled'
+          ? 1
+          : 2;
+
+    const eligible = candidates
+      .filter(
+        (c) =>
+          this.onlyDigits(c.nit) === digits &&
+          (c.software_id ?? '').trim() === software_id &&
+          this.evidenceHasPassed(c.enablement_evidence),
+      )
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          Number(a.enablement_inherited_from_id !== null) -
+            Number(b.enablement_inherited_from_id !== null) ||
+          a.id - b.id,
+      );
+
+    return eligible[0] ?? null;
+  }
+
+  /**
+   * ¿Puede esta configuración heredar una habilitación existente? Nunca devuelve
+   * id, nombre, organización ni tienda de la fuente.
+   */
+  async getEnablementInheritance(id: number) {
+    const target = await this.prisma.dian_configurations.findFirst({
+      where: { id },
+    });
+    if (!target) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    const base = {
+      issuer_nit: this.onlyDigits(target.nit),
+      software_id: (target.software_id ?? '').trim(),
+      legal_notice: this.buildInheritanceLegalNotice(
+        this.onlyDigits(target.nit),
+      ),
+    };
+
+    const unavailable = (
+      reason:
+        | 'already_enabled'
+        | 'already_inherited'
+        | 'no_source'
+        | 'not_own_software',
+    ) => ({ available: false as const, reason, ...base });
+
+    if (target.operation_mode !== 'own_software') {
+      return unavailable('not_own_software');
+    }
+    if (target.enablement_inherited_from_id !== null) {
+      return unavailable('already_inherited');
+    }
+    if (
+      target.enablement_status === 'enabled' ||
+      target.enablement_status === 'test_set_passed'
+    ) {
+      return unavailable('already_enabled');
+    }
+
+    const source = await this.findEnablementSource(target);
+    if (!source) return unavailable('no_source');
+
+    return {
+      available: true as const,
+      source_enablement_status: source.enablement_status as
+        | 'enabled'
+        | 'test_set_passed',
+      target_environment: (source.enablement_status === 'enabled'
+        ? source.environment
+        : 'test') as 'production' | 'test',
+      ...base,
+    };
+  }
+
+  /**
+   * Hereda la habilitación (evidencia del set de pruebas) de otra configuración
+   * con el mismo NIT + software_id + tipo. Anti-abuso: NIT y software_id viajan en
+   * cada XML y no son secretos, así que se exige que el PIN del software del
+   * objetivo coincida con el de la fuente.
+   */
+  async inheritEnablement(id: number, user_id?: number) {
+    const target = await this.prisma.dian_configurations.findFirst({
+      where: { id },
+    });
+    if (!target) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    if (target.operation_mode !== 'own_software') {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_003,
+        'Solo las configuraciones con software propio pueden heredar una habilitación.',
+      );
+    }
+    if (
+      target.enablement_status === 'enabled' ||
+      target.enablement_status === 'test_set_passed'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_003,
+        'Esta configuración ya está habilitada; no necesita heredar una habilitación.',
+      );
+    }
+    if (target.enablement_status !== 'not_started' && target.enablement_status !== 'testing') {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_003,
+        'El estado actual de la habilitación no permite heredar una habilitación existente.',
+      );
+    }
+    if (target.enablement_inherited_from_id !== null) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_003,
+        'Esta configuración ya heredó una habilitación.',
+      );
+    }
+
+    const source = await this.findEnablementSource(target);
+    if (!source) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_003,
+        'No existe una habilitación DIAN vigente para este NIT y software que se pueda heredar.',
+      );
+    }
+
+    if (!this.softwarePinsMatch(target.software_pin_encrypted, source.software_pin_encrypted)) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_004,
+        'El PIN del software no coincide con el de la habilitación existente para este NIT y software.',
+      );
+    }
+
+    const source_status = source.enablement_status as
+      | 'enabled'
+      | 'test_set_passed';
+    const is_enabled = source_status === 'enabled';
+    const issuer_nit = this.onlyDigits(target.nit);
+    const software_id = (target.software_id ?? '').trim();
+    const legal_notice = this.buildInheritanceLegalNotice(issuer_nit);
+    const now = new Date();
+
+    // Resumen SANEADO: la evidencia de la fuente (otro tenant) lleva resolution_id,
+    // documentos con CUFE, zip keys y raw_response; nada de eso se copia. Solo el
+    // veredicto mínimo que leen `looksLikeVerdict` / `resolveTestSetProof` y el
+    // puntero de auditoría `inheritance` (C1).
+    const source_evidence = (source.enablement_evidence ?? {}) as Record<
+      string,
+      any
+    >;
+    const source_response = (source_evidence.dian_response ?? {}) as Record<
+      string,
+      any
+    >;
+    const evidence = {
+      success: true,
+      executed_at: now.toISOString(),
+      test_set_id: source.test_set_id ?? null,
+      dian_response: {
+        success: true,
+        status_code: source_response.status_code ?? null,
+        status_message: source_response.status_message ?? null,
+      },
+      inheritance: {
+        from_dian_configuration_id: source.id,
+        source_enablement_status: source_status,
+        source_environment: source.environment,
+        issuer_nit,
+        software_id,
+        configuration_type: target.configuration_type,
+        inherited_at: now.toISOString(),
+        inherited_by_user_id: user_id ?? null,
+        legal_notice,
+      },
+    };
+
+    const updated = await this.prisma.dian_configurations.update({
+      where: { id },
+      data: {
+        enablement_status: source_status,
+        environment: is_enabled ? source.environment : 'test',
+        enabled_at: is_enabled ? now : null,
+        enablement_inherited_from_id: source.id,
+        enablement_evidence: evidence,
+        // El gate de producción exige `test_set_id`; es el TestSetId del MISMO
+        // software, así que solo se completa cuando el objetivo no tiene uno.
+        ...(!target.test_set_id && source.test_set_id
+          ? { test_set_id: source.test_set_id }
+          : {}),
+      },
+    });
+
+    try {
+      await this.prisma.dian_audit_logs.create({
+        data: {
+          dian_configuration_id: id,
+          action: 'enablement_inherited',
+          status: 'success',
+          error_message: null,
+        },
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create DIAN audit log (enablement_inherited): ${error?.message}`,
+      );
+    }
+
+    this.logger.log(
+      `DIAN config ${id} inherited enablement (status=${source_status}) from config ${source.id}`,
+    );
+
+    // Proyección explícita: ni la evidencia ni el id de la fila origen (otro
+    // tenant) salen al cliente.
+    return {
+      id: updated.id,
+      enablement_status: updated.enablement_status,
+      environment: updated.environment,
+      enabled_at: updated.enabled_at ?? null,
+      inherited: true,
+    };
+  }
+
+  /** Compara dos PINs cifrados descifrados, en tiempo constante. */
+  private softwarePinsMatch(
+    target_encrypted: string | null,
+    source_encrypted: string | null,
+  ): boolean {
+    if (!target_encrypted || !source_encrypted) return false;
+    try {
+      const a = Buffer.from(this.encryption.decrypt(target_encrypted), 'utf8');
+      const b = Buffer.from(this.encryption.decrypt(source_encrypted), 'utf8');
+      if (a.length === 0 || a.length !== b.length) return false;
+      return timingSafeEqual(a, b);
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Saves test set results to the DIAN configuration.
    */
@@ -1321,8 +1649,17 @@ export class DianConfigService {
   /**
    * Gets audit logs for the current store's DIAN configurations.
    * Optionally filtered by config_id.
+   *
+   * SEC-L2: `select` explícito. Por defecto NO devuelve `request_xml` /
+   * `response_xml` (XML firmados, con el X509 público y los hashes del PIN);
+   * solo la bitácora cross-tenant del superadmin los pide con `include_xml`.
    */
-  async getAuditLogs(page = 1, limit = 20, config_id?: number) {
+  async getAuditLogs(
+    page = 1,
+    limit = 20,
+    config_id?: number,
+    options: { include_xml?: boolean } = {},
+  ) {
     const context = this.getContext();
     const organization_id = this.requireOrganizationId(context.organization_id);
     const fiscalScope = await this.fiscalScope.requireFiscalScope(
@@ -1354,6 +1691,19 @@ export class DianConfigService {
     const [data, total] = await Promise.all([
       this.prisma.dian_audit_logs.findMany({
         where: where_clause,
+        select: {
+          id: true,
+          dian_configuration_id: true,
+          action: true,
+          document_type: true,
+          document_number: true,
+          status: true,
+          error_message: true,
+          cufe: true,
+          duration_ms: true,
+          created_at: true,
+          ...(options.include_xml && { request_xml: true, response_xml: true }),
+        },
         orderBy: { created_at: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

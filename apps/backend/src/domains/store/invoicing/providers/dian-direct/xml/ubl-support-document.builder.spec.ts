@@ -235,4 +235,38 @@ describe('UblSupportDocumentBuilder', () => {
       );
     });
   });
+
+  it('support adjustment note emits the line AllowanceCharge with ID and factor (FBE01)', () => {
+    const xml = UblSupportDocumentBuilder.buildAdjustmentNote({
+      support_adjustment_data: {
+        ...baseDocument,
+        invoice_number: 'NADS101',
+        invoice_type: 'support_adjustment_note',
+        original_invoice_number: 'DS100',
+        original_invoice_cufe: 'original-cuds',
+        original_invoice_issue_date: '2026-03-10',
+        items: [{ ...baseDocument.items[0], discount_amount: '100.00' }],
+      },
+      buyer,
+      seller,
+      software_security,
+      cuds: 'adjustment-cuds',
+      environment: 'test',
+      original_support_document_number: 'DS100',
+      original_support_document_cuds: 'original-cuds',
+      original_support_document_date: '2026-03-10',
+    });
+    const group = xml.match(
+      /<cac:CreditNoteLine>[\s\S]*?<cac:AllowanceCharge>([\s\S]*?)<\/cac:AllowanceCharge>/,
+    )![1];
+
+    expect(group).toContain('<cbc:ID>1</cbc:ID>');
+    expect(group).toContain(
+      '<cbc:MultiplierFactorNumeric>10.00</cbc:MultiplierFactorNumeric>',
+    );
+    expect(group.indexOf('<cbc:MultiplierFactorNumeric>')).toBeLessThan(
+      group.indexOf('<cbc:Amount '),
+    );
+    expect(group).toContain('<cbc:BaseAmount');
+  });
 });

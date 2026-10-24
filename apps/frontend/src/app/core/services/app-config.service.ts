@@ -9,15 +9,11 @@ import {
 } from '../models/domain-config.interface';
 import { AppType } from '../models/environment.enum';
 import type { DomainResolutionErrorKind } from '../store/config/config.actions';
-import { superAdminRoutes } from '../../routes/private/super_admin.routes';
 import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
 import { orgLandingPublicRoutes } from '../../routes/public/org_landing.public.routes';
 import { storeEcommercePublicRoutes } from '../../routes/public/store_ecommerce.public.routes';
 import { storeLandingPublicRoutes } from '../../routes/public/store_landing.public.routes';
 import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
-import { orgAdminRoutes } from '../../routes/private/org_admin.routes';
-import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
-import { storeDeliveryRoutes } from '../../routes/private/store_delivery.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
 import { environment } from '../../../environments/environment';
@@ -245,16 +241,32 @@ export class AppConfigService {
     let routes: Routes;
     switch (domainConfig.environment) {
       case AppType.VENDIX_ADMIN:
-        routes = superAdminRoutes;
+        routes = this.lazyPrivateRoutes(() =>
+          import('../../routes/private/super_admin.routes').then(
+            (m) => m.superAdminRoutes,
+          ),
+        );
         break;
       case AppType.ORG_ADMIN:
-        routes = orgAdminRoutes;
+        routes = this.lazyPrivateRoutes(() =>
+          import('../../routes/private/org_admin.routes').then(
+            (m) => m.orgAdminRoutes,
+          ),
+        );
         break;
       case AppType.STORE_ADMIN:
-        routes = storeAdminRoutes;
+        routes = this.lazyPrivateRoutes(() =>
+          import('../../routes/private/store_admin.routes').then(
+            (m) => m.storeAdminRoutes,
+          ),
+        );
         break;
       case AppType.STORE_DELIVERY:
-        routes = storeDeliveryRoutes;
+        routes = this.lazyPrivateRoutes(() =>
+          import('../../routes/private/store_delivery.routes').then(
+            (m) => m.storeDeliveryRoutes,
+          ),
+        );
         break;
       case AppType.STORE_ECOMMERCE:
         routes = ecommerceRoutes;
@@ -264,6 +276,20 @@ export class AppConfigService {
     }
 
     return routes;
+  }
+
+  /**
+   * Envuelve las rutas privadas de una app en un padre vacío con
+   * `loadChildren`. Cada archivo de rutas privadas importa de forma estática
+   * sus guards, reducers y efectos (y por ellos el barrel de
+   * shared/components, con ECharts y marked). Importarlos arriba los metía en
+   * el bundle inicial de TODAS las apps, incluida la landing pública, y
+   * retrasaba su primer render. Así solo se descargan en la app que los usa.
+   * Si ninguna ruta hija coincide, el router sigue con la siguiente (el
+   * catch-all `**` de RouteManagerService), igual que antes.
+   */
+  private lazyPrivateRoutes(load: () => Promise<Routes>): Routes {
+    return [{ path: '', loadChildren: load }];
   }
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {

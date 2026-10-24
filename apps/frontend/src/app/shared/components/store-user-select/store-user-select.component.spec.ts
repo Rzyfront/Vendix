@@ -135,6 +135,21 @@ describe('StoreUserSelectComponent · syncValueInput no pisa el estado CVA (B9 r
 
       expect(component.selected()).toBeNull();
     });
+
+    it('writeValue(null) limpia el texto de búsqueda sin disparar onChange (QUI-480)', () => {
+      const onChange = jasmine.createSpy('onChange');
+      component.registerOnChange(onChange);
+
+      component.onQueryChange('Juan');
+      component.results.set([USER_7]);
+
+      component.writeValue(null);
+
+      expect(component.query()).toBe('');
+      expect(component.results()).toEqual([]);
+      expect(component.isOpen()).toBeFalse();
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 
   describe('modo [value] (payment-collector, plain signal sin FormControl)', () => {

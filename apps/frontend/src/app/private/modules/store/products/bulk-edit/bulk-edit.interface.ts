@@ -33,6 +33,16 @@ import {
  */
 export const MAX_BULK_EDIT_IDS = 100;
 
+/**
+ * Valor sentinela de la opción "KDS por defecto de la tienda" del selector
+ * `kds-stations`. `app-selector` solo admite `string | number`, y un `null`
+ * inicial del formulario es indistinguible de "no elegí" (resetearía la
+ * estación de N productos sin que el operador lo pida). Los ids reales son
+ * enteros positivos, así que `0` no colisiona; `coerceBulkEditValue` lo
+ * traduce a `null` en el payload.
+ */
+export const KDS_DEFAULT_OPTION_VALUE = 0;
+
 /** Espejo de `BulkEditItemStatus` (`bulk-edit-products.dto.ts:34`). */
 export type BulkEditItemStatus = 'ok' | 'warning' | 'error';
 
@@ -65,7 +75,7 @@ export interface BulkEditDimensions {
 
 /**
  * Subconjunto ESCALAR de `UpdateProductDto` habilitado para edición masiva.
- * Espejo 1:1 de `BulkEditableChangesDto` — 34 campos, ni uno más.
+ * Espejo 1:1 de `BulkEditableChangesDto` — 44 campos, ni uno más.
  *
  * EXCLUIDOS DELIBERADAMENTE por el backend (no añadir sin leer el motivo en
  * `bulk-edit-products.dto.ts:47-60`): `sku`/`slug`/`barcode` (unique por
@@ -107,6 +117,16 @@ export interface BulkEditableChanges {
   track_inventory?: boolean;
   min_stock_level?: number | null;
   requires_serial_numbers?: boolean;
+  requires_batch_tracking?: boolean;
+
+  // ===== Reposición (umbrales de alerta/compra; no mueven el stock) =====
+  max_stock_level?: number | null;
+  reorder_point?: number | null;
+  reorder_quantity?: number | null;
+
+  // ===== Contabilidad =====
+  /** PUC solo dígitos (4–20). `null` limpia → cuenta de ingresos por defecto. */
+  account_code?: string | null;
 
   // ===== Precios =====
   base_price?: number;
@@ -128,16 +148,26 @@ export interface BulkEditableChanges {
   // ===== UoM (FKs al catálogo global units_of_measure) =====
   stock_uom_id?: number;
   purchase_uom_id?: number;
+  /** Entero ≥ 1. Solo para envases cuyo contenido no se deriva del catálogo. */
+  purchase_to_stock_factor?: number;
 
   // ===== Servicio =====
   service_duration_minutes?: number;
   service_modality?: BulkEditServiceModalityValue;
   service_pricing_type?: BulkEditServicePricingTypeValue;
   requires_booking?: boolean;
+  /** Entero ≥ 0. */
+  buffer_minutes?: number;
+  is_eligible_for_home_service?: boolean;
   booking_mode?: BulkEditBookingModeValue;
   is_recurring?: boolean;
   service_instructions?: string;
   preparation_time_minutes?: number;
+  /** `null` = "KDS por defecto de la tienda". Solo platos preparados. */
+  kds_id?: number | null;
+
+  // ===== Ecommerce (unidad suelta) =====
+  offer_loose_unit?: boolean;
 
   // ===== Consulta =====
   is_consultation?: boolean;
@@ -355,7 +385,8 @@ export type BulkEditControlType =
   | 'text'
   | 'textarea'
   | 'dimensions'
-  | 'tax-action';
+  | 'tax-action'
+  | 'account-code';
 
 /**
  * Bloque de UI al que pertenece un campo. Cada clave replica una sección real
@@ -367,12 +398,14 @@ export type BulkEditGroupKey =
   | 'pricing'
   | 'price_tiers'
   | 'availability'
+  | 'replenishment'
   | 'restaurant'
   | 'uom'
   | 'physical'
   | 'service'
   | 'consultation'
-  | 'operations';
+  | 'operations'
+  | 'accounting';
 
 /** Opción de un control enumerado. Estructuralmente compatible con `SelectorOption`. */
 export interface BulkEditFieldOption {
@@ -389,6 +422,8 @@ export interface BulkEditFieldOption {
  *
  * - `uom-purchase` / `uom-stock` → `UomService.getCatalog()`, mismo par de
  *   selectores que el form individual (html:943 y html:984).
+ * - `kds-stations` → `KdsStationsService.loadStations()`; la opción sentinela
+ *   `KDS_DEFAULT_OPTION_VALUE` significa "KDS por defecto" y viaja como `null`.
  * - `document-templates` → catálogo de plantillas de consulta/preconsulta
  *   (`templateSelectorOptions` del form individual, html:1530 y html:1562).
  */
@@ -396,7 +431,8 @@ export type BulkEditOptionsRef =
   | 'uom-purchase'
   | 'uom-stock'
   | 'document-templates'
-  | 'tax-categories';
+  | 'tax-categories'
+  | 'kds-stations';
 
 /**
  * Capacidad de tienda requerida por un campo, resuelta con el helper

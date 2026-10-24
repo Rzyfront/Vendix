@@ -1,111 +1,165 @@
-import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { Component, DestroyRef, ElementRef, PLATFORM_ID, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { finalize, Subscription } from 'rxjs';
+import { Subscription, finalize, timeout } from 'rxjs';
 import {
-  CardComponent,
-  EmptyStateComponent,
-  IconComponent,
-  InputsearchComponent,
-  PaginationComponent,
-  ResponsiveDataViewComponent,
-  ToastService,
-  type ItemListCardConfig,
-  type TableAction,
-  type TableColumn,
+  ButtonComponent, CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent,
+  OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent, ToastService, ModalComponent,
+  type ItemListCardConfig, type TableAction, type TableColumn,
 } from '../../../../../shared/components/index';
+import type { DropdownAction, FilterConfig, FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
-import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
+import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/components/org-fiscal-scope-selector.component';
 import { ReceivedDocumentImportComponent } from './received-document-import.component';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
-import type { ReceivedDocument, ReceivedDocumentQuery, ReceivedDocumentsScope } from './received-documents.interface';
+import type { ReceivedDocument, ReceivedDocumentInboxState, ReceivedDocumentLegalStatus, ReceivedDocumentQuery, ReceivedDocumentType, ReceivedDocumentsScope } from './received-documents.interface';
+import { isReceivedDocumentSafeNotice } from './received-documents.interface';
+import { ReceivedEmailMessagesComponent } from './received-email-messages.component';
+import { ReceivedEmailReceptionWizardComponent } from './received-email-reception-wizard.component';
+import { ReceivedEmailReceptionService } from './received-email-reception.service';
+import { receivedEmailStatusCopy } from './received-email-reception-projection.util';
 import { ReceivedDocumentsService } from './received-documents.service';
-
-const STATUS_FILTERS = [
-  { value: '', label: 'Todos los estados' },
-  { value: 'pending', label: 'Validación pendiente' },
-  { value: 'valid', label: 'Validación correcta' },
-  { value: 'needs_review', label: 'Requieren revisión' },
-  { value: 'invalid', label: 'Con inconsistencias' },
-];
+import { ReceivedDocumentsInboxFacade } from './received-documents-inbox.facade';
+import {
+  RECEIVED_INBOX_LABELS, RECEIVED_LEGAL_LABELS, RECEIVED_TYPE_LABELS, receivedChannelLabel, receivedInboxEmptyState,
+  receivedInboxLabel, receivedLegalLabel, receivedOcrLabel, receivedTypeLabel,
+  receivedDianLabel, receivedDocumentSourceLabel, receivedIsElectronicPos, receivedMobileInboxLabel,
+} from './received-documents-inbox-projection.util';
 
 @Component({
-  selector: 'app-received-documents-page',
-  standalone: true,
-  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent],
+  selector: 'app-received-documents-page', standalone: true,
+  providers: [ReceivedDocumentsInboxFacade],
+  imports: [FormsModule, ButtonComponent, CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent,
+    OptionsDropdownComponent, PaginationComponent, ResponsiveDataViewComponent, StatsComponent, ModalComponent,
+    OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent, ReceivedEmailReceptionWizardComponent, ReceivedEmailMessagesComponent],
   template: `
     <div class="w-full space-y-4">
       @if (scope === 'organization') {
-        <app-org-fiscal-scope-selector
-          [selectedStoreId]="storeId() ?? null"
-          [showHeader]="false"
-          (storeChange)="onFiscalStoreChange($event)"
-        />
+        <app-org-fiscal-scope-selector [selectedStoreId]="storeId() ?? null" [showHeader]="false" (storeChange)="onFiscalStoreChange($event)" />
       }
-      <app-card [responsive]="true" [padding]="false">
-        <div class="flex flex-col gap-3 border-b border-border p-3 md:flex-row md:items-center md:justify-between md:p-4">
-          <div class="min-w-0">
-            <h2 class="text-base font-semibold text-text-primary">Bandeja de proveedores</h2>
-            <p class="text-sm text-text-secondary">{{ total() }} documentos en el alcance actual</p>
-          </div>
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <app-inputsearch class="min-w-[220px]" placeholder="Buscar proveedor, NIT o número" [debounceTime]="300" (searchChange)="onSearch($event)" />
-            <label class="sr-only" for="received-status">Filtrar por estado</label>
-            <select id="received-status" class="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary" [value]="status()" (change)="onStatusChange($event)">
-              @for (option of statusFilters; track option.value) { <option [value]="option.value">{{ option.label }}</option> }
-            </select>
-            @if (canImport()) {
-              <button type="button" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-primary px-3 py-2 text-sm font-medium text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="uploading() || !canImportInCurrentScope()" (click)="manualFormOpen.set(true)">
-                <app-icon name="plus" [size]="16" /> Capturar manualmente
-              </button>
-              <label class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:opacity-90" [class.opacity-60]="!canImportInCurrentScope()" [class.pointer-events-none]="!canImportInCurrentScope()" [attr.aria-disabled]="!canImportInCurrentScope()">
-                <app-icon name="upload" [size]="16" />
-                {{ uploading() ? 'Importando…' : 'Importar XML' }}
-                <input class="sr-only" type="file" accept=".xml,text/xml,application/xml" [disabled]="uploading() || !canImportInCurrentScope()" (change)="onFileSelected($event)" />
-              </label>
-              <button type="button" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-primary px-3 py-2 text-sm font-medium text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="uploading() || !canImportInCurrentScope()" (click)="scanImportOpen.set(true)">
-                <app-icon name="scan-line" [size]="16" />
-                Escanear PDF/foto
-              </button>
+      <div #statsStrip class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats title="Nuevas" [value]="summaryValue('new')" smallText="Por revisar" iconName="inbox" iconBgColor="bg-primary/10" iconColor="text-primary" />
+        <app-stats title="Requieren revisión" [value]="summaryValue('requires_review')" smallText="Atención pendiente" iconName="alert-circle" iconBgColor="bg-warning/10" iconColor="text-warning" />
+        <app-stats title="Aceptadas" [value]="summaryValue('accepted')" smallText="Aceptación legal" iconName="check-circle" iconBgColor="bg-success/10" iconColor="text-success" />
+        <app-stats title="Reclamadas" [value]="summaryValue('reclaimed')" smallText="Reclamo de factura" iconName="x-circle" iconBgColor="bg-error/10" iconColor="text-error" />
+      </div>
+      @if (inbox.summaryError()) {
+        <p class="text-sm text-text-secondary" role="status">No se pudo actualizar el resumen. Los contadores no están disponibles; usa Actualizar para reintentar.</p>
+      }
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <div class="sticky z-10 bg-background px-2 py-2 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border" [style.top.px]="statsOffset()">
+          <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
+            <h2 class="text-sm font-semibold text-text-primary md:text-lg">Buzón de facturas</h2>
+              <input #xmlInput class="sr-only" type="file" aria-label="Importar XML" accept=".xml,text/xml,application/xml" [disabled]="uploading() || !canImportInCurrentScope()" (click)="onXmlInputClick($event)" (change)="onFileSelected($event)" />
+            @if (areaView() === 'invoices') {
+            <div class="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto">
+              <app-inputsearch class="min-w-0 flex-1 basis-40 md:w-64" placeholder="Buscar proveedor, NIT o número" ariaLabel="Buscar facturas recibidas" [debounceTime]="300" [ngModel]="searchValue()" (ngModelChange)="searchValue.set($event)" (searchChange)="onSearch($event)" (clear)="onSearch('')" />
+              <app-options-dropdown [filters]="filterConfigs" [filterValues]="filterValues()" [actions]="dropdownActions()" [isLoading]="inbox.refreshing()" (filterChange)="onFilterChange($event)" (clearAllFilters)="clearFilters()" (actionClick)="onDropdownAction($event, xmlInput)" />
+            </div>
             }
           </div>
+          @if (scope === 'store' && canRead()) {
+            <nav class="mt-3 flex flex-wrap gap-2" aria-label="Secciones del Buzón">
+              <app-button customClasses="min-h-11" variant="outline" [ariaPressed]="areaView() === 'invoices'" [disabled]="areaChangeLocked()" (clicked)="setAreaView('invoices')">Facturas</app-button>
+              <app-button customClasses="min-h-11" variant="outline" [ariaPressed]="areaView() === 'not_processed'" [disabled]="areaChangeLocked()" (clicked)="setAreaView('not_processed')">No procesados ({{ emailNotProcessedCount() }})</app-button>
+              <app-button customClasses="min-h-11" variant="outline" [ariaPressed]="areaView() === 'history'" [disabled]="areaChangeLocked()" (clicked)="setAreaView('history')">Historial de correo</app-button>
+            </nav>
+          }
         </div>
-
-        @if (error()) {
-          <div role="alert" class="m-3 flex items-center justify-between gap-3 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error md:m-4">
-            <span>{{ error() }}</span><button type="button" class="rounded-md border border-error/30 px-3 py-1.5 font-medium" (click)="load()">Reintentar</button>
+        <div class="px-2 pt-3 text-xs text-text-secondary md:px-6" role="status">
+          <p>{{ receptionMessage() }}</p>
+          <p>Última recepción: {{ formatTimestamp(inbox.health()?.last_received_at) }} · Última actualización: {{ formatTimestamp(inbox.lastUpdatedAt()) }}</p>
+          @if (inbox.health()?.next_sync_at) { <p>Próxima consulta del proveedor: {{ formatTimestamp(inbox.health()?.next_sync_at) }}</p> }
+          @if (inbox.summary() && !inbox.summaryError()) { <p>{{ inbox.summary()!.total }} facturas en búsqueda, canal y tipo · Corte: {{ formatTimestamp(inbox.summary()!.as_of) }}</p> }
+          @if (emailAvailable() && canConfigureEmail()) {
+            <section class="mt-3 space-y-2 rounded-lg border border-border p-3 text-sm" aria-label="Recepción por correo">
+              @if (emailAddress(); as address) {
+                <p class="select-all break-all text-text-primary">Tu correo de facturas: {{ address }}</p>
+                <div class="flex flex-wrap gap-2">
+                  <app-button customClasses="min-h-11" variant="outline" (clicked)="copyEmailAddress()">Copiar</app-button>
+                  <app-button customClasses="min-h-11" variant="ghost" (clicked)="openEmailWizard()">Cómo configurarlo</app-button>
+                </div>
+              } @else {
+                <p class="font-semibold text-text-primary">Recibe tus facturas automáticamente por correo</p>
+                <p>Activa tu dirección Vendix y reenvía las facturas de tus proveedores. No necesitas conectar ni compartir la contraseña de tu correo.</p>
+                @if (inbox.health()?.dian_active === false) {
+                  <p>Primero termina la activación de facturación electrónica de tu negocio.</p>
+                  <app-button customClasses="min-h-11" variant="outline" (clicked)="openConfiguration()">Ver configuración</app-button>
+                } @else {
+                  <app-button customClasses="min-h-11" (clicked)="openEmailWizard()">{{ inbox.health()?.email?.configured ? 'Cómo configurarlo' : 'Activar' }}</app-button>
+                }
+              }
+              @if (addressError()) { <p role="status">{{ addressError() }}</p> }
+              @if (addressCopyMessage()) { <p role="status">{{ addressCopyMessage() }}</p> }
+            </section>
+          } @else if (canConfigure()) { <app-button variant="ghost" size="sm" (clicked)="openConfiguration()">Configurar recepción</app-button> }
+        </div>
+        @if (areaView() === 'invoices') {
+        @if (inbox.error()) {
+          <div role="alert" class="mx-2 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/30 bg-error-light p-3 text-sm text-error md:mx-6">
+            <span>{{ inbox.error() }} Los datos anteriores se conservan.</span>
+            <app-button variant="outline" size="sm" (clicked)="inbox.refresh()">Reintentar</app-button>
           </div>
         }
-        @if (requiresStoreSelector() && !scopeReady()) {
-          <div class="p-8 text-center text-sm text-text-secondary" role="status">Selecciona una tienda fiscal para consultar sus documentos recibidos.</div>
-        } @else if (loading() && rows().length === 0) {
-          <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando documentos…</div>
-        } @else if (!loading() && rows().length === 0 && !error()) {
-          <app-empty-state icon="inbox" title="No hay documentos recibidos" description="Importa un XML o captura manualmente un documento de proveedor para iniciar la revisión." [showActionButton]="false" />
-        } @else {
-          <div class="p-2 md:p-4">
-            <app-responsive-data-view [data]="rows()" [columns]="columns" [cardConfig]="cardConfig" [actions]="rowActions" [loading]="loading()" [rowLabelKey]="'invoice_number'" (rowClick)="openDetail($event)" />
+        @if (inbox.hasPendingUpdate()) {
+          <div class="mx-2 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3 text-sm text-text-secondary md:mx-6" role="status" aria-live="polite">
+            <span>{{ inbox.pendingNewCount() > 0 ? inbox.pendingNewCount() + ' nuevas facturas' : 'Hay una actualización disponible' }}. Tu página y trabajo se conservan.</span>
+            <app-button variant="outline" size="sm" (clicked)="inbox.applyPendingUpdate()">Aplicar actualización</app-button>
           </div>
-          <app-pagination [currentPage]="page()" [totalPages]="totalPages()" [total]="total()" [limit]="limit()" (pageChange)="onPageChange($event)" />
+        }
+        @if (!canRead()) {
+          <p class="p-8 text-center text-sm text-text-secondary" role="status">No tienes permiso para consultar el buzón de facturas.</p>
+        } @else if (requiresStoreSelector() && !scopeReady()) {
+          <div class="p-8 text-center text-sm text-text-secondary" role="status">Selecciona una tienda fiscal para consultar su buzón de facturas.</div>
+        } @else if (inbox.loading() && inbox.rows().length === 0) {
+          <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando facturas…</div>
+        } @else if (!inbox.loading() && inbox.rows().length === 0 && !inbox.error()) {
+          <app-empty-state icon="inbox" [title]="emptyState().title" [description]="emptyState().description" [showActionButton]="emptyState().configure" [actionButtonText]="emailAvailable() && canConfigureEmail() ? 'Configurar correo' : 'Configurar recepción'" actionButtonIcon="settings" (actionClick)="openReceptionSetup()" [showClearFilters]="emptyState().clearFilters" (clearFiltersClick)="clearFilters()" [showRefreshButton]="true" (refreshClick)="inbox.refresh()" />
+        } @else {
+          <div class="px-2 pb-2 pt-3 md:p-4" (focusin)="listFocused.set(true)" (focusout)="onListFocusOut($event)">
+            <app-responsive-data-view [data]="inbox.rows()" [columns]="columns" [cardConfig]="cardConfig" [actions]="rowActions" [loading]="inbox.loading()" [sortable]="false" rowLabelKey="invoice_number" (rowClick)="openDetail($event)" />
+            <app-pagination [currentPage]="page()" [totalPages]="totalPages()" [total]="inbox.total()" [limit]="limit" (pageChange)="onPageChange($event)" />
+          </div>
+        }
+        }
+        @if (scope === 'store' && canRead()) {
+          <div class="px-2 py-3 md:px-6">
+            <app-received-email-messages [tenantKey]="tenantKey()" [contextReady]="scopeReady()"
+              [canRead]="canRead()" [canImport]="canImportInCurrentScope()" [canConfigure]="canConfigureEmail()" [canSync]="canSyncEmail()"
+              [isActive]="areaView() !== 'invoices'" [view]="areaView() === 'not_processed' ? 'not_processed' : 'history'" [timezone]="timezone()"
+              (protectedChange)="emailMessagesProtected.set($event)" (manualImportRequested)="openManualFromEmail()"
+              (configureRequested)="openEmailWizard()" (forwardingRequested)="onEmailForwardingRequested()" (documentRequested)="onEmailDocumentRequested($event)" />
+          </div>
         }
       </app-card>
-      <p class="px-1 text-xs text-text-secondary">Los estados fiscales, de revisión, coincidencia y contabilización son independientes. “Listo” no significa aceptado por la DIAN.</p>
+      <p class="text-xs text-text-secondary">Recepción, revisión, aceptación legal y conciliación son independientes. Leer por OCR no acepta ni contabiliza una factura.</p>
+      @if (scope === 'store' && canRead()) {
+        <app-received-email-reception-wizard [(isOpen)]="emailWizardOpen" [tenantKey]="tenantKey()"
+          [scope]="scope" [contextReady]="scopeReady()" [canRead]="canRead()" [canConfigure]="canConfigureEmail()"
+          (protectedChange)="emailWizardProtected.set($event)" (completed)="onEmailCompleted()"
+          (manualImportRequested)="openManualFromEmail()" (historyRequested)="onEmailHistoryRequested()" />
+      }
+      <app-modal [(isOpen)]="manualImportOptionsOpen" title="Importar manualmente" size="md" [dialog]="true" [fullScreenOnMobile]="true" [closeOnBackdrop]="false"
+        (cancel)="closeManualImportOptions()" (closed)="closeManualImportOptions()">
+        <div class="space-y-3">
+          <p class="text-sm text-text-secondary">Elige un archivo de tu dispositivo o captura los datos. No usamos ni transferimos los adjuntos rechazados del correo.</p>
+          <div class="flex flex-col gap-3">
+            <app-button customClasses="min-h-11" variant="outline" [disabled]="!canUseManualImportOptions()" (clicked)="chooseManualImport('xml')">Importar XML</app-button>
+            <app-button customClasses="min-h-11" variant="outline" [disabled]="!canUseManualImportOptions()" (clicked)="chooseManualImport('scan')">Escanear PDF/foto</app-button>
+            <app-button customClasses="min-h-11" variant="outline" [disabled]="!canUseManualImportOptions()" (clicked)="chooseManualImport('manual')">Capturar manualmente</app-button>
+          </div>
+        </div>
+        <div slot="footer"><app-button customClasses="min-h-11" variant="outline" (clicked)="closeManualImportOptions()">Cancelar</app-button></div>
+      </app-modal>
       @if (canImport()) {
-        <app-received-document-import
-          [(isOpen)]="scanImportOpen"
-          [scope]="scope"
-          [selectedStoreId]="storeId() ?? null"
-          (completed)="onScanCompleted($event)"
-        />
-        <app-received-document-form
-          [(isOpen)]="manualFormOpen"
-          [scope]="scope"
-          [selectedStoreId]="storeId() ?? null"
-          (saved)="onManualSaved($event)"
-        />
+        <app-received-document-import [(isOpen)]="scanImportOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" (completed)="onScanCompleted($event)" />
+        <app-received-document-form [(isOpen)]="manualFormOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" (saved)="onManualSaved($event)" (duplicateNotice)="onManualDuplicate()" />
       }
     </div>
   `,
@@ -115,181 +169,415 @@ export class ReceivedDocumentsPageComponent {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(ReceivedDocumentsService);
+  private readonly emailApi = inject(ReceivedEmailReceptionService);
   private readonly toast = inject(ToastService);
   private readonly auth = inject(AuthFacade);
   private readonly currency = inject(CurrencyFormatService);
-  readonly statusFilters = STATUS_FILTERS;
+  private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly browser = isPlatformBrowser(inject(PLATFORM_ID));
+  readonly inbox = inject(ReceivedDocumentsInboxFacade);
   readonly scope: ReceivedDocumentsScope = this.readScope(this.route.snapshot.data['receivedDocumentsScope']);
   private readonly routeQueryParams = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
   readonly requiresStoreSelector = computed(() => this.scope === 'organization' && this.auth.fiscalScope() === 'STORE');
   readonly storeId = computed(() => this.requiresStoreSelector() ? this.readStoreId(this.routeQueryParams().get('store_id')) : undefined);
-  readonly rows = signal<ReceivedDocument[]>([]);
-  readonly total = signal(0);
-  readonly page = signal(1);
-  readonly limit = signal(25);
-  readonly search = signal('');
-  readonly status = signal('');
-  readonly loading = signal(false);
-  readonly uploading = signal(false);
-  readonly scanImportOpen = signal(false);
-  readonly manualFormOpen = signal(false);
-  readonly error = signal<string | null>(null);
-  readonly canImport = computed(() => this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:import`));
   readonly storeSelectionReady = signal(this.scope !== 'organization');
   readonly pendingStoreSelection = signal<number | null | undefined>(undefined);
   readonly scopeReady = computed(() => !this.requiresStoreSelector() || (this.storeSelectionReady() && this.storeId() != null && this.pendingStoreSelection() === undefined));
+  readonly page = computed(() => this.readStoreId(this.routeQueryParams().get('page')) ?? 1);
+  readonly limit = 25;
+  readonly search = computed(() => this.routeQueryParams().get('search')?.trim() ?? '');
+  readonly searchValue = signal(this.search());
+  readonly inboxState = computed(() => this.readChoice(this.routeQueryParams().get('inbox_state'), RECEIVED_INBOX_LABELS) as ReceivedDocumentInboxState | undefined);
+  readonly legalStatus = computed(() => this.readChoice(this.routeQueryParams().get('legal_status'), RECEIVED_LEGAL_LABELS) as ReceivedDocumentLegalStatus | undefined);
+  readonly sourceChannel = computed(() => this.readChoice(this.routeQueryParams().get('source_channel'), { api: '', automated: '', xml: '', manual: '', email: '' }));
+  readonly documentType = computed(() => this.readChoice(this.routeQueryParams().get('document_type'), RECEIVED_TYPE_LABELS) as ReceivedDocumentType | undefined);
+  readonly query = computed<ReceivedDocumentQuery>(() => ({ page: this.page(), limit: this.limit, search: this.search() || undefined,
+    inbox_state: this.inboxState(), legal_status: this.legalStatus(), source_channel: this.sourceChannel(), document_type: this.documentType(), sort: 'inbox', store_id: this.storeId() }));
+  readonly filterValues = computed<FilterValues>(() => ({ inbox_state: this.inboxState() ?? null, legal_status: this.legalStatus() ?? null, source_channel: this.sourceChannel() ?? null, document_type: this.documentType() ?? null }));
+  readonly hasFilters = computed(() => !!(this.search() || this.inboxState() || this.legalStatus() || this.sourceChannel() || this.documentType()));
+  readonly uploading = signal(false);
+  readonly scanImportOpen = signal(false);
+  readonly manualFormOpen = signal(false);
+  readonly listFocused = signal(false);
+  readonly emailWizardOpen = signal(false);
+  readonly emailWizardProtected = signal(false);
+  readonly emailMessagesProtected = signal(false);
+  readonly manualImportOptionsOpen = signal(false);
+  private readonly manualImportOptionsContext = signal('');
+  private readonly xmlInput = viewChild<ElementRef<HTMLInputElement>>('xmlInput');
+  private xmlSelectionContext = '';
+  readonly canUseManualImportOptions = computed(() => this.manualImportOptionsOpen() && this.canImportInCurrentScope()
+    && !this.uploading() && this.manualImportOptionsContext() === this.writeContext());
+  readonly areaView = signal<'invoices' | 'not_processed' | 'history'>('invoices');
+  readonly areaChangeLocked = computed(() => this.uploading() || this.scanImportOpen() || this.manualFormOpen()
+    || this.emailWizardOpen() || this.emailMessagesProtected() || this.manualImportOptionsOpen());
+  private readonly emailMessages = viewChild(ReceivedEmailMessagesComponent);
+  private readonly emailWizard = viewChild(ReceivedEmailReceptionWizardComponent);
+  readonly emailNotProcessedCount = computed(() => this.inbox.healthError() ? '—' : this.inbox.health()?.email?.not_processed_count ?? '—');
+  readonly addressError = signal<string | null>(null);
+  readonly addressCopyMessage = signal<string | null>(null);
+  private readonly addressValue = signal<string | null>(null);
+  private readonly addressSnapshotKey = signal('');
+  private addressRequest?: Subscription;
+  private addressGeneration = 0;
+  private emailDeepLinkContext = '';
+  private scanContext = '';
+  private manualContext = '';
+  private writeContext(): string { return JSON.stringify([this.tenantKey(), this.storeId()]); }
+  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.inbox.total() / this.limit)));
+  private readonly permissionPrefix = this.scope === 'store' ? 'invoicing:received' : 'organization:invoicing:received';
+  readonly tenantKey = computed(() => JSON.stringify([this.auth.userId(), this.auth.userStore()?.id ?? null, this.auth.userOrganization()?.id ?? null]));
+  readonly canRead = computed(() => this.auth.userId() !== null && this.auth.hasPermission(`${this.permissionPrefix}:read`));
+  readonly canImport = computed(() => this.auth.hasPermission(`${this.permissionPrefix}:import`));
   readonly canImportInCurrentScope = computed(() => this.canImport() && this.scopeReady());
-  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.total() / this.limit())));
-
+  readonly canConfigure = computed(() => this.inbox.health()?.dian_active === false
+    ? this.auth.hasPermission(this.scope === 'store' ? 'invoicing:write' : 'organization:invoicing:dian:write')
+    : this.auth.hasPermission(`${this.permissionPrefix}:connections:configure`));
+  readonly canConfigureEmail = computed(() => this.scope === 'store' && this.canRead()
+    && this.auth.hasPermission('invoicing:received:connections:configure'));
+  readonly canSyncEmail = computed(() => this.scope === 'store' && this.canRead()
+    && this.auth.hasPermission('invoicing:received:connections:sync'));
+  readonly emailAvailable = computed(() => this.scope === 'store' && this.scopeReady() && !this.inbox.healthError()
+    && this.inbox.health()?.email?.pilot_available === true);
+  private readonly emailAddressContextKey = computed(() => JSON.stringify([this.tenantKey(), this.canConfigureEmail(),
+    this.emailAvailable(), this.inbox.health()?.email?.configured === true]));
+  readonly emailAddress = computed(() => this.emailAvailable() && this.canConfigureEmail()
+    && this.addressSnapshotKey() === this.emailAddressContextKey() ? this.addressValue() : null);
+  readonly emptyState = computed(() => {
+    if (this.emailAvailable() && this.canConfigureEmail() && !this.hasFilters() && !this.inbox.health()?.email?.configured)
+      return { title: 'Recibe tus facturas automáticamente por correo', description: 'Activa tu dirección Vendix y reenvía las facturas de tus proveedores. No necesitas compartir la contraseña de tu correo.', configure: true, clearFilters: false };
+    return receivedInboxEmptyState(this.inbox.healthError() ? null : this.inbox.health(), this.hasFilters(), this.canConfigure());
+  });
+  readonly statsStrip = viewChild<ElementRef<HTMLElement>>('statsStrip');
+  readonly statsOffset = signal(96);
+  readonly timezone = computed(() => this.storeSettings.settings()?.general?.timezone ?? 'America/Bogota');
+  readonly receptionMessage = computed(() => {
+    if (this.inbox.healthError()) return 'No se pudo consultar la salud de recepción. El historial sigue disponible.';
+    const health = this.inbox.health();
+    if (!health) return 'Consultando el estado de recepción…';
+    if (health.email?.pilot_available && health.email.configured) return receivedEmailStatusCopy(health.email).title;
+    if (health.requires_operational_store) return 'Selecciona una tienda operativa para configurar recepción automática. El historial fiscal sigue disponible.';
+    if (health.error_code) return 'La conexión de recepción requiere atención. El historial se conserva; solicita revisión al administrador.';
+    if (!health.dian_active) return 'DIAN no activa para recepción automática. El historial y la importación manual siguen disponibles.';
+    if (!health.configured) return this.canConfigure() ? 'Sin conexión automática: configura recepción por correo o una integración avanzada.' : 'Sin conexión automática. Solicita configuración al administrador.';
+    if (!health.active_connections) return this.canConfigure() ? 'Activa un canal de recepción automática.' : 'Solicita al administrador que active un canal de recepción.';
+    return 'Recibiendo por una integración avanzada configurada.';
+  });
+  readonly filterConfigs: FilterConfig[] = [
+    { key: 'inbox_state', label: 'Estado de atención', type: 'select', options: Object.entries(RECEIVED_INBOX_LABELS).map(([value, label]) => ({ value, label })) },
+    { key: 'legal_status', label: 'Estado legal', type: 'select', options: Object.entries(RECEIVED_LEGAL_LABELS).map(([value, label]) => ({ value, label })) },
+    { key: 'source_channel', label: 'Canal de origen', type: 'select', options: ['api', 'automated', 'xml', 'manual', 'email'].map((value) => ({ value, label: receivedChannelLabel(value) })) },
+    { key: 'document_type', label: 'Tipo de documento', type: 'select', options: Object.entries(RECEIVED_TYPE_LABELS).map(([value, label]) => ({ value, label })) },
+  ];
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    { label: 'Actualizar buzón', icon: 'refresh-cw', action: 'refresh' },
+    ...(this.canImport() ? [
+      { label: 'Importar XML', icon: 'upload', action: 'xml', disabled: this.uploading() || !this.canImportInCurrentScope() },
+      { label: 'Capturar manualmente', icon: 'plus', action: 'manual', disabled: this.uploading() || !this.canImportInCurrentScope() },
+      { label: 'Escanear PDF/foto', icon: 'scan-line', action: 'scan', disabled: this.uploading() || !this.canImportInCurrentScope() },
+    ] : []),
+  ]);
+  readonly inboxBadgeConfig = { type: 'custom' as const, colorMap: {
+    new: 'var(--color-info)', requires_review: 'var(--color-warning)', accepted: 'var(--color-success)', reclaimed: 'var(--color-error)',
+  } };
   readonly columns: TableColumn[] = [
     { key: 'issuer_name', label: 'Proveedor', priority: 1, transform: (v, row) => `${v || 'Proveedor sin nombre'}${row?.issuer_tax_id ? ` · ${row.issuer_tax_id}` : ''}` },
-    { key: 'invoice_number', label: 'Número', priority: 1 },
-    { key: 'issue_date', label: 'Fecha emisión', priority: 2, transform: (v) => this.formatDate(v) },
+    { key: 'invoice_number', label: 'Factura', priority: 1 },
+    { key: 'document_type', label: 'Tipo', priority: 2, transform: (_v, row) => this.documentTypeLabel(row) },
+    { key: 'source_channel', label: 'Origen', priority: 3, transform: (_v, row) => receivedDocumentSourceLabel(row) },
+    { key: 'arrived_at', label: 'Llegó', priority: 2, transform: (v) => this.formatTimestamp(v) },
+    { key: 'issue_date', label: 'Emisión', priority: 3, transform: (v) => this.formatDate(v) },
     { key: 'total_amount', label: 'Total', align: 'right', priority: 1, transform: (_v, row) => this.formatMoney(row) },
-    { key: 'validation_status', label: 'Validación', badge: true, priority: 2, badgeTransform: (v) => this.label(v) },
-    { key: 'review_status', label: 'Revisión', badge: true, priority: 3, badgeTransform: (v) => this.label(v) },
+    { key: 'inbox_state', label: 'Atención', badge: true, badgeConfig: this.inboxBadgeConfig, priority: 1, transform: receivedInboxLabel, badgeTransform: receivedInboxLabel },
+    { key: 'legal_status', label: 'Estado legal', badge: true, priority: 2, transform: receivedLegalLabel, badgeTransform: receivedLegalLabel },
+    { key: 'dian_validation_status', label: 'Verificación DIAN', badge: true, priority: 2,
+      badgeConfig: { type: 'custom', colorMap: { not_checked: 'var(--color-text-secondary)' } },
+      transform: (_v, row) => receivedDianLabel(row), badgeTransform: receivedDianLabel },
+    { key: 'processing_status', label: 'Lectura / OCR', priority: 3, transform: (v) => receivedOcrLabel(String(v)) },
   ];
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'issuer_name', titleTransform: (row) => row.issuer_name || 'Proveedor sin nombre',
-    subtitleKey: 'invoice_number', subtitleTransform: (row) => `${row.invoice_number || 'Sin número'} · ${this.formatDate(row.issue_date)}`,
-    badgeKey: 'processing_status', badgeTransform: (v) => this.label(v),
+    subtitleKey: 'invoice_number', subtitleTransform: (row) => `${row.invoice_number || 'Sin número'} · ${this.documentTypeLabel(row)}`,
+    badgeKey: 'inbox_state', badgeConfig: this.inboxBadgeConfig, badgeTransform: receivedMobileInboxLabel,
     detailKeys: [
-      { key: 'validation_status', label: 'Validación', transform: (v) => this.label(v) },
-      { key: 'review_status', label: 'Revisión', transform: (v) => this.label(v) },
-      { key: 'matching_status', label: 'Coincidencia', transform: (v) => this.label(v) },
+      { key: 'arrived_at', label: 'Llegó', transform: (v) => this.formatTimestamp(v) },
+      { key: 'issue_date', label: 'Emisión', transform: (v) => this.formatDate(v) },
+      { key: 'legal_status', label: 'Legal', transform: receivedLegalLabel },
+      { key: 'source_channel', label: 'Origen', transform: (_v, row) => receivedDocumentSourceLabel(row) },
+      { key: 'processing_status', label: 'Lectura / OCR', transform: (v) => receivedOcrLabel(String(v)) },
     ],
     footerKey: 'total_amount', footerLabel: 'Total', footerTransform: (_v, row) => this.formatMoney(row), footerStyle: 'prominent',
   };
-  readonly rowActions: TableAction[] = [{ label: 'Ver documento', icon: 'eye', variant: 'ghost', action: (row: ReceivedDocument) => this.openDetail(row) }];
-  private activeRequest?: Subscription;
-  private requestSequence = 0;
+  readonly rowActions: TableAction[] = [{ label: 'Ver / revisar factura', icon: 'eye', variant: 'ghost', action: (row: ReceivedDocument) => this.openDetail(row) }];
+
   constructor() {
-    if (!this.route.snapshot.data['receivedDocumentsScope']) {
-      this.error.set('No se pudo determinar el alcance fiscal de esta bandeja.');
-      return;
-    }
+    let previousTenant = this.writeContext();
+    effect(() => {
+      const tenantKey = this.writeContext();
+      if (tenantKey !== previousTenant) {
+        previousTenant = tenantKey;
+        untracked(() => {
+          this.scanImportOpen.set(false); this.manualFormOpen.set(false); this.emailWizardOpen.set(false);
+          this.emailWizardProtected.set(false); this.emailMessagesProtected.set(false); this.closeManualImportOptions();
+          this.xmlSelectionContext = '';
+          const input = this.xmlInput()?.nativeElement;
+          if (input) input.value = '';
+          this.areaView.set('invoices'); this.listFocused.set(false);
+        });
+      }
+    });
     effect(() => {
       const currentStoreId = this.storeId();
       untracked(() => {
-        const pendingStoreId = this.pendingStoreSelection();
-        if (pendingStoreId !== undefined && (pendingStoreId === currentStoreId || (pendingStoreId === null && currentStoreId === undefined))) {
+        const pending = this.pendingStoreSelection();
+        if (pending !== undefined && (pending === currentStoreId || (pending === null && currentStoreId === undefined))) {
           this.pendingStoreSelection.set(undefined);
           this.storeSelectionReady.set(true);
         }
-        this.page.set(1);
-        this.rows.set([]);
-        this.total.set(0);
-        this.load();
       });
     });
-  }
-
-  load(): void {
-    const requestSequence = ++this.requestSequence;
-    this.activeRequest?.unsubscribe();
-    if (!this.scopeReady()) {
-      this.rows.set([]);
-      this.total.set(0);
-      this.error.set(null);
-      this.loading.set(false);
-      return;
-    }
-    this.loading.set(true);
-    this.error.set(null);
-    const query: ReceivedDocumentQuery = { page: this.page(), limit: this.limit(), search: this.search() || undefined };
-    if (this.status()) query.validation_status = this.status();
-    if (this.scope === 'organization' && this.storeId()) query.store_id = this.storeId();
-    this.activeRequest = this.service.list(this.scope, query).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => {
-      if (requestSequence === this.requestSequence) this.loading.set(false);
-    })).subscribe({
-      next: (response) => { this.rows.set(response.data ?? []); this.total.set(response.meta?.total ?? 0); },
-      error: (err: unknown) => { this.rows.set([]); this.total.set(0); this.error.set(describeApiFailure(err).message || 'No se pudieron cargar los documentos.'); },
+    effect(() => {
+      const query = this.query();
+      const ready = this.scopeReady() && this.canRead();
+      const tenantKey = this.tenantKey();
+      untracked(() => { this.searchValue.set(query.search ?? ''); this.inbox.setContext(this.scope, query, ready, tenantKey); });
+    });
+    effect(() => {
+      const protectedWork = this.uploading() || this.scanImportOpen() || this.manualFormOpen() || this.emailWizardOpen() || this.emailWizardProtected() || this.listFocused() || this.emailMessagesProtected() || this.areaView() !== 'invoices' || this.manualImportOptionsOpen();
+      untracked(() => this.inbox.setProtected(protectedWork));
+    });
+    effect(() => {
+      const key = this.emailAddressContextKey();
+      untracked(() => { this.addressSnapshotKey.set(key); this.refreshEmailAddress(); });
+    });
+    effect(() => {
+      const requested = this.routeQueryParams().get('setup') === 'email';
+      const eligible = this.emailAvailable() && this.canConfigureEmail() && this.inbox.health()?.dian_active === true;
+      const key = this.tenantKey();
+      if (requested && eligible && this.emailDeepLinkContext !== key) {
+        this.emailDeepLinkContext = key;
+        untracked(() => this.emailWizardOpen.set(true));
+      }
+    });
+    this.destroyRef.onDestroy(() => { this.addressGeneration++; this.addressRequest?.unsubscribe(); });
+    effect((onCleanup) => {
+      const element = this.statsStrip()?.nativeElement;
+      if (!element || !this.browser || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(([entry]) => this.statsOffset.set(Math.ceil(entry.contentRect.height)));
+      observer.observe(element);
+      onCleanup(() => observer.disconnect());
     });
   }
-
-  onSearch(value: string): void { this.search.set(value.trim()); this.page.set(1); this.load(); }
-  onStatusChange(event: Event): void { this.status.set((event.target as HTMLSelectElement).value); this.page.set(1); this.load(); }
-  onPageChange(page: number): void { this.page.set(page); this.load(); }
-
+  setAreaView(view: 'invoices' | 'not_processed' | 'history'): void {
+    if (this.scope !== 'store' || !this.canRead() || !this.scopeReady()) return;
+    if (this.areaChangeLocked()) return;
+    this.areaView.set(view);
+    // Invoice URL/search/filter/page and open manual buffers are untouched. Only the active area shows a paginator.
+  }
+  onEmailHistoryRequested(): void {
+    const wizard = this.emailWizard();
+    if (!wizard || wizard.busy() || wizard.tenantKey() !== this.tenantKey() || !this.scopeReady()
+      || this.scope !== 'store' || !this.canRead()) return;
+    // Explicit user intent only; completion never closes the assistant.
+    this.emailWizardOpen.set(false);
+    this.areaView.set('not_processed');
+  }
+  onEmailForwardingRequested(): void {
+    if (this.canConfigureEmail()) this.openEmailWizard();
+    else if (this.scope === 'store' && this.canRead()) this.toast.info('Pide a una persona autorizada que revise el reenvío de facturas de esta tienda.');
+  }
+  onEmailDocumentRequested(id: number): void {
+    if (this.scope !== 'store' || !this.canRead() || !this.scopeReady() || this.areaView() === 'invoices'
+      || this.emailMessages()?.tenantKey() !== this.tenantKey() || !Number.isSafeInteger(id) || id <= 0) return;
+    // The child emits only an ID present in its current scoped metadata projection, never a hidden duplicate.
+    this.openDocumentDetail(id);
+  }
+  documentTypeLabel(doc: ReceivedDocument): string {
+    return receivedIsElectronicPos(doc) ? 'Documento POS electrónico' : receivedTypeLabel(doc.document_type);
+  }
+  summaryValue(key: ReceivedDocumentInboxState): number | string {
+    return this.inbox.summaryError() ? '—' : this.inbox.summary()?.[key] ?? '—';
+  }
+  onSearch(value: string): void {
+    if (value !== this.searchValue()) return;
+    this.navigateQuery({ search: value.trim() || null, page: 1 });
+  }
+  onFilterChange(values: FilterValues): void {
+    const queryParams: Record<string, string | number | null> = { page: 1 };
+    for (const key of ['inbox_state', 'legal_status', 'source_channel', 'document_type']) {
+      queryParams[key] = typeof values[key] === 'string' ? values[key] : null;
+    }
+    this.navigateQuery(queryParams);
+  }
+  clearFilters(): void {
+    this.searchValue.set('');
+    this.navigateQuery({ search: null, inbox_state: null, legal_status: null, source_channel: null, document_type: null, page: 1 });
+  }
+  onPageChange(page: number): void {
+    if (!Number.isInteger(page) || page < 1 || page > this.totalPages()) return;
+    this.navigateQuery({ page });
+  }
+  private navigateQuery(queryParams: Record<string, string | number | null>): void {
+    void this.router.navigate([], { relativeTo: this.route, queryParams, queryParamsHandling: 'merge', replaceUrl: true });
+  }
   onFiscalStoreChange(storeId: number | null): void {
-    const wasReadyForCurrentStore = this.scopeReady();
     this.storeSelectionReady.set(true);
     if (!this.requiresStoreSelector()) {
-      if (this.routeQueryParams().has('store_id')) {
-        void this.router.navigate([], {
-          relativeTo: this.route,
-          queryParams: { store_id: null, page: 1 },
-          queryParamsHandling: 'merge',
-        });
-      }
+      if (this.routeQueryParams().has('store_id')) this.navigateQuery({ store_id: null, page: 1 });
       return;
     }
-    if (storeId === (this.storeId() ?? null)) {
-      if (!wasReadyForCurrentStore && storeId !== null && this.pendingStoreSelection() === undefined) {
-        this.pendingStoreSelection.set(undefined);
-        this.load();
-      }
-      return;
-    }
+    if (storeId === (this.storeId() ?? null)) return;
     this.pendingStoreSelection.set(storeId);
     this.storeSelectionReady.set(false);
-    this.rows.set([]);
-    this.total.set(0);
-    this.activeRequest?.unsubscribe();
-    this.requestSequence++;
-    this.loading.set(false);
-    void this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { store_id: storeId || null, page: 1 },
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
+    this.inbox.setContext(this.scope, this.query(), false, this.tenantKey());
+    this.navigateQuery({ store_id: storeId || null, page: 1 });
+  }
+  onListFocusOut(event: FocusEvent): void {
+    const container = event.currentTarget as HTMLElement;
+    this.listFocused.set(!!event.relatedTarget && container.contains(event.relatedTarget as Node));
+  }
+  onDropdownAction(action: string, input: HTMLInputElement): void {
+    if (action === 'refresh') { this.inbox.refresh(); return; }
+    if (!this.canImportInCurrentScope() || this.uploading()) return;
+    if (action === 'manual') { this.manualContext = this.writeContext(); this.manualFormOpen.set(true); }
+    if (action === 'scan') { this.scanContext = this.writeContext(); this.scanImportOpen.set(true); }
+    if (action === 'xml') { this.xmlSelectionContext = this.writeContext(); input.click(); }
+  }
+  openReceptionSetup(): void {
+    if (this.emailAvailable() && this.canConfigureEmail() && this.inbox.health()?.dian_active) this.openEmailWizard();
+    else this.openConfiguration();
+  }
+  openEmailWizard(): void {
+    if (!this.emailAvailable() || !this.canConfigureEmail() || this.inbox.health()?.dian_active !== true) return;
+    this.emailWizardOpen.set(true);
+  }
+  onEmailCompleted(): void {
+    // The wizard remains open; protected rows/new membership stay buffered until the user closes it.
+    this.inbox.refreshAfterMutation();
+    this.refreshEmailAddress();
+  }
+  openManualFromEmail(): void {
+    if (!this.canImportInCurrentScope() || this.uploading()) return;
+    this.manualImportOptionsContext.set(this.writeContext());
+    this.manualImportOptionsOpen.set(true);
+  }
+  closeManualImportOptions(): void {
+    this.manualImportOptionsOpen.set(false);
+    this.manualImportOptionsContext.set('');
+  }
+  chooseManualImport(kind: 'xml' | 'scan' | 'manual'): void {
+    if (!this.canUseManualImportOptions()) return;
+    const context = this.manualImportOptionsContext();
+    const input = this.xmlInput()?.nativeElement;
+    if (kind === 'xml' && !input) return;
+    this.closeManualImportOptions();
+    if (!this.canImportInCurrentScope() || context !== this.writeContext()) return;
+    if (kind === 'xml' && input) { this.xmlSelectionContext = context; input.click(); }
+    if (kind === 'scan') { this.scanContext = context; this.scanImportOpen.set(true); }
+    if (kind === 'manual') { this.manualContext = context; this.manualFormOpen.set(true); }
+  }
+  onManualDuplicate(): void {
+    if (this.manualContext === this.writeContext()) this.inbox.refreshAfterMutation();
+  }
+  private refreshEmailAddress(): void {
+    this.addressGeneration++;
+    this.addressRequest?.unsubscribe();
+    this.addressValue.set(null); this.addressError.set(null); this.addressCopyMessage.set(null);
+    if (!this.emailAvailable() || !this.canConfigureEmail() || !this.inbox.health()?.email?.configured) return;
+    const generation = this.addressGeneration;
+    const key = this.emailAddressContextKey();
+    this.addressRequest = this.emailApi.configuration().pipe(timeout(20_000), takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (configuration) => {
+        if (generation !== this.addressGeneration || key !== this.emailAddressContextKey()) return;
+        const address = configuration?.address;
+        if (configuration?.configured === true && typeof address === 'string' && address.length <= 254 && /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+$/.test(address)) {
+          this.addressValue.set(address); this.addressSnapshotKey.set(key);
+        } else this.addressError.set('No se pudo consultar tu dirección. Abre el asistente para actualizarla.');
+      },
+      error: (error: unknown) => {
+        if (generation === this.addressGeneration && key === this.emailAddressContextKey())
+          this.addressError.set(describeApiFailure(error).message || 'No se pudo consultar tu dirección.');
+      },
     });
   }
-
+  async copyEmailAddress(): Promise<void> {
+    const address = this.emailAddress(); const key = this.emailAddressContextKey();
+    if (!address || !this.browser) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(address);
+      if (key === this.emailAddressContextKey()) this.toast.success('Dirección copiada');
+    } catch {
+      if (key === this.emailAddressContextKey()) this.addressCopyMessage.set('Selecciona la dirección y cópiala manualmente.');
+    }
+  }
+  openConfiguration(): void {
+    if (!this.canConfigure() && !this.canConfigureEmail()) return;
+    void this.router.navigate(['/admin/invoicing/dian-config'], { queryParams: this.storeId() ? { store_id: this.storeId() } : undefined });
+  }
+  onXmlInputClick(event: Event): void {
+    if (!this.canImportInCurrentScope() || this.uploading()) {
+      this.xmlSelectionContext = '';
+      event.preventDefault();
+      return;
+    }
+    // Includes direct keyboard/click activation of the accessible file input.
+    this.xmlSelectionContext = this.writeContext();
+  }
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    if (!this.canImportInCurrentScope()) { input.value = ''; return; }
+    if (!this.canImportInCurrentScope() || !this.xmlSelectionContext || this.xmlSelectionContext !== this.writeContext()) {
+      input.value = ''; this.xmlSelectionContext = ''; return;
+    }
+    this.xmlSelectionContext = '';
     const file = input.files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.xml') || file.size > 10 * 1024 * 1024) {
       this.toast.error('Selecciona un archivo XML de hasta 10 MB.'); input.value = ''; return;
     }
+    const scope = this.scope;
+    const storeId = this.storeId();
+    const tenantKey = this.tenantKey();
     this.uploading.set(true);
-    this.service.importXml(this.scope, file, this.storeId()).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { this.uploading.set(false); input.value = ''; })).subscribe({
-      next: () => { this.toast.success('XML importado. El documento quedó disponible para revisión.'); this.page.set(1); this.load(); },
-      error: (err: unknown) => this.toast.error(describeApiFailure(err).message || 'No se pudo importar el XML.'),
+    this.service.importXml(scope, file, storeId).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => { this.uploading.set(false); input.value = ''; })).subscribe({
+      next: (response) => {
+        if (storeId !== this.storeId() || tenantKey !== this.tenantKey()) return;
+        if (isReceivedDocumentSafeNotice(response.data)) {
+          this.toast.info(response.data.message); this.inbox.refreshAfterMutation(); return;
+        }
+        this.toast.success('XML importado. El documento quedó disponible para revisión.'); this.inbox.refreshAfterMutation();
+      },
+      error: (err: unknown) => { if (storeId === this.storeId() && tenantKey === this.tenantKey()) this.toast.error(describeApiFailure(err).message || 'No se pudo importar el XML.'); },
     });
   }
-
   openDetail(row: ReceivedDocument): void {
     if (!row?.id) return;
-    const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
-    void this.router.navigate(['/admin/invoicing/received-documents', row.id], { queryParams });
+    this.openDocumentDetail(row.id);
   }
-
+  private openDocumentDetail(id: number): void {
+    void this.router.navigate(['/admin/invoicing/received-documents', id], { queryParams: this.route.snapshot.queryParams });
+  }
   onScanCompleted(documentId: number): void {
+    if (this.scanContext !== this.writeContext()) return;
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return;
     this.toast.success('Documento leído; requiere revisión.');
-    this.page.set(1);
-    this.load();
-    const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
-    void this.router.navigate(['/admin/invoicing/received-documents', documentId], { queryParams });
+    this.inbox.refreshAfterMutation();
+    this.openDocumentDetail(documentId);
   }
-
   onManualSaved(documentId: number): void {
+    if (this.manualContext !== this.writeContext()) return;
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return;
     this.toast.success('Documento guardado para revisión. No fue aceptado ni contabilizado.');
-    this.page.set(1);
-    this.load();
-    const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
-    void this.router.navigate(['/admin/invoicing/received-documents', documentId], { queryParams });
+    this.inbox.refreshAfterMutation();
+    this.openDocumentDetail(documentId);
   }
-
-  formatDate(value: string | null | undefined): string {
+  formatDate(value: unknown): string {
     if (!value) return 'Sin fecha';
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return 'Fecha inválida';
-    return formatDateOnlyUTC(date);
+    const date = new Date(String(value));
+    return Number.isFinite(date.getTime()) ? formatDateOnlyUTC(date) : 'Fecha inválida';
+  }
+  formatTimestamp(value: unknown): string {
+    return value ? formatStoreDateTime(String(value), this.timezone()) || 'Fecha inválida' : 'Sin registro';
   }
   formatMoney(row: ReceivedDocument): string {
     const amount = row?.total_amount;
@@ -299,10 +587,14 @@ export class ReceivedDocumentsPageComponent {
     if (this.currency.currencyCode().toUpperCase() === currency) return this.currency.format(amount);
     return `${amount} ${currency}`;
   }
-  label(value: unknown): string { return String(value ?? 'pendiente').replaceAll('_', ' '); }
   private readScope(value: unknown): ReceivedDocumentsScope {
     if (value === 'store' || value === 'organization') return value;
     throw new Error('La ruta debe declarar data.receivedDocumentsScope como store u organization.');
   }
-  private readStoreId(value: string | null): number | undefined { const id = Number(value); return Number.isInteger(id) && id > 0 ? id : undefined; }
+  private readStoreId(value: string | null): number | undefined {
+    const id = Number(value); return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  }
+  private readChoice(value: string | null, choices: Readonly<Record<string, string>>): string | undefined {
+    return value && Object.hasOwn(choices, value) ? value : undefined;
+  }
 }

@@ -521,7 +521,7 @@ export class DispatchNoteFlowService {
     // El payload se arma con la nota PRE-update: el `data` de abajo solo toca
     // status / delivered_by_user_id / delivered_at / actual_delivery_date /
     // updated_at, ninguno de los campos que viajan acá.
-    await this.eventEmitter.emitAsync('dispatch_note.received', {
+    const receivedResults = await this.eventEmitter.emitAsync('dispatch_note.received', {
       dispatch_note_id: id,
       dispatch_number: dispatch_note.dispatch_number,
       store_id: dispatch_note.store_id,
@@ -549,6 +549,13 @@ export class DispatchNoteFlowService {
     });
 
     this.logger.log(`Dispatch note #${id} received (inbound)`);
-    return updated;
+
+    // Recepción de OC con > 100 líneas: el listener no llamó a receive() en
+    // línea sino que encoló el job; su id vuelve en el resultado del emitAsync.
+    const po_receive_job_id = (
+      Array.isArray(receivedResults) ? receivedResults : []
+    ).find((r) => r && typeof r.po_receive_job_id === 'string')
+      ?.po_receive_job_id as string | undefined;
+    return po_receive_job_id ? { ...updated, po_receive_job_id } : updated;
   }
 }

@@ -2,6 +2,19 @@
   display: block;
   width: 100%;
   min-width: 0;
+
+  /* Contraste AA (4.5:1) solo dentro del demo de la portada. Los tokens del
+     tema base (gris #94a3b8, verde #22c55e, naranja #fb923c, rojo #ef4444)
+     no alcanzan 4.5:1 con texto pequeño sobre blanco o sus fondos -light.
+     Se oscurecen aquí, sin tocar el tema global ni app-stats, que heredan
+     las variables por cascada. */
+  --color-text-secondary: #64748b;
+  --color-text-secondary-rgb: 100, 116, 139;
+  --color-success-500-rgb: 21, 128, 61;
+  --color-warning: #c2410c;
+  --color-warning-rgb: 194, 65, 12;
+  --color-error: #b91c1c;
+  --color-error-rgb: 185, 28, 28;
 }
 
 /* Drawer móvil: entrada lateral */

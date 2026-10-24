@@ -38,6 +38,30 @@ export class VexiVoiceService {
 
   constructor(private readonly aiEngine: AIEngineService) {}
 
+  /** Isolated G capture: never reads normal dictation chunks or browser text. */
+  async transcribeConsent(
+    file?: Express.Multer.File,
+  ): Promise<import('./vexi-voice-consent.service').VoiceConsentObservation> {
+    this.requireFile(file, MAX_CHUNK_BYTES);
+    if (!RequestContextService.asyncLocalStorage.getStore()?.user_id)
+      throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
+    const response = await this.aiEngine.runTranscription(VOICE_STT_APP_KEY, {
+      inputAudio: {
+        data: file!.buffer.toString('base64'),
+        format: this.resolveFormat(file!),
+      },
+      language: TRANSCRIPTION_LANGUAGE,
+      requireConfidence: true,
+    });
+    if (!response.success)
+      throw new VendixHttpException(ErrorCodes.VEXI_VOICE_TRANSCRIBE_FAILED);
+    return {
+      source: 'server_stt',
+      text: (response.text ?? '').trim(),
+      confidence: response.confidence ?? null,
+    };
+  }
+
   /**
    * Accepts a slice of a recording still in progress.
    *
@@ -46,7 +70,10 @@ export class VexiVoiceService {
    * overlapped, not the transcription — the audio still reaches the provider as
    * one request.
    */
-  appendChunk(dtoTurnId: string, file?: Express.Multer.File): { bytes: number } {
+  appendChunk(
+    dtoTurnId: string,
+    file?: Express.Multer.File,
+  ): { bytes: number } {
     const chunk = this.requireFile(file, MAX_CHUNK_BYTES);
     const format = this.resolveFormat(file!);
     const key = this.bufferKey(dtoTurnId);

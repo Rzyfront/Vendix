@@ -89,6 +89,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
       [title]="derivedModalTitle()"
       [subtitle]="derivedModalSubtitle()"
       (closed)="onModalClosed()"
+      [dialog]="true"
       >
       <div slot="header"
         class="confirm-header-icon">
@@ -362,11 +363,6 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
             </app-button>
           }
     
-          <app-button variant="ghost" size="md" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
-            <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
-            <span class="hidden sm:inline">Email</span>
-          </app-button>
-    
           <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
                cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
                un reintento, es un hecho económico distinto. -->
@@ -378,7 +374,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           <!-- Separador visual entre categorías -->
           <div class="confirm-footer-sep"></div>
     
-          @if (orderData()?.isShippingSale && orderId) {
+          @if (derivedIsShippingSale() && orderId) {
             <app-button variant="ghost" size="md" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
               <app-icon name="send" [size]="16" slot="icon" ></app-icon>
               <span class="hidden sm:inline">Despachar</span>
@@ -789,7 +785,6 @@ export class PosOrderConfirmationComponent {
   readonly viewDetail = output<string>();
 
   printing = false;
-  emailing = false;
   /**
    * Loading del botón «Factura». Es señal —y no un campo plano como sus dos
    * vecinos— porque ahora lo apaga la respuesta del indicador fiscal, que llega
@@ -836,9 +831,20 @@ export class PosOrderConfirmationComponent {
   // the confirmation modal copy so the cashier doesn't read a draft save
   // as a fiscal sale. Draft = state in ['draft', 'created'] with no
   // payment row; anything else with a payment row is a sale.
-  readonly derivedIsShippingSale = computed(
-    () => !!this.orderData()?.isShippingSale,
-  );
+  readonly derivedIsShippingSale = computed(() => {
+    const order = this.orderData();
+    if (!order) return false;
+    if (order.isShippingSale) return true;
+
+    // El flujo estándar de cobro devuelve delivery_type desde la orden, pero
+    // no siempre agrega la marca temporal `isShippingSale` que usa el flujo
+    // del wizard. El tipo persistido es la fuente fiable para habilitar el
+    // despacho. Un borrador todavía no se puede despachar.
+    const state = (order.state || order.status || '').toString().toLowerCase();
+    return order.delivery_type === 'home_delivery' &&
+      state !== 'draft' &&
+      state !== 'created';
+  });
   readonly derivedIsPaid = computed(() => {
     const d = this.orderData();
     if (!d) return false;
@@ -1529,20 +1535,6 @@ private authFacade = inject(AuthFacade);
           void this.printDispatchTicketIfNeeded(trigger);
         }
       } });
-  }
-
-  emailReceipt(): void {
-    if (!this.derivedCustomerEmail()) {
-      this.toastService.warning('No hay email de cliente disponible');
-      return;
-    }
-
-    this.emailing = true;
-
-    setTimeout(() => {
-      this.emailing = false;
-      this.toastService.success('Ticket enviado por email correctamente');
-    }, 2000);
   }
 
   startNewSale(): void {

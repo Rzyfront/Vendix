@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -7,6 +7,28 @@ import {
   PrintFormatType,
 } from '../../../../../../../core/models/print-formats.model';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
+import { resolvePrintGeometry } from '../../../../../../../core/lib/print-geometry';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
+import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
+import {
+  CALIBRATION_MAX_PRINTABLE_MM,
+  CalibrationRollFormat,
+  buildCalibrationBodyHtml,
+} from './paper-calibration';
+
+/** Opciones de "Ancho imprimible" por rollo; la primera es la recomendada. */
+const PRINTABLE_OPTIONS: Record<string, readonly { mm: number; label: string }[]> = {
+  thermal_80: [
+    { mm: 72, label: '72 mm (recomendado)' },
+    { mm: 64, label: '64 mm (impresoras de 512 puntos)' },
+    { mm: 76, label: '76 mm' },
+  ],
+  thermal_58: [
+    { mm: 48, label: '48 mm (recomendado)' },
+    { mm: 52, label: '52 mm' },
+  ],
+};
 
 /** Cast helper — PAPER_GEOMETRY is keyed by a closed set, but the
  *  editor dropdown also exposes `custom`. Unknown keys fall through to
@@ -26,7 +48,7 @@ function lookupGeometry(format: PrintPaperFormat) {
 @Component({
   selector: 'app-print-paper-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IconComponent, ButtonComponent],
   template: `
     <section class="vendix-subpanel">
       <h4 class="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
@@ -84,6 +106,49 @@ function lookupGeometry(format: PrintPaperFormat) {
           </div>
         }
 
+        <!-- Ancho imprimible (solo rollo) -->
+        @if (printableOptions().length) {
+          <div>
+            <label
+              for="print-format-printable-width"
+              class="block text-[11px] font-medium text-text-secondary mb-1"
+            >
+              Ancho imprimible de la impresora
+            </label>
+            <select
+              id="print-format-printable-width"
+              [ngModel]="selectedPrintableMm()"
+              (ngModelChange)="setPrintableWidth($event)"
+              class="w-full px-3 py-2 bg-surface-secondary border border-border rounded-lg text-xs text-text-primary focus:border-primary-500 focus:outline-none"
+            >
+              @for (opt of printableOptions(); track opt.mm) {
+                <option [ngValue]="opt.mm">{{ opt.label }}</option>
+              }
+            </select>
+            <p class="text-[10px] text-text-tertiary mt-1">
+              Es lo que el cabezal imprime de verdad; el papel de {{ geometry().paper_width_mm }} mm
+              deja una franja sin imprimir a cada lado.
+            </p>
+            <div class="mt-2">
+              <app-button
+                variant="outline"
+                size="sm"
+                [disabled]="isCalibrating()"
+                (clicked)="printCalibration()"
+              >
+                <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                Imprimir ticket de calibración
+              </app-button>
+              @if (calibrationError(); as err) {
+                <p class="flex items-center gap-1 text-[10px] text-text-secondary mt-1" role="alert">
+                  <app-icon name="alert-circle" [size]="12"></app-icon>
+                  {{ err }}
+                </p>
+              }
+            </div>
+          </div>
+        }
+
         <!-- Margins -->
         <div>
           <div class="flex items-center justify-between mb-1">
@@ -103,51 +168,73 @@ function lookupGeometry(format: PrintPaperFormat) {
               <span class="text-[10px] text-text-tertiary">Superior</span>
               <input
                 type="number"
-                min="0"
+                [attr.min]="minMarginMm()"
                 max="50"
-                [ngModel]="paper().margin_top_mm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_top_mm ?? paper().margin_mm ?? defaultMarginMm()"
                 (ngModelChange)="setMargin('top', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
             </label>
-            <label class="block">
-              <span class="text-[10px] text-text-tertiary">Derecho</span>
-              <input
-                type="number"
-                min="0"
-                max="50"
-                [ngModel]="paper().margin_right_mm ?? paper().margin_mm ?? 0"
-                (ngModelChange)="setMargin('right', $event)"
-                class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
-              />
-            </label>
+            @if (isRoll()) {
+              <div class="block">
+                <span class="text-[10px] text-text-tertiary">Margen lateral efectivo</span>
+                <div
+                  class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-secondary"
+                  aria-readonly="true"
+                >
+                  {{ geometry().margins.left }} mm
+                </div>
+              </div>
+            } @else {
+              <label class="block">
+                <span class="text-[10px] text-text-tertiary">Derecho</span>
+                <input
+                  type="number"
+                  [attr.min]="minMarginMm()"
+                  max="50"
+                  [ngModel]="paper().margin_right_mm ?? paper().margin_mm ?? defaultMarginMm()"
+                  (ngModelChange)="setMargin('right', $event)"
+                  class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
+                />
+              </label>
+            }
             <label class="block">
               <span class="text-[10px] text-text-tertiary">Inferior</span>
               <input
                 type="number"
-                min="0"
+                [attr.min]="minMarginMm()"
                 max="50"
-                [ngModel]="paper().margin_bottom_mm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_bottom_mm ?? paper().margin_mm ?? defaultMarginMm()"
                 (ngModelChange)="setMargin('bottom', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
             </label>
-            <label class="block">
-              <span class="text-[10px] text-text-tertiary">Izquierdo</span>
-              <input
-                type="number"
-                min="0"
-                max="50"
-                [ngModel]="paper().margin_left_mm ?? paper().margin_mm ?? 0"
-                (ngModelChange)="setMargin('left', $event)"
-                class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
-              />
-            </label>
+            @if (!isRoll()) {
+              <label class="block">
+                <span class="text-[10px] text-text-tertiary">Izquierdo</span>
+                <input
+                  type="number"
+                  [attr.min]="minMarginMm()"
+                  max="50"
+                  [ngModel]="paper().margin_left_mm ?? paper().margin_mm ?? defaultMarginMm()"
+                  (ngModelChange)="setMargin('left', $event)"
+                  class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
+                />
+              </label>
+            }
           </div>
+          @if (isRoll()) {
+            <p class="text-[10px] text-text-tertiary mt-1">
+              Mínimo {{ minLateralMm() }} mm a cada lado por el ancho imprimible
+              ({{ geometry().printable_width_mm }} mm).
+            </p>
+          } @else {
+            <p class="text-[10px] text-text-tertiary mt-1">Mínimo 5 mm por lado.</p>
+          }
         </div>
 
         <!-- Orientation -->
-        @if (!paper().is_roll) {
+        @if (!isRoll()) {
           <div>
             <label class="block text-[11px] font-medium text-text-secondary mb-1">
               Orientación
@@ -276,6 +363,33 @@ export class PrintPaperPanelComponent {
   readonly formatType = input<PrintFormatType | null>(null);
   readonly definitionChanged = output<PrintFormatDefinition>();
 
+  private readonly printService = inject(DocumentPrintService);
+
+  /** Geometría efectiva (kernel) del borrador: única fuente de mínimos. */
+  readonly geometry = computed(() => resolvePrintGeometry(this.definition().paper));
+  readonly isRoll = computed(() => this.geometry().is_roll);
+  /** Margen lateral mínimo físico en rollo: (papel − imprimible) / 2. */
+  readonly minLateralMm = computed(() => {
+    const g = this.geometry();
+    return Math.ceil(((g.paper_width_mm - g.printable_width_mm) / 2) * 100 - 1e-9) / 100;
+  });
+  readonly minMarginMm = computed(() => (this.isRoll() ? 0 : 5));
+  readonly defaultMarginMm = computed(() => (this.isRoll() ? 1.5 : 10));
+
+  readonly printableOptions = computed<readonly { mm: number; label: string }[]>(() => {
+    const g = this.geometry();
+    if (!g.is_roll) return [];
+    const base = PRINTABLE_OPTIONS[g.format] ?? [];
+    if (!base.length) return [];
+    return base.some((o) => o.mm === g.printable_width_mm)
+      ? base
+      : [...base, { mm: g.printable_width_mm, label: `${g.printable_width_mm} mm (personalizado)` }];
+  });
+  readonly selectedPrintableMm = computed(() => this.geometry().printable_width_mm);
+
+  readonly isCalibrating = signal(false);
+  readonly calibrationError = signal<string | null>(null);
+
   supportsAutoPrint(): boolean {
     return ['pos_sale_ticket', 'pos_electronic_invoice', 'dispatch_ticket', 'kitchen_ticket']
       .includes(this.formatType() ?? '');
@@ -335,12 +449,13 @@ export class PrintPaperPanelComponent {
     if (isCustom) {
       paper.height_mm = Math.max(50, this.paper().height_mm || 150);
     }
+    // Cambiar de papel nunca escribe márgenes: se borran y rige el default
+    // efectivo del kernel (rollo: 1,5 mm + mínimo lateral; hoja: 10 mm).
+    // El ancho imprimible guardado pertenece al rollo anterior.
+    this.clearMargins(paper);
+    delete paper.printable_width_mm;
     if (target.is_roll) {
-      paper.margin_mm = 0;
-      paper.margin_top_mm = 0;
-      paper.margin_right_mm = 0;
-      paper.margin_bottom_mm = 0;
-      paper.margin_left_mm = 0;
+      delete paper.orientation;
     }
     this.emit({ ...this.definition(), paper });
   }
@@ -363,7 +478,7 @@ export class PrintPaperPanelComponent {
    * whenever the per-side value it looks for is absent.
    */
   setMargin(side: 'top' | 'right' | 'bottom' | 'left', value: number): void {
-    const clamped = Math.max(0, Math.min(50, Number(value) || 0));
+    const clamped = Math.max(this.minMarginMm(), Math.min(50, Number(value) || 0));
     const field = `margin_${side}_mm` as
       | 'margin_top_mm'
       | 'margin_right_mm'
@@ -376,16 +491,65 @@ export class PrintPaperPanelComponent {
     this.emit({ ...this.definition(), paper });
   }
 
+  /** Borra los márgenes del borrador: el kernel aplica el default efectivo. */
+  private clearMargins(paper: PrintFormatDefinition['paper']): void {
+    delete paper.margin_mm;
+    delete paper.margin_top_mm;
+    delete paper.margin_right_mm;
+    delete paper.margin_bottom_mm;
+    delete paper.margin_left_mm;
+  }
+
   resetMargins(): void {
-    const paper: PrintFormatDefinition['paper'] = {
-      ...this.paper(),
-      margin_mm: 0,
-      margin_top_mm: 0,
-      margin_right_mm: 0,
-      margin_bottom_mm: 0,
-      margin_left_mm: 0,
-    };
+    const paper: PrintFormatDefinition['paper'] = { ...this.paper() };
+    this.clearMargins(paper);
     this.emit({ ...this.definition(), paper });
+  }
+
+  /** Elige el ancho imprimible; el recomendado se guarda como "sin dato". */
+  setPrintableWidth(value: number): void {
+    const g = this.geometry();
+    if (!g.is_roll) return;
+    const mm = Number(value);
+    if (!Number.isFinite(mm)) return;
+    const recommended = (PRINTABLE_OPTIONS[g.format] ?? [])[0]?.mm;
+    const paper: PrintFormatDefinition['paper'] = { ...this.paper() };
+    if (mm === recommended) {
+      delete paper.printable_width_mm;
+    } else {
+      paper.printable_width_mm = mm;
+    }
+    this.emit({ ...this.definition(), paper });
+  }
+
+  /**
+   * Imprime la regla de calibración (HTML local, sin backend). El override pide
+   * el ancho imprimible máximo para que la regla abarque la banda más ancha
+   * posible; `DocumentPrintService` lo acota con el kernel.
+   */
+  async printCalibration(): Promise<void> {
+    const g = this.geometry();
+    if (!g.is_roll || this.isCalibrating()) return;
+    const format: CalibrationRollFormat = g.format === 'thermal_58' ? 'thermal_58' : 'thermal_80';
+    this.calibrationError.set(null);
+    this.isCalibrating.set(true);
+    try {
+      await this.printService.print({
+        document: 'pos_ticket',
+        body: buildCalibrationBodyHtml(format),
+        title: 'Ticket de calibración',
+        trigger: 'explicit',
+        overrides: {
+          format,
+          printableWidthMm: CALIBRATION_MAX_PRINTABLE_MM[format],
+          marginMm: 0,
+        },
+      });
+    } catch {
+      this.calibrationError.set('No se pudo abrir la impresión del ticket de calibración.');
+    } finally {
+      this.isCalibrating.set(false);
+    }
   }
 
   setOrientation(orientation: 'portrait' | 'landscape'): void {

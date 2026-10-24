@@ -12,7 +12,8 @@ export type OrgAdjustmentType =
   | 'theft'
   | 'expiration'
   | 'count_variance'
-  | 'manual_correction';
+  | 'manual_correction'
+  | 'initial_load';
 
 export type OrgAdjustmentStatus = 'pending' | 'approved' | 'cancelled';
 

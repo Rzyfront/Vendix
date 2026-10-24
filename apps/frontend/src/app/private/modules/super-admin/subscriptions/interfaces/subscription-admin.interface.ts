@@ -530,6 +530,9 @@ export interface ActivateStorePlanDto {
   /** YYYY-MM-DD */
   paid_at?: string;
   notes?: string;
+  /** YYYY-MM-DD */
+  starts_at?: string;
+  accept_partial_payment?: boolean;
 }
 
 export interface ActivateStorePlanResult {
@@ -542,4 +545,98 @@ export interface ActivateStorePlanResult {
   invoice_number: string | null;
   payment_id: number | null;
   amount_paid: string | null;
+  period_start?: string;
+  period_end?: string;
+  invoice_total?: string | null;
+}
+
+export type ActivatePlanCycleState = 'active' | 'draft';
+
+export interface ActivatePlanCycleOption {
+  plan_id: number;
+  code: string;
+  billing_cycle: string;
+  state: ActivatePlanCycleState;
+  base_price: string;
+  effective_price: string;
+  margin_amount: string;
+  fixed_surcharge: string;
+  currency: string;
+  is_free_effective: boolean;
+  is_current: boolean;
+}
+
+export interface ActivatePlanGroupOption {
+  group_code: string;
+  name: string;
+  description: string | null;
+  plan_type: string;
+  is_popular: boolean;
+  sort_order: number;
+  feature_matrix: any;
+  ai_feature_flags: any;
+  grace_period_soft_days: number | null;
+  grace_period_hard_days: number | null;
+  cycles: ActivatePlanCycleOption[];
+}
+
+export interface ActivatePlanCurrentSubscription {
+  subscription_id: number;
+  state: string;
+  plan_id: number | null;
+  plan_name: string | null;
+  billing_cycle: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  pending_credit: string;
+  open_invoices: { id: number; invoice_number: string; total: string }[];
+  promotional_overlay: { plan_id: number; plan_name: string } | null;
+  partner_override: {
+    organization_id: number;
+    margin_pct: string;
+    fixed_surcharge: string | null;
+  } | null;
+}
+
+export interface ActivatePlanOptions {
+  store: { id: number; name: string };
+  current: ActivatePlanCurrentSubscription | null;
+  groups: ActivatePlanGroupOption[];
+}
+
+export type ActivatePlanWarningCode =
+  | 'VOID_OPEN_INVOICES'
+  | 'UNUSED_PERIOD_LOST'
+  | 'PROMO_OVERLAY_KEPT'
+  | 'TRIAL_CONVERSION'
+  | 'SAME_PLAN_RENEWAL'
+  | 'PARTNER_PRICING'
+  | 'UNDERPAYMENT';
+
+export interface ActivatePlanWarning {
+  code: ActivatePlanWarningCode;
+  message: string;
+  data?: Record<string, any> | null;
+}
+
+export interface ActivatePlanPreviewRequest {
+  plan_id: number;
+  starts_at?: string;
+  amount?: string;
+}
+
+export interface ActivatePlanPreview {
+  plan_id: number;
+  billing_cycle: string;
+  is_free: boolean;
+  period_start: string;
+  period_end: string;
+  effective_price: string;
+  pending_credit_applied: string;
+  invoice_total: string;
+  amount_received: string;
+  excess_to_credit: string;
+  shortfall: string;
+  change_kind: 'initial' | 'trial_conversion' | 'resubscribe';
+  warnings: ActivatePlanWarning[];
 }

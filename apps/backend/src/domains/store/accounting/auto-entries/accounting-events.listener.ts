@@ -336,6 +336,57 @@ export class AccountingEventsListener {
   }
 
   /**
+   * platform_invoice.payment_received — cobro de una factura de PLATAFORMA a
+   * crédito (superadmin). Sin `store_id`: gate por organización. Delega en
+   * `AutoEntryService.onPlatformInvoicePaymentReceived` (DR caja/bancos,
+   * CR 1305). Nunca lanza hacia el emisor: el pago de negocio ya se guardó.
+   */
+  @OnEvent('platform_invoice.payment_received')
+  async handlePlatformInvoicePaymentReceived(event: {
+    organization_id: number;
+    accounting_entity_id: number;
+    evidence_id: number;
+    transmission_id?: number;
+    document_number: string;
+    amount: number;
+    payment_method: string;
+    paid_at: string;
+    reference?: string | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          undefined,
+          'payments',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onPlatformInvoicePaymentReceived({
+        organization_id: event.organization_id,
+        accounting_entity_id: event.accounting_entity_id,
+        evidence_id: event.evidence_id,
+        transmission_id: event.transmission_id,
+        document_number: event.document_number,
+        amount: Number(event.amount),
+        payment_method: event.payment_method,
+        paid_at: event.paid_at,
+        reference: event.reference,
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for platform_invoice.payment_received #${event.evidence_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for platform_invoice.payment_received #${event.evidence_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
    * payment.voided — reversa el asiento de `payment.received` cuando se anula
    * un pago ya asentado (`OrderFlowService.cancelPayment`). Delega en
    * `AutoEntryService.onPaymentVoided`, que localiza el asiento original por
@@ -1117,6 +1168,7 @@ export class AccountingEventsListener {
     store_id?: number;
     cost_amount: number;
     quantity_change: number;
+    adjustment_type?: string;
     user_id?: number;
   }) {
     try {
@@ -1136,6 +1188,7 @@ export class AccountingEventsListener {
         store_id: event.store_id,
         cost_amount: Number(event.cost_amount),
         quantity_change: Number(event.quantity_change),
+        adjustment_type: event.adjustment_type,
         user_id: event.user_id,
       });
       if (entry) {

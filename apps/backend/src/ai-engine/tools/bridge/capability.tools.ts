@@ -1,8 +1,27 @@
+import {
+  discoveryPage,
+  discoveryError,
+  pageParameters,
+} from '../discovery-pagination';
 import { RegisteredTool } from '../interfaces/tool.interface';
-import { CapabilityRegistryService } from './capability-registry.service';
+import {
+  Capability,
+  CapabilityRegistryService,
+} from './capability-registry.service';
 
 export interface CapabilityToolDeps {
   capabilities: CapabilityRegistryService;
+}
+
+function summaryFields<T extends Capability>(
+  operation: T,
+): T & { fields_total: number; fields_has_more: boolean } {
+  return {
+    ...operation,
+    fields: operation.fields?.slice(0, 8),
+    fields_total: operation.fields?.length ?? 0,
+    fields_has_more: (operation.fields?.length ?? 0) > 8,
+  };
 }
 
 /** Past this, one answer crowds the conversation out of the window. */
@@ -31,6 +50,7 @@ export function createCapabilityTools({
       parameters: {
         type: 'object',
         properties: {
+          ...pageParameters,
           domain: {
             type: 'string',
             description:
@@ -40,6 +60,56 @@ export function createCapabilityTools({
         required: [],
       },
       handler: async (args) => {
+        {
+          try {
+            if (!args.domain) {
+              const page = discoveryPage(
+                capabilities.listDomains(),
+                args,
+                'capability-domains',
+              );
+              return JSON.stringify({
+                areas: page.data.map((d) => ({
+                  domain: d.domain,
+                  scope: d.area,
+                  puedo_consultar: d.reads,
+                  puedo_modificar: d.writes,
+                })),
+                total: page.total,
+                has_more: page.has_more,
+                cursor: page.cursor,
+                next_step:
+                  'Consulta domain para procesos; usa cursor para continuar áreas.',
+              });
+            }
+            const operations = capabilities
+              .describeDomain(String(args.domain))
+              .flatMap((g) =>
+                [...g.reads, ...g.writes].map((operation) => ({
+                  scope: g.area,
+                  module_hint: g.module_hint,
+                  ...operation,
+                })),
+              );
+            const page = discoveryPage(operations, args, [
+              'capabilities',
+              args.domain,
+            ]);
+            return JSON.stringify({
+              domain: args.domain,
+              operaciones: page.data.map(summaryFields),
+              total: page.total,
+              has_more: page.has_more,
+              cursor: page.cursor,
+              next_step: page.total
+                ? 'Obtén el contrato completo en list_endpoints antes de escribir; no adivines DTOs anidados.'
+                : 'Esta área no tiene rutas del puente: no adivines rutas con call_endpoint. Busca la herramienta propia con search_tools usando la intención de la persona.',
+            });
+          } catch (error) {
+            return discoveryError(error);
+          }
+        }
+
         if (!args.domain) {
           const domains = capabilities.listDomains();
           const gaps = capabilities.gaps();
@@ -96,13 +166,21 @@ export function createCapabilityTools({
       parameters: {
         type: 'object',
         properties: {
+          ...pageParameters,
           domain: {
             type: 'string',
-            description: 'Área del negocio, tal como la devuelve list_capabilities.',
+            description:
+              'Área del negocio, tal como la devuelve list_capabilities.',
           },
           action: {
             type: 'string',
-            enum: ['consultar', 'registrar', 'modificar', 'reemplazar', 'archivar'],
+            enum: [
+              'consultar',
+              'registrar',
+              'modificar',
+              'reemplazar',
+              'archivar',
+            ],
             description: 'Qué quieres hacer.',
           },
         },
@@ -117,6 +195,24 @@ export function createCapabilityTools({
             .filter((capability) => capability.action === action)
             .map((capability) => ({ ...capability, scope: group.area })),
         );
+
+        {
+          try {
+            const page = discoveryPage(matches, args, [args.domain, action]);
+            return JSON.stringify({
+              domain: args.domain,
+              action,
+              operaciones: page.data.map(summaryFields),
+              total: page.total,
+              has_more: page.has_more,
+              cursor: page.cursor,
+              next_step:
+                'Verifica existencia y contrato/preflight del dominio; cada escritura necesita su aprobación.',
+            });
+          } catch (error) {
+            return discoveryError(error);
+          }
+        }
 
         if (!matches.length) {
           return JSON.stringify({

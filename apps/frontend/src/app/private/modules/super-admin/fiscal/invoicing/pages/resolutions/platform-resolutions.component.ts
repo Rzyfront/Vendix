@@ -19,7 +19,6 @@ import {
 import {
   ButtonComponent,
   CardComponent,
-  ConfirmationModalComponent,
   DianResolutionScanResult,
   DianResolutionScannerModalComponent,
   IconComponent,
@@ -34,6 +33,8 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../../shared/components';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CreatePlatformResolutionDto,
   PlatformResolution,
@@ -43,6 +44,25 @@ import {
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
+import {
+  ResolutionArchiveModalComponent,
+  ResolutionsInUseCardComponent,
+  deactivatedResolutionsToast,
+  extractDeactivatedResolutionIds,
+  findNoteSeriesConflicts,
+  formatArchivedAt,
+  isResolutionInUse,
+  isNoteSeriesType,
+  noteSeriesActivationMessage,
+  requirementsFor,
+  type FiscalDocumentType,
+} from '../../../../../../../shared/components/dian';
+import {
+  INTERNAL_SERIES_FORM_VALIDITY_YEARS,
+  INTERNAL_SERIES_INITIAL_RANGE,
+} from '../../../../../../../shared/components/dian/fiscal-document-requirements';
+import { ConfirmationModalComponent } from '../../../../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   ENVIRONMENT_OPTIONS,
@@ -75,14 +95,17 @@ interface ResolutionFormControls {
     ReactiveFormsModule,
     ButtonComponent,
     CardComponent,
-    ConfirmationModalComponent,
     DianResolutionScannerModalComponent,
+    ResolutionArchiveModalComponent,
+    ToggleComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
     StatsComponent,
+    ResolutionsInUseCardComponent,
+    ConfirmationModalComponent,
   ],
   templateUrl: './platform-resolutions.component.html',
 })
@@ -123,6 +146,8 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.shellActions.clear();
+    // «Ver archivadas» no debe filtrarse a las otras pestañas que comparten el store.
+    if (this.store.includeArchived()) this.store.setIncludeArchived(false);
   }
 
   readonly modalOpen = signal(false);
@@ -130,8 +155,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
   readonly formInvalid = signal(true);
   /** Non-null while the modal edits an existing row instead of creating one. */
   readonly editing = signal<PlatformResolution | null>(null);
-  readonly pendingDelete = signal<PlatformResolution | null>(null);
-  readonly deleting = signal(false);
+  readonly pendingArchive = signal<PlatformResolution | null>(null);
+  readonly archiveBusy = signal(false);
+  readonly archiveError = signal<string | null>(null);
+  readonly archiveRequirePrefix = signal(false);
   readonly togglingId = signal<number | null>(null);
   readonly scannerOpen = signal(false);
   /**
@@ -139,26 +166,54 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
    * formulario recién precargado. Se limpia al cerrar el modal.
    */
   readonly scanUnverified = signal<string[]>([]);
+  /** Tipo de documento del formulario, como signal para que la plantilla reaccione. */
+  readonly selectedDocType = signal<PlatformResolutionDocumentType>('sales_invoice');
+  /** Serie interna de nota: sin N° de resolución, ClTec ni validación DIAN. */
+  readonly isNoteType = computed(() => this.isNoteDocType(this.selectedDocType()));
+  /** Guardado/activación en espera de confirmación por conflicto de serie de notas. */
+  readonly pendingConfirm = signal<{ message: string; proceed: () => void } | null>(null);
+  /** Última siembra de defaults de nota, para no pisar lo que el usuario editó. */
+  private noteSeed: {
+    prefix: string;
+    range_from: number;
+    range_to: number;
+    valid_from: string;
+    valid_to: string;
+  } | null = null;
 
   readonly documentTypeOptions = RESOLUTION_DOCUMENT_TYPE_OPTIONS;
   readonly environmentOptions = ENVIRONMENT_OPTIONS;
   readonly docTypeLabel = resolutionDocTypeLabel;
 
-  readonly totalCount = computed(() => this.store.resolutions().length);
+  /** Las archivadas no cuentan en los KPI: ya no son parte de la numeración. */
+  private readonly liveResolutions = computed(() =>
+    this.store.resolutions().filter((r) => !r.archived_at),
+  );
+  readonly totalCount = computed(() => this.liveResolutions().length);
   readonly activeCount = computed(
-    () => this.store.resolutions().filter((r) => r.is_active).length,
+    () => this.liveResolutions().filter((r) => r.is_active).length,
   );
   readonly salesCount = computed(
     () =>
-      this.store.resolutions().filter((r) => r.document_type === 'sales_invoice')
+      this.liveResolutions().filter((r) => r.document_type === 'sales_invoice')
         .length,
   );
   readonly supportCount = computed(
     () =>
-      this.store.resolutions().filter(
+      this.liveResolutions().filter(
         (r) => r.document_type === 'support_document',
       ).length,
   );
+
+  /** Filas decoradas con `in_use` (la que toma el generador) para tabla y cards. */
+  readonly rows = computed(() => {
+    const inUse = this.store.inUse();
+    return this.store.resolutions().map((r) => ({
+      ...r,
+      in_use: !r.archived_at && isResolutionInUse(r, inUse),
+      state_label: r.archived_at ? 'Archivada' : r.is_active ? 'Activa' : 'Inactiva',
+    }));
+  });
 
   readonly columns: TableColumn[] = [
     { key: 'prefix', label: 'Prefijo' },
@@ -189,6 +244,16 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       },
     },
     {
+      key: 'in_use',
+      label: 'Numeración',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { 'En uso': '#2563eb', '—': '#cbd5e1' },
+      },
+      transform: (v) => (v ? 'En uso' : '—'),
+    },
+    {
       key: 'is_active',
       label: 'Estado',
       badgeConfig: {
@@ -200,6 +265,12 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       },
       badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
     },
+    {
+      // Aparece solo en filas archivadas (con «Ver archivadas» encendido).
+      key: 'archived_at',
+      label: 'Archivada',
+      transform: (v) => (v ? formatArchivedAt(v as string) : ''),
+    },
   ];
 
   readonly cardConfig: ItemListCardConfig = {
@@ -207,15 +278,24 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     subtitleKey: 'document_type',
     subtitleTransform: (v) =>
       this.docTypeLabel(v as PlatformResolutionDocumentType),
-    badgeKey: 'is_active',
+    badgeKey: 'state_label',
     badgeConfig: {
       type: 'custom',
       colorMap: {
-        true: 'success',
-        false: 'secondary',
+        Activa: 'success',
+        Inactiva: 'secondary',
+        Archivada: 'secondary',
       },
     },
-    badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
+    badgeTransform: (v) => String(v ?? ''),
+    detailKeys: [
+      {
+        key: 'in_use',
+        label: 'Numeración',
+        icon: 'hash',
+        transform: (v) => (v ? 'En uso' : '-'),
+      },
+    ],
     footerKey: 'current_number',
     footerLabel: 'Consecutivo actual',
     footerTransform: (v, item: PlatformResolution) =>
@@ -226,19 +306,22 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
+      show: (item: PlatformResolution) => !item.archived_at,
       action: (item: PlatformResolution) => this.openEdit(item),
     },
     {
       label: 'Alternar estado',
       icon: 'power',
+      show: (item: PlatformResolution) => !item.archived_at,
       action: (item: PlatformResolution) => this.toggleActive(item),
     },
     {
-      label: 'Eliminar',
-      icon: 'trash-2',
+      // «Ya no la voy a usar más». Las resoluciones DIAN nunca se borran.
+      label: 'Archivar',
+      icon: 'archive',
       variant: 'danger',
-      disabled: (item: PlatformResolution) => this.isLocked(item),
-      action: (item: PlatformResolution) => this.askDelete(item),
+      show: (item: PlatformResolution) => !item.archived_at,
+      action: (item: PlatformResolution) => this.askArchive(item),
     },
   ];
 
@@ -280,7 +363,15 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
     );
 
   constructor() {
+    this.form.controls.document_type.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => {
+        this.selectedDocType.set(type);
+        if (!this.editing()) this.applyNoteDefaults(type);
+      });
+
     this.store.loadResolutions();
+    this.store.loadInUse();
     this.store.loadStatus();
 
     this.form.statusChanges
@@ -304,8 +395,71 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       valid_to: null,
     });
     this.form.enable({ emitEvent: false });
+    this.noteSeed = null;
+    this.selectedDocType.set('sales_invoice');
+    this.setRangoFinalMin(2);
     this.formInvalid.set(this.form.invalid);
     this.modalOpen.set(true);
+  }
+
+  /** Abre el alta con el tipo indicado (CTA «Crear serie» de la tarjeta). */
+  onCreateSeries(type: FiscalDocumentType): void {
+    if (type !== 'credit_note' && type !== 'debit_note') return;
+    this.openModal();
+    this.form.controls.document_type.setValue(type);
+    this.formInvalid.set(this.form.invalid);
+  }
+
+  private isNoteDocType(type: string | null | undefined): boolean {
+    return type === 'credit_note' || type === 'debit_note';
+  }
+
+  private setRangoFinalMin(min: number): void {
+    const ctrl = this.form.controls.rango_final;
+    ctrl.setValidators([Validators.required, Validators.min(min)]);
+    ctrl.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /**
+   * Al elegir una nota en el alta se siembran prefijo, rango y vigencia de la
+   * serie interna. Solo se pisan los campos vacíos o que aún valen la siembra
+   * anterior; al volver a un tipo DIAN se retira lo sembrado.
+   */
+  private applyNoteDefaults(type: PlatformResolutionDocumentType): void {
+    const c = this.form.controls;
+    const prev = this.noteSeed;
+    const untouched = (cur: unknown, was: unknown) =>
+      cur === null || cur === '' || cur === undefined || (prev !== null && cur === was);
+
+    if (!this.isNoteDocType(type)) {
+      if (prev) {
+        if (c.prefix.value === prev.prefix) c.prefix.setValue(null);
+        if (c.rango_inicial.value === prev.range_from) c.rango_inicial.setValue(null);
+        if (c.rango_final.value === prev.range_to) c.rango_final.setValue(null);
+        if (c.valid_from.value === prev.valid_from) c.valid_from.setValue(null);
+        if (c.valid_to.value === prev.valid_to) c.valid_to.setValue(null);
+      }
+      this.noteSeed = null;
+      return;
+    }
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(now.getFullYear() + INTERNAL_SERIES_FORM_VALIDITY_YEARS);
+    const seed = {
+      prefix: requirementsFor(type as FiscalDocumentType).internal_series_prefix ?? '',
+      range_from: 1,
+      range_to: INTERNAL_SERIES_INITIAL_RANGE,
+      valid_from: toLocalDateString(now),
+      valid_to: toLocalDateString(end),
+    };
+    if (untouched(c.prefix.value, prev?.prefix)) c.prefix.setValue(seed.prefix);
+    if (untouched(c.rango_inicial.value, prev?.range_from)) c.rango_inicial.setValue(seed.range_from);
+    if (untouched(c.rango_final.value, prev?.range_to)) c.rango_final.setValue(seed.range_to);
+    if (untouched(c.valid_from.value, prev?.valid_from)) c.valid_from.setValue(seed.valid_from);
+    if (untouched(c.valid_to.value, prev?.valid_to)) c.valid_to.setValue(seed.valid_to);
+    this.noteSeed = seed;
+    this.formInvalid.set(this.form.invalid);
   }
 
   /**
@@ -323,14 +477,18 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       environment: row.environment,
       rango_inicial: row.range_from,
       rango_final: row.range_to,
-      technical_key: row.technical_key ?? null,
+      // La ClTec guardada no llega al navegador: vacío = conservar la actual.
+      technical_key: null,
       resolution_number: row.resolution_number ?? null,
       resolution_date: this.dateOnly(row.resolution_date),
       valid_from: this.dateOnly(row.valid_from),
       valid_to: this.dateOnly(row.valid_to),
     });
 
+    this.noteSeed = null;
+    this.selectedDocType.set(row.document_type);
     this.form.enable({ emitEvent: false });
+    this.setRangoFinalMin(this.isLocked(row) ? Math.max(2, row.current_number) : 2);
     if (this.isLocked(row)) {
       this.form.controls.prefix.disable({ emitEvent: false });
       this.form.controls.document_type.disable({ emitEvent: false });
@@ -434,6 +592,7 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   private submitCreate(): void {
     const value = this.form.getRawValue();
+    const isNote = this.isNoteDocType(value.document_type);
     const dto: CreatePlatformResolutionDto = {
       prefix: value.prefix!.trim(),
       document_type: value.document_type,
@@ -441,28 +600,68 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       rango_inicial: Number(value.rango_inicial),
       rango_final: Number(value.rango_final),
     };
-    if (value.technical_key?.trim()) {
-      dto.technical_key = value.technical_key.trim();
+    // Serie interna de nota: no hay N° de resolución, fecha ni ClTec que enviar.
+    if (!isNote) {
+      if (value.technical_key?.trim()) {
+        dto.technical_key = value.technical_key.trim();
+      }
+      if (value.resolution_number?.trim()) {
+        dto.resolution_number = value.resolution_number.trim();
+      }
+      if (value.resolution_date) dto.resolution_date = value.resolution_date;
     }
-    if (value.resolution_number?.trim()) {
-      dto.resolution_number = value.resolution_number.trim();
-    }
-    if (value.resolution_date) dto.resolution_date = value.resolution_date;
     if (value.valid_from) dto.valid_from = value.valid_from;
     if (value.valid_to) dto.valid_to = value.valid_to;
 
+    const send = () => this.sendCreate(dto);
+    if (isNote) {
+      const conflicts = findNoteSeriesConflicts(this.liveRows(), {
+        id: null,
+        document_type: dto.document_type,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          message: noteSeriesActivationMessage(dto.prefix, conflicts),
+          proceed: send,
+        });
+        return;
+      }
+    }
+    send();
+  }
+
+  private liveRows(): PlatformResolution[] {
+    return this.store.resolutions().filter((r) => !r.archived_at);
+  }
+
+  confirmPending(): void {
+    const pending = this.pendingConfirm();
+    this.pendingConfirm.set(null);
+    pending?.proceed();
+  }
+
+  /** Tras guardar: avisa si el backend desactivó otra serie de notas. */
+  private afterWrite(res: unknown, message: string): void {
+    const deactivated = extractDeactivatedResolutionIds(res);
+    this.toast.success(message, 'Plataforma');
+    if (deactivated.length > 0) {
+      this.toast.info(deactivatedResolutionsToast(deactivated.length), 'Plataforma');
+    }
+    // Forzado: las otras pestañas ofrecen estas resoluciones en sus selectores
+    // y quedarían mostrando la lista vieja. También recarga «Numeración vigente».
+    this.store.loadResolutions(true);
+  }
+
+  private sendCreate(dto: CreatePlatformResolutionDto): void {
     this.saving.set(true);
     this.fiscal
       .createResolution(dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.saving.set(false);
           this.closeModal();
-          this.toast.success('Resolución DIAN creada', 'Plataforma');
-          // Forzado: las otras pestañas ofrecen estas resoluciones en sus
-          // selectores y quedarían mostrando la lista vieja.
-          this.store.loadResolutions(true);
+          this.afterWrite(res, 'Resolución DIAN creada');
         },
         error: (err: { error?: { message?: string } }) => {
           this.saving.set(false);
@@ -494,8 +693,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       dto.rango_final = Number(value.rango_final);
     }
 
+    // Vacío significa «conservar la guardada»: solo se envía si el usuario
+    // tecleó una clave nueva.
     const nextTechnicalKey = value.technical_key?.trim() ?? '';
-    if (nextTechnicalKey !== (editing.technical_key ?? '')) {
+    if (nextTechnicalKey) {
       dto.technical_key = nextTechnicalKey;
     }
     const nextNumber = value.resolution_number?.trim() ?? '';
@@ -523,11 +724,10 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       .updateResolution(editing.id, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.saving.set(false);
           this.closeModal();
-          this.toast.success('Resolución DIAN actualizada', 'Plataforma');
-          this.store.loadResolutions(true);
+          this.afterWrite(res, 'Resolución DIAN actualizada');
         },
         error: (err: { error?: { message?: string } }) => {
           this.saving.set(false);
@@ -541,23 +741,40 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
 
   /**
    * Flips `is_active` without opening the form. This is the supported way to
-   * retire a resolution that already numbered documents — deleting it is
-   * refused by the backend precisely because it is fiscal evidence.
+   * pause a resolution reversibly. To retire it for good use «Archivar»:
+   * resolutions are fiscal evidence and are never deleted.
    */
   toggleActive(row: PlatformResolution): void {
     if (this.togglingId() !== null) return;
+    if (!row.is_active && isNoteSeriesType(row.document_type)) {
+      const conflicts = findNoteSeriesConflicts(this.liveRows(), {
+        id: row.id,
+        document_type: row.document_type,
+        accounting_entity_id: row.accounting_entity_id,
+      });
+      if (conflicts.length > 0) {
+        this.pendingConfirm.set({
+          message: noteSeriesActivationMessage(row.prefix, conflicts),
+          proceed: () => this.sendToggle(row),
+        });
+        return;
+      }
+    }
+    this.sendToggle(row);
+  }
+
+  private sendToggle(row: PlatformResolution): void {
     this.togglingId.set(row.id);
     this.fiscal
       .updateResolution(row.id, { is_active: !row.is_active })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.togglingId.set(null);
-          this.toast.success(
+          this.afterWrite(
+            res,
             row.is_active ? 'Resolución desactivada' : 'Resolución activada',
-            'Plataforma',
           );
-          this.store.loadResolutions(true);
         },
         error: (err: { error?: { message?: string } }) => {
           this.togglingId.set(null);
@@ -569,40 +786,55 @@ export class PlatformResolutionsComponent implements OnInit, OnDestroy {
       });
   }
 
-  askDelete(row: PlatformResolution): void {
-    this.pendingDelete.set(row);
+  onToggleArchived(value: boolean): void {
+    this.store.setIncludeArchived(value);
   }
 
-  deleteMessage(row: PlatformResolution): string {
-    return `Se eliminará la resolución ${row.prefix} · ${this.docTypeLabel(row.document_type)} (rango ${row.range_from} – ${row.range_to}). No ha numerado ningún documento, así que no hay evidencia fiscal que preservar. Si vuelve a necesitarse, tendrás que crearla de nuevo.`;
+  askArchive(row: PlatformResolution): void {
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+    this.archiveBusy.set(false);
+    this.pendingArchive.set(row);
   }
 
-  cancelDelete(): void {
-    this.pendingDelete.set(null);
+  cancelArchive(): void {
+    if (this.archiveBusy()) return;
+    this.closeArchive();
   }
 
-  confirmDelete(): void {
-    const row = this.pendingDelete();
-    if (!row || this.deleting()) return;
+  private closeArchive(): void {
+    this.pendingArchive.set(null);
+    this.archiveBusy.set(false);
+    this.archiveError.set(null);
+    this.archiveRequirePrefix.set(false);
+  }
 
-    this.deleting.set(true);
+  confirmArchive(row: PlatformResolution, replacementPrefix: string | undefined): void {
+    if (this.archiveBusy()) return;
+    this.archiveBusy.set(true);
+    this.archiveError.set(null);
     this.fiscal
-      .deleteResolution(row.id)
+      .archiveResolution(row.id, replacementPrefix)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
-          this.deleting.set(false);
-          this.pendingDelete.set(null);
-          this.toast.success('Resolución DIAN eliminada', 'Plataforma');
+        next: (res) => {
+          this.closeArchive();
+          this.toast.success(
+            res?.replacement_resolution_id
+              ? 'Resolución DIAN archivada. Se creó la serie de reemplazo.'
+              : 'Resolución DIAN archivada',
+            'Plataforma',
+          );
           this.store.loadResolutions(true);
         },
-        error: (err: { error?: { message?: string } }) => {
-          this.deleting.set(false);
-          this.pendingDelete.set(null);
-          this.toast.error(
-            err?.error?.message ?? 'No se pudo eliminar la resolución',
-            'Error',
-          );
+        error: (err: unknown) => {
+          this.archiveBusy.set(false);
+          const { errorCode, userMessage } = parseApiError(err);
+          // 015: es la serie de notas en uso; hay que indicar la serie nueva.
+          if (errorCode === 'INVOICING_RESOLUTION_015') {
+            this.archiveRequirePrefix.set(true);
+          }
+          this.archiveError.set(userMessage);
         },
       });
   }

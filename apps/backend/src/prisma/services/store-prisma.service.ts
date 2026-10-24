@@ -9,6 +9,9 @@ import { RequestContextService } from '@common/context/request-context.service';
 @Injectable()
 export class StorePrismaService extends BasePrismaService {
   private readonly store_scoped_models = [
+    // Operational store ownership is independent of fiscal entity scope.
+    'document_reception_email_inboxes',
+    'document_reception_email_messages',
     'store_users',
     'store_settings',
     'inventory_locations',
@@ -108,6 +111,13 @@ export class StorePrismaService extends BasePrismaService {
     // registro.
     'ai_attachments',
     'ai_agent_tasks',
+    'ai_agent_objectives',
+    'ai_agent_recipes',
+    'ai_agent_recipe_events',
+    'ai_agent_tool_results',
+    'ai_agent_effects',
+    // Explicit store ownership excludes system-only (NULL tenant) trace spans.
+    'ai_agent_trace_spans',
     // Bloques UI de Vex. `store_id` propio y NO nullable: scoping directo por
     // tienda, igual que `ai_attachments`. Sin este registro el getter
     // devolvería un delegate SIN scoping y un bloque sería legible por id
@@ -1586,6 +1596,30 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.ai_attachments;
   }
 
+  get ai_agent_trace_spans() {
+    return this.scoped_client.ai_agent_trace_spans;
+  }
+
+  // F global recipes are never reached through StorePrisma. Repository ALSO filters owner.
+  get ai_agent_recipes() {
+    return this.scoped_client.ai_agent_recipes;
+  }
+  get ai_agent_recipe_events() {
+    return this.scoped_client.ai_agent_recipe_events;
+  }
+
+  get ai_agent_objectives() {
+    return this.scoped_client.ai_agent_objectives;
+  }
+
+  get ai_agent_tool_results() {
+    return this.scoped_client.ai_agent_tool_results;
+  }
+
+  get ai_agent_effects() {
+    return this.scoped_client.ai_agent_effects;
+  }
+
   get ai_agent_tasks() {
     return this.scoped_client.ai_agent_tasks;
   }
@@ -1913,6 +1947,15 @@ export class StorePrismaService extends BasePrismaService {
   // ===== CRM Landing (QUI-719) — scoped getter =====
   get crm_landing_pages() {
     return this.scoped_client.crm_landing_pages;
+  }
+
+  // Email reception remains scoped to the operational tenant, not a shared NIT.
+  get document_reception_email_inboxes() {
+    return this.scoped_client.document_reception_email_inboxes;
+  }
+
+  get document_reception_email_messages() {
+    return this.scoped_client.document_reception_email_messages;
   }
 
   /**

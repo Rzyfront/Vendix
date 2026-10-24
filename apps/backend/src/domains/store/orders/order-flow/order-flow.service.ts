@@ -32,6 +32,7 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   hasKitchenLinesAwaitingHandoff,
+  computePendingOrderFingerprint,
   describeKitchenHandoffBlocker,
   kitchenHandoffBlocker,
   getUnpaidBalanceForFinish,
@@ -52,6 +53,7 @@ import {
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, order_delivery_type_enum, order_state_enum, payment_methods_type_enum, payments_state_enum } from '@prisma/client';
+import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -96,6 +98,10 @@ import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper'
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { resolveKitchenMode } from '../../kitchen-fire/kitchen-mode.util';
+import {
+  closeSupersededKitchenRows,
+  findLinesAwaitingKitchenDelivery,
+} from '../../kitchen-fire/kitchen-superseded-rows.util';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
 import { ShippingCalculatorService } from '../../shipping/shipping-calculator.service';
@@ -140,6 +146,11 @@ import {
 } from '../../withholding-tax/withholding-flow.service';
 
 type OrderState = order_state_enum;
+type CashSessionFinishSelection = {
+  id: number;
+  version: string;
+  fingerprint: string;
+};
 type DraftReservationKey = {
   productId: number;
   variantId: number | undefined;
@@ -701,16 +712,10 @@ export class OrderFlowService {
    */
   private async hasPendingKitchenItems(
     orderId: number,
-    client: { kitchen_ticket_items: { count: (args: any) => Promise<number> } } = this
-      .prisma,
+    client: any = this.prisma,
   ): Promise<boolean> {
-    const pendingCount = await client.kitchen_ticket_items.count({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-    });
-    return pendingCount > 0;
+    // QUI-892: solo la última fila de cada línea no cancelada cuenta.
+    return (await findLinesAwaitingKitchenDelivery(client, orderId)).length > 0;
   }
 
   /**
@@ -722,28 +727,8 @@ export class OrderFlowService {
     orderId: number,
     client: any = this.prisma,
   ): Promise<string | null> {
-    const lines = await client.order_items.findMany({
-      where: {
-        order_id: orderId,
-        cancelled_at: null,
-        kitchen_ticket_items: { some: {} },
-      },
-      select: {
-        product_name: true,
-        kitchen_ticket_items: {
-          orderBy: { id: 'desc' },
-          take: 1,
-          select: { status: true },
-        },
-      },
-    });
-    for (const line of lines ?? []) {
-      const status = line.kitchen_ticket_items?.[0]?.status;
-      if (status != null && status !== 'delivered' && status !== 'cancelled') {
-        return line.product_name || 'este producto';
-      }
-    }
-    return null;
+    const lines = await findLinesAwaitingKitchenDelivery(client, orderId);
+    return lines.length > 0 ? lines[0].product_name || 'este producto' : null;
   }
 
   /** Whole-order fulfillment is never allowed to use a retail line as a
@@ -805,6 +790,219 @@ export class OrderFlowService {
           `Valid transitions from '${currentState}': [${validTargets.join(', ') || 'none'}]`,
       );
     }
+  }
+
+  /** Finaliza las órdenes elegibles de una sesión en una sola transacción.
+   * No registra dinero ni entrega: sólo consume inventario pendiente y aplica
+   * la transición canónica a `finished`. Los eventos se publican después del
+   * commit, por lo que un fallo en cualquier orden revierte el lote completo. */
+  async finishCashSessionOrders(input: {
+    storeId: number;
+    sessionId: number;
+    selected: CashSessionFinishSelection[];
+    expectedFingerprint: string;
+    reason: string;
+    actorId: number;
+  }): Promise<{ finished: number; order_ids: number[]; idempotent: boolean }> {
+    const { storeId, sessionId, selected } = input;
+    if (
+      !Number.isInteger(storeId) || storeId <= 0 ||
+      !Number.isInteger(sessionId) || sessionId <= 0 ||
+      !Number.isInteger(input.actorId) || input.actorId <= 0 ||
+      !Array.isArray(selected) || selected.length < 1 || selected.length > 100 ||
+      !input.expectedFingerprint || !input.reason?.trim() ||
+      selected.some((row) =>
+        !Number.isInteger(row?.id) || row.id <= 0 ||
+        typeof row.version !== 'string' || !row.version ||
+        typeof row.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(row.fingerprint),
+      ) || new Set(selected.map((row) => row.id)).size !== selected.length
+    ) {
+      throw new BadRequestException('La selección para finalizar las órdenes no es válida.');
+    }
+
+    const canonicalSelectionFingerprint = createHash('sha256')
+      .update(`${sessionId}:${selected.map((row) => `${row.id}:${row.fingerprint}`).sort().join('|')}`)
+      .digest('hex');
+    if (canonicalSelectionFingerprint !== input.expectedFingerprint) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+    }
+
+    const orderedSelection = [...selected].sort((a, b) => a.id - b.id);
+    const stockEvents: Array<() => void> = [];
+    const completedEvents: Array<{
+      store_id: number;
+      order_id: number;
+      order_number: string;
+      old_state: string;
+      organization_id: number | null;
+      total_cost: number;
+    }> = [];
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const sessionRows = await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM cash_register_sessions
+        WHERE id = ${sessionId} AND store_id = ${storeId}
+          AND status = 'open' AND pending_orders_tracking_enabled = true
+        FOR UPDATE
+      `;
+      if (!sessionRows.length) {
+        throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+      }
+
+      const ids = orderedSelection.map((row) => row.id);
+      await tx.$queryRaw`
+        SELECT id FROM orders
+        WHERE store_id = ${storeId}
+          AND origin_cash_session_id = ${sessionId}
+          AND id IN (${Prisma.join(ids)})
+          AND store_id = ${storeId}
+          AND origin_cash_session_id = ${sessionId}
+        ORDER BY id ASC
+        FOR UPDATE
+      `;
+      const rows = await tx.orders.findMany({
+        where: { id: { in: ids }, store_id: storeId, origin_cash_session_id: sessionId },
+        orderBy: { id: 'asc' },
+        include: {
+          stores: { select: { id: true, organization_id: true, industries: true } },
+          payments: { select: { state: true, amount: true } },
+          order_items: {
+            include: {
+              products: { select: { product_type: true, requires_serial_numbers: true } },
+              product_variants: { select: { track_inventory_override: true } },
+              kitchen_ticket_items: {
+                orderBy: { id: 'desc' }, take: 1, select: { status: true },
+              },
+            },
+          },
+        },
+      });
+      if (rows.length !== ids.length) {
+        throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+      }
+
+      const allFinished = rows.every((row: any) => row.state === 'finished');
+      if (allFinished) {
+        return { finished: 0, order_ids: ids, idempotent: true };
+      }
+      if (rows.some((row: any) => row.state === 'finished')) {
+        throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+      }
+
+      // Prevalidar todo el lote antes del primer efecto de inventario.
+      for (const row of rows as any[]) {
+        const selectedRow = orderedSelection.find((item) => item.id === row.id)!;
+        const version = row.updated_at?.toISOString() ?? null;
+        const balance = Number(row.remaining_balance ?? 0);
+        const rowFingerprint = computePendingOrderFingerprint(row, version);
+        if (
+          row.origin_cash_session_id !== sessionId ||
+          selectedRow.version !== version || selectedRow.fingerprint !== rowFingerprint ||
+          !((VALID_TRANSITIONS[row.state as OrderState] ?? []).includes('finished')) ||
+          ['finished', 'delivered', 'cancelled', 'refunded'].includes(row.state)
+        ) {
+          throw new VendixHttpException(ErrorCodes.CASH_SESSION_EXPECTED_STALE_001);
+        }
+        const unpaid = Math.max(balance, getUnpaidBalanceForFinish(row));
+        if (unpaid > 0.01) {
+          throw new VendixHttpException(ErrorCodes.ORD_FINISH_UNPAID_BALANCE_001, undefined, {
+            order_id: row.id,
+            remaining_balance: Math.round(unpaid * 100) / 100,
+          });
+        }
+        const blocker = kitchenHandoffBlocker(row.order_items, {
+          isRestaurant: storeIsRestaurant(row.stores?.industries),
+        });
+        if (blocker) {
+          throw new VendixHttpException(
+            ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+            describeKitchenHandoffBlocker(blocker),
+          );
+        }
+        if (row.shipping_method_id != null && row.state !== 'delivered') {
+          throw new BadRequestException('El envío asignado aún no está confirmado como entregado.');
+        }
+      }
+
+      for (const row of rows as any[]) {
+        const previousState = row.state as OrderState;
+        const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(storeId, tx);
+        const allowOversell = inventoryPolicy?.allowOversell === true;
+        const warnings: InsufficientStockItem[] = [];
+        const commit = await this.orderStockCommit.commitOrderDelivery(
+          row.id,
+          {
+            movementType: 'sale',
+            blockOnInsufficient: !allowOversell,
+            allowNegativeOnShortfall: allowOversell,
+            onShortfall: allowOversell ? (item) => warnings.push({ ...item, kind: 'product' }) : undefined,
+            consumeSerials: true,
+            reason: 'Order completed from cash session close',
+            afterCommit: stockEvents,
+            userId: input.actorId,
+          },
+          tx,
+        );
+        const now = new Date();
+        const updated = await tx.orders.update({
+          where: { id: row.id },
+          data: { state: 'finished', completed_at: now, updated_at: now },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId: row.id,
+          storeId,
+          organizationId: row.stores?.organization_id ?? null,
+          type: 'state_changed',
+          fromState: previousState,
+          toState: 'finished',
+          source: 'http',
+          actorUserId: input.actorId,
+          payload: {
+            reason: input.reason.trim(),
+            session_id: sessionId,
+            source: 'cash_session_close',
+          },
+        });
+        completedEvents.push({
+          store_id: storeId,
+          order_id: row.id,
+          order_number: row.order_number,
+          old_state: previousState,
+          organization_id: row.stores?.organization_id ?? null,
+          total_cost: commit.totalCost,
+        });
+      }
+      return { finished: rows.length, order_ids: ids, idempotent: false };
+    }, { timeout: 20000 });
+
+    if (!result.idempotent) {
+      for (const publish of stockEvents) {
+        try { publish(); } catch (error) {
+          this.logger.warn(`Stock committed; notification failed: ${(error as Error).message}`);
+        }
+      }
+      for (const event of completedEvents) {
+        this.eventEmitter.emit('order.status_changed', {
+          store_id: event.store_id,
+          order_id: event.order_id,
+          order_number: event.order_number,
+          old_state: event.old_state,
+          new_state: 'finished',
+          source: 'cash_session_close',
+        });
+        if (event.total_cost > 0) {
+          this.eventEmitter.emit('order.completed', {
+            order_id: event.order_id,
+            order_number: event.order_number,
+            organization_id: event.organization_id,
+            store_id: event.store_id,
+            total_cost: event.total_cost,
+            user_id: input.actorId,
+          });
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -1554,7 +1752,7 @@ export class OrderFlowService {
   async payOrder(
     orderId: number,
     dto: PayOrderDto,
-    options?: { strictKitchenPending?: boolean },
+    options?: { strictKitchenPending?: boolean; deferFinish?: boolean },
   ) {
     // Gate único de caja: con el switch activo, quien cobra debe tener SU
     // sesión abierta. Primero que todo — antes del claim de estado — para no
@@ -2132,6 +2330,14 @@ export class OrderFlowService {
       settlementOrigin,
       settlementReceipt,
       confirmInPlacePayment: confirmInPlaceMarker,
+      deferCashMovementUntilFinish:
+        !!confirmInPlaceMarker && order.delivery_type === 'direct_delivery',
+      deferCashSignalRequired: false,
+      deferredCashSessionId: null as number | null,
+      deferredCashSignalId: null as number | null,
+      deferredCashReadyState: null as 'finished' | 'delivered' | null,
+      deferredCashCompensationState: preClaimState,
+      paymentMethodTypes: {} as Record<number, string>,
     };
     // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
     // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
@@ -2201,6 +2407,11 @@ export class OrderFlowService {
       );
     }
     const isPartialCharge = wantsPartialAmount;
+    paymentHistoryCtx.deferCashSignalRequired =
+      paymentHistoryCtx.deferCashMovementUntilFinish && !isPartialCharge;
+    paymentHistoryCtx.deferredCashReadyState = paymentHistoryCtx.deferCashSignalRequired
+      ? preClaimState === 'delivered' ? 'delivered' : 'finished'
+      : null;
     // Lo que el normalizador debe cuadrar: el parcial, o el saldo exacto (sin
     // polvo flotante de `dto.amount`) cuando se salda.
     const payableAmount = isPartialCharge ? chargeAmount : amountToCharge;
@@ -2322,6 +2533,8 @@ export class OrderFlowService {
     // estado (nada de `updateOrderState`: sin consumo de stock, sin factura,
     // sin ETA, sin proyección a mesa; el cupón se consume al saldar). La acción
     // "Registrar pago" sigue disponible para el saldo (paso 6).
+    Object.assign(paymentHistoryCtx.paymentMethodTypes, legMethodTypes);
+
     if (isPartialCharge) {
       const legPayments = await this.createLegPayments(
         orderId,
@@ -2365,15 +2578,6 @@ export class OrderFlowService {
       );
 
       // Movimiento de caja por tramo, neto de vuelto (`leg.amount`).
-      for (const { payment, leg } of legPayments) {
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          leg.amount,
-          legMethodTypes[leg.store_payment_method_id] ?? '',
-          payment.id,
-        ).catch(() => {});
-      }
 
       // Un `payment.received` por tramo (el asiento resuelve su rama
       // con/sin factura; la retención se prorratea a la porción de este
@@ -2432,15 +2636,6 @@ export class OrderFlowService {
       this.logger.log(`Order #${orderId} payment registered while shipped`);
 
       // Record cash register movement per leg (non-blocking)
-      for (const { payment, leg } of legPayments) {
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          leg.amount,
-          legMethodTypes[leg.store_payment_method_id] ?? '',
-          payment.id,
-        ).catch(() => {});
-      }
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
@@ -2496,11 +2691,18 @@ export class OrderFlowService {
         await this.cancelLegPayments(legPayments, 'finish_blocked');
         paymentCompensated = true;
         await this.restorePreClaimState(orderId, preClaimState);
+        await this.cancelDeferredCashSignalAfterRestore(
+          order.store_id, orderId, legPayments, paymentHistoryCtx, preClaimState,
+        );
         throw this.wrapPaymentFailure(
           'finish_blocked',
           { order_id: orderId },
           (e as any)?.errorCode ?? 'n/a',
         );
+      }
+
+      if (paymentHistoryCtx.deferCashMovementUntilFinish) {
+        await this.recordDeferredLegCashMovements(order.store_id, orderId, legPayments, paymentHistoryCtx);
       }
 
       // Void the settlement pending marker(s) (COD o manual) so they never
@@ -2518,16 +2720,6 @@ export class OrderFlowService {
       // llama a `emitPosSaleCompletedIfFullyPaid` (la venta aún no se cierra
       // aquí), pero el pago SÍ existe y debe reconocer su caja/banco.
       await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
-
-      for (const { payment, leg } of legPayments) {
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          leg.amount,
-          legMethodTypes[leg.store_payment_method_id] ?? '',
-          payment.id,
-        ).catch(() => {});
-      }
 
       await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
@@ -2569,11 +2761,18 @@ export class OrderFlowService {
         await this.cancelLegPayments(legPayments, 'finish_blocked');
         paymentCompensated = true;
         await this.restorePreClaimState(orderId, preClaimState);
+        await this.cancelDeferredCashSignalAfterRestore(
+          order.store_id, orderId, legPayments, paymentHistoryCtx, preClaimState,
+        );
         throw this.wrapPaymentFailure(
           'finish_blocked',
           { order_id: orderId },
           (e as any)?.errorCode ?? 'n/a',
         );
+      }
+
+      if (paymentHistoryCtx.deferCashMovementUntilFinish) {
+        await this.recordDeferredLegCashMovements(order.store_id, orderId, legPayments, paymentHistoryCtx);
       }
 
       // Void the settlement pending marker(s) (COD o manual) so they never
@@ -2584,16 +2783,6 @@ export class OrderFlowService {
       this.logger.log(
         `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
       );
-
-      for (const { payment, leg } of legPayments) {
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          leg.amount,
-          legMethodTypes[leg.store_payment_method_id] ?? '',
-          payment.id,
-        ).catch(() => {});
-      }
 
       // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
       // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
@@ -2633,8 +2822,9 @@ export class OrderFlowService {
       // Only auto-finish for direct_delivery (POS) or other (no shipping method).
       // Orders with home_delivery or pickup need fulfillment stages.
       const requiresFulfillment =
-        order.delivery_type !== 'direct_delivery' &&
-        order.delivery_type !== 'other';
+        options?.deferFinish === true ||
+        (order.delivery_type !== 'direct_delivery' &&
+          order.delivery_type !== 'other');
 
       if (requiresFulfillment) {
         this.validateTransition(order.state as OrderState, 'processing');
@@ -2654,15 +2844,6 @@ export class OrderFlowService {
         );
 
         // Record cash register movement per leg (non-blocking)
-        for (const { payment, leg } of legPayments) {
-          this.recordPayOrderCashMovement(
-            order.store_id,
-            orderId,
-            leg.amount,
-            legMethodTypes[leg.store_payment_method_id] ?? '',
-            payment.id,
-          ).catch(() => {});
-        }
 
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
@@ -2720,6 +2901,9 @@ export class OrderFlowService {
           if (preClaimState !== 'draft') {
             await this.restorePreClaimState(orderId, preClaimState);
           }
+          await this.cancelDeferredCashSignalAfterRestore(
+            order.store_id, orderId, legPayments, paymentHistoryCtx, preClaimState,
+          );
           throw this.wrapPaymentFailure(
             'kitchen_pending',
             { order_id: orderId },
@@ -2742,16 +2926,6 @@ export class OrderFlowService {
         this.logger.log(
           `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
         );
-
-        for (const { payment, leg } of legPayments) {
-          this.recordPayOrderCashMovement(
-            order.store_id,
-            orderId,
-            leg.amount,
-            legMethodTypes[leg.store_payment_method_id] ?? '',
-            payment.id,
-          ).catch(() => {});
-        }
 
         await this.computeAndPersistEta(orderId, new Date());
         // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received`
@@ -2800,6 +2974,9 @@ export class OrderFlowService {
           if (preClaimState !== 'draft') {
             await this.restorePreClaimState(orderId, preClaimState);
           }
+          await this.cancelDeferredCashSignalAfterRestore(
+            order.store_id, orderId, legPayments, paymentHistoryCtx, preClaimState,
+          );
           // Round 1 MAJOR #11: el código de superficie que ve el caller es
           // SIEMPRE `ORD_FLOW_PAYMENT_FAILED_001`. El código tipado original
           // (p.ej. `INV_STOCK_002` / `SERIAL_REQUIRED_001`) viaja en
@@ -2818,18 +2995,13 @@ export class OrderFlowService {
         });
       }
 
+      if (paymentHistoryCtx.deferCashMovementUntilFinish) {
+        await this.recordDeferredLegCashMovements(order.store_id, orderId, legPayments, paymentHistoryCtx);
+      }
+
       this.logger.log(`Order #${orderId} paid directly and finished`);
 
       // Record cash register movement per leg (non-blocking)
-      for (const { payment, leg } of legPayments) {
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          leg.amount,
-          legMethodTypes[leg.store_payment_method_id] ?? '',
-          payment.id,
-        ).catch(() => {});
-      }
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
@@ -4784,6 +4956,25 @@ export class OrderFlowService {
         data: { status: 'delivered', updated_at: new Date() },
       });
 
+      // QUI-892: la nueva fila entregada cierra (solo estado) las filas viejas
+      // de reenvíos previos para que su ticket pueda volverse terminal.
+      // Best-effort aparte: si falla, el cierre del ticket vigente y el puente
+      // all-delivered siguen corriendo.
+      try {
+        const closedTickets = await closeSupersededKitchenRows(this.prisma, [
+          orderItemId,
+        ]);
+        for (const closedId of closedTickets) {
+          if (closedId !== latest.kitchen_ticket_id) {
+            await this.kitchenFireService?.emitTicketUpdatedEvent(closedId);
+          }
+        }
+      } catch (e) {
+        this.logger.warn(
+          `QUI-892: no se pudieron cerrar filas superadas del item #${orderItemId}: ${(e as Error).message}`,
+        );
+      }
+
       const rows = await this.prisma.kitchen_ticket_items.findMany({
         where: { kitchen_ticket_id: latest.kitchen_ticket_id },
         select: { status: true },
@@ -5991,20 +6182,11 @@ export class OrderFlowService {
     // path, so we THROW (the operator must wait for the kitchen or mark the
     // tickets delivered first). Automatic paths (credit payment, forgiveness,
     // POS payment, auto-finish job) handle this by NOT finishing instead.
-    const pendingKitchenItems = await this.prisma.kitchen_ticket_items.findMany({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-      select: {
-        order_item_id: true,
-        status: true,
-        quantity: true,
-        variant_label: true,
-        order_item: { select: { product_name: true } },
-      },
-      orderBy: { id: 'asc' },
-    });
+    // QUI-892: solo la última fila de cada línea bloquea (reenvíos).
+    const pendingKitchenItems = await findLinesAwaitingKitchenDelivery(
+      this.prisma,
+      orderId,
+    );
     if (pendingKitchenItems.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
@@ -6012,7 +6194,7 @@ export class OrderFlowService {
         {
           pending_items: pendingKitchenItems.map((item) => ({
             order_item_id: item.order_item_id,
-            product_name: item.order_item.product_name,
+            product_name: item.product_name,
             variant_label: item.variant_label,
             quantity: item.quantity,
             status: item.status,
@@ -7795,128 +7977,116 @@ export class OrderFlowService {
       }
     }
 
-    // Generate transaction ID
+    // Resolver la sesión fuera del tx es solo una lectura; recordSaleMovement
+    // vuelve a validarla y toma el lock canónico dentro del tx antes de pagos.
+    const cashSession = await this.resolveCashSessionForSale();
     const transactionId = `credit_pay_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-    // Create payment record
-    const payment = await this.prisma.payments.create({
-      data: {
-        order_id: orderId,
-        store_payment_method_id: dto.store_payment_method_id,
-        amount: paymentAmount,
-        currency: order.currency,
-        state: 'succeeded',
-        transaction_id: transactionId,
-        paid_at: new Date(),
-        gateway_response: {
-          payment_type: 'direct',
-          amount_received: dto.amount_received,
-          change: change,
-          payment_reference: dto.payment_reference,
-          metadata: { is_credit_payment: true },
-        },
-      },
-    });
-
-    // Update order balances — persisted ALWAYS. The payment is registered even
-    // if the finish is later blocked by insufficient stock, so this balance
-    // write is separate from and precedes the finish transition below.
-    const newTotalPaid = Number(order.total_paid) + paymentAmount;
-    const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
-
-    await this.prisma.orders.update({
-      where: { id: orderId },
-      data: {
-        total_paid: Math.round(newTotalPaid * 100) / 100,
-        remaining_balance: Math.round(newRemainingBalance * 100) / 100,
-      },
-    });
-
-    // The finish transition runs after the table projection below: a
-    // projection failure must skip it (no false `finished`) while keeping
-    // the committed payment, balances, installments and cash movement.
     let finished = false;
     let finishBlockedReason: string | undefined;
 
-    // Update installment if specified (for installment-based credit)
-    if (order.credit_type === 'installments') {
-      let remainingPayment = paymentAmount;
-
-      if (dto.installment_id) {
-        // Pay specific installment
-        const installment = await this.prisma.order_installments.findFirst({
-          where: { id: dto.installment_id, order_id: orderId },
+    const creditPayment = await this.prisma.$transaction(async (tx) => {
+      const movement = cashSession
+        ? await this.recordPayOrderCashMovement(
+            order.store_id,
+            orderId,
+            paymentAmount,
+            paymentMethod.system_payment_method.type,
+            undefined,
+            tx,
+            cashSession.id,
+          )
+        : null;
+      const payment = await tx.payments.create({
+        data: {
+          order_id: orderId,
+          store_payment_method_id: dto.store_payment_method_id,
+          amount: paymentAmount,
+          currency: order.currency,
+          state: 'succeeded',
+          transaction_id: transactionId,
+          paid_at: new Date(),
+          gateway_response: {
+            payment_type: 'direct',
+            amount_received: dto.amount_received,
+            change,
+            payment_reference: dto.payment_reference,
+            metadata: { is_credit_payment: true },
+          },
+        },
+      });
+      if (movement?.id != null) {
+        await tx.cash_register_movements.update({
+          where: { id: movement.id },
+          data: { payment_id: payment.id },
         });
-        if (installment) {
-          const payable = Math.min(
-            remainingPayment,
-            Number(installment.remaining_balance),
-          );
-          const newPaid = Number(installment.amount_paid) + payable;
-          const newInstBalance =
-            Number(installment.remaining_balance) - payable;
-
-          await this.prisma.order_installments.update({
-            where: { id: installment.id },
-            data: {
-              amount_paid: Math.round(newPaid * 100) / 100,
-              remaining_balance:
-                Math.round(Math.max(newInstBalance, 0) * 100) / 100,
-              state: newInstBalance <= 0.01 ? 'paid' : 'partial',
-              paid_at: newInstBalance <= 0.01 ? new Date() : null,
-            },
-          });
-          remainingPayment -= payable;
-        }
       }
 
-      // If there's remaining payment (or no specific installment), apply sequentially
-      if (remainingPayment > 0.01) {
-        const pendingInstallments =
-          await this.prisma.order_installments.findMany({
+      const newTotalPaid = Number(order.total_paid) + paymentAmount;
+      const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          total_paid: Math.round(newTotalPaid * 100) / 100,
+          remaining_balance: Math.round(newRemainingBalance * 100) / 100,
+        },
+      });
+
+      if (order.credit_type === 'installments') {
+        let remainingPayment = paymentAmount;
+        if (dto.installment_id) {
+          const installment = await tx.order_installments.findFirst({
+            where: { id: dto.installment_id, order_id: orderId },
+          });
+          if (installment) {
+            const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+            const newPaid = Number(installment.amount_paid) + payable;
+            const newInstBalance = Number(installment.remaining_balance) - payable;
+            await tx.order_installments.update({
+              where: { id: installment.id },
+              data: {
+                amount_paid: Math.round(newPaid * 100) / 100,
+                remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+                state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+                paid_at: newInstBalance <= 0.01 ? new Date() : null,
+              },
+            });
+            remainingPayment -= payable;
+          }
+        }
+
+        if (remainingPayment > 0.01) {
+          const pendingInstallments = await tx.order_installments.findMany({
             where: {
               order_id: orderId,
               state: { in: ['pending', 'partial', 'overdue'] },
             },
             orderBy: { installment_number: 'asc' },
           });
-
-        for (const inst of pendingInstallments) {
-          if (remainingPayment <= 0.01) break;
-          const payable = Math.min(
-            remainingPayment,
-            Number(inst.remaining_balance),
-          );
-          const newPaid = Number(inst.amount_paid) + payable;
-          const newInstBalance = Number(inst.remaining_balance) - payable;
-
-          await this.prisma.order_installments.update({
-            where: { id: inst.id },
-            data: {
-              amount_paid: Math.round(newPaid * 100) / 100,
-              remaining_balance:
-                Math.round(Math.max(newInstBalance, 0) * 100) / 100,
-              state: newInstBalance <= 0.01 ? 'paid' : 'partial',
-              paid_at: newInstBalance <= 0.01 ? new Date() : null,
-            },
-          });
-          remainingPayment -= payable;
+          for (const installment of pendingInstallments) {
+            if (remainingPayment <= 0.01) break;
+            const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+            const newPaid = Number(installment.amount_paid) + payable;
+            const newInstBalance = Number(installment.remaining_balance) - payable;
+            await tx.order_installments.update({
+              where: { id: installment.id },
+              data: {
+                amount_paid: Math.round(newPaid * 100) / 100,
+                remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+                state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+                paid_at: newInstBalance <= 0.01 ? new Date() : null,
+              },
+            });
+            remainingPayment -= payable;
+          }
         }
       }
-    }
+      return { payment, newTotalPaid, newRemainingBalance };
+    });
+    const { payment, newTotalPaid, newRemainingBalance } = creditPayment;
 
     this.logger.log(
       `Credit payment of ${paymentAmount} registered for order #${orderId}. Remaining: ${newRemainingBalance}`,
     );
-
-    // Record cash register movement
-    this.recordPayOrderCashMovement(
-      order.store_id,
-      orderId,
-      paymentAmount,
-      paymentMethod.system_payment_method.type,
-      payment.id,
-    ).catch(() => {});
 
     // Emit event
     this.eventEmitter.emit('order.credit_payment_received', {
@@ -8302,7 +8472,11 @@ export class OrderFlowService {
     }
 
     // 1) Pay (only if not already paid)
-    if (!hasSuccessfulPayment && !splitSettled) {
+    const unpaidBalance = getUnpaidBalanceForFinish(order);
+    const requiresPayment =
+      unpaidBalance > 0.01 ||
+      (!hasSuccessfulPayment && order.grand_total == null);
+    if (requiresPayment && !splitSettled) {
       if (!dto.payment) {
         throw new VendixHttpException(
           ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001,
@@ -8315,7 +8489,10 @@ export class OrderFlowService {
       // whose kitchen never handed the items off. The direct "pagar" call
       // (order detail / `/flow/pay`) does NOT pass this flag and gets the new
       // lenient `processing` (paid) behavior instead — see payOrder above.
-      await this.payOrder(orderId, dto.payment, { strictKitchenPending: true });
+      await this.payOrder(orderId, dto.payment, {
+        strictKitchenPending: true,
+        deferFinish: dto.confirm_delivery === false,
+      });
       stepsExecuted.push('pay');
     }
 
@@ -8366,15 +8543,17 @@ export class OrderFlowService {
       current = await this.getOrder(orderId);
     }
 
-    // 3) Deliver (shipped → delivered)
-    if (current.state === 'shipped') {
+    // 3) Deliver (shipped → delivered). Fast-track callers can explicitly
+    // leave this step pending when the customer has not received the order.
+    const confirmDelivery = dto.confirm_delivery !== false;
+    if (current.state === 'shipped' && confirmDelivery) {
       await this.deliverOrder(orderId, dto.deliver ?? {});
       stepsExecuted.push('deliver');
       current = await this.getOrder(orderId);
     }
 
     // 4) Confirm delivery (delivered → finished)
-    if (current.state === 'delivered') {
+    if (current.state === 'delivered' && confirmDelivery) {
       await this.confirmDelivery(orderId);
       stepsExecuted.push('finish');
       current = await this.getOrder(orderId);
@@ -8490,6 +8669,13 @@ export class OrderFlowService {
         receipt_uploaded_at: Date | string | null;
         bank_account_id: number | null;
       } | null;
+      paymentMethodTypes?: Record<number, string>;
+      deferCashMovementUntilFinish?: boolean;
+      deferCashSignalRequired?: boolean;
+      deferredCashSessionId?: number | null;
+      deferredCashSignalId?: number | null;
+      deferredCashReadyState?: 'finished' | 'delivered' | null;
+      deferredCashCompensationState?: OrderState | null;
       /**
        * Pago online manual `pending` (fila completa de `getOrder`) que el
        * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
@@ -8572,6 +8758,9 @@ export class OrderFlowService {
     // segundo `payments.create` falla, Prisma revierte el primero y no queda
     // ninguna fila `succeeded` huérfana (antes corrían fuera de transacción,
     // uno por uno, con `this.prisma`).
+    const deferredCashSession = historyCtx?.deferCashSignalRequired
+      ? await this.resolveCashSessionForSale()
+      : null;
     return this.prisma.$transaction(async (tx) => {
       const created: Array<{
         payment: any;
@@ -8580,6 +8769,43 @@ export class OrderFlowService {
         confirmedInPlaceOriginal?: any;
       }> = [];
       const inPlace = historyCtx?.confirmInPlacePayment ?? null;
+      const cashMovements: Array<any | null> = [];
+      if (deferredCashSession && historyCtx?.deferCashSignalRequired) {
+        const userId = RequestContextService.getUserId();
+        if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+        historyCtx.deferredCashSessionId = deferredCashSession.id;
+        const organizationId = historyCtx.organizationId ?? RequestContextService.getOrganizationId();
+        if (!organizationId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+        historyCtx.deferredCashSignalId =
+          await this.movementsService.createDeferredSaleCashMovementSignal(tx, {
+            session_id: deferredCashSession.id,
+            store_id: historyCtx.storeId,
+            order_id: orderId,
+            user_id: userId,
+            organization_id: organizationId,
+            ready_state: historyCtx.deferredCashReadyState ?? 'finished',
+            compensation_state: historyCtx.deferredCashCompensationState ?? 'created',
+          });
+      }
+      // Take the session lock before creating new payments. For an in-place
+      // manual confirmation, first claim the pending payment below; stale
+      // markers must not create a movement. Direct-delivery confirmations
+      // defer the movement until the order finish succeeds.
+      for (const [legIndex, leg] of legs.entries()) {
+        cashMovements.push(
+          historyCtx && Number(leg.amount) > 0 && !inPlace
+            ? await this.recordPayOrderCashMovement(
+                historyCtx.storeId,
+                orderId,
+                leg.amount,
+                historyCtx.paymentMethodTypes?.[leg.store_payment_method_id] ??
+                  (leg.is_cash ? 'cash' : ''),
+                undefined,
+                tx,
+              )
+            : null,
+        );
+      }
       for (const [legIndex, leg] of legs.entries()) {
         // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
         const legReceived = leg.amount_received ?? leg.amount;
@@ -8690,6 +8916,29 @@ export class OrderFlowService {
             },
           });
         }
+        if (
+          inPlace &&
+          !historyCtx?.deferCashSignalRequired &&
+          historyCtx &&
+          Number(leg.amount) > 0
+        ) {
+          cashMovements[legIndex] = await this.recordPayOrderCashMovement(
+            historyCtx.storeId,
+            orderId,
+            leg.amount,
+            historyCtx.paymentMethodTypes?.[leg.store_payment_method_id] ??
+              (leg.is_cash ? 'cash' : ''),
+            undefined,
+            tx,
+          );
+        }
+        const movement = cashMovements[legIndex];
+        if (movement?.id != null) {
+          await tx.cash_register_movements.update({
+            where: { id: movement.id },
+            data: { payment_id: payment.id },
+          });
+        }
         created.push({
           payment,
           leg,
@@ -8748,6 +8997,20 @@ export class OrderFlowService {
             }`,
           );
         }
+      }
+      if (
+        historyCtx?.deferredCashSignalId != null &&
+        historyCtx.deferredCashSessionId != null
+      ) {
+        await this.movementsService.attachDeferredSaleCashMovementPayments(tx, {
+          failure_id: historyCtx.deferredCashSignalId,
+          session_id: historyCtx.deferredCashSessionId,
+          store_id: historyCtx.storeId,
+          order_id: orderId,
+          payment_ids: created
+            .filter(({ leg }) => Number(leg.amount) > 0)
+            .map(({ payment }) => payment.id),
+        });
       }
       return created;
     });
@@ -8846,58 +9109,116 @@ export class OrderFlowService {
     };
   }
 
-  /**
-   * Record a sale movement in the cash register if the feature is enabled
-   * and the user has an active session. Non-blocking.
-   */
+  private async resolveCashSessionForSale(): Promise<{ id: number } | null> {
+    // Constructor-only specs and optional integrations may omit settings; in
+    // production this dependency is always registered.
+    if (!this.settingsService?.getSettings) return null;
+    const settings = await this.settingsService.getSettings();
+    if (!(settings as any)?.pos?.cash_register?.enabled) return null;
+    const userId = RequestContextService.getUserId();
+    if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    const session = await this.sessionsService.getActiveSession(userId);
+    if (!session) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    return { id: session.id };
+  }
+
+  /** Create a sale movement in the caller's payment transaction. */
   private async recordPayOrderCashMovement(
     storeId: number,
     orderId: number,
     amount: number,
     paymentMethodType: string,
-    paymentId?: number,
+    paymentId: number | undefined,
+    tx: Prisma.TransactionClient,
+    sessionId?: number,
+  ): Promise<any | null> {
+    // Cupón 100 %: sin dinero no hay movimiento que insertar.
+    if (!(Number(amount) > 0)) return null;
+    const session = sessionId != null
+      ? { id: sessionId }
+      : await this.resolveCashSessionForSale();
+    if (!session) return null;
+    const userId = RequestContextService.getUserId();
+    if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    return this.movementsService.recordSaleMovement(session.id, {
+      store_id: storeId,
+      user_id: userId,
+      amount,
+      payment_method: paymentMethodType,
+      order_id: orderId,
+      payment_id: paymentId,
+    }, tx);
+  }
+
+  /** Manual in-place confirmations on direct delivery only count as cash after
+   * the canonical order finish succeeds. */
+  private async recordDeferredLegCashMovements(
+    storeId: number,
+    orderId: number,
+    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    historyCtx: {
+      deferredCashSessionId: number | null;
+      deferredCashSignalId: number | null;
+      deferredCashReadyState: 'finished' | 'delivered' | null;
+      deferredCashCompensationState: OrderState | null;
+    },
   ): Promise<void> {
-    try {
-      // Venta de total $0 (cupón 100 %): no hay dinero que mover en caja.
-      if (!(Number(amount) > 0)) return;
-      const settings = await this.settingsService.getSettings();
-      const cr_settings = (settings as any)?.pos?.cash_register;
-      if (!cr_settings?.enabled) return;
-
-      // Todo método se registra (efectivo, tarjeta, transferencia...): ya no
-      // depende de `track_non_cash_payments`. El arqueo esperado sigue
-      // contando sólo efectivo.
-      const userId = RequestContextService.getUserId();
-      if (!userId) {
-        this.logger.error(
-          `[payOrder cash movement] sin usuario en contexto: order=${orderId} payment=${paymentId ?? 'n/a'} amount=${amount}`,
-        );
-        return;
-      }
-
-      const session = await this.sessionsService.getActiveSession(userId);
-      if (!session) {
-        this.logger.error(
-          `[payOrder cash movement] sin sesión de caja activa: order=${orderId} payment=${paymentId ?? 'n/a'} user=${userId} amount=${amount}`,
-        );
-        return;
-      }
-
-      await this.movementsService.recordSaleMovement(session.id, {
+    if (historyCtx.deferredCashSessionId == null || historyCtx.deferredCashSignalId == null) return;
+    const userId = RequestContextService.getUserId();
+    if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    await this.prisma.$transaction(async (tx) => {
+      await this.movementsService.completeDeferredSaleCashMovement(tx, {
+        failure_id: historyCtx.deferredCashSignalId!,
+        session_id: historyCtx.deferredCashSessionId!,
         store_id: storeId,
-        user_id: userId,
-        amount,
-        payment_method: paymentMethodType,
         order_id: orderId,
-        payment_id: paymentId,
+        user_id: userId,
+        ready_state: historyCtx.deferredCashReadyState ?? 'finished',
+        compensation_state: historyCtx.deferredCashCompensationState ?? 'created',
+        payment_ids: legPayments.filter(({ leg }) => Number(leg.amount) > 0).map(({ payment }) => payment.id),
+        movements: legPayments
+          .filter(({ leg }) => Number(leg.amount) > 0)
+          .map(({ payment, leg }) => ({
+            amount: leg.amount,
+            payment_method: payment.store_payment_method?.system_payment_method?.type ?? 'cash',
+            payment_id: payment.id,
+          })),
       });
-    } catch (error) {
-      // Non-critical: don't fail the payment if movement recording fails,
-      // but never swallow it silently.
-      this.logger.error(
-        `[payOrder cash movement] fallo al registrar: order=${orderId} payment=${paymentId ?? 'n/a'}: ${(error as Error)?.message}`,
-      );
-    }
+    });
+  }
+
+  private async cancelDeferredCashSignalAfterRestore(
+    storeId: number,
+    orderId: number,
+    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    historyCtx: {
+      deferredCashSessionId: number | null;
+      deferredCashSignalId: number | null;
+      deferredCashReadyState: 'finished' | 'delivered' | null;
+      deferredCashCompensationState: OrderState | null;
+    },
+    restoredState: OrderState | null,
+  ): Promise<void> {
+    if (
+      historyCtx.deferredCashSessionId == null ||
+      historyCtx.deferredCashSignalId == null ||
+      !restoredState
+    ) return;
+    const userId = RequestContextService.getUserId();
+    if (!userId) return;
+    await this.prisma.$transaction((tx) =>
+      this.movementsService.cancelDeferredSaleCashMovementSignal(tx, {
+        failure_id: historyCtx.deferredCashSignalId!,
+        session_id: historyCtx.deferredCashSessionId!,
+        store_id: storeId,
+        order_id: orderId,
+        user_id: userId,
+        payment_ids: legPayments.filter(({ leg }) => Number(leg.amount) > 0).map(({ payment }) => payment.id),
+        ready_state: historyCtx.deferredCashReadyState ?? 'finished',
+        compensation_state: historyCtx.deferredCashCompensationState ?? restoredState,
+        restored_state: restoredState,
+      }),
+    );
   }
 
   /**

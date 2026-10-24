@@ -2855,7 +2855,20 @@ export class OrdersService {
       where: { order_id: orderId, store_id: storeId },
       select: { id: true },
     });
-    if (tableHistory) {
+    if (!tableHistory) return;
+
+    // QUI-940: tras cerrar la mesa, la orden sigue editable mientras esté
+    // impaga y sin factura titular; el split financiero activo ya lo bloquea
+    // `assertNoActiveFinancialSplit` en los callers.
+    const settledPayment = await this.prisma.payments.findFirst({
+      where: {
+        order_id: orderId,
+        state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+      },
+      select: { id: true },
+    });
+    const titularInvoice = await this.findActiveTitularInvoice(orderId);
+    if (settledPayment || titularInvoice) {
       throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
     }
   }

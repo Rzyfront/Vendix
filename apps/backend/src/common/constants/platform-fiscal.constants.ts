@@ -21,3 +21,9 @@ export const PLATFORM_TIMEZONE = DEFAULT_STORE_TIMEZONE;
  * the customer-facing side would keep demanding NITs for nothing.
  */
 export const PLATFORM_FISCAL_SETTINGS_KEY = 'subscription_fiscal_billing';
+
+/**
+ * `platform_settings.key` holding the vendor-support (documento soporte) fiscal
+ * switch. Its `invoice_resolution_id` wires a resolution that must not be archived.
+ */
+export const VENDOR_SUPPORT_FISCAL_SETTINGS_KEY = 'vendor_support_fiscal';

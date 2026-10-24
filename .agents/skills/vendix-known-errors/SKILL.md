@@ -126,6 +126,7 @@ Para lo demás de Zoneless y señales: `vendix-zoneless-signals`.
 | El dist queda con un `SyntaxError` en un archivo distinto cada arranque | **VirtioFS desgarra la escritura del dist de SWC.** `colima restart` **no** lo cura. |
 | «Successfully compiled: 1 file» pero no hay `main.js` | **`.tsbuildinfo` sobrevive a `deleteOutDir`.** Muerto con log verde. |
 | Build verde y `ENOENT` al arrancar | **Assets JSON fuera del `dist`**: falta declararlos en `nest-cli.json`. |
+| `ENOENT` de un `.json` al arrancar en prod, aunque `nest-cli.json` lo declara como asset | **`watchAssets: true` en `nest-cli.json` pierde la copia del asset en `nest build` en silencio**: carrera entre chokidar y `closeWatchers` (500 ms) en @nestjs/cli 11; el build sale verde sin el archivo. Regla: sin `watchAssets` en los assets de prod, y `apps/backend/scripts/assert-build-assets.js` en Dockerfile/CI para fallar el build si falta algun asset. |
 | `docker logs --since` devuelve una ventana vacía | **`--since` es hora local, el log es UTC.** Contar ciclos en vez de acotar por tiempo. |
 | Un `prune` no libera espacio en disco | Falta `colima ssh -- sudo fstrim -a -v`; el disco es sparse. |
 | Cambios de frontend que no aparecen tras reiniciar | **La caché de Angular sobrevive al restart**: borrar `.angular/cache`. |
@@ -140,7 +141,7 @@ Puertos y contenedores: `docker restart`, **nunca matar PIDs**.
 |---|---|
 | «107 de 107 tests pasaron» | Leer **Test Suites**, no Tests: una **«suite failed to run»** no ejecuta nada y no resta. Verificar además que el gate de CI no esté apagado (`if: false`). |
 | Un test muere con un mensaje que parece error de compilación | **SIGKILL** por techo de memoria del contenedor; se lee igual en el resumen. |
-| Un `curl` a `/api/...` devuelve 200 con HTML | **El catch-all del SPA responde.** Apuntar a `localhost:3000` y exigir `Content-Type: application/json`. |
+| Un `curl` a `/api/...` devuelve 200 con HTML | **El catch-all del SPA responde.** Apuntar a `localhost:3000` (DEV; en prod es el puerto del slot en `/etc/nginx/conf.d/vendix-upstream.conf`) y exigir `Content-Type: application/json`. |
 | Un `curl` prueba un fix que aún no estaba compilado | **La sonda mide el `dist`, no el código fuente.** Comparar la hora de la sonda con la de la recompilación. |
 | Un login inválido devuelve 200 | El cuerpo trae `success: false`. El código HTTP no alcanza. |
 | Dos agentes sondean y uno lee la respuesta del otro | **Nombre de archivo temporal fijo**: un `curl` fallido no escribe y `head` lee lo anterior. Usar rutas únicas por sesión. |
@@ -160,6 +161,12 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 | Un conflicto que no debería existir | **`git patch-id`** prueba si es fantasma. |
 | `gh pr review --approve` falla en el propio PR | No se puede aprobar el PR propio: el veredicto va como `--comment`. |
 
+## Impresión térmica
+
+| Síntoma | Causa y regla |
+|---|---|
+| El ticket térmico se corta en los laterales («LIENTE», «$59.0(») aunque el margen guardado es 1,5 mm | El contenido se armó al ancho del papel menos márgenes (≈77 mm) y el cabezal de 80 mm sólo imprime ~72 mm (58 mm → ~48). Se maqueta al **ancho imprimible** (`printable_width_mm`) vía `resolvePrintGeometry`, nunca a `width_mm`; no fijar anchos ni margen 0 en rollo. Ver `vendix-print-geometry`. |
+
 ## Decision Rules
 
 | Situación | Qué hacer |
@@ -178,3 +185,4 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 - `how-to-test` — diseño de pruebas y credenciales
 - `git-workflow` — ramas, commits y PRs
 - `vendix-engram` — dónde persistir una trampa nueva
+- `vendix-print-geometry` — ancho imprimible en tickets térmicos

@@ -90,6 +90,28 @@ describe('SubscriptionStateService', () => {
     expect(result.state).toBe('pending_payment');
   });
 
+  // QUI-677 — the RNC-40 draft cleanup cron cancels abandoned drafts.
+  it('draft → cancelled is legal and persists state + event (QUI-677)', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'draft' }]);
+    prismaMock.store_subscriptions.update.mockResolvedValue({
+      id: 100,
+      state: 'cancelled',
+    });
+
+    const result = await service.transition(10, 'cancelled', {
+      reason: 'Draft abandoned',
+      triggeredByJob: 'subscription-draft-cleanup',
+    });
+
+    const updArg = prismaMock.store_subscriptions.update.mock.calls[0][0];
+    expect(updArg.data.state).toBe('cancelled');
+    const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(evtArg.data.from_state).toBe('draft');
+    expect(evtArg.data.to_state).toBe('cancelled');
+    expect(result.state).toBe('cancelled');
+    expect(service.isLegalTransition('draft', 'cancelled')).toBe(true);
+  });
+
   // QUI-676 — every state that may legally ENTER pending_payment must be able
   // to come back out of it, because the checkout paths write that origin state
   // verbatim into `pending_revert_state` and the rollback paths have nothing
@@ -1078,6 +1100,40 @@ describe('SubscriptionStateService', () => {
         requested.getTime() - 4 * DAY_MS,
       );
       expect(prismaMock.subscription_plans.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('writes current_period_start = ctx.periodStart when periodEnd + periodStart are given; otherwise now', async () => {
+      const requested = new Date(Date.now() + 26 * DAY_MS);
+      const anchor = new Date(Date.now() - 5 * DAY_MS);
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 4 * DAY_MS),
+      });
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+        periodStart: anchor,
+      });
+      expect(lastUpdateData().current_period_start.getTime()).toBe(
+        anchor.getTime(),
+      );
+
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 4 * DAY_MS),
+      });
+      const before = Date.now();
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+      });
+      const start = lastUpdateData().current_period_start.getTime();
+      expect(start).toBeGreaterThanOrEqual(before);
+      expect(start).not.toBe(anchor.getTime());
     });
 
     it('writes NOTHING when already active with an unexpired period (duplicate webhook)', async () => {

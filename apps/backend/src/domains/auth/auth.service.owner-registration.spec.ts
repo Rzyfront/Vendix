@@ -325,7 +325,7 @@ describe('AuthService - Owner Registration Flow', () => {
 
       expect(mockPrismaService.users.findFirst).toHaveBeenCalledWith({
         where: {
-          email: validOwnerData.email,
+          email: { equals: validOwnerData.email, mode: 'insensitive' },
           organizations: { onboarding: false },
           user_roles: {
             some: { roles: { name: 'owner' } },
@@ -569,7 +569,7 @@ describe('AuthService - Owner Registration Flow', () => {
         alreadyVerified: false,
       });
       expect(mockPrismaService.users.findFirst).toHaveBeenCalledWith({
-        where: { email: testEmail },
+        where: { email: { equals: testEmail, mode: 'insensitive' } },
       });
       expect(service.sendEmailVerification).toHaveBeenCalledWith(1);
     });

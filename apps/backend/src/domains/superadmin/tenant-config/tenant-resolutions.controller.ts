@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -28,6 +29,8 @@ import { UserRole } from '../../auth/enums/user-role.enum';
 
 import { CreateResolutionDto } from '../../store/invoicing/resolutions/dto/create-resolution.dto';
 import { UpdateResolutionDto } from '../../store/invoicing/resolutions/dto/update-resolution.dto';
+import { ArchiveResolutionDto } from '../../store/invoicing/resolutions/dto/archive-resolution.dto';
+import { ListResolutionsQueryDto } from '../../store/invoicing/resolutions/dto/list-resolutions-query.dto';
 import { ResolutionsService } from '../../store/invoicing/resolutions/resolutions.service';
 
 import { toTenantTarget, type TenantScopeSegment } from './dto/tenant-scope-param.dto';
@@ -84,16 +87,40 @@ export class TenantResolutionsController {
   async list(
     @Param('scope') scope: TenantScopeSegment,
     @Param('tenantId', ParseIntPipe) tenantId: number,
+    @Query() query: ListResolutionsQueryDto,
   ) {
     const rows = await this.runner.runAsTenant(
       toTenantTarget(scope, tenantId),
       this.opciones(PERMISOS_LECTURA),
-      () => this.resolutions.findAll(),
+      () => this.resolutions.findAll(query.include_archived === true),
     );
 
     return this.response.success(
       (rows as Record<string, any>[]).map((row) => this.sinClaveTecnica(row)),
       'Resoluciones del tenant obtenidas',
+    );
+  }
+
+  @Get('in-use')
+  @Permissions('superadmin:tenants:resolutions:read')
+  @ApiOperation({
+    summary: 'Resolución en uso por tipo de documento del tenant',
+    description:
+      'Misma regla que el generador de consecutivos. Nunca expone la clave técnica.',
+  })
+  async inUse(
+    @Param('scope') scope: TenantScopeSegment,
+    @Param('tenantId', ParseIntPipe) tenantId: number,
+  ) {
+    const data = await this.runner.runAsTenant(
+      toTenantTarget(scope, tenantId),
+      this.opciones(PERMISOS_LECTURA),
+      () => this.resolutions.findInUse(),
+    );
+
+    return this.response.success(
+      data,
+      'Resoluciones en uso del tenant obtenidas',
     );
   }
 
@@ -163,25 +190,48 @@ export class TenantResolutionsController {
     );
   }
 
+  @Post(':resolutionId/archive')
+  @Permissions('superadmin:tenants:resolutions:write')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Archivar una resolución del tenant',
+    description:
+      'Archivado lógico (nunca hay borrado físico). Si es la serie de notas en uso exige replacement_prefix.',
+  })
+  async archive(
+    @Param('scope') scope: TenantScopeSegment,
+    @Param('tenantId', ParseIntPipe) tenantId: number,
+    @Param('resolutionId', ParseIntPipe) resolutionId: number,
+    @Body() dto: ArchiveResolutionDto,
+  ) {
+    const result = await this.runner.runAsTenant(
+      toTenantTarget(scope, tenantId),
+      this.opciones(PERMISOS_BORRADO),
+      () => this.resolutions.archive(resolutionId, dto),
+    );
+
+    return this.response.success(result, 'Resolution archived');
+  }
+
   @Delete(':resolutionId')
   @Permissions('superadmin:tenants:resolutions:write')
   @ApiOperation({
-    summary: 'Eliminar una resolución del tenant',
+    summary: 'Archivar una resolución del tenant (sin reemplazo)',
     description:
-      'Rechazada si la resolución ya emitió documentos o ya consumió numeración ante la DIAN; en ese caso hay que desactivarla, no borrarla.',
+      'No hay borrado físico: la resolución se archiva (is_active=false, archived_at).',
   })
   async remove(
     @Param('scope') scope: TenantScopeSegment,
     @Param('tenantId', ParseIntPipe) tenantId: number,
     @Param('resolutionId', ParseIntPipe) resolutionId: number,
   ) {
-    await this.runner.runAsTenant(
+    const result = await this.runner.runAsTenant(
       toTenantTarget(scope, tenantId),
       this.opciones(PERMISOS_BORRADO),
       () => this.resolutions.remove(resolutionId),
     );
 
-    return this.response.deleted('Resolución eliminada');
+    return this.response.success(result, 'Resolution archived');
   }
 
   // --------------------------------------------------------------------
@@ -209,7 +259,10 @@ export class TenantResolutionsController {
    * Misma decisión que `TenantDirectoryService.readResolutions`.
    */
   private sinClaveTecnica(row: Record<string, any>) {
-    const { technical_key, ...resto } = row ?? {};
-    return { ...resto, technical_key_set: Boolean(technical_key) };
+    const { technical_key, technical_key_set, ...resto } = row ?? {};
+    return {
+      ...resto,
+      technical_key_set: Boolean(technical_key_set ?? technical_key),
+    };
   }
 }

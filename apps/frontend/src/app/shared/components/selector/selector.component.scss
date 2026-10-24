@@ -70,7 +70,6 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
   color: var(--color-text-primary);
-  margin-bottom: 0.5rem;
 
   &.opacity-50 {
     opacity: 0.5;
@@ -155,17 +154,17 @@
   text-overflow: ellipsis;
 
   &::placeholder {
-    color: var(--color-text-primary);
+    color: var(--color-text-secondary);
   }
 
   &::placeholder {
-    color: var(--color-text-primary);
+    color: var(--color-text-secondary);
   }
 
   // Estados
   &.selector-disabled {
     cursor: not-allowed;
-    color: var(--color-text-primary);
+    color: var(--color-text-secondary);
   }
 
   &.selector-error {
@@ -269,7 +268,7 @@
   left: 1rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   pointer-events: none;
   font-size: var(--fs-base);
   font-weight: var(--fw-regular);
@@ -300,7 +299,7 @@
 
   // Estado deshabilitado
   &.selector-placeholder-disabled {
-    color: var(--color-text-primary);
+    color: var(--color-text-muted);
     opacity: 0.6;
   }
 }
@@ -344,7 +343,7 @@
   margin-top: 0.25rem;
 
   .text-text-secondary {
-    color: var(--color-text-primary);
+    color: var(--color-text-secondary);
   }
 
   .text-error-500 {
@@ -444,7 +443,12 @@
 }
 
 .help-icon {
-  color: var(--color-text-primary);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  line-height: 0;
+  color: var(--color-text-muted);
   cursor: help;
   position: relative;
   display: inline-flex;
@@ -458,7 +462,7 @@
 }
 
 .help-icon:hover {
-  color: var(--color-text-primary);
+  color: var(--color-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

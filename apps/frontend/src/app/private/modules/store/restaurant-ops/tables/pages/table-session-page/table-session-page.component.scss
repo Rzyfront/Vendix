@@ -1440,3 +1440,41 @@
     }
   }
 }
+
+/* QUI-898 — notas informales de la mesa */
+.informal-notes-card {
+  display: block;
+  margin-top: 0.75rem;
+}
+.informal-notes__textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary, inherit);
+  font-size: 1rem; // 16px: evita el zoom de iOS al enfocar
+  &:focus {
+    outline: 2px solid var(--color-primary, #2563eb);
+    outline-offset: 1px;
+  }
+}
+.informal-notes__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.informal-notes__count {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.informal-notes__readonly {
+  margin: 0;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

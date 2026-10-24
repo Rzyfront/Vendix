@@ -52,6 +52,8 @@ const transformTechnicalKey = ({ value }: { value: unknown }) => {
 export const PLATFORM_RESOLUTION_DOCUMENT_TYPES = [
   'sales_invoice',
   'support_document',
+  'credit_note',
+  'debit_note',
 ] as const;
 
 export type PlatformResolutionDocumentType =
@@ -312,10 +314,21 @@ export class ListPlatformResolutionsQueryDto {
   @IsIn(['test', 'production'])
   environment?: SubscriptionFiscalEnvironment;
 
-  @Type(() => Boolean)
   @IsOptional()
+  @Transform(({ obj, key }) =>
+    obj[key] === true || obj[key] === 'true'
+      ? true
+      : obj[key] === false || obj[key] === 'false'
+        ? false
+        : obj[key],
+  )
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => obj[key] === true || obj[key] === 'true')
+  @IsBoolean()
+  include_archived?: boolean;
 }
 
 /**
@@ -1183,3 +1196,43 @@ export class CreatePlatformSupportDocumentDto {
   profile_id?: number;
 }
 
+
+export const PLATFORM_INVOICE_PAYMENT_METHODS = [
+  'cash',
+  'bank_transfer',
+  'card',
+  'other',
+] as const;
+export type PlatformInvoicePaymentMethod =
+  (typeof PLATFORM_INVOICE_PAYMENT_METHODS)[number];
+
+/** Cobro registrado contra una factura de plataforma (cartera). */
+export class RegisterPlatformInvoicePaymentDto {
+  @Type(() => Number)
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'amount debe ser un número con máximo 2 decimales.' },
+  )
+  @Min(0.01, { message: 'amount debe ser mayor que cero.' })
+  amount!: number;
+
+  /** Fecha civil del cobro (YYYY-MM-DD). */
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'paid_at debe tener formato YYYY-MM-DD.',
+  })
+  paid_at!: string;
+
+  @IsIn(PLATFORM_INVOICE_PAYMENT_METHODS as unknown as string[])
+  payment_method!: PlatformInvoicePaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}

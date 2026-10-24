@@ -227,6 +227,11 @@ export interface TableBillItem {
   quantity: number;
   unit_price: number;
   total: number;
+  /** Precio con impuesto incluido (lo que ve el comensal). */
+  unit_price_gross?: number;
+  line_total_gross?: number;
+  /** Línea cancelada (soft cancel): se excluye del Subtotal mostrado. */
+  cancelled_at?: string | null;
   /**
    * Product image URL, surfaced by the diner bill so the "Mi cuenta" panel can
    * render a thumbnail per line. Optional — use as-is (never sign/transform;

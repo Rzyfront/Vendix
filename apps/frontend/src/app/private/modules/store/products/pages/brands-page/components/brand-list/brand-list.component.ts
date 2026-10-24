@@ -61,6 +61,7 @@ export class BrandListComponent {
   readonly edit = output<Brand>();
   readonly toggleState = output<Brand>();
   readonly toggleFeatured = output<Brand>();
+  readonly manageProducts = output<Brand>();
   readonly delete = output<Brand>();
   readonly sort = output<{
     column: string;
@@ -154,6 +155,12 @@ export class BrandListComponent {
       },
     },
     {
+      key: 'product_count',
+      label: 'Productos',
+      priority: 2,
+      defaultValue: '0',
+    },
+    {
       key: 'state',
       label: 'Estado',
       priority: 1,
@@ -176,6 +183,13 @@ export class BrandListComponent {
         icon: 'pencil',
         variant: 'info',
         action: (item: Brand) => this.edit.emit(item),
+      });
+      actions.push({
+        label: 'Productos',
+        icon: 'package',
+        variant: 'primary',
+        tooltip: 'Asignar productos a esta marca',
+        action: (item: Brand) => this.manageProducts.emit(item),
       });
       actions.push({
         label: (item: Brand) =>
@@ -226,6 +240,7 @@ export class BrandListComponent {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: string) => (val === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
+      { key: 'product_count', label: 'Productos', icon: 'package' },
       {
         key: 'is_featured',
         label: 'Destacada',

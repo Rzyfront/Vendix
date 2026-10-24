@@ -3,7 +3,7 @@ import { InvoicingService } from './invoicing.service';
 /**
  * `validate-draft` tiene que dar EL MISMO veredicto que daría «Crear factura»,
  * y el generador de numeración no se limita a buscar una resolución: para los
- * tipos con serie interna (`NAS`, `NAE`) la abre o la reactiva él mismo. Si la
+ * tipos con serie interna (`NASVS`, `NAEVS`) la abre o la reactiva él mismo. Si la
  * previsualización sólo mirara `invoice_resolutions`, la primera nota de ajuste
  * de una tienda saldría de «Validar» con un bloqueante que la emisión real no
  * tiene — el usuario leería «falta resolución» de un documento que sí se emite.
@@ -40,14 +40,14 @@ describe('InvoicingService.peekResolutionForDraft — serie interna proyectada',
       // Sin fila todavía: anunciar un id apuntaría un diagnóstico a una
       // resolución ajena.
       id: null,
-      resolution_number: 'INTERNA-NAS',
-      prefix: 'NAS',
+      resolution_number: 'INTERNA-NASVS',
+      prefix: 'NASVS',
       range_from: 1,
-      range_to: 1000,
+      range_to: 10_000_000,
       current_number: 0,
       is_active: true,
     });
-    expect(result.projected_number).toBe('NAS1');
+    expect(result.projected_number).toBe('NASVS1');
     // El CUDE de estas notas se firma con el Software-PIN; inventarles una
     // ClTec haría que el prevalidador juzgara una clave que la emisión no usa.
     expect(result.resolution_secret).toEqual({
@@ -62,10 +62,26 @@ describe('InvoicingService.peekResolutionForDraft — serie interna proyectada',
     const result = await peek(service, 77, 'equivalent_adjustment_note');
 
     expect(result.resolution).toMatchObject({
-      resolution_number: 'INTERNA-NAE',
-      prefix: 'NAE',
+      resolution_number: 'INTERNA-NAEVS',
+      prefix: 'NAEVS',
     });
-    expect(result.projected_number).toBe('NAE1');
+    expect(result.projected_number).toBe('NAEVS1');
+  });
+
+  it('proyecta una nota crédito sin serie con prefijo NCVS y rango inicial de 10.000.000', async () => {
+    const service = buildService(jest.fn().mockResolvedValue(null));
+
+    const result = await peek(service, 77, 'credit_note');
+
+    expect(result.resolution).toMatchObject({
+      id: null,
+      resolution_number: 'INTERNA-NCVS',
+      prefix: 'NCVS',
+      range_from: 1,
+      range_to: 10_000_000,
+      current_number: 0,
+    });
+    expect(result.projected_number).toBe('NCVS1');
   });
 
   it('reactiva la serie dormida CONSERVANDO su cursor, no reabriéndola en el inicio del rango', async () => {

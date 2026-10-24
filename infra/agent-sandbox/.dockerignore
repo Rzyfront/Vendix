@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!runner.ts
+!deno.json
+!deno.lock

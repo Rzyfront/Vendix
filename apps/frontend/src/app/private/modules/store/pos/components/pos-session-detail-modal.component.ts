@@ -189,6 +189,9 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                         · {{ mov.reference }}
                       }
                     </p>
+                    @if (mov.notes) {
+                      <p class="sd-row-notes">{{ mov.notes }}</p>
+                    }
                   </div>
 
                   <!-- Amount -->
@@ -512,6 +515,14 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
       font-size: 12px;
       color: var(--color-neutral-600);
       margin: 0;
+    }
+
+    .sd-row-notes {
+      font-size: 12px;
+      color: var(--color-neutral-600);
+      margin: 2px 0 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .sd-row-amount {

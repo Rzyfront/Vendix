@@ -21,6 +21,7 @@ import {
   MapStopsResponse,
   PaginatedDispatchRoutesResponse,
   PaginatedMonitorResponse,
+  RouteCloseOptions,
   ReleaseStopDto,
   ReorderStopEntry,
   RouteSheetMatchResult,
@@ -197,7 +198,8 @@ export class PlanillasRutasService {
       .pipe(
         map((r) => r.data as DispatchRoute),
         tap(() => this.invalidateStatsCache()),
-        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+        // Original HttpErrorResponse is rethrown on purpose: the page needs
+        // `error_code` (DISPATCH_ROUTE_NOT_RESPONSIBLE) for parseApiError.
       );
   }
 
@@ -243,8 +245,16 @@ export class PlanillasRutasService {
       .pipe(
         map((r) => r.data as DispatchRoute),
         tap(() => this.invalidateStatsCache()),
-        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+        // Original HttpErrorResponse is rethrown on purpose: callers need
+        // `error_code` (CASH_SESSION_REQUIRED / INVALID / ALREADY_CLOSED).
       );
+  }
+
+  /** Cash-session options for closing a route (`cash_required` + open sessions). */
+  getCloseOptions(id: number): Observable<RouteCloseOptions> {
+    return this.http
+      .get<any>(`${this.apiUrl}/store/dispatch-routes/${id}/close-options`)
+      .pipe(map((r) => r.data as RouteCloseOptions));
   }
 
   void(id: number, dto: VoidDispatchRouteDto): Observable<DispatchRoute> {
