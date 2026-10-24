@@ -2194,6 +2194,35 @@ export class ProductCreatePageComponent {
   }
 
   /** Guarda en qué estaciones se presta el servicio, solo si cambió. Nunca rechaza. */
+  /** Opción especial del selector: marca o desmarca todas las estaciones de una vez. */
+  private static readonly ALL_STATIONS = -1;
+
+  readonly stationSelectorOptions = computed(() => [
+    { value: ProductCreatePageComponent.ALL_STATIONS, label: 'Todas las estaciones' },
+    ...this.serviceStationOptions(),
+  ]);
+
+  /** Valor mostrado: incluye "Todas" cuando cada estación está marcada. */
+  readonly stationSelectorValue = computed(() => {
+    const ids = this.productStationIds();
+    const all = this.serviceStationOptions().map((o) => o.value);
+    return all.length && all.every((id) => ids.includes(id)) ? [ProductCreatePageComponent.ALL_STATIONS, ...ids] : ids;
+  });
+
+  onStationSelectorChange(value: Array<string | number>): void {
+    const ALL = ProductCreatePageComponent.ALL_STATIONS;
+    const next = (value ?? []).map(Number);
+    const wasAll = this.stationSelectorValue().includes(ALL);
+    const all = this.serviceStationOptions().map((o) => o.value);
+    if (next.includes(ALL) && !wasAll) {
+      this.productStationIds.set(all); // marcó "Todas"
+    } else if (!next.includes(ALL) && wasAll && next.length === all.length) {
+      this.productStationIds.set([]); // desmarcó "Todas"
+    } else {
+      this.productStationIds.set(next.filter((id) => id !== ALL));
+    }
+  }
+
   private syncProductStations(productId: number | undefined, isService: boolean): Promise<void> {
     const next = isService && this.productForm.get('requires_station')?.value ? [...this.productStationIds()].sort() : [];
     const prev = [...this.originalProductStationIds()].sort();

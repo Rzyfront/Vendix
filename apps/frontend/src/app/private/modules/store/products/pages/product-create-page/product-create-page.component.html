@@ -1740,10 +1740,10 @@
                 @if (productForm.get('requires_station')?.value && serviceStationOptions().length) {
                   <app-multi-selector
                     label="Estaciones donde se presta"
-                    [options]="serviceStationOptions()"
-                    [ngModel]="productStationIds()"
+                    [options]="stationSelectorOptions()"
+                    [ngModel]="stationSelectorValue()"
                     [ngModelOptions]="{ standalone: true }"
-                    (ngModelChange)="productStationIds.set($event)"
+                    (ngModelChange)="onStationSelectorChange($event)"
                     placeholder="Elige las estaciones..."
                     helpText="Solo en estas estaciones se podrá reservar o iniciar el servicio."
                   />
