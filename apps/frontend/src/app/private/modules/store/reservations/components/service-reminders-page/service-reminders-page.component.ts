@@ -152,9 +152,9 @@ export class ServiceRemindersPageComponent {
     { key: 'service_name', label: 'Servicio', priority: 1 },
     { key: 'station_name', label: 'Estación', priority: 2 },
     { key: 'subject_display', label: 'Atendido', priority: 2 },
-    { key: 'service_date_label', label: 'Fecha', priority: 1 },
-    { key: 'next_due_label', label: 'Próxima', priority: 2 },
-    { key: 'countdown_text', label: 'Estado', priority: 1, template: this.countdownTpl() },
+    { key: 'service_date_label', label: 'Fecha', priority: 1, cellClass: () => 'whitespace-nowrap' },
+    { key: 'next_due_label', label: 'Próxima', priority: 2, cellClass: () => 'whitespace-nowrap' },
+    { key: 'countdown_text', label: 'Estado', priority: 1, align: 'center', template: this.countdownTpl() },
     { key: 'reminder_label', label: 'Recordatorio', priority: 3 },
   ]);
 
