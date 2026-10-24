@@ -120,6 +120,5 @@ export interface PrintOptions {
   copies?: number;
   openCashDrawer?: boolean;
   printReceipt?: boolean;
-  emailReceipt?: boolean;
   smsReceipt?: boolean;
 }

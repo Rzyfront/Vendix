@@ -252,6 +252,16 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     expect(modal.dialog()).toBe(true);
   });
 
+  // QUI-833: el botón Email era un mock; se eliminó del modal.
+  it('no expone el botón Email', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+
+    expect((component as any).emailReceipt).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('[title="Enviar por Email"]')).toBeNull();
+  });
+
   it('muestra Despachar para domicilio cobrado aunque no venga isShippingSale', () => {
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', {
