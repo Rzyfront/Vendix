@@ -98,6 +98,10 @@ import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper'
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { resolveKitchenMode } from '../../kitchen-fire/kitchen-mode.util';
+import {
+  closeSupersededKitchenRows,
+  findLinesAwaitingKitchenDelivery,
+} from '../../kitchen-fire/kitchen-superseded-rows.util';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
 import { ShippingCalculatorService } from '../../shipping/shipping-calculator.service';
@@ -708,16 +712,10 @@ export class OrderFlowService {
    */
   private async hasPendingKitchenItems(
     orderId: number,
-    client: { kitchen_ticket_items: { count: (args: any) => Promise<number> } } = this
-      .prisma,
+    client: any = this.prisma,
   ): Promise<boolean> {
-    const pendingCount = await client.kitchen_ticket_items.count({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-    });
-    return pendingCount > 0;
+    // QUI-892: solo la última fila de cada línea no cancelada cuenta.
+    return (await findLinesAwaitingKitchenDelivery(client, orderId)).length > 0;
   }
 
   /**
@@ -729,28 +727,8 @@ export class OrderFlowService {
     orderId: number,
     client: any = this.prisma,
   ): Promise<string | null> {
-    const lines = await client.order_items.findMany({
-      where: {
-        order_id: orderId,
-        cancelled_at: null,
-        kitchen_ticket_items: { some: {} },
-      },
-      select: {
-        product_name: true,
-        kitchen_ticket_items: {
-          orderBy: { id: 'desc' },
-          take: 1,
-          select: { status: true },
-        },
-      },
-    });
-    for (const line of lines ?? []) {
-      const status = line.kitchen_ticket_items?.[0]?.status;
-      if (status != null && status !== 'delivered' && status !== 'cancelled') {
-        return line.product_name || 'este producto';
-      }
-    }
-    return null;
+    const lines = await findLinesAwaitingKitchenDelivery(client, orderId);
+    return lines.length > 0 ? lines[0].product_name || 'este producto' : null;
   }
 
   /** Whole-order fulfillment is never allowed to use a retail line as a
@@ -4956,6 +4934,25 @@ export class OrderFlowService {
         data: { status: 'delivered', updated_at: new Date() },
       });
 
+      // QUI-892: la nueva fila entregada cierra (solo estado) las filas viejas
+      // de reenvíos previos para que su ticket pueda volverse terminal.
+      // Best-effort aparte: si falla, el cierre del ticket vigente y el puente
+      // all-delivered siguen corriendo.
+      try {
+        const closedTickets = await closeSupersededKitchenRows(this.prisma, [
+          orderItemId,
+        ]);
+        for (const closedId of closedTickets) {
+          if (closedId !== latest.kitchen_ticket_id) {
+            await this.kitchenFireService?.emitTicketUpdatedEvent(closedId);
+          }
+        }
+      } catch (e) {
+        this.logger.warn(
+          `QUI-892: no se pudieron cerrar filas superadas del item #${orderItemId}: ${(e as Error).message}`,
+        );
+      }
+
       const rows = await this.prisma.kitchen_ticket_items.findMany({
         where: { kitchen_ticket_id: latest.kitchen_ticket_id },
         select: { status: true },
@@ -6160,20 +6157,11 @@ export class OrderFlowService {
     // path, so we THROW (the operator must wait for the kitchen or mark the
     // tickets delivered first). Automatic paths (credit payment, forgiveness,
     // POS payment, auto-finish job) handle this by NOT finishing instead.
-    const pendingKitchenItems = await this.prisma.kitchen_ticket_items.findMany({
-      where: {
-        kitchen_ticket: { order_id: orderId },
-        status: { notIn: ['delivered', 'cancelled'] },
-      },
-      select: {
-        order_item_id: true,
-        status: true,
-        quantity: true,
-        variant_label: true,
-        order_item: { select: { product_name: true } },
-      },
-      orderBy: { id: 'asc' },
-    });
+    // QUI-892: solo la última fila de cada línea bloquea (reenvíos).
+    const pendingKitchenItems = await findLinesAwaitingKitchenDelivery(
+      this.prisma,
+      orderId,
+    );
     if (pendingKitchenItems.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
@@ -6181,7 +6169,7 @@ export class OrderFlowService {
         {
           pending_items: pendingKitchenItems.map((item) => ({
             order_item_id: item.order_item_id,
-            product_name: item.order_item.product_name,
+            product_name: item.product_name,
             variant_label: item.variant_label,
             quantity: item.quantity,
             status: item.status,
