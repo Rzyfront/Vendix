@@ -563,7 +563,7 @@
       />
 
       <!-- Campos fijos por tipo: solo cuando la estación/servicio no tiene formulario de recepción -->
-      @if (!checkinIntakeTemplate() && !checkinIntakeLoading()) {
+      @if (!checkinIntakeTemplate() && !checkinIntakeLoading() && !selectedCheckinStation()?.intake_template_id) {
       <!-- Datos del Vehículo (Solo si la estación es de Carro o Moto) -->
       @if (checkinRequiresVehicle()) {
         <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-amber-500/25 space-y-3">

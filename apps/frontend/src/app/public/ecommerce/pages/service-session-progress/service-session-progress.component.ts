@@ -22,8 +22,19 @@ interface ServiceProposal {
 interface PublicProgress {
   store_id: number;
   status: string;
-  /** Qué se atiende: estación, servicio y lo atendido (p. ej. la moto). */
-  service?: { station_name: string | null; service_name: string | null; subject_label: string | null; opened_at: string } | null;
+  store?: { id: number; name: string; logo_url: string | null } | null;
+  order_number?: string | null;
+  order_created_at?: string | null;
+  /** Qué se atiende: estación, servicio, lo atendido, especialista y datos de recepción. */
+  service?: {
+    station_name: string | null;
+    service_name: string | null;
+    subject_label: string | null;
+    provider_name?: string | null;
+    customer_first_name?: string | null;
+    intake?: Array<{ label: string; value: string }>;
+    opened_at: string;
+  } | null;
   account: {
     currency: string;
     items: Array<{ name: string; description?: string | null; quantity: number; unit_price: string; total: string; item_type: string }>;
@@ -38,11 +49,19 @@ interface PublicProgress {
   proposal?: ServiceProposal | null;
 }
 import { ButtonComponent, IconComponent } from '../../../../shared/components';
+import {
+  GuestOrderSummary,
+  GuestOrderSummaryComponent,
+} from '../../../../private/modules/ecommerce/pages/guest-order-summary/guest-order-summary.component';
+import {
+  ServiceSessionDetailsComponent,
+  ServiceSessionDetailsData,
+} from '../../../../private/modules/ecommerce/components/service-session-details/service-session-details.component';
 
 @Component({
   selector: 'app-service-session-progress',
   standalone: true,
-  imports: [CommonModule, DatePipe, ButtonComponent, IconComponent],
+  imports: [CommonModule, DatePipe, ButtonComponent, IconComponent, GuestOrderSummaryComponent, ServiceSessionDetailsComponent],
   templateUrl: './service-session-progress.component.html',
   styleUrl: './service-session-progress.component.scss',
 })
@@ -65,6 +84,57 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   readonly proposalLines = computed(() => {
     const lines = this.progress()?.proposal?.lines as { items?: unknown[] } | null | undefined;
     return Array.isArray(lines?.items) ? (lines.items as Array<Record<string, unknown>>) : [];
+  });
+
+  /**
+   * La cuenta en vivo con el mismo resumen de orden de la tienda (el de los
+   * pedidos de productos): se ve dentro de la tienda, no como otra página.
+   */
+  readonly orderSummary = computed((): GuestOrderSummary | null => {
+    const p = this.progress();
+    if (!p) return null;
+    const tax = Number(p.account.tax ?? 0);
+    return {
+      token: '',
+      prints_vat_breakdown: tax > 0,
+      store: p.store ? { id: p.store.id, name: p.store.name, logo_url: p.store.logo_url ?? undefined } : undefined,
+      order: {
+        order_number: p.order_number || 'Servicio',
+        state: this.finished() ? 'finished' : 'draft',
+        created_at: p.order_created_at ?? p.service?.opened_at ?? null,
+        currency: p.account.currency,
+        items: p.account.items.map((item, index) => ({
+          order_item_id: index + 1,
+          product_name: item.name,
+          notes: item.description ?? null,
+          quantity: item.quantity,
+          unit_price: Number(item.unit_price),
+          total_price: Number(item.total),
+          product_type: item.item_type === 'service' ? 'service' : 'physical',
+        })) as GuestOrderSummary['order']['items'],
+        discount_amount: 0,
+        subtotal_amount: Number(p.account.subtotal ?? p.account.total),
+        tax_amount: tax,
+        shipping_cost: 0,
+        grand_total: Number(p.account.total),
+        payments: [],
+      },
+    };
+  });
+
+  readonly serviceDetails = computed((): ServiceSessionDetailsData | null => {
+    const p = this.progress();
+    if (!p?.service) return null;
+    return {
+      status: p.status,
+      station_name: p.service.station_name,
+      service_name: p.service.service_name,
+      subject_label: p.service.subject_label,
+      provider_name: p.service.provider_name ?? null,
+      customer_name: p.service.customer_first_name ?? null,
+      opened_at: p.service.opened_at,
+      intake: p.service.intake ?? [],
+    };
   });
 
   private token = '';

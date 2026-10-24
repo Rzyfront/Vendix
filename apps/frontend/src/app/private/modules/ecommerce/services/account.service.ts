@@ -63,6 +63,10 @@ export interface ServiceSessionSummary {
   station_name: string | null;
   service_name: string | null;
   subject_label: string | null;
+  /** Especialista que atiende (nombre visible). */
+  provider_name?: string | null;
+  /** Respuestas de la plantilla de la estación (solo en el detalle). */
+  intake?: Array<{ label: string; value: string }>;
 }
 
 export interface OrderAppliedPromotion {

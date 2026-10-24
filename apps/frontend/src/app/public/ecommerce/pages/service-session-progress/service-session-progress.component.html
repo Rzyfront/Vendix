@@ -28,73 +28,14 @@
       </app-button>
     </section>
   } @else {
-    <section class="status-card" aria-labelledby="service-status-title">
-      <div class="status-mark" aria-hidden="true">✓</div>
-      <div>
-        <h2 id="service-status-title">
-          {{ finished() || progress()?.status === 'closed' ? 'Servicio finalizado' : progress()?.status === 'paused' ? 'Atención en pausa' : 'Atención en curso' }}
-        </h2>
-        <p>
-          {{ finished()
-            ? 'Tu servicio terminó. Esta es la última cuenta registrada; acércate al establecimiento para pagar o recoger.'
-            : 'El establecimiento actualizará este seguimiento durante el servicio.' }}
-        </p>
-      </div>
-    </section>
-
-    @if (progress()?.service; as svc) {
-      <section class="proposal-card" aria-labelledby="service-detail-title">
-        <p class="eyebrow">Tu servicio</p>
-        <h2 id="service-detail-title">{{ svc.subject_label || svc.service_name || 'Servicio' }}</h2>
-        <dl class="totals">
-          @if (svc.service_name) {
-            <div><dt>Servicio</dt><dd>{{ svc.service_name }}</dd></div>
-          }
-          @if (svc.station_name) {
-            <div><dt>Estación</dt><dd>{{ svc.station_name }}</dd></div>
-          }
-          <div><dt>Ingreso</dt><dd>{{ svc.opened_at | date:'short' }}</dd></div>
-        </dl>
-      </section>
-    }
-
-    @if (progress()?.account; as account) {
-      <section class="proposal-card" aria-labelledby="account-title">
-        <div class="proposal-heading">
-          <div>
-            <p class="eyebrow">Cuenta actualizada en vivo</p>
-            <h2 id="account-title">Servicios y productos</h2>
-          </div>
-        </div>
-        @if (account.items.length) {
-          <ul class="line-list">
-            @for (item of account.items; track $index) {
-              <li>
-                <span>{{ item.name }} <small>× {{ item.quantity }}</small></span>
-                <strong>{{ money(item.total, account.currency) }}</strong>
-              </li>
-            }
-          </ul>
-        } @else {
-          <p>Aún no se han agregado servicios o productos a la cuenta.</p>
-        }
-        <dl class="totals">
-          @if (account.subtotal !== undefined) {
-            <div><dt>Subtotal</dt><dd>{{ money(account.subtotal, account.currency) }}</dd></div>
-            <div><dt>Impuestos</dt><dd>{{ money(account.tax ?? 0, account.currency) }}</dd></div>
-          }
-          <div class="grand-total"><dt>Total acumulado</dt><dd>{{ money(account.total, account.currency) }}</dd></div>
-          @if (account.budget_amount !== null) {
-            <div><dt>Presupuesto aprobado</dt><dd>{{ money(account.budget_amount, account.currency) }}</dd></div>
-            <div><dt>Gastado</dt><dd>{{ money(account.budget_spent, account.currency) }}</dd></div>
-            <div><dt>Saldo del presupuesto</dt><dd>{{ money(account.budget_remaining, account.currency) }}</dd></div>
-          }
-        </dl>
-      </section>
-    }
-
+    <app-guest-order-summary [embedded]="true" [summaryInput]="orderSummary()" [physicalProgressAllowed]="false">
+      <app-service-session-details
+        data-slot="after-products"
+        [data]="serviceDetails()"
+        [finished]="finished()"
+      />
     @if (progress()?.proposal; as proposal) {
-      <section class="proposal-card" aria-labelledby="proposal-title">
+      <section data-slot="after-products" class="proposal-card" aria-labelledby="proposal-title">
         <div class="proposal-heading">
           <div>
             <p class="eyebrow">Autorización</p>
@@ -136,11 +77,11 @@
     }
 
     @if (decisionMessage()) {
-      <p class="notice notice-success" role="status">{{ decisionMessage() }}</p>
+      <p data-slot="after-products" class="notice notice-success" role="status">{{ decisionMessage() }}</p>
     }
 
     @if (decisionPrompt(); as decision) {
-      <section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+      <section data-slot="after-products" class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
         <h2 id="confirm-title">
           {{ decision === 'approved' ? '¿Confirmas esta aprobación?' : '¿Confirmas que rechazas esta propuesta?' }}
         </h2>
@@ -158,7 +99,7 @@
       </section>
     }
 
-    <section class="timeline" aria-labelledby="timeline-title">
+    <section data-slot="after-products" class="timeline" aria-labelledby="timeline-title">
       <h2 id="timeline-title">Actualizaciones</h2>
       @if (progress()?.events?.length) {
         <ol>
@@ -176,5 +117,6 @@
         <p>Aún no hay actualizaciones.</p>
       }
     </section>
+    </app-guest-order-summary>
   }
 </main>

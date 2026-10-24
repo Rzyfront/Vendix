@@ -610,7 +610,20 @@
                   <div><span class="text-text-secondary block">Cierre</span><span class="font-semibold">{{ svc.closed_at ? (svc.closed_at | date: 'short') : 'En curso' }}</span></div>
                   <div><span class="text-text-secondary block">Técnico</span><span class="font-semibold">{{ svc.provider_name || 'Sin asignar' }}</span></div>
                   <div><span class="text-text-secondary block">Saldo por pagar</span><span class="font-semibold" [class.text-red-600]="serviceSessionBalance() > 0">{{ serviceSessionBalance() | currency }}</span></div>
+                  @if (svc.customer_name) {
+                    <div><span class="text-text-secondary block">Recibido de</span><span class="font-semibold">{{ svc.customer_name }}</span></div>
+                  }
                 </div>
+                @if (svc.intake?.length) {
+                  <div class="pt-2 border-t border-border">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Datos de la recepción</span>
+                    <div class="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      @for (answer of svc.intake; track answer.label) {
+                        <div><span class="text-text-secondary block">{{ answer.label }}</span><span class="font-semibold break-words">{{ answer.value }}</span></div>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
             </app-card>
           }

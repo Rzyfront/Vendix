@@ -1415,7 +1415,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinProductId.set(next);
     if (changed) {
       this.checkinDurationMinutes.set(this.defaultCheckinDuration());
-      this.loadCheckinIntake();
+      // Con plantilla de estación el formulario no cambia con el servicio: no se
+      // recarga para no borrar lo que ya se escribió.
+      if (!this.selectedCheckinStation()?.intake_template_id) this.loadCheckinIntake();
     }
   }
 
@@ -1439,9 +1441,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private loadCheckinIntakePrefill(): void {
     const customerId = this.checkinCustomer()?.id;
     const productId = Number(this.checkinProductId() || 0);
-    if (!customerId || !productId || !this.checkinIntakeTemplate()) return;
+    if (!customerId || !this.checkinIntakeTemplate()) return;
     const seq = ++this.prefillRequestSeq;
-    this.stationsApi.getIntakePrefill(productId, customerId, this.checkinStationId()).subscribe({
+    this.stationsApi.getIntakePrefill(productId || null, customerId, this.checkinStationId()).subscribe({
       next: (entries) => {
         if (seq !== this.prefillRequestSeq) return;
         if (this.checkinCustomer()?.id !== customerId || Number(this.checkinProductId() || 0) !== productId) return;
@@ -1465,15 +1467,17 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   /** Carga el formulario de recepción: el de la estación o, si no tiene, el del servicio. */
   private loadCheckinIntake(): void {
     const productId = Number(this.checkinProductId() || 0);
+    const stationId = Number(this.checkinStationId() || 0);
     const seq = ++this.intakeRequestSeq;
     this.checkinIntakeTemplate.set(null);
     this.checkinIntakeValues.set({});
-    if (!productId) {
+    // La plantilla de la estación no depende del servicio: se carga apenas hay estación.
+    if (!productId && !stationId) {
       this.checkinIntakeLoading.set(false);
       return;
     }
     this.checkinIntakeLoading.set(true);
-    this.stationsApi.getIntakeTemplate(productId, this.checkinStationId()).subscribe({
+    this.stationsApi.getIntakeTemplate(productId || null, stationId || null).subscribe({
       next: (template) => {
         if (seq !== this.intakeRequestSeq) return;
         this.checkinIntakeTemplate.set(template);

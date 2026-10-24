@@ -37,40 +37,9 @@
       [orderId]="order.id"
       (receiptUploaded)="loadOrder(order.id)"
     >
-      <!-- Orden de estación de servicio: estación, servicio, lo atendido y estado
-           del pago, en el mismo slot y estilo que la tarjeta de envío. -->
+      <!-- Orden de estación de servicio: qué se atiende, quién lo trabaja, datos de recepción y pago -->
       @if (order.service_session; as svc) {
-        <section data-slot="after-products" class="order-section" aria-label="Servicio en estación">
-          <div class="section-header">
-            <app-icon name="warehouse" [size]="18" />
-            <h2>Servicio en estación</h2>
-          </div>
-          <div class="extras-list">
-            <div class="extra-row">
-              <div class="extra-row-main">
-                <span class="extra-row-title">{{ svc.service_name || 'Servicio' }}@if (svc.subject_label) { · {{ svc.subject_label }} }</span>
-                <span class="extra-row-sub">
-                  {{ svc.station_name || 'Estación' }} · Ingreso {{ svc.opened_at | date: 'short' }}
-                  @if (svc.closed_at) { · Finalizado {{ svc.closed_at | date: 'short' }} }
-                </span>
-              </div>
-            </div>
-            <div class="extra-row">
-              <div class="extra-row-main">
-                <span class="extra-row-title">
-                  {{ svc.status === 'open' || svc.status === 'paused' ? 'Servicio en proceso' : svc.status === 'closed' ? 'Servicio finalizado' : 'Servicio cancelado' }}
-                </span>
-                <span class="extra-row-sub">
-                  @if (pendingBalance() > 0) {
-                    Pago pendiente: {{ pendingBalance() | currency }}
-                  } @else {
-                    Pagado
-                  }
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
+        <app-service-session-details data-slot="after-products" [data]="svc" [pendingBalance]="pendingBalance()" />
       }
 
       <!-- Tarjeta de envío proyectada en el slot del guest: queda

@@ -607,6 +607,8 @@ export interface OrderServiceSessionSummary {
   service_name: string | null;
   subject_label: string | null;
   provider_name: string | null;
+  customer_name?: string | null;
+  intake?: Array<{ label: string; value: string }>;
 }
 
 export function orderStateLabel(status: string | null | undefined): string {

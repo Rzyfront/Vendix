@@ -17,6 +17,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ServiceSessionDetailsComponent } from '../../../components/service-session-details/service-session-details.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { RescheduleModalComponent } from '../../../../store/reservations/components/reschedule-modal/reschedule-modal.component';
 import { parseVariantAttributes } from '../../../../../../shared/utils';
@@ -42,6 +43,7 @@ import {
     BadgeComponent,
     ButtonComponent,
     CurrencyPipe,
+    ServiceSessionDetailsComponent,
     RescheduleModalComponent,
     GuestOrderSummaryComponent,
   ],
@@ -347,6 +349,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopServiceLiveRefresh();
     if (this.wompiPollTimer) {
       clearInterval(this.wompiPollTimer);
       this.wompiPollTimer = null;
@@ -440,6 +443,42 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     }, 5000); // Poll every 5 seconds
   }
 
+  // --- Orden de estación de servicio: se actualiza sola mientras está en curso ---
+
+  private serviceRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Activa o apaga el refresco según el estado de la atención. */
+  private syncServiceLiveRefresh(orderId: number): void {
+    const status = this.order()?.service_session?.status;
+    const active = status === 'open' || status === 'paused';
+    if (active && !this.serviceRefreshTimer) {
+      this.serviceRefreshTimer = setInterval(() => this.refreshOrderSilently(orderId), 15000);
+    } else if (!active) {
+      this.stopServiceLiveRefresh();
+    }
+  }
+
+  private stopServiceLiveRefresh(): void {
+    if (this.serviceRefreshTimer) {
+      clearInterval(this.serviceRefreshTimer);
+      this.serviceRefreshTimer = null;
+    }
+  }
+
+  /** Recarga sin spinner: productos agregados, estado y pago aparecen solos. */
+  private refreshOrderSilently(orderId: number): void {
+    this.account_service.getOrderDetail(orderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (!response.success) return;
+          this.order.set(response.data);
+          this.syncServiceLiveRefresh(orderId);
+        },
+        error: () => {}, // No crítico: se reintenta en el siguiente ciclo
+      });
+  }
+
   loadOrder(order_id: number): void {
     this.is_loading.set(true);
     this.account_service.getOrderDetail(order_id)
@@ -448,6 +487,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
         next: (response) => {
           if (response.success) {
             this.order.set(response.data);
+            this.syncServiceLiveRefresh(order_id);
           }
           this.is_loading.set(false);
         },

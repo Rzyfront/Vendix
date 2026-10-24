@@ -1,3 +1,4 @@
+import { loadSessionIntakeAnswers } from '../../store/service-sessions/utils/session-intake-answers.util';
 import {
   HttpException,
   Inject,
@@ -164,6 +165,8 @@ export class ServiceSessionAccessService {
         ? this.prisma.orders.findFirst({
             where: { id: binding.order_id, store_id: binding.store_id },
             select: {
+              order_number: true,
+              created_at: true,
               currency: true,
               grand_total: true,
               subtotal_amount: true,
@@ -212,9 +215,13 @@ export class ServiceSessionAccessService {
       : null;
     const budgetAmount = budget ? Number(budget.amount) : null;
     const accountTotal = order ? Number(order.grand_total) : 0;
+    const store = await this.prisma.stores.findFirst({ where: { id: binding.store_id }, select: { id: true, name: true, logo_url: true } });
     return {
       store_id: binding.store_id,
       status: binding.status,
+      store,
+      order_number: order?.order_number ?? null,
+      order_created_at: order?.created_at ?? null,
       service: details,
       budget: budget ? {
         amount: String(budget.amount),
@@ -267,15 +274,32 @@ export class ServiceSessionAccessService {
       select: { station_id: true, product_id: true, opened_at: true },
     });
     if (!session) return null;
-    const [station, product, subject] = await Promise.all([
+    const allocation = await this.prisma.service_allocations.findFirst({
+      where: { store_id: storeId, session_id: sessionId },
+      orderBy: { id: 'desc' },
+      select: { provider_id: true },
+    });
+    const provider = allocation?.provider_id
+      ? await this.prisma.service_providers.findFirst({ where: { id: allocation.provider_id, store_id: storeId }, select: { display_name: true } })
+      : null;
+    const [station, product, subject, intake, sessionOrder] = await Promise.all([
       this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { name: true } }),
       this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { name: true } }),
-      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true } }),
+      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true, metadata: true } }),
+      loadSessionIntakeAnswers(this.prisma, storeId, sessionId, { hideSensitive: true }),
+      this.prisma.orders.findFirst({ where: { store_id: storeId, service_session_id: sessionId }, select: { users: { select: { first_name: true } } } }),
     ]);
+    // Enlace reenviable: solo el primer nombre de quien dejó el vehículo/equipo.
+    const walkInName = String((subject?.metadata as Record<string, unknown> | null)?.['customer_name'] ?? '').trim();
+    const customerFirstName = sessionOrder?.users?.first_name || walkInName.split(/\s+/)[0] || null;
     return {
       station_name: station?.name ?? null,
       service_name: product?.name ?? null,
       subject_label: subject?.subject_type === 'person' ? null : subject?.label ?? null,
+      // Solo el nombre visible del especialista (display_name), nunca datos de contacto.
+      provider_name: provider?.display_name ?? null,
+      customer_first_name: customerFirstName,
+      intake,
       opened_at: session.opened_at,
     };
   }

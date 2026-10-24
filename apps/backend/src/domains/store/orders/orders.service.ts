@@ -1,3 +1,4 @@
+import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef, BadRequestException, NotFoundException } from '@nestjs/common';
@@ -1855,16 +1856,20 @@ export class OrdersService {
       select: { id: true, status: true, opened_at: true, closed_at: true, station_id: true, product_id: true },
     });
     if (!session) return null;
-    const [station, product, subject, allocation] = await Promise.all([
+    const [station, product, subject, allocation, intake, order] = await Promise.all([
       this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { id: true, name: true, station_type: true } }),
       this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { id: true, name: true } }),
-      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true } }),
+      this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true, metadata: true } }),
       this.prisma.service_allocations.findFirst({
         where: { store_id: storeId, session_id: sessionId },
         orderBy: { id: 'desc' },
         select: { provider_id: true },
       }),
+      loadSessionIntakeAnswers(this.prisma, storeId, sessionId, { hideSensitive: false }),
+      this.prisma.orders.findFirst({ where: { store_id: storeId, service_session_id: sessionId }, select: { users: { select: { first_name: true, last_name: true } } } }),
     ]);
+    const walkInName = String((subject?.metadata as Record<string, unknown> | null)?.['customer_name'] ?? '').trim();
+    const customerName = [order?.users?.first_name, order?.users?.last_name].filter(Boolean).join(' ') || walkInName || null;
     const provider = allocation?.provider_id
       ? await this.prisma.service_providers.findFirst({ where: { id: allocation.provider_id, store_id: storeId }, select: { display_name: true } })
       : null;
@@ -1877,6 +1882,8 @@ export class OrdersService {
       service_name: product?.name ?? null,
       subject_label: subject?.label ?? null,
       provider_name: provider?.display_name ?? null,
+      customer_name: customerName,
+      intake,
     };
   }
 

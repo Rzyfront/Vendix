@@ -260,8 +260,9 @@ export class ServiceStationsService {
       .pipe(map((r) => this.unwrap(r)));
   }
 
-  getIntakeTemplate(productId: number, stationId?: number | null): Observable<IntakeTemplate | null> {
-    let params = new HttpParams().set('product_id', String(productId));
+  getIntakeTemplate(productId: number | null, stationId?: number | null): Observable<IntakeTemplate | null> {
+    let params = new HttpParams();
+    if (productId) params = params.set('product_id', String(productId));
     if (stationId) params = params.set('station_id', String(stationId));
     return this.http
       .get<{ data?: { template: IntakeTemplate | null } } | { template: IntakeTemplate | null }>(
@@ -271,8 +272,9 @@ export class ServiceStationsService {
       .pipe(map((r) => this.unwrap<{ template: IntakeTemplate | null }>(r)?.template ?? null));
   }
 
-  getIntakePrefill(productId: number, customerId: number, stationId?: number | null): Observable<Array<{ field_id: number; value: unknown }>> {
-    let params = new HttpParams().set('product_id', String(productId)).set('customer_id', String(customerId));
+  getIntakePrefill(productId: number | null, customerId: number, stationId?: number | null): Observable<Array<{ field_id: number; value: unknown }>> {
+    let params = new HttpParams().set('customer_id', String(customerId));
+    if (productId) params = params.set('product_id', String(productId));
     if (stationId) params = params.set('station_id', String(stationId));
     return this.http
       .get<{ data?: { values: Array<{ field_id: number; value: unknown }> } } | { values: Array<{ field_id: number; value: unknown }> }>(

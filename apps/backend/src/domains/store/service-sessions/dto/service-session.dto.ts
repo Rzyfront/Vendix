@@ -106,10 +106,12 @@ export class OpenServiceSessionDto {
 }
 
 export class ServiceIntakeQueryDto {
+  /** Opcional si se envía station_id: la plantilla de la estación no depende del servicio. */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  product_id: number;
+  product_id?: number;
 
   @IsOptional()
   @Type(() => Number)

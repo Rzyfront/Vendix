@@ -1,3 +1,4 @@
+import { loadSessionIntakeAnswers } from '../../store/service-sessions/utils/session-intake-answers.util';
 import {
   Injectable,
   Logger,
@@ -57,12 +58,21 @@ export class AccountService {
    */
   private async serviceSessionSummaries(sessionIds: number[]) {
     const ids = [...new Set(sessionIds)];
-    const out = new Map<number, { status: string; opened_at: Date; closed_at: Date | null; station_name: string | null; service_name: string | null; subject_label: string | null }>();
+    const out = new Map<number, { status: string; opened_at: Date; closed_at: Date | null; station_name: string | null; service_name: string | null; subject_label: string | null; provider_name: string | null }>();
     if (!ids.length) return out;
     const sessions = await this.storePrisma.service_sessions.findMany({
       where: { id: { in: ids } },
       select: { id: true, status: true, opened_at: true, closed_at: true, station_id: true, product_id: true },
     });
+    const allocations = await this.storePrisma.service_allocations.findMany({
+      where: { session_id: { in: ids } },
+      orderBy: { id: 'desc' },
+      select: { session_id: true, provider_id: true },
+    });
+    const providerIds = [...new Set(allocations.map((a) => a.provider_id).filter((id): id is number => id != null))];
+    const providers = providerIds.length
+      ? await this.storePrisma.service_providers.findMany({ where: { id: { in: providerIds } }, select: { id: true, display_name: true } })
+      : [];
     const [stations, products, subjects] = await Promise.all([
       this.storePrisma.service_stations.findMany({ where: { id: { in: sessions.map((x) => x.station_id) } }, select: { id: true, name: true } }),
       this.storePrisma.products.findMany({ where: { id: { in: sessions.map((x) => x.product_id) } }, select: { id: true, name: true } }),
@@ -77,6 +87,10 @@ export class AccountService {
         station_name: stations.find((x) => x.id === session.station_id)?.name ?? null,
         service_name: products.find((x) => x.id === session.product_id)?.name ?? null,
         subject_label: subject && subject.subject_type !== 'person' ? subject.label : null,
+        provider_name: (() => {
+          const providerId = allocations.find((a) => a.session_id === session.id)?.provider_id;
+          return providers.find((p) => p.id === providerId)?.display_name ?? null;
+        })(),
       });
     }
     return out;
@@ -456,12 +470,16 @@ export class AccountService {
     const serviceSession = order.service_session_id
       ? (await this.serviceSessionSummaries([order.service_session_id])).get(order.service_session_id) ?? null
       : null;
+    // El dueño de la orden ve todos los datos que dejó en la recepción.
+    const serviceIntake = order.service_session_id
+      ? await loadSessionIntakeAnswers(this.storePrisma, order.store_id, order.service_session_id, { hideSensitive: false })
+      : [];
 
     return {
       id: order.id,
       order_number: order.order_number,
       state: order.state,
-      service_session: serviceSession,
+      service_session: serviceSession ? { ...serviceSession, intake: serviceIntake } : null,
       total_paid: order.total_paid,
       subtotal_amount: order.subtotal_amount,
       discount_amount: order.discount_amount,

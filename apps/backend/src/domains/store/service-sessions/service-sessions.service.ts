@@ -346,7 +346,7 @@ export class ServiceSessionsService {
    * Formulario de recepción de la atención: el configurado en la estación manda; si la
    * estación no tiene, el vinculado explícitamente al servicio (sin fallback a la default).
    */
-  private async resolveIntakeTemplate(productId: number, stationId?: number | null): Promise<IntakeTemplate | null> {
+  private async resolveIntakeTemplate(productId: number | null | undefined, stationId?: number | null): Promise<IntakeTemplate | null> {
     const { storeId } = this.requireContext();
     if (stationId) {
       const station = await this.prisma.service_stations.findFirst({
@@ -358,16 +358,17 @@ export class ServiceSessionsService {
         if (template) return template as unknown as IntakeTemplate;
       }
     }
+    if (!productId) return null;
     return (await this.templates.getLinkedTemplateForProduct(productId)) as IntakeTemplate | null;
   }
 
-  async getIntakeTemplate(productId: number, stationId?: number) {
+  async getIntakeTemplate(productId: number | undefined, stationId?: number) {
     this.requireContext();
     return { template: await this.resolveIntakeTemplate(productId, stationId) };
   }
 
   /** Valores actuales del perfil del cliente para los campos `customer` del formulario de recepción. */
-  async getIntakePrefill(productId: number, customerId: number, stationId?: number) {
+  async getIntakePrefill(productId: number | undefined, customerId: number, stationId?: number) {
     const { storeId } = this.requireContext();
     const template = await this.resolveIntakeTemplate(productId, stationId);
     if (!template) return { values: [] };
@@ -605,14 +606,15 @@ export class ServiceSessionsService {
     }
     const store = await this.prisma.stores.findFirst({ where: { id: storeId }, select: { name: true } });
     const name = store?.name || 'el servicio técnico';
+    const ordersUrl = `${new URL(url).origin}/account/orders`;
     const safeName = name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
     let result: Awaited<ReturnType<EmailService['sendEmail']>>;
     try {
       result = await this.email.sendEmail(
       delivery.recipient,
       `Seguimiento de tu servicio en ${name}`,
-      `<p>Tu atención en <strong>${safeName}</strong> ya está en curso.</p><p><a href="${url}">Consultar progreso y aprobar cambios</a></p><p>Este enlace es privado y temporal. No lo compartas con otras personas.</p>`,
-      `Tu atención en ${name} ya está en curso. Consulta el progreso y aprueba cambios en: ${url}\nEste enlace es privado y temporal.`,
+      `<p>Tu atención en <strong>${safeName}</strong> ya está en curso.</p><p><a href="${url}">Consultar progreso y aprobar cambios</a></p><p>Si tienes cuenta en la tienda, también la ves en <a href="${ordersUrl}">Mis pedidos</a> al iniciar sesión.</p><p>Este enlace es privado y temporal. No lo compartas con otras personas.</p>`,
+      `Tu atención en ${name} ya está en curso. Consulta el progreso y aprueba cambios en: ${url}\nSi tienes cuenta, también la ves en Mis pedidos: ${ordersUrl}\nEste enlace es privado y temporal.`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Email provider failed';
