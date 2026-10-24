@@ -15,6 +15,8 @@ import { ReportsDataService } from '../../../reports/services/reports-data.servi
 import { AnalyticsService } from '../../../analytics/services/analytics.service';
 import { AnalyticsRefreshService } from '../../../shared/services/analytics-refresh.service';
 import * as ExpensesActions from '../actions/expenses.actions';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { selectExpensesState } from '../selectors/expenses.selectors';
 
 @Injectable()
@@ -25,6 +27,7 @@ export class ExpensesEffects {
   private reportsDataService = inject(ReportsDataService);
   private analyticsService = inject(AnalyticsService);
   private analyticsRefresh = inject(AnalyticsRefreshService);
+  private toastService = inject(ToastService);
 
   // Load expenses using filter-as-state from store
   loadExpenses$ = createEffect(() =>
@@ -187,10 +190,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.updateExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error updating expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -208,10 +208,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.deleteExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error deleting expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -231,10 +228,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.approveExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error approving expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -254,10 +248,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.rejectExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error rejecting expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -277,10 +268,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.payExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error marking expense as paid',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -300,10 +288,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.cancelExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error cancelling expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -323,10 +308,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.refundExpenseFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error refunding expense',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -373,10 +355,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.createExpenseCategoryFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error creating category',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -398,10 +377,7 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.updateExpenseCategoryFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error updating category',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
@@ -419,15 +395,67 @@ export class ExpensesEffects {
           catchError((error) =>
             of(
               ExpensesActions.deleteExpenseCategoryFailure({
-                error:
-                  error.error?.message ||
-                  error.message ||
-                  'Error deleting category',
+                error: parseApiError(error).userMessage,
               }),
             ),
           ),
         ),
       ),
     ),
+  );
+
+  // Toasts de éxito/error de mutaciones (createExpense lo avisa el componente)
+  mutationSuccessToast$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          ExpensesActions.updateExpenseSuccess,
+          ExpensesActions.deleteExpenseSuccess,
+          ExpensesActions.approveExpenseSuccess,
+          ExpensesActions.rejectExpenseSuccess,
+          ExpensesActions.payExpenseSuccess,
+          ExpensesActions.cancelExpenseSuccess,
+          ExpensesActions.refundExpenseSuccess,
+          ExpensesActions.createExpenseCategorySuccess,
+          ExpensesActions.updateExpenseCategorySuccess,
+          ExpensesActions.deleteExpenseCategorySuccess,
+        ),
+        tap((action) => {
+          const messages: Record<string, string> = {
+            [ExpensesActions.updateExpenseSuccess.type]: 'Gasto actualizado',
+            [ExpensesActions.deleteExpenseSuccess.type]: 'Gasto eliminado',
+            [ExpensesActions.approveExpenseSuccess.type]: 'Gasto aprobado',
+            [ExpensesActions.rejectExpenseSuccess.type]: 'Gasto rechazado',
+            [ExpensesActions.payExpenseSuccess.type]: 'Gasto marcado como pagado',
+            [ExpensesActions.cancelExpenseSuccess.type]: 'Gasto cancelado',
+            [ExpensesActions.refundExpenseSuccess.type]: 'Gasto reembolsado',
+            [ExpensesActions.createExpenseCategorySuccess.type]: 'Categoría creada',
+            [ExpensesActions.updateExpenseCategorySuccess.type]: 'Categoría actualizada',
+            [ExpensesActions.deleteExpenseCategorySuccess.type]: 'Categoría eliminada',
+          };
+          this.toastService.success(messages[action.type] || 'Operación exitosa');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  mutationFailureToast$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          ExpensesActions.updateExpenseFailure,
+          ExpensesActions.deleteExpenseFailure,
+          ExpensesActions.approveExpenseFailure,
+          ExpensesActions.rejectExpenseFailure,
+          ExpensesActions.payExpenseFailure,
+          ExpensesActions.cancelExpenseFailure,
+          ExpensesActions.refundExpenseFailure,
+          ExpensesActions.createExpenseCategoryFailure,
+          ExpensesActions.updateExpenseCategoryFailure,
+          ExpensesActions.deleteExpenseCategoryFailure,
+        ),
+        tap(({ error }) => this.toastService.error(error)),
+      ),
+    { dispatch: false },
   );
 }
