@@ -41,6 +41,8 @@ import {
 } from '../../products/services/product-tax-combination.util';
 import {
   localDateString,
+  dateOnlyString,
+  daysBetweenDateStrings,
   resolveStoreTimezone,
   DEFAULT_STORE_TIMEZONE,
 } from '@common/utils/store-timezone.util';
@@ -2993,6 +2995,15 @@ export class PurchaseOrdersService {
     const map = await this.deriveNextPaymentDates(poIds);
     const todayLocal = localDateString(new Date(), DEFAULT_STORE_TIMEZONE);
     return rows.map((row) => {
+      // QUI-711: una OC 100% pagada no tiene "próximo pago" aunque conserve
+      // cuotas o payment_due_date históricos.
+      if ((row as any).payment_status === 'paid') {
+        return {
+          ...row,
+          next_payment_date: null,
+          next_payment_due_in_days: null,
+        };
+      }
       const next = map.get(row.id);
       if (!next || !next.date) {
         return {
@@ -3001,11 +3012,7 @@ export class PurchaseOrdersService {
           next_payment_due_in_days: null,
         };
       }
-      const days = Math.ceil(
-        (new Date(`${next.date}T00:00:00`).getTime() -
-          new Date(`${todayLocal}T00:00:00`).getTime()) /
-          86_400_000,
-      );
+      const days = daysBetweenDateStrings(todayLocal, next.date);
       return {
         ...row,
         next_payment_date: next.date,
@@ -3017,7 +3024,10 @@ export class PurchaseOrdersService {
   /**
    * Bug 4 — Helper público de derivación. Recibe un set de PO ids y devuelve un
    * `Map<poId, { date: string | null }>` con la próxima fecha de pago planeada
-   * (`status='planned'` ASC) o `null` si no hay. Exposed para tests y para que
+   * pendiente (`status IN ('planned','materialized')`, fecha ASC) o `null` si no
+   * hay. QUI-713: tras la recepción de la OC las cuotas pendientes quedan en
+   * 'materialized' (copiadas a CxP) y siguen siendo pendientes; solo las 'paid'
+   * se excluyen. Exposed para tests y para que
    * `findOne` pueda enriquecer en el futuro sin duplicar lógica.
    *
    * Implementación: usa `$queryRaw` directo contra `baseClient` porque
@@ -3040,13 +3050,13 @@ export class PurchaseOrdersService {
         `SELECT purchase_order_id, scheduled_date
          FROM purchase_order_payment_schedules
          WHERE purchase_order_id IN (${idsList})
-           AND status = 'planned'
+           AND status IN ('planned', 'materialized') -- QUI-713
          ORDER BY purchase_order_id ASC, scheduled_date ASC`,
       );
     for (const r of rows) {
       if (!out.has(r.purchase_order_id)) {
         out.set(r.purchase_order_id, {
-          date: localDateString(r.scheduled_date, DEFAULT_STORE_TIMEZONE),
+          date: dateOnlyString(r.scheduled_date),
         });
       }
     }
@@ -3060,7 +3070,7 @@ export class PurchaseOrdersService {
       for (const o of orders) {
         out.set(o.id, {
           date: o.payment_due_date
-            ? localDateString(o.payment_due_date, DEFAULT_STORE_TIMEZONE)
+            ? dateOnlyString(o.payment_due_date)
             : null,
         });
       }
@@ -6160,7 +6170,9 @@ export class PurchaseOrdersService {
             where: {
               id: dto.payment_schedule_id,
               purchase_order_id: purchaseOrderId,
-              status: 'planned',
+              // QUI-713 — tras la recepción la cuota queda 'materialized'
+              // y también debe poder marcarse como pagada.
+              status: { in: ['planned', 'materialized'] },
             },
             data: {
               status: 'paid',

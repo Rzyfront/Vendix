@@ -18,7 +18,9 @@ import {
   IconComponent,
   StepsLineComponent,
   StepsLineItem,
+  ToastService,
 } from '../../../../../../shared/components';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-create.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -333,6 +335,7 @@ export class ExpenseCreateComponent {
   private expensesService = inject(ExpensesService);
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private toastService = inject(ToastService);
 
   private readonly categories = toSignal(this.store.select(selectActiveExpenseCategories), { initialValue: [] as ExpenseCategory[] });
   readonly categoryOptions = toSignal(
@@ -452,16 +455,25 @@ export class ExpenseCreateComponent {
               if (targetState === 'paid') {
                 this.expensesService.payExpense(expenseId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
                   next: () => this.finishSubmit(),
-                  error: () => this.finishSubmit(),
+                  error: (err) =>
+                    this.finishSubmit(
+                      'Gasto registrado y aprobado, pero no se pudo marcar como pagado: ' +
+                        parseApiError(err).userMessage,
+                    ),
                 });
               } else {
                 this.finishSubmit();
               }
             },
-            error: () => this.finishSubmit(),
+            error: (err) =>
+              this.finishSubmit(
+                'Gasto registrado, pero no se pudo aprobar: ' +
+                  parseApiError(err).userMessage,
+              ),
           });
         },
-        error: () => {
+        error: (err) => {
+          this.toastService.error(parseApiError(err).userMessage);
           this.submitting.set(false);
         }
       });
@@ -472,14 +484,22 @@ export class ExpenseCreateComponent {
     if (currentFile) {
       this.expensesService.uploadReceipt(currentFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (result: { key: string; url: string }) => createAndFinish(result.key),
-        error: () => createAndFinish(),
+        error: () => {
+          this.toastService.warning('No se pudo subir el recibo; el gasto se registrará sin él');
+          createAndFinish();
+        },
       });
     } else {
       createAndFinish();
     }
   }
 
-  private finishSubmit(): void {
+  private finishSubmit(warning?: string): void {
+    if (warning) {
+      this.toastService.warning(warning);
+    } else {
+      this.toastService.success('Gasto registrado');
+    }
     this.store.dispatch(loadExpenses());
     this.store.dispatch(loadExpensesSummary());
     this.submitting.set(false);
