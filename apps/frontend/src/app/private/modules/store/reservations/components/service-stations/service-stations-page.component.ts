@@ -55,6 +55,7 @@ import { DataCollectionTemplatesService } from '../../../data-collection/service
 import { MetadataFieldsService } from '../../../data-collection/services/metadata-fields.service';
 import { MetadataField } from '../../../data-collection/interfaces/metadata-field.interface';
 import {
+  DEFAULT_CUSTOMER_SECTION,
   SERVICE_FIELD_PRESETS,
   STATION_TEMPLATE_TYPES,
   StationTemplateType,
@@ -1025,7 +1026,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const meta = STATION_TEMPLATE_TYPES.find((t) => t.value === type)!;
     this.showTemplateTypePicker.set(false);
     this.designingTemplate.set(true);
-    const presets = meta.keys.map((key) => SERVICE_FIELD_PRESETS[key]);
+    // Datos del cliente (sección editable) + los campos del tipo de estación.
+    const customerKeys = DEFAULT_CUSTOMER_SECTION.keys;
+    const presets = [...customerKeys, ...meta.keys].map((key) => SERVICE_FIELD_PRESETS[key]);
     this.fieldsApi
       .getFields()
       .pipe(
@@ -1059,9 +1062,18 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
             status: 'inactive',
             sections: [
               {
-                title: 'Datos de ingreso',
+                title: DEFAULT_CUSTOMER_SECTION.title,
                 sort_order: 0,
-                items: fields.map((field, index) => ({
+                items: fields.slice(0, customerKeys.length).map((field, index) => ({
+                  metadata_field_id: field.id,
+                  sort_order: index,
+                  is_required: field.field_key === 'nombre_cliente',
+                })),
+              },
+              {
+                title: 'Datos de ingreso',
+                sort_order: 1,
+                items: fields.slice(customerKeys.length).map((field, index) => ({
                   metadata_field_id: field.id,
                   sort_order: index,
                   is_required: meta.required.includes(field.field_key),
@@ -1455,6 +1467,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   onCheckinCustomerChange(customer: CustomerSelectOption | null): void {
     this.checkinCustomer.set(customer);
     if (!customer) return;
+    this.fillTemplateCustomerFields(customer);
     const fullName = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim() || customer.name;
     this.checkinCustomerName.set(fullName);
     if (customer.document_number) this.checkinCustomerDoc.set(customer.document_number);
@@ -1649,8 +1662,56 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return Math.max(1, Number(line.quantity || 1)) * Math.max(0, unit);
   }
 
+  /** Campos de cliente de la plantilla (por clave) que reemplazan al bloque fijo. */
+  private readonly templateCustomerFieldIds = computed(() => {
+    const ids: Record<string, number> = {};
+    for (const item of this.checkinIntakeItems()) {
+      const field = item.metadata_field;
+      if (field.entity_type === 'customer' && ['nombre_cliente', 'numero_documento', 'telefono', 'correo'].includes(field.field_key)) {
+        ids[field.field_key] = field.id;
+      }
+    }
+    return ids;
+  });
+
+  readonly templateHandlesCustomer = computed(() => !!this.templateCustomerFieldIds()['nombre_cliente']);
+
+  /** Lleva lo escrito en "Datos del cliente" de la plantilla a los datos de contacto de la atención. */
+  private syncCustomerFromTemplate(): void {
+    if (!this.templateHandlesCustomer()) return;
+    const ids = this.templateCustomerFieldIds();
+    const values = this.checkinIntakeValues();
+    const read = (key: string) => String(values[ids[key]] ?? '').trim();
+    if (read('nombre_cliente')) this.checkinCustomerName.set(read('nombre_cliente'));
+    if (read('numero_documento')) this.checkinCustomerDoc.set(read('numero_documento'));
+    if (read('telefono')) this.checkinCustomerPhone.set(read('telefono'));
+    if (read('correo')) this.checkinCustomerEmail.set(read('correo'));
+  }
+
+  /** Cliente elegido en el buscador → llena la sección de cliente de la plantilla si está vacía. */
+  private fillTemplateCustomerFields(customer: CustomerSelectOption): void {
+    const ids = this.templateCustomerFieldIds();
+    const fullName = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim() || customer.name;
+    const fill: Record<string, unknown> = {
+      nombre_cliente: fullName,
+      numero_documento: customer.document_number,
+      telefono: customer.phone,
+      correo: customer.email,
+    };
+    this.checkinIntakeValues.update((values) => {
+      const next = { ...values };
+      for (const [key, value] of Object.entries(fill)) {
+        const id = ids[key];
+        if (!id || value == null || value === '') continue;
+        if (next[id] === undefined || next[id] === null || next[id] === '') next[id] = value;
+      }
+      return next;
+    });
+  }
+
   submitCheckin(): void {
     const stationId = this.checkinStationId();
+    this.syncCustomerFromTemplate();
     const customerName = this.checkinCustomerName().trim();
     if (!stationId) {
       this.toastService.error('Debes seleccionar una estación libre.');

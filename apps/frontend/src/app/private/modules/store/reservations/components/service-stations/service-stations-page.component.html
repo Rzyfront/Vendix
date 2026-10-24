@@ -683,6 +683,8 @@
           (selectedChange)="onCheckinCustomerChange($event)"
           [createInitialValues]="checkinCustomerInitialValues()"
         />
+        <!-- Si la plantilla trae "Datos del cliente", esos campos reemplazan a estos -->
+        @if (!templateHandlesCustomer()) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <app-input
             label="Nombre Completo del Cliente"
@@ -714,6 +716,9 @@
             placeholder="cliente@ejemplo.com"
           />
         </div>
+        } @else {
+          <p class="text-xs text-[var(--color-text-secondary)]">Los datos del cliente se piden en la sección "Datos del cliente" de la plantilla de esta estación.</p>
+        }
       </div>
 
       <!-- Presupuesto del Cliente Opcional (Común para TODOS los tipos) -->

@@ -31,6 +31,7 @@ export const SERVICE_FIELD_PRESETS: Record<string, ServiceFieldPreset> = {
   estado_recepcion: { field_key: 'estado_recepcion', label: 'Estado en que se recibe', field_type: 'textarea', hint: 'Golpes, rayones, faltantes…' },
   accesorios: { field_key: 'accesorios', label: 'Accesorios entregados', field_type: 'textarea', hint: 'Cargador, casco, llaves…' },
   autoriza_adicionales: { field_key: 'autoriza_adicionales', label: 'Autoriza trabajos adicionales', field_type: 'checkbox', hint: 'Casilla' },
+  nombre_cliente: { field_key: 'nombre_cliente', label: 'Nombre completo', field_type: 'text', hint: 'Texto', customer: true },
   tipo_documento: { field_key: 'tipo_documento', label: 'Tipo de documento', field_type: 'select', hint: 'Lista', options: ['CC', 'NIT', 'CE', 'Pasaporte', 'TI'], customer: true },
   numero_documento: { field_key: 'numero_documento', label: 'Número de documento', field_type: 'text', hint: 'Texto', customer: true },
   correo: { field_key: 'correo', label: 'Correo', field_type: 'email', hint: 'Correo electrónico', customer: true },
@@ -43,8 +44,18 @@ export const SERVICE_FIELD_PRESETS: Record<string, ServiceFieldPreset> = {
 export const SERVICE_FIELD_GROUPS: Array<{ title: string; keys: string[] }> = [
   { title: 'Vehículo o equipo', keys: ['placa', 'marca_modelo', 'anio', 'color', 'kilometraje', 'serial_imei', 'nivel_combustible', 'clave_desbloqueo'] },
   { title: 'Atención', keys: ['motivo_ingreso', 'estado_recepcion', 'accesorios', 'autoriza_adicionales', 'estilo_deseado', 'alergias'] },
-  { title: 'Cliente (se guarda en su perfil)', keys: ['tipo_documento', 'numero_documento', 'correo', 'telefono', 'direccion', 'fecha_nacimiento'] },
+  { title: 'Cliente (se guarda en su perfil)', keys: ['nombre_cliente', 'tipo_documento', 'numero_documento', 'correo', 'telefono', 'direccion', 'fecha_nacimiento'] },
 ];
+
+/**
+ * Sección "Datos del cliente" con la que nace toda plantilla de estación. Es
+ * editable: se pueden quitar campos o agregar otros. Se guarda en el perfil del
+ * cliente, así que la próxima visita sale prellenada.
+ */
+export const DEFAULT_CUSTOMER_SECTION = {
+  title: 'Datos del cliente',
+  keys: ['nombre_cliente', 'tipo_documento', 'numero_documento', 'telefono', 'correo'],
+};
 
 export type StationTemplateType = 'carro' | 'moto' | 'celular' | 'barberia' | 'peluqueria' | 'salon_belleza' | 'general';
 
