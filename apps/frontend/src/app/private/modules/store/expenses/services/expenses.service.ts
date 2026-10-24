@@ -92,9 +92,16 @@ export class ExpensesService {
   }
 
   // NgRx is the cache — no manual cache needed
-  getExpensesSummary(): Observable<ApiResponse<ExpenseSummary>> {
+  getExpensesSummary(params?: {
+    date_from?: string;
+    date_to?: string;
+  }): Observable<ApiResponse<ExpenseSummary>> {
+    const query: Record<string, string> = {};
+    if (params?.date_from) query['date_from'] = params.date_from;
+    if (params?.date_to) query['date_to'] = params.date_to;
     return this.http.get<ApiResponse<ExpenseSummary>>(
       this.getApiUrl('summary'),
+      { params: query },
     );
   }
 

@@ -327,6 +327,23 @@ export class PopPaymentStepComponent {
     );
   }
 
+  /**
+   * QUI-713 — al confirmar el valor de CUOTAS / CADA (DÍAS) (evento `change`:
+   * blur, Enter o spinner; no cada tecla) se recalcula la plantilla. Primero
+   * se sincroniza el signal desde el input por si `change` llega sin `input`
+   * previo. "Generar" sigue siendo el reset explícito.
+   */
+  onInstallmentParamsChange(event: Event, field: 'count' | 'everyDays'): void {
+    if (field === 'count') {
+      this.onCountInput(event);
+    } else {
+      this.onEveryDaysInput(event);
+    }
+    if (this.form.controls.mode.value === 'installments') {
+      this.generateInstallments();
+    }
+  }
+
   /** Accesores tipados para el template (strictTemplates: `controls[...]` es AbstractControl). */
   installmentDateControl(group: FormGroup): FormControl<string> {
     return group.controls['scheduled_date'] as FormControl<string>;
