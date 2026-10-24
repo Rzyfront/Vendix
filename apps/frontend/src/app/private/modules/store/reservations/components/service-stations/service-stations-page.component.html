@@ -204,7 +204,6 @@
                           >
                             <app-icon name="qr-code" [size]="14" />
                           </button>
-                          <span class="text-[11px] font-mono text-[var(--color-text-secondary)]">Cap: {{ station.capacity || 1 }}</span>
                         </div>
                       </div>
 
@@ -322,7 +321,6 @@
                           >
                             <app-icon name="qr-code" [size]="14" />
                           </button>
-                          <span class="text-[11px] font-mono text-[var(--color-text-secondary)]">Cap: {{ station.capacity || 1 }}</span>
                         </div>
                       </div>
 
@@ -376,7 +374,6 @@
                           >
                             <app-icon name="qr-code" [size]="14" />
                           </button>
-                          <span class="text-[11px] font-mono text-[var(--color-text-secondary)]">Cap: {{ station.capacity || 1 }}</span>
                         </div>
                       </div>
 
@@ -1328,19 +1325,13 @@
         <!-- Pestaña 1: Datos & QR -->
         @if (selectedConfigTab() === 'details') {
           <div class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <app-input
-                label="Nombre de la Estación"
-                [ngModel]="editName()"
-                (ngModelChange)="editName.set($event)"
-                placeholder="Ej. Bahía de Alineación 1, Silla Barber 2"
-                [required]="true"
-              />
-              <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col justify-center">
-                <span class="text-xs font-bold text-[var(--color-text-primary)]">Capacidad</span>
-                <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">1 cliente a la vez (igual que una mesa)</span>
-              </div>
-            </div>
+            <app-input
+              label="Nombre de la Estación"
+              [ngModel]="editName()"
+              (ngModelChange)="editName.set($event)"
+              placeholder="Ej. Bahía de Alineación 1, Silla Barber 2"
+              [required]="true"
+            />
 
             <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
               <div class="flex items-center justify-between gap-3">

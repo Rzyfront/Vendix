@@ -514,10 +514,6 @@
                             <app-icon name="tag" [size]="12"/>
                             {{ getStationTypeLabel(station.station_type) }}
                           </span>
-                          <span class="service-meta-item">
-                            <app-icon name="users" [size]="12"/>
-                            Capacidad: {{ station.capacity || 1 }}
-                          </span>
                           @if (station.services.length) {
                             <span class="service-meta-item text-xs text-gray-500">
                               • {{ station.services.length }} servicio(s) asociado(s)

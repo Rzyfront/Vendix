@@ -451,7 +451,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         label: `${st.name}${statusLabel}`,
         icon: meta.icon,
         disabled: isOccupied || isInactive,
-        description: isOccupied ? `Ocupada (${this.getCustomerName(sess!)})` : `Capacidad: 1 • ${meta.singularLabel}`,
+        description: isOccupied ? `Ocupada (${this.getCustomerName(sess!)})` : meta.singularLabel,
       };
     });
   });
