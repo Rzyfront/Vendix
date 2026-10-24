@@ -256,6 +256,38 @@
               }
             </div>
           </app-card>
+
+          <!-- QUI-898 — notas informales de la mesa -->
+          @if (!isClosed() || session()?.informal_notes) {
+            <app-card title="Notas de la mesa" subtitle="No se cobran ni van a cocina" [responsivePadding]="true" class="informal-notes-card">
+              @if (isClosed()) {
+                <p class="informal-notes__readonly">{{ session()?.informal_notes }}</p>
+              } @else {
+                <textarea
+                  class="informal-notes__textarea"
+                  rows="3"
+                  [attr.maxlength]="informalNotesMaxLength"
+                  placeholder="Ej: el cliente pidió un vaso adicional"
+                  aria-label="Notas de la mesa"
+                  [value]="informalNotesText()"
+                  [disabled]="isSavingInformalNotes()"
+                  (input)="onInformalNotesInput($event)"
+                ></textarea>
+                <div class="informal-notes__footer">
+                  <span class="informal-notes__count">{{ informalNotesText().length }}/{{ informalNotesMaxLength }}</span>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="!informalNotesDirty() || isSavingInformalNotes()"
+                    [loading]="isSavingInformalNotes()"
+                    (clicked)="saveInformalNotes()"
+                  >
+                    Guardar notas
+                  </app-button>
+                </div>
+              }
+            </app-card>
+          }
         </div>
 
         <!-- ── Items (Main Area) ────────────────────────────────────── -->

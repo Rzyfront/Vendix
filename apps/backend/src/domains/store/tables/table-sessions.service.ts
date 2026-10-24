@@ -74,6 +74,8 @@ export interface TableSessionView {
   opened_at: Date;
   closed_at: Date | null;
   guest_count: number | null;
+  /** QUI-898 — notas informales del mesero; no afectan cuenta/inventario/KDS. */
+  informal_notes: string | null;
   /** Only present in the response that creates a session, never persisted. */
   previous_table_status?: table_status_enum;
   /**
@@ -2631,6 +2633,34 @@ export class TableSessionsService {
     this.logger.log(
       `Table item notes updated: session=${sessionId} orderItemId=${orderItemId} notes="${cleanNotes ?? ''}"`,
     );
+
+    return this.findOne(sessionId);
+  }
+
+  // ------------------------------------------------------- informal notes
+  /**
+   * QUI-898 — Guarda las notas informales (texto libre) de una mesa activa.
+   * Solo toca `table_sessions.informal_notes`: no afecta orden, totales,
+   * inventario ni KDS, y no emite eventos. Se conservan al cerrar la sesión.
+   */
+  async updateInformalNotes(
+    sessionId: number,
+    informalNotes?: string | null,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireStoreContext();
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    const clean = informalNotes?.trim() || null;
+
+    await this.prisma.table_sessions.updateMany({
+      where: { id: sessionId, store_id: storeId },
+      data: { informal_notes: clean, updated_at: new Date() },
+    });
+
+    this.logger.log(`Table informal notes updated: session=${sessionId}`);
 
     return this.findOne(sessionId);
   }
