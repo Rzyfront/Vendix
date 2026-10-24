@@ -10,6 +10,8 @@ import {
   zonedWallClockToUtc,
   localOffsetString,
   localDateString,
+  dateOnlyString,
+  daysBetweenDateStrings,
   localTimeString,
   fiscalIssueDate,
   fiscalIssueTime,
@@ -448,5 +450,20 @@ describe('store-timezone.util', () => {
       const instant = new Date('2026-09-26T02:30:00Z');
       expect(fiscalIssueDate(instant)).toBe('2026-09-26');
     });
+  });
+});
+
+describe('QUI-712 date-only helpers', () => {
+  it('dateOnlyString reads midnight UTC without shifting the day', () => {
+    expect(dateOnlyString(new Date('2026-08-21T00:00:00Z'))).toBe('2026-08-21');
+    expect(dateOnlyString('2026-08-21T00:00:00Z' as any)).toBe('2026-08-21');
+  });
+
+  it('daysBetweenDateStrings returns exact civil days', () => {
+    expect(daysBetweenDateStrings('2026-08-21', '2026-08-21')).toBe(0);
+    expect(daysBetweenDateStrings('2026-08-21', '2026-08-22')).toBe(1);
+    expect(daysBetweenDateStrings('2026-08-21', '2026-08-20')).toBe(-1);
+    expect(daysBetweenDateStrings('2026-01-30', '2026-03-01')).toBe(30);
+    expect(daysBetweenDateStrings('2026-12-31', '2027-01-01')).toBe(1);
   });
 });
