@@ -2962,6 +2962,14 @@
       }
     }
 
+    @if (showItemsEditModal() && order(); as orderData) {
+      <app-order-items-edit-modal
+        [(isOpen)]="showItemsEditModal"
+        [order]="orderData"
+        (saved)="loadData()"
+      />
+    }
+
     <!-- SHIP MODAL (delivery-type aware) -->
     <app-modal
       [isOpen]="showShipModal()"

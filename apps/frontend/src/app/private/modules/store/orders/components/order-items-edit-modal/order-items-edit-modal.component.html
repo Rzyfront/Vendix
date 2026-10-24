@@ -1,0 +1,164 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpen.set($event)"
+  title="Modificar productos"
+  [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
+  size="lg"
+>
+  <div class="space-y-4">
+    <!-- Líneas del borrador -->
+    <div class="space-y-2">
+      @for (line of draft(); track line.key) {
+        <div class="flex items-center gap-3 p-3 border border-border rounded-lg">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-text-primary truncate">{{ line.product_name }}</p>
+            @if (line.variant_label) {
+              <p class="text-xs text-text-secondary truncate">{{ line.variant_label }}</p>
+            }
+            <p class="text-xs text-text-secondary">{{ line.display_price | currency }}</p>
+          </div>
+
+          @if (line.weighted) {
+            <span class="text-xs text-text-secondary">{{ line.quantity }} (por peso)</span>
+          } @else {
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="w-8 h-8 rounded border border-border flex items-center justify-center disabled:opacity-40"
+                [disabled]="line.quantity <= 1 || saving()"
+                aria-label="Disminuir cantidad"
+                (click)="decrement(line)"
+              >
+                <app-icon name="minus" [size]="14" />
+              </button>
+              <span class="w-8 text-center text-sm font-semibold">{{ line.quantity }}</span>
+              <button
+                type="button"
+                class="w-8 h-8 rounded border border-border flex items-center justify-center disabled:opacity-40"
+                [disabled]="saving()"
+                aria-label="Aumentar cantidad"
+                (click)="increment(line)"
+              >
+                <app-icon name="plus" [size]="14" />
+              </button>
+            </div>
+          }
+
+          <button
+            type="button"
+            class="w-8 h-8 rounded flex items-center justify-center text-red-600 hover:bg-red-50 disabled:opacity-40"
+            [disabled]="saving()"
+            aria-label="Quitar producto"
+            (click)="remove(line)"
+          >
+            <app-icon name="trash-2" [size]="16" />
+          </button>
+        </div>
+      }
+    </div>
+
+    @if (hasCancelledLines()) {
+      <p
+        class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3"
+        role="alert"
+      >
+        Esta orden tiene productos anulados; no se puede modificar desde aquí sin perder ese registro.
+      </p>
+    }
+
+    @if (isEmpty()) {
+      <p class="text-sm text-red-600" role="alert">
+        La orden debe tener al menos un producto; para anularla usa Cancelar orden
+      </p>
+    }
+
+    <!-- Agregar producto -->
+    <div class="space-y-2">
+      <label class="text-sm font-medium text-text-primary" for="order-items-edit-search">
+        Agregar producto
+      </label>
+      <div class="relative">
+        <input
+          id="order-items-edit-search"
+          type="text"
+          class="w-full h-10 pl-9 pr-3 border border-border rounded-lg text-sm bg-surface"
+          placeholder="Buscar por nombre o SKU"
+          autocomplete="off"
+          [ngModel]="searchTerm()"
+          (ngModelChange)="onSearchInput($event)"
+        />
+        <app-icon name="search" [size]="16" class="absolute left-3 top-3 text-text-secondary" />
+      </div>
+
+      @if (searching()) {
+        <p class="text-xs text-text-secondary">Buscando...</p>
+      }
+
+      @if (searchResults().length > 0) {
+        <ul class="max-h-60 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+          @for (product of searchResults(); track product.id) {
+            <li>
+              <button
+                type="button"
+                class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50"
+                [disabled]="!isSellable(product)"
+                (click)="onProductClick(product)"
+              >
+                <span class="min-w-0">
+                  <span class="block text-sm truncate">{{ product.name }}</span>
+                  @if (!isSellable(product)) {
+                    <span class="block text-xs text-text-secondary">No vendible</span>
+                  } @else if (hasVariants(product)) {
+                    <span class="block text-xs text-text-secondary">Elige una variante</span>
+                  }
+                </span>
+                @if (!hasVariants(product)) {
+                  <span class="text-xs text-text-secondary">{{ priceOf(product) | currency }}</span>
+                }
+              </button>
+              @if (expandedProductId() === product.id) {
+                <ul class="bg-muted/40 divide-y divide-border">
+                  @for (variant of product.product_variants; track variant.id) {
+                    <li>
+                      <button
+                        type="button"
+                        class="w-full flex items-center justify-between gap-2 pl-6 pr-3 py-2 text-left hover:bg-muted"
+                        (click)="addProduct(product, variant)"
+                      >
+                        <span class="text-sm truncate">{{ variantName(variant) }}</span>
+                        <span class="text-xs text-text-secondary">{{
+                          priceOf(product, variant) | currency
+                        }}</span>
+                      </button>
+                    </li>
+                  }
+                </ul>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </div>
+
+    <!-- Total estimado -->
+    <div class="flex items-center justify-between pt-2 border-t border-border">
+      <span class="text-sm font-medium">Total estimado</span>
+      <span class="text-base font-bold">{{ estimatedTotal() | currency }}</span>
+    </div>
+    <p class="text-xs text-text-secondary">
+      Estimado; impuestos y total final los calcula el sistema al guardar
+    </p>
+  </div>
+
+  <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
+    <app-button variant="outline" [disabled]="saving()" (clicked)="close()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [disabled]="!canSave()"
+      [loading]="saving()"
+      (clicked)="save()"
+    >
+      Guardar cambios
+    </app-button>
+  </div>
+</app-modal>
