@@ -265,6 +265,43 @@ describe('OrderFlowService — sincronía cancelado/entregado orden↔cocina', (
     });
   });
 
+  describe('QUI-892 — syncKitchenOnOrderItemDelivered cierra filas superadas', () => {
+    it('cancela la fila vieja, recalcula su ticket y emite ticket.updated de ambos', async () => {
+      const { service, prismaMock, kitchenFireService } = buildService();
+      const OLD_TICKET = 7001;
+      // Última fila (ready) -> se entrega; la vieja (otro ticket) queda viva.
+      prismaMock.kitchen_ticket_items = {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: 900, status: 'ready', kitchen_ticket_id: TICKET_ID })
+          .mockResolvedValueOnce({ id: 900, status: 'delivered' }),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([{ kitchen_ticket_id: OLD_TICKET }]) // filas viejas
+          .mockResolvedValueOnce([{ status: 'cancelled' }]) // recalculo ticket viejo
+          .mockResolvedValueOnce([{ status: 'delivered' }]), // filas ticket vigente
+      };
+      prismaMock.kitchen_tickets = {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([{ status: 'delivered' }]),
+      };
+
+      await (service as any).syncKitchenOnOrderItemDelivered(ORDER_ID, ITEM_ID, STORE_ID);
+
+      expect(prismaMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+        where: { order_item_id: ITEM_ID, id: { lt: 900 }, status: { notIn: ['delivered', 'cancelled'] } },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect(prismaMock.kitchen_tickets.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: OLD_TICKET }, data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
+      expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(OLD_TICKET);
+      expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(TICKET_ID);
+    });
+  });
+
   describe('R1 — seam cancelItemsFromKitchenInTx / isOrderPaidForKitchenCancel', () => {
     const params = (over: Record<string, unknown> = {}) => ({
       orderId: ORDER_ID,

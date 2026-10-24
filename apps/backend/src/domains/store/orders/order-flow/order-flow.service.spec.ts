@@ -845,15 +845,15 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
 });
 
 describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
-  const pendingItems = [
-    { order_item_id: 11, status: 'ready', quantity: 2, variant_label: 'Grande', order_item: { product_name: 'Hamburguesa' } },
-    { order_item_id: 12, status: 'in_preparation', quantity: 1, variant_label: null, order_item: { product_name: 'Papas' } },
+  // QUI-892: el bloqueo se calcula sobre la ÚLTIMA fila de cada línea no cancelada.
+  const pendingLines = [
+    { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'ready', quantity: 2, variant_label: 'Grande' }] },
+    { id: 12, product_name: 'Papas', kitchen_ticket_items: [{ status: 'in_preparation', quantity: 1, variant_label: null }] },
   ];
 
-  const harness = (state: string, items: typeof pendingItems) => {
+  const harness = (state: string, lines: any[]) => {
     const prisma: any = {
-      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
-      order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: { findMany: jest.fn().mockResolvedValue(lines) },
     };
     const service = new OrderFlowService(
       prisma, {} as any, {} as any, {} as any, {} as any,
@@ -868,7 +868,7 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
   it.each(['processing', 'delivered'])(
     'rechaza finalizar desde %s con lista de platos accionable',
     async (state) => {
-      const { service, prisma, updateState } = harness(state, pendingItems);
+      const { service, prisma, updateState } = harness(state, pendingLines);
       await expect(service.confirmDelivery(1)).rejects.toMatchObject({
         errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
         response: expect.objectContaining({
@@ -880,8 +880,8 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
           },
         }),
       });
-      expect(prisma.kitchen_ticket_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { kitchen_ticket: { order_id: 1 }, status: { notIn: ['delivered', 'cancelled'] } },
+      expect(prisma.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ order_id: 1, cancelled_at: null }),
       }));
       expect(updateState).not.toHaveBeenCalled();
     },
@@ -896,10 +896,28 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
     },
   );
 
+  it('QUI-892: línea con fila vieja pendiente y última delivered NO bloquea', async () => {
+    // La query ya trae solo la última fila (orderBy id desc, take 1): la vieja no llega.
+    const { service, updateState } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'delivered', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).resolves.toMatchObject({ state: 'finished' });
+    expect(updateState).toHaveBeenCalled();
+  });
+
+  it('QUI-892: línea reenviada con última fila pending sí bloquea', async () => {
+    const { service } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'pending', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).rejects.toMatchObject({
+      errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+  });
+
   it('no consulta cocina ni muta un estado no finalizable', async () => {
-    const { service, prisma, updateState } = harness('refunded', pendingItems);
+    const { service, prisma, updateState } = harness('refunded', pendingLines);
     await expect(service.confirmDelivery(1)).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(prisma.order_items.findMany).not.toHaveBeenCalled();
     expect(updateState).not.toHaveBeenCalled();
   });
 });
