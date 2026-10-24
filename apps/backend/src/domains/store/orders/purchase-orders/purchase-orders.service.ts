@@ -41,6 +41,8 @@ import {
 } from '../../products/services/product-tax-combination.util';
 import {
   localDateString,
+  dateOnlyString,
+  daysBetweenDateStrings,
   resolveStoreTimezone,
   DEFAULT_STORE_TIMEZONE,
 } from '@common/utils/store-timezone.util';
@@ -2993,6 +2995,15 @@ export class PurchaseOrdersService {
     const map = await this.deriveNextPaymentDates(poIds);
     const todayLocal = localDateString(new Date(), DEFAULT_STORE_TIMEZONE);
     return rows.map((row) => {
+      // QUI-711: una OC 100% pagada no tiene "próximo pago" aunque conserve
+      // cuotas o payment_due_date históricos.
+      if ((row as any).payment_status === 'paid') {
+        return {
+          ...row,
+          next_payment_date: null,
+          next_payment_due_in_days: null,
+        };
+      }
       const next = map.get(row.id);
       if (!next || !next.date) {
         return {
@@ -3001,11 +3012,7 @@ export class PurchaseOrdersService {
           next_payment_due_in_days: null,
         };
       }
-      const days = Math.ceil(
-        (new Date(`${next.date}T00:00:00`).getTime() -
-          new Date(`${todayLocal}T00:00:00`).getTime()) /
-          86_400_000,
-      );
+      const days = daysBetweenDateStrings(todayLocal, next.date);
       return {
         ...row,
         next_payment_date: next.date,
@@ -3049,7 +3056,7 @@ export class PurchaseOrdersService {
     for (const r of rows) {
       if (!out.has(r.purchase_order_id)) {
         out.set(r.purchase_order_id, {
-          date: localDateString(r.scheduled_date, DEFAULT_STORE_TIMEZONE),
+          date: dateOnlyString(r.scheduled_date),
         });
       }
     }
@@ -3063,7 +3070,7 @@ export class PurchaseOrdersService {
       for (const o of orders) {
         out.set(o.id, {
           date: o.payment_due_date
-            ? localDateString(o.payment_due_date, DEFAULT_STORE_TIMEZONE)
+            ? dateOnlyString(o.payment_due_date)
             : null,
         });
       }

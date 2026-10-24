@@ -11,6 +11,12 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import {
+  localDateString,
+  dateOnlyString,
+  daysBetweenDateStrings,
+  DEFAULT_STORE_TIMEZONE,
+} from '@common/utils/store-timezone.util';
+import {
   TERMINAL_PURCHASE_ORDER_STATUS,
   TERMINAL_DISPATCH_NOTE_STATUS,
 } from '@common/constants/supplier-lifecycle.constants';
@@ -486,26 +492,22 @@ export class SuppliersService {
     for (const r of rowsRaw) {
       if (!map.has(r.purchase_order_id)) {
         map.set(r.purchase_order_id, {
-          date: new Date(r.scheduled_date).toISOString().slice(0, 10),
+          date: dateOnlyString(r.scheduled_date),
         });
       }
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateString(new Date(), DEFAULT_STORE_TIMEZONE);
     return rows.map((row) => {
       let next = map.get(row.id);
       if (!next || !next.date) {
         next = {
           date: row.payment_due_date
-            ? new Date(row.payment_due_date).toISOString().slice(0, 10)
+            ? dateOnlyString(row.payment_due_date)
             : null,
         };
       }
       const days = next.date
-        ? Math.ceil(
-            (new Date(`${next.date}T00:00:00`).getTime() -
-              new Date(`${today}T00:00:00`).getTime()) /
-              86_400_000,
-          )
+        ? daysBetweenDateStrings(today, next.date)
         : null;
       return { ...row, next_payment_date: next.date, next_payment_due_in_days: days };
     });
