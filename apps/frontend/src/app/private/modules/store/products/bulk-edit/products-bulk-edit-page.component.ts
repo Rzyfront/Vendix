@@ -76,6 +76,7 @@ import {
   type SelectorOption,
   type StickyHeaderActionButton,
 } from '../../../../../shared/components/index';
+import { KdsStationsService } from '../../restaurant-ops/kds/services';
 import { UomService } from '../../inventory/services/uom.service';
 import {
   ProductState,
@@ -104,8 +105,9 @@ import {
   getVisibleBulkEditGroups,
   resolveEffectiveStoreIndustries,
 } from './bulk-editable-fields.constant';
-import type {
-  BulkArchiveResult,
+import {
+  KDS_DEFAULT_OPTION_VALUE,
+  type BulkArchiveResult,
   BulkEditFieldContext,
   BulkEditProductTypeValue,
   BulkEditResult,
@@ -146,6 +148,7 @@ export class ProductsBulkEditPageComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly uomService = inject(UomService);
   private readonly taxesService = inject(TaxesService);
+  private readonly kdsStationsService = inject(KdsStationsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -354,6 +357,9 @@ export class ProductsBulkEditPageComponent {
 
   readonly uomOptions = signal<SelectorOption[]>([]);
   readonly templateOptions = signal<SelectorOption[]>([]);
+  /** Estaciones KDS activas + opción "por defecto" (sentinela → `null`). */
+  readonly kdsOptions = signal<SelectorOption[]>([]);
+  private kdsLoadRequested = false;
   readonly taxCategories = signal<TaxCategory[]>([]);
 
   readonly taxSelectorOptions = computed<SelectorOption[]>(() => {
@@ -450,6 +456,14 @@ export class ProductsBulkEditPageComponent {
     this.loadUomCatalog();
     this.loadTemplateCatalog();
     this.loadTaxCategories();
+
+    // Las estaciones KDS solo existen para tiendas con industria restaurante:
+    // se piden una única vez, cuando la señal de industrias lo confirma.
+    effect(() => {
+      if (this.industries().includes('restaurant')) {
+        untracked(() => this.loadKdsStations());
+      }
+    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -508,6 +522,36 @@ export class ProductsBulkEditPageComponent {
       .subscribe({
         next: (templates) => this.templateOptions.set(templates),
         error: () => this.templateOptions.set([]),
+      });
+  }
+
+  private loadKdsStations(): void {
+    if (this.kdsLoadRequested) {
+      return;
+    }
+    this.kdsLoadRequested = true;
+    this.kdsStationsService
+      .listStations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (stations) =>
+          this.kdsOptions.set([
+            {
+              value: KDS_DEFAULT_OPTION_VALUE,
+              label: 'KDS por defecto de la tienda',
+            },
+            ...stations
+              .filter((station) => station.is_active)
+              .map((station) => ({
+                value: station.id,
+                label: station.is_default
+                  ? `${station.name} (por defecto)`
+                  : station.name,
+              })),
+          ]),
+        // Silencioso: sin estaciones el selector queda vacío y el backend
+        // resuelve cada plato contra el KDS por defecto.
+        error: () => this.kdsOptions.set([]),
       });
   }
 
@@ -828,6 +872,14 @@ function buildChangesForm(): FormGroup<{ [key: string]: AbstractControl }> {
   return new FormGroup<{ [key: string]: AbstractControl }>(controls);
 }
 
+/** Numéricos cuyo vacío significa `null` (limpiar), no "no elegí". */
+const NULLABLE_NUMBER_KEYS: ReadonlySet<string> = new Set<BulkEditableFieldKey>([
+  'min_stock_level',
+  'max_stock_level',
+  'reorder_point',
+  'reorder_quantity',
+]);
+
 /**
  * Convierte el valor crudo de un control al tipo que el DTO espera.
  *
@@ -867,7 +919,7 @@ export function coerceBulkEditValue(
     case 'number':
     case 'currency': {
       if (raw === null || raw === undefined || raw === '') {
-        if (field.key === 'min_stock_level') {
+        if (NULLABLE_NUMBER_KEYS.has(field.key)) {
           return null;
         }
         return undefined;
@@ -898,6 +950,10 @@ export function coerceBulkEditValue(
       if (raw === null || raw === undefined || raw === '') {
         return undefined;
       }
+      // "KDS por defecto" viaja como `null` (limpia la estación del plato).
+      if (field.key === 'kds_id' && Number(raw) === KDS_DEFAULT_OPTION_VALUE) {
+        return null;
+      }
       // Los selectores del contrato que apuntan a una FK son numéricos
       // (`stock_uom_id`, `purchase_uom_id`, `*_template_id`); el resto son enums
       // de string.
@@ -913,6 +969,12 @@ export function coerceBulkEditValue(
         return undefined;
       }
       return String(raw);
+    }
+
+    case 'account-code': {
+      // Activado y vacío = limpiar → cuenta de ingresos por defecto.
+      const code = raw === null || raw === undefined ? '' : String(raw).trim();
+      return code === '' ? null : code;
     }
 
     case 'text':

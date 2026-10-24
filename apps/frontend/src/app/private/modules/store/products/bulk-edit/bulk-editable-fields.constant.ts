@@ -235,6 +235,14 @@ export const BULK_EDIT_FIELD_GROUPS: readonly BulkEditFieldGroup[] = [
     icon: 'check-circle',
   },
   {
+    // Umbrales de reposición (min/max/punto y cantidad de reorden). Sub-bloque
+    // de inventario del formulario individual, promovido a grupo propio.
+    key: 'replenishment',
+    label: 'Reposición',
+    icon: 'refresh-cw',
+    hint: 'Umbrales para alertas y sugerencias de compra; no mueven el stock',
+  },
+  {
     // html:855-889 — sub-bloque `@if (isRestaurant())` DENTRO de
     // "Disponibilidad y Estado". Se promueve a grupo propio porque su gating es
     // distinto (industria) y el usuario debe entender por qué aparece o no.
@@ -278,6 +286,12 @@ export const BULK_EDIT_FIELD_GROUPS: readonly BulkEditFieldGroup[] = [
     label: 'Operaciones',
     icon: 'clock',
   },
+  {
+    // html:1647 — "Cuenta de ingreso (PUC)" del formulario individual.
+    key: 'accounting',
+    label: 'Contabilidad',
+    icon: 'calculator',
+  },
 ];
 
 const GROUP_BY_KEY: Record<BulkEditGroupKey, BulkEditFieldGroup> =
@@ -290,7 +304,7 @@ const GROUP_BY_KEY: Record<BulkEditGroupKey, BulkEditFieldGroup> =
   );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Registro — 34 campos, exactamente los de `BulkEditableChangesDto`
+// Registro — 44 campos, exactamente los de `BulkEditableChangesDto`
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const BULK_EDITABLE_FIELDS = [
@@ -430,6 +444,15 @@ export const BULK_EDITABLE_FIELDS = [
     productTypes: ALL_TYPES,
   },
   {
+    key: 'offer_loose_unit',
+    label: 'Ofrecer unidad suelta',
+    description:
+      'Si la tienda en línea ofrece también la unidad suelta, además de sus presentaciones.',
+    group: 'availability',
+    control: 'toggle',
+    productTypes: STOCKABLE_TYPES,
+  },
+  {
     // html:847-852.
     key: 'allow_pos_price_override',
     label: 'Precio editable en POS',
@@ -450,16 +473,6 @@ export const BULK_EDITABLE_FIELDS = [
     productTypes: ALL_TYPES,
   },
   {
-    key: 'min_stock_level',
-    label: 'Umbral de stock bajo',
-    description:
-      'Cantidad mínima antes de alertar stock bajo. Si se deja vacío o en 0, usa el valor por defecto de la tienda.',
-    group: 'availability',
-    control: 'number',
-    min: 0,
-    productTypes: ALL_TYPES,
-  },
-  {
     // html:1044-1049.
     key: 'requires_serial_numbers',
     label: 'Requerir número de serie',
@@ -468,6 +481,55 @@ export const BULK_EDITABLE_FIELDS = [
     group: 'availability',
     control: 'toggle',
     productTypes: ALL_TYPES,
+  },
+  {
+    key: 'requires_batch_tracking',
+    label: 'Requerir control por lotes',
+    description:
+      'Cada ingreso de stock debe registrarse por lote (trazabilidad, vencimientos).',
+    group: 'availability',
+    control: 'toggle',
+    productTypes: STOCKABLE_TYPES,
+  },
+
+  // ═══ replenishment ════════════════════════════════════════════════════════
+  {
+    key: 'min_stock_level',
+    label: 'Umbral de stock bajo',
+    description:
+      'Cantidad mínima antes de alertar stock bajo. Si se deja vacío o en 0, usa el valor por defecto de la tienda.',
+    group: 'replenishment',
+    control: 'number',
+    min: 0,
+    productTypes: ALL_TYPES,
+  },
+  {
+    key: 'max_stock_level',
+    label: 'Stock máximo',
+    description:
+      'Cantidad máxima deseada en inventario. Se usa para sugerencias de compra.',
+    group: 'replenishment',
+    control: 'number',
+    min: 0,
+    productTypes: STOCKABLE_TYPES,
+  },
+  {
+    key: 'reorder_point',
+    label: 'Punto de reorden',
+    description: 'Nivel de stock en el que conviene volver a pedir el producto.',
+    group: 'replenishment',
+    control: 'number',
+    min: 0,
+    productTypes: STOCKABLE_TYPES,
+  },
+  {
+    key: 'reorder_quantity',
+    label: 'Cantidad de reorden',
+    description: 'Cantidad sugerida a pedir cuando se alcanza el punto de reorden.',
+    group: 'replenishment',
+    control: 'number',
+    min: 0,
+    productTypes: STOCKABLE_TYPES,
   },
 
   // ═══ restaurant (requiere industria `restaurant`) ══════════════════════════
@@ -518,6 +580,19 @@ export const BULK_EDITABLE_FIELDS = [
     productTypes: STOCKABLE_TYPES,
     requiresIndustry: 'restaurant',
   },
+  {
+    // product-create-page (QUI-651): estación KDS del plato preparado. El fire
+    // excluye todo lo que no sea `prepared`.
+    key: 'kds_id',
+    label: 'Estación de preparación',
+    description:
+      'Estación de cocina (KDS) donde se prepara este plato. Sin elegir una, va al KDS por defecto de la tienda.',
+    group: 'restaurant',
+    control: 'selector',
+    productTypes: PREPARED_ONLY,
+    requiresIndustry: 'restaurant',
+    optionsRef: 'kds-stations',
+  },
 
   // ═══ uom (requiere la capacidad de insumo) ════════════════════════════════
   {
@@ -533,7 +608,20 @@ export const BULK_EDITABLE_FIELDS = [
     dependsOn: 'is_ingredient',
   },
   {
-    // html:984-991. El factor compra→stock NO se envía: el backend lo deriva de
+    key: 'purchase_to_stock_factor',
+    label: 'Unidades de inventario por unidad de compra',
+    description:
+      'Solo para envases cuyo contenido no se deriva del catálogo (p. ej. bolsa → gramos). Si las unidades son convertibles, el sistema calcula el factor.',
+    group: 'uom',
+    control: 'number',
+    productTypes: STOCKABLE_TYPES,
+    requiresCapability: 'ingredients',
+    min: 1,
+    dependsOn: 'is_ingredient',
+  },
+  {
+    // html:984-991. El factor compra→stock solo se envía si el envase no es convertible
+    // (`purchase_to_stock_factor`); si no, el backend lo deriva de
     // `factor_to_base` del catálogo (`bulk-edit-products.dto.ts:174-176`).
     key: 'stock_uom_id',
     label: 'Stock (unidad mínima)',
@@ -624,6 +712,26 @@ export const BULK_EDITABLE_FIELDS = [
     productTypes: SERVICE_ONLY,
   },
   {
+    key: 'buffer_minutes',
+    label: 'Tiempo de margen entre reservas',
+    description:
+      'Minutos de descanso que se bloquean después de cada reserva de este servicio.',
+    group: 'service',
+    control: 'number',
+    productTypes: SERVICE_ONLY,
+    suffix: 'min',
+    min: 0,
+    max: 10080,
+  },
+  {
+    key: 'is_eligible_for_home_service',
+    label: 'Disponible a domicilio',
+    description: 'El servicio puede prestarse en la dirección del cliente.',
+    group: 'service',
+    control: 'toggle',
+    productTypes: SERVICE_ONLY,
+  },
+  {
     // html:1485-1497, anidado tras `@if (requires_booking)`.
     key: 'booking_mode',
     label: 'Modo de reserva',
@@ -707,6 +815,18 @@ export const BULK_EDITABLE_FIELDS = [
     suffix: 'min',
     min: 0,
     max: 10080,
+  },
+
+  // ═══ accounting ═══════════════════════════════════════════════════════════
+  {
+    // html:1647-1657.
+    key: 'account_code',
+    label: 'Cuenta de ingreso (PUC)',
+    description:
+      'Cuenta del PUC con la que se acredita el ingreso de este producto al facturar. Si la dejas vacía, el ingreso va a la cuenta de ingresos por defecto de la organización.',
+    group: 'accounting',
+    control: 'account-code',
+    productTypes: ALL_TYPES,
   },
 ] as const satisfies readonly BulkEditableField[];
 
@@ -888,7 +1008,7 @@ export function describeBulkEditIndustryRequirement(
 
 /**
  * Falla la compilación si `T` no es `never`. Se usa abajo para verificar que el
- * registro cubre EXACTAMENTE las 34 claves de `BulkEditableChangesDto`: un
+ * registro cubre EXACTAMENTE las 44 claves de `BulkEditableChangesDto`: un
  * campo de menos deja el wizard incompleto, y uno de más provoca un 400 del
  * `ValidationPipe` (`forbidNonWhitelisted: true`).
  */
