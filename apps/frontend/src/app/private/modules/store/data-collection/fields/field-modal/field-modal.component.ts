@@ -90,6 +90,8 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 })
 export class FieldModalComponent implements OnInit {
   field = input<MetadataField | null>(null);
+  /** Tipo de entidad con el que nace un campo nuevo (p. ej. desde el editor de una plantilla). */
+  defaultEntityType = input<string | null>(null);
   save = output<any>();
   close = output<void>();
 
@@ -123,6 +125,7 @@ export class FieldModalComponent implements OnInit {
 
   ngOnInit() {
     const f = this.field();
+    if (!f && this.defaultEntityType()) this.formData.entity_type = this.defaultEntityType();
     if (f) {
       this.formData = {
         label: f.label,

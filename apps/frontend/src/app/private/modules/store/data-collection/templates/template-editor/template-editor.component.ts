@@ -14,6 +14,9 @@ import {
 import { MetadataField } from '../../interfaces/metadata-field.interface';
 import { DataCollectionTemplatesService } from '../../services/data-collection-templates.service';
 import { MetadataFieldsService } from '../../services/metadata-fields.service';
+import { FieldModalComponent } from '../../fields/field-modal/field-modal.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { forkJoin, of } from 'rxjs';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { IconPickerComponent } from '../../../../../../shared/components/icon-picker/icon-picker.component';
 import {
@@ -95,6 +98,8 @@ interface Selection {
     SelectorComponent,
     SettingToggleComponent,
     ScrollableTabsComponent,
+    FieldModalComponent,
+    ModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -313,10 +318,16 @@ interface Selection {
             }
 
             <!-- Add Section Button -->
-            <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
-              <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-              Agregar Sección
-            </app-button>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                Agregar Sección
+              </app-button>
+              <app-button variant="primary" [fullWidth]="true" (clicked)="openSuggested()">
+                <app-icon name="sparkles" [size]="16" slot="icon" ></app-icon>
+                Campos sugeridos
+              </app-button>
+            </div>
           </div>
 
           <!-- Right Properties Panel (35%) -->
@@ -696,20 +707,26 @@ interface Selection {
                 </p>
               }
 
-              <!-- Add field dropdown -->
-              @if (
-                getAvailableFieldsForSection(si, isChild, parentIndex).length >
-                0
-              ) {
-                <div>
-                  <app-selector
-                    [ngModel]="''"
-                    (ngModelChange)="isChild ? onFieldSelectByValue(parentIndex, si, $event) : onFieldSelectByValue(-1, si, $event)"
-                    [options]="getFieldOptionsForSection(si, isChild, parentIndex)"
-                    placeholder="+ Agregar campo..."
-                  />
-                </div>
-              }
+              <!-- Add field dropdown + crear campo nuevo sin salir del editor -->
+              <div class="flex flex-col sm:flex-row sm:items-start gap-2">
+                @if (
+                  getAvailableFieldsForSection(si, isChild, parentIndex).length >
+                  0
+                ) {
+                  <div class="flex-1 min-w-0">
+                    <app-selector
+                      [ngModel]="''"
+                      (ngModelChange)="isChild ? onFieldSelectByValue(parentIndex, si, $event) : onFieldSelectByValue(-1, si, $event)"
+                      [options]="getFieldOptionsForSection(si, isChild, parentIndex)"
+                      placeholder="+ Agregar campo existente..."
+                    />
+                  </div>
+                }
+                <app-button variant="outline" size="sm" (clicked)="openCreateField(isChild ? parentIndex : -1, si)">
+                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  Crear campo
+                </app-button>
+              </div>
 
               <!-- Child Sections -->
               @if (!isChild) {
@@ -740,6 +757,42 @@ interface Selection {
           }
         </div>
       </ng-template>
+    }
+    @if (fieldModalTarget()) {
+      <app-field-modal
+        [defaultEntityType]="formData().entity_type"
+        (save)="onCreateField($event)"
+        (close)="fieldModalTarget.set(null)"
+      />
+    }
+
+    @if (showSuggested()) {
+      <app-modal [isOpen]="true" (isOpenChange)="!$event && showSuggested.set(false)" title="Campos sugeridos" subtitle="Marca los que quieres pedir; se crean si no existen y se agregan a la primera sección" size="lg">
+        <div class="space-y-4">
+          @for (group of suggestedGroups; track group.title) {
+            <div>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">{{ group.title }}</h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                @for (f of group.fields; track f.field_key) {
+                  <label class="flex items-start gap-2 p-2 rounded-lg border border-[var(--color-border)] cursor-pointer text-sm">
+                    <input type="checkbox" class="mt-1" [checked]="suggestedPicked().has(f.field_key)" (change)="toggleSuggested(f.field_key)" />
+                    <span>
+                      <span class="font-semibold text-[var(--color-text-primary)]">{{ f.label }}</span>
+                      <span class="block text-xs text-[var(--color-text-secondary)]">{{ f.hint }}</span>
+                    </span>
+                  </label>
+                }
+              </div>
+            </div>
+          }
+        </div>
+        <div slot="footer" class="flex justify-end gap-2">
+          <app-button variant="outline" (clicked)="showSuggested.set(false)">Cancelar</app-button>
+          <app-button variant="primary" [disabled]="!suggestedPicked().size" [loading]="addingSuggested()" (clicked)="applySuggested()">
+            Agregar {{ suggestedPicked().size }} campo(s)
+          </app-button>
+        </div>
+      </app-modal>
     }
   `,
 })
@@ -1657,6 +1710,140 @@ export class TemplateEditorComponent implements OnInit {
   }
 
   // --- Data Loading ---
+
+  // --- Crear campos sin salir del editor ---
+
+  /** Sección donde se agregará el campo recién creado. */
+  readonly fieldModalTarget = signal<{ parentIndex: number; sectionIndex: number } | null>(null);
+
+  openCreateField(parentIndex: number, sectionIndex: number) {
+    this.fieldModalTarget.set({ parentIndex, sectionIndex });
+  }
+
+  onCreateField(data: Partial<MetadataField>) {
+    const target = this.fieldModalTarget();
+    this.fieldsService.createField(data).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (field) => {
+        this.availableFields.update((fields) => [...fields, field]);
+        if (target) this.onFieldSelectByValue(target.parentIndex, target.sectionIndex, field.id);
+        this.fieldModalTarget.set(null);
+        this.toastService.success(`Campo "${field.label}" creado y agregado`);
+      },
+      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+    });
+  }
+
+  // --- Campos sugeridos (atención de servicio) ---
+
+  /**
+   * Campos típicos para recibir un servicio. Los de "Cliente" se guardan en el
+   * perfil del cliente (se prellenan la próxima vez); el resto queda en la
+   * atención. Placa y marca van primero: con ellas se arma el nombre de lo
+   * atendido ("ABC123 · Yamaha NMAX").
+   */
+  readonly suggestedGroups: Array<{ title: string; customer: boolean; fields: Array<{ field_key: string; label: string; field_type: string; hint: string; options?: string[] }> }> = [
+    {
+      title: 'Vehículo o equipo',
+      customer: false,
+      fields: [
+        { field_key: 'placa', label: 'Placa', field_type: 'text', hint: 'Texto · ej. ABC123' },
+        { field_key: 'marca_modelo', label: 'Marca y modelo', field_type: 'text', hint: 'Texto · ej. Yamaha NMAX' },
+        { field_key: 'anio', label: 'Año', field_type: 'number', hint: 'Número' },
+        { field_key: 'color', label: 'Color', field_type: 'text', hint: 'Texto' },
+        { field_key: 'kilometraje', label: 'Kilometraje', field_type: 'number', hint: 'Número' },
+        { field_key: 'serial_imei', label: 'Serial / IMEI', field_type: 'text', hint: 'Texto · para celulares y equipos' },
+        { field_key: 'nivel_combustible', label: 'Nivel de combustible', field_type: 'select', hint: 'Lista', options: ['Reserva', '1/4', '1/2', '3/4', 'Lleno'] },
+      ],
+    },
+    {
+      title: 'Atención',
+      customer: false,
+      fields: [
+        { field_key: 'motivo_ingreso', label: 'Falla o motivo del ingreso', field_type: 'textarea', hint: 'Texto largo' },
+        { field_key: 'estado_recepcion', label: 'Estado en que se recibe', field_type: 'textarea', hint: 'Golpes, rayones, faltantes…' },
+        { field_key: 'accesorios', label: 'Accesorios entregados', field_type: 'textarea', hint: 'Cargador, casco, llaves…' },
+        { field_key: 'autoriza_adicionales', label: 'Autoriza trabajos adicionales', field_type: 'checkbox', hint: 'Casilla' },
+      ],
+    },
+    {
+      title: 'Cliente (se guarda en su perfil)',
+      customer: true,
+      fields: [
+        { field_key: 'tipo_documento', label: 'Tipo de documento', field_type: 'select', hint: 'Lista', options: ['CC', 'NIT', 'CE', 'Pasaporte', 'TI'] },
+        { field_key: 'numero_documento', label: 'Número de documento', field_type: 'text', hint: 'Texto' },
+        { field_key: 'correo', label: 'Correo', field_type: 'email', hint: 'Correo electrónico' },
+        { field_key: 'telefono', label: 'Teléfono / WhatsApp', field_type: 'phone', hint: 'Teléfono' },
+        { field_key: 'direccion', label: 'Dirección', field_type: 'text', hint: 'Texto' },
+        { field_key: 'fecha_nacimiento', label: 'Fecha de nacimiento', field_type: 'date', hint: 'Fecha' },
+      ],
+    },
+  ];
+
+  readonly showSuggested = signal(false);
+  readonly suggestedPicked = signal<Set<string>>(new Set());
+  readonly addingSuggested = signal(false);
+
+  openSuggested() {
+    this.suggestedPicked.set(new Set());
+    this.showSuggested.set(true);
+  }
+
+  toggleSuggested(key: string) {
+    this.suggestedPicked.update((set) => {
+      const next = new Set(set);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  /** Reutiliza los campos que ya existen (misma clave y entidad) y crea los que falten. */
+  applySuggested() {
+    const picked = this.suggestedPicked();
+    const templateEntity = this.formData().entity_type || 'service_session';
+    const wanted = this.suggestedGroups.flatMap((group) =>
+      group.fields
+        .filter((f) => picked.has(f.field_key))
+        .map((f) => ({ ...f, entity_type: group.customer ? 'customer' : templateEntity })),
+    );
+    if (!wanted.length) return;
+    this.addingSuggested.set(true);
+    const requests = wanted.map((f) => {
+      const existing = this.availableFields().find((af) => af.field_key === f.field_key && af.entity_type === f.entity_type);
+      return existing
+        ? of(existing)
+        : this.fieldsService.createField({
+            label: f.label,
+            field_key: f.field_key,
+            entity_type: f.entity_type as MetadataField['entity_type'],
+            field_type: f.field_type as MetadataField['field_type'],
+            display_mode: 'detail',
+            is_required: false,
+            ...(f.options ? { options: f.options } : {}),
+          } as Partial<MetadataField>);
+    });
+    forkJoin(requests).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (fields) => {
+        this.availableFields.update((current) => [
+          ...current,
+          ...fields.filter((f) => !current.some((c) => c.id === f.id)),
+        ]);
+        if (!this.activeSections().length) {
+          this.addSection();
+          this.mutateActiveSections((sections) => {
+            sections[0] = { ...sections[0], title: 'Datos de ingreso' };
+          });
+        }
+        for (const field of fields) this.addFieldToSection(0, field.id);
+        this.addingSuggested.set(false);
+        this.showSuggested.set(false);
+        this.toastService.success(`${fields.length} campo(s) agregados. Guarda la plantilla para conservarlos.`);
+      },
+      error: (err) => {
+        this.addingSuggested.set(false);
+        this.toastService.error(extractApiErrorMessage(err));
+      },
+    });
+  }
 
   private loadAvailableFields() {
     this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
