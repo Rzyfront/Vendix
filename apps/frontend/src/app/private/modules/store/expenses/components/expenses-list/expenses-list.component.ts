@@ -9,6 +9,8 @@ import * as ExpensesActions from '../../state/actions/expenses.actions';
 import {
   selectSearch,
   selectStateFilter,
+  selectDateFrom,
+  selectDateTo,
   selectExpensesMeta,
   selectPage,
 } from '../../state/selectors/expenses.selectors';
@@ -35,14 +37,14 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 @Component({
   selector: 'app-expenses-list',
   standalone: true,
-imports: [
+  imports: [
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent
+    CardComponent,
   ],
   templateUrl: './expenses-list.component.html',
 })
@@ -60,9 +62,21 @@ export class ExpensesListComponent {
   private currencyService = inject(CurrencyFormatService);
 
   // Signals from store for current filter values
-  readonly search = toSignal(this.store.select(selectSearch), { initialValue: '' });
-  readonly stateFilter = toSignal(this.store.select(selectStateFilter), { initialValue: '' });
-  readonly meta = toSignal(this.store.select(selectExpensesMeta), { initialValue: null });
+  readonly search = toSignal(this.store.select(selectSearch), {
+    initialValue: '',
+  });
+  readonly stateFilter = toSignal(this.store.select(selectStateFilter), {
+    initialValue: '',
+  });
+  readonly dateFrom = toSignal(this.store.select(selectDateFrom), {
+    initialValue: '',
+  });
+  readonly dateTo = toSignal(this.store.select(selectDateTo), {
+    initialValue: '',
+  });
+  readonly meta = toSignal(this.store.select(selectExpensesMeta), {
+    initialValue: null,
+  });
   readonly page = toSignal(this.store.select(selectPage), { initialValue: 1 });
 
   // Local tracking for template binding
@@ -84,6 +98,13 @@ export class ExpensesListComponent {
         { value: 'cancelled', label: 'Cancelado' },
         { value: 'refunded', label: 'Reembolsado' },
       ],
+    },
+    {
+      key: 'date',
+      label: 'Fecha',
+      type: 'date-range',
+      startKey: 'date_from',
+      endKey: 'date_to',
     },
   ];
 
@@ -202,7 +223,15 @@ export class ExpensesListComponent {
   onFilterChange(values: FilterValues): void {
     this.filterValues.set({ ...values });
     const stateFilter = (values['state'] as string) || '';
-    this.store.dispatch(ExpensesActions.setStateFilter({ stateFilter }));
+    const dateFrom = (values['date_from'] as string) || '';
+    const dateTo = (values['date_to'] as string) || '';
+    // Only dispatch what changed to avoid duplicate list reloads
+    if (stateFilter !== this.stateFilter()) {
+      this.store.dispatch(ExpensesActions.setStateFilter({ stateFilter }));
+    }
+    if (dateFrom !== this.dateFrom() || dateTo !== this.dateTo()) {
+      this.store.dispatch(ExpensesActions.setDateRange({ dateFrom, dateTo }));
+    }
   }
 
   onClearFilters(): void {
@@ -247,7 +276,13 @@ export class ExpensesListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm() || this.filterValues()['state']);
+    const values = this.filterValues();
+    return !!(
+      this.searchTerm() ||
+      values['state'] ||
+      values['date_from'] ||
+      values['date_to']
+    );
   }
 
   getEmptyStateTitle(): string {

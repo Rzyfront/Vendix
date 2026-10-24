@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Component, input, output, signal } from '@angular/core';
 import { of } from 'rxjs';
 import { Store } from '@ngrx/store';
@@ -22,6 +23,7 @@ class ModalStub {
   readonly showCloseButton = input(true);
   readonly title = input('');
   readonly subtitle = input('');
+  readonly dialog = input(false);
   readonly closed = output<void>();
 }
 
@@ -239,6 +241,16 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
       { id: 1, name: 'Producto Test', quantity: 1, unit_price: 50000, total_price: 50000, tax_amount: 7984 },
     ],
   };
+
+  // QUI-746: el modal de confirmación se expone como diálogo accesible.
+  it('abre el app-modal con dialog activado', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', sampleOrder);
+    fixture.detectChanges();
+
+    const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+    expect(modal.dialog()).toBe(true);
+  });
 
   it('muestra Despachar para domicilio cobrado aunque no venga isShippingSale', () => {
     fixture.componentRef.setInput('isOpen', true);
