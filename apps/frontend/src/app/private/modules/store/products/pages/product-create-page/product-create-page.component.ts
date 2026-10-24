@@ -1747,6 +1747,7 @@ export class ProductCreatePageComponent {
 
     // Check for ID in route to determine edit mode
     this.route.params.subscribe((params: Params) => {
+      if (!params['id']) this.loadServiceStations();
       if (!params['id'] && this.pendingIntakeDraft) {
         // Creación: no hay nada que cargar del servidor; se aplica ya.
         queueMicrotask(() => this.applyIntakeDraft());
@@ -1756,6 +1757,7 @@ export class ProductCreatePageComponent {
         this.isEditMode.set(true);
         this.loadProduct(this.productId);
         this.loadIntakeTemplateLink(this.productId);
+        this.loadServiceStations(this.productId);
         this.loadPromotionOptions();
         this.loadProductPromotions(this.productId);
       }
@@ -2163,6 +2165,57 @@ export class ProductCreatePageComponent {
    * Nunca rechaza: un fallo se avisa con un warning y el guardado del producto
    * sigue su curso.
    */
+  // --- Estaciones donde se presta el servicio ("Requiere estación de servicio") ---
+
+  /** Estaciones activas de la tienda; vacío (y sección oculta) si la tienda no usa estaciones. */
+  readonly serviceStationOptions = signal<Array<{ value: number; label: string }>>([]);
+  readonly productStationIds = signal<number[]>([]);
+  private readonly originalProductStationIds = signal<number[]>([]);
+
+  private loadServiceStations(productId?: number): void {
+    this.http
+      .get<any>(`${environment.apiUrl}/store/service-stations?limit=100&status=active`)
+      .subscribe({
+        next: (res) => {
+          const rows = res?.data?.data ?? res?.data ?? [];
+          this.serviceStationOptions.set((Array.isArray(rows) ? rows : []).map((s: any) => ({ value: s.id, label: s.name })));
+        },
+        error: () => this.serviceStationOptions.set([]), // 403: la tienda no tiene la industria Servicios
+      });
+    if (!productId) return;
+    this.http.get<any>(`${environment.apiUrl}/store/service-stations/by-product/${productId}`).subscribe({
+      next: (res) => {
+        const ids: number[] = res?.data?.station_ids ?? [];
+        this.productStationIds.set(ids);
+        this.originalProductStationIds.set(ids);
+      },
+      error: () => {},
+    });
+  }
+
+  /** Guarda en qué estaciones se presta el servicio, solo si cambió. Nunca rechaza. */
+  private syncProductStations(productId: number | undefined, isService: boolean): Promise<void> {
+    const next = isService && this.productForm.get('requires_station')?.value ? [...this.productStationIds()].sort() : [];
+    const prev = [...this.originalProductStationIds()].sort();
+    if (!productId || !this.serviceStationOptions().length || JSON.stringify(next) === JSON.stringify(prev)) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.http
+        .put<any>(`${environment.apiUrl}/store/service-stations/by-product/${productId}`, { station_ids: next })
+        .subscribe({
+          next: () => {
+            this.originalProductStationIds.set(next);
+            resolve();
+          },
+          error: () => {
+            this.toastService.warning('Producto guardado, pero no se pudieron asignar las estaciones.');
+            resolve();
+          },
+        });
+    });
+  }
+
   private syncIntakeTemplateLink(productId: number | undefined, isService: boolean): Promise<void> {
     const next = isService ? this.intakeTemplateId() : 0;
     if (!productId || next === this.originalIntakeTemplateId()) {
@@ -4730,7 +4783,10 @@ export class ProductCreatePageComponent {
 
         const navigateAfterSave = () => {
           const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-          this.syncIntakeTemplateLink(savedProduct?.id, isServiceType).then(() => {
+          Promise.all([
+            this.syncIntakeTemplateLink(savedProduct?.id, isServiceType),
+            this.syncProductStations(savedProduct?.id, isServiceType),
+          ]).then(() => {
             this.router.navigate(['/admin/products'], {
               queryParams: { page: returnPage },
             });

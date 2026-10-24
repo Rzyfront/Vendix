@@ -1730,12 +1730,25 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-setting-toggle
-                formControlName="requires_station"
-                label="Requiere estación de servicio"
-                description="Solo permite reservar o iniciar este servicio en una estación compatible de la tienda."
-              >
-              </app-setting-toggle>
+              <div class="space-y-2">
+                <app-setting-toggle
+                  formControlName="requires_station"
+                  label="Requiere estación de servicio"
+                  description="Solo permite reservar o iniciar este servicio en una estación compatible de la tienda."
+                >
+                </app-setting-toggle>
+                @if (productForm.get('requires_station')?.value && serviceStationOptions().length) {
+                  <app-multi-selector
+                    label="Estaciones donde se presta"
+                    [options]="serviceStationOptions()"
+                    [ngModel]="productStationIds()"
+                    [ngModelOptions]="{ standalone: true }"
+                    (ngModelChange)="productStationIds.set($event)"
+                    placeholder="Elige las estaciones..."
+                    helpText="Solo en estas estaciones se podrá reservar o iniciar el servicio."
+                  />
+                }
+              </div>
 
               <app-setting-toggle
                 formControlName="requires_booking"
