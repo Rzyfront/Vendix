@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductsService } from './products.service';
+import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import {
@@ -35,6 +36,12 @@ import {
   PROD_TAX_COMBO_001,
   type ProductTaxComboCategory,
 } from './services/product-tax-combination.util';
+
+const PURCHASE_FACTOR_DERIVED_MESSAGE =
+  'El factor de compra de este producto lo calcula el catálogo de unidades; cambia las unidades en vez del factor.';
+
+const KDS_ONLY_PREPARED_MESSAGE =
+  'La estación de cocina solo aplica a platos preparados.';
 
 const TRACK_INVENTORY_WITH_VARIANTS_MESSAGE =
   "Este producto maneja variantes: cambia 'Controla inventario' desde el editor del producto para decidir qué pasa con el stock";
@@ -120,7 +127,17 @@ const BULK_EDITABLE_FIELDS: readonly string[] = [
   'is_batch_produced',
   'track_inventory',
   'min_stock_level',
+  'max_stock_level',
+  'reorder_point',
+  'reorder_quantity',
   'requires_serial_numbers',
+  'requires_batch_tracking',
+  'account_code',
+  'kds_id',
+  'buffer_minutes',
+  'is_eligible_for_home_service',
+  'offer_loose_unit',
+  'purchase_to_stock_factor',
   'base_price',
   'cost_price',
   'profit_margin',
@@ -181,6 +198,7 @@ export class ProductsBulkEditService {
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly autoEntryService: AutoEntryService,
   ) {}
 
   // ===========================================================================
@@ -198,6 +216,12 @@ export class ProductsBulkEditService {
     // en vez de repetirse N veces.
     const batch = this.sanitizeIngredientPayload(this.cloneChanges(dto.changes));
     this.validateByProductType(batch.payload);
+    // Validación de LOTE (una vez, falla rápido como las de arriba): la
+    // estación KDS debe existir en esta tienda y la subcuenta PUC debe ser
+    // válida. `update()` valida la cuenta fila por fila en el apply; aquí se
+    // adelanta con UNA llamada al mismo validador.
+    await this.assertKdsBelongsToStore(dto.changes.kds_id);
+    await this.assertAccountCodeUsable(dto.changes.account_code);
 
     // --- Lecturas ---------------------------------------------------------
     // `products` está en la lista store-scoped de StorePrismaService, así que el
@@ -227,6 +251,10 @@ export class ProductsBulkEditService {
     const ingredientCapableStores = await this.loadIngredientCapableStores(
       batch.payload,
       products,
+    );
+    const derivedFactorProductIds = await this.loadDerivedFactorProductIds(
+      batch.payload,
+      products.filter((product) => product.state !== ProductState.ARCHIVED),
     );
 
     const taxAction = dto.changes.tax_category_action;
@@ -375,6 +403,7 @@ export class ProductsBulkEditService {
         effective.payload,
         reservedProductIds,
         variantProductIds,
+        derivedFactorProductIds,
       );
       if (failure) {
         return { ...base, status: 'error', ...failure };
@@ -445,14 +474,30 @@ export class ProductsBulkEditService {
   async apply(dto: BulkEditProductsDto): Promise<BulkEditResultDto> {
     const ids = this.dedupeIds(dto.ids);
 
+    // Mismas validaciones de LOTE que el preview (una vez por lote).
+    await this.assertKdsBelongsToStore(dto.changes.kds_id);
+    await this.assertAccountCodeUsable(dto.changes.account_code);
+
     // Nombres por adelantado: si `update()` lanza no hay fila devuelta de la
     // que sacar el nombre, y una fila de resultado sin nombre es inútil en la
     // UI. Lectura barata y read-only.
     const knownNames = new Map<number, string>();
     const rows = await this.prisma.products.findMany({
       where: { id: { in: ids } },
-      select: { id: true, name: true, track_inventory: true },
+      select: {
+        id: true,
+        name: true,
+        track_inventory: true,
+        stock_uom_id: true,
+        purchase_uom_id: true,
+      },
     });
+    // Factor de compra derivable del catálogo ⇒ la fila falla igual que en el
+    // preview (solo cuando el lote trae `purchase_to_stock_factor`).
+    const derivedFactorProductIds = await this.loadDerivedFactorProductIds(
+      dto.changes as Record<string, any>,
+      rows,
+    );
     const currentTrackInventory = new Map<number, boolean>();
     for (const row of rows) {
       knownNames.set(row.id, row.name);
@@ -503,6 +548,12 @@ export class ProductsBulkEditService {
     // siguientes. Delegación íntegra en `update()` (ver docblock de la clase).
     for (const id of ids) {
       try {
+        if (derivedFactorProductIds.has(id)) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VALIDATE_001,
+            PURCHASE_FACTOR_DERIVED_MESSAGE,
+          );
+        }
         if (
           nextTrackInventory !== undefined &&
           nextTrackInventory !== currentTrackInventory.get(id) &&
@@ -958,6 +1009,104 @@ export class ProductsBulkEditService {
   }
 
   // ===========================================================================
+  // Validaciones de lote (KDS / cuenta PUC / factor de compra)
+  // ===========================================================================
+
+  /**
+   * `kds_id` no nulo: la estación debe existir en la tienda actual. Una vez por
+   * lote. `kds` está registrada en el scope de tienda; el `store_id` explícito
+   * es defensa en profundidad. `update()` NO valida esta FK (la rechazaría la
+   * base con un error opaco), por eso se valida aquí.
+   */
+  private async assertKdsBelongsToStore(
+    kdsId: number | null | undefined,
+  ): Promise<void> {
+    if (kdsId === undefined || kdsId === null) return;
+    const storeId = RequestContextService.getStoreId();
+    const station = await this.prisma.kds.findFirst({
+      where: {
+        id: kdsId,
+        is_active: true,
+        ...(storeId ? { store_id: storeId } : {}),
+      },
+      select: { id: true },
+    });
+    if (!station) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'La estación de cocina no existe, está inactiva o no pertenece a esta tienda',
+        { kds_id: kdsId },
+      );
+    }
+  }
+
+  /**
+   * `account_code` no vacío: misma validación que `update()` (existe, activa y
+   * acepta movimientos), UNA llamada por lote. Lanza la `VendixHttpException`
+   * del validador (PROD_ACCOUNT_CODE_*) y falla el lote completo, como el resto
+   * de validaciones de lote. Sin organización en contexto no se valida.
+   */
+  private async assertAccountCodeUsable(
+    accountCode: string | null | undefined,
+  ): Promise<void> {
+    if (accountCode === undefined || accountCode === null) return;
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!organizationId) return;
+    await this.autoEntryService.validateProductAccountCodes(organizationId, [
+      accountCode,
+    ]);
+  }
+
+  /**
+   * Ids de producto cuyo `purchase_to_stock_factor` NO se puede aceptar del
+   * cliente: el payload lo trae y la pareja de UoM efectiva (la del lote si
+   * viene, si no la persistida) es derivable del catálogo, es decir, tiene la
+   * misma dimensión. El caso "contenido por envase" (compra `count`, stock
+   * `mass`/`volume`) NO es derivable y el factor se aplica tal cual; sin pareja
+   * completa de UoM tampoco hay nada que derivar.
+   */
+  private async loadDerivedFactorProductIds(
+    payload: Record<string, any>,
+    products: Array<{
+      id: number;
+      stock_uom_id?: number | null;
+      purchase_uom_id?: number | null;
+    }>,
+  ): Promise<Set<number>> {
+    const result = new Set<number>();
+    if (payload.purchase_to_stock_factor === undefined) return result;
+
+    const pairs = products
+      .map((product) => ({
+        id: product.id,
+        stock: payload.stock_uom_id ?? product.stock_uom_id ?? null,
+        purchase: payload.purchase_uom_id ?? product.purchase_uom_id ?? null,
+      }))
+      .filter((pair) => pair.stock != null && pair.purchase != null);
+    if (pairs.length === 0) return result;
+
+    const uomIds = [
+      ...new Set(pairs.flatMap((pair) => [pair.stock, pair.purchase])),
+    ] as number[];
+    const uoms = await this.prisma.units_of_measure.findMany({
+      where: { id: { in: uomIds } },
+      select: { id: true, dimension: true },
+    });
+    const dimensionById = new Map<number, string>(
+      uoms.map((uom: any) => [uom.id, uom.dimension]),
+    );
+
+    for (const pair of pairs) {
+      const stockDim = dimensionById.get(pair.stock as number);
+      const purchaseDim = dimensionById.get(pair.purchase as number);
+      if (stockDim && purchaseDim && stockDim === purchaseDim) {
+        result.add(pair.id);
+      }
+    }
+    return result;
+  }
+
+  // ===========================================================================
   // Lecturas auxiliares del archivado (read-only)
   // ===========================================================================
 
@@ -1204,11 +1353,11 @@ export class ProductsBulkEditService {
    * (`products.service.ts:422-444`). MUTA el payload recibido, igual que el
    * original — de ahí el clon previo en `preview()`.
    *
-   * Solo se replican los campos que existen en `BulkEditableChangesDto`: los de
-   * stock (`stock_quantity`, `reorder_point`, …) y `requires_batch_tracking`
-   * están excluidos del contrato de edición masiva, así que forzarlos aquí no
-   * cambiaría nada. La excepción es `min_stock_level`, que sí es editable y por
-   * eso se descarta explícitamente para servicios.
+   * Solo se replican los campos que existen en `BulkEditableChangesDto`
+   * (`stock_quantity` está excluido del contrato). Los umbrales de reposición
+   * (`min_stock_level`, `max_stock_level`, `reorder_point`, `reorder_quantity`)
+   * y los flags de rastreo (`requires_serial_numbers`,
+   * `requires_batch_tracking`) sí son editables y se descartan para servicios.
    */
   private validateByProductType(payload: Record<string, any>): void {
     if (payload.product_type !== ProductType.SERVICE) return;
@@ -1226,9 +1375,13 @@ export class ProductsBulkEditService {
     // así que un umbral nunca dispararía.
     payload.track_inventory = false;
     payload.min_stock_level = undefined;
+    payload.max_stock_level = undefined;
+    payload.reorder_point = undefined;
+    payload.reorder_quantity = undefined;
     payload.weight = undefined;
     payload.dimensions = undefined;
     payload.requires_serial_numbers = undefined;
+    payload.requires_batch_tracking = undefined;
   }
 
   /**
@@ -1266,7 +1419,19 @@ export class ProductsBulkEditService {
     effective: Record<string, any>,
     reservedProductIds: Set<number>,
     variantProductIds: Set<number>,
+    derivedFactorProductIds: Set<number>,
   ): { code: string; message: string } | null {
+    // 0. `purchase_to_stock_factor` sobre una pareja de UoM derivable del
+    //    catálogo: el factor es crítico de costeo y `update()` lo recalcula
+    //    solo si se tocan las unidades; si no, lo persistiría tal cual y
+    //    desalinearía el costeo del catálogo.
+    if (derivedFactorProductIds.has(product.id)) {
+      return {
+        code: ErrorCodes.PROD_VALIDATE_001.code,
+        message: PURCHASE_FACTOR_DERIVED_MESSAGE,
+      };
+    }
+
     // 1. `products.service.ts:1917-1931` — reservas de stock activas del propio
     //    producto (`product_variant_id: null`, `status: 'active'`).
     if (reservedProductIds.has(product.id)) {
@@ -1408,6 +1573,16 @@ export class ProductsBulkEditService {
       warnings.push(
         'El producto no tiene receta activa: quedará como preparado sin lista de materiales.',
       );
+    }
+
+    // La estación de cocina solo tiene efecto en platos preparados.
+    const effectiveProductType =
+      effective.payload.product_type ?? product.product_type;
+    if (
+      effective.payload.kds_id != null &&
+      effectiveProductType !== ProductType.PREPARED
+    ) {
+      warnings.push(KDS_ONLY_PREPARED_MESSAGE);
     }
 
     return warnings;

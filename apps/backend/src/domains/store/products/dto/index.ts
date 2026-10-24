@@ -44,7 +44,11 @@ export * from './product-enums';
 // El normalizador del mapa vive en el módulo hoja de bulk-edit (NO importar
 // valores desde este barrel: ver la cabecera de `product-enums.ts` y de
 // `bulk-edit-products.dto.ts` para el porqué del ciclo con swc).
-import { normalizeTaxInclusiveMapKeys } from './bulk-edit-products.dto';
+import {
+  normalizeTaxInclusiveMapKeys,
+  PUC_ACCOUNT_CODE_MESSAGE,
+  PUC_ACCOUNT_CODE_REGEX,
+} from './bulk-edit-products.dto';
 
 /**
  * Forma sintáctica de una subcuenta PUC colombiana (`products.account_code`,
@@ -73,10 +77,9 @@ import { normalizeTaxInclusiveMapKeys } from './bulk-edit-products.dto';
  * `PROD_ACCOUNT_CODE_NOT_FOUND_001`, `PROD_ACCOUNT_CODE_INACTIVE_001` o
  * `PROD_ACCOUNT_CODE_NOT_POSTABLE_001`.
  */
-export const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
-
-export const PUC_ACCOUNT_CODE_MESSAGE =
-  'La cuenta contable debe ser un código PUC numérico de 4 a 20 dígitos (por ejemplo 413550). No admite puntos, guiones ni espacios.';
+// `PUC_ACCOUNT_CODE_REGEX` y `PUC_ACCOUNT_CODE_MESSAGE` se DEFINEN en
+// `./bulk-edit-products.dto` (módulo hoja, para evitar el ciclo con el barrel)
+// y salen por el `export *` del final de este archivo.
 
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
