@@ -816,14 +816,17 @@ export class ServiceSessionsService {
   private async ensureChargeBudget(tx: Prisma.TransactionClient, storeId: number, sessionId: number, orderId: number) {
     const [order, budget] = await Promise.all([
       tx.orders.findFirst({ where: { id: orderId, store_id: storeId }, select: { grand_total: true, tip_amount: true, currency: true } }),
-      tx.service_budgets.findFirst({ where: { store_id: storeId, session_id: sessionId }, orderBy: { version: 'desc' }, select: { amount: true, currency: true } }),
+      tx.service_budgets.findFirst({ where: { store_id: storeId, session_id: sessionId }, orderBy: { version: 'desc' }, select: { amount: true, currency: true, version: true, is_system: true } }),
     ]);
     if (!order) return { covered: false };
     const authorized = new Prisma.Decimal(order.grand_total).minus(order.tip_amount ?? 0);
-    if (!budget) {
-      await tx.service_budgets.create({
-        data: { store_id: storeId, session_id: sessionId, version: 1, amount: authorized, currency: order.currency ?? 'COP', approved_at: null },
-      });
+    // Sin tope pactado (o con el base del sistema): el base sigue al total de la cuenta.
+    if (!budget || budget.is_system) {
+      if (!budget || !authorized.equals(budget.amount)) {
+        await tx.service_budgets.create({
+          data: { store_id: storeId, session_id: sessionId, version: (budget?.version ?? 0) + 1, amount: authorized, currency: order.currency ?? 'COP', approved_at: null, is_system: true },
+        });
+      }
       return { covered: true };
     }
     return { covered: budget.currency === order.currency && !authorized.greaterThan(budget.amount) };
@@ -1219,10 +1222,16 @@ export class ServiceSessionsService {
     }, 0));
     const grandTotal = roundMoney2(subtotal + tax);
     const remaining = roundMoney2(Math.max(0, grandTotal - Number(order?.total_paid ?? 0)));
-    await tx.orders.update({
+    const updatedOrder = await tx.orders.update({
       where: { id: orderId },
       data: { subtotal_amount: subtotal, tax_amount: tax, grand_total: grandTotal, remaining_balance: remaining, updated_at: now },
+      select: { store_id: true, service_session_id: true },
     });
+    // Un presupuesto base del sistema (no fijado por nadie) acompaña al total para que
+    // cobrar nunca choque contra un "tope" que el cliente no puso.
+    if (updatedOrder?.service_session_id) {
+      await this.ensureChargeBudget(tx, updatedOrder.store_id, updatedOrder.service_session_id, orderId);
+    }
     return { subtotal, tax_amount: tax, grand_total: grandTotal };
   }
 

@@ -913,7 +913,7 @@
 
   <!-- Modal 3: Gestión de Atención y Cuenta Abierta de la Bahía (Estilo Mesa Restaurante) -->
   @if (selectedSession(); as session) {
-    <app-modal [(isOpen)]="showSessionModal" [title]="'Cuenta de Estación: ' + session.station_name" [subtitle]="getCustomerName(session) + ' • Sesión #' + session.id" size="xl-mid">
+    <app-modal [(isOpen)]="showSessionModal" [title]="'Cuenta de Estación: ' + stationNameOf(session)" [subtitle]="getCustomerName(session) + ' • Sesión #' + session.id" size="xl-mid">
       <div class="space-y-5">
         <!-- Ficha del Cliente y Estado de la Atención -->
         <div class="p-4 rounded-2xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-wrap items-center justify-between gap-3">

@@ -162,7 +162,9 @@
         [reminderStatus]="row.reminder?.status"
       />
       @if (row.service.recurrence_interval_days) {
-        <span class="text-[11px] text-text-secondary">Cada {{ row.service.recurrence_interval_days }} días</span>
+        <span class="text-[11px] text-text-secondary whitespace-nowrap">
+          {{ row.service.recurrence_interval_days === 1 ? 'Cada día' : 'Cada ' + row.service.recurrence_interval_days + ' días' }}
+        </span>
       }
     </div>
   </ng-template>

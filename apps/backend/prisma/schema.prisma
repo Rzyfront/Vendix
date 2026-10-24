@@ -12777,6 +12777,9 @@ model service_budgets {
   currency   String   @db.VarChar(10)
   version    Int      @default(1)
   approved_at DateTime? @db.Timestamptz(6)
+  /// true = presupuesto base que crea el sistema para poder cobrar (sigue al total);
+  /// false = tope que fijó el comercio/cliente (nunca se sube solo).
+  is_system  Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
   @@unique([session_id, version])
   @@map("service_budgets")

@@ -150,7 +150,7 @@ export class ServiceSessionAccessService {
       this.prisma.service_budgets.findFirst({
         where: { store_id: binding.store_id, session_id: binding.session_id },
         orderBy: { version: 'desc' },
-        select: { amount: true, currency: true, version: true, approved_at: true },
+        select: { amount: true, currency: true, version: true, approved_at: true, is_system: true },
       }),
       this.prisma.service_change_proposals.findFirst({
         where: { store_id: binding.store_id, session_id: binding.session_id },
@@ -213,7 +213,8 @@ export class ServiceSessionAccessService {
           expires_at: proposal.expires_at,
         }
       : null;
-    const budgetAmount = budget ? Number(budget.amount) : null;
+    // El base del sistema no es un presupuesto del cliente: no se muestra como tal.
+    const budgetAmount = budget && !budget.is_system ? Number(budget.amount) : null;
     const accountTotal = order ? Number(order.grand_total) : 0;
     const store = await this.prisma.stores.findFirst({ where: { id: binding.store_id }, select: { id: true, name: true, logo_url: true } });
     return {
@@ -223,7 +224,7 @@ export class ServiceSessionAccessService {
       order_number: order?.order_number ?? null,
       order_created_at: order?.created_at ?? null,
       service: details,
-      budget: budget ? {
+      budget: budget && !budget.is_system ? {
         amount: String(budget.amount),
         currency: budget.currency,
         version: budget.version,

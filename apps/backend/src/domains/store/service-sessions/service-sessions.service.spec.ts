@@ -297,7 +297,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       const tx = setup(null);
       await expect(service.prepareCharge(77)).resolves.toEqual({ order_id: 88 });
       expect(tx.service_budgets.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ session_id: 77, version: 1, currency: 'COP', approved_at: null }),
+        data: expect.objectContaining({ session_id: 77, version: 1, currency: 'COP', approved_at: null, is_system: true }),
       });
       expect(Number(tx.service_budgets.create.mock.calls[0][0].data.amount)).toBe(119000);
     });
@@ -308,6 +308,15 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         response: expect.objectContaining({ error_code: 'SERVICE_BUDGET_001' }),
       });
       expect(tx.service_budgets.create).not.toHaveBeenCalled();
+    });
+
+    it('el base del sistema sube con la cuenta: nunca bloquea el cobro', async () => {
+      const tx = setup({ amount: 100000, currency: 'COP', version: 1, is_system: true });
+      await expect(service.prepareCharge(77)).resolves.toEqual({ order_id: 88 });
+      expect(tx.service_budgets.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ version: 2, is_system: true }),
+      });
+      expect(Number(tx.service_budgets.create.mock.calls[0][0].data.amount)).toBe(119000);
     });
 
     it('acepta un presupuesto que cubre el total', async () => {

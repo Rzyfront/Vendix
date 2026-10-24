@@ -33,7 +33,8 @@ export function describeDaysRemaining(
   selector: 'app-days-remaining-badge',
   standalone: true,
   imports: [BadgeComponent],
-  template: `<app-badge [variant]="view().variant" size="sm">{{ view().text }}</app-badge>`,
+  // En una sola línea: un estado partido en dos descuadra la fila de la tabla.
+  template: `<span class="inline-flex whitespace-nowrap"><app-badge [variant]="view().variant" size="sm">{{ view().text }}</app-badge></span>`,
 })
 export class DaysRemainingBadgeComponent {
   readonly status = input.required<RecurrenceStatus>();

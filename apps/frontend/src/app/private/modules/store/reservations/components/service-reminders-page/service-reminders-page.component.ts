@@ -66,15 +66,16 @@ const VARIANT_COLORS: Record<BadgeVariant, string> = {
   service: '#7c3aed',
 };
 
-/** Fecha date-only (YYYY-MM-DD) → "3 oct 2026" sin corrimiento de zona horaria. */
+const SHORT_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/**
+ * Fecha date-only (YYYY-MM-DD) → "3 oct 2026" sin corrimiento de zona horaria.
+ * Con espacios no separables para que la celda no se parta en dos líneas.
+ */
 function formatDateOnly(value: string | null): string {
   if (!value) return '—';
-  return new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString('es-CO', {
-    timeZone: 'UTC',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  return [day, SHORT_MONTHS[month - 1], year].join('\u00a0');
 }
 
 function reminderLabel(row: ServiceRegistryRow): string {
@@ -150,9 +151,9 @@ export class ServiceRemindersPageComponent {
     { key: 'customer_name', label: 'Cliente', priority: 1 },
     { key: 'service_name', label: 'Servicio', priority: 1 },
     { key: 'station_name', label: 'Estación', priority: 2 },
-    { key: 'subject_display', label: 'Vehículo / sujeto', priority: 2 },
-    { key: 'service_date_label', label: 'Fecha del servicio', priority: 1 },
-    { key: 'next_due_label', label: 'Próxima vez', priority: 2 },
+    { key: 'subject_display', label: 'Atendido', priority: 2 },
+    { key: 'service_date_label', label: 'Fecha', priority: 1 },
+    { key: 'next_due_label', label: 'Próxima', priority: 2 },
     { key: 'countdown_text', label: 'Estado', priority: 1, template: this.countdownTpl() },
     { key: 'reminder_label', label: 'Recordatorio', priority: 3 },
   ]);

@@ -1085,6 +1085,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  /** Nombre de la estación de una atención (el detalle completo no siempre lo trae). */
+  stationNameOf(session: ServiceSessionRow): string {
+    return session.station_name || this.stations().find((s) => s.id === session.station_id)?.name || 'Estación';
+  }
+
   stationTracksTime(stationId: number): boolean {
     return !!this.stations().find((s) => s.id === stationId)?.track_time;
   }
@@ -1906,7 +1911,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     // Load budget
     this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`).subscribe({
       next: (r) => {
-        const val = r?.data ?? null;
+        // El base del sistema (is_system) no es un tope del cliente: ni aviso ni "Techo".
+        const raw = r?.data ?? null;
+        const val = raw && !raw.is_system ? raw : null;
         this.budget.set(val);
         this.sessionBudgetAmount.set(val ? Number(val.amount) : null);
       },
