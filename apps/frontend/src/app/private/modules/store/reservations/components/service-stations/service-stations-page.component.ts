@@ -1055,7 +1055,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
             name: `Plantilla ${meta.label}`,
             entity_type: 'service_session',
             station_type: type,
-            status: 'active',
+            // Guía en borrador: solo aparece al crear estaciones cuando el usuario la guarda.
+            status: 'inactive',
             sections: [
               {
                 title: 'Datos de ingreso',

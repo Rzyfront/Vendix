@@ -1000,6 +1000,11 @@ export class TemplateEditorComponent implements OnInit {
       next: (t) => {
         this.template.set(t);
         this.initFormData(t);
+        // Plantilla guía de estación (borrador) abierta desde Estaciones: al guardarla
+        // queda activa y ya se puede elegir al crear estaciones.
+        if (this.returnTo() && t.status === 'inactive' && t.entity_type === 'service_session') {
+          this.updateFormData('status', 'active');
+        }
         this.loading.set(false);
       },
       error: (err) => {
