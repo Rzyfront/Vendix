@@ -578,15 +578,15 @@ export class RouteFlowService {
   async startStop(id: number, stopId: number) {
     const store_id = this.getStoreId();
     const route = await this.getRoute(id, store_id);
+    const stop = await this.prisma.dispatch_route_stops.findFirst({
+      where: { id: stopId, route_id: id },
+    });
+    if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede iniciar liquidación en planilla en estado '${route.status}'`,
       );
     }
-    const stop = await this.prisma.dispatch_route_stops.findFirst({
-      where: { id: stopId, route_id: id },
-    });
-    if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (stop.status !== 'pending') {
       throw new BadRequestException(
         `La parada está en estado '${stop.status}', solo se puede iniciar desde 'pending'`,
@@ -629,12 +629,6 @@ export class RouteFlowService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
-    if (!['dispatched', 'in_transit'].includes(route.status)) {
-      throw new BadRequestException(
-        `No se puede liquidar una parada en planilla en estado '${route.status}'`,
-      );
-    }
-
     const stop = await this.prisma.dispatch_route_stops.findFirst({
       where: { id: stopId, route_id: id },
       include: {
@@ -669,6 +663,11 @@ export class RouteFlowService {
       },
     });
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
+      throw new BadRequestException(
+        `No se puede liquidar una parada en planilla en estado '${route.status}'`,
+      );
+    }
 
     if (stop.status === 'released' || stop.status === 'delivered') {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
@@ -922,15 +921,15 @@ export class RouteFlowService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
+    const stop = await this.prisma.dispatch_route_stops.findFirst({
+      where: { id: stopId, route_id: id },
+    });
+    if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (['closed', 'voided'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede liberar una parada en planilla '${route.status}'`,
       );
     }
-    const stop = await this.prisma.dispatch_route_stops.findFirst({
-      where: { id: stopId, route_id: id },
-    });
-    if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (['released', 'delivered'].includes(stop.status)) {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
     }
