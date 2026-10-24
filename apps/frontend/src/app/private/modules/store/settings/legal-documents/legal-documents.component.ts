@@ -130,8 +130,10 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 
     <!-- Modal -->
     <app-store-legal-document-modal
-      [(isOpen)]="isModalOpen"
-      [document]="selectedDocument"
+      [isOpen]="isModalOpen()"
+      (isOpenChange)="isModalOpen.set($event)"
+      [document]="selectedDocument()"
+      [submitting]="isSubmitting()"
       (save)="onSaveDocument($event)"
       (cancel)="closeModal()"
     ></app-store-legal-document-modal>
@@ -174,8 +176,9 @@ export class LegalDocumentsComponent implements OnInit {
     });
   });
 
-  isModalOpen = false;
-  selectedDocument?: StoreLegalDocument;
+  isModalOpen = signal(false);
+  selectedDocument = signal<StoreLegalDocument | undefined>(undefined);
+  isSubmitting = signal(false);
 
   cardConfig: ItemListCardConfig = {
     titleKey: 'title',
@@ -273,16 +276,16 @@ export class LegalDocumentsComponent implements OnInit {
   }
 
   openCreateModal() {
-    this.selectedDocument = undefined;
-    this.isModalOpen = true;
+    this.selectedDocument.set(undefined);
+    this.isModalOpen.set(true);
   }
 
   openEditModal(doc: StoreLegalDocument) {
     this.loading.set(true);
     this.service.getDocument(doc.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fullDoc) => {
-        this.selectedDocument = fullDoc;
-        this.isModalOpen = true;
+        this.selectedDocument.set(fullDoc);
+        this.isModalOpen.set(true);
         this.loading.set(false);
       },
       error: (err: any) => {
@@ -294,34 +297,40 @@ export class LegalDocumentsComponent implements OnInit {
   }
 
   closeModal() {
-    this.isModalOpen = false;
-    this.selectedDocument = undefined;
+    this.isModalOpen.set(false);
+    this.selectedDocument.set(undefined);
   }
 
   onSaveDocument(dto: CreateStoreDocumentDto | UpdateStoreDocumentDto) {
-    if (this.selectedDocument) {
+    const selected = this.selectedDocument();
+    this.isSubmitting.set(true);
+    if (selected) {
       this.service
-        .updateDocument(this.selectedDocument.id, dto as UpdateStoreDocumentDto)
+        .updateDocument(selected.id, dto as UpdateStoreDocumentDto)
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
+            this.isSubmitting.set(false);
             this.toast.success('Documento actualizado');
             this.closeModal();
             this.loadDocuments();
           },
           error: (err: any) => {
             console.error(err);
-            this.toast.error('Error al actualizar');
+            this.isSubmitting.set(false);
+            this.toast.error(err.error?.message || 'Error al actualizar');
           },
         });
     } else {
       this.service.createDocument(dto as CreateStoreDocumentDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
+          this.isSubmitting.set(false);
           this.toast.success('Documento creado');
           this.closeModal();
           this.loadDocuments();
         },
         error: (err: any) => {
           console.error(err);
+          this.isSubmitting.set(false);
           this.toast.error(err.error?.message || 'Error al crear');
         },
       });
