@@ -363,11 +363,6 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
             </app-button>
           }
     
-          <app-button variant="ghost" size="md" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
-            <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
-            <span class="hidden sm:inline">Email</span>
-          </app-button>
-    
           <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
                cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
                un reintento, es un hecho económico distinto. -->
@@ -790,7 +785,6 @@ export class PosOrderConfirmationComponent {
   readonly viewDetail = output<string>();
 
   printing = false;
-  emailing = false;
   /**
    * Loading del botón «Factura». Es señal —y no un campo plano como sus dos
    * vecinos— porque ahora lo apaga la respuesta del indicador fiscal, que llega
@@ -1541,20 +1535,6 @@ private authFacade = inject(AuthFacade);
           void this.printDispatchTicketIfNeeded(trigger);
         }
       } });
-  }
-
-  emailReceipt(): void {
-    if (!this.derivedCustomerEmail()) {
-      this.toastService.warning('No hay email de cliente disponible');
-      return;
-    }
-
-    this.emailing = true;
-
-    setTimeout(() => {
-      this.emailing = false;
-      this.toastService.success('Ticket enviado por email correctamente');
-    }, 2000);
   }
 
   startNewSale(): void {
