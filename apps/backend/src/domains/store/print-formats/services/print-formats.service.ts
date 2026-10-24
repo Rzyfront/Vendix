@@ -180,7 +180,7 @@ export const FORMAT_TYPE_METADATA: Record<
   fiscal_credit_note: { name: 'Nota Crédito Electrónica', category: 'Facturación', icon: 'file-minus', engine: 'html' },
   kitchen_ticket: { name: 'Ticket de Cocina (KDS)', category: 'Restaurante', icon: 'utensils', engine: 'html' },
   dispatch_ticket: { name: 'Tiquete de Despacho', category: 'Logística', icon: 'package', engine: 'html' },
-  dispatch_route: { name: 'Planilla de Ruta (DSD)', category: 'Logística', icon: 'route', engine: 'html' },
+  dispatch_route: { name: 'Ruta (DSD)', category: 'Logística', icon: 'route', engine: 'html' },
   withholding_practiced: { name: 'Certificado Retención Practicada', category: 'Tributario', icon: 'file-minus', engine: 'html' },
   withholding_suffered: { name: 'Certificado Retención Sufrida', category: 'Tributario', icon: 'file-plus', engine: 'html' },
   withholding_employee_certificate: { name: 'Certificado Laboral Empleado', category: 'Tributario', icon: 'file-badge', engine: 'html' },

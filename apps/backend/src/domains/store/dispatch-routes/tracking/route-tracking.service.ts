@@ -34,7 +34,7 @@ export class RouteTrackingService {
         driver_user: { select: { id: true, first_name: true, last_name: true } },
       },
     });
-    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    if (!route) throw new NotFoundException(`Ruta #${id} no encontrada`);
     return route as any;
   }
 

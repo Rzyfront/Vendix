@@ -22,7 +22,7 @@ import {
           Vas a liberar
           <strong>{{ stop().dispatch_note?.dispatch_number }}</strong>
           ({{ stop().dispatch_note?.customer_name }}) para que pueda asignarse a
-          otra planilla.
+          otra ruta.
         </p>
         <div>
           <label class="block text-sm font-medium mb-1">Motivo</label>

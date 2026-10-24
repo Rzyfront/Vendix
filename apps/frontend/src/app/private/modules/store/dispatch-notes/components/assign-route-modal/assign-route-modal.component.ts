@@ -68,8 +68,8 @@ export class AssignRouteModalComponent {
   readonly submitting = signal(false);
 
   readonly modeOptions: Array<{ value: AssignMode; label: string; icon: string; description: string }> = [
-    { value: 'existing', label: 'Planilla existente', icon: 'truck', description: 'Asignar a una planilla en borrador o despachada.' },
-    { value: 'new', label: 'Nueva planilla', icon: 'plus-circle', description: 'Crear una planilla nueva con esta remisión.' },
+    { value: 'existing', label: 'Ruta existente', icon: 'truck', description: 'Asignar a una ruta en borrador o despachada.' },
+    { value: 'new', label: 'Nueva ruta', icon: 'plus-circle', description: 'Crear una ruta nueva con esta remisión.' },
   ];
 
   // ── Delivery address (normalized) ───────────────────
@@ -105,7 +105,7 @@ export class AssignRouteModalComponent {
   readonly hasAddress = computed<boolean>(() => this.addressLines().length > 0);
 
   readonly confirmLabel = computed<string>(() =>
-    this.mode() === 'new' ? 'Crear planilla' : 'Asignar a planilla',
+    this.mode() === 'new' ? 'Crear ruta' : 'Asignar a ruta',
   );
 
   readonly confirmDisabled = computed<boolean>(() => {
@@ -148,7 +148,7 @@ export class AssignRouteModalComponent {
         },
         error: (err: Error) => {
           this.loadingRoutes.set(false);
-          this.toast.error(err?.message || 'No se pudieron cargar las planillas.');
+          this.toast.error(err?.message || 'No se pudieron cargar las rutas.');
         },
       });
   }
@@ -181,13 +181,13 @@ export class AssignRouteModalComponent {
       .subscribe({
         next: () => {
           this.submitting.set(false);
-          this.toast.success('Remisión asignada a la planilla.');
+          this.toast.success('Remisión asignada a la ruta.');
           this.assigned.emit();
           this.close();
         },
         error: (err: Error) => {
           this.submitting.set(false);
-          this.toast.error(err?.message || 'No se pudo asignar la remisión a la planilla.');
+          this.toast.error(err?.message || 'No se pudo asignar la remisión a la ruta.');
         },
       });
   }

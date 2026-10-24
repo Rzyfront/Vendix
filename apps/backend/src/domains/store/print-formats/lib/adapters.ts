@@ -298,7 +298,7 @@ export const KITCHEN_TICKET_ADAPTER = freezeAdapter({
  */
 export const DISPATCH_ROUTE_ADAPTER = freezeAdapter({
   formatType: 'dispatch_route',
-  label: 'Planilla de Ruta (DSD)',
+  label: 'Ruta (DSD)',
   category: 'Logística',
   defaultPaper: 'letter',
   availableRegions: [

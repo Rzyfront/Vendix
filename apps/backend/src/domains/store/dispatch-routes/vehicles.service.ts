@@ -195,7 +195,7 @@ export class VehiclesService {
     });
     if (in_use > 0) {
       throw new BadRequestException(
-        `El vehículo está en uso en ${in_use} planilla(s). Marca como inactivo en su lugar.`,
+        `El vehículo está en uso en ${in_use} ruta(s). Marca como inactivo en su lugar.`,
       );
     }
     await this.prisma.vehicles.delete({ where: { id } });

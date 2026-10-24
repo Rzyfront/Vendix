@@ -607,7 +607,7 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/dispatch-notes',
         },
         {
-          label: 'Planillas de Ruta',
+          label: 'Rutas',
           icon: 'truck',
           route: '/admin/orders/planillas',
         },

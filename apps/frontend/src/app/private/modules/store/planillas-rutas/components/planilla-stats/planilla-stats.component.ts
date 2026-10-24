@@ -9,9 +9,9 @@ import { DispatchRouteStats } from '../../interfaces/planilla.interface';
   template: `
     <ng-container>
       <app-stats
-        title="Total Planillas"
+        title="Total Rutas"
         [value]="formatNumber(stats()?.total ?? 0)"
-        smallText="Planillas creadas"
+        smallText="Rutas creadas"
         iconName="file-text"
         iconBgColor="bg-blue-100"
         iconColor="text-blue-500"

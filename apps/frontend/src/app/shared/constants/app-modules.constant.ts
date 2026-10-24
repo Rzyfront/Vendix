@@ -227,7 +227,7 @@ export const APP_MODULES: {
         },
         {
           key: 'orders_dispatch_routes',
-          label: 'Planillas de Ruta',
+          label: 'Rutas',
           description: 'Rutas de despacho DSD con recaudo en ruta',
         },
         {
@@ -512,7 +512,7 @@ export const APP_MODULES: {
     {
       key: 'reports_dispatch',
       label: 'Despachos',
-      description: 'Reportes de remisiones, planillas de ruta y flota',
+      description: 'Reportes de remisiones, rutas y flota',
     },
 
     // Contabilidad (padre con hijos)

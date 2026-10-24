@@ -211,9 +211,9 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
                 }
                 @case ('new') {
                   @if (wizardService.newRouteDraft(); as draft) {
-                    Nueva planilla · {{ draft.planned_date }} · #{{ draft.driver_user_id }}
+                    Nueva ruta · {{ draft.planned_date }} · #{{ draft.driver_user_id }}
                   } @else {
-                    Nueva planilla (borrador)
+                    Nueva ruta (borrador)
                   }
                 }
               }

@@ -763,7 +763,7 @@ export class OrdersBulkService {
       return {
         ...base,
         status: 'ok' as const,
-        message: `Se creará la remisión (${pending} ${pending === 1 ? 'unidad' : 'unidades'} pendientes) y se asignará a la planilla`,
+        message: `Se creará la remisión (${pending} ${pending === 1 ? 'unidad' : 'unidades'} pendientes) y se asignará a la ruta`,
       };
     });
 
@@ -851,7 +851,7 @@ export class OrdersBulkService {
         results.push({
           id: row.order_id,
           status: 'ok',
-          message: `Remisión ${row.dispatch_number} creada y asignada a planilla ${dto.route_id}`,
+          message: `Remisión ${row.dispatch_number} creada y asignada a ruta ${dto.route_id}`,
         });
       } else if (row.status === 'skipped') {
         // Idempotente: ya estaba aplicado (batch_key). Lo contamos como ok.
@@ -886,7 +886,7 @@ export class OrdersBulkService {
         } as any);
       } catch (error: any) {
         this.logger.warn(
-          `bulkAssignRoute: remisiones creadas pero addStops a planilla ${dto.route_id} falló: ${error?.message}`,
+          `bulkAssignRoute: remisiones creadas pero addStops a ruta ${dto.route_id} falló: ${error?.message}`,
         );
         // Las remisiones ya existen (efecto deseado: la orden está remitida),
         // pero NO quedaron en la planilla. Se advierte en cada fila ok para que
@@ -896,7 +896,7 @@ export class OrdersBulkService {
           if (r.status === 'ok' && okOrderIds.has(r.id)) {
             r.message =
               (r.message ?? '') +
-              ` | ADVERTENCIA: no se pudo asignar a la planilla ${dto.route_id}: ${error?.message ?? 'error desconocido'}`;
+              ` | ADVERTENCIA: no se pudo asignar a la ruta ${dto.route_id}: ${error?.message ?? 'error desconocido'}`;
           }
         }
       }

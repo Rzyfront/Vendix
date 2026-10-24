@@ -173,7 +173,8 @@ export class MenuFilterService {
     // STORE_ADMIN - Despacho (padre + submódulos)
     Despacho: 'dispatch',
     Remisiones: 'orders_dispatch_notes',
-    'Planillas de Ruta': 'orders_dispatch_routes',
+    'Planillas de Ruta': 'orders_dispatch_routes', // legacy label
+    Rutas: 'orders_dispatch_routes',
     Flota: 'dispatch_fleet',
 
     // ORG_ADMIN - Compras (consolidado) + analytics_purchases (Analiticas > Compras)

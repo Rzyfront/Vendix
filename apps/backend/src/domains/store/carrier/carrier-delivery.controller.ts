@@ -239,7 +239,7 @@ export class CarrierDeliveryController {
       total,
       page,
       limit,
-      'Historial de planillas',
+      'Historial de rutas',
     );
   }
 
@@ -248,6 +248,6 @@ export class CarrierDeliveryController {
   @Permissions('store:carrier:route:read')
   async getMyRouteById(@Param('id', ParseIntPipe) id: number) {
     const result = await this.carrierService.getMyRouteById(id);
-    return this.responseService.success(result, 'Detalle de planilla');
+    return this.responseService.success(result, 'Detalle de ruta');
   }
 }

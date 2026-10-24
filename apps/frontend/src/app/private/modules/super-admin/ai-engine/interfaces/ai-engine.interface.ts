@@ -398,7 +398,7 @@ export const AI_QUEUE_DESCRIPTIONS: Record<string, string> = {
   'ai-agent':
     'Tareas delegadas del agente: revisiones y validaciones que corren sin supervisión.',
   'receipt-scan':
-    'OCR de recibos y facturas de planillas de despacho. El endpoint responde 202 y se consulta por ID.',
+    'OCR de recibos y facturas de rutas de despacho. El endpoint responde 202 y se consulta por ID.',
   'expense-scan':
     'OCR de facturas de gasto. El endpoint responde 202 y se consulta por ID.',
 };

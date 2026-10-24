@@ -563,7 +563,7 @@ export class PdfExportService {
     doc
       .font('Helvetica-Bold')
       .fontSize(this.fz(L, 18))
-      .text('PLANILLA DE DESPACHO', L.margin, L.margin, {
+      .text('RUTA', L.margin, L.margin, {
         align: 'center',
         width: L.content,
       });
@@ -583,7 +583,7 @@ export class PdfExportService {
     doc
       .font('Helvetica-Bold')
       .fontSize(this.fz(L, 14))
-      .text(`Planilla N° ${route.route_number}`, L.margin, doc.y, {
+      .text(`Ruta N° ${route.route_number}`, L.margin, doc.y, {
         width: L.content,
       });
     if (route.route_code) {
@@ -1033,7 +1033,7 @@ export class PdfExportService {
     const y = doc.y;
     const labels = [
       'Conductor / Responsable de la ruta',
-      'Quien recibe / Cierra la planilla',
+      'Quien recibe / Cierra la ruta',
     ];
     doc.font('Helvetica').fontSize(this.fz(L, 9));
 

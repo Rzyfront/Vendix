@@ -67,7 +67,7 @@ export const ROUTE_STATUS_LABELS: Record<DispatchRouteStatus, string> = {
     <app-wizard-step-section
       icon="truck"
       title="Ruta"
-      subtitle="Asigna una planilla ahora o déjala sin ruta (se creará como borrador)"
+      subtitle="Asigna una ruta ahora o deja la remisión sin ruta (se creará como borrador)"
       [dense]="true"
     >
       <!-- Mode radio group -->
@@ -98,20 +98,20 @@ export const ROUTE_STATUS_LABELS: Record<DispatchRouteStatus, string> = {
       @if (wizardService.routeMode() === 'existing') {
         <div class="space-y-1.5">
           <app-inputsearch
-            placeholder="Buscar planilla por # o ruta..."
+            placeholder="Buscar ruta por # o nombre..."
             [debounceTime]="300"
             (search)="onRouteSearch($event)"
           ></app-inputsearch>
 
           @if (loadingRoutes()) {
             <p class="text-xs text-[var(--color-text-secondary)] py-1.5 px-1">
-              Buscando planillas...
+              Buscando rutas...
             </p>
           }
 
           @if (!loadingRoutes() && routes().length === 0) {
             <p class="text-xs text-[var(--color-text-muted)] py-2 px-1">
-              No hay planillas registradas.
+              No hay rutas registradas.
             </p>
           }
 
@@ -146,7 +146,7 @@ export const ROUTE_STATUS_LABELS: Record<DispatchRouteStatus, string> = {
               </p>
               @if (!isAssignable(r)) {
                 <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
-                  No admite nuevas remisiones: solo se pueden asignar planillas en Borrador o Despachada.
+                  No admite nuevas remisiones: solo se pueden asignar rutas en Borrador o Despachada.
                 </p>
               }
             </button>
@@ -182,7 +182,7 @@ export const ROUTE_STATUS_LABELS: Record<DispatchRouteStatus, string> = {
 
           <app-textarea
             label="Notas (opcional)"
-            placeholder="Notas internas de la planilla..."
+            placeholder="Notas internas de la ruta..."
             [rows]="2"
             [ngModel]="notes()"
             (ngModelChange)="setNotes($event)"
@@ -204,8 +204,8 @@ export class RouteStepComponent {
     icon: string;
   }> = [
     { value: 'none', label: 'Sin ruta', description: 'Entrega directa desde la remisión.', icon: 'x' },
-    { value: 'existing', label: 'Planilla existente', description: 'Asignar a una planilla en borrador o despachada.', icon: 'truck' },
-    { value: 'new', label: 'Nueva planilla', description: 'Crear planilla y asignar la remisión.', icon: 'plus-circle' },
+    { value: 'existing', label: 'Ruta existente', description: 'Asignar a una ruta en borrador o despachada.', icon: 'truck' },
+    { value: 'new', label: 'Nueva ruta', description: 'Crear ruta y asignar la remisión.', icon: 'plus-circle' },
   ];
 
   readonly statusLabels = ROUTE_STATUS_LABELS;

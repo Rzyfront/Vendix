@@ -92,7 +92,7 @@ interface AvailableNote {
   template: `
     <app-modal
       [isOpen]="true"
-      title="Nueva Planilla de Despacho"
+      title="Nueva Ruta"
       size="lg"
       (cancel)="close.emit()"
     >
@@ -629,7 +629,7 @@ interface AvailableNote {
             [showTextWhileLoading]="true"
             (clicked)="submit()"
           >
-            Crear planilla
+            Crear ruta
           </app-button>
         </div>
       }

@@ -217,7 +217,7 @@ export class RouteSheetScannerService implements OnModuleInit {
         mappedCount++;
       } else {
         warnings.push(
-          `Fila parada #${extracted.stop_sequence}${extracted.remision_number ? ` (rem ${extracted.remision_number})` : ''} no mapea a ninguna parada de la planilla.`,
+          `Fila parada #${extracted.stop_sequence}${extracted.remision_number ? ` (rem ${extracted.remision_number})` : ''} no mapea a ninguna parada de la ruta.`,
         );
       }
 

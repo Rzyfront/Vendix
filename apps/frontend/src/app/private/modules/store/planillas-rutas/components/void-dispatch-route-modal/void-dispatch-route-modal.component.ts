@@ -25,22 +25,22 @@ import {
   template: `
     <app-modal
       [isOpen]="true"
-      title="Anular planilla de despacho"
+      title="Anular ruta"
       size="md"
       (cancel)="close.emit()"
     >
       <div class="space-y-3">
         <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <strong>Advertencia:</strong> anular la planilla es una acción irreversible.
+          <strong>Advertencia:</strong> anular la ruta es una acción irreversible.
           @if (route().status === 'draft') {
             <p class="mt-1">
-              Como la planilla está en borrador, se anulará sin impacto contable.
-              Las remisiones <strong>no asignadas</strong> podrán asignarse a otra planilla.
+              Como la ruta está en borrador, se anulará sin impacto contable.
+              Las remisiones <strong>no asignadas</strong> podrán asignarse a otra ruta.
             </p>
           } @else {
             <p class="mt-1">
               Las paradas pendientes se marcan como <strong>released</strong>
-              y sus remisiones vuelven a estar disponibles para asignar a otra planilla.
+              y sus remisiones vuelven a estar disponibles para asignar a otra ruta.
               Las paradas ya liquidadas <strong>no se revierten</strong> — el efectivo
               y los movimientos ya quedaron en el libro auxiliar.
             </p>
@@ -79,7 +79,7 @@ import {
         </div>
 
         <div class="text-xs text-text-secondary">
-          Planilla: <strong>{{ route().route_number }}</strong>
+          Ruta: <strong>{{ route().route_number }}</strong>
           · Estado actual: <strong>{{ route().status }}</strong>
         </div>
       </div>
@@ -98,7 +98,7 @@ import {
           [disabled]="!canSubmit() || submitting()"
           class="flex-1 rounded-md bg-red-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
-          {{ submitting() ? 'Anulando...' : 'Anular planilla' }}
+          {{ submitting() ? 'Anulando...' : 'Anular ruta' }}
         </button>
       </div>
     </app-modal>
