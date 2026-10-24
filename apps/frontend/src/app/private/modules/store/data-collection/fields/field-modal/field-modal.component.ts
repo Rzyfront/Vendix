@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, output, OnInit } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
-import { MetadataField } from '../../interfaces/metadata-field.interface';
+import { FIELD_TYPE_LABELS, FieldType, MetadataField } from '../../interfaces/metadata-field.interface';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
@@ -23,14 +23,14 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
     >
       <div class="space-y-4">
         <app-input
-          label="Label"
+          label="Nombre del campo"
           [(ngModel)]="formData.label"
           (inputChange)="autoGenerateKey()"
           [required]="true"
         />
 
         <app-input
-          label="Key"
+          label="Clave interna"
           [(ngModel)]="formData.field_key"
           [disabled]="!!field()"
         />
@@ -59,7 +59,7 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 
         <div class="grid grid-cols-2 gap-4">
           <app-selector
-            label="Modo de Display"
+            label="Modo de visualización"
             [(ngModel)]="formData.display_mode"
             [options]="displayModeOptions"
           />
@@ -104,7 +104,8 @@ export class FieldModalComponent implements OnInit {
     { value: 'service_session', label: 'Atención de servicio' },
   ];
 
-  fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: t }));
+
+  fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: FIELD_TYPE_LABELS[t as FieldType] ?? t }));
 
   displayModeOptions = [
     { value: 'detail', label: 'Detalle' },

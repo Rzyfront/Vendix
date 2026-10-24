@@ -11,7 +11,7 @@ import {
   TemplateSection,
   TemplateItem,
 } from '../../interfaces/data-collection-template.interface';
-import { MetadataField } from '../../interfaces/metadata-field.interface';
+import { FIELD_TYPE_LABELS, MetadataField } from '../../interfaces/metadata-field.interface';
 import { DataCollectionTemplatesService } from '../../services/data-collection-templates.service';
 import { MetadataFieldsService } from '../../services/metadata-fields.service';
 import { FieldModalComponent } from '../../fields/field-modal/field-modal.component';
@@ -259,6 +259,17 @@ interface Selection {
                     [showActionButton]="false"
                   />
                 }
+              } @else {
+                <!-- Plantilla aún sin campos (p. ej. recién creada desde una estación) -->
+                <app-empty-state
+                  icon="clipboard-list"
+                  title="Esta plantilla aún no tiene campos"
+                  description="Agrega los datos que quieres pedir (placa, documento, correo…) con Campos sugeridos o Crear campo, y vuelve a la vista previa."
+                  [showActionButton]="true"
+                  actionButtonText="Campos sugeridos"
+                  actionButtonIcon="sparkles"
+                  (actionClick)="showPreview.set(false); openSuggested()"
+                />
               }
             </div>
           </div>
@@ -1189,12 +1200,7 @@ export class TemplateEditorComponent implements OnInit {
     if (this.showPreview()) {
       this.showPreview.set(false);
     } else {
-      if (this.previewSteps().length === 0) {
-        this.toastService.info(
-          'La plantilla no tiene campos para previsualizar',
-        );
-        return;
-      }
+      // Sin campos también se abre: la vista previa explica qué agregar.
       this.previewStep.set(0);
       this.showPreview.set(true);
     }
@@ -1433,7 +1439,7 @@ export class TemplateEditorComponent implements OnInit {
   getFieldOptionsForSection(si: number, isChild: boolean, parentIndex: number) {
     return this.getAvailableFieldsForSection(si, isChild, parentIndex).map((f) => ({
       value: String(f.id),
-      label: `${f.label} (${f.field_type})`,
+      label: `${f.label} (${FIELD_TYPE_LABELS[f.field_type] ?? f.field_type})`,
     }));
   }
 
@@ -1662,9 +1668,8 @@ export class TemplateEditorComponent implements OnInit {
   }
 
   getFieldType(fieldId: number): string {
-    return (
-      this.availableFields().find((f) => f.id === fieldId)?.field_type || ''
-    );
+    const type = this.availableFields().find((f) => f.id === fieldId)?.field_type;
+    return type ? FIELD_TYPE_LABELS[type] ?? type : '';
   }
 
   // --- Product Helpers ---
