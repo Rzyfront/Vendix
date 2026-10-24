@@ -125,6 +125,7 @@ export interface DispatchNote {
   discount_amount: number;
   tax_amount: number;
   grand_total: number;
+  shipping_cost?: number | string;
   currency?: string;
   notes?: string;
   internal_notes?: string;
@@ -143,6 +144,13 @@ export interface DispatchNote {
   dispatch_note_items?: DispatchNoteItem[];
   customer?: any;
   sales_order?: any;
+  order?: {
+    id: number;
+    order_number?: string;
+    state?: string;
+    shipping_tax_amount?: number | string | null;
+    shipping_tax_name?: string | null;
+  } | null;
   invoice?: any;
   dispatch_location?: any;
   created_by_user?: any;

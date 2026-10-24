@@ -69,6 +69,10 @@ export interface DispatchNotePdfData {
    * papel no se retracta (fail-closed), igual que en el resto del dominio.
    */
   prints_vat_breakdown: boolean;
+  /** Envío BRUTO (ya incluye su impuesto). Se imprime como línea aparte. */
+  shipping_cost: number;
+  shipping_tax_amount?: number;
+  shipping_tax_name?: string;
   grand_total: number;
   currency?: string;
 
@@ -429,6 +433,16 @@ export class DispatchNotePdfBuilder {
     // condición, divergiendo del riel A que sí gatea el desglose de IVA).
     if (data.prints_vat_breakdown && data.tax_amount > 0) {
       line('IVA:', COP.format(data.tax_amount));
+    }
+    if (data.shipping_cost > 0) {
+      line('Envío:', COP.format(data.shipping_cost));
+      // Mismo gate fiscal que la fila IVA.
+      if (data.prints_vat_breakdown && (data.shipping_tax_amount ?? 0) > 0) {
+        line(
+          `Incluye ${data.shipping_tax_name || 'impuesto'}:`,
+          COP.format(data.shipping_tax_amount as number),
+        );
+      }
     }
 
     // Total box.
