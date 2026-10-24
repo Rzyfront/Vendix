@@ -12,6 +12,13 @@ export interface PaginatedApiResponse<T> {
 
 export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
 
+export interface ProviderAvailability {
+  provider_id: number;
+  display_name: string;
+  status: 'available' | 'no_schedule' | 'off_schedule' | 'busy' | 'inactive';
+  detail: string | null;
+}
+
 export interface ServiceStation {
   id: number;
   name: string;
@@ -246,6 +253,14 @@ export class ServiceStationsService {
     return this.http
       .post<{ data?: { order_id: number } } | { order_id: number }>(`${environment.apiUrl}/store/service-sessions/${sessionId}/prepare-charge`, {})
       .pipe(map((r) => this.unwrap(r)));
+  }
+
+  /** Personal asignado a la estación con su disponibilidad para atender ahora. */
+  getProviderAvailability(stationId: number, plannedEndAt: string): Observable<ProviderAvailability[]> {
+    const params = new HttpParams().set('station_id', String(stationId)).set('planned_end_at', plannedEndAt);
+    return this.http
+      .get<{ data?: ProviderAvailability[] } | ProviderAvailability[]>(`${environment.apiUrl}/store/service-sessions/provider-availability`, { params })
+      .pipe(map((r) => this.unwrap(r) ?? []));
   }
 
   reissueAccessLink(

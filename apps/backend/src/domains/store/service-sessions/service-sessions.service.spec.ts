@@ -355,4 +355,46 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       expect(tx.order_items.create).not.toHaveBeenCalled();
     });
   });
+
+  describe('assessProviders (horario y ocupación del personal)', () => {
+    // Martes 2026-10-20 10:00 hora Bogotá (UTC-5).
+    const NOW = new Date('2026-10-20T15:00:00.000Z');
+    const END = new Date('2026-10-20T15:45:00.000Z');
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(NOW);
+      prisma.store_settings = { findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }) };
+      prisma.service_providers = { findMany: jest.fn().mockResolvedValue([
+        { id: 1, display_name: 'Sin horario', is_active: true },
+        { id: 2, display_name: 'Libre', is_active: true },
+        { id: 3, display_name: 'Ocupado', is_active: true },
+        { id: 4, display_name: 'Con reserva', is_active: true },
+        { id: 5, display_name: 'Fuera de turno', is_active: true },
+      ]) };
+      const workday = (provider_id: number, start = '08:00', end = '18:00') => ({ provider_id, day_of_week: 2, start_time: start, end_time: end });
+      prisma.provider_schedules = { findMany: jest.fn().mockResolvedValue([workday(2), workday(3), workday(4), workday(5, '14:00', '18:00')]) };
+      prisma.provider_exceptions = { findMany: jest.fn().mockResolvedValue([]) };
+      prisma.service_allocations = { findMany: jest.fn().mockResolvedValue([{ provider_id: 3, station_id: 9, session_id: 50, booking_id: null }]) };
+      prisma.bookings = { findMany: jest.fn().mockResolvedValue([{ provider_id: 4, start_time: '10:15', end_time: '11:00' }]) };
+      prisma.service_stations.findMany = jest.fn().mockResolvedValue([{ id: 9, name: 'Bahía 2' }]);
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    it('clasifica sin horario, fuera de turno, ocupado, con reserva y disponible', async () => {
+      const result = await service.assessProviders(3, END, [1, 2, 3, 4, 5]);
+      const byName = Object.fromEntries(result.map((r: any) => [r.display_name, r]));
+      expect(byName['Sin horario']).toMatchObject({ status: 'no_schedule' });
+      expect(byName['Libre']).toMatchObject({ status: 'available' });
+      expect(byName['Ocupado']).toMatchObject({ status: 'busy', detail: 'Atendiendo en Bahía 2' });
+      expect(byName['Con reserva']).toMatchObject({ status: 'busy' });
+      expect(byName['Fuera de turno']).toMatchObject({ status: 'off_schedule' });
+    });
+
+    it('una excepción de día libre deja al especialista fuera de turno', async () => {
+      prisma.provider_exceptions.findMany.mockResolvedValue([{ provider_id: 2, is_unavailable: true, custom_start_time: null, custom_end_time: null }]);
+      const result = await service.assessProviders(3, END, [2]);
+      expect(result.find((r: any) => r.display_name === 'Libre')).toMatchObject({ status: 'off_schedule' });
+    });
+  });
 });

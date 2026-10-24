@@ -105,6 +105,17 @@ export class OpenServiceSessionDto {
   intake_values?: ServiceIntakeValueDto[];
 }
 
+export class ProviderAvailabilityQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  station_id: number;
+
+  @IsOptional()
+  @IsDateString()
+  planned_end_at?: string;
+}
+
 export class ServiceIntakeQueryDto {
   /** Opcional si se envía station_id: la plantilla de la estación no depende del servicio. */
   @IsOptional()

@@ -29,6 +29,7 @@ import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
 import {
   ServiceStation,
+  ProviderAvailability,
   ServiceStationsService,
   StationProviderOption,
   StationServiceOption,
@@ -545,18 +546,36 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return current + quantity * Math.max(0, unitPrice);
   });
 
+  readonly checkinProviderAvailability = signal<ProviderAvailability[]>([]);
+  /** Personal de la estación que no se puede asignar ahora, con el motivo. */
+  readonly unavailableCheckinProviders = computed(() =>
+    this.checkinProviderAvailability().filter((entry) => entry.status !== 'available' && entry.status !== 'inactive'),
+  );
+
+  private loadCheckinProviderAvailability(): void {
+    const stationId = Number(this.checkinStationId() || 0);
+    this.checkinProviderAvailability.set([]);
+    if (!stationId) return;
+    const plannedEnd = new Date(Date.now() + (Number(this.checkinDurationMinutes()) || 45) * 60000).toISOString();
+    this.stationsApi.getProviderAvailability(stationId, plannedEnd).subscribe({
+      next: (list) => {
+        if (Number(this.checkinStationId()) !== stationId) return;
+        this.checkinProviderAvailability.set(list);
+        const chosen = Number(this.checkinProviderId() || 0);
+        if (chosen && !list.some((p) => p.provider_id === chosen && p.status === 'available')) this.checkinProviderId.set(0);
+      },
+      error: () => this.checkinProviderAvailability.set([]),
+    });
+  }
+
   readonly providerSelectorOptions = computed<SelectorOption[]>(() => {
     const opts: SelectorOption[] = [
       { value: 0, label: 'Rotativo / Sin asignar' },
     ];
-    // Solo el personal asignado a ESTA estación (Configurar estación → Proveedores).
-    const assigned = new Set(this.selectedCheckinStation()?.providers?.map((entry) => entry.provider_id) ?? []);
-    for (const p of this.providers().filter((provider) => assigned.has(provider.id))) {
-      opts.push({
-        value: p.id,
-        label: p.display_name,
-        disabled: !p.is_active,
-      });
+    // Solo el personal de ESTA estación con horario que cubre este momento y libre
+    // (sin otra atención ni reserva que se cruce); el backend lo vuelve a validar.
+    for (const p of this.checkinProviderAvailability().filter((entry) => entry.status === 'available')) {
+      opts.push({ value: p.provider_id, label: p.display_name });
     }
     return opts;
   });
@@ -1354,6 +1373,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       target = freeStation || this.stations()[0] || null;
     }
     this.checkinStationId.set(target ? target.id : null);
+    this.loadCheckinProviderAvailability();
     this.checkinVehicleName.set('');
     this.checkinPlate.set('');
     this.checkinMileage.set('');
@@ -1394,6 +1414,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
     this.checkinProviderId.set(0); // el técnico elegido puede no estar asignado a la nueva estación
+    this.loadCheckinProviderAvailability();
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
     this.loadCheckinIntake();

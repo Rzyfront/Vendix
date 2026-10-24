@@ -25,6 +25,7 @@ import {
   ExtendServiceSessionDto,
   ListActiveServiceSessionsDto,
   OpenServiceSessionDto,
+  ProviderAvailabilityQueryDto,
   ServiceIntakePrefillQueryDto,
   ServiceIntakeQueryDto,
   ServiceSessionTransitionDto,
@@ -55,6 +56,13 @@ export class ServiceSessionsController {
   }
 
   // Static routes MUST be declared before the `:id` routes.
+  @Get('provider-availability')
+  @Permissions('store:reservations:read')
+  async providerAvailability(@Query() query: ProviderAvailabilityQueryDto) {
+    const end = query.planned_end_at ? new Date(query.planned_end_at) : new Date(Date.now() + 45 * 60_000);
+    return this.response.success(await this.sessions.assessProviders(query.station_id, end));
+  }
+
   @Get('intake-template')
   @Permissions('store:reservations:read')
   async intakeTemplate(@Query() query: ServiceIntakeQueryDto) {

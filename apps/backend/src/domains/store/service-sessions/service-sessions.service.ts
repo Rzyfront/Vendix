@@ -177,13 +177,19 @@ export class ServiceSessionsService {
         ]);
         if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
       } else {
-        // Walk-in: el técnico debe estar activo y asignado a ESTA estación.
+        // Walk-in: el técnico debe estar activo, asignado a ESTA estación, con horario
+        // que cubra este momento y sin otra atención o reserva que se cruce.
         const [provider, stationProvider] = await Promise.all([
           this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true }, select: { id: true } }),
           this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: stationId, provider_id: providerId }, select: { id: true } }),
         ]);
         if (!provider || !stationProvider) {
           throw new VendixHttpException(ErrorCodes.STATION_001, 'El técnico no está asignado a esta estación.');
+        }
+        const walkInEnd = dto.planned_end_at ? new Date(dto.planned_end_at) : new Date(Date.now() + 45 * 60_000);
+        const [assessment] = await this.assessProviders(stationId, walkInEnd, [providerId]);
+        if (assessment && assessment.status !== 'available') {
+          throw new VendixHttpException(ErrorCodes.STATION_001, `No se puede asignar a ${assessment.display_name}: ${assessment.detail}.`);
         }
       }
     } else if (bookingAllocation && product.booking_mode === 'provider_required') {
@@ -340,6 +346,88 @@ export class ServiceSessionsService {
     this.emit(storeId, result.id, 'opened', { status: 'open' });
     delete (result as Partial<typeof result>).access_token_id;
     return result;
+  }
+
+  /**
+   * Disponibilidad del personal para iniciar una atención YA en una estación:
+   * - `no_schedule`: no tiene ningún horario configurado.
+   * - `off_schedule`: tiene horario, pero hoy/ahora no trabaja (o tiene excepción).
+   * - `busy`: ya está en otra atención o tiene una reserva que se cruza.
+   * - `available`: se puede asignar.
+   * Sin `providerIds` evalúa el personal asignado a la estación.
+   */
+  async assessProviders(stationId: number, plannedEnd: Date, providerIds?: number[]) {
+    const { storeId } = this.requireContext();
+    const now = new Date();
+    const ids = providerIds ?? (await this.prisma.service_station_providers.findMany({
+      where: { store_id: storeId, station_id: stationId },
+      select: { provider_id: true },
+    })).map((row) => row.provider_id);
+    if (!ids.length) return [];
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(now).map((part) => [part.type, part.value]),
+    ) as Record<string, string>;
+    const localDate = `${parts.year}-${parts.month}-${parts.day}`;
+    const weekday = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
+    const nowMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+    const endParts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-CA', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(plannedEnd).map((part) => [part.type, part.value]),
+    ) as Record<string, string>;
+    const endMinutes = Math.max(nowMinutes + 1, Number(endParts.hour) * 60 + Number(endParts.minute));
+    const toMinutes = (hhmm: string) => {
+      const [h, m] = hhmm.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    const [providers, schedules, exceptions, allocations, bookings] = await Promise.all([
+      this.prisma.service_providers.findMany({ where: { id: { in: ids }, store_id: storeId }, select: { id: true, display_name: true, is_active: true } }),
+      this.prisma.provider_schedules.findMany({ where: { provider_id: { in: ids }, is_active: true }, select: { provider_id: true, day_of_week: true, start_time: true, end_time: true } }),
+      this.prisma.provider_exceptions.findMany({ where: { provider_id: { in: ids }, date: new Date(`${localDate}T00:00:00.000Z`) }, select: { provider_id: true, is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
+      this.prisma.service_allocations.findMany({
+        where: {
+          store_id: storeId, provider_id: { in: ids }, state: { in: ACTIVE_ALLOCATIONS },
+          start_at: { lt: plannedEnd }, end_at: { gt: now },
+          OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+        },
+        select: { provider_id: true, station_id: true, session_id: true, booking_id: true },
+      }),
+      this.prisma.bookings.findMany({
+        where: { store_id: storeId, provider_id: { in: ids }, date: new Date(`${localDate}T00:00:00.000Z`), status: { in: ['pending', 'confirmed', 'arriving', 'in_progress', 'attending'] } },
+        select: { provider_id: true, start_time: true, end_time: true },
+      }),
+    ]);
+    const stationNames = new Map(
+      (await this.prisma.service_stations.findMany({ where: { store_id: storeId, id: { in: [...new Set(allocations.map((a) => a.station_id))] } }, select: { id: true, name: true } }))
+        .map((station) => [station.id, station.name]),
+    );
+
+    return providers.map((provider) => {
+      const base = { provider_id: provider.id, display_name: provider.display_name };
+      if (!provider.is_active) return { ...base, status: 'inactive' as const, detail: 'Inactivo' };
+      const own = schedules.filter((s) => s.provider_id === provider.id);
+      if (!own.length) return { ...base, status: 'no_schedule' as const, detail: 'No tiene horario configurado' };
+      const exception = exceptions.find((e) => e.provider_id === provider.id);
+      if (exception?.is_unavailable && !exception.custom_start_time) {
+        return { ...base, status: 'off_schedule' as const, detail: 'Hoy no trabaja (excepción de horario)' };
+      }
+      const windows = exception?.custom_start_time && exception.custom_end_time
+        ? [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]
+        : own.filter((s) => s.day_of_week === weekday);
+      if (!windows.some((w) => nowMinutes >= toMinutes(w.start_time) && nowMinutes < toMinutes(w.end_time))) {
+        return { ...base, status: 'off_schedule' as const, detail: windows.length ? 'Fuera de su horario en este momento' : 'Hoy no trabaja según su horario' };
+      }
+      const allocation = allocations.find((a) => a.provider_id === provider.id);
+      if (allocation) {
+        const where = stationNames.get(allocation.station_id) ?? 'otra estación';
+        return { ...base, status: 'busy' as const, detail: allocation.session_id ? `Atendiendo en ${where}` : `Reservado en ${where}` };
+      }
+      const booking = bookings.find((b) => b.provider_id === provider.id && toMinutes(b.start_time) < endMinutes && toMinutes(b.end_time) > nowMinutes);
+      if (booking) return { ...base, status: 'busy' as const, detail: `Tiene una reserva de ${booking.start_time} a ${booking.end_time}` };
+      return { ...base, status: 'available' as const, detail: null };
+    });
   }
 
   /**

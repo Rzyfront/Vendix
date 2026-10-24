@@ -872,12 +872,27 @@
         </div>
       }
 
-      <app-selector
-        label="Técnico / Especialista Asignado"
-        [options]="providerSelectorOptions()"
-        [ngModel]="checkinProviderId()"
-        (ngModelChange)="checkinProviderId.set($event)"
-      />
+      <div>
+        <app-selector
+          label="Técnico / Especialista Asignado"
+          [options]="providerSelectorOptions()"
+          [ngModel]="checkinProviderId()"
+          (ngModelChange)="checkinProviderId.set($event)"
+        />
+        @if (unavailableCheckinProviders().length) {
+          <div class="mt-2 p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs space-y-1">
+            <span class="font-semibold text-amber-700 dark:text-amber-300">No disponibles ahora:</span>
+            @for (p of unavailableCheckinProviders(); track p.provider_id) {
+              <div class="text-[var(--color-text-secondary)]">
+                <span class="font-semibold text-[var(--color-text-primary)]">{{ p.display_name }}</span> — {{ p.detail }}
+                @if (p.status === 'no_schedule' || p.status === 'off_schedule') {
+                  · <span class="text-amber-700 dark:text-amber-300">revisa su horario en Reservas → Personal</span>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
 
       <app-textarea
         label="Instrucciones Especiales / Notas (Opcional)"
