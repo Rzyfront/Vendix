@@ -21,6 +21,7 @@ import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
+import { serviceBudgetBlocks, serviceOrderTxOptions } from '../../orders/utils/service-budget-cap.util';
 import { ProcessReservedPosPaymentDto } from '../dto/create-payment.dto';
 
 @Injectable()
@@ -719,6 +720,13 @@ export class PaymentGatewayService {
   ) {
     let serviceSessionId: number | null | undefined;
     try {
+      // Serializable only for service-station orders: minimal pre-read.
+      const preOrder = await this.prisma.orders.findFirst({
+        where: { id: paymentData.orderId, store_id: paymentData.storeId },
+        select: { service_session_id: true },
+      });
+      serviceSessionId = preOrder?.service_session_id ?? null;
+      const txOptions = serviceOrderTxOptions(serviceSessionId);
       return await this.prisma.$transaction(async (tx) => {
         await lockOrderLifecycle(tx, paymentData.orderId, paymentData.storeId);
         const order = await tx.orders.findFirst({
@@ -739,18 +747,14 @@ export class PaymentGatewayService {
               session_id: serviceSessionId,
             },
             orderBy: { version: 'desc' },
-            select: { amount: true, currency: true },
+            select: { amount: true, currency: true, is_system: true },
           });
           // A service-session payment requires its initialized budget and
           // must still agree immediately before a pending provider payment is recorded.
           const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
             order.tip_amount ?? 0,
           );
-          if (
-            !budget ||
-            budget.currency !== order.currency ||
-            authorizedTotal.greaterThan(budget.amount)
-          ) {
+          if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
             throw new VendixHttpException(
               ErrorCodes.SERVICE_BUDGET_001,
               'No se puede iniciar el pago: el total de la orden no coincide con el presupuesto vigente.',
@@ -777,7 +781,7 @@ export class PaymentGatewayService {
             gateway_response: paymentData.metadata,
           },
         });
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      }, txOptions);
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2034') {
         if (serviceSessionId === undefined) {

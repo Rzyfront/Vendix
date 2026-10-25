@@ -404,8 +404,11 @@ export class AvailabilityService {
       where: {
         store_id: product.store_id,
         status: 'active',
-        ...(station_id ? { id: station_id } : {}),
-        id: { in: stationServices.map((relation) => relation.station_id) },
+        id: {
+          in: stationServices
+            .map((relation) => relation.station_id)
+            .filter((id) => !station_id || id === station_id),
+        },
       },
       select: { id: true, name: true, capacity: true },
       orderBy: { id: 'asc' },
@@ -420,8 +423,11 @@ export class AvailabilityService {
       where: {
         is_active: true,
         services: { some: { product_id: product.id } },
-        ...(provider_id ? { id: provider_id } : {}),
-        id: { in: stationProviders.map((row) => row.provider_id) },
+        id: {
+          in: stationProviders
+            .map((row) => row.provider_id)
+            .filter((id) => !provider_id || id === provider_id),
+        },
       },
       select: { id: true, display_name: true, avatar_url: true },
     });

@@ -44,8 +44,22 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
   let templates: { getLinkedTemplateForProduct: jest.Mock; getActiveTemplateById: jest.Mock };
   let prisma: any;
   let notifications: { push: jest.Mock };
+  let stockLevelManager: { reserveStock: jest.Mock; getDefaultLocationForProduct: jest.Mock; releaseReservationQuantity: jest.Mock; releaseReservationsByReference: jest.Mock };
+  let stockValidator: { resolveInventoryPolicy: jest.Mock };
+  let allocator: { allocateForLine: jest.Mock; absorbShortfall: jest.Mock };
 
   beforeEach(() => {
+    stockLevelManager = {
+      reserveStock: jest.fn(),
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(7),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
+      releaseReservationsByReference: jest.fn(),
+    };
+    stockValidator = { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowOversell: false }) };
+    allocator = {
+      allocateForLine: jest.fn().mockResolvedValue({ slices: [{ location_id: 7, quantity: 1 }], shortfall: 0, available: 1 }),
+      absorbShortfall: jest.fn((a: any, loc: number) => [{ location_id: loc, quantity: 1 }]),
+    };
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9 } as any);
     templates = {
       getLinkedTemplateForProduct: jest.fn().mockResolvedValue(template),
@@ -61,12 +75,15 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     service = new ServiceSessionsService(
       prisma,
       notifications as any,
-      {} as any,
+      { getStoreCurrency: jest.fn().mockResolvedValue('USD') } as any,
       {} as any,
       {} as any,
       {} as any,
       {} as any,
       templates as any,
+      stockLevelManager as any,
+      stockValidator as any,
+      allocator as any,
     );
   });
 
@@ -166,11 +183,11 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     let createdItems = 0;
     const tx = {
       products: {
-        findFirst: jest.fn(({ where }: any) => Promise.resolve({ id: where.id, name: `P${where.id}`, base_price: 1000, product_type: 'service', track_inventory: false })),
+        findFirst: jest.fn(({ where }: any) => Promise.resolve({ id: where.id, name: `P${where.id}`, base_price: 1000, product_type: 'service', track_inventory: false, allow_pos_price_override: true })),
       },
       orders: { create: jest.fn().mockResolvedValue({ id: 88 }), update: jest.fn(), findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }) },
       product_variants: { count: jest.fn().mockResolvedValue(0) },
-      service_sessions: { updateMany: jest.fn() },
+      service_sessions: { updateMany: jest.fn(), findFirst: jest.fn().mockResolvedValue({ status: 'open' }) },
       // Producto 2 lleva IVA 19 % sumado encima; el 1 no tiene impuesto.
       product_tax_assignments: {
         findMany: jest.fn(({ where }: any) => Promise.resolve(where.product_id.in.includes(2)
@@ -195,6 +212,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.orders.create).toHaveBeenCalledTimes(1);
+    expect(tx.orders.create.mock.calls[0][0].data.currency).toBe('USD');
     expect(tx.order_items.create).toHaveBeenCalledTimes(2);
     const taxed = tx.order_items.create.mock.calls[1][0].data;
     expect(Number(taxed.unit_price)).toBe(1500);
@@ -224,7 +242,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       order_items: { create: jest.fn(({ data }: any) => Promise.resolve({ id: 1, ...data })), findMany: jest.fn().mockResolvedValue([]) },
       service_progress_events: { create: jest.fn() },
     };
-    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
     await service.addItemsBulk(77, [{ product_id: 3, quantity: 1 }]);
     const line = tx.order_items.create.mock.calls[0][0].data;
     expect(Number(line.final_unit_price)).toBe(119000);
@@ -235,7 +253,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
   it('addItemsBulk revierte todo si un producto no existe', async () => {
     prisma.service_sessions.findFirst.mockResolvedValue({ id: 77, status: 'open', order_id: 88 });
     const tx = { products: { findFirst: jest.fn().mockResolvedValue(null) } };
-    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+    prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
     await expect(service.addItemsBulk(77, [{ product_id: 1 }])).rejects.toMatchObject({
       response: expect.objectContaining({ error_code: 'PROD_FIND_001' }),
     });
@@ -282,6 +300,64 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  describe('stock y precio al cargar ítems', () => {
+    const buildTx = (product: any) => {
+      const tx: any = {
+        products: { findFirst: jest.fn().mockResolvedValue({ id: 5, name: 'Aceite', base_price: 1000, product_type: 'physical', track_inventory: true, allow_pos_price_override: false, ...product }) },
+        product_variants: { count: jest.fn().mockResolvedValue(0) },
+        product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
+        order_items: { create: jest.fn(({ data }: any) => Promise.resolve({ id: 1, ...data })) },
+        service_progress_events: { create: jest.fn() },
+      };
+      return tx;
+    };
+    const add = (tx: any, dto: any) =>
+      (service as any).addItemTx(tx, 1, 9, { id: 77, order_id: 88 }, { product_id: 5, quantity: 1, ...dto }, new Date());
+
+    it('reserva por StockLevelManager en la ubicación vendible, con claim estricto', async () => {
+      const tx = buildTx({});
+      await add(tx, {});
+      expect(allocator.allocateForLine).toHaveBeenCalledWith(1, 5, undefined, 1, [], tx);
+      // validate_availability=true y allow_negative_available=false: claim atómico estricto.
+      expect(stockLevelManager.reserveStock).toHaveBeenCalledWith(5, undefined, 7, 1, 'order', 88, 9, true, tx, undefined, false, undefined, false);
+    });
+
+    it('sin stock suficiente lanza INV_STOCK_INSUFFICIENT_LINES y no crea la línea', async () => {
+      allocator.allocateForLine.mockResolvedValue({ slices: [], shortfall: 1, available: 0 });
+      const tx = buildTx({});
+      await expect(add(tx, {})).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'INV_STOCK_INSUFFICIENT_LINES' }) });
+      expect(stockLevelManager.reserveStock).not.toHaveBeenCalled();
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('con allow_negative_stock absorbe el faltante en la ubicación por defecto', async () => {
+      stockValidator.resolveInventoryPolicy.mockResolvedValue({ allowOversell: true });
+      allocator.allocateForLine.mockResolvedValue({ slices: [], shortfall: 1, available: 0 });
+      const tx = buildTx({});
+      await add(tx, {});
+      expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(5, undefined, tx);
+      expect(stockLevelManager.reserveStock).toHaveBeenCalledWith(5, undefined, 7, 1, 'order', 88, 9, false, tx, undefined, false, undefined, true);
+    });
+
+    it('un producto sin inventario no toca el stock', async () => {
+      const tx = buildTx({ track_inventory: false });
+      await add(tx, {});
+      expect(allocator.allocateForLine).not.toHaveBeenCalled();
+      expect(stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un unit_price distinto al publicado si el producto no permite editar precio', async () => {
+      const tx = buildTx({ track_inventory: false });
+      await expect(add(tx, { unit_price: 500 })).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'POS_PRICE_OVERRIDE_NOT_ALLOWED_001' }) });
+    });
+
+    it('acepta un unit_price igual al publicado aunque el producto no permita override', async () => {
+      const tx = buildTx({ track_inventory: false });
+      await add(tx, { unit_price: 1000 });
+      expect(tx.order_items.create.mock.calls[0][0].data.is_price_overridden).toBe(false);
+    });
+  });
+
   describe('prepareCharge', () => {
     const setup = (budget: any) => {
       jest.spyOn(service, 'findOne').mockResolvedValue({ id: 77, order_id: 88 } as any);
@@ -289,7 +365,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         orders: { findFirst: jest.fn().mockResolvedValue({ grand_total: 119000, tip_amount: 0, currency: 'COP' }) },
         service_budgets: { findFirst: jest.fn().mockResolvedValue(budget), create: jest.fn() },
       };
-      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
       return tx;
     };
 
@@ -340,7 +416,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('usa el precio y el nombre de la variante', async () => {
       const tx = txWith({ id: 9, name: '4 L', sku: 'AC-4L', price_override: 180000, is_on_sale: false, sale_price: null, track_inventory_override: null });
-      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
       await service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 9, quantity: 1 }]);
       const line = tx.order_items.create.mock.calls[0][0].data;
       expect(line).toMatchObject({ product_variant_id: 9, product_name: 'Aceite - 4 L' });
@@ -349,7 +425,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('exige elegir variante si el producto las tiene', async () => {
       const tx = txWith(null, 2);
-      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
       await expect(service.addItemsBulk(77, [{ product_id: 4, quantity: 1 }])).rejects.toMatchObject({
         response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
       });
@@ -357,7 +433,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
     it('rechaza una variante de otro producto', async () => {
       const tx = txWith(null);
-      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), ...tx }));
+      prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));
       await expect(service.addItemsBulk(77, [{ product_id: 4, product_variant_id: 99, quantity: 1 }])).rejects.toMatchObject({
         response: expect.objectContaining({ error_code: 'PRODUCT_VARIANT_MISMATCH' }),
       });

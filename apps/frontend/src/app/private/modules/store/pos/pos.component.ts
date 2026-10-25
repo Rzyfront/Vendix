@@ -1062,6 +1062,20 @@ export class PosComponent {
       );
       return;
     }
+    // La cuenta de la estación no hereda cupones ni promociones: el carrito se
+    // enviaría a precio de lista y se vaciaría perdiendo el descuento.
+    const state = this.cartState();
+    const hasDiscounts =
+      !!state?.appliedCoupon ||
+      (state?.appliedDiscounts?.length ?? 0) > 0 ||
+      Number(state?.summary?.discountAmount ?? 0) > 0 ||
+      this.cartItems().some((it) => (it.discounts?.length ?? 0) > 0);
+    if (hasDiscounts) {
+      this.toastService.warning(
+        'El carrito tiene cupón, promoción o descuentos aplicados y no se pueden enviar a la estación. Quítalos y aplica los descuentos al cobrar la cuenta en la estación.',
+      );
+      return;
+    }
     this.showCartModal.set(false);
     this.showChargeStationModal.set(true);
   }

@@ -5,6 +5,7 @@ describe('ServiceSessionEmailReconciliationJob', () => {
     id: 17,
     store_id: 4,
     session_id: 91,
+    status: 'sending',
     updated_at: new Date(Date.now() - 20 * 60_000),
   }]) {
     const deliveryModel = {
@@ -22,11 +23,11 @@ describe('ServiceSessionEmailReconciliationJob', () => {
     const updatedAt = new Date(Date.now() - 20 * 60_000);
 
     // Reuse the exact fetched timestamp because the conditional update is the concurrency guard.
-    deliveryModel.findMany.mockResolvedValueOnce([{ id: 17, store_id: 4, session_id: 91, updated_at: updatedAt }]);
+    deliveryModel.findMany.mockResolvedValueOnce([{ id: 17, store_id: 4, session_id: 91, status: 'sending', updated_at: updatedAt }]);
     await job.reconcileStaleDeliveries();
 
     expect(deliveryModel.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: 'sending', updated_at: { lt: expect.any(Date) } },
+      where: { status: { in: ['sending', 'pending'] }, updated_at: { lt: expect.any(Date) } },
       take: 500,
     }));
     expect(deliveryModel.updateMany).toHaveBeenCalledWith({
@@ -42,6 +43,20 @@ describe('ServiceSessionEmailReconciliationJob', () => {
     );
     const notificationPayload = JSON.stringify(notifications.createAndBroadcast.mock.calls[0]);
     expect(notificationPayload).not.toMatch(/recipient|token/i);
+  });
+
+  it('also reconciles a stale pending delivery, using its own status in the CAS', async () => {
+    const { job, deliveryModel, notifications } = buildJob();
+    const updatedAt = new Date(Date.now() - 20 * 60_000);
+    deliveryModel.findMany.mockResolvedValueOnce([{ id: 18, store_id: 4, session_id: 92, status: 'pending', updated_at: updatedAt }]);
+
+    await job.reconcileStaleDeliveries();
+
+    expect(deliveryModel.updateMany).toHaveBeenCalledWith({
+      where: { id: 18, store_id: 4, status: 'pending', updated_at: updatedAt },
+      data: expect.objectContaining({ status: 'failed' }),
+    });
+    expect(notifications.createAndBroadcast).toHaveBeenCalledTimes(1);
   });
 
   it('does not alert when another worker has already changed the delivery', async () => {

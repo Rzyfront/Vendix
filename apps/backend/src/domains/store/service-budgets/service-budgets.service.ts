@@ -11,6 +11,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 
 /** Exact values produced by a trusted server-side order quote calculator. */
 export interface ServerProposalSnapshot {
@@ -30,6 +31,21 @@ function canonicalJson(value: unknown): string {
     return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
   }
   return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * Regla de consentimiento: el staff no puede subir por su cuenta un límite que
+ * el cliente aprobó; eso solo ocurre aprobando una propuesta (decideWithToken).
+ * Devuelve true cuando el cambio pedido por el staff debe rechazarse.
+ */
+export function staffChangeNeedsCustomerProposal(
+  current: { amount: Prisma.Decimal; approved_at: Date | null; is_system: boolean } | null,
+  requested: Prisma.Decimal,
+): boolean {
+  // Sin límite previo, o uno que solo sigue el total (sistema) o que fijó el staff: no hay
+  // consentimiento que proteger. Bajar o mantener un límite aprobado favorece al cliente.
+  if (!current || current.is_system || current.approved_at == null) return false;
+  return requested.greaterThan(current.amount);
 }
 
 @Injectable()
@@ -76,6 +92,13 @@ export class ServiceBudgetsService {
         });
         if (dto.expectedVersion !== undefined && (current?.version ?? 0) !== dto.expectedVersion) {
           throw new ConflictException('El presupuesto cambió; recarga la sesión');
+        }
+        if (staffChangeNeedsCustomerProposal(current, new Prisma.Decimal(dto.amount))) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'El cliente aprobó este límite: para subirlo envíale una propuesta desde el enlace de seguimiento.',
+            { session_id: sessionId },
+          );
         }
         if (session.order_id) {
           const pendingPayment = await tx.payments.findFirst({
@@ -290,11 +313,13 @@ export class ServiceBudgetsService {
 
     try {
       const outcome = await this.prisma.$transaction(async (tx) => {
+        // Con la orden bloqueada: una cuenta ya cobrada no recibe líneas ni cambia su total.
+        const locked = await lockOrderLifecycle(tx, session.order_id!, this.storeId);
         const order = await tx.orders.findFirst({
           where: { id: session.order_id!, store_id: this.storeId },
           select: { service_version: true, currency: true },
         });
-        if (!order || order.service_version !== proposal.order_version || order.currency !== proposal.currency) {
+        if (!order || locked.state !== 'draft' || order.service_version !== proposal.order_version || order.currency !== proposal.currency) {
           await tx.service_change_proposals.updateMany({
             where: { id: proposal.id, store_id: this.storeId, status: 'pending' },
             data: { status: 'stale' },

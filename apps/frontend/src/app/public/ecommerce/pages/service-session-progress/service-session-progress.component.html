@@ -5,7 +5,7 @@
     <div class="connection" aria-live="polite">
       <span class="connection-dot" [class.online]="connected()"></span>
       <span>{{ finished() ? 'Servicio finalizado' : connected() ? 'Actualización en vivo' : 'Última información recibida' }}</span>
-      <app-button variant="ghost" size="xsm" (clicked)="refresh()">
+      <app-button variant="ghost" size="xsm" [disabled]="refreshing()" (clicked)="refresh()">
         <app-icon name="refresh-cw" [size]="12" slot="icon" />
         Actualizar
       </app-button>
@@ -28,6 +28,9 @@
       </app-button>
     </section>
   } @else {
+    @if (staleNotice(); as notice) {
+      <p class="notice notice-error" role="status">{{ notice }}</p>
+    }
     <app-guest-order-summary [embedded]="true" [summaryInput]="orderSummary()" [physicalProgressAllowed]="false">
       <app-service-session-details
         data-slot="after-products"
@@ -62,7 +65,7 @@
           <div><dt>Descuentos</dt><dd>−{{ money(proposal.discount, proposal.currency) }}</dd></div>
           <div class="grand-total"><dt>Total propuesto</dt><dd>{{ money(proposal.total, proposal.currency) }}</dd></div>
         </dl>
-        <p class="expires">Válida hasta {{ proposal.expires_at | date:'medium' }}</p>
+        <p class="expires">Válida hasta {{ dateTime(proposal.expires_at) }}</p>
         @if (proposal.status === 'pending') {
           <div class="decision-actions flex flex-wrap gap-2 pt-2">
             <app-button variant="primary" (clicked)="askDecision('approved')">
@@ -108,7 +111,7 @@
               <span class="timeline-dot" aria-hidden="true"></span>
               <div>
                 <p>{{ event.text }}</p>
-                <time>{{ event.created_at | date:'medium' }}</time>
+                <time>{{ dateTime(event.created_at) }}</time>
               </div>
             </li>
           }

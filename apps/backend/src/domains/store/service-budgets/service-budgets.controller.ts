@@ -1,12 +1,13 @@
 import { Controller, Get, Param, ParseIntPipe, Put, Body, UseGuards } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ServiceBudgetsService } from './service-budgets.service';
 import { SetServiceBudgetDto } from './dto/set-service-budget.dto';
 
 @Controller('store/service-sessions')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, ServiceIndustryGuard)
 export class ServiceBudgetsController {
   constructor(
     private readonly serviceBudgetsService: ServiceBudgetsService,

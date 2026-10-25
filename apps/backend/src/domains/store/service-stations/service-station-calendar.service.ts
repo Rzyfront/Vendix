@@ -77,10 +77,10 @@ export class ServiceStationCalendarService {
     const startAt = new Date(dto.start_at);
     const endAt = new Date(dto.end_at);
     if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || startAt >= endAt) {
-      throw new BadRequestException('El cierre debe tener un intervalo UTC vÃ¡lido con inicio anterior al fin.');
+      throw new BadRequestException('El cierre debe tener un intervalo UTC válido con inicio anterior al fin.');
     }
     if (endAt.getTime() - startAt.getTime() > 366 * 24 * 60 * 60_000) {
-      throw new BadRequestException('El cierre no puede superar 366 dÃ­as.');
+      throw new BadRequestException('El cierre no puede superar 366 días.');
     }
     return this.prisma.service_station_exceptions.create({
       data: { store_id: storeId, station_id: stationId, start_at: startAt, end_at: endAt },

@@ -278,6 +278,8 @@ model users {
   dian_configuration_documents_uploaded dian_configuration_documents[]
   print_templates_created               print_templates[]             @relation("print_templates_created_by")
 
+  service_progress_events_actor_user_id_fkey service_progress_events[] @relation("service_progress_events_actor_user_id_fkey")
+
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
@@ -574,6 +576,8 @@ model order_events {
   stores        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   orders        orders         @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users         users?         @relation(fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  service_progress_events_order_event_id_fkey service_progress_events[] @relation("service_progress_events_order_event_id_fkey")
 
   @@index([order_id, created_at])
   @@index([store_id, created_at])
@@ -1085,6 +1089,9 @@ model stores {
   // CRM Landing (QUI-719)
   crm_landing_page crm_landing_pages?
 
+  service_stations_store_fkey service_stations[] @relation("service_stations_store_fkey")
+  service_reminder_logs_store_id_fkey service_reminder_logs[] @relation("service_reminder_logs_store_id_fkey")
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -1507,6 +1514,8 @@ model order_items {
   cancelled_at                    DateTime?                @db.Timestamp(6)
   cancellation_reason             String?
   cancellation_type               String?                  @db.VarChar(20)
+  service_session orders? @relation("order_items_service_session_fkey", fields: [order_id, service_session_id], references: [id, service_session_id], onDelete: Restrict, onUpdate: NoAction, map: "order_items_service_session_fkey")
+
   @@index([order_id, cancelled_at])
   @@index([service_session_id])
   // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
@@ -1707,6 +1716,11 @@ model orders {
   tip_value                                       Decimal?                  @db.Decimal(14, 2)
   tip_waiter_id                                   Int?
   users_orders_tip_waiter_idTousers               users?                    @relation("orders_tip_waiter_idTousers", fields: [tip_waiter_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  service_session service_sessions? @relation("orders_service_session_fkey", fields: [store_id, service_session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "orders_service_session_fkey")
+
+  service_sessions_order_fkey service_sessions[] @relation("service_sessions_order_fkey")
+  order_items_service_session_fkey order_items[] @relation("order_items_service_session_fkey")
+
   @@index([tip_waiter_id])
   // QUI-551: Usuario interno / vendedor que registró la orden (atribución de ventas)
   created_by_user_id                              Int?
@@ -2208,6 +2222,9 @@ model products {
   /// No lo vuelvas a declarar como @@unique al regenerar: por eso no existe
   /// `store_id_sku` / `store_id_slug` / `store_id_barcode` como where-unique;
   /// usa findFirst con `state: { not: 'archived' }`.
+  service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
+  service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
+
   @@index([store_id, slug])
   @@index([store_id, sku])
   @@index([store_id, barcode])
@@ -9677,6 +9694,11 @@ model bookings {
   reschedule_requests         booking_reschedule_requests[]
   proximity_notifications     proximity_notification_log[]
 
+  service_allocation service_allocations? @relation("bookings_service_allocation_fkey", fields: [store_id, service_allocation_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "bookings_service_allocation_fkey")
+
+  service_allocations_booking_fkey service_allocations[] @relation("service_allocations_booking_fkey")
+  service_sessions_booking_fkey service_sessions[] @relation("service_sessions_booking_fkey")
+
   @@unique([store_id, booking_number])
   @@unique([store_id, id])
   @@index([store_id, date])
@@ -9745,6 +9767,10 @@ model service_providers {
   schedules  provider_schedules[]
   exceptions provider_exceptions[]
   bookings   bookings[]
+
+  service_station_providers_provider_fkey service_station_providers[] @relation("service_station_providers_provider_fkey")
+  service_allocations_provider_fkey service_allocations[] @relation("service_allocations_provider_fkey")
+  booking_reschedule_requests_provider_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_provider_store_fkey")
 
   @@unique([store_id, employee_id])
   @@unique([store_id, id])
@@ -10639,7 +10665,7 @@ model booking_reschedule_requests {
   /// The admin/employee who approved/rejected the request. NULL while
   /// pending; populated on `approved`/`rejected`.
   decided_by_user_id       Int?
-  decided_at               DateTime?
+  decided_at               DateTime?                              @db.Timestamp(6)
   /// Free-text reason the admin typed when rejecting (also allowed on
   /// approve, but most approvals won't use it).
   decision_reason          String?                                @db.Text
@@ -10651,10 +10677,13 @@ model booking_reschedule_requests {
   requested_slot_start_at  DateTime?                              @db.Timestamptz(6)
 
   booking               bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store                 stores   @relation(fields: [store_id], references: [id])
+  store                 stores   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   requested_by_user     users?   @relation("reschedule_req_user", fields: [requested_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   requested_by_customer users?   @relation("reschedule_req_customer", fields: [requested_by_customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   decided_by_user       users?   @relation("reschedule_req_decided", fields: [decided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  requested_station service_stations? @relation("booking_reschedule_requests_station_store_fkey", fields: [requested_station_id, store_id], references: [id, store_id], onDelete: Restrict, onUpdate: NoAction, map: "booking_reschedule_requests_station_store_fkey")
+  requested_provider service_providers? @relation("booking_reschedule_requests_provider_store_fkey", fields: [requested_provider_id, store_id], references: [id, store_id], onDelete: Restrict, onUpdate: NoAction, map: "booking_reschedule_requests_provider_store_fkey")
 
   @@index([booking_id])
   @@index([store_id, status])
@@ -13037,13 +13066,23 @@ model service_stations {
   target_minutes Int?
   intake_template_id Int?
   intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull)
-  public_id  String   @unique @default(uuid()) @db.Uuid
+  public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz(6)
-  updated_at DateTime @updatedAt @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  @@unique([store_id, name])
+  store stores @relation("service_stations_store_fkey", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_stations_store_fkey")
+
+  service_station_services_station_fkey service_station_services[] @relation("service_station_services_station_fkey")
+  service_station_providers_station_fkey service_station_providers[] @relation("service_station_providers_station_fkey")
+  service_station_schedules_station_fkey service_station_schedules[] @relation("service_station_schedules_station_fkey")
+  service_station_exceptions_station_fkey service_station_exceptions[] @relation("service_station_exceptions_station_fkey")
+  service_allocations_station_fkey service_allocations[] @relation("service_allocations_station_fkey")
+  service_sessions_station_fkey service_sessions[] @relation("service_sessions_station_fkey")
+  booking_reschedule_requests_station_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_station_store_fkey")
+
+  @@unique([store_id, name], map: "service_stations_store_name_key")
   @@unique([store_id, id])
-  @@index([store_id, status])
+  @@index([store_id, status], map: "service_stations_store_status_idx")
   @@index([intake_template_id])
   @@map("service_stations")
 }
@@ -13053,8 +13092,11 @@ model service_station_services {
   store_id   Int
   station_id Int
   product_id Int
-  @@unique([station_id, product_id])
-  @@index([store_id, product_id])
+  station service_stations @relation("service_station_services_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_services_station_fkey")
+  product products @relation("service_station_services_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_services_product_fkey")
+
+  @@unique([station_id, product_id], map: "service_station_services_station_product_key")
+  @@index([store_id, product_id], map: "service_station_services_store_product_idx")
   @@map("service_station_services")
 }
 
@@ -13063,8 +13105,11 @@ model service_station_providers {
   store_id    Int
   station_id  Int
   provider_id Int
-  @@unique([station_id, provider_id])
-  @@index([store_id, provider_id])
+  station service_stations @relation("service_station_providers_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_providers_station_fkey")
+  provider service_providers @relation("service_station_providers_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_providers_provider_fkey")
+
+  @@unique([station_id, provider_id], map: "service_station_providers_station_provider_key")
+  @@index([store_id, provider_id], map: "service_station_providers_store_provider_idx")
   @@map("service_station_providers")
 }
 
@@ -13077,8 +13122,10 @@ model service_station_schedules {
   start_time  String   @db.VarChar(5)
   end_time    String   @db.VarChar(5)
   is_active   Boolean  @default(true)
-  @@unique([station_id, weekday, block_order])
-  @@index([store_id, station_id, weekday])
+  station service_stations @relation("service_station_schedules_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_schedules_station_fkey")
+
+  @@unique([station_id, weekday, block_order], map: "service_station_schedules_station_weekday_block_key")
+  @@index([store_id, station_id, weekday], map: "service_station_schedules_store_station_weekday_idx")
   @@map("service_station_schedules")
 }
 
@@ -13090,7 +13137,9 @@ model service_station_exceptions {
   end_at     DateTime @db.Timestamptz(6)
   reason     String?  @db.VarChar(255)
   created_at DateTime @default(now()) @db.Timestamptz(6)
-  @@index([store_id, station_id, start_at])
+  station service_stations @relation("service_station_exceptions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_exceptions_station_fkey")
+
+  @@index([store_id, station_id, start_at], map: "service_station_exceptions_store_station_start_idx")
   @@map("service_station_exceptions")
 }
 
@@ -13107,12 +13156,19 @@ model service_allocations {
   state       String   @default("held") @db.VarChar(24)
   /// SQL-only CHECK: exactly one allocation owner (booking XOR session).
   created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @updatedAt @db.Timestamptz(6)
-  @@index([store_id, station_id, start_at])
-  @@index([store_id, provider_id, start_at])
-  @@index([booking_id])
-  @@index([session_id])
-  @@unique([store_id, id])
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  station service_stations @relation("service_allocations_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_station_fkey")
+  provider service_providers? @relation("service_allocations_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_provider_fkey")
+  booking bookings? @relation("service_allocations_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_booking_fkey")
+  session service_sessions? @relation("service_allocations_session_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_session_fkey")
+
+  bookings_service_allocation_fkey bookings[] @relation("bookings_service_allocation_fkey")
+
+  @@index([store_id, station_id, start_at], map: "service_allocations_store_station_start_idx")
+  @@index([store_id, provider_id, start_at], map: "service_allocations_store_provider_start_idx")
+  @@index([booking_id], map: "service_allocations_booking_idx")
+  @@index([session_id], map: "service_allocations_session_idx")
+  @@unique([store_id, id], map: "service_allocations_store_id_key")
   @@map("service_allocations")
 }
 
@@ -13128,11 +13184,31 @@ model service_sessions {
   opened_at   DateTime @default(now()) @db.Timestamptz(6)
   closed_at   DateTime? @db.Timestamptz(6)
   created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @updatedAt @db.Timestamptz(6)
-  @@index([store_id, station_id, status])
-  @@index([booking_id])
-  @@index([order_id])
-  @@unique([store_id, id])
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  station service_stations @relation("service_sessions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_station_fkey")
+  product products @relation("service_sessions_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_product_fkey")
+  booking bookings? @relation("service_sessions_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_booking_fkey")
+  order orders? @relation("service_sessions_order_fkey", fields: [store_id, order_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_order_fkey")
+
+  service_allocations_session_fkey service_allocations[] @relation("service_allocations_session_fkey")
+  orders_service_session_fkey orders[] @relation("orders_service_session_fkey")
+  service_session_email_deliveries_session_store_fkey service_session_email_deliveries[] @relation("service_session_email_deliveries_session_store_fkey")
+  service_subjects_session_id_fkey service_subjects[] @relation("service_subjects_session_id_fkey")
+  service_subjects_session_store_fkey service_subjects[] @relation("service_subjects_session_store_fkey")
+  service_session_tokens_session_id_fkey service_session_tokens[] @relation("service_session_tokens_session_id_fkey")
+  service_session_tokens_session_store_fkey service_session_tokens[] @relation("service_session_tokens_session_store_fkey")
+  service_progress_events_session_id_fkey service_progress_events[] @relation("service_progress_events_session_id_fkey")
+  service_progress_events_session_store_fkey service_progress_events[] @relation("service_progress_events_session_store_fkey")
+  service_budgets_session_id_fkey service_budgets[] @relation("service_budgets_session_id_fkey")
+  service_budgets_session_store_fkey service_budgets[] @relation("service_budgets_session_store_fkey")
+  service_change_proposals_session_id_fkey service_change_proposals[] @relation("service_change_proposals_session_id_fkey")
+  service_change_proposals_session_store_fkey service_change_proposals[] @relation("service_change_proposals_session_store_fkey")
+  service_proposal_decision_challenges_session_store_fkey service_proposal_decision_challenges[] @relation("service_proposal_decision_challenges_session_store_fkey")
+
+  @@index([store_id, status], map: "service_sessions_store_status_idx")
+  @@index([booking_id], map: "service_sessions_booking_idx")
+  @@index([order_id], map: "service_sessions_order_idx")
+  @@unique([store_id, id], map: "service_sessions_store_id_key")
   @@map("service_sessions")
 }
 
@@ -13149,9 +13225,12 @@ model service_session_email_deliveries {
   last_error         String?  @db.VarChar(500)
   sent_at            DateTime? @db.Timestamptz(6)
   created_at         DateTime @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime @updatedAt @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  @@index([store_id, session_id, status])
+  session service_sessions @relation("service_session_email_deliveries_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_email_deliveries_session_store_fkey")
+  token service_session_tokens @relation("service_session_email_deliveries_token_scope_fkey", fields: [store_id, session_id, token_id], references: [store_id, session_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_email_deliveries_token_scope_fkey")
+
+  @@index([store_id, session_id, status], map: "service_session_email_deliveries_store_session_status_idx")
   // SQL-only composite FK also enforces that token and delivery share a session/store.
   @@map("service_session_email_deliveries")
 }
@@ -13172,7 +13251,10 @@ model service_subjects {
   label      String   @db.VarChar(120)
   metadata   Json?
   created_at DateTime @default(now()) @db.Timestamptz(6)
-  @@index([session_id])
+  session service_sessions @relation("service_subjects_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_subjects_session_id_fkey")
+  session_scoped service_sessions @relation("service_subjects_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_subjects_session_store_fkey")
+
+  @@index([session_id], map: "service_subjects_session_idx")
   @@map("service_subjects")
 }
 
@@ -13184,8 +13266,14 @@ model service_session_tokens {
   expires_at DateTime @db.Timestamptz(6)
   revoked_at DateTime? @db.Timestamptz(6)
   created_at DateTime @default(now()) @db.Timestamptz(6)
-  @@index([session_id, expires_at])
-  @@unique([store_id, session_id, id])
+  session service_sessions @relation("service_session_tokens_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_tokens_session_id_fkey")
+  session_scoped service_sessions @relation("service_session_tokens_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_tokens_session_store_fkey")
+
+  service_session_email_deliveries_token_scope_fkey service_session_email_deliveries[] @relation("service_session_email_deliveries_token_scope_fkey")
+  service_proposal_decision_challenges_token_session_store_fkey service_proposal_decision_challenges[] @relation("service_proposal_decision_challenges_token_session_store_fkey")
+
+  @@index([session_id, expires_at], map: "service_session_tokens_session_expiry_idx")
+  @@unique([store_id, session_id, id], map: "service_session_tokens_store_session_id_key")
   @@map("service_session_tokens")
 }
 
@@ -13199,8 +13287,13 @@ model service_progress_events {
   order_event_id  Int?
   metadata        Json?
   created_at      DateTime @default(now()) @db.Timestamptz(6)
-  @@index([session_id, created_at])
-  @@index([order_event_id])
+  session service_sessions @relation("service_progress_events_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_progress_events_session_id_fkey")
+  session_scoped service_sessions @relation("service_progress_events_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_progress_events_session_store_fkey")
+  actor_user users? @relation("service_progress_events_actor_user_id_fkey", fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_progress_events_actor_user_id_fkey")
+  order_event order_events? @relation("service_progress_events_order_event_id_fkey", fields: [order_event_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_progress_events_order_event_id_fkey")
+
+  @@index([session_id, created_at], map: "service_progress_events_session_created_idx")
+  @@index([order_event_id], map: "service_progress_events_order_event_idx")
   @@map("service_progress_events")
 }
 
@@ -13216,7 +13309,10 @@ model service_budgets {
   /// false = tope que fijó el comercio/cliente (nunca se sube solo).
   is_system  Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
-  @@unique([session_id, version])
+  session service_sessions @relation("service_budgets_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_budgets_session_id_fkey")
+  session_scoped service_sessions @relation("service_budgets_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_budgets_session_store_fkey")
+
+  @@unique([session_id, version], map: "service_budgets_session_version_key")
   @@map("service_budgets")
 }
 
@@ -13236,9 +13332,18 @@ model service_change_proposals {
   status         String   @default("pending") @db.VarChar(24)
   expires_at     DateTime @db.Timestamptz(6)
   created_at     DateTime @default(now()) @db.Timestamptz(6)
-  @@unique([session_id, version])
-  @@index([session_id, status, expires_at])
-  @@unique([store_id, id])
+  session service_sessions @relation("service_change_proposals_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_change_proposals_session_id_fkey")
+  session_scoped service_sessions @relation("service_change_proposals_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_change_proposals_session_store_fkey")
+
+  service_contact_attempts_proposal_id_fkey service_contact_attempts[] @relation("service_contact_attempts_proposal_id_fkey")
+  service_contact_attempts_proposal_store_fkey service_contact_attempts[] @relation("service_contact_attempts_proposal_store_fkey")
+  service_proposal_decisions_proposal_id_fkey service_proposal_decisions? @relation("service_proposal_decisions_proposal_id_fkey")
+  service_proposal_decisions_proposal_store_fkey service_proposal_decisions[] @relation("service_proposal_decisions_proposal_store_fkey")
+  service_proposal_decision_challenges_proposal_store_fkey service_proposal_decision_challenges[] @relation("service_proposal_decision_challenges_proposal_store_fkey")
+
+  @@unique([session_id, version], map: "service_change_proposals_session_version_key")
+  @@index([session_id, status, expires_at], map: "service_change_proposals_session_status_expiry_idx")
+  @@unique([store_id, id], map: "service_change_proposals_store_id_key")
   @@map("service_change_proposals")
 }
 
@@ -13251,6 +13356,9 @@ model service_proposal_decisions {
   actor_id    String?  @db.VarChar(120)
   decided_at  DateTime @default(now()) @db.Timestamptz(6)
   proof       Json?
+  proposal service_change_proposals @relation("service_proposal_decisions_proposal_id_fkey", fields: [proposal_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decisions_proposal_id_fkey")
+  proposal_scoped service_change_proposals @relation("service_proposal_decisions_proposal_store_fkey", fields: [store_id, proposal_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decisions_proposal_store_fkey")
+
   @@unique([proposal_id])
   @@map("service_proposal_decisions")
 }
@@ -13266,7 +13374,10 @@ model service_contact_attempts {
   provider_message_id String? @db.VarChar(255)
   attempted_at      DateTime @default(now()) @db.Timestamptz(6)
   completed_at      DateTime? @db.Timestamptz(6)
-  @@index([proposal_id, attempted_at])
+  proposal service_change_proposals @relation("service_contact_attempts_proposal_id_fkey", fields: [proposal_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_contact_attempts_proposal_id_fkey")
+  proposal_scoped service_change_proposals @relation("service_contact_attempts_proposal_store_fkey", fields: [store_id, proposal_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_contact_attempts_proposal_store_fkey")
+
+  @@index([proposal_id, attempted_at], map: "service_contact_attempts_proposal_attempted_idx")
   @@map("service_contact_attempts")
 }
 
@@ -13281,11 +13392,13 @@ model service_reminder_logs {
   status          String    @default("pending") @db.VarChar(20)
   sent_at         DateTime? @db.Timestamptz(6)
   notification_sent_at DateTime? @db.Timestamptz(6)
-  created_at      DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime? @default(now()) @updatedAt @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  @@unique([store_id, customer_id, product_id, source_order_id])
-  @@index([store_id, status])
+  store stores @relation("service_reminder_logs_store_id_fkey", fields: [store_id], references: [id], onDelete: Restrict, map: "service_reminder_logs_store_id_fkey")
+
+  @@unique([store_id, customer_id, product_id, source_order_id], map: "service_reminder_logs_store_customer_product_order_key")
+  @@index([store_id, status], map: "service_reminder_logs_store_status_idx")
   @@map("service_reminder_logs")
 }
 
@@ -13301,6 +13414,10 @@ model service_proposal_decision_challenges {
   expires_at     DateTime  @db.Timestamptz(6)
   consumed_at    DateTime? @db.Timestamptz(6)
   created_at     DateTime  @default(now()) @db.Timestamptz(6)
+
+  proposal_scoped service_change_proposals @relation("service_proposal_decision_challenges_proposal_store_fkey", fields: [store_id, proposal_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decision_challenges_proposal_store_fkey")
+  session_scoped service_sessions @relation("service_proposal_decision_challenges_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decision_challenges_session_store_fkey")
+  token_scoped service_session_tokens @relation("service_proposal_decision_challenges_token_session_store_fkey", fields: [store_id, session_id, token_id], references: [store_id, session_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decision_challenges_token_session_store_fkey")
 
   @@index([store_id, proposal_id, created_at(sort: Desc)], map: "service_proposal_decision_challenges_store_proposal_created_idx")
   @@map("service_proposal_decision_challenges")

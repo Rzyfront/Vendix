@@ -19,6 +19,9 @@ import { TemplatesService } from '../data-collection/templates.service';
 import { buildEntityQueries, EntityContext, resolveEntityId } from '../data-collection/utils/entity-resolver.util';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 
 const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
@@ -104,6 +107,9 @@ export class ServiceSessionsService {
     private readonly email: EmailService,
     private readonly allocationCoordinator: ServiceAllocationCoordinator,
     private readonly templates: TemplatesService,
+    private readonly stockLevelManager: StockLevelManager,
+    private readonly stockValidator: StockValidatorService,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   async open(dto: OpenServiceSessionDto) {
@@ -800,7 +806,7 @@ export class ServiceSessionsService {
         if (dto.action !== 'close' && existing.order_id) {
           const order = await lockOrderLifecycle(tx, existing.order_id, storeId);
           if (order.state === 'draft') {
-            await this.releaseOrderReservations(tx, existing.order_id, new Date());
+            await this.stockLevelManager.releaseReservationsByReference('order', existing.order_id, 'cancelled', tx);
             await tx.orders.updateMany({ where: { id: existing.order_id, store_id: storeId, state: 'draft' }, data: { state: 'cancelled', updated_at: new Date() } });
           }
         }
@@ -824,6 +830,9 @@ export class ServiceSessionsService {
    * porque es el límite que el cliente autorizó; devuelve si cubre o no el total.
    */
   private async ensureChargeBudget(tx: Prisma.TransactionClient, storeId: number, sessionId: number, orderId: number) {
+    // Serializa las versiones del presupuesto (@@unique session_id+version): prepare-charge,
+    // close y la carga de ítems pueden llegar a la vez. El lock es reentrante en la misma tx.
+    await lockOrderLifecycle(tx, orderId, storeId);
     const [order, budget] = await Promise.all([
       tx.orders.findFirst({ where: { id: orderId, store_id: storeId }, select: { grand_total: true, tip_amount: true, currency: true } }),
       tx.service_budgets.findFirst({ where: { store_id: storeId, session_id: sessionId }, orderBy: { version: 'desc' }, select: { amount: true, currency: true, version: true, is_system: true } }),
@@ -1059,12 +1068,12 @@ export class ServiceSessionsService {
     const { storeId, userId } = this.requireContext();
     const found = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
-      select: { id: true, status: true, order_id: true },
+      select: { id: true, status: true, order_id: true, booking_id: true },
     });
     if (!found || !ITEM_SESSION_STATUSES.includes(found.status)) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
     }
-    const session = { id: found.id, order_id: found.order_id };
+    const session = { id: found.id, order_id: found.order_id, booking_id: found.booking_id };
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1073,6 +1082,11 @@ export class ServiceSessionsService {
         if (order.state !== 'draft') {
           throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se pueden agregar ítems.');
         }
+      }
+      // Re-chequeo bajo el lock: un cierre que confirmó entre la lectura y la tx no recibe líneas.
+      const live = await tx.service_sessions.findFirst({ where: { id: session.id, store_id: storeId }, select: { status: true } });
+      if (!live || !ITEM_SESSION_STATUSES.includes(live.status)) {
+        throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
       }
       const items: order_items[] = [];
       for (const dto of dtos) {
@@ -1095,7 +1109,7 @@ export class ServiceSessionsService {
     tx: Prisma.TransactionClient,
     storeId: number,
     userId: number | null,
-    session: { id: number; order_id: number | null },
+    session: { id: number; order_id: number | null; booking_id?: number | null },
     dto: AddSessionItemDto,
     now: Date,
   ) {
@@ -1121,21 +1135,35 @@ export class ServiceSessionsService {
     }
     // Un precio escrito a mano se trata como el precio publicado del producto: el
     // impuesto se despeja o se suma según la configuración de ESE producto.
-    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : catalogUnitPrice(product, variant);
+    const catalogPrice = catalogUnitPrice(product, variant);
+    const unitPrice = dto.unit_price != null ? Number(dto.unit_price) : catalogPrice;
+    // Mismo guard que el POS: cambiar el precio publicado exige que el producto lo permita.
+    const priceOverridden = dto.unit_price != null && Math.round(unitPrice * 100) !== Math.round(catalogPrice * 100);
+    if (priceOverridden && !product.allow_pos_price_override) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_PRICE_OVERRIDE_NOT_ALLOWED_001,
+        `El producto "${product.name}" no permite editar el precio en POS.`,
+      );
+    }
     const lineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
     const tracksInventory = variant?.track_inventory_override ?? product.track_inventory;
     const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
 
     if (!session.order_id) {
+      const currency = await this.settings.getStoreCurrency();
+      const booking = session.booking_id
+        ? await tx.bookings.findFirst({ where: { id: session.booking_id, store_id: storeId }, select: { customer_id: true } })
+        : null;
       const newOrder = await tx.orders.create({
         data: {
           store_id: storeId,
           created_by_user_id: userId,
+          customer_id: booking?.customer_id ?? null,
           order_number: `SVC-${session.id}`,
           state: 'draft',
           channel: 'pos',
           delivery_type: 'direct_delivery',
-          currency: 'COP',
+          currency: currency || 'COP',
           subtotal_amount: 0,
           tax_amount: 0,
           shipping_cost: 0,
@@ -1154,37 +1182,26 @@ export class ServiceSessionsService {
     const orderId = session.order_id;
 
     if (tracksInventory && product.product_type === 'physical') {
-      const stockLevel = await tx.stock_levels.findFirst({
-        where: { product_id: product.id, product_variant_id: variant?.id ?? null },
-        orderBy: { quantity_available: 'desc' },
-      });
-      if (stockLevel && stockLevel.quantity_available < qty) {
-        throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${lineName}`);
-      }
-      if (stockLevel) {
-        const store = await tx.stores.findUnique({ where: { id: storeId }, select: { organization_id: true } });
-        if (store?.organization_id) {
-          await tx.stock_reservations.create({
-            data: {
-              organization_id: store.organization_id,
-              product_id: product.id,
-              product_variant_id: variant?.id ?? null,
-              location_id: stockLevel.location_id,
-              quantity: qty,
-              reserved_for_type: 'order',
-              reserved_for_id: orderId,
-              status: 'active',
-            },
-          });
-          await tx.stock_levels.update({
-            where: { id: stockLevel.id },
-            data: {
-              quantity_reserved: { increment: qty },
-              quantity_available: { decrement: qty },
-              updated_at: now,
-            },
+      // Mismo camino que mesas y POS: ubicaciones vendibles + StockLevelManager, cuyo
+      // claim es atómico (dos cargas sobre la última unidad no pasan las dos).
+      const { allowOversell } = await this.stockValidator.resolveInventoryPolicy(storeId, tx);
+      const allocation = await this.sellableStockAllocator.allocateForLine(storeId, product.id, variant?.id ?? undefined, qty, [], tx);
+      let slices = allocation.slices;
+      if (allocation.shortfall > 0) {
+        if (!allowOversell) {
+          throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${lineName}`, {
+            items: [{ product_id: product.id, product_variant_id: variant?.id ?? null, product_name: lineName, kind: 'product', requested: qty, available: allocation.available }],
           });
         }
+        const fallbackLocationId = allocation.slices[0]?.location_id
+          ?? (await this.stockLevelManager.getDefaultLocationForProduct(product.id, variant?.id ?? undefined, tx));
+        slices = this.sellableStockAllocator.absorbShortfall(allocation, fallbackLocationId);
+      }
+      for (const slice of slices) {
+        await this.stockLevelManager.reserveStock(
+          product.id, variant?.id ?? undefined, slice.location_id, slice.quantity, 'order', orderId,
+          userId ?? undefined, !allowOversell, tx, undefined, false, undefined, allowOversell,
+        );
       }
     }
 
@@ -1198,7 +1215,7 @@ export class ServiceSessionsService {
         description: dto.description || null,
         quantity: qty,
         item_type: product.product_type === 'physical' ? 'physical' : 'service',
-        is_price_overridden: dto.unit_price != null,
+        is_price_overridden: priceOverridden,
         updated_at: now,
         ...buildTaxedLine(unitPrice, qty, taxRows.get(product.id) ?? []),
       },
@@ -1262,12 +1279,6 @@ export class ServiceSessionsService {
     if (!ITEM_SESSION_STATUSES.includes(session.status)) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
     }
-    const item = await this.prisma.order_items.findFirst({
-      where: { id: itemId, order_id: session.order_id },
-    });
-    if (!item) {
-      throw new VendixHttpException(ErrorCodes.ORD_ITEM_NOTES_NOT_FOUND_001, 'Ítem no encontrado en la orden.');
-    }
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1276,8 +1287,21 @@ export class ServiceSessionsService {
       if (order.state !== 'draft') {
         throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se pueden quitar ítems.');
       }
-      if (item.product_id) {
-        await this.releaseOrderReservations(tx, session.order_id!, now, { product_id: item.product_id, product_variant_id: item.product_variant_id ?? null }, 1);
+      // Se lee bajo el lock: dos borrados simultáneos dan "no encontrado", no un P2025.
+      const item = await tx.order_items.findFirst({
+        where: { id: itemId, order_id: session.order_id! },
+        include: { products: { select: { product_type: true, track_inventory: true } }, product_variants: { select: { track_inventory_override: true } } },
+      });
+      if (!item) {
+        throw new VendixHttpException(ErrorCodes.ORD_ITEM_NOTES_NOT_FOUND_001, 'Ítem no encontrado en la orden.');
+      }
+      const tracked = item.products?.product_type === 'physical'
+        && (item.product_variants?.track_inventory_override ?? item.products?.track_inventory);
+      if (item.product_id && tracked) {
+        // Solo las unidades de ESTA línea: una línea hermana del mismo producto conserva su reserva.
+        await this.stockLevelManager.releaseReservationQuantity(
+          'order', session.order_id!, item.product_id, item.product_variant_id, Number(item.quantity), 'cancelled', tx, { newestFirst: true },
+        );
       }
 
       // order_item_taxes cae en cascada con la línea.
@@ -1290,35 +1314,6 @@ export class ServiceSessionsService {
 
     this.emit(storeId, sessionId, 'item_removed', { item_id: itemId, grand_total: result.grand_total });
     return result;
-  }
-
-  /**
-   * Cancela reservas de stock activas de la orden y devuelve las unidades al nivel de
-   * stock de su ubicación. Con `match` libera solo las de esa línea (y `limit` acota cuántas).
-   */
-  private async releaseOrderReservations(
-    tx: Prisma.TransactionClient,
-    orderId: number,
-    now: Date,
-    match?: { product_id: number; product_variant_id: number | null },
-    limit?: number,
-  ) {
-    const reservations = await tx.stock_reservations.findMany({
-      where: { reserved_for_type: 'order', reserved_for_id: orderId, status: 'active', ...(match ?? {}) },
-      orderBy: { id: 'asc' },
-      ...(limit ? { take: limit } : {}),
-    });
-    for (const reservation of reservations) {
-      await tx.stock_reservations.update({ where: { id: reservation.id }, data: { status: 'cancelled', updated_at: now } });
-      await tx.stock_levels.updateMany({
-        where: { product_id: reservation.product_id, product_variant_id: reservation.product_variant_id ?? null, location_id: reservation.location_id },
-        data: {
-          quantity_reserved: { decrement: reservation.quantity },
-          quantity_available: { increment: reservation.quantity },
-          updated_at: now,
-        },
-      });
-    }
   }
 
   async publicProgress(id: number) {

@@ -9,9 +9,10 @@ import { ServiceAllocationModule } from '../reservations/service-allocation.modu
 import { ServiceSessionAccessModule } from '../../ecommerce/service-sessions/service-session-access.module';
 import { EmailModule } from '../../../email/email.module';
 import { DataCollectionModule } from '../data-collection/data-collection.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [ResponseModule, NotificationsModule, SettingsModule, ServiceAllocationModule, ServiceSessionAccessModule, EmailModule, DataCollectionModule],
+  imports: [ResponseModule, NotificationsModule, SettingsModule, ServiceAllocationModule, ServiceSessionAccessModule, EmailModule, DataCollectionModule, InventoryModule],
   controllers: [ServiceSessionsController],
   providers: [ServiceSessionsService, ServiceIndustryGuard],
   exports: [ServiceSessionsService],

@@ -7,6 +7,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { getModulesHiddenByIndustries } from '../../../../../shared/constants/industry-modules.constant';
 import type { CartItem } from '../models/cart.model';
 import { catalogInclusiveDefault } from '../../products/utils/product-tax-inclusive.util';
+import { resolveLineUnits } from '../utils/line-units.util';
 
 /**
  * Tasa que el producto lleva INCLUIDA en su precio publicado (misma precedencia
@@ -204,9 +205,19 @@ export class PosServiceStationIntegrationService {
         blocked.push({ name, reason: 'los productos por peso no se pueden cargar a una estación' });
         continue;
       }
+      if ((it.discounts?.length ?? 0) > 0) {
+        blocked.push({ name, reason: 'tiene descuentos o promociones; aplícalos al cobrar en la estación' });
+        continue;
+      }
       const quantity = Number(it.quantity);
       if (!Number.isInteger(quantity) || quantity < 1) {
         blocked.push({ name, reason: 'la cantidad debe ser un número entero' });
+        continue;
+      }
+      // La cuenta cobra `unit_price × quantity`. Una línea por unidad de venta o con
+      // escala de precio (cable por metro en mm) se cobra por otro multiplicador.
+      if (resolveLineUnits(it) !== quantity) {
+        blocked.push({ name, reason: 'se vende por unidad de medida o escala de precio; cóbralo desde el POS' });
         continue;
       }
       const unitPrice = Math.max(

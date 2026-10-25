@@ -1,4 +1,3 @@
-import { loadSessionIntakeAnswers } from '../../store/service-sessions/utils/session-intake-answers.util';
 import {
   HttpException,
   Inject,
@@ -81,25 +80,11 @@ export class ServiceSessionAccessService {
     const session = await this.prisma.service_sessions.findFirst({
       where: { store_id: storeId, station_id: station.id, status: { in: ['open', 'paused'] } },
       orderBy: { opened_at: 'desc' },
-      select: { id: true, status: true, product_id: true, order_id: true, opened_at: true },
+      select: { status: true },
     });
-    if (!session) return { station: station.name, state: 'available', service: null, items: [], total: '0' };
-    const [service, order] = await Promise.all([
-      this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { name: true } }),
-      session.order_id ? this.prisma.orders.findFirst({
-        where: { id: session.order_id, store_id: storeId },
-        select: { currency: true, grand_total: true, order_items: { orderBy: { id: 'asc' }, take: 100, select: { product_name: true, quantity: true, total_price: true } } },
-      }) : Promise.resolve(null),
-    ]);
-    return {
-      station: station.name,
-      state: session.status === 'paused' ? 'paused' : 'occupied',
-      service: service?.name ?? 'Servicio en curso',
-      opened_at: session.opened_at,
-      currency: order?.currency ?? 'COP',
-      items: (order?.order_items ?? []).map((item) => ({ name: item.product_name, quantity: Number(item.quantity), total: String(item.total_price) })),
-      total: String(order?.grand_total ?? 0),
-    };
+    // Sin credencial de sesión: solo la estación y su estado. Nada de servicio, ítems ni montos.
+    const state = !session ? 'available' : session.status === 'paused' ? 'paused' : 'occupied';
+    return { station: station.name, state };
   }
 
   /** Internal hook for session-open/email orchestration. Plaintext is returned once and never logged. */
@@ -283,11 +268,10 @@ export class ServiceSessionAccessService {
     const provider = allocation?.provider_id
       ? await this.prisma.service_providers.findFirst({ where: { id: allocation.provider_id, store_id: storeId }, select: { display_name: true } })
       : null;
-    const [station, product, subject, intake, sessionOrder] = await Promise.all([
+    const [station, product, subject, sessionOrder] = await Promise.all([
       this.prisma.service_stations.findFirst({ where: { id: session.station_id, store_id: storeId }, select: { name: true } }),
       this.prisma.products.findFirst({ where: { id: session.product_id, store_id: storeId }, select: { name: true } }),
       this.prisma.service_subjects.findFirst({ where: { store_id: storeId, session_id: sessionId }, select: { label: true, subject_type: true, metadata: true } }),
-      loadSessionIntakeAnswers(this.prisma, storeId, sessionId, { hideSensitive: true }),
       this.prisma.orders.findFirst({ where: { store_id: storeId, service_session_id: sessionId }, select: { users: { select: { first_name: true } } } }),
     ]);
     // Enlace reenviable: solo el primer nombre de quien dejó el vehículo/equipo.
@@ -300,7 +284,8 @@ export class ServiceSessionAccessService {
       // Solo el nombre visible del especialista (display_name), nunca datos de contacto.
       provider_name: provider?.display_name ?? null,
       customer_first_name: customerFirstName,
-      intake,
+      // El enlace con token es reenviable: no devuelve respuestas de la plantilla de ingreso.
+      intake: [] as Array<{ label: string; value: string }>,
       opened_at: session.opened_at,
     };
   }

@@ -469,9 +469,9 @@ export class AccountService {
     const serviceSession = order.service_session_id
       ? (await this.serviceSessionSummaries([order.service_session_id])).get(order.service_session_id) ?? null
       : null;
-    // El dueño de la orden ve todos los datos que dejó en la recepción.
+    // Sin claves ni PIN: un walk-in mal asignado expondría los datos de otro cliente.
     const serviceIntake = order.service_session_id
-      ? await loadSessionIntakeAnswers(this.storePrisma, order.store_id, order.service_session_id, { hideSensitive: false })
+      ? await loadSessionIntakeAnswers(this.storePrisma, order.store_id, order.service_session_id, { hideSensitive: true })
       : [];
 
     return {

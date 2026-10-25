@@ -27,6 +27,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { OrderSseService } from './services/order-sse.service';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 import { assertVariantRequiredForPrepared } from './utils/variant-required.validator';
+import { serviceBudgetBlocks, serviceOrderTxOptions } from './utils/service-budget-cap.util';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -2636,11 +2637,11 @@ export class OrdersService {
           const budget = await tx.service_budgets.findFirst({
             where: { store_id: order.store_id, session_id: current.service_session_id! },
             orderBy: { version: 'desc' },
-            select: { amount: true, currency: true },
+            select: { amount: true, currency: true, is_system: true },
           });
           const nextTotalExcludingTip = new Prisma.Decimal(nextGrandTotal)
             .minus(current.tip_amount ?? 0);
-          if (!budget || budget.currency !== current.currency || nextTotalExcludingTip.greaterThan(budget.amount)) {
+          if (serviceBudgetBlocks(budget, current.currency, nextTotalExcludingTip)) {
             throw new VendixHttpException(
               ErrorCodes.SERVICE_BUDGET_001,
               'El cambio de envío supera el límite vigente o no hay un presupuesto válido para la sesión de servicio.',
@@ -2710,7 +2711,7 @@ export class OrdersService {
           },
         },
       });
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      }, serviceOrderTxOptions(order.service_session_id));
     } catch (error) {
       // Release-854 follow-up paso 1 — compensación: el borrador ya tiene
       // el titular nuevo pero la orden no se escribió. Se restaura el
@@ -2893,9 +2894,9 @@ export class OrdersService {
     const budget = await tx.service_budgets.findFirst({
       where: { store_id: storeId, session_id: order.service_session_id },
       orderBy: { version: 'desc' },
-      select: { amount: true, currency: true },
+      select: { amount: true, currency: true, is_system: true },
     });
-    if (!budget || budget.currency !== order.currency || new Prisma.Decimal(nextTotal).greaterThan(budget.amount)) {
+    if (serviceBudgetBlocks(budget, order.currency, nextTotal)) {
       throw new VendixHttpException(
         ErrorCodes.SERVICE_BUDGET_001,
         'El total supera el límite vigente o su moneda no coincide. Registra una propuesta y espera la autorización del cliente.',
@@ -3298,7 +3299,12 @@ export class OrdersService {
           },
         },
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, serviceOrderTxOptions(order.service_session_id)).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === 'P2034') {
+        throw new ConflictException('La orden o el presupuesto cambió durante la actualización; recarga y vuelve a intentar.');
+      }
+      throw error;
+    });
     return stockWarnings.length > 0
       ? { ...finalOrder, stock_warnings: stockWarnings }
       : finalOrder;
@@ -4673,6 +4679,7 @@ export class OrdersService {
                 productVariantId: item.product_variant_id ?? null,
                 stationId: b.station_id, providerId: b.provider_id ?? null,
                 date: b.date, startTime: b.start_time, endTime: b.end_time,
+                excludeBookingId: createdBooking.id,
               });
             }
           } else {
@@ -5185,7 +5192,12 @@ export class OrdersService {
       }
 
       return hydrated;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, serviceOrderTxOptions(existingOrder.service_session_id)).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === 'P2034') {
+        throw new ConflictException('La orden o el presupuesto cambió durante la actualización; recarga y vuelve a intentar.');
+      }
+      throw error;
+    });
 
     // 15) Firma las imágenes S3.
     await this.signOrderItemImages(result);

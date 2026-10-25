@@ -1,12 +1,13 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { AvailabilityService } from './availability.service';
 import { StationAvailabilityQueryDto } from './dto/station-availability-query.dto';
 
 @Controller('store/service-stations')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, ServiceIndustryGuard)
 export class StationAvailabilityController {
   constructor(
     private readonly availabilityService: AvailabilityService,

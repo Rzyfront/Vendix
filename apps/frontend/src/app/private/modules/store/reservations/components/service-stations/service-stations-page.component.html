@@ -1057,7 +1057,7 @@
                   label="Precio Unitario"
                   type="number"
                   [ngModel]="addUnitPrice()"
-                  (ngModelChange)="addUnitPrice.set($event)"
+                  (ngModelChange)="onAddUnitPriceChange($event)"
                   placeholder="COP"
                 />
               </div>

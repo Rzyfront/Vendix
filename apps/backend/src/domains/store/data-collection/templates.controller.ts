@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { TemplatesService } from './templates.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
@@ -35,6 +36,7 @@ export class TemplatesController {
   }
 
   @Get('product/:productId')
+  @UseGuards(ServiceIndustryGuard)
   @Permissions('store:products:read')
   async getProductTemplate(
     @Param('productId', ParseIntPipe) productId: number,
@@ -44,6 +46,7 @@ export class TemplatesController {
   }
 
   @Put('product/:productId')
+  @UseGuards(ServiceIndustryGuard)
   @Permissions('store:products:update')
   async setProductTemplate(
     @Param('productId', ParseIntPipe) productId: number,

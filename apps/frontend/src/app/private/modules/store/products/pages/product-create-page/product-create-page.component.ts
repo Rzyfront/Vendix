@@ -6,6 +6,7 @@ import {
   signal,
   inject,
   DestroyRef,
+  untracked,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
@@ -1747,7 +1748,6 @@ export class ProductCreatePageComponent {
 
     // Check for ID in route to determine edit mode
     this.route.params.subscribe((params: Params) => {
-      if (!params['id']) this.loadServiceStations();
       if (!params['id'] && this.pendingIntakeDraft) {
         // Creación: no hay nada que cargar del servidor; se aplica ya.
         queueMicrotask(() => this.applyIntakeDraft());
@@ -1757,7 +1757,6 @@ export class ProductCreatePageComponent {
         this.isEditMode.set(true);
         this.loadProduct(this.productId);
         this.loadIntakeTemplateLink(this.productId);
-        this.loadServiceStations(this.productId);
         this.loadPromotionOptions();
         this.loadProductPromotions(this.productId);
       }
@@ -1806,6 +1805,14 @@ export class ProductCreatePageComponent {
       if (this.isRestaurant() || this.isPreparedProduct()) {
         this.loadKdsStations();
       }
+    });
+
+    // Las estaciones de servicio solo existen en tiendas con industria `service`;
+    // en las demás el endpoint responde 403, así que ni se consulta. El effect
+    // también cubre el caso en que las industrias llegan tras la construcción.
+    effect(() => {
+      if (!this.isServiceIndustry()) return;
+      untracked(() => this.loadServiceStations(this.productId ?? undefined));
     });
 }
 
@@ -2096,7 +2103,10 @@ export class ProductCreatePageComponent {
   }
 
   private intakeDraftKey(): string {
-    return `vendix:product-intake-draft:${this.productId ?? 'new'}`;
+    // `takeIntakeDraft()` corre antes de que `route.params` asigne `productId`: el id
+    // de la ruta evita leer `:new` al volver al editar un producto existente.
+    const id = this.productId ?? this.route.snapshot.paramMap.get('id');
+    return `vendix:product-intake-draft:${id ?? 'new'}`;
   }
 
   private saveIntakeDraft(templateId: number): void {

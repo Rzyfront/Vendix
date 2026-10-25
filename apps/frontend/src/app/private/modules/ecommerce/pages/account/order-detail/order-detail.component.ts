@@ -446,13 +446,17 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   // --- Orden de estación de servicio: se actualiza sola mientras está en curso ---
 
   private serviceRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private serviceRefreshInFlight = false;
 
   /** Activa o apaga el refresco según el estado de la atención. */
   private syncServiceLiveRefresh(orderId: number): void {
     const status = this.order()?.service_session?.status;
     const active = status === 'open' || status === 'paused';
     if (active && !this.serviceRefreshTimer) {
-      this.serviceRefreshTimer = setInterval(() => this.refreshOrderSilently(orderId), 15000);
+      this.serviceRefreshTimer = setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        this.refreshOrderSilently(orderId);
+      }, 15000);
     } else if (!active) {
       this.stopServiceLiveRefresh();
     }
@@ -467,15 +471,25 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
   /** Recarga sin spinner: productos agregados, estado y pago aparecen solos. */
   private refreshOrderSilently(orderId: number): void {
+    if (this.serviceRefreshInFlight) return;
+    this.serviceRefreshInFlight = true;
     this.account_service.getOrderDetail(orderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
+          this.serviceRefreshInFlight = false;
           if (!response.success) return;
           this.order.set(response.data);
           this.syncServiceLiveRefresh(orderId);
         },
-        error: () => {}, // No crítico: se reintenta en el siguiente ciclo
+        error: (err) => {
+          this.serviceRefreshInFlight = false;
+          // Sesión vencida u orden inexistente/cerrada: reintentar no sirve.
+          if (err?.status === 401 || err?.status === 404 || err?.status === 410) {
+            this.stopServiceLiveRefresh();
+          }
+          // Otros fallos son transitorios: se reintenta en el siguiente ciclo.
+        },
       });
   }
 

@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { StorePrismaService } from '../prisma/services/store-prisma.service';
 import { NotificationsService } from '../domains/store/notifications/notifications.service';
 
-/** Reconciles process-crash cases where an access email remained in `sending`. */
+/** Reconciles process-crash cases where an access email remained in `sending` or `pending`. */
 @Injectable()
 export class ServiceSessionEmailReconciliationJob {
   private readonly logger = new Logger(ServiceSessionEmailReconciliationJob.name);
@@ -21,8 +21,8 @@ export class ServiceSessionEmailReconciliationJob {
     try {
       const db = this.prisma.withoutScope();
       const rows = await db.service_session_email_deliveries.findMany({
-        where: { status: 'sending', updated_at: { lt: cutoff } },
-        select: { id: true, store_id: true, session_id: true, updated_at: true },
+        where: { status: { in: ['sending', 'pending'] }, updated_at: { lt: cutoff } },
+        select: { id: true, store_id: true, session_id: true, status: true, updated_at: true },
         orderBy: { updated_at: 'asc' },
         take: ServiceSessionEmailReconciliationJob.MAX_ROWS_PER_RUN,
       });
@@ -30,10 +30,10 @@ export class ServiceSessionEmailReconciliationJob {
       for (const row of rows) {
         const reconciledAt = new Date();
         const changed = await db.service_session_email_deliveries.updateMany({
-          where: { id: row.id, store_id: row.store_id, status: 'sending', updated_at: row.updated_at },
+          where: { id: row.id, store_id: row.store_id, status: row.status, updated_at: row.updated_at },
           data: {
             status: 'failed',
-            last_error: 'Email delivery remained in sending beyond the reconciliation threshold',
+            last_error: `Email delivery remained in ${row.status} beyond the reconciliation threshold`,
             updated_at: reconciledAt,
           },
         });
@@ -43,7 +43,7 @@ export class ServiceSessionEmailReconciliationJob {
           row.store_id,
           'service_session_email_failed',
           'Correo de seguimiento sin confirmar',
-          `La atenciÃ³n ${row.session_id} no confirmÃ³ el envÃ­o del correo. Revisa la sesiÃ³n y reenvÃ­a el enlace si corresponde.`,
+          `La atención ${row.session_id} no confirmó el envío del correo. Revisa la sesión y reenvía el enlace si corresponde.`,
           { session_id: row.session_id, route: '/admin/reservations' },
         );
         if (!notification) {

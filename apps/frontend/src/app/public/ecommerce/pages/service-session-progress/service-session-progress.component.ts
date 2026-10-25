@@ -1,4 +1,4 @@
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
@@ -49,6 +49,8 @@ interface PublicProgress {
   proposal?: ServiceProposal | null;
 }
 import { ButtonComponent, IconComponent } from '../../../../shared/components';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import { formatStoreDateTime } from '../../../../shared/utils/date.util';
 import {
   GuestOrderSummary,
   GuestOrderSummaryComponent,
@@ -61,7 +63,7 @@ import {
 @Component({
   selector: 'app-service-session-progress',
   standalone: true,
-  imports: [CommonModule, DatePipe, ButtonComponent, IconComponent, GuestOrderSummaryComponent, ServiceSessionDetailsComponent],
+  imports: [CommonModule, ButtonComponent, IconComponent, GuestOrderSummaryComponent, ServiceSessionDetailsComponent],
   templateUrl: './service-session-progress.component.html',
   styleUrl: './service-session-progress.component.scss',
 })
@@ -70,7 +72,15 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
   private readonly meta = inject(Meta);
+  private readonly currencyService = inject(CurrencyFormatService);
   private stream?: EventSource;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectAttempts = 0;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly MAX_BACKOFF_MS = 60000;
+  private static readonly POLL_INTERVAL_MS = 30000;
+  private readonly browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
   private readonly apiUrl = `${environment.apiUrl}/ecommerce`;
 
   readonly state = signal<'loading' | 'loaded' | 'unavailable' | 'error'>('loading');
@@ -79,6 +89,10 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   readonly decisionPrompt = signal<'approved' | 'rejected' | null>(null);
   readonly decisionMessage = signal<string | null>(null);
   readonly connected = signal(false);
+  /** Hay un refresco en vuelo: evita solapar peticiones (botón Actualizar). */
+  readonly refreshing = signal(false);
+  /** Se conservan los últimos datos pero el refresco falló o el enlace dejó de responder. */
+  readonly staleNotice = signal<string | null>(null);
   /** El enlace se cierra al finalizar la atención: se conserva la última cuenta vista. */
   readonly finished = signal(false);
   readonly proposalLines = computed(() => {
@@ -152,11 +166,16 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.stream?.close();
+    this.stopStream();
+    this.stopPolling();
+    this.clearReconnectTimer();
     this.connected.set(false);
+    this.meta.removeTag("name='referrer'");
   }
 
   refresh(): void {
+    if (this.refreshing()) return;
+    this.refreshing.set(true);
     this.http
       .get<PublicProgress>(`${this.apiUrl}/service-sessions/${this.token}`, {
         headers: { 'Cache-Control': 'no-cache' },
@@ -164,12 +183,34 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (value) => {
+          this.refreshing.set(false);
+          this.staleNotice.set(null);
           this.progress.set(value);
           this.state.set('loaded');
-          this.openStream(value.store_id);
+          if (!this.stream || this.stream.readyState === EventSource.CLOSED) {
+            if (!this.pollTimer) this.openStream(value.store_id);
+          }
         },
-        error: (error) =>
-          this.state.set(error?.status === 410 || error?.status === 404 ? 'unavailable' : 'error'),
+        error: (error) => {
+          this.refreshing.set(false);
+          const gone = error?.status === 410 || error?.status === 404;
+          if (this.progress()) {
+            // Ya hay datos: se conserva la última vista y solo se avisa.
+            this.staleNotice.set(
+              gone
+                ? 'Este enlace ya no responde. Mostramos la última información recibida.'
+                : 'No pudimos actualizar. Mostramos la última información recibida.',
+            );
+            if (gone) {
+              this.stopStream();
+              this.stopPolling();
+              this.clearReconnectTimer();
+              this.connected.set(false);
+            }
+            return;
+          }
+          this.state.set(gone ? 'unavailable' : 'error');
+        },
       });
   }
 
@@ -220,18 +261,63 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
       });
   }
 
-  money(value: unknown, currency?: string): string {
+  /** Moneda de la tienda vía CurrencyFormatService (el código de la propuesta no la cambia). */
+  money(value: unknown, _currency?: string): string {
     const amount = Number(value ?? 0);
     if (!Number.isFinite(amount)) return '—';
-    try {
-      return new Intl.NumberFormat('es-CO', {
-        style: 'currency',
-        currency: currency || 'COP',
-        maximumFractionDigits: 0,
-      }).format(amount);
-    } catch {
-      return `${currency || '$'} ${amount.toLocaleString('es-CO')}`.trim();
+    return this.currencyService.format(amount);
+  }
+
+  dateTime(value: string | null | undefined): string {
+    return value ? formatStoreDateTime(value, this.browserTimezone, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  }
+
+  private stopStream(): void {
+    if (this.stream) {
+      this.stream.onopen = null;
+      this.stream.onerror = null;
+      this.stream.close();
+      this.stream = undefined;
     }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private startPolling(): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible' || this.finished()) return;
+      this.refresh();
+    }, ServiceSessionProgressComponent.POLL_INTERVAL_MS);
+  }
+
+  private scheduleReconnect(storeId: number): void {
+    if (this.reconnectTimer || this.pollTimer) return;
+    if (this.reconnectAttempts >= ServiceSessionProgressComponent.MAX_RECONNECT_ATTEMPTS) {
+      this.startPolling();
+      return;
+    }
+    const delay = Math.min(
+      2000 * 2 ** this.reconnectAttempts,
+      ServiceSessionProgressComponent.MAX_BACKOFF_MS,
+    );
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.openStream(storeId);
+    }, delay);
   }
 
   proposalStatusLabel(status: string): string {
@@ -247,12 +333,21 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
   }
 
   private openStream(storeId: number): void {
-    this.stream?.close();
+    this.stopStream();
     this.stream = new EventSource(`${this.apiUrl}/service-sessions/${this.token}/stream?store_id=${encodeURIComponent(storeId)}`, {
       withCredentials: true,
     });
-    this.stream.onopen = () => this.connected.set(true);
-    this.stream.onerror = () => this.connected.set(false);
+    const stream = this.stream;
+    stream.onopen = () => {
+      this.reconnectAttempts = 0;
+      this.connected.set(true);
+    };
+    stream.onerror = () => {
+      this.connected.set(false);
+      if (stream.readyState === EventSource.CLOSED) {
+        this.scheduleReconnect(storeId);
+      }
+    };
     for (const eventName of ['snapshot', 'progress']) {
       this.stream.addEventListener(eventName, (event: MessageEvent) => {
         try {
@@ -269,10 +364,14 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
                   {
                     type: payload.type,
                     text: payload.text,
-                    created_at: new Date().toISOString(),
+                    created_at: payload.created_at ?? new Date().toISOString(),
                   },
                 ].slice(-100),
               });
+            }
+            // Una propuesta nueva o resuelta cambia la tarjeta de aprobación: se vuelve a leer.
+            if (typeof payload?.type === 'string' && payload.type.startsWith('proposal_')) {
+              this.refresh();
             }
           }
           this.state.set('loaded');
@@ -282,7 +381,9 @@ export class ServiceSessionProgressComponent implements OnInit, OnDestroy {
       });
     }
     this.stream.addEventListener('link_expired', () => {
-      this.stream?.close();
+      this.stopStream();
+      this.stopPolling();
+      this.clearReconnectTimer();
       this.connected.set(false);
       // Con una cuenta ya mostrada, el cierre del enlace es el fin del servicio.
       if (this.progress()) this.finished.set(true);

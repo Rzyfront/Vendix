@@ -62,8 +62,12 @@ export class OrdersComponent implements OnInit {
     return labels[state] || state;
   }
 
-  /** Saldo pendiente: total menos lo pagado. */
+  /**
+   * Saldo pendiente: solo para cuentas de servicio. En órdenes históricas
+   * `total_paid` es 0 aunque estén pagadas, así que no se infiere de ahí.
+   */
   hasPendingPayment(order: Order): boolean {
+    if (!order.service_session) return false;
     return Number(order.grand_total ?? 0) - Number(order.total_paid ?? 0) > 0.009 && order.state !== 'cancelled';
   }
 

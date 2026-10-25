@@ -437,6 +437,7 @@ export class ReservationsService {
               date: dto.date,
               startTime: dto.start_time,
               endTime: dto.end_time,
+              excludeBookingId: created.id,
             });
           }
 
@@ -645,6 +646,7 @@ export class ReservationsService {
         // to its original cart row. Optional and persisted verbatim.
         cart_item_id: dto.cart_item_id ?? null,
         order_id: dto.order_id ?? null,
+        provider_id: dto.provider_id ?? null,
         notes: dto.notes,
         expires_at: expiresAt,
         created_by_user_id: context?.user_id,
@@ -665,6 +667,7 @@ export class ReservationsService {
           endTime: dto.end_time,
           expiresAt,
           state: 'held',
+          excludeBookingId: created.id,
         });
       }
       return created;
@@ -1303,11 +1306,11 @@ export class ReservationsService {
         include: this.BOOKING_INCLUDE,
       });
       if (product?.requires_station) {
-        const previous = await tx.service_allocations.findFirst({ where: { store_id: booking.store_id, booking_id: booking.id, state: 'cancelled' }, orderBy: { id: 'desc' }, select: { station_id: true } });
+        const previous = await tx.service_allocations.findFirst({ where: { store_id: booking.store_id, booking_id: booking.id, state: 'cancelled' }, orderBy: { id: 'desc' }, select: { station_id: true, provider_id: true } });
         await this.allocationCoordinator!.allocateBooking(tx, {
           storeId: booking.store_id, bookingId: booking.id, productId: booking.product_id,
           productVariantId: booking.product_variant_id, stationId: previous?.station_id,
-          providerId: booking.provider_id, date: this.formatDateOnly(request.requested_date),
+          providerId: booking.provider_id ?? previous?.provider_id, date: this.formatDateOnly(request.requested_date),
           startTime: request.requested_start_time, endTime: request.requested_end_time,
           excludeBookingId: booking.id,
         });
@@ -1805,6 +1808,18 @@ export class ReservationsService {
     return this.prisma.$transaction(async (tx) => {
       if (product?.requires_station && ['cancelled', 'no_show', 'completed'].includes(targetStatus)) {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, targetStatus === 'cancelled' ? 'cancelled' : 'released');
+      }
+      if (product?.requires_station && targetStatus === 'confirmed') {
+        // Same mechanism as confirmHold: a held allocation must not stay
+        // held (and expire) once the booking is confirmed.
+        const held = await tx.service_allocations.findFirst({
+          where: { store_id: booking.store_id, booking_id: id, state: 'held' },
+          select: { id: true, expires_at: true },
+        });
+        if (held) {
+          if (held.expires_at && held.expires_at <= new Date()) throw new VendixHttpException(ErrorCodes.STATION_011);
+          await tx.service_allocations.update({ where: { id: held.id }, data: { state: 'confirmed', expires_at: null, updated_at: new Date() } });
+        }
       }
       return this.mapBooking(await tx.bookings.update({
         where: { id },

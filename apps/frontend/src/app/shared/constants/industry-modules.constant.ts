@@ -200,7 +200,6 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'memberships',
     'orders_reservations',
     'orders_service_stations',
-    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',

@@ -18,7 +18,7 @@ interface MetadataValuesReader {
   };
 }
 
-const SENSITIVE_KEY = /(clave|contrase|password|pin\b|patron|patrón|desbloqueo)/i;
+const SENSITIVE_KEY = /(clave|contrase|password|\bpin(?:[_-]|\b)|patron|patrón|desbloqueo|codigo|código|passcode|cedula|cédula|documento|alergia|salud)/i;
 
 export async function loadSessionIntakeAnswers(
   client: MetadataValuesReader,

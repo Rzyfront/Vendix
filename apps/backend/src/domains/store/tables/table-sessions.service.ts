@@ -32,6 +32,7 @@ import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { serviceBudgetBlocks, serviceOrderTxOptions } from '../orders/utils/service-budget-cap.util';
 import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
@@ -1205,15 +1206,13 @@ export class TableSessionsService {
         const budget = await tx.service_budgets.findFirst({
           where: { store_id: storeId, session_id: serviceSessionId },
           orderBy: { version: 'desc' },
-          select: { amount: true, currency: true },
+          select: { amount: true, currency: true, is_system: true },
         });
         // A service session must have its initialized baseline budget before
         // any table/QR writer can raise the order total. This table writer's
         // grand_total deliberately excludes tips, so compare it as-is.
         if (
-          !budget ||
-          budget.currency !== lockedOrders[0].currency ||
-          new Prisma.Decimal(nextGrandTotal).greaterThan(budget.amount)
+          serviceBudgetBlocks(budget, lockedOrders[0].currency, nextGrandTotal)
         ) {
           throw new VendixHttpException(
             ErrorCodes.SERVICE_BUDGET_001,
@@ -2866,7 +2865,12 @@ export class TableSessionsService {
     }
 
     // 2. Resolve + authorize the payment row INSIDE the transaction so
-    //    the CAS + balance update are atomic.
+    //    the CAS + balance update are atomic. Serializable only for
+    //    service-station orders (decided from a minimal pre-read).
+    const serviceOrder = await this.prisma.orders.findFirst({
+      where: { id: session.order_id, store_id: storeId },
+      select: { service_session_id: true },
+    });
     const result = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payments.findFirst({
         where: { id: paymentId, order_id: session.order_id },
@@ -2948,14 +2952,12 @@ export class TableSessionsService {
             session_id: payment.orders.service_session_id,
           },
           orderBy: { version: 'desc' },
-          select: { amount: true, currency: true },
+          select: { amount: true, currency: true, is_system: true },
         });
         const authorizedTotal = new Prisma.Decimal(payment.orders.grand_total)
           .minus(payment.orders.tip_amount ?? 0);
         if (
-          !budget ||
-          budget.currency !== payment.orders.currency ||
-          authorizedTotal.greaterThan(budget.amount)
+          serviceBudgetBlocks(budget, payment.orders.currency, authorizedTotal)
         ) {
           throw new VendixHttpException(
             ErrorCodes.SERVICE_BUDGET_001,
@@ -3049,7 +3051,15 @@ export class TableSessionsService {
         newTotalPaid: orderTotalPaid,
         shouldProject: orderTotalPaid >= Number(order.grand_total || 0),
       };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, serviceOrderTxOptions(serviceOrder?.service_session_id)).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === 'P2034') {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Conflicto de escritura al confirmar el pago; reintenta la operación',
+        );
+      }
+      throw error;
+    });
 
     // The payment and order balance are committed before B.1 opens its own
     // transaction. A succeeded retry repairs a missed projection; B.1 keeps

@@ -1144,6 +1144,15 @@ export class ProductsService {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
       }
 
+      if (
+        sanitizedDto.requires_station &&
+        sanitizedDto.product_type !== ProductType.SERVICE
+      ) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
+
       // Consultation validation
       if (sanitizedDto.is_consultation) {
         if (sanitizedDto.product_type !== ProductType.SERVICE) {

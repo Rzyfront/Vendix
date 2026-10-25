@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { map, Observable } from 'rxjs';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { environment } from '../../../../../../../environments/environment';
 
 export interface PaginatedApiResponse<T> {
@@ -127,6 +128,7 @@ export interface StationProviderOption {
 @Injectable({ providedIn: 'root' })
 export class ServiceStationsService {
   private readonly http = inject(HttpClient);
+  private readonly currencyService = inject(CurrencyFormatService);
   private readonly base = `${environment.apiUrl}/store/service-stations`;
 
   private unwrap<T>(response: { data?: T } | T): T {
@@ -327,7 +329,9 @@ export class ServiceStationsService {
     );
   }
 
-  setBudget(sessionId: number, amount: number, currency: string = 'COP', expectedVersion: number = 0): Observable<any> {
+  setBudget(sessionId: number, amount: number, currency?: string, expectedVersion: number = 0): Observable<any> {
+    // Moneda de la tienda; 'COP' solo como último recurso si aún no cargó.
+    currency = currency || this.currencyService.currencyCode() || 'COP';
     return this.http.put<{ data?: any } | any>(
       `${environment.apiUrl}/store/service-sessions/${sessionId}/budget`,
       { amount, currency, expectedVersion },

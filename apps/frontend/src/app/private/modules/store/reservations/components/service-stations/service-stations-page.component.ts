@@ -1,7 +1,8 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { HttpClient } from '@angular/common/http';
-import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -368,6 +369,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinIntakeValues = signal<Record<number, unknown>>({});
   private intakeRequestSeq = 0;
   private prefillRequestSeq = 0;
+  private manageSessionSeq = 0;
+  private readonly destroyRef = inject(DestroyRef);
 
   /** Prellenado del alta de cliente con lo ya digitado en el check-in. */
   readonly checkinCustomerInitialValues = computed(() => {
@@ -652,6 +655,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   );
   readonly addQuantity = signal<number>(1);
   readonly addUnitPrice = signal<number | null>(null);
+  /** true si el usuario cambió el precio: solo entonces se envía `unit_price` (igual que el check-in). */
+  readonly addPriceEdited = signal(false);
   readonly addDescription = signal('');
   readonly addingItem = signal(false);
 
@@ -907,7 +912,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.reissuingLink.set(false);
         this.reissueIdentityChecked.set(false);
-        this.showSessionAccessUrl(session.id, res.access_url ?? null);
+        // Si el usuario ya abrió otra cuenta, no pintar el enlace/QR de esta en el modal.
+        if (this.selectedSession()?.id === session.id) {
+          this.showSessionAccessUrl(session.id, res.access_url ?? null);
+        }
         this.toastService.success(
           res.email_delivery_status === 'sent'
             ? 'Enlace nuevo generado y enviado al correo del cliente.'
@@ -1896,7 +1904,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         if (newSessionId) {
           // 1. Guardar presupuesto inicial opcional para TODOS los tipos
           if (budgetVal != null && Number(budgetVal) > 0) {
-            this.stationsApi.setBudget(newSessionId, Number(budgetVal)).subscribe({
+            this.stationsApi.setBudget(newSessionId, Number(budgetVal), this.currencyService.currencyCode() || 'COP').subscribe({
               error: (error: unknown) =>
                 this.toastService.warning(
                   this.errorText(error, 'La atención se abrió, pero no se pudo guardar el presupuesto. Ajústalo desde "Ver Cuenta".'),
@@ -1941,8 +1949,15 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Modal 3: Manage Active Session / Cuenta de la Bahía
   openManageSession(session: ServiceSessionRow): void {
+    const seq = ++this.manageSessionSeq;
+    const isCurrent = () =>
+      seq === this.manageSessionSeq && this.selectedSession()?.id === session.id;
+
     this.selectedSession.set(session);
     this.sessionOrder.set(session.order ?? null);
+    this.budget.set(null);
+    this.sessionBudgetAmount.set(null);
+    this.proposals.set([]);
     this.showSessionModal.set(true);
     this.sessionOrderLoading.set(true);
     this.selectedAddProductId.set(null);
@@ -1954,8 +1969,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.showSessionAccessUrl(session.id, this.lastAccessUrlBySession().get(session.id) || session.access_url || null);
 
     // Load full session with order_items
-    this.stationsApi.getSession(session.id).subscribe({
+    this.stationsApi.getSession(session.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (full) => {
+        if (!isCurrent()) return;
         this.sessionOrderLoading.set(false);
         if (full) {
           this.selectedSession.set(full);
@@ -1965,33 +1981,46 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
           }
         }
       },
-      error: () => this.sessionOrderLoading.set(false),
+      error: () => {
+        if (!isCurrent()) return;
+        this.sessionOrderLoading.set(false);
+      },
     });
 
     // Load sellable catalog for adding to the account (products + services, no insumos)
     if (!this.sellableCatalogProducts().length) {
-      this.stationsApi.getSellableProducts().subscribe({
+      this.stationsApi.getSellableProducts().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (prods) => this.sellableCatalogProducts.set(prods || []),
         error: () => {},
       });
     }
 
     // Load budget
-    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`).subscribe({
+    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (r) => {
+        if (!isCurrent()) return;
         // El base del sistema (is_system) no es un tope del cliente: ni aviso ni "Techo".
         const raw = r?.data ?? null;
         const val = raw && !raw.is_system ? raw : null;
         this.budget.set(val);
         this.sessionBudgetAmount.set(val ? Number(val.amount) : null);
       },
-      error: () => {},
+      error: (error: unknown) => {
+        if (!isCurrent()) return;
+        this.toastService.error(this.errorText(error, 'No fue posible cargar el presupuesto de la cuenta.'));
+      },
     });
 
     // Load proposals
-    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/proposals`).subscribe({
-      next: (r) => this.proposals.set(r?.data ?? []),
-      error: () => this.proposals.set([]),
+    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/proposals`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (r) => {
+        if (!isCurrent()) return;
+        this.proposals.set(r?.data ?? []);
+      },
+      error: () => {
+        if (!isCurrent()) return;
+        this.proposals.set([]);
+      },
     });
   }
 
@@ -2040,11 +2069,18 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.selectedAddVariantId.set(Number(variantId) || null);
     const variant = this.addProductVariants().find((v) => v.id === Number(variantId));
     if (variant) this.addUnitPrice.set(this.variantPublishedPrice(variant));
+    this.addPriceEdited.set(false);
+  }
+
+  onAddUnitPriceChange(value: number | null): void {
+    this.addUnitPrice.set(value);
+    this.addPriceEdited.set(true);
   }
 
   onAddProductSelect(productId: number | null): void {
     this.selectedAddProductId.set(productId);
     this.selectedAddVariantId.set(null);
+    this.addPriceEdited.set(false);
     if (!productId) {
       this.addUnitPrice.set(null);
       return;
@@ -2052,8 +2088,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const found =
       this.sellableCatalogProducts().find((p) => p.id === productId) ??
       this.allCatalogProducts().find((p) => p.id === productId);
+    // Precio publicado (oferta incluida); el backend lo vuelve a resolver si no se edita.
     if (found) {
-      this.addUnitPrice.set(Number(found.base_price || 0));
+      this.addUnitPrice.set(this.publishedPrice(found));
     }
   }
 
@@ -2066,7 +2103,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       return;
     }
     const qty = Math.max(1, Number(this.addQuantity() || 1));
-    const price = this.addUnitPrice() != null ? Number(this.addUnitPrice()) : undefined;
+    const price = this.addPriceEdited() && this.addUnitPrice() != null ? Number(this.addUnitPrice()) : undefined;
 
     this.addingItem.set(true);
     this.stationsApi.addItem(session.id, {
@@ -2082,12 +2119,14 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         this.selectedAddVariantId.set(null);
         this.addQuantity.set(1);
         this.addUnitPrice.set(null);
+        this.addPriceEdited.set(false);
         this.addDescription.set('');
         this.toastService.success('Ítem agregado a la cuenta de la estación.');
         // Refresh session & order
         this.stationsApi.getSession(session.id).subscribe({
           next: (full) => {
-            if (full) {
+            // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
+            if (full && this.selectedSession()?.id === session.id) {
               this.selectedSession.set(full);
               this.sessionOrder.set(full.order ?? null);
             }
@@ -2112,7 +2151,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         // Refresh session & order
         this.stationsApi.getSession(session.id).subscribe({
           next: (full) => {
-            if (full) {
+            // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
+            if (full && this.selectedSession()?.id === session.id) {
               this.selectedSession.set(full);
               this.sessionOrder.set(full.order ?? null);
             }
@@ -2134,7 +2174,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.http
       .put<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`, {
         amount,
-        currency: this.budget()?.currency || 'COP',
+        currency: this.budget()?.currency || this.currencyService.currencyCode() || 'COP',
         expectedVersion: this.budget()?.version ?? 0,
       })
       .subscribe({

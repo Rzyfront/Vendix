@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
 import { ListServiceRegistryDto, ListServiceRemindersDto, ServiceRegistryActionDto, ServiceRegistryAssignCustomerDto, ServiceRegistryWhatsappDto } from './dto';
@@ -19,7 +20,7 @@ import { ServiceRemindersService } from './service-reminders.service';
 
 @ApiTags('Store Service Reminders')
 @Controller('store/service-reminders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, ServiceIndustryGuard)
 export class ServiceRemindersController {
   constructor(
     private readonly serviceReminders: ServiceRemindersService,

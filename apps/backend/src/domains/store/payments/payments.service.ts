@@ -53,6 +53,7 @@ import { resolvePackSize } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
+import { serviceBudgetBlocks } from '../orders/utils/service-budget-cap.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
@@ -6043,12 +6044,12 @@ export class PaymentsService {
           const budget = await tx.service_budgets.findFirst({
             where: { store_id: dtoStoreId, session_id: existingOrder.service_session_id },
             orderBy: { version: 'desc' },
-            select: { amount: true, currency: true },
+            select: { amount: true, currency: true, is_system: true },
           });
           // Budget policy excludes optional tips; the order grand total still
           // includes them for payment and receipt purposes.
           const budgetComparableTotal = this.roundMoney(grandTotal - tip);
-          if (!budget || budget.currency !== existingOrder.currency || new Prisma.Decimal(budgetComparableTotal).greaterThan(budget.amount)) {
+          if (serviceBudgetBlocks(budget, existingOrder.currency, budgetComparableTotal)) {
             throw new VendixHttpException(
               ErrorCodes.SERVICE_BUDGET_001,
               'El total supera el límite vigente. Registra una propuesta y espera la autorización del cliente.',
@@ -6637,10 +6638,10 @@ export class PaymentsService {
         const budget = await tx.service_budgets.findFirst({
           where: { store_id: dtoStoreId, session_id: serviceOrder.service_session_id },
           orderBy: { version: 'desc' },
-          select: { amount: true, currency: true },
+          select: { amount: true, currency: true, is_system: true },
         });
         const authorizedTotal = this.roundMoney(payableAmount - Number(serviceOrder.tip_amount ?? 0));
-        if (!budget || budget.currency !== serviceOrder.currency || new Prisma.Decimal(authorizedTotal).greaterThan(budget.amount)) {
+        if (serviceBudgetBlocks(budget, serviceOrder.currency, authorizedTotal)) {
           throw new VendixHttpException(
             ErrorCodes.SERVICE_BUDGET_001,
             'No se puede cobrar: el total autorizado supera el límite vigente.',
