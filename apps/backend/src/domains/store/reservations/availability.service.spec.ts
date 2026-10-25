@@ -175,4 +175,18 @@ describe('AvailabilityService — business hours integration', () => {
     );
     expect(available).toBe(false);
   });
+
+  it('un producto sin estación acepta un rango de 90 días', async () => {
+    const { service } = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: false }],
+    });
+    await expect(service.getAvailableSlots(10, '2026-08-01', '2026-10-30')).resolves.toBeDefined();
+  });
+
+  it('un producto con estación rechaza un rango mayor a 62 días', async () => {
+    const { service } = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: true }],
+    });
+    await expect(service.getAvailableSlots(10, '2026-08-01', '2026-10-30')).rejects.toThrow(/62/);
+  });
 });

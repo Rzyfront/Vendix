@@ -176,9 +176,15 @@ export function buildReminderMessage(input: ReminderMessageInput): string {
   return `${opening} Te recomendamos repetirlo cada ${interval} ${dayWord(interval)}, así que en ${remaining} ${dayWord(remaining)} es buen momento para ${bring}. ¡Te esperamos!`;
 }
 
-/** Normaliza un teléfono colombiano para wa.me (10 dígitos → prefijo 57). */
-export function normalizeWhatsappPhone(phone: string | null | undefined): string | null {
+/** Extrae solo dígitos y exige entre 10 y 15 (E.164); null si no cumple. */
+export function digitsOnlyPhone(phone: string | null | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+}
+
+/** Normaliza un teléfono para wa.me (10 a 15 dígitos; 10 dígitos → prefijo 57). */
+export function normalizeWhatsappPhone(phone: string | null | undefined): string | null {
+  const digits = digitsOnlyPhone(phone);
   if (!digits) return null;
   return digits.length === 10 ? `57${digits}` : digits;
 }

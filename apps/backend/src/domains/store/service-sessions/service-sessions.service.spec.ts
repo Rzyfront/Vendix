@@ -60,7 +60,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       allocateForLine: jest.fn().mockResolvedValue({ slices: [{ location_id: 7, quantity: 1 }], shortfall: 0, available: 1 }),
       absorbShortfall: jest.fn((a: any, loc: number) => [{ location_id: loc, quantity: 1 }]),
     };
-    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9 } as any);
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9, roles: ['admin'], permissions: ['store:pos:price_override'] } as any);
     templates = {
       getLinkedTemplateForProduct: jest.fn().mockResolvedValue(template),
       getActiveTemplateById: jest.fn().mockResolvedValue(null),
@@ -349,6 +349,20 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     it('rechaza un unit_price distinto al publicado si el producto no permite editar precio', async () => {
       const tx = buildTx({ track_inventory: false });
       await expect(add(tx, { unit_price: 500 })).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'POS_PRICE_OVERRIDE_NOT_ALLOWED_001' }) });
+    });
+
+    it('rechaza con AUTH_PERM_001 un precio editado sin el permiso store:pos:price_override', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9, roles: ['cashier'], permissions: [] } as any);
+      const tx = buildTx({ track_inventory: false, allow_pos_price_override: true });
+      await expect(add(tx, { unit_price: 500 })).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'AUTH_PERM_001' }) });
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('acepta un precio editado con el permiso y el flag del producto', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9, roles: ['cashier'], permissions: ['store:pos:price_override'] } as any);
+      const tx = buildTx({ track_inventory: false, allow_pos_price_override: true });
+      await add(tx, { unit_price: 500 });
+      expect(tx.order_items.create.mock.calls[0][0].data.is_price_overridden).toBe(true);
     });
 
     it('acepta un unit_price igual al publicado aunque el producto no permita override', async () => {

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max, IsIn, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, IsIn, MaxLength, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -87,6 +87,7 @@ export class ServiceRegistryWhatsappDto extends ServiceRegistryActionDto {
   @IsOptional()
   @IsString()
   @MaxLength(30)
+  @Matches(/^(?:\D*\d){10,15}\D*$/, { message: 'El teléfono debe tener entre 10 y 15 dígitos' })
   phone?: string;
 }
 

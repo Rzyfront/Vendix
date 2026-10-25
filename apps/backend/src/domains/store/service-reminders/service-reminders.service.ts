@@ -13,6 +13,7 @@ import {
   buildReminderMessage,
   computeRecurrence,
   localDayUtc,
+  digitsOnlyPhone,
   normalizeWhatsappPhone,
   summarizeSubject,
 } from './service-reminders.utils';
@@ -317,8 +318,14 @@ export class ServiceRemindersService {
           select: { entity_type: true, entity_id: true, value_text: true },
         })
       : [];
+    const phoneByEntity = new Map<string, string>();
+    for (const v of phoneValues) {
+      const text = v.value_text?.trim();
+      const key = `${v.entity_type}:${v.entity_id}`;
+      if (text && !phoneByEntity.has(key)) phoneByEntity.set(key, text);
+    }
     const templatePhone = (type: 'service_session' | 'customer', id: number | null) =>
-      id == null ? null : phoneValues.find((v) => v.entity_type === type && v.entity_id === id && v.value_text?.trim())?.value_text?.trim() ?? null;
+      id == null ? null : phoneByEntity.get(`${type}:${id}`) ?? null;
 
     const now = new Date();
     const subjectPhrases = new Map<string, string | null>();
@@ -450,7 +457,7 @@ export class ServiceRemindersService {
 
   async registry(query: ListServiceRegistryDto) {
     const storeId = this.requireStoreId();
-    await this.computeDue(storeId);
+    // Solo lectura: computeDue lo ejecuta el cron diario (handleDailyCron).
     const { rows } = await this.buildRows(storeId);
 
     const search = query.search?.trim() ? normalizeText(query.search.trim()) : '';
@@ -576,14 +583,15 @@ export class ServiceRemindersService {
     // Sin teléfono guardado, el comercio lo escribe al enviar; si el cliente está
     // registrado y su perfil no tiene teléfono, queda guardado para la próxima vez.
     if (!ctx.row.customer.phone && dto.phone) {
-      if (!normalizeWhatsappPhone(dto.phone)) throw new BadRequestException('El teléfono no es válido');
+      const cleanPhone = digitsOnlyPhone(dto.phone);
+      if (!cleanPhone) throw new BadRequestException('El teléfono no es válido: debe tener entre 10 y 15 dígitos');
       if (ctx.row.customer.id != null) {
         await this.prisma.users.updateMany({
           where: { id: ctx.row.customer.id, store_users: { some: { store_id: storeId } }, OR: [{ phone: null }, { phone: '' }] },
-          data: { phone: dto.phone.trim() },
+          data: { phone: cleanPhone },
         });
       }
-      ctx.row.customer.phone = dto.phone.trim();
+      ctx.row.customer.phone = cleanPhone;
     }
     if (!ctx.row.customer.phone) throw new BadRequestException('El cliente no tiene un número de teléfono registrado');
     return this.deliverWhatsapp(ctx, await this.ensureLog(storeId, ctx.row));
@@ -629,11 +637,10 @@ export class ServiceRemindersService {
 
   /**
    * Lista los recordatorios (logs) de la tienda con filtros y paginación.
-   * Ejecuta computeDue antes de listar.
+   * Solo lectura: los logs los genera el cron diario (computeDue).
    */
   async list(query: ListServiceRemindersDto) {
     const storeId = this.requireStoreId();
-    await this.computeDue(storeId);
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     const todayStartUtc = localDayUtc(new Date(), tz);

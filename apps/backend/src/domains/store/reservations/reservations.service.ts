@@ -688,11 +688,17 @@ export class ReservationsService {
     }
 
     if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
+      if (!product?.requires_station) {
+        await this.prisma.bookings.delete({ where: { id } });
+        throw new BadRequestException(
+          'La reserva temporal ha expirado. Por favor selecciona un horario nuevamente.',
+        );
+      }
       await this.prisma.$transaction(async (tx) => {
-        if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'expired');
+        await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'expired');
         await tx.bookings.update({ where: { id }, data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() } });
       });
-      throw new VendixHttpException(product?.requires_station ? ErrorCodes.STATION_011 : ErrorCodes.BOOK_CONFIRM_001);
+      throw new VendixHttpException(ErrorCodes.STATION_011);
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {

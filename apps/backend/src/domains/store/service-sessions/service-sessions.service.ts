@@ -1102,6 +1102,26 @@ export class ServiceSessionsService {
   }
 
   /**
+   * Réplica del chequeo del POS (`PaymentsService.hasActivePermission` + `requireActivePermission`):
+   * el helper del POS es privado, así que se lee del contexto, que ya trae solo permisos activos.
+   */
+  private requirePosPriceOverridePermission(): void {
+    const ctx = RequestContextService.getContext();
+    const roles = ctx?.roles || [];
+    const allowed =
+      ctx?.is_super_admin === true ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN') ||
+      (ctx?.permissions || []).includes('store:pos:price_override');
+    if (!allowed) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        'No tienes permiso para realizar esta operación en POS.',
+      );
+    }
+  }
+
+  /**
    * Agrega una línea dentro de una transacción abierta. Crea la orden SVC-{id} si la
    * atención aún no tiene una (muta `session.order_id`). No recalcula totales: lo hace el llamador.
    */
@@ -1145,6 +1165,9 @@ export class ServiceSessionsService {
         `El producto "${product.name}" no permite editar el precio en POS.`,
       );
     }
+    // Mismo permiso que el POS (payments.service requireActivePermission): editar el precio exige
+    // además `store:pos:price_override` del usuario actual.
+    if (priceOverridden) this.requirePosPriceOverridePermission();
     const lineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
     const tracksInventory = variant?.track_inventory_override ?? product.track_inventory;
     const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);

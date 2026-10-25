@@ -120,5 +120,9 @@ describe('service-reminders utils', () => {
     expect(normalizeWhatsappPhone('300 123 4567')).toBe('573001234567');
     expect(normalizeWhatsappPhone('+57 300 123 4567')).toBe('573001234567');
     expect(normalizeWhatsappPhone('')).toBeNull();
+    expect(normalizeWhatsappPhone('x1')).toBeNull();
+    expect(normalizeWhatsappPhone('123456789')).toBeNull();
+    expect(normalizeWhatsappPhone('3001234567')).toBe('573001234567');
+    expect(normalizeWhatsappPhone('573001234567')).toBe('573001234567');
   });
 });

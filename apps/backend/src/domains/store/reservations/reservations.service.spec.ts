@@ -465,3 +465,62 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     expect(ctx.bookings.length).toBe(0);
   });
 });
+describe('ReservationsService.confirmHold — hold expirado', () => {
+  function build(requires_station: boolean) {
+    const expired = {
+      id: 7,
+      store_id: 1,
+      product_id: 3,
+      status: 'pending',
+      expires_at: new Date(Date.now() - 60_000),
+    };
+    const prisma: any = {
+      bookings: {
+        findFirst: jest.fn().mockResolvedValue({ ...expired }),
+        delete: jest.fn().mockResolvedValue(expired),
+        update: jest.fn().mockResolvedValue(expired),
+      },
+      products: {
+        findFirst: jest.fn().mockResolvedValue({ requires_station }),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
+    };
+    const coordinator: any = { releaseBooking: jest.fn().mockResolvedValue(undefined) };
+    const service = new ReservationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+      coordinator,
+    );
+    return { service, prisma, coordinator };
+  }
+
+  it('producto sin estación: elimina la reserva y lanza BadRequest', async () => {
+    const { service, prisma, coordinator } = build(false);
+    await expect(service.confirmHold(7)).rejects.toThrow(BadRequestException);
+    await expect(service.confirmHold(7)).rejects.toThrow(
+      'La reserva temporal ha expirado. Por favor selecciona un horario nuevamente.',
+    );
+    expect(prisma.bookings.delete).toHaveBeenCalledWith({ where: { id: 7 } });
+    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(coordinator.releaseBooking).not.toHaveBeenCalled();
+  });
+
+  it('producto con estación: libera la asignación, cancela y lanza STATION_011', async () => {
+    const { service, prisma, coordinator } = build(true);
+    await expect(service.confirmHold(7)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'STATION_011' }),
+    });
+    expect(coordinator.releaseBooking).toHaveBeenCalled();
+    expect(prisma.bookings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+    );
+    expect(prisma.bookings.delete).not.toHaveBeenCalled();
+  });
+});

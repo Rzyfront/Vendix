@@ -49,7 +49,6 @@ export class AvailabilityService {
     date_to: string,
     options: { provider_id?: number; product_variant_id?: number; station_id?: number; include_booked?: boolean; prisma?: StorePrismaService } = {},
   ): Promise<AvailabilitySlot[]> {
-    this.assertAvailabilityRange(date_from, date_to);
     const { provider_id, product_variant_id, station_id, include_booked } = options;
     const queryPrisma = options.prisma ?? this.prisma;
     // 1. Obtener producto con duracion y booking_mode
@@ -66,6 +65,9 @@ export class AvailabilityService {
     });
 
     if (!product) return [];
+
+    // Solo los productos con estaciones exigen formato estricto y maximo 62 dias.
+    if (product.requires_station) this.assertAvailabilityRange(date_from, date_to);
 
     // Resolve the store's business-hours master calendar once per call.
     // Empty Map = store never configured their hours (legacy fallback).
@@ -1229,7 +1231,6 @@ export class AvailabilityService {
     station_id?: number,
     product_variant_id?: number,
   ): Promise<Array<{ date: string; has_slots: boolean; slots_count: number }>> {
-    this.assertAvailabilityRange(date_from, date_to);
     // Use withoutScope() — this method is called from a @Public endpoint
     // and there is no store_id in the request context.
     const db = this.prisma.withoutScope();
@@ -1241,6 +1242,7 @@ export class AvailabilityService {
     if (!product) return [];
 
     if (product.requires_station) {
+      this.assertAvailabilityRange(date_from, date_to);
       const slots = await this.getAvailableSlots(product_id, date_from, date_to, {
         provider_id,
         station_id,
