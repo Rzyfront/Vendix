@@ -8,6 +8,7 @@ import {
   ItemChangesPreviewLine,
   Order,
 } from '../../interfaces/order.interface';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { ProductsService } from '../../../products/services/products.service';
 import { Product } from '../../../products/interfaces/product.interface';
@@ -16,6 +17,7 @@ import { OrderItemsEditModalComponent } from './order-items-edit-modal.component
 describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
   let ordersService: jasmine.SpyObj<StoreOrdersService>;
   let toast: jasmine.SpyObj<ToastService>;
+  let ticketPrint: jasmine.SpyObj<KitchenTicketPrintService>;
 
   const totals = (grand: number) => ({
     subtotal: grand,
@@ -95,15 +97,18 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
       'previewItemChanges',
       'applyItemChanges',
       'updateOrderItems',
+      'getOrderById',
     ]);
     ordersService.previewItemChanges.and.returnValue(of(previewOf()));
-    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']);
+    ticketPrint = jasmine.createSpyObj('KitchenTicketPrintService', ['printAfterFire']);
     await TestBed.configureTestingModule({
       imports: [OrderItemsEditModalComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: StoreOrdersService, useValue: ordersService },
         { provide: ToastService, useValue: toast },
+        { provide: KitchenTicketPrintService, useValue: ticketPrint },
         { provide: ProductsService, useValue: { getProducts: () => of({ data: [] }) } },
       ],
     })
@@ -242,18 +247,182 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
     expect(component.saving()).toBeFalse();
   });
 
-  it('a version conflict shows the refresh message and relaunches the preview', async () => {
-    const err = Object.assign(new Error('x'), { errorCode: 'ORD_EDIT_INVALID_STATE_001' });
-    ordersService.applyItemChanges.and.returnValue(throwError(() => err));
+  const httpError = (status: number, errorCode?: string) =>
+    Object.assign(new Error('x'), { errorCode: errorCode ?? null, cause: { status } });
+
+  /** Orden fresca: la línea añadida ya existe (id 50) y la 1 cambió de cantidad. */
+  const freshOrder = (): Order =>
+    ({
+      id: 77,
+      order_number: 'ORD-77',
+      order_items: [
+        { id: 1, product_id: 10, product_name: 'Camisa', quantity: 3, unit_price: 10000 },
+        { id: 50, product_id: 30, product_name: 'Zapato', quantity: 1, unit_price: 50000 },
+      ],
+    }) as unknown as Order;
+
+  it('a version conflict (409) reloads the order and rebuilds the draft without the added lines', async () => {
+    ordersService.applyItemChanges.and.returnValue(
+      throwError(() => httpError(409, 'ORD_EDIT_INVALID_STATE_001')),
+    );
+    ordersService.getOrderById.and.returnValue(of(freshOrder()));
+    const { fixture, component } = create();
+    const reloaded: Order[] = [];
+    component.orderReloaded.subscribe((o) => reloaded.push(o));
+    component.addProduct({ id: 30, name: 'Zapato', base_price: 50000 } as unknown as Product, null);
+    await settle(fixture);
+    expect(component.changeSet().add).toEqual([{ product_id: 30, quantity: 1 }]);
+    component.save();
+    fixture.detectChanges();
+
+    expect(ordersService.getOrderById).toHaveBeenCalledWith('77');
+    expect(toast.error).toHaveBeenCalledWith(
+      'La orden cambió mientras editabas. Se recargó su estado actual; vuelve a aplicar tus cambios.',
+    );
+    expect(component.draft().map((l) => l.product_name)).toEqual(['Camisa', 'Zapato']);
+    expect(component.draft().every((l) => !!l.existing)).toBeTrue();
+    expect(component.changeSet()).toEqual({});
+    expect(reloaded.length).toBe(1);
+    expect(component.isOpen()).toBeTrue();
+  });
+
+  it('a 500 reloads the order with the unknown-outcome message', async () => {
+    ordersService.applyItemChanges.and.returnValue(throwError(() => httpError(500)));
+    ordersService.getOrderById.and.returnValue(of(freshOrder()));
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    fixture.detectChanges();
+    expect(ordersService.getOrderById).toHaveBeenCalledWith('77');
+    expect(toast.error).toHaveBeenCalledWith(
+      'No pudimos confirmar si se guardó. Recargamos la orden para que veas su estado real.',
+    );
+    expect(component.draft().length).toBe(2);
+    expect(component.changeSet()).toEqual({});
+  });
+
+  it('a network error (status 0) also reloads the order', async () => {
+    ordersService.applyItemChanges.and.returnValue(throwError(() => httpError(0)));
+    ordersService.getOrderById.and.returnValue(of(freshOrder()));
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(ordersService.getOrderById).toHaveBeenCalledTimes(1);
+  });
+
+  it('if the reload itself fails, saving is blocked to avoid duplicating lines', async () => {
+    ordersService.applyItemChanges.and.returnValue(throwError(() => httpError(500)));
+    ordersService.getOrderById.and.returnValue(throwError(() => new Error('down')));
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    fixture.detectChanges();
+    expect(component.reloadFailed()).toBeTrue();
+    expect(component.canSave()).toBeFalse();
+  });
+
+  it('a 422 keeps the draft, shows the real error and relaunches the preview', async () => {
+    ordersService.applyItemChanges.and.returnValue(
+      throwError(() => Object.assign(new Error('Insumos insuficientes'), { errorCode: 'INV_STOCK_INSUFFICIENT_LINES', cause: { status: 422 } })),
+    );
     const { fixture, component } = create();
     component.increment(component.draft()[0]);
     await settle(fixture);
     const calls = ordersService.previewItemChanges.calls.count();
     component.save();
     fixture.detectChanges();
-    expect(toast.error).toHaveBeenCalledWith('La orden cambió mientras editabas; revisa los cambios');
+    expect(ordersService.getOrderById).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith('Insumos insuficientes');
+    expect(component.changeSet()).toEqual({ update: [{ order_item_id: 1, quantity: 3 }] });
     expect(ordersService.previewItemChanges.calls.count()).toBe(calls + 1);
     expect(component.isOpen()).toBeTrue();
+  });
+
+  it('apply with kitchen_ticket_ids prints the comanda before emitting saved', async () => {
+    const updated = { id: 77 } as Order;
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: updated, summary: previewOf(), kitchen: { kitchen_ticket_ids: [8, 9] } }),
+    );
+    const { fixture, component } = create();
+    const order: string[] = [];
+    ticketPrint.printAfterFire.and.callFake(() => { order.push('print'); });
+    component.saved.subscribe(() => order.push('saved'));
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(ticketPrint.printAfterFire).toHaveBeenCalledOnceWith([8, 9], jasmine.any(Function));
+    expect(order).toEqual(['print', 'saved']);
+  });
+
+  it('a print failure is only a warning, not a save error', async () => {
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: { id: 77 } as Order, summary: previewOf(), kitchen: { kitchen_ticket_ids: [8] } }),
+    );
+    ticketPrint.printAfterFire.and.callFake((_ids, failed) => { failed?.(8); failed?.(8); });
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(component.isOpen()).toBeFalse();
+  });
+
+  it('does not print when there are no kitchen tickets', async () => {
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: { id: 77 } as Order, summary: previewOf(), kitchen: { kitchen_ticket_ids: [] } }),
+    );
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(ticketPrint.printAfterFire).not.toHaveBeenCalled();
+  });
+
+  it('stock_warnings (kitchen or top-level) show a warning toast', async () => {
+    const warning = [{ kind: 'ingredient', product_name: 'Limón', requested: 3, available: 1 }];
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: { id: 77 } as Order, summary: previewOf(), kitchen: { kitchen_ticket_ids: [8], stock_warnings: warning as any } }),
+    );
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(toast.warning).toHaveBeenCalledWith(jasmine.stringContaining('Limón (faltan 2)'));
+  });
+
+  it('top-level stock_warnings are tolerated', async () => {
+    const warning = [{ kind: 'product', product_name: 'Cerveza', requested: 2, available: 1 }];
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: { id: 77 } as Order, summary: previewOf(), stock_warnings: warning as any }),
+    );
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(toast.warning).toHaveBeenCalledWith(jasmine.stringContaining('Cerveza (falta 1)'));
+  });
+
+  it('a reprice preview entry is informative and does not alter the change-set', async () => {
+    ordersService.previewItemChanges.and.returnValue(
+      of(
+        previewOf([
+          { key: 'existing:1', action: 'reprice', quantity_before: 2, quantity_after: 2, messages: ['Descuento $100 → $50'] },
+          { key: 'existing:2', action: 'remove', quantity_before: 1, quantity_after: 0, kitchen_effect: 'none', messages: [] },
+        ]),
+      ),
+    );
+    const { fixture, component } = create();
+    component.remove(component.draft()[1]);
+    await settle(fixture);
+    expect(component.changeSet()).toEqual({ remove: [{ order_item_id: 2 }] });
+    const pl = component.previewFor(component.draft()[0])!;
+    expect(component.repriceChip(pl)?.text).toBe('Descuento recalculado');
+    expect(pl.messages).toEqual(['Descuento $100 → $50']);
+    expect(component.draft()[0].quantity).toBe(2);
   });
 
   it('on success sends the diff with expected_version, emits saved and closes', async () => {

@@ -578,6 +578,7 @@ export class StoreOrdersService {
    * El backend puede responder 200 con `{success:false}` (envelope legado).
    * Nunca debe verse como éxito: se convierte en el mismo error tipado que
    * produce `buildApiError`, para que `extractApiErrorMessage` saque el mensaje.
+   * Se mantiene a propósito: el dueño pidió tratar `success:false` como error, nunca como éxito.
    */
   private unwrapOrThrow<T>(response: any): T {
     if (response && typeof response === 'object' && response.success === false) {

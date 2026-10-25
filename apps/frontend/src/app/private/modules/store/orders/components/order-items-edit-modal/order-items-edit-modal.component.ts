@@ -32,12 +32,15 @@ import type { IconName } from '../../../../../../shared/components/icon/icons.re
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
+import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import {
   ItemCancellationType,
   ItemChangesDto,
   ItemChangesPreview,
   ItemChangesPreviewLine,
   ItemChangesTotals,
+  ItemChangesApplyResult,
   Order,
   OrderItem,
 } from '../../interfaces/order.interface';
@@ -102,7 +105,12 @@ const KDS_STATUS_ES: Record<string, string> = {
 
 const PREVIEW_DEBOUNCE_MS = 400;
 export const VERSION_CONFLICT_CODE = 'ORD_EDIT_INVALID_STATE_001';
-export const VERSION_CONFLICT_MESSAGE = 'La orden cambió mientras editabas; revisa los cambios';
+export const VERSION_CONFLICT_MESSAGE =
+  'La orden cambió mientras editabas. Se recargó su estado actual; vuelve a aplicar tus cambios.';
+export const UNKNOWN_OUTCOME_MESSAGE =
+  'No pudimos confirmar si se guardó. Recargamos la orden para que veas su estado real.';
+export const RELOAD_FAILED_MESSAGE =
+  'No pudimos recargar la orden. Cierra esta ventana y vuelve a abrir el detalle antes de reintentar.';
 
 const MAX_RESULTS = 20;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -154,10 +162,13 @@ export class OrderItemsEditModalComponent {
   private readonly ordersService = inject(StoreOrdersService);
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
+  private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
 
   readonly isOpen = model<boolean>(false);
   readonly order = input.required<Order>();
   readonly saved = output<Order>();
+  /** La orden se recargó tras un conflicto o un resultado desconocido: la página debería refrescarse. */
+  readonly orderReloaded = output<Order>();
 
   readonly draft = signal<OrderItemDraftLine[]>([]);
   readonly saving = signal(false);
@@ -168,6 +179,15 @@ export class OrderItemsEditModalComponent {
   readonly reason = signal('');
   readonly cancellationTypes = signal<Record<number, ItemCancellationType>>({});
   readonly conflictMessage = signal<string | null>(null);
+  /** Tras un resultado desconocido y una recarga fallida no se permite reintentar (evita duplicar líneas). */
+  readonly reloadFailed = signal(false);
+  /** Orden fresca traída tras un conflicto; solo vale mientras el input `order` sea el mismo. */
+  private readonly reloaded = signal<{ base: Order; order: Order } | null>(null);
+  private readonly currentOrder = computed(() => {
+    const base = this.order();
+    const r = this.reloaded();
+    return r && r.base === base ? r.order : base;
+  });
   private readonly previewResult = signal<{
     key: string;
     preview: ItemChangesPreview | null;
@@ -180,7 +200,7 @@ export class OrderItemsEditModalComponent {
 
   /** Líneas anuladas: solo lectura, no bloquean el guardado. */
   readonly cancelledLines = computed(() =>
-    (this.order().order_items ?? []).filter((i) => !!i.cancelled_at),
+    (this.currentOrder().order_items ?? []).filter((i) => !!i.cancelled_at),
   );
   readonly activeDraft = computed(() => this.draft().filter((l) => !l.removed));
   readonly isEmpty = computed(() => this.activeDraft().length === 0);
@@ -290,6 +310,7 @@ export class OrderItemsEditModalComponent {
       this.hasChanges() &&
       !this.isEmpty() &&
       !this.saving() &&
+      !this.reloadFailed() &&
       !this.previewPending() &&
       !this.previewError() &&
       this.preview()?.can_apply === true &&
@@ -360,7 +381,7 @@ export class OrderItemsEditModalComponent {
             return of({ key, preview: null, error: null });
           }
           const dto = untracked(() => this.changeSet());
-          return this.ordersService.previewItemChanges(untracked(() => this.order().id), dto).pipe(
+          return this.ordersService.previewItemChanges(untracked(() => this.currentOrder().id), dto).pipe(
             map((preview) => ({ key, preview, error: null as string | null })),
             catchError((err) =>
               of({ key, preview: null, error: extractApiErrorMessage(err) as string | null }),
@@ -378,11 +399,12 @@ export class OrderItemsEditModalComponent {
   // ── Borrador ────────────────────────────────────────────────────────────
 
   private resetDraft(): void {
-    const items = (this.order().order_items ?? []).filter((i) => !i.cancelled_at);
+    const items = (this.currentOrder().order_items ?? []).filter((i) => !i.cancelled_at);
     this.draft.set(items.map((item) => this.fromExisting(item)));
     this.reason.set('');
     this.cancellationTypes.set({});
     this.conflictMessage.set(null);
+    this.reloadFailed.set(false);
     this.previewResult.set(null);
     this.searchTerm.set('');
     this.searchResults.set([]);
@@ -573,6 +595,11 @@ export class OrderItemsEditModalComponent {
     return (key && this.previewByKey().get(key)) || null;
   }
 
+  /** Línea no tocada cuyo descuento se recalcula por promoción o cupón (solo informativo). */
+  repriceChip(pl: ItemChangesPreviewLine): ChipView | null {
+    return pl.action === 'reprice' ? { icon: 'refresh-cw', text: 'Descuento recalculado' } : null;
+  }
+
   kitchenChip(pl: ItemChangesPreviewLine): ChipView | null {
     if (pl.kitchen_effect === 'fire') return { icon: 'chef-hat', text: 'Irá a cocina al guardar' };
     if (pl.kitchen_effect === 'cancel_ticket_item') {
@@ -607,7 +634,7 @@ export class OrderItemsEditModalComponent {
 
   save(): void {
     if (!this.canSave()) return;
-    const order = this.order();
+    const order = this.currentOrder();
     const preview = this.preview()!;
     const dto: ItemChangesDto = {
       ...this.changeSet(),
@@ -624,6 +651,7 @@ export class OrderItemsEditModalComponent {
           return;
         }
         this.toastService.success('Productos de la orden actualizados');
+        this.afterKitchenEffects(result);
         this.saved.emit(result.order);
         this.isOpen.set(false);
       },
@@ -631,13 +659,67 @@ export class OrderItemsEditModalComponent {
         this.saving.set(false);
         const code = (err as { errorCode?: string | null })?.errorCode ?? parseApiError(err).errorCode;
         if (code === VERSION_CONFLICT_CODE) {
-          this.conflictMessage.set(VERSION_CONFLICT_MESSAGE);
-          this.toastService.error(VERSION_CONFLICT_MESSAGE);
-          this.previewResult.set(null);
-          this.refreshPreview$.next();
+          this.reloadOrder(VERSION_CONFLICT_MESSAGE);
           return;
         }
+        if (this.isUnknownOutcome(err)) {
+          // Sin respuesta o 5xx: pudo haber hecho commit. Se reconstruye desde la orden real.
+          this.reloadOrder(UNKNOWN_OUTCOME_MESSAGE);
+          return;
+        }
+        // Error de validación (4xx): se conserva el borrador y se relanza el preview.
         this.toastService.error(extractApiErrorMessage(err));
+        this.previewResult.set(null);
+        this.refreshPreview$.next();
+      },
+    });
+  }
+
+  /** Comanda en papel y avisos de stock tras un apply exitoso (mismo trato que un fire manual). */
+  private afterKitchenEffects(result: ItemChangesApplyResult): void {
+    const ticketIds = result.kitchen?.kitchen_ticket_ids ?? [];
+    if (ticketIds.length > 0) {
+      let printFailureReported = false;
+      // No-op en cocina virtual; en física imprime la comanda. Una falla es solo un aviso.
+      this.kitchenTicketPrint.printAfterFire(ticketIds, () => {
+        if (printFailureReported) return;
+        printFailureReported = true;
+        this.toastService.warning(
+          'Los cambios se guardaron, pero no se pudo imprimir la comanda. Imprímela desde el detalle de la orden.',
+        );
+      });
+    }
+    const warnings = result.kitchen?.stock_warnings?.length
+      ? result.kitchen.stock_warnings
+      : (result.stock_warnings ?? []);
+    if (warnings.length) {
+      this.toastService.warning(formatStockWarningSummary(warnings));
+    }
+  }
+
+  /** Status 0 (red) o 5xx: el resultado del guardado es desconocido. */
+  private isUnknownOutcome(err: unknown): boolean {
+    const raw = (err as { cause?: { status?: unknown }; status?: unknown }) ?? {};
+    const status = typeof raw.cause?.status === 'number' ? raw.cause.status : raw.status;
+    return typeof status === 'number' && (status === 0 || status >= 500);
+  }
+
+  /** Recarga la orden y reconstruye el borrador desde su estado real. */
+  private reloadOrder(message: string): void {
+    const base = this.order();
+    const orderId = this.currentOrder().id;
+    this.ordersService.getOrderById(String(orderId)).subscribe({
+      next: (fresh) => {
+        this.reloaded.set({ base, order: fresh });
+        this.resetDraft();
+        this.conflictMessage.set(message);
+        this.toastService.error(message);
+        this.orderReloaded.emit(fresh);
+      },
+      error: () => {
+        this.reloadFailed.set(true);
+        this.conflictMessage.set(RELOAD_FAILED_MESSAGE);
+        this.toastService.error(RELOAD_FAILED_MESSAGE);
       },
     });
   }

@@ -129,6 +129,14 @@
                   {{ pl.blocked_reason }}
                 </p>
               }
+              @let rc = repriceChip(pl);
+              @if (rc) {
+                <div class="flex flex-wrap gap-1">
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-900 border border-sky-200">
+                    <app-icon [name]="rc.icon" [size]="12" /> {{ rc.text }}
+                  </span>
+                </div>
+              }
               @let kc = kitchenChip(pl);
               @let sc = stockChip(pl);
               @if (kc || sc) {

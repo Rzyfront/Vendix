@@ -131,7 +131,7 @@ type ResolvedLineTax = {
  * filas de `order_item_taxes` que la respaldan. `line_tax_total` es lo que la
  * línea aporta a `orders.tax_amount`.
  */
-type PlannedOrderLine = {
+export type PlannedOrderLine = {
   unit_price: number;
   total_price: number;
   tax_rate: number | null;
@@ -1855,27 +1855,6 @@ export class OrdersService {
   }
 
   /**
-   * order-truth-and-invoice-tz plan — Step 2. Mirrors
-   * `OrderFlowService.getAvailableActions`'s per-state orchestration
-   * action-for-action (same codes, same `label_key`s, same util predicates)
-   * so `findOne`'s response can render the same buttons without a second
-   * call to `GET .../flow/available-actions`. Deliberately duplicates only
-   * the "which code applies in which state" wiring — never the rule logic
-   * itself, which stays in `order-action-policy.util.ts`'s predicates.
-   *
-   * Two small, intentional differences from `OrderFlowService
-   * .getAvailableActions`, both required to stay a pure/non-requerying
-   * helper over data `findOne` already loaded:
-   *  - `processing`'s method-type branch reads `order.shipping_method?.type`
-   *    (already `include`d by `findOne`) instead of the sibling method's own
-   *    `shipping_methods.findFirst` query.
-   *  - `hasIssuedSalesInvoice` is the caller's already-computed
-   *    `activeSalesInvoice` (unconditional in `findOne`), not the lazy,
-   *    conditional `findBlockingSalesInvoiceForPaymentCancel` lookup — same
-   *    semantics (`status !== 'draft'`), just no separate branch to decide
-   *    whether to bother resolving it.
-   */
-  /**
    * QUI-650 — `PUT /items` y `PUT /editor` reemplazan todas las líneas
    * (deleteMany + create). Si alguna ya tiene comanda de cocina, movimientos
    * de inventario, reembolsos o líneas financieras, el borrado chocaría con
@@ -1920,6 +1899,27 @@ export class OrdersService {
     }
   }
 
+  /**
+   * order-truth-and-invoice-tz plan — Step 2. Mirrors
+   * `OrderFlowService.getAvailableActions`'s per-state orchestration
+   * action-for-action (same codes, same `label_key`s, same util predicates)
+   * so `findOne`'s response can render the same buttons without a second
+   * call to `GET .../flow/available-actions`. Deliberately duplicates only
+   * the "which code applies in which state" wiring — never the rule logic
+   * itself, which stays in `order-action-policy.util.ts`'s predicates.
+   *
+   * Two small, intentional differences from `OrderFlowService
+   * .getAvailableActions`, both required to stay a pure/non-requerying
+   * helper over data `findOne` already loaded:
+   *  - `processing`'s method-type branch reads `order.shipping_method?.type`
+   *    (already `include`d by `findOne`) instead of the sibling method's own
+   *    `shipping_methods.findFirst` query.
+   *  - `hasIssuedSalesInvoice` is the caller's already-computed
+   *    `activeSalesInvoice` (unconditional in `findOne`), not the lazy,
+   *    conditional `findBlockingSalesInvoiceForPaymentCancel` lookup — same
+   *    semantics (`status !== 'draft'`), just no separate branch to decide
+   *    whether to bother resolving it.
+   */
   private buildOrderAvailableActions(
     order: any,
     hasIssuedSalesInvoice: boolean,
@@ -6027,7 +6027,7 @@ export class OrdersService {
    * tarifa y precio (base y, si viene, bruto) al centavo. Consume el candidato
    * elegido para que dos líneas iguales no reclamen la misma fila previa.
    */
-  private preservePersistedOrderLine(
+  preservePersistedOrderLine(
     item: {
       product_id?: number | null;
       product_variant_id?: number | null;
@@ -6109,7 +6109,7 @@ export class OrdersService {
   }
 
   /** Payload anidado `order_item_taxes: { create }` desde el plan de línea. */
-  private toOrderItemTaxesCreate(line: PlannedOrderLine) {
+  toOrderItemTaxesCreate(line: PlannedOrderLine) {
     if (line.taxes.length === 0) return undefined;
     return {
       create: line.taxes.map((t) => ({
@@ -6213,7 +6213,7 @@ export class OrdersService {
   }
 
   /** Bruto (base + impuesto pre-descuento) de un plan de líneas. */
-  private grossOfPlannedLines(lines: PlannedOrderLine[]): number {
+  grossOfPlannedLines(lines: PlannedOrderLine[]): number {
     return roundMoney(
       lines.reduce(
         (sum, l) =>
@@ -6231,7 +6231,7 @@ export class OrdersService {
    * impuesto total y el descuento de base total. Sin descuento reconstruye el
    * impuesto desde la tarifa (restituye líneas antes descontadas).
    */
-  private applyGrossDiscountToPlannedLines(
+  applyGrossDiscountToPlannedLines(
     lines: PlannedOrderLine[],
     grossDiscount: number,
   ): {

@@ -9,7 +9,7 @@ import {
   OrderFlowService,
   OrderItemCancelEffects,
 } from '../order-flow/order-flow.service';
-import { OrdersService } from '../orders.service';
+import { OrdersService, PlannedOrderLine } from '../orders.service';
 import { OrderSseService } from '../services/order-sse.service';
 import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
 import { assertVariantRequiredForPrepared } from '../utils/variant-required.validator';
@@ -19,14 +19,17 @@ import {
   resolveCatalogUnitPrice,
   resolveFullTaxRowsByProductId,
 } from '../utils/catalog-line-pricing.util';
-import { roundMoney2 } from '../../taxes/utils/final-price.util';
+import { roundMoney2, resolveLineUnits } from '../../taxes/utils/final-price.util';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
   StockValidatorService,
   StockDemandLine,
+  InsufficientStockItem,
 } from '../../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
+import { PromotionEngineService } from '../../promotions/promotion-engine/promotion-engine.service';
+import { CouponsService } from '../../coupons/coupons.service';
 import { OrderItemChangesDto } from './dto/order-item-changes.dto';
 
 type Client = Prisma.TransactionClient | StorePrismaService;
@@ -60,7 +63,7 @@ export interface ItemChangesPreviewLine {
   order_item_id: number | null;
   product_name: string;
   variant_label: string | null;
-  action: 'add' | 'increase' | 'decrease' | 'remove';
+  action: 'add' | 'increase' | 'decrease' | 'remove' | 'reprice';
   quantity_before: number | null;
   quantity_after: number;
   kitchen_status: ItemChangeKitchenStatus;
@@ -71,6 +74,15 @@ export interface ItemChangesPreviewLine {
   blocked: boolean;
   blocked_reason: string | null;
   messages: string[];
+}
+
+/**
+ * Resultado de cocina de `apply`. `stock_warnings` comparte shape con la
+ * respuesta de POST /store/kitchen-fire (`InsufficientStockItem[]`).
+ */
+export interface ItemChangesKitchenResult {
+  kitchen_ticket_ids: number[];
+  stock_warnings: InsufficientStockItem[];
 }
 
 export interface ItemChangesPreview {
@@ -90,12 +102,20 @@ interface PlannedRemove {
 interface PlannedUpdate {
   line: any;
   new_quantity: number;
-  ratio: number;
   new_total_price: number;
   new_discount: number | null;
   new_stock_units: number | null;
   new_tax_rows: Array<{ id: number; tax_amount: number }>;
+  /** `tax_amount_item` re-tasado (null = la línea no lo usa; no se escribe). */
+  new_tax_amount_item: number | null;
   reserve_delta_units: number; // >0 reservar, <0 liberar, 0 nada
+}
+/** Línea NO tocada por el usuario cuyo descuento/impuesto cambia al re-cotizar. */
+interface PlannedReprice {
+  line: any;
+  new_discount: number;
+  new_tax_rows: Array<{ id: number; tax_amount: number }>;
+  new_tax_amount_item: number | null;
 }
 interface PlannedAdd {
   index: number;
@@ -107,6 +127,10 @@ interface PlannedAdd {
   rows: FullTaxRow[];
   fire: boolean;
   reserve: boolean;
+  /** Descuento de BASE que recibe la línea nueva (solo al redistribuir). */
+  discount: number;
+  /** Plan fiscal (impuesto ya sobre base descontada) con el que se persiste. */
+  planned: PlannedOrderLine;
 }
 
 interface ItemChangesPlan {
@@ -114,13 +138,23 @@ interface ItemChangesPlan {
   order: any;
   removes: PlannedRemove[];
   updates: PlannedUpdate[];
+  reprices: PlannedReprice[];
   adds: PlannedAdd[];
   discountOverride?: number;
+  /** El cupón de la orden deja de aplicar: `apply` limpia coupon_id/coupon_code. */
+  dropCoupon: boolean;
+  /**
+   * Snapshot re-cotizado de `order_promotions` (solo si hubo redistribución o
+   * pérdida de cupón): `apply` reconcilia las filas con él.
+   */
+  promotionSync: Array<{ promotion_id: number; discount_amount: number }> | null;
+  /** Bloqueo a nivel plan (p.ej. falló la re-cotización de promociones). */
+  planBlock: VendixHttpException | null;
   blockedCodes: Map<string, string>; // line key -> error code
   allowOversell: boolean;
 }
 
-const TERMINAL_ORDER_STATES = ['draft', 'created'];
+const EDITABLE_ORDER_STATES = ['draft', 'created'];
 
 @Injectable()
 export class OrderItemChangesService {
@@ -136,6 +170,8 @@ export class OrderItemChangesService {
     private readonly sellableStockAllocator: SellableStockAllocator,
     private readonly orderSse: OrderSseService,
     private readonly auditService: AuditService,
+    private readonly promotionEngine: PromotionEngineService,
+    private readonly couponsService: CouponsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -183,6 +219,7 @@ export class OrderItemChangesService {
         }
         const order = { ...plan.order, id: orderId };
 
+        const reserveWarnings: InsufficientStockItem[] = [];
         // --- Quitar: soft-cancel reutilizando el núcleo de OrderFlow -------
         const cancelEffects: OrderItemCancelEffects[] = [];
         for (const r of plan.removes) {
@@ -207,6 +244,9 @@ export class OrderItemChangesService {
               ...(u.new_discount != null
                 ? { discount_amount: new Prisma.Decimal(u.new_discount) }
                 : {}),
+              ...(u.new_tax_amount_item != null
+                ? { tax_amount_item: new Prisma.Decimal(u.new_tax_amount_item) }
+                : {}),
               ...(u.new_stock_units != null
                 ? { stock_units_consumed: u.new_stock_units }
                 : {}),
@@ -229,6 +269,78 @@ export class OrderItemChangesService {
               'cancelled',
               tx,
             );
+          }
+        }
+
+        // --- Re-cotización: líneas NO tocadas cuyo descuento cambia ----------
+        // Update en sitio (mismo id): SOLO discount_amount y el monto de sus
+        // order_item_taxes. Nada más de la línea se escribe.
+        for (const r of plan.reprices) {
+          await tx.order_items.update({
+            where: { id: r.line.id },
+            data: {
+              discount_amount: new Prisma.Decimal(r.new_discount),
+              ...(r.new_tax_amount_item != null
+                ? { tax_amount_item: new Prisma.Decimal(r.new_tax_amount_item) }
+                : {}),
+            },
+          });
+          for (const t of r.new_tax_rows) {
+            await tx.order_item_taxes.update({
+              where: { id: t.id },
+              data: { tax_amount: new Prisma.Decimal(t.tax_amount) },
+            });
+          }
+        }
+        // Cupón que dejó de ser válido: se limpia la referencia sin tocar
+        // `current_uses` (igual que el editor al quitar un cupón en
+        // draft/created: el consumo se hace en `flow/pay`).
+        if (plan.dropCoupon) {
+          await tx.orders.update({
+            where: { id: orderId },
+            data: { coupon_id: null, coupon_code: null },
+          });
+        }
+
+        // order_promotions: se reconcilia con la re-cotización (el editor hace
+        // deleteMany + insert; acá en sitio por promotion_id: update de las que
+        // siguen, delete de las que ya no aplican, create de las nuevas).
+        // `order_promotions` no tiene FKs entrantes: borrar es seguro.
+        if (plan.promotionSync) {
+          const existing: Array<{ id: number; promotion_id: number }> =
+            plan.order.order_promotions ?? [];
+          const wanted = new Map(
+            plan.promotionSync.map((p) => [p.promotion_id, p.discount_amount]),
+          );
+          const obsolete = existing
+            .filter((e) => !wanted.has(e.promotion_id))
+            .map((e) => e.id);
+          if (obsolete.length > 0) {
+            await tx.order_promotions.deleteMany({
+              where: { order_id: orderId, id: { in: obsolete } },
+            });
+          }
+          const kept = new Set<number>();
+          for (const e of existing) {
+            if (!wanted.has(e.promotion_id)) continue;
+            kept.add(e.promotion_id);
+            await tx.order_promotions.updateMany({
+              where: { order_id: orderId, promotion_id: e.promotion_id },
+              data: {
+                discount_amount: new Prisma.Decimal(wanted.get(e.promotion_id)!),
+              },
+            });
+          }
+          const created = plan.promotionSync.filter((p) => !kept.has(p.promotion_id));
+          if (created.length > 0) {
+            await tx.order_promotions.createMany({
+              data: created.map((p) => ({
+                order_id: orderId,
+                promotion_id: p.promotion_id,
+                customer_id: plan.order.customer_id ?? null,
+                discount_amount: new Prisma.Decimal(p.discount_amount),
+              })),
+            });
           }
         }
 
@@ -269,6 +381,7 @@ export class OrderItemChangesService {
               userId,
               tx,
               plan.allowOversell,
+              reserveWarnings,
             );
           }
         }
@@ -305,21 +418,14 @@ export class OrderItemChangesService {
               skip_kds: false,
               notes: a.notes,
               updated_at: new Date(),
-              ...(a.rows.length > 0
+              ...(a.discount > 0
+                ? { discount_amount: new Prisma.Decimal(a.discount) }
+                : {}),
+              ...(a.planned.taxes.length > 0
                 ? {
-                    order_item_taxes: {
-                      create: res.taxRows.map(({ row, tax_amount }) => ({
-                        tax_rate_id: row.tax_rate_id,
-                        tax_name: row.name,
-                        tax_rate:
-                          Math.round((row.rate + Number.EPSILON) * 100000) /
-                          100000,
-                        tax_amount,
-                        tax_type: row.tax_type,
-                        is_compound: false,
-                        is_inclusive: row.is_inclusive,
-                      })),
-                    },
+                    order_item_taxes: this.ordersService.toOrderItemTaxesCreate(
+                      a.planned,
+                    ),
                   }
                 : {}),
             },
@@ -340,6 +446,7 @@ export class OrderItemChangesService {
               userId,
               tx,
               plan.allowOversell,
+              reserveWarnings,
             );
           }
         }
@@ -374,12 +481,13 @@ export class OrderItemChangesService {
             : undefined,
         );
 
-        return { plan, cancelEffects, fireResult, newItemIds };
+        return { plan, cancelEffects, fireResult, newItemIds, reserveWarnings };
       },
       { timeout: 20_000, maxWait: 5_000 },
     );
 
-    const { plan, cancelEffects, fireResult, newItemIds } = txResult;
+    const { plan, cancelEffects, fireResult, newItemIds, reserveWarnings } =
+      txResult;
 
     // --- Post-commit: nada de esto revierte el cambio ya persistido ---------
     for (const effects of cancelEffects) {
@@ -396,20 +504,28 @@ export class OrderItemChangesService {
         );
       }
     }
+    let kitchenTicketIds: number[] = fireResult?.ticketIds ?? [];
     if (fireResult) {
       try {
-        await this.kitchenFireService.emitKitchenFiredAfterCommit(
+        const emitted = await this.kitchenFireService.emitKitchenFiredAfterCommit(
           storeId,
           undefined,
           fireResult,
           orderId,
         );
+        if (emitted?.kitchen_ticket_ids?.length) {
+          kitchenTicketIds = emitted.kitchen_ticket_ids;
+        }
       } catch (err) {
         this.logger.error(
           `emitKitchenFiredAfterCommit failed order=${orderId}: ${(err as Error).message}`,
         );
       }
     }
+    const stockWarnings: InsufficientStockItem[] = [
+      ...(fireResult?.stockWarnings ?? []),
+      ...reserveWarnings,
+    ];
     this.orderSse.pushOrderEvent(storeId, orderId, 'order.items.updated', {
       order_number: plan.order.order_number,
       item_count:
@@ -436,7 +552,16 @@ export class OrderItemChangesService {
     }
 
     const order = await this.ordersService.findOne(orderId);
-    return { order, summary: plan.preview };
+    // `kitchen`: lo que el frontend necesita para imprimir la comanda
+    // (`printAfterFire(kitchen_ticket_ids)`) y mostrar avisos de stock.
+    // `stock_warnings` usa el MISMO shape que POST /store/kitchen-fire
+    // (`InsufficientStockItem[]`): insumos del fire con sobre-uso permitido
+    // MÁS la sobreventa absorbida al reservar unidades (kind:'product').
+    const kitchen: ItemChangesKitchenResult = {
+      kitchen_ticket_ids: kitchenTicketIds,
+      stock_warnings: stockWarnings,
+    };
+    return { order, summary: plan.preview, kitchen };
   }
 
   // ---------------------------------------------------------------------------
@@ -477,7 +602,7 @@ export class OrderItemChangesService {
           },
         },
         table_sessions: { select: { id: true }, take: 1 },
-        order_promotions: { select: { id: true }, take: 1 },
+        order_promotions: { select: { id: true, promotion_id: true } },
       },
     });
     if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
@@ -489,7 +614,7 @@ export class OrderItemChangesService {
         'La orden cambió mientras editabas. Revisa los cambios.',
       );
     }
-    if (!TERMINAL_ORDER_STATES.includes(order.state)) {
+    if (!EDITABLE_ORDER_STATES.includes(order.state)) {
       throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
     }
     assertNoActiveFinancialSplit(order);
@@ -524,8 +649,21 @@ export class OrderItemChangesService {
     const activeLines = lineRows.filter((l) => l.cancelled_at == null);
     const lineById = new Map<number, any>(activeLines.map((l) => [l.id, l]));
 
-    const reservesStock =
+    // "La orden reserva stock": estado created, mesa abierta, o al menos una
+    // reserva activa referenciando esta orden (un draft sin mesa que ya
+    // reservó debe liberar al bajar cantidad).
+    let reservesStock =
       order.state === 'created' || (order.table_sessions?.length ?? 0) > 0;
+    if (!reservesStock) {
+      const activeReservations = await db.stock_reservations.count({
+        where: {
+          reserved_for_type: 'order',
+          reserved_for_id: orderId,
+          status: 'active',
+        },
+      });
+      reservesStock = Number(activeReservations) > 0;
+    }
     const restaurant = storeIsRestaurant(order.stores?.industries);
 
     const lines: ItemChangesPreviewLine[] = [];
@@ -707,20 +845,47 @@ export class OrderItemChangesService {
             : 'Se liberará la reserva de stock sobrante',
         );
       }
+      // Total = unit_price × unidades de la línea (nunca `total × ratio`:
+      // 100 -> 33,33 -> 99,99 deriva en cada ida y vuelta).
+      const unitPrice = Number(l.unit_price);
+      const oldTotal = Number(l.total_price);
+      const newBase =
+        unitPrice > 0
+          ? roundMoney2(
+              unitPrice *
+                resolveLineUnits({
+                  quantity: u.quantity,
+                  weight: l.weight,
+                  price_unit_quantity: l.price_unit_quantity,
+                }),
+            )
+          : roundMoney2(oldTotal * ratio);
+      // El descuento de la línea es un MONTO ABSOLUTO (un cupón fijo de $10
+      // sigue siendo $10), con clamp a la nueva base.
+      const newDiscount =
+        l.discount_amount != null
+          ? roundMoney2(Math.min(Number(l.discount_amount), newBase))
+          : null;
+      // Impuesto sobre la base descontada, misma convención del kernel del
+      // editor (`applyGrossDiscountRetax`): `round2(base_neta × tarifa)`.
+      const netBase = newBase - (newDiscount ?? 0);
+      const newTaxRows = (l.order_item_taxes ?? []).map((t: any) => ({
+        id: t.id,
+        tax_amount: roundMoney2(netBase * this.rateOfTaxRow(t, oldTotal)),
+      }));
       updates.push({
         line: l,
         new_quantity: u.quantity,
-        ratio,
-        new_total_price: roundMoney2(Number(l.total_price) * ratio),
-        new_discount:
-          l.discount_amount != null
-            ? roundMoney2(Number(l.discount_amount) * ratio)
-            : null,
+        new_total_price: newBase,
+        new_discount: newDiscount,
         new_stock_units: newStockUnits,
-        new_tax_rows: (l.order_item_taxes ?? []).map((t: any) => ({
-          id: t.id,
-          tax_amount: roundMoney2(Number(t.tax_amount) * ratio),
-        })),
+        new_tax_rows: newTaxRows,
+        // Misma convención del kernel del editor: impuesto de línea / líneas.
+        new_tax_amount_item: this.retaxedTaxAmountItem(
+          l,
+          newBase,
+          newTaxRows.reduce((sum: number, t: any) => sum + t.tax_amount, 0),
+        ),
         reserve_delta_units: delta,
       });
     }
@@ -854,71 +1019,175 @@ export class OrderItemChangesService {
           rows,
           fire,
           reserve,
+          discount: 0,
+          planned: this.plannedLineOfAdd(resolution),
         });
       }
     }
 
+    const warnings: string[] = [];
+
+    // ---- insumos del BOM de platos nuevos que irán a cocina (sin escribir) ---
+    const fireAdds = adds.filter((a) => a.fire);
+    if (fireAdds.length > 0) {
+      const { allowIngredientOveruse, shortages } =
+        await this.kitchenFireService.previewIngredientShortfall(
+          fireAdds.map((a) => ({
+            product_id: a.product.id,
+            product_variant_id: a.variant?.id ?? null,
+            quantity: a.quantity,
+            product_name: a.product.name,
+          })),
+          { tx: opts.tx },
+        );
+      for (const sh of shortages ?? []) {
+        const detail = `${sh.product_name} (se necesitan ${sh.requested}, hay ${sh.available})`;
+        const dishNames = new Set(sh.used_by ?? []);
+        const affected = fireAdds.filter(
+          (a) => dishNames.size === 0 || dishNames.has(a.product.name),
+        );
+        for (const a of affected) {
+          const line = lines.find((l) => l.key === `add:${a.index}`)!;
+          const msg = `Faltan insumos para ${a.product.name}: ${detail}`;
+          if (allowIngredientOveruse) {
+            line.messages.push(`${msg}. La tienda permite sobre-uso de insumos`);
+            warnings.push(msg);
+          } else {
+            markBlocked(
+              line,
+              msg,
+              ErrorCodes.INV_STOCK_INSUFFICIENT_LINES.code,
+            );
+          }
+        }
+      }
+    }
+
     // ---- stock disponible (no lanza; marca la línea) ---------------------------
+    // Demanda NETA: las unidades que el mismo change-set libera (remove y
+    // decrease del mismo producto/variante) se acreditan contra lo que
+    // aumenta o se agrega. `apply` ya libera antes de validar, así que esto
+    // lo hace coherente con él.
     const inventoryPolicy = await this.stockValidator.resolveInventoryPolicy(
       storeId,
       opts.tx,
     );
     const allowOversell = inventoryPolicy.allowOversell === true;
-    const demandKeys: Array<{ key: string; demand: StockDemandLine }> = [
-      ...updates
-        .filter((u) => u.reserve_delta_units > 0)
-        .map((u) => ({
-          key: `existing:${u.line.id}`,
+    const stockKey = (p: number, v: number | null | undefined) =>
+      `${p}-${v ?? 'null'}`;
+    const released = new Map<string, number>();
+    const credit = (p: number, v: number | null | undefined, n: number) =>
+      released.set(stockKey(p, v), (released.get(stockKey(p, v)) ?? 0) + n);
+    if (reservesStock) {
+      for (const r of removes) {
+        const l = lineById.get(r.order_item_id);
+        const rl = lines.find((x) => x.key === `existing:${r.order_item_id}`);
+        if (l && rl?.stock_effect === 'release') {
+          credit(
+            l.product_id,
+            l.product_variant_id,
+            Number(l.stock_units_consumed ?? 0) || l.quantity,
+          );
+        }
+      }
+    }
+    for (const u of updates) {
+      if (u.reserve_delta_units < 0) {
+        credit(
+          u.line.product_id,
+          u.line.product_variant_id,
+          Math.abs(u.reserve_delta_units),
+        );
+      }
+    }
+    const demandBySku = new Map<
+      string,
+      { demand: StockDemandLine; keys: string[] }
+    >();
+    const addDemand = (
+      lineKey: string,
+      productId: number,
+      variantId: number | null | undefined,
+      quantity: number,
+      name: string,
+    ) => {
+      const k = stockKey(productId, variantId);
+      const cur = demandBySku.get(k);
+      if (cur) {
+        cur.demand.quantity += quantity;
+        cur.keys.push(lineKey);
+      } else {
+        demandBySku.set(k, {
           demand: {
-            product_id: u.line.product_id,
-            product_variant_id: u.line.product_variant_id,
-            quantity: u.reserve_delta_units,
-            product_name: u.line.product_name,
-          } as StockDemandLine,
-        })),
-      ...adds
-        .filter((a) => a.reserve)
-        .map((a) => ({
-          key: `add:${a.index}`,
-          demand: {
-            product_id: a.product.id,
-            product_variant_id: a.variant?.id ?? undefined,
-            quantity: a.quantity,
-            product_name: a.product.name,
-          } as StockDemandLine,
-        })),
-    ];
-    const warnings: string[] = [];
-    if (demandKeys.length > 0) {
+            product_id: productId,
+            product_variant_id: variantId ?? undefined,
+            quantity,
+            product_name: name,
+          },
+          keys: [lineKey],
+        });
+      }
+    };
+    for (const u of updates) {
+      if (u.reserve_delta_units > 0) {
+        addDemand(
+          `existing:${u.line.id}`,
+          u.line.product_id,
+          u.line.product_variant_id,
+          u.reserve_delta_units,
+          u.line.product_name,
+        );
+      }
+    }
+    for (const a of adds) {
+      if (a.reserve) {
+        addDemand(
+          `add:${a.index}`,
+          a.product.id,
+          a.variant?.id,
+          a.quantity,
+          a.product.name,
+        );
+      }
+    }
+    const netDemands: Array<{ demand: StockDemandLine; keys: string[] }> = [];
+    for (const [k, entry] of demandBySku) {
+      entry.demand.quantity -= released.get(k) ?? 0;
+      if (entry.demand.quantity > 0) netDemands.push(entry);
+    }
+    if (netDemands.length > 0) {
       const short = await this.stockValidator.findInsufficientLines(
-        demandKeys.map((d) => d.demand),
+        netDemands.map((d) => d.demand),
         { tx: opts.tx, kind: 'product' },
       );
       for (const s of short) {
-        for (const dk of demandKeys) {
+        for (const dk of netDemands) {
           if (
             dk.demand.product_id === s.product_id &&
             (dk.demand.product_variant_id ?? null) === (s.product_variant_id ?? null)
           ) {
-            const line = lines.find((l) => l.key === dk.key)!;
-            if (allowOversell) {
-              line.messages.push(
-                'No hay existencias suficientes; la tienda permite sobreventa',
-              );
-              warnings.push(`Sobreventa: ${s.product_name ?? line.product_name}`);
-            } else {
-              markBlocked(
-                line,
-                `No hay existencias suficientes de ${s.product_name ?? line.product_name}`,
-                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES.code,
-              );
+            for (const key of dk.keys) {
+              const line = lines.find((l) => l.key === key)!;
+              if (allowOversell) {
+                line.messages.push(
+                  'No hay existencias suficientes; la tienda permite sobreventa',
+                );
+                warnings.push(`Sobreventa: ${s.product_name ?? line.product_name}`);
+              } else {
+                markBlocked(
+                  line,
+                  `No hay existencias suficientes de ${s.product_name ?? line.product_name}`,
+                  ErrorCodes.INV_STOCK_INSUFFICIENT_LINES.code,
+                );
+              }
             }
           }
         }
       }
     }
 
-    // ---- totales -------------------------------------------------------------
+    // ---- descuentos: línea por línea + re-cotización de promo/cupón ----------
+    const money = (n: number) => `$${roundMoney2(n)}`;
     const headerDiscount = Number(order.discount_amount ?? 0);
     const before: ItemChangesTotals = {
       subtotal: roundMoney2(Number(order.subtotal_amount ?? 0)),
@@ -931,43 +1200,297 @@ export class OrderItemChangesService {
 
     const removedIds = new Set(removes.map((r) => r.order_item_id));
     const updateById = new Map(updates.map((u) => [u.line.id, u]));
-    let subtotal = 0;
-    let tax = 0;
-    let lineDiscounts = 0; // descuentos de las líneas resultantes
+    const sumRows = (rows: Array<{ tax_amount: number }>) =>
+      rows.reduce((sum, t) => sum + t.tax_amount, 0);
+
+    interface Resulting {
+      line: any;
+      quantity: number;
+      base: number;
+      discount: number | null;
+      taxRows: Array<{ id: number; tax_amount: number }>;
+      update: PlannedUpdate | null;
+    }
     let currentLineDiscounts = 0; // descuentos de las líneas actuales
-    const sumTaxes = (l: any) =>
-      (l.order_item_taxes ?? []).reduce(
-        (s: number, t: any) => s + Number(t.tax_amount ?? 0),
-        0,
-      );
+    let removedWithDiscount = false;
+    const resulting: Resulting[] = [];
     for (const l of activeLines) {
       currentLineDiscounts += Number(l.discount_amount ?? 0);
-      if (removedIds.has(l.id)) continue;
-      const u = updateById.get(l.id);
-      if (u) {
-        subtotal += u.new_total_price;
-        tax += u.new_tax_rows.reduce((s, t) => s + t.tax_amount, 0);
-        lineDiscounts += u.new_discount ?? 0;
-      } else {
-        subtotal += Number(l.total_price);
-        tax += sumTaxes(l);
-        lineDiscounts += Number(l.discount_amount ?? 0);
+      if (removedIds.has(l.id)) {
+        if (Number(l.discount_amount ?? 0) > 0) removedWithDiscount = true;
+        continue;
       }
+      const u = updateById.get(l.id) ?? null;
+      resulting.push(
+        u
+          ? {
+              line: l,
+              quantity: u.new_quantity,
+              base: u.new_total_price,
+              discount: u.new_discount,
+              taxRows: u.new_tax_rows,
+              update: u,
+            }
+          : {
+              line: l,
+              quantity: l.quantity,
+              base: Number(l.total_price),
+              discount: l.discount_amount != null ? Number(l.discount_amount) : null,
+              taxRows: (l.order_item_taxes ?? []).map((t: any) => ({
+                id: t.id,
+                tax_amount: Number(t.tax_amount ?? 0),
+              })),
+              update: null,
+            },
+      );
+    }
+
+    // Promociones / cupón: se RE-COTIZAN sobre el carrito resultante con el
+    // mismo motor del editor (`updateOrderFromEditor`).
+    const reprices: PlannedReprice[] = [];
+    let dropCoupon = false;
+    let planBlock: VendixHttpException | null = null;
+    let redistributedDiscount: number | null = null;
+    let promotionSync: Array<{ promotion_id: number; discount_amount: number }> | null = null;
+    const couponCode = String(order.coupon_code ?? '').trim();
+    const promoIds: number[] = (order.order_promotions ?? [])
+      .map((p: any) => p.promotion_id)
+      .filter((id: unknown): id is number => typeof id === 'number');
+    const hasPromoOrCoupon =
+      couponCode.length > 0 || order.coupon_id != null || promoIds.length > 0;
+    if (hasPromoOrCoupon) {
+      const plannedLines: PlannedOrderLine[] = [
+        ...resulting.map((r) => this.plannedLineOfRow(r.line, r.base)),
+        ...adds.map((a) => a.planned),
+      ];
+      const quoteItems = [
+        ...resulting.map((r) => ({
+          product_id: r.line.product_id as number | null,
+          variant_id: r.line.product_variant_id ?? null,
+          unit_price: Number(r.line.final_unit_price ?? r.line.unit_price ?? 0),
+          quantity: r.quantity,
+          tier: r.line.applied_price_tier_id ?? null,
+        })),
+        ...adds.map((a) => ({
+          product_id: a.product.id as number | null,
+          variant_id: a.variant?.id ?? null,
+          unit_price: a.resolution.finalUnitPrice,
+          quantity: a.quantity,
+          tier: null,
+        })),
+      ].filter((it) => it.product_id);
+
+      let promotionDiscount = 0;
+      let promoSnapshot: Array<{ promotion_id: number; discount_amount: number }> = [];
+      let quoted = true;
+      try {
+        const quote = await this.promotionEngine.quoteDiscounts({
+          customer_id: order.customer_id ?? undefined,
+          manual_promotion_ids: promoIds,
+          items: quoteItems.map((it, index) => ({
+            line_id: index,
+            product_id: it.product_id as number,
+            variant_id: it.variant_id,
+            category_id: null,
+            category_ids: null,
+            unit_price: it.unit_price,
+            quantity: Number(it.quantity || 0),
+            applied_price_tier_id: it.tier,
+            stock_units_consumed: null,
+          })),
+        } as any);
+        promotionDiscount = Number(quote?.total_discount ?? 0);
+        promoSnapshot = (quote?.order_promotions_snapshot ?? []).map((sn: any) => ({
+          promotion_id: sn.promotion_id,
+          discount_amount: Number(sn.discount_amount || 0),
+        }));
+      } catch (err) {
+        quoted = false;
+        this.logger.warn(
+          `[item-changes] quoteDiscounts failed order=${orderId}: ${(err as Error).message}`,
+        );
+        const msg = 'No se pudo recalcular la promoción; intenta de nuevo';
+        warnings.push(msg);
+        planBlock = new VendixHttpException(
+          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+          msg,
+        );
+      }
+
+      let couponDiscount = 0;
+      if (quoted && couponCode) {
+        try {
+          const remaining = Math.max(
+            0,
+            this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+          );
+          const validation = await this.couponsService.validate({
+            code: couponCode,
+            cart_subtotal: remaining,
+            customer_id: order.customer_id ?? undefined,
+            items: quoteItems.map((it) => ({
+              product_id: it.product_id as number,
+              category_id: null,
+              category_ids: null,
+              line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
+            })),
+            store_id: storeId,
+          } as any);
+          couponDiscount = roundMoney2(
+            Math.min(validation?.discount_amount || 0, remaining),
+          );
+        } catch (err) {
+          if (err instanceof VendixHttpException) {
+            dropCoupon = true;
+            warnings.push(
+              `El cupón ${couponCode} dejará de aplicar con este cambio (${err.message})`,
+            );
+          } else {
+            quoted = false;
+            this.logger.warn(
+              `[item-changes] coupon validate failed order=${orderId}: ${(err as Error).message}`,
+            );
+            const msg = 'No se pudo recalcular la promoción; intenta de nuevo';
+            warnings.push(msg);
+            planBlock = new VendixHttpException(
+              ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+              msg,
+            );
+          }
+        }
+      }
+
+      if (quoted) {
+        const grossDiscount = roundMoney2(promotionDiscount + couponDiscount);
+        const kernel = this.ordersService.applyGrossDiscountToPlannedLines(
+          plannedLines,
+          grossDiscount,
+        );
+        const lineSum = resulting.reduce((sum, r) => sum + (r.discount ?? 0), 0);
+        const redistributes = Math.abs(kernel.baseDiscount - lineSum) > 0.01;
+        // Cambió el descuento (redistribución o cupón perdido): las filas
+        // order_promotions se reconcilian con lo re-cotizado.
+        if (redistributes || dropCoupon) promotionSync = promoSnapshot;
+        // D' ≈ Σ descuentos de línea resultantes: nada que redistribuir; las
+        // líneas no tocadas quedan intactas.
+        if (redistributes) {
+          redistributedDiscount = roundMoney2(kernel.baseDiscount);
+          const priorDiscount = before.discount;
+          warnings.push(
+            `El descuento de la promoción/cupón se recalcula: ${money(priorDiscount)} → ${money(redistributedDiscount)} y se reparte entre los productos`,
+          );
+          resulting.forEach((r, i) => {
+            const newDiscount = roundMoney2(kernel.discountByLine[i] ?? 0);
+            const newRows = r.taxRows.map((t, k) => ({
+              id: t.id,
+              tax_amount: kernel.lines[i].taxes[k]?.tax_amount ?? t.tax_amount,
+            }));
+            const oldDiscount = Number(r.line.discount_amount ?? 0);
+            const oldRows = (r.line.order_item_taxes ?? []) as any[];
+            const changed =
+              Math.abs(newDiscount - (r.update ? (r.discount ?? 0) : oldDiscount)) > 0.001 ||
+              newRows.some(
+                (t, k) =>
+                  Math.abs(
+                    t.tax_amount -
+                      (r.update
+                        ? r.taxRows[k].tax_amount
+                        : Number(oldRows[k]?.tax_amount ?? 0)),
+                  ) > 0.001,
+              );
+            const shownBefore = r.update ? (r.discount ?? 0) : oldDiscount;
+            r.discount = newDiscount;
+            r.taxRows = newRows;
+            if (r.update) {
+              r.update.new_discount = newDiscount;
+              r.update.new_tax_rows = newRows;
+              r.update.new_tax_amount_item = kernel.lines[i].tax_amount_item ?? null;
+              if (changed) {
+                const ul = lines.find((x) => x.key === `existing:${r.line.id}`);
+                ul?.messages.push(
+                  `Descuento ${money(oldDiscount)} → ${money(newDiscount)}`,
+                );
+              }
+            } else if (changed) {
+              reprices.push({
+                line: r.line,
+                new_discount: newDiscount,
+                new_tax_rows: newRows,
+                new_tax_amount_item: kernel.lines[i].tax_amount_item ?? null,
+              });
+              const k = liveKti(r.line);
+              lines.push({
+                key: `existing:${r.line.id}`,
+                order_item_id: r.line.id,
+                product_name: r.line.product_name,
+                variant_label: variantLabelOf(r.line),
+                action: 'reprice',
+                quantity_before: r.line.quantity,
+                quantity_after: r.line.quantity,
+                kitchen_status: kitchenStatusOf(r.line),
+                kitchen_ticket_number: k?.kitchen_ticket?.daily_number ?? null,
+                kitchen_effect: 'none',
+                stock_effect: 'none',
+                requires_cancellation_type: false,
+                blocked: false,
+                blocked_reason: null,
+                messages: [`Descuento ${money(shownBefore)} → ${money(newDiscount)}`],
+              });
+            }
+          });
+          adds.forEach((a, k) => {
+            const i = resulting.length + k;
+            a.discount = roundMoney2(kernel.discountByLine[i] ?? 0);
+            a.planned = kernel.lines[i];
+            if (a.discount > 0) {
+              const al = lines.find((x) => x.key === `add:${a.index}`);
+              al?.messages.push(`Descuento ${money(a.discount)}`);
+            }
+          });
+        }
+      }
+    }
+
+    // ---- totales -------------------------------------------------------------
+    let subtotal = 0;
+    let tax = 0;
+    let lineDiscounts = 0;
+    for (const r of resulting) {
+      subtotal += r.base;
+      tax += sumRows(r.taxRows);
+      lineDiscounts += r.discount ?? 0;
     }
     for (const a of adds) {
       subtotal += a.resolution.totalPrice;
-      tax += a.resolution.taxRows.reduce((s, t) => s + t.tax_amount, 0);
+      tax += a.planned.taxes.reduce((sum, t) => sum + t.tax_amount, 0);
+      lineDiscounts += a.discount;
     }
     subtotal = roundMoney2(subtotal);
     tax = roundMoney2(tax);
 
+    // `discountOverride` SOLO si el descuento realmente cambió por el
+    // change-set; si no, la cabecera (aunque no cuadre al centavo) queda intacta.
+    const discountTouched =
+      removedWithDiscount ||
+      redistributedDiscount != null ||
+      dropCoupon ||
+      resulting.some(
+        (r) => Math.abs((r.discount ?? 0) - Number(r.line.discount_amount ?? 0)) > 0.001,
+      );
     let discountOverride: number | undefined;
     let discount: number;
     const lineDriven =
       headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
-    if (lineDriven) {
+    if (redistributedDiscount != null) {
       discount = roundMoney2(lineDiscounts);
       discountOverride = discount;
+    } else if (lineDriven || (hasPromoOrCoupon && discountTouched)) {
+      if (discountTouched) {
+        discount = roundMoney2(lineDiscounts);
+        discountOverride = discount;
+      } else {
+        discount = roundMoney2(headerDiscount);
+      }
     } else {
       discount = Math.min(headerDiscount, subtotal + tax);
       if (headerDiscount > 0) {
@@ -975,11 +1498,6 @@ export class OrderItemChangesService {
         if (discount !== headerDiscount) discountOverride = roundMoney2(discount);
       }
       discount = roundMoney2(discount);
-    }
-    if (order.coupon_code || (order.order_promotions?.length ?? 0) > 0) {
-      warnings.push(
-        'Las promociones y cupones no se recalculan automáticamente; el descuento se ajusta a los productos que quedan',
-      );
     }
     const shipping = before.shipping;
     let tip = before.tip;
@@ -999,7 +1517,9 @@ export class OrderItemChangesService {
     };
 
     const canApply =
-      lines.every((l) => !l.blocked) && awaitingChoice.size === 0;
+      lines.every((l) => !l.blocked) &&
+      awaitingChoice.size === 0 &&
+      planBlock == null;
 
     return {
       preview: {
@@ -1013,8 +1533,12 @@ export class OrderItemChangesService {
       order,
       removes,
       updates,
+      reprices,
       adds,
       discountOverride,
+      dropCoupon,
+      promotionSync,
+      planBlock,
       blockedCodes,
       allowOversell,
     };
@@ -1023,6 +1547,98 @@ export class OrderItemChangesService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * `tax_amount_item` re-tasado de una línea (impuesto de UNA unidad de
+   * precio): `impuesto_de_línea / (total_price / unit_price)`, igual que el
+   * kernel del editor. `null` = la línea no lo usa (no se escribe).
+   */
+  private retaxedTaxAmountItem(l: any, base: number, taxTotal: number): number | null {
+    if (l.tax_amount_item == null) return null;
+    const unit = Number(l.unit_price);
+    const multiplier = unit > 0 ? base / unit : 0;
+    return multiplier <= 0 ? Number(l.tax_amount_item) : roundMoney2(taxTotal / multiplier);
+  }
+
+  /** Tarifa (fracción) de una fila de impuesto; misma regla del kernel del editor. */
+  private rateOfTaxRow(t: any, base: number): number {
+    const rate = Number(t.tax_rate ?? 0);
+    if (rate > 0) return rate;
+    return base > 0 ? Number(t.tax_amount ?? 0) / base : 0;
+  }
+
+  /**
+   * Plan fiscal de una línea persistida (snapshot), vía el mismo
+   * `preservePersistedOrderLine` del editor; con `base` distinta se reescala
+   * a la nueva base PRE-descuento (el kernel reconstruye el impuesto como
+   * `tarifa × base`).
+   */
+  private plannedLineOfRow(l: any, base: number): PlannedOrderLine {
+    const kept = this.ordersService.preservePersistedOrderLine(
+      {
+        product_id: l.product_id,
+        product_variant_id: l.product_variant_id,
+        quantity: l.quantity,
+        weight: l.weight,
+        unit_price: l.unit_price,
+        final_unit_price: l.final_unit_price,
+        applied_price_tier_id: l.applied_price_tier_id,
+      },
+      l.price_unit_quantity,
+      [l],
+    );
+    const rows: any[] = l.order_item_taxes ?? [];
+    const planned: PlannedOrderLine = kept ?? {
+      unit_price: Number(l.unit_price ?? 0),
+      total_price: Number(l.total_price ?? 0),
+      tax_rate: l.tax_rate == null ? null : Number(l.tax_rate),
+      tax_amount_item: l.tax_amount_item == null ? null : Number(l.tax_amount_item),
+      final_unit_price: Number(l.final_unit_price ?? l.unit_price ?? 0),
+      line_tax_total: rows.reduce((sum, t) => sum + Number(t.tax_amount ?? 0), 0),
+      taxes: rows.map((t) => ({
+        tax_rate_id: t.tax_rate_id ?? null,
+        tax_name: t.tax_name ?? '',
+        tax_rate: Number(t.tax_rate ?? 0),
+        tax_amount: Number(t.tax_amount ?? 0),
+        tax_type: (t.tax_type ?? null) as string | null,
+        is_compound: t.is_compound ?? false,
+        is_inclusive: t.is_inclusive ?? false,
+      })),
+      source: 'preserved_snapshot',
+    };
+    const oldTotal = Number(l.total_price ?? 0);
+    if (Math.abs(base - oldTotal) < 0.0001) return planned;
+    return {
+      ...planned,
+      total_price: base,
+      line_tax_total:
+        oldTotal > 0 ? roundMoney2(planned.line_tax_total * (base / oldTotal)) : 0,
+    };
+  }
+
+  /** Plan fiscal PRE-descuento de una línea nueva (precio/impuesto de catálogo). */
+  private plannedLineOfAdd(
+    res: ReturnType<typeof resolveCatalogLine>,
+  ): PlannedOrderLine {
+    return {
+      unit_price: res.unitBase,
+      total_price: res.totalPrice,
+      tax_rate: res.taxRate,
+      tax_amount_item: res.taxAmountItem,
+      final_unit_price: res.finalUnitPrice,
+      line_tax_total: res.taxRows.reduce((sum, t) => sum + t.tax_amount, 0),
+      taxes: res.taxRows.map(({ row, tax_amount }) => ({
+        tax_rate_id: row.tax_rate_id,
+        tax_name: row.name,
+        tax_rate: Math.round((row.rate + Number.EPSILON) * 100000) / 100000,
+        tax_amount,
+        tax_type: row.tax_type as string | null,
+        is_compound: false,
+        is_inclusive: row.is_inclusive,
+      })),
+      source: 'custom_client',
+    };
+  }
 
   private validateChangeSet(dto: OrderItemChangesDto): void {
     const add = dto.add ?? [];
@@ -1043,6 +1659,7 @@ export class OrderItemChangesService {
   }
 
   private firstBlock(plan: ItemChangesPlan): VendixHttpException {
+    if (plan.planBlock) return plan.planBlock;
     const line = plan.preview.lines.find((l) => l.blocked);
     if (line) {
       const code = plan.blockedCodes.get(line.key);
@@ -1090,6 +1707,7 @@ export class OrderItemChangesService {
     userId: number | undefined,
     tx: Prisma.TransactionClient,
     allowOversell: boolean,
+    warnings: InsufficientStockItem[],
   ): Promise<void> {
     const allocation = await this.sellableStockAllocator.allocateForLine(
       storeId,
@@ -1119,6 +1737,18 @@ export class OrderItemChangesService {
           },
         );
       }
+      // Faltante absorbido por sobreventa: no bloquea, pero no es silencioso.
+      this.logger.warn(
+        `Sobreventa absorbida order=${orderId} product=${item.product_id} variant=${item.product_variant_id ?? 'null'}: pedido=${required} disponible=${allocation.available}`,
+      );
+      warnings.push({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        product_name: item.product_name,
+        kind: 'product',
+        requested: required,
+        available: allocation.available,
+      });
       const fallbackLocationId =
         allocation.slices[0]?.location_id ??
         (await this.stockLevelManager.getDefaultLocationForProduct(

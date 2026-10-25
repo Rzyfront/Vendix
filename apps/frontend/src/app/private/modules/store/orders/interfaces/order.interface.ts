@@ -1,4 +1,5 @@
 import type { OrderReview } from '../../customers/reviews/models/review.model';
+import type { InsufficientStockItem } from '../../../../../core/utils/parse-api-error';
 
 // Order channel types
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
@@ -1330,7 +1331,8 @@ export interface ItemChangesPreviewLine {
   order_item_id: number | null;
   product_name: string;
   variant_label: string | null;
-  action: 'add' | 'increase' | 'decrease' | 'remove';
+  /** 'reprice': línea no tocada cuyo descuento se recalcula (promoción/cupón). */
+  action: 'add' | 'increase' | 'decrease' | 'remove' | 'reprice';
   quantity_before: number | null;
   quantity_after: number;
   kitchen_status: 'none' | 'pending' | 'in_preparation' | 'ready' | 'delivered';
@@ -1361,4 +1363,11 @@ export interface ItemChangesPreview {
 export interface ItemChangesApplyResult {
   order: Order;
   summary: ItemChangesPreview;
+  /** Efectos de cocina del apply (misma forma que `POST /store/kitchen-fire`). */
+  kitchen?: {
+    kitchen_ticket_ids?: number[];
+    stock_warnings?: InsufficientStockItem[];
+  };
+  /** Algunas respuestas lo traen a nivel raíz; se toleran ambos. */
+  stock_warnings?: InsufficientStockItem[];
 }
