@@ -285,7 +285,14 @@ export class CouponsService {
     });
   }
 
-  async validate(dto: ValidateCouponDto) {
+  /**
+   * `opts.excludeOrderId` (aditivo, SOLO uso interno — deliberadamente fuera
+   * del DTO HTTP para que un cliente no pueda saltarse los límites): al
+   * revalidar el cupón YA aplicado a una orden, los usos que esa misma orden
+   * registró (`coupon_uses`/`current_uses`) no cuentan contra los límites
+   * global ni por cliente. Sin la opción el comportamiento es el de siempre.
+   */
+  async validate(dto: ValidateCouponDto, opts: { excludeOrderId?: number } = {}) {
     const coupon = await this.prisma.coupons.findFirst({
       where: { code: dto.code, is_active: true },
       include: {
@@ -308,8 +315,15 @@ export class CouponsService {
       throw new VendixHttpException(ErrorCodes.CPN_EXPIRED_001);
     }
 
+    const ownUses =
+      opts.excludeOrderId != null
+        ? await this.prisma.coupon_uses.count({
+            where: { coupon_id: coupon.id, order_id: opts.excludeOrderId },
+          })
+        : 0;
+
     // Check global usage limit
-    if (coupon.max_uses && coupon.current_uses >= coupon.max_uses) {
+    if (coupon.max_uses && coupon.current_uses - ownUses >= coupon.max_uses) {
       throw new VendixHttpException(ErrorCodes.CPN_LIMIT_001);
     }
 
@@ -321,7 +335,17 @@ export class CouponsService {
           customer_id: dto.customer_id,
         },
       });
-      if (customerUses >= coupon.max_uses_per_customer) {
+      const ownCustomerUses =
+        opts.excludeOrderId != null
+          ? await this.prisma.coupon_uses.count({
+              where: {
+                coupon_id: coupon.id,
+                customer_id: dto.customer_id,
+                order_id: opts.excludeOrderId,
+              },
+            })
+          : 0;
+      if (customerUses - ownCustomerUses >= coupon.max_uses_per_customer) {
         throw new VendixHttpException(ErrorCodes.CPN_LIMIT_002);
       }
     }

@@ -62,6 +62,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       // via `groupBy`, so the spec exposes the mock surface the engine
       // actually queries against.
       groupBy: jest.Mock;
+      findMany: jest.Mock;
     };
     products: { findMany: jest.Mock };
   };
@@ -83,6 +84,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         // override the mock per-case with a concrete `{ promotion_id,
         // _count: { _all } }` row.
         groupBy: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       // QUI-648: el motor lee la escala de venta del producto para contar
       // presentaciones en vez de unidades mínimas. Por defecto ningún producto
@@ -407,6 +409,32 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         _count: { _all: true },
       });
       expect(result.applied_promotions).toEqual([]);
+    });
+
+    it('exclude_order_id: la promoción limit 1 que la propia orden ya tiene sigue aplicando al re-cotizar', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({ id: 64, per_customer_limit: 1, usage_limit: 1, usage_count: 1 }),
+      ]);
+      // El uso existente ES de la orden 900: el conteo real lo excluye con
+      // `order_id: { not: 900 }`; sin la opción lo cuenta.
+      prisma.order_promotions.groupBy.mockImplementation(async ({ where }: any) =>
+        where.order_id ? [] : [{ promotion_id: 64, _count: { _all: 1 } }],
+      );
+      prisma.order_promotions.findMany.mockResolvedValue([{ promotion_id: 64 }]);
+      const input = {
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        customer_id: 77,
+        now: REFERENCE_NOW,
+      };
+      const without = await service.quoteDiscounts(input);
+      expect(without.applied_promotions).toEqual([]);
+      const withOpt = await service.quoteDiscounts({ ...input, exclude_order_id: 900 });
+      expect(prisma.order_promotions.groupBy).toHaveBeenLastCalledWith({
+        by: ['promotion_id'],
+        where: { promotion_id: { in: [64] }, customer_id: 77, order_id: { not: 900 } },
+        _count: { _all: true },
+      });
+      expect(withOpt.applied_promotions).toHaveLength(1);
     });
   });
 

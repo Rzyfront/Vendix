@@ -61,6 +61,13 @@ export interface PromotionQuoteInput {
    */
   manual_promotion_ids?: number[];
   /**
+   * Aditivo. Al RE-cotizar una orden ya persistida, los usos que esa misma
+   * orden registró (`order_promotions` y su parte de `usage_count`) no cuentan
+   * contra `per_customer_limit` ni `usage_limit`. Sin la opción, el
+   * comportamiento es el de siempre.
+   */
+  exclude_order_id?: number | null;
+  /**
    * Reference date used for date-range eligibility. Defaults to `new Date()`.
    * Useful for deterministic tests and replays.
    */

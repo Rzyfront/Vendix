@@ -19,7 +19,12 @@ import {
   resolveCatalogUnitPrice,
   resolveFullTaxRowsByProductId,
 } from '../utils/catalog-line-pricing.util';
-import { roundMoney2, resolveLineUnits } from '../../taxes/utils/final-price.util';
+import { createHash } from 'crypto';
+import {
+  roundMoney2,
+  resolveLineUnits,
+  resolveOrderLineTaxTotal,
+} from '../../taxes/utils/final-price.util';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
@@ -108,6 +113,8 @@ interface PlannedUpdate {
   new_tax_rows: Array<{ id: number; tax_amount: number }>;
   /** `tax_amount_item` re-tasado (null = la línea no lo usa; no se escribe). */
   new_tax_amount_item: number | null;
+  /** Impuesto TOTAL resultante de la línea (filas, o `tax_amount_item` × unidades). */
+  new_tax_total: number;
   reserve_delta_units: number; // >0 reservar, <0 liberar, 0 nada
 }
 /** Línea NO tocada por el usuario cuyo descuento/impuesto cambia al re-cotizar. */
@@ -141,8 +148,6 @@ interface ItemChangesPlan {
   reprices: PlannedReprice[];
   adds: PlannedAdd[];
   discountOverride?: number;
-  /** El cupón de la orden deja de aplicar: `apply` limpia coupon_id/coupon_code. */
-  dropCoupon: boolean;
   /**
    * Snapshot re-cotizado de `order_promotions` (solo si hubo redistribución o
    * pérdida de cupón): `apply` reconcilia las filas con él.
@@ -292,16 +297,6 @@ export class OrderItemChangesService {
             });
           }
         }
-        // Cupón que dejó de ser válido: se limpia la referencia sin tocar
-        // `current_uses` (igual que el editor al quitar un cupón en
-        // draft/created: el consumo se hace en `flow/pay`).
-        if (plan.dropCoupon) {
-          await tx.orders.update({
-            where: { id: orderId },
-            data: { coupon_id: null, coupon_code: null },
-          });
-        }
-
         // order_promotions: se reconcilia con la re-cotización (el editor hace
         // deleteMany + insert; acá en sitio por promotion_id: update de las que
         // siguen, delete de las que ya no aplican, create de las nuevas).
@@ -405,7 +400,9 @@ export class OrderItemChangesService {
               unit_price: new Prisma.Decimal(res.unitBase),
               total_price: new Prisma.Decimal(res.totalPrice),
               tax_rate: new Prisma.Decimal(res.taxRate),
-              tax_amount_item: new Prisma.Decimal(res.taxAmountItem),
+              tax_amount_item: new Prisma.Decimal(
+                a.planned?.tax_amount_item ?? res.taxAmountItem,
+              ),
               final_unit_price: new Prisma.Decimal(res.finalUnitPrice),
               catalog_unit_price: new Prisma.Decimal(res.catalogUnitPrice),
               catalog_final_price: new Prisma.Decimal(res.finalUnitPrice),
@@ -607,8 +604,15 @@ export class OrderItemChangesService {
     });
     if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
 
-    const version = order.updated_at ? new Date(order.updated_at).toISOString() : '';
-    if (opts.expectedVersion !== undefined && opts.expectedVersion !== version) {
+    const updatedAtIso = order.updated_at
+      ? new Date(order.updated_at).toISOString()
+      : '';
+    // La version completa es `${updated_at ISO}|${hash del resumen}`; acá solo
+    // se compara la parte de `updated_at` (la orden cambió); el hash, al final.
+    if (
+      opts.expectedVersion !== undefined &&
+      opts.expectedVersion.split('|')[0] !== updatedAtIso
+    ) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_STATE_001,
         'La orden cambió mientras editabas. Revisa los cambios.',
@@ -873,6 +877,14 @@ export class OrderItemChangesService {
         id: t.id,
         tax_amount: roundMoney2(netBase * this.rateOfTaxRow(t, oldTotal)),
       }));
+      // Línea sin filas (custom del POS): su impuesto es `tax_amount_item` ×
+      // unidades; se escala a la nueva base neta con la tasa implícita.
+      const newTaxTotal =
+        newTaxRows.length > 0
+          ? roundMoney2(newTaxRows.reduce((sum: number, t: any) => sum + t.tax_amount, 0))
+          : roundMoney2(
+              netBase * (oldTotal > 0 ? resolveOrderLineTaxTotal(l) / oldTotal : 0),
+            );
       updates.push({
         line: l,
         new_quantity: u.quantity,
@@ -884,8 +896,9 @@ export class OrderItemChangesService {
         new_tax_amount_item: this.retaxedTaxAmountItem(
           l,
           newBase,
-          newTaxRows.reduce((sum: number, t: any) => sum + t.tax_amount, 0),
+          newTaxTotal,
         ),
+        new_tax_total: newTaxTotal,
         reserve_delta_units: delta,
       });
     }
@@ -1008,6 +1021,16 @@ export class OrderItemChangesService {
           line.messages.push('Se reservará stock');
         }
         if (orderBlock) markBlocked(line, orderBlock.message, orderBlock.code.code);
+        // Compuerta F4 de IVA (misma que `PUT :id/items`): un comercio no
+        // responsable de IVA no puede vender productos con IVA.
+        try {
+          await this.ordersService.assertSaleVatAllowed([
+            { product_id: p.id, tax_amount_item: resolution.taxAmountItem },
+          ]);
+        } catch (err) {
+          if (!(err instanceof VendixHttpException)) throw err;
+          markBlocked(line, err.message, err.errorCode);
+        }
         lines.push(line);
         adds.push({
           index,
@@ -1025,6 +1048,11 @@ export class OrderItemChangesService {
       }
     }
 
+    // Updates sin cambio real se descartan: si no queda NADA, no hay cambios.
+    if (removes.length + updates.length + adds.length === 0) {
+      throw this.invalid('No hay cambios para aplicar');
+    }
+
     const warnings: string[] = [];
 
     // ---- insumos del BOM de platos nuevos que irán a cocina (sin escribir) ---
@@ -1040,7 +1068,46 @@ export class OrderItemChangesService {
           })),
           { tx: opts.tx },
         );
-      for (const sh of shortages ?? []) {
+      // Insumos que devuelven los removes con `ingredients_reused`: se leen de
+      // los consumos (`quantity_change < 0`) de cada línea quitada y se acreditan
+      // a la disponibilidad (un intercambio quitar+agregar el mismo plato no se
+      // bloquea de más).
+      const reusedIds = removes
+        .map((r) => r.order_item_id)
+        .filter(
+          (id) =>
+            lines.find((x) => x.key === `existing:${id}`)?.stock_effect ===
+            'ingredients_reused',
+        );
+      const returned = new Map<string, number>();
+      if (reusedIds.length > 0) {
+        const consumed: Array<{
+          product_id: number;
+          product_variant_id: number | null;
+          quantity_change: number;
+        }> =
+          (await db.inventory_transactions.findMany({
+            where: { order_item_id: { in: reusedIds }, quantity_change: { lt: 0 } },
+            select: {
+              product_id: true,
+              product_variant_id: true,
+              quantity_change: true,
+            },
+          })) ?? [];
+        for (const c of consumed) {
+          const k = `${c.product_id}-${c.product_variant_id ?? 'null'}`;
+          returned.set(k, (returned.get(k) ?? 0) + Math.abs(c.quantity_change));
+        }
+      }
+      const effectiveShortages = (shortages ?? [])
+        .map((sh) => ({
+          ...sh,
+          available:
+            sh.available +
+            (returned.get(`${sh.product_id}-${sh.product_variant_id ?? 'null'}`) ?? 0),
+        }))
+        .filter((sh) => sh.requested > sh.available);
+      for (const sh of effectiveShortages) {
         const detail = `${sh.product_name} (se necesitan ${sh.requested}, hay ${sh.available})`;
         const dishNames = new Set(sh.used_by ?? []);
         const affected = fireAdds.filter(
@@ -1200,8 +1267,6 @@ export class OrderItemChangesService {
 
     const removedIds = new Set(removes.map((r) => r.order_item_id));
     const updateById = new Map(updates.map((u) => [u.line.id, u]));
-    const sumRows = (rows: Array<{ tax_amount: number }>) =>
-      rows.reduce((sum, t) => sum + t.tax_amount, 0);
 
     interface Resulting {
       line: any;
@@ -1209,6 +1274,7 @@ export class OrderItemChangesService {
       base: number;
       discount: number | null;
       taxRows: Array<{ id: number; tax_amount: number }>;
+      taxTotal: number;
       update: PlannedUpdate | null;
     }
     let currentLineDiscounts = 0; // descuentos de las líneas actuales
@@ -1229,6 +1295,7 @@ export class OrderItemChangesService {
               base: u.new_total_price,
               discount: u.new_discount,
               taxRows: u.new_tax_rows,
+              taxTotal: u.new_tax_total,
               update: u,
             }
           : {
@@ -1240,6 +1307,7 @@ export class OrderItemChangesService {
                 id: t.id,
                 tax_amount: Number(t.tax_amount ?? 0),
               })),
+              taxTotal: resolveOrderLineTaxTotal(l),
               update: null,
             },
       );
@@ -1248,10 +1316,18 @@ export class OrderItemChangesService {
     // Promociones / cupón: se RE-COTIZAN sobre el carrito resultante con el
     // mismo motor del editor (`updateOrderFromEditor`).
     const reprices: PlannedReprice[] = [];
-    let dropCoupon = false;
     let planBlock: VendixHttpException | null = null;
     let redistributedDiscount: number | null = null;
     let promotionSync: Array<{ promotion_id: number; discount_amount: number }> | null = null;
+    // Convención de la orden. line-driven: Σ descuentos de línea ≈ cabecera.
+    // header-only (ecommerce/WhatsApp): líneas sin descuento, descuento solo
+    // en la cabecera y el impuesto ya calculado ANTES del descuento: nunca se
+    // redistribuye en líneas ni se tocan sus impuestos.
+    const lineDriven =
+      headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
+    const headerOnly = headerDiscount > 0 && currentLineDiscounts <= 0.01;
+    let headerOverride: number | null = null;
+    let quotedSnapshot: Array<{ promotion_id: number; discount_amount: number }> | null = null;
     const couponCode = String(order.coupon_code ?? '').trim();
     const promoIds: number[] = (order.order_promotions ?? [])
       .map((p: any) => p.promotion_id)
@@ -1287,6 +1363,7 @@ export class OrderItemChangesService {
         const quote = await this.promotionEngine.quoteDiscounts({
           customer_id: order.customer_id ?? undefined,
           manual_promotion_ids: promoIds,
+          exclude_order_id: orderId,
           items: quoteItems.map((it, index) => ({
             line_id: index,
             product_id: it.product_id as number,
@@ -1335,15 +1412,20 @@ export class OrderItemChangesService {
               line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
             })),
             store_id: storeId,
-          } as any);
+          } as any, { excludeOrderId: orderId });
           couponDiscount = roundMoney2(
             Math.min(validation?.discount_amount || 0, remaining),
           );
         } catch (err) {
           if (err instanceof VendixHttpException) {
-            dropCoupon = true;
-            warnings.push(
-              `El cupón ${couponCode} dejará de aplicar con este cambio (${err.message})`,
+            // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
+            // se bloquea y el usuario ajusta los productos (igual que el editor).
+            quoted = false;
+            const msg = `Con este cambio el cupón ${couponCode} deja de aplicar (${err.message}). Ajusta los productos para mantenerlo.`;
+            warnings.push(msg);
+            planBlock = new VendixHttpException(
+              ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+              msg,
             );
           } else {
             quoted = false;
@@ -1360,7 +1442,17 @@ export class OrderItemChangesService {
         }
       }
 
-      if (quoted) {
+      if (quoted) quotedSnapshot = promoSnapshot;
+      if (quoted && headerOnly) {
+        // Solo la cabecera: D' (bruto re-cotizado) vs cabecera actual.
+        const requoted = roundMoney2(promotionDiscount + couponDiscount);
+        if (Math.abs(requoted - headerDiscount) > 0.01) {
+          headerOverride = requoted;
+          warnings.push(
+            `El descuento de la promoción/cupón se recalcula: ${money(headerDiscount)} → ${money(requoted)}`,
+          );
+        }
+      } else if (quoted) {
         const grossDiscount = roundMoney2(promotionDiscount + couponDiscount);
         const kernel = this.ordersService.applyGrossDiscountToPlannedLines(
           plannedLines,
@@ -1368,9 +1460,6 @@ export class OrderItemChangesService {
         );
         const lineSum = resulting.reduce((sum, r) => sum + (r.discount ?? 0), 0);
         const redistributes = Math.abs(kernel.baseDiscount - lineSum) > 0.01;
-        // Cambió el descuento (redistribución o cupón perdido): las filas
-        // order_promotions se reconcilian con lo re-cotizado.
-        if (redistributes || dropCoupon) promotionSync = promoSnapshot;
         // D' ≈ Σ descuentos de línea resultantes: nada que redistribuir; las
         // líneas no tocadas quedan intactas.
         if (redistributes) {
@@ -1401,9 +1490,11 @@ export class OrderItemChangesService {
             const shownBefore = r.update ? (r.discount ?? 0) : oldDiscount;
             r.discount = newDiscount;
             r.taxRows = newRows;
+            r.taxTotal = kernel.lines[i].line_tax_total;
             if (r.update) {
               r.update.new_discount = newDiscount;
               r.update.new_tax_rows = newRows;
+              r.update.new_tax_total = kernel.lines[i].line_tax_total;
               r.update.new_tax_amount_item = kernel.lines[i].tax_amount_item ?? null;
               if (changed) {
                 const ul = lines.find((x) => x.key === `existing:${r.line.id}`);
@@ -1457,7 +1548,7 @@ export class OrderItemChangesService {
     let lineDiscounts = 0;
     for (const r of resulting) {
       subtotal += r.base;
-      tax += sumRows(r.taxRows);
+      tax += r.taxTotal;
       lineDiscounts += r.discount ?? 0;
     }
     for (const a of adds) {
@@ -1473,15 +1564,19 @@ export class OrderItemChangesService {
     const discountTouched =
       removedWithDiscount ||
       redistributedDiscount != null ||
-      dropCoupon ||
+      headerOverride != null ||
       resulting.some(
         (r) => Math.abs((r.discount ?? 0) - Number(r.line.discount_amount ?? 0)) > 0.001,
       );
+    // order_promotions se sincroniza con lo cotizado SIEMPRE que haya
+    // cotización y el descuento haya cambiado.
+    if (quotedSnapshot && discountTouched) promotionSync = quotedSnapshot;
     let discountOverride: number | undefined;
     let discount: number;
-    const lineDriven =
-      headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
-    if (redistributedDiscount != null) {
+    if (headerOverride != null) {
+      discount = headerOverride;
+      discountOverride = headerOverride;
+    } else if (redistributedDiscount != null) {
       discount = roundMoney2(lineDiscounts);
       discountOverride = discount;
     } else if (lineDriven || (hasPromoOrCoupon && discountTouched)) {
@@ -1516,6 +1611,39 @@ export class OrderItemChangesService {
       ),
     };
 
+    // Version = updated_at + huella del resumen (totales y, por línea, acción,
+    // cantidad, efecto en cocina y montos de precio/descuento resultantes):
+    // si precios o estado cambian entre preview y apply, apply lo rechaza.
+    const priceByKey = new Map<string, [number, number]>();
+    for (const r of resulting) {
+      priceByKey.set(`existing:${r.line.id}`, [r.base, r.discount ?? 0]);
+    }
+    for (const a of adds) {
+      priceByKey.set(`add:${a.index}`, [a.resolution.totalPrice, a.discount]);
+    }
+    const fingerprint = createHash('sha1')
+      .update(
+        JSON.stringify({
+          totals: after,
+          lines: lines.map((l) => [
+            l.key,
+            l.action,
+            l.quantity_after,
+            l.kitchen_effect,
+            ...(priceByKey.get(l.key) ?? [0, 0]),
+          ]),
+        }),
+      )
+      .digest('hex')
+      .slice(0, 16);
+    const version = `${updatedAtIso}|${fingerprint}`;
+    if (opts.expectedVersion !== undefined && opts.expectedVersion !== version) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_STATE_001,
+        'Los precios o el estado de la orden cambiaron; revisa el resumen y vuelve a confirmar',
+      );
+    }
+
     const canApply =
       lines.every((l) => !l.blocked) &&
       awaitingChoice.size === 0 &&
@@ -1536,7 +1664,6 @@ export class OrderItemChangesService {
       reprices,
       adds,
       discountOverride,
-      dropCoupon,
       promotionSync,
       planBlock,
       blockedCodes,

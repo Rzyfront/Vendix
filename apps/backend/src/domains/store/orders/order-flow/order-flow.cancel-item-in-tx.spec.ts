@@ -101,4 +101,29 @@ describe('OrderFlowService — cancelOrderItemInTx / recalc (QUI-650)', () => {
     expect(d2.discount_amount).toBeUndefined();
     expect(Number(d2.grand_total)).toBe(100 + 19 + 10 - 5);
   });
+
+  it('recalcOrderTotalsFromActiveLinesInTx: una línea custom sin order_item_taxes aporta tax_amount_item × unidades', async () => {
+    const { service } = build();
+    const update = jest.fn().mockResolvedValue({});
+    const tx: any = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([
+          { total_price: 100, quantity: 1, order_item_taxes: [{ tax_amount: 19 }], tax_amount_item: 19 },
+          { total_price: 20, quantity: 2, tax_amount_item: 1.5, weight: null, price_unit_quantity: null, order_item_taxes: [] },
+        ]),
+      },
+      orders: { update },
+    };
+    jest.spyOn(service as any, 'syncPendingCodAmountInTx').mockResolvedValue(undefined);
+    await service.recalcOrderTotalsFromActiveLinesInTx(
+      tx, { discount_amount: 0, shipping_cost: 0, tip_amount: 0, payments: [] }, ORDER_ID,
+    );
+    const data = update.mock.calls[0][0].data;
+    // 19 (con filas: idéntico a antes) + 1.5 × 2 (custom)
+    expect(Number(data.tax_amount)).toBe(22);
+    expect(Number(data.grand_total)).toBe(120 + 22);
+    // y el select pide los campos de la fórmula canónica
+    const select = tx.order_items.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({ tax_amount_item: true, quantity: true, weight: true, price_unit_quantity: true });
+  });
 });

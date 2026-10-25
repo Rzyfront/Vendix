@@ -247,7 +247,7 @@ export class OrdersService {
    * temprano si el comercio SÍ es responsable (camino feliz mayoritario).
    * Indeterminado ⇒ responsable (no bloquea).
    */
-  private async assertSaleVatAllowed(
+  async assertSaleVatAllowed(
     items: Array<{ product_id?: number | null; tax_amount_item?: number | null }>,
   ): Promise<void> {
     const taxedProductIds = Array.from(

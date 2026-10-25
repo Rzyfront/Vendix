@@ -544,6 +544,7 @@ export class PromotionEngineService {
     // por qué el dinero no puede usar el piso que sí usa la cantidad.
     const saleUnitScale = await this.resolveSaleUnitScales(items);
     const customerId = input.customer_id ?? null;
+    const excludeOrderId = input.exclude_order_id ?? null;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
     const subtotal = this.roundMoney(
@@ -628,12 +629,24 @@ export class PromotionEngineService {
     // candidate promo.
     const customerUsageByPromotion = new Map<number, number>();
     const candidateIds = candidates.map((c) => Number(c.id));
+    // Promociones que ESTA orden ya consumió (su parte de `usage_count`).
+    const ownPromotionIds = new Set<number>();
+    if (excludeOrderId != null && candidateIds.length > 0) {
+      const own = await this.prisma.order_promotions.findMany({
+        where: { order_id: excludeOrderId, promotion_id: { in: candidateIds } },
+        select: { promotion_id: true },
+      });
+      for (const r of own) ownPromotionIds.add(Number(r.promotion_id));
+    }
     if (customerId && candidateIds.length > 0) {
       const rows = await this.prisma.order_promotions.groupBy({
         by: ['promotion_id'],
         where: {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
+          ...(excludeOrderId != null
+            ? { order_id: { not: excludeOrderId } }
+            : {}),
         },
         _count: { _all: true },
       });
@@ -658,7 +671,12 @@ export class PromotionEngineService {
     for (const promo of candidates) {
       const isManual = !promo.is_auto_apply;
       if (isManual && !manualIds.includes(promo.id)) continue;
-      if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
+      if (
+        promo.usage_limit &&
+        promo.usage_count - (ownPromotionIds.has(Number(promo.id)) ? 1 : 0) >=
+          promo.usage_limit
+      )
+        continue;
       if (promo.per_customer_limit && customerId) {
         const customerUsage = customerUsageByPromotion.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;

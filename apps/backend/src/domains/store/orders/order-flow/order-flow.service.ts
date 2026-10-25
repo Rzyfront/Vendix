@@ -141,6 +141,7 @@ import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.i
 import { resolvePaymentInvoiceBranch } from '../../accounting/auto-entries/payment-invoice-branch.util';
 import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
 import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
+import { resolveOrderLineTaxTotal } from '../../taxes/utils/final-price.util';
 import {
   WithholdingFlowService,
   type WithholdingResolution,
@@ -5815,6 +5816,12 @@ export class OrderFlowService {
       where: { order_id: orderId, cancelled_at: null },
       select: {
         total_price: true,
+        // Líneas custom del POS (sin `order_item_taxes`): su impuesto vive en
+        // `tax_amount_item` × unidades de línea (`resolveOrderLineTaxTotal`).
+        tax_amount_item: true,
+        quantity: true,
+        weight: true,
+        price_unit_quantity: true,
         order_item_taxes: { select: { tax_amount: true } },
       },
     });
@@ -5822,15 +5829,10 @@ export class OrderFlowService {
       (acc, it) => acc + Number(it.total_price),
       0,
     );
+    // Fórmula canónica: con filas de desglose = Σ filas (idéntico a antes);
+    // sin filas, `tax_amount_item` × unidades de línea.
     const tax = activeItems.reduce(
-      (acc, it) =>
-        acc +
-        // ADR-06 — nunca asumir la relación poblada: una fila sin desglose
-        // fiscal persistido aporta cero impuesto en vez de tronar.
-        (it.order_item_taxes ?? []).reduce(
-          (s, t) => s + Number(t.tax_amount ?? 0),
-          0,
-        ),
+      (acc, it) => acc + resolveOrderLineTaxTotal(it as any),
       0,
     );
     const shippingCost = Number(order?.shipping_cost ?? 0);
