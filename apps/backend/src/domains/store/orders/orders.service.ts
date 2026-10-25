@@ -81,8 +81,10 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   computeItemActions,
+  hasKitchenLinesAwaitingHandoff,
   OrderActionSnapshot,
 } from './order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import {
@@ -1364,7 +1366,7 @@ export class OrdersService {
         ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
       include: {
-        stores: { select: { id: true, name: true, store_code: true } },
+        stores: { select: { id: true, name: true, store_code: true, industries: true } },
         order_items: {
           include: {
             products: {
@@ -1529,6 +1531,8 @@ export class OrdersService {
         // Persisted discount snapshots — read what was actually charged,
         // never recalculate against current promotions/coupons.
         order_promotions: {
+          // Filas en 0 = promociones que dejaron de aplicar tras una edición.
+          where: { discount_amount: { gt: 0 } },
           select: {
             id: true,
             promotion_id: true,
@@ -1942,19 +1946,13 @@ export class OrdersService {
     const isKitchenOrder = (order.order_items ?? []).some(
       (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
     );
-    // Misma semántica que `findLinesAwaitingKitchenDelivery`: por línea no
-    // cancelada solo cuenta la ÚLTIMA fila KDS (las superadas por un reenvío
-    // no deben mantener la orden "pendiente en cocina").
-    const hasPendingKitchen = (order.order_items ?? []).some((item: any) => {
-      if (item.cancelled_at) return false;
-      const rows: any[] = [...(item.kitchen_ticket_items ?? [])].sort(
-        (x, y) => Number(y.id ?? 0) - Number(x.id ?? 0),
-      );
-      const latest = rows[0];
-      return (
-        !!latest && latest.status !== 'delivered' && latest.status !== 'cancelled'
-      );
-    });
+    // Misma compuerta que la entrega/despacho reales (`OrderFlowService`):
+    // por línea no cancelada manda la ÚLTIMA fila KDS (una cancelada también
+    // bloquea) y una línea `prepared` sin ticket cuenta solo en restaurantes.
+    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(
+      (order.order_items ?? []) as any[],
+      { isRestaurant: storeIsRestaurant(order.stores?.industries) },
+    );
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
     const snapshot: OrderActionSnapshot & {
@@ -4865,6 +4863,7 @@ export class OrdersService {
             orderBy: { installment_number: 'asc' },
           },
           order_promotions: {
+            where: { discount_amount: { gt: 0 } },
             select: {
               id: true,
               promotion_id: true,

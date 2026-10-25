@@ -1,6 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { ToastService } from '../../../../../../shared/components';
 import {
@@ -535,5 +535,41 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
     expect(reloaded).toEqual([null]);
     expect(saved).toEqual([]);
     expect(component.isOpen()).toBeFalse();
+  });
+
+  it('a failed reload after apply error emits orderReloaded(null) and again on close', async () => {
+    ordersService.applyItemChanges.and.returnValue(throwError(() => httpError(500)));
+    ordersService.getOrderById.and.returnValue(throwError(() => new Error('down')));
+    const { fixture, component } = create();
+    const reloaded: Array<Order | null> = [];
+    component.orderReloaded.subscribe((o) => reloaded.push(o));
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(component.reloadFailed()).toBeTrue();
+    expect(reloaded).toEqual([null]);
+    component.close();
+    expect(reloaded).toEqual([null, null]);
+    expect(component.isOpen()).toBeFalse();
+  });
+
+  it('while reloading the modal is busy: cannot save nor close', async () => {
+    ordersService.applyItemChanges.and.returnValue(throwError(() => httpError(500)));
+    const pending = new Subject<Order>();
+    ordersService.getOrderById.and.returnValue(pending.asObservable());
+    const { fixture, component } = create();
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(component.reloading()).toBeTrue();
+    expect(component.busy()).toBeTrue();
+    expect(component.canSave()).toBeFalse();
+    expect(component.canCloseModal()).toBeFalse();
+    component.close();
+    expect(component.isOpen()).toBeTrue();
+    pending.next(freshOrder());
+    pending.complete();
+    expect(component.reloading()).toBeFalse();
+    expect(component.canCloseModal()).toBeTrue();
   });
 });

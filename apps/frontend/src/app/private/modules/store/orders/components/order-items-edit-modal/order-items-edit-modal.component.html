@@ -1,6 +1,6 @@
 <app-modal
   [isOpen]="isOpen()"
-  (isOpenChange)="isOpen.set($event)"
+  (isOpenChange)="onOpenChange($event)"
   title="Modificar productos"
   [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
   size="lg"
@@ -67,7 +67,7 @@
               <button
                 type="button"
                 class="h-8 px-2 rounded border border-border text-xs"
-                [disabled]="saving()"
+                [disabled]="busy()"
                 (click)="restore(line)"
               >
                 Deshacer
@@ -80,7 +80,7 @@
                   <button
                     type="button"
                     class="w-9 h-9 rounded border border-border flex items-center justify-center disabled:opacity-40"
-                    [disabled]="line.quantity <= 1 || isLocked(line) || saving()"
+                    [disabled]="line.quantity <= 1 || isLocked(line) || busy()"
                     aria-label="Disminuir cantidad"
                     (click)="decrement(line)"
                   >
@@ -90,7 +90,7 @@
                   <button
                     type="button"
                     class="w-9 h-9 rounded border border-border flex items-center justify-center disabled:opacity-40"
-                    [disabled]="saving()"
+                    [disabled]="busy()"
                     [attr.aria-label]="isLocked(line) ? 'Agregar una unidad nueva' : 'Aumentar cantidad'"
                     (click)="increment(line)"
                   >
@@ -102,7 +102,7 @@
               <button
                 type="button"
                 class="w-9 h-9 rounded flex items-center justify-center text-red-600 hover:bg-red-50 disabled:opacity-40"
-                [disabled]="saving() || line.delivered"
+                [disabled]="busy() || line.delivered"
                 aria-label="Quitar producto"
                 (click)="remove(line)"
               >
@@ -225,6 +225,7 @@
           autocomplete="off"
           [ngModel]="searchTerm()"
           (ngModelChange)="onSearchInput($event)"
+          [disabled]="busy()"
         />
         <app-icon name="search" [size]="16" class="absolute left-3 top-3 text-text-secondary" />
       </div>
@@ -240,7 +241,7 @@
               <button
                 type="button"
                 class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50"
-                [disabled]="!isSellable(product)"
+                [disabled]="busy() || !isSellable(product)"
                 (click)="onProductClick(product)"
               >
                 <span class="min-w-0">
@@ -262,6 +263,7 @@
                       <button
                         type="button"
                         class="w-full flex items-center justify-between gap-2 pl-6 pr-3 py-2 text-left hover:bg-muted"
+                        [disabled]="busy()"
                         (click)="addProduct(product, variant)"
                       >
                         <span class="text-sm truncate">{{ variantName(variant) }}</span>
@@ -293,6 +295,7 @@
           placeholder="Ej: el cliente cambió de opinión"
           [ngModel]="reason()"
           (ngModelChange)="reason.set($event)"
+          [disabled]="busy()"
         ></textarea>
         @if (!reasonValid()) {
           <p class="text-xs text-red-600" role="alert">Escribe un motivo de al menos 3 caracteres</p>
@@ -353,7 +356,7 @@
 
   <div slot="footer" class="p-4 border-t border-border space-y-2">
     <div class="flex items-center justify-end gap-2">
-      <app-button variant="outline" [disabled]="saving()" (clicked)="close()">Cancelar</app-button>
+      <app-button variant="outline" [disabled]="busy()" (clicked)="close()">Cancelar</app-button>
       <app-button
         variant="primary"
         [disabled]="!canSave()"

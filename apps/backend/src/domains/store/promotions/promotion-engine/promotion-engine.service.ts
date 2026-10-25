@@ -128,6 +128,8 @@ export class PromotionEngineService {
         where: {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
+          // Una fila en 0 (la promoción dejó de aplicar) no consume el límite.
+          discount_amount: { gt: 0 },
         },
         _count: { _all: true },
       });
@@ -343,6 +345,7 @@ export class PromotionEngineService {
         where: {
           promotion_id: promotion.id,
           customer_id: customerId,
+          discount_amount: { gt: 0 },
         },
       });
       if (customerUsage >= promotion.per_customer_limit) {
@@ -655,6 +658,7 @@ export class PromotionEngineService {
         where: {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
+          discount_amount: { gt: 0 },
           ...(excludeOrderId != null
             ? { order_id: { not: excludeOrderId } }
             : {}),

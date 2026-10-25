@@ -323,32 +323,23 @@ export class OrderItemChangesService {
             data: { discount_applied: new Prisma.Decimal(plan.couponUseSync.discount_applied) },
           });
         }
-        // order_promotions: se reconcilia con la re-cotización (el editor hace
-        // deleteMany + insert; acá en sitio por promotion_id: update de las que
-        // siguen, delete de las que ya no aplican, create de las nuevas).
-        // `order_promotions` no tiene FKs entrantes: borrar es seguro.
+        // order_promotions: se reconcilia con la re-cotización EN SITIO por
+        // promotion_id. Una promoción que deja de aplicar NO se borra: su fila
+        // queda en 0 para seguir en el alcance (`order_scope`) y poder volver a
+        // aplicar en una edición posterior (p.ej. si se re-agrega el producto).
         if (plan.promotionSync) {
           const existing: Array<{ id: number; promotion_id: number }> =
             plan.order.order_promotions ?? [];
           const wanted = new Map(
             plan.promotionSync.map((p) => [p.promotion_id, p.discount_amount]),
           );
-          const obsolete = existing
-            .filter((e) => !wanted.has(e.promotion_id))
-            .map((e) => e.id);
-          if (obsolete.length > 0) {
-            await tx.order_promotions.deleteMany({
-              where: { order_id: orderId, id: { in: obsolete } },
-            });
-          }
           const kept = new Set<number>();
           for (const e of existing) {
-            if (!wanted.has(e.promotion_id)) continue;
             kept.add(e.promotion_id);
             await tx.order_promotions.updateMany({
               where: { order_id: orderId, promotion_id: e.promotion_id },
               data: {
-                discount_amount: new Prisma.Decimal(wanted.get(e.promotion_id)!),
+                discount_amount: new Prisma.Decimal(wanted.get(e.promotion_id) ?? 0),
               },
             });
           }
@@ -642,7 +633,7 @@ export class OrderItemChangesService {
           },
         },
         table_sessions: { select: { id: true }, take: 1 },
-        order_promotions: { select: { id: true, promotion_id: true } },
+        order_promotions: { select: { id: true, promotion_id: true, discount_amount: true } },
       },
     });
     if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
@@ -814,7 +805,7 @@ export class OrderItemChangesService {
         } else if (c.resolvedType === 'after_fire_waste' && c.preparedFired) {
           line.stock_effect = 'ingredients_wasted';
           line.messages.push('Los insumos se registran como merma');
-        } else if (!c.wasFired && isTracked(l)) {
+        } else if (!c.wasFired && isTracked(l) && reservesStock) {
           line.stock_effect = 'release';
           line.messages.push('Se liberará la reserva de stock');
         }
@@ -1386,6 +1377,7 @@ export class OrderItemChangesService {
     let promotionSync: Array<{ promotion_id: number; discount_amount: number }> | null = null;
     let couponUseSync: { id: number; discount_applied: number } | null = null;
     let couponUseRow: { id: number; discount_applied: unknown } | null = null;
+    let requotedCouponDiscount: number | null = null;
     // Convención de la orden. line-driven: Σ descuentos de línea ≈ cabecera.
     // header-only (ecommerce/WhatsApp): líneas sin descuento, descuento solo
     // en la cabecera y el impuesto ya calculado ANTES del descuento: nunca se
@@ -1528,6 +1520,7 @@ export class OrderItemChangesService {
           couponDiscount = roundMoney2(
             Math.min(validation?.discount_amount || 0, remaining),
           );
+          requotedCouponDiscount = couponDiscount;
         } catch (err) {
           if (err instanceof VendixHttpException) {
             // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
@@ -1554,7 +1547,36 @@ export class OrderItemChangesService {
         }
       }
 
-      if (quoted) quotedSnapshot = promoSnapshot;
+      if (quoted) {
+        quotedSnapshot = promoSnapshot;
+        if (promoIds.length > 0) {
+          const prior = new Map<number, number>(
+            (order.order_promotions ?? []).map((p: any) => [
+              p.promotion_id,
+              Number(p.discount_amount ?? 0),
+            ]),
+          );
+          const next = new Map(promoSnapshot.map((p) => [p.promotion_id, p.discount_amount]));
+          const named: Array<{ id: number; name: string }> =
+            (await db.promotions.findMany({
+              where: { id: { in: promoIds } },
+              select: { id: true, name: true },
+            })) ?? [];
+          const nameOf = new Map(named.map((p) => [p.id, p.name]));
+          for (const id of promoIds) {
+            const a = prior.get(id) ?? 0;
+            const b = next.get(id) ?? 0;
+            const name = nameOf.get(id) ?? `#${id}`;
+            if (a > 0 && b <= 0) {
+              warnings.push(
+                `La promoción «${name}» deja de aplicar con este cambio (${money(a)} → $0)`,
+              );
+            } else if (a <= 0 && b > 0) {
+              warnings.push(`La promoción «${name}» vuelve a aplicar`);
+            }
+          }
+        }
+      }
       if (quoted && !(lineDriven || mixed)) {
         // Header-only o cabecera 0 con promo/cupón: no se redistribuye en
         // líneas; solo la cabecera (D' bruto re-cotizado vs cabecera actual).
@@ -1721,15 +1743,16 @@ export class OrderItemChangesService {
       }
       discount = roundMoney2(discount);
     }
-    // `coupon_uses.discount_applied` sigue la convención de `payOrder`: el
-    // descuento de CABECERA de la orden. Solo si el descuento cambió.
+    // `coupon_uses.discount_applied` guarda SOLO el monto del cupón (como lo
+    // registra el checkout con `registerUse`), no el descuento de cabecera.
+    // Solo si el descuento cambió y el monto del cupón es otro.
     if (
       couponUseRow &&
       discountTouched &&
-      discountOverride != null &&
-      Math.abs(Number(couponUseRow.discount_applied) - discountOverride) > 0.001
+      requotedCouponDiscount != null &&
+      Math.abs(Number(couponUseRow.discount_applied) - requotedCouponDiscount) > 0.001
     ) {
-      couponUseSync = { id: couponUseRow.id, discount_applied: discountOverride };
+      couponUseSync = { id: couponUseRow.id, discount_applied: requotedCouponDiscount };
     }
     const shipping = before.shipping;
     let tip = before.tip;

@@ -181,6 +181,10 @@ export class OrderItemsEditModalComponent {
   readonly conflictMessage = signal<string | null>(null);
   /** Tras un resultado desconocido y una recarga fallida no se permite reintentar (evita duplicar líneas). */
   readonly reloadFailed = signal(false);
+  /** Recargando la orden tras un error de apply: no se editan ni se cierra para no perder cambios. */
+  readonly reloading = signal(false);
+  /** Guardando o recargando: la edición queda deshabilitada. */
+  readonly busy = computed(() => this.saving() || this.reloading());
   /** Orden fresca traída tras un conflicto; solo vale mientras el input `order` sea el mismo. */
   private readonly reloaded = signal<{ base: Order; order: Order } | null>(null);
   private readonly currentOrder = computed(() => {
@@ -309,7 +313,7 @@ export class OrderItemsEditModalComponent {
     () =>
       this.hasChanges() &&
       !this.isEmpty() &&
-      !this.saving() &&
+      !this.busy() &&
       !this.reloadFailed() &&
       !this.previewPending() &&
       !this.previewError() &&
@@ -752,8 +756,10 @@ export class OrderItemsEditModalComponent {
   private reloadOrder(message: string): void {
     const base = this.order();
     const orderId = this.currentOrder().id;
+    this.reloading.set(true);
     this.ordersService.getOrderById(String(orderId)).subscribe({
       next: (fresh) => {
+        this.reloading.set(false);
         this.reloaded.set({ base, order: fresh });
         this.resetDraft();
         this.conflictMessage.set(message);
@@ -761,18 +767,36 @@ export class OrderItemsEditModalComponent {
         this.orderReloaded.emit(fresh);
       },
       error: () => {
+        this.reloading.set(false);
         this.reloadFailed.set(true);
         this.conflictMessage.set(RELOAD_FAILED_MESSAGE);
         this.toastService.error(RELOAD_FAILED_MESSAGE);
+        // Que el padre recargue su detalle: el guardado pudo haber hecho commit.
+        this.orderReloaded.emit(null);
       },
     });
   }
 
   /** `app-modal` consulta esto en la X y en Escape: mientras guarda no se puede cerrar. */
-  readonly canCloseModal = (): boolean => !this.saving();
+  readonly canCloseModal = (): boolean => !this.saving() && !this.reloading();
 
   close(): void {
-    if (this.saving()) return;
+    if (this.busy()) return;
+    this.dismiss();
+  }
+
+  /** Cambio de visibilidad desde `app-modal` (X / Escape). */
+  onOpenChange(open: boolean): void {
+    if (open) {
+      this.isOpen.set(true);
+      return;
+    }
+    this.dismiss();
+  }
+
+  private dismiss(): void {
+    // Si la recarga falló, el detalle puede estar desactualizado: que el padre lo refresque.
+    if (this.reloadFailed()) this.orderReloaded.emit(null);
     this.isOpen.set(false);
   }
 }

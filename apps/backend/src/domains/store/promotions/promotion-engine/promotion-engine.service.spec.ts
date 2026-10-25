@@ -405,7 +405,8 @@ describe('PromotionEngineService - quoteDiscounts', () => {
 
       expect(prisma.order_promotions.groupBy).toHaveBeenCalledWith({
         by: ['promotion_id'],
-        where: { promotion_id: { in: [63] }, customer_id: 77 },
+        // las filas en 0 (promoción que dejó de aplicar) no consumen el límite
+        where: { promotion_id: { in: [63] }, customer_id: 77, discount_amount: { gt: 0 } },
         _count: { _all: true },
       });
       expect(result.applied_promotions).toEqual([]);
@@ -431,7 +432,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       const withOpt = await service.quoteDiscounts({ ...input, exclude_order_id: 900 });
       expect(prisma.order_promotions.groupBy).toHaveBeenLastCalledWith({
         by: ['promotion_id'],
-        where: { promotion_id: { in: [64] }, customer_id: 77, order_id: { not: 900 } },
+        where: { promotion_id: { in: [64] }, customer_id: 77, discount_amount: { gt: 0 }, order_id: { not: 900 } },
         _count: { _all: true },
       });
       expect(withOpt.applied_promotions).toHaveLength(1);

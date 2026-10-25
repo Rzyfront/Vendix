@@ -2538,8 +2538,9 @@ describe('OrdersService', () => {
       expect(reasons(build([{ id: 2, status: 'delivered' }, { id: 1, status: 'pending' }]))).not.toContain(pendingCode);
       // Última fila pending: sí bloquea.
       expect(reasons(build([{ id: 2, status: 'pending' }, { id: 1, status: 'delivered' }]))).toContain(pendingCode);
-      // Orden de entrada irrelevante: se toma el id mayor.
-      expect(reasons(build([{ id: 1, status: 'pending' }, { id: 2, status: 'delivered' }]))).not.toContain(pendingCode);
+      // Misma compuerta que la entrega/despacho: `findOne` entrega la última fila
+      // primero; una última fila CANCELADA con una anterior viva también bloquea.
+      expect(reasons(build([{ id: 2, status: 'cancelled' }, { id: 1, status: 'pending' }]))).toContain(pendingCode);
     });
 
     it('reutiliza solo la dirección huérfana ya asociada al borrador alias', async () => {
