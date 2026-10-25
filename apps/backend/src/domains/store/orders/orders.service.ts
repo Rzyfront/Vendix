@@ -1875,6 +1875,51 @@ export class OrdersService {
    *    semantics (`status !== 'draft'`), just no separate branch to decide
    *    whether to bother resolving it.
    */
+  /**
+   * QUI-650 — `PUT /items` y `PUT /editor` reemplazan todas las líneas
+   * (deleteMany + create). Si alguna ya tiene comanda de cocina, movimientos
+   * de inventario, reembolsos o líneas financieras, el borrado chocaría con
+   * FKs Restrict (P2003) o perdería historial: se rechaza con 409 tipado.
+   */
+  private async assertOrderLinesNotLockedInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+  ): Promise<void> {
+    const locked = await tx.order_items.findFirst({
+      where: {
+        order_id: orderId,
+        OR: [
+          { kitchen_ticket_items: { some: {} } },
+          { inventory_transactions: { some: {} } },
+          { refund_items: { some: {} } },
+          { financial_lines: { some: {} } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (locked) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_LINES_LOCKED_001);
+    }
+  }
+
+  /** `order_items.deleteMany` con red de seguridad: P2003 -> ORD_EDIT_LINES_LOCKED_001. */
+  private async deleteOrderItemsMappingLockInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+  ): Promise<void> {
+    try {
+      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
+        throw new VendixHttpException(ErrorCodes.ORD_EDIT_LINES_LOCKED_001);
+      }
+      throw error;
+    }
+  }
+
   private buildOrderAvailableActions(
     order: any,
     hasIssuedSalesInvoice: boolean,
@@ -1897,11 +1942,19 @@ export class OrdersService {
     const isKitchenOrder = (order.order_items ?? []).some(
       (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
     );
-    const hasPendingKitchen = (order.order_items ?? []).some((item: any) =>
-      (item.kitchen_ticket_items ?? []).some(
-        (k: any) => k.status !== 'delivered' && k.status !== 'cancelled',
-      ),
-    );
+    // Misma semántica que `findLinesAwaitingKitchenDelivery`: por línea no
+    // cancelada solo cuenta la ÚLTIMA fila KDS (las superadas por un reenvío
+    // no deben mantener la orden "pendiente en cocina").
+    const hasPendingKitchen = (order.order_items ?? []).some((item: any) => {
+      if (item.cancelled_at) return false;
+      const rows: any[] = [...(item.kitchen_ticket_items ?? [])].sort(
+        (x, y) => Number(y.id ?? 0) - Number(x.id ?? 0),
+      );
+      const latest = rows[0];
+      return (
+        !!latest && latest.status !== 'delivered' && latest.status !== 'cancelled'
+      );
+    });
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
     const snapshot: OrderActionSnapshot & {
@@ -2689,7 +2742,7 @@ export class OrdersService {
     });
   }
 
-  private async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
+  async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
     // ADR-07: una sesión nueva abierta manda sobre cualquier historial cerrado.
     const openSession = await this.prisma.table_sessions.findFirst({
       where: { order_id: orderId, store_id: storeId, closed_at: null },
@@ -2922,10 +2975,9 @@ export class OrdersService {
       // Delete existing items. P0-4: primero el desglose fiscal (FK
       // `order_item_taxes_order_item_id_fkey` requerida, sin `onDelete`),
       // dentro de esta misma tx; se recrea anidado en cada línea de abajo.
+      await this.assertOrderLinesNotLockedInTx(tx, id);
       await this.deletePersistedTaxBreakdown(tx, id);
-      await tx.order_items.deleteMany({
-        where: { order_id: id },
-      });
+      await this.deleteOrderItemsMappingLockInTx(tx, id);
 
       // Pre-resolve variant image S3 keys for items that have a variant
       const variantIds = dto.items
@@ -4145,8 +4197,9 @@ export class OrdersService {
       // `order_items`; se borra primero, en esta misma tx, y se recrea
       // anidado en cada línea de abajo (antes: 409
       // `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`).
+      await this.assertOrderLinesNotLockedInTx(tx, orderId);
       await this.deletePersistedTaxBreakdown(tx, orderId);
-      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+      await this.deleteOrderItemsMappingLockInTx(tx, orderId);
 
       const variantIds = dto.items
         .map((it) => (it.product_id ? it.product_variant_id : null))

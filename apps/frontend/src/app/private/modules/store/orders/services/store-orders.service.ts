@@ -32,6 +32,9 @@ import {
   FastTrackOrderDto,
   AssignShippingMethodDto,
   OrderTimelineResponse,
+  ItemChangesDto,
+  ItemChangesPreview,
+  ItemChangesApplyResult,
 } from '../interfaces/order.interface';
 
 /**
@@ -571,6 +574,21 @@ export class StoreOrdersService {
     return wrapped;
   }
 
+  /**
+   * El backend puede responder 200 con `{success:false}` (envelope legado).
+   * Nunca debe verse como éxito: se convierte en el mismo error tipado que
+   * produce `buildApiError`, para que `extractApiErrorMessage` saque el mensaje.
+   */
+  private unwrapOrThrow<T>(response: any): T {
+    if (response && typeof response === 'object' && response.success === false) {
+      throw this.buildApiError({
+        error: response,
+        status: response.statusCode ?? 400,
+      });
+    }
+    return (response?.data ?? response) as T;
+  }
+
   // ── Order Flow Methods ──────────────────────────────────────
 
   getValidTransitions(orderId: string): Observable<OrderState[]> {
@@ -709,12 +727,56 @@ export class StoreOrdersService {
   updateOrderItems(orderId: string, dto: any): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/items`;
     return this.http.put<any>(url, dto).pipe(
-      map((r) => r.data || r),
+      map((r) => this.unwrapOrThrow<Order>(r)),
       catchError((error) => {
         console.error('Error updating order items:', error);
-        return throwError(() => this.buildApiError(error));
+        return throwError(() => this.asApiError(error));
       }),
     );
+  }
+
+  /**
+   * QUI-650 — vista previa por diferencias de un cambio de productos.
+   * `POST /store/orders/:id/flow/items/changes/preview`.
+   */
+  previewItemChanges(orderId: number | string, dto: ItemChangesDto): Observable<ItemChangesPreview> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/items/changes/preview`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => this.unwrapOrThrow<ItemChangesPreview>(r)),
+      catchError((error) => {
+        console.error('Error previewing item changes:', error);
+        return throwError(() => this.asApiError(error));
+      }),
+    );
+  }
+
+  /**
+   * QUI-650 — aplica el change-set (solo diferencias) en una transacción.
+   * `POST /store/orders/:id/flow/items/changes`.
+   */
+  applyItemChanges(orderId: number | string, dto: ItemChangesDto): Observable<ItemChangesApplyResult> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/items/changes`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => {
+        const data = this.unwrapOrThrow<ItemChangesApplyResult>(r);
+        if (!data || typeof data !== 'object' || !data.order) {
+          throw this.buildApiError({
+            error: { message: 'Respuesta inválida al guardar los cambios' },
+            status: 502,
+          });
+        }
+        return data;
+      }),
+      catchError((error) => {
+        console.error('Error applying item changes:', error);
+        return throwError(() => this.asApiError(error));
+      }),
+    );
+  }
+
+  /** Evita doble envoltura si el error ya fue normalizado por `unwrapOrThrow`. */
+  private asApiError(error: unknown): Error {
+    return error instanceof Error && 'errorCode' in error ? error : this.buildApiError(error);
   }
 
   /**
@@ -731,10 +793,10 @@ export class StoreOrdersService {
   updateOrderFromEditor(orderId: string, dto: any): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/editor`;
     return this.http.put<any>(url, dto).pipe(
-      map((r) => (r?.data ?? r) as Order),
+      map((r) => this.unwrapOrThrow<Order>(r)),
       catchError((error) => {
         console.error('Error updating order via editor endpoint:', error);
-        return throwError(() => this.buildApiError(error));
+        return throwError(() => this.asApiError(error));
       }),
     );
   }

@@ -10,10 +10,17 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { Subject, of } from 'rxjs';
-import { catchError, debounceTime, distinctUntilChanged, switchMap, tap } from 'rxjs/operators';
+import { Subject, merge, of } from 'rxjs';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  map,
+  switchMap,
+  tap,
+} from 'rxjs/operators';
 
 import {
   ButtonComponent,
@@ -21,9 +28,19 @@ import {
   ModalComponent,
   ToastService,
 } from '../../../../../../shared/components';
+import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
-import { Order, OrderItem } from '../../interfaces/order.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import {
+  ItemCancellationType,
+  ItemChangesDto,
+  ItemChangesPreview,
+  ItemChangesPreviewLine,
+  ItemChangesTotals,
+  Order,
+  OrderItem,
+} from '../../interfaces/order.interface';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { ProductsService } from '../../../products/services/products.service';
 import {
@@ -43,12 +60,49 @@ export interface OrderItemDraftLine {
   variant_label: string;
   /** Precio unitario mostrado (existente: final con impuesto; nueva: base sin impuesto). */
   display_price: number;
-  /** Precio base de una línea nueva (el que viaja como `unit_price`). */
+  /** Precio base de una línea nueva. */
   base_price: number;
   quantity: number;
+  /** Cantidad persistida (solo líneas existentes). */
+  original_quantity: number;
   /** Producto por peso: la cantidad no se edita, solo se quita. */
   weighted: boolean;
+  /** Línea existente marcada para quitar (se cancela al guardar). */
+  removed: boolean;
+  /** Ya se entregó al cliente: no se puede quitar ni bajar. */
+  delivered: boolean;
+  /** Ya está en cocina: no se reduce; quitar cancela su comanda. */
+  in_kitchen: boolean;
+  kitchen_ticket_number: number | null;
+  kitchen_status_label: string;
+  /** Línea nueva creada con "+" sobre una línea que ya estaba en cocina/entregada. */
+  from_locked: boolean;
 }
+
+export interface ChipView {
+  icon: IconName;
+  text: string;
+}
+
+export interface TotalsRow {
+  label: string;
+  before: number;
+  after: number;
+  changed: boolean;
+  strong: boolean;
+}
+
+const KDS_STATUS_ES: Record<string, string> = {
+  pending: 'pendiente',
+  in_preparation: 'en preparación',
+  ready: 'lista',
+  delivered: 'entregada',
+  cancelled: 'cancelada',
+};
+
+const PREVIEW_DEBOUNCE_MS = 400;
+export const VERSION_CONFLICT_CODE = 'ORD_EDIT_INVALID_STATE_001';
+export const VERSION_CONFLICT_MESSAGE = 'La orden cambió mientras editabas; revisa los cambios';
 
 const MAX_RESULTS = 20;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -84,9 +138,10 @@ function variantLabelOf(raw: unknown): string {
 }
 
 /**
- * QUI-650 — edición de ítems de la orden en el mismo detalle (sin ir al POS).
- * Reemplazo total vía `PUT /store/orders/:id/items`; el servidor recalcula
- * impuestos por línea y solo acepta órdenes draft/created.
+ * QUI-650 — edición de productos de la orden en el mismo detalle (sin ir al POS).
+ * Trabaja por DIFERENCIAS: solo viajan las líneas tocadas
+ * (`POST .../flow/items/changes[/preview]`); el preview explica las
+ * consecuencias (cocina, stock, totales) antes de guardar.
  */
 @Component({
   selector: 'app-order-items-edit-modal',
@@ -110,23 +165,155 @@ export class OrderItemsEditModalComponent {
   readonly searching = signal(false);
   readonly searchResults = signal<Product[]>([]);
   readonly expandedProductId = signal<number | null>(null);
+  readonly reason = signal('');
+  readonly cancellationTypes = signal<Record<number, ItemCancellationType>>({});
+  readonly conflictMessage = signal<string | null>(null);
+  private readonly previewResult = signal<{
+    key: string;
+    preview: ItemChangesPreview | null;
+    error: string | null;
+  } | null>(null);
 
   private readonly search$ = new Subject<string>();
+  private readonly refreshPreview$ = new Subject<void>();
   private newKeySeq = 0;
-  private originalSignature = '';
 
-  readonly estimatedTotal = computed(() =>
-    round2(this.draft().reduce((sum, l) => sum + l.display_price * l.quantity, 0)),
+  /** Líneas anuladas: solo lectura, no bloquean el guardado. */
+  readonly cancelledLines = computed(() =>
+    (this.order().order_items ?? []).filter((i) => !!i.cancelled_at),
   );
-  readonly isEmpty = computed(() => this.draft().length === 0);
-  readonly hasChanges = computed(() => this.signatureOf(this.draft()) !== this.originalSignature);
-  /** El PUT reemplaza TODAS las líneas, incluidas las anuladas: guardar borraría su registro. */
-  readonly hasCancelledLines = computed(() =>
-    (this.order().order_items ?? []).some((i) => !!i.cancelled_at),
+  readonly activeDraft = computed(() => this.draft().filter((l) => !l.removed));
+  readonly isEmpty = computed(() => this.activeDraft().length === 0);
+
+  /** Llave `add:<i>` de cada línea nueva, por su key local. */
+  private readonly addKeys = computed(() => {
+    const map = new Map<string, string>();
+    this.draft()
+      .filter((l) => !l.existing)
+      .forEach((l, i) => map.set(l.key, `add:${i}`));
+    return map;
+  });
+
+  /** Change-set: solo diferencias. Las líneas no tocadas no viajan. */
+  readonly changeSet = computed<ItemChangesDto>(() => {
+    const lines = this.draft();
+    const types = this.cancellationTypes();
+    const update = lines
+      .filter(
+        (l) =>
+          l.existing &&
+          !l.removed &&
+          !l.weighted &&
+          !l.in_kitchen &&
+          !l.delivered &&
+          l.quantity !== l.original_quantity,
+      )
+      .map((l) => ({ order_item_id: l.existing!.id, quantity: l.quantity }));
+    const remove = lines
+      .filter((l) => l.existing && l.removed)
+      .map((l) => {
+        const type = types[l.existing!.id];
+        return type
+          ? { order_item_id: l.existing!.id, cancellation_type: type }
+          : { order_item_id: l.existing!.id };
+      });
+    const add = lines
+      .filter((l) => !l.existing)
+      .map((l) => ({
+        product_id: l.product_id as number,
+        ...(l.product_variant_id != null ? { product_variant_id: l.product_variant_id } : {}),
+        quantity: l.quantity,
+      }));
+    const dto: ItemChangesDto = {};
+    if (add.length) dto.add = add;
+    if (update.length) dto.update = update;
+    if (remove.length) dto.remove = remove;
+    return dto;
+  });
+  private readonly changeKey = computed(() => JSON.stringify(this.changeSet()));
+  readonly hasChanges = computed(() => {
+    const c = this.changeSet();
+    return !!(c.add?.length || c.update?.length || c.remove?.length);
+  });
+  readonly hasRemovals = computed(() => !!this.changeSet().remove?.length);
+
+  // ── Preview ─────────────────────────────────────────────────────────────
+  readonly preview = computed(() => this.previewResult()?.preview ?? null);
+  private readonly previewIsCurrent = computed(
+    () => this.previewResult()?.key === this.changeKey(),
   );
+  /** Hay cambios cuyo preview aún no llega (debounce o request en vuelo). */
+  readonly previewPending = computed(
+    () => this.hasChanges() && !this.previewIsCurrent(),
+  );
+  readonly previewError = computed(() =>
+    this.previewIsCurrent() ? (this.previewResult()?.error ?? null) : null,
+  );
+  private readonly previewByKey = computed(() => {
+    const map = new Map<string, ItemChangesPreviewLine>();
+    for (const l of this.preview()?.lines ?? []) map.set(l.key, l);
+    return map;
+  });
+  readonly totalsRows = computed<TotalsRow[]>(() => {
+    const t = this.preview()?.totals;
+    if (!t) return [];
+    const defs: Array<[string, keyof ItemChangesTotals, boolean]> = [
+      ['Subtotal', 'subtotal', false],
+      ['Descuento', 'discount', false],
+      ['Impuesto', 'tax', false],
+      ['Propina', 'tip', false],
+      ['Envío', 'shipping', false],
+      ['Total', 'grand_total', true],
+    ];
+    return defs
+      .map(([label, k, strong]) => {
+        const before = Number(t.before?.[k]) || 0;
+        const after = Number(t.after?.[k]) || 0;
+        return { label, before, after, changed: round2(before) !== round2(after), strong };
+      })
+      .filter((r) => r.strong || r.label === 'Subtotal' || r.before !== 0 || r.after !== 0);
+  });
+
+  // ── Validaciones de guardado ────────────────────────────────────────────
+  readonly reasonValid = computed(() => !this.hasRemovals() || this.reason().trim().length >= 3);
+  /** Líneas quitadas que exigen elegir qué hacer con los insumos y no lo tienen. */
+  readonly missingCancellationType = computed(() => {
+    const types = this.cancellationTypes();
+    return this.draft().some((l) => {
+      if (!l.existing || !l.removed) return false;
+      const pl = this.previewByKey().get(`existing:${l.existing.id}`);
+      return !!pl?.requires_cancellation_type && !types[l.existing.id];
+    });
+  });
   readonly canSave = computed(
-    () => !this.isEmpty() && this.hasChanges() && !this.saving() && !this.hasCancelledLines(),
+    () =>
+      this.hasChanges() &&
+      !this.isEmpty() &&
+      !this.saving() &&
+      !this.previewPending() &&
+      !this.previewError() &&
+      this.preview()?.can_apply === true &&
+      this.reasonValid() &&
+      !this.missingCancellationType(),
   );
+
+  /** Resumen de una línea bajo el botón Guardar. */
+  readonly summaryParts = computed(() => {
+    const p = this.preview();
+    if (!p || this.previewPending()) return null;
+    const cancelled = p.lines.filter((l) => l.kitchen_effect === 'cancel_ticket_item').length;
+    const fired = p.lines
+      .filter((l) => l.kitchen_effect === 'fire')
+      .reduce((sum, l) => sum + (l.quantity_after - (l.quantity_before ?? 0)), 0);
+    const texts: string[] = [];
+    if (cancelled > 0) texts.push(`Se ${cancelled === 1 ? 'cancelará 1 comanda' : `cancelarán ${cancelled} comandas`}`);
+    if (fired > 0) texts.push(`${fired} ${fired === 1 ? 'plato irá' : 'platos irán'} a cocina`);
+    return {
+      texts,
+      before: Number(p.totals?.before?.grand_total) || 0,
+      after: Number(p.totals?.after?.grand_total) || 0,
+    };
+  });
 
   constructor() {
     effect(() => {
@@ -161,6 +348,31 @@ export class OrderItemsEditModalComponent {
         this.searching.set(false);
         if (response) this.searchResults.set(response.data ?? []);
       });
+
+    // Preview dinámico: debounce ante cambios, switchMap cancela el request anterior.
+    merge(
+      toObservable(this.changeKey).pipe(debounceTime(PREVIEW_DEBOUNCE_MS)),
+      this.refreshPreview$.pipe(map(() => untracked(() => this.changeKey()))),
+    )
+      .pipe(
+        switchMap((key) => {
+          if (!untracked(() => this.hasChanges())) {
+            return of({ key, preview: null, error: null });
+          }
+          const dto = untracked(() => this.changeSet());
+          return this.ordersService.previewItemChanges(untracked(() => this.order().id), dto).pipe(
+            map((preview) => ({ key, preview, error: null as string | null })),
+            catchError((err) =>
+              of({ key, preview: null, error: extractApiErrorMessage(err) as string | null }),
+            ),
+          );
+        }),
+        takeUntilDestroyed(),
+      )
+      .subscribe((result) => {
+        // Descarta resultados de una llave que ya no es la actual.
+        if (result.key === untracked(() => this.changeKey())) this.previewResult.set(result);
+      });
   }
 
   // ── Borrador ────────────────────────────────────────────────────────────
@@ -168,7 +380,10 @@ export class OrderItemsEditModalComponent {
   private resetDraft(): void {
     const items = (this.order().order_items ?? []).filter((i) => !i.cancelled_at);
     this.draft.set(items.map((item) => this.fromExisting(item)));
-    this.originalSignature = this.signatureOf(this.draft());
+    this.reason.set('');
+    this.cancellationTypes.set({});
+    this.conflictMessage.set(null);
+    this.previewResult.set(null);
     this.searchTerm.set('');
     this.searchResults.set([]);
     this.expandedProductId.set(null);
@@ -177,6 +392,11 @@ export class OrderItemsEditModalComponent {
 
   private fromExisting(item: OrderItem): OrderItemDraftLine {
     const raw = item as OrderItem & { weight?: number | string | null };
+    // Las filas KDS vienen ordenadas desc: la vigente es la primera.
+    const last = item.kitchen_ticket_items?.[0];
+    const liveKds = !!last && last.status !== 'delivered' && last.status !== 'cancelled';
+    const inKitchen = item.inventory_consumed_at_fire === true || liveKds;
+    const quantity = Number(item.quantity) || 1;
     return {
       key: `e-${item.id}`,
       existing: item,
@@ -187,29 +407,93 @@ export class OrderItemsEditModalComponent {
       variant_label: variantLabelOf(item.variant_attributes),
       display_price: Number(item.final_unit_price ?? item.unit_price) || 0,
       base_price: Number(item.unit_price) || 0,
-      quantity: Number(item.quantity) || 1,
+      quantity,
+      original_quantity: quantity,
       weighted: Number(raw.weight) > 0,
+      removed: false,
+      delivered: !!item.delivered_at,
+      in_kitchen: inKitchen,
+      kitchen_ticket_number: last?.kitchen_ticket?.daily_number ?? null,
+      kitchen_status_label: last ? (KDS_STATUS_ES[last.status] ?? last.status) : 'enviado',
+      from_locked: false,
     };
   }
 
-  private signatureOf(lines: OrderItemDraftLine[]): string {
-    return lines.map((l) => `${l.key}:${l.quantity}`).join('|');
+  /** La línea no admite cambiar su cantidad en sitio (cocina o entregada). */
+  isLocked(line: OrderItemDraftLine): boolean {
+    return !!line.existing && (line.in_kitchen || line.delivered);
   }
 
   increment(line: OrderItemDraftLine): void {
+    if (line.removed) return;
+    if (this.isLocked(line)) {
+      // No se toca la línea existente: se crea/incrementa una nueva del mismo producto.
+      this.addToNewLine(line);
+      return;
+    }
     this.patchLine(line.key, line.quantity + 1);
   }
 
   decrement(line: OrderItemDraftLine): void {
+    if (line.removed || this.isLocked(line)) return;
     if (line.quantity > 1) this.patchLine(line.key, line.quantity - 1);
   }
 
   remove(line: OrderItemDraftLine): void {
-    this.draft.update((lines) => lines.filter((l) => l.key !== line.key));
+    if (!line.existing) {
+      this.draft.update((lines) => lines.filter((l) => l.key !== line.key));
+      return;
+    }
+    if (line.delivered) return;
+    this.draft.update((lines) => lines.map((l) => (l.key === line.key ? { ...l, removed: true } : l)));
+  }
+
+  restore(line: OrderItemDraftLine): void {
+    this.draft.update((lines) => lines.map((l) => (l.key === line.key ? { ...l, removed: false } : l)));
+    if (line.existing) {
+      this.cancellationTypes.update((t) => {
+        const { [line.existing!.id]: _drop, ...rest } = t;
+        return rest;
+      });
+    }
+  }
+
+  private addToNewLine(source: OrderItemDraftLine): void {
+    const same = this.draft().find(
+      (l) =>
+        !l.existing &&
+        l.product_id === source.product_id &&
+        l.product_variant_id === source.product_variant_id,
+    );
+    if (same) {
+      this.patchLine(same.key, same.quantity + 1);
+      return;
+    }
+    const line: OrderItemDraftLine = {
+      ...source,
+      key: `n-${++this.newKeySeq}`,
+      existing: null,
+      quantity: 1,
+      original_quantity: 0,
+      weighted: false,
+      removed: false,
+      delivered: false,
+      in_kitchen: false,
+      kitchen_ticket_number: null,
+      kitchen_status_label: '',
+      from_locked: true,
+    };
+    this.draft.update((lines) => [...lines, line]);
   }
 
   private patchLine(key: string, quantity: number): void {
     this.draft.update((lines) => lines.map((l) => (l.key === key ? { ...l, quantity } : l)));
+  }
+
+  setCancellationType(line: OrderItemDraftLine, type: ItemCancellationType): void {
+    if (!line.existing) return;
+    const id = line.existing.id;
+    this.cancellationTypes.update((t) => ({ ...t, [id]: type }));
   }
 
   // ── Búsqueda / agregar ──────────────────────────────────────────────────
@@ -267,73 +551,56 @@ export class OrderItemsEditModalComponent {
       product_name: product.name,
       variant_sku: variant?.sku ?? null,
       variant_label: variant ? this.variantName(variant) : '',
-      // Estimado con impuesto (coherente con las líneas existentes). La variante
-      // no publica precio final: cae al base.
       display_price: !variant && Number(product.final_price) > 0 ? Number(product.final_price) : price,
       base_price: price,
       quantity: 1,
+      original_quantity: 0,
       weighted: false,
+      removed: false,
+      delivered: false,
+      in_kitchen: false,
+      kitchen_ticket_number: null,
+      kitchen_status_label: '',
+      from_locked: false,
     };
     this.draft.update((lines) => [...lines, line]);
   }
 
-  // ── Payload ─────────────────────────────────────────────────────────────
+  // ── Preview por línea (para el template) ────────────────────────────────
 
-  buildPayload(): { items: Record<string, unknown>[]; discount_amount: number } {
-    const items = this.draft().map((line) =>
-      line.existing ? this.existingPayload(line) : this.newPayload(line),
-    );
-    return { items, discount_amount: Number(this.order().discount_amount ?? 0) };
+  previewFor(line: OrderItemDraftLine): ItemChangesPreviewLine | null {
+    const key = line.existing ? `existing:${line.existing.id}` : this.addKeys().get(line.key);
+    return (key && this.previewByKey().get(key)) || null;
   }
 
-  private existingPayload(line: OrderItemDraftLine): Record<string, unknown> {
-    const raw = line.existing as OrderItem & {
-      description?: string | null;
-      weight?: number | string | null;
-      weight_unit?: string | null;
-    };
-    const unitPrice = round2(Number(raw.unit_price));
-    const weight = Number(raw.weight);
-    const units = weight > 0 ? weight : line.quantity;
-    const attrs = raw.variant_attributes as unknown;
-    const payload: Record<string, unknown> = {
-      item_type: raw.product_id ? 'product' : 'custom',
-      product_id: raw.product_id,
-      product_variant_id: raw.product_variant_id,
-      product_name: raw.product_name,
-      variant_sku: raw.variant_sku,
-      variant_attributes:
-        attrs != null && typeof attrs === 'object' ? JSON.stringify(attrs) : attrs,
-      description: raw.description,
-      notes: raw.notes,
-      quantity: line.quantity,
-      unit_price: unitPrice,
-      final_unit_price:
-        raw.final_unit_price != null ? round2(Number(raw.final_unit_price)) : undefined,
-      weight: weight > 0 ? weight : undefined,
-      weight_unit: weight > 0 ? raw.weight_unit : undefined,
-      applied_price_tier_id: raw.applied_price_tier_id,
-      total_price: round2(unitPrice * units),
-    };
-    return this.compact(payload);
+  kitchenChip(pl: ItemChangesPreviewLine): ChipView | null {
+    if (pl.kitchen_effect === 'fire') return { icon: 'chef-hat', text: 'Irá a cocina al guardar' };
+    if (pl.kitchen_effect === 'cancel_ticket_item') {
+      return {
+        icon: 'ban',
+        text: pl.kitchen_ticket_number
+          ? `Se cancelará la comanda #${pl.kitchen_ticket_number}`
+          : 'Se cancelará su comanda',
+      };
+    }
+    return null;
   }
 
-  private newPayload(line: OrderItemDraftLine): Record<string, unknown> {
-    const unitPrice = round2(line.base_price);
-    return this.compact({
-      item_type: 'product',
-      product_id: line.product_id,
-      product_variant_id: line.product_variant_id,
-      product_name: line.product_name,
-      variant_sku: line.variant_sku,
-      quantity: line.quantity,
-      unit_price: unitPrice,
-      total_price: round2(unitPrice * line.quantity),
-    });
-  }
-
-  private compact(obj: Record<string, unknown>): Record<string, unknown> {
-    return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== undefined));
+  stockChip(pl: ItemChangesPreviewLine): ChipView | null {
+    switch (pl.stock_effect) {
+      case 'reserve':
+        return { icon: 'package', text: 'Se reservará stock' };
+      case 'release':
+        return { icon: 'package', text: 'Se liberará la reserva de stock' };
+      case 'ingredients_reused':
+        return { icon: 'package', text: 'Los insumos se reutilizan' };
+      case 'ingredients_wasted':
+        return { icon: 'package', text: 'Los insumos se desechan' };
+      case 'ingredients_consumed':
+        return { icon: 'package', text: 'Se descontarán los insumos' };
+      default:
+        return null;
+    }
   }
 
   // ── Acciones ────────────────────────────────────────────────────────────
@@ -341,16 +608,35 @@ export class OrderItemsEditModalComponent {
   save(): void {
     if (!this.canSave()) return;
     const order = this.order();
+    const preview = this.preview()!;
+    const dto: ItemChangesDto = {
+      ...this.changeSet(),
+      expected_version: preview.version,
+      ...(this.hasRemovals() ? { reason: this.reason().trim() } : {}),
+    };
     this.saving.set(true);
-    this.ordersService.updateOrderItems(String(order.id), this.buildPayload()).subscribe({
-      next: (updated) => {
+    this.conflictMessage.set(null);
+    this.ordersService.applyItemChanges(order.id, dto).subscribe({
+      next: (result) => {
         this.saving.set(false);
+        if (!result?.order) {
+          this.toastService.error('No se pudo confirmar el guardado de los cambios');
+          return;
+        }
         this.toastService.success('Productos de la orden actualizados');
-        this.saved.emit(updated);
+        this.saved.emit(result.order);
         this.isOpen.set(false);
       },
       error: (err) => {
         this.saving.set(false);
+        const code = (err as { errorCode?: string | null })?.errorCode ?? parseApiError(err).errorCode;
+        if (code === VERSION_CONFLICT_CODE) {
+          this.conflictMessage.set(VERSION_CONFLICT_MESSAGE);
+          this.toastService.error(VERSION_CONFLICT_MESSAGE);
+          this.previewResult.set(null);
+          this.refreshPreview$.next();
+          return;
+        }
         this.toastService.error(extractApiErrorMessage(err));
       },
     });

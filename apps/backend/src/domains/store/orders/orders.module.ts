@@ -49,6 +49,9 @@ import { OrderSseService } from './services/order-sse.service';
 // no importa este módulo hoy, pero ambos dominios se referencian vía eventos
 // y seeds, y el ciclo rompería el arranque en silencio.
 import { InvoicingModule } from '../invoicing/invoicing.module';
+import { OrderItemChangesController } from './item-changes/order-item-changes.controller';
+import { OrderItemChangesService } from './item-changes/order-item-changes.service';
+import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module'; // QUI-650: fire en la misma tx (sin ciclo: KitchenFireModule no importa OrdersModule)
 import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
 
 @Module({
@@ -76,11 +79,13 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     // Release-853 paso 10: propagación del titular al borrador de factura.
     forwardRef(() => InvoicingModule),
     OrderHistoryModule,
+    KitchenFireModule,
   ],
-  controllers: [OrdersController, OrdersBulkController],
+  controllers: [OrdersController, OrdersBulkController, OrderItemChangesController],
   providers: [
     OrdersService,
     OrdersBulkService,
+    OrderItemChangesService,
     StockLevelManager,
     StockValidatorService,
     SellableStockAllocator,
