@@ -438,6 +438,21 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
+  describe('as_of', () => {
+    it('as_of fija la ventana de vigencia (re-cotizar a la fecha de la orden)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([buildPromotion({ id: 90 })]);
+      const asOf = new Date('2026-03-01T00:00:00Z');
+      await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        as_of: asOf,
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.start_date).toEqual({ lte: asOf });
+      expect(where.OR).toEqual([{ end_date: null }, { end_date: { gte: asOf } }]);
+    });
+  });
+
   describe('winner-takes-all', () => {
     // Promotions do NOT stack. When several auto-apply promos are eligible,
     // exactly ONE is applied: the lowest priority NUMBER wins (1 = highest

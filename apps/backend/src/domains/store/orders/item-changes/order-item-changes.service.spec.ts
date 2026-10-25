@@ -44,6 +44,7 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
     state: 'created',
     order_number: 'ORD-1',
     updated_at: new Date(VERSION),
+    created_at: new Date('2026-10-20T10:00:00.000Z'),
     subtotal_amount: lines.reduce((s, l) => s + Number(l.total_price), 0),
     discount_amount: 0,
     tax_amount: lines.length * 2,
@@ -82,6 +83,8 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
     product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
     stock_reservations: { count: jest.fn().mockResolvedValue(0) },
     inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
+    product_categories: { findMany: jest.fn().mockResolvedValue([]) },
+    coupon_uses: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
     order_promotions: {
       deleteMany: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({}),
@@ -403,7 +406,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(preview.warnings.join(' ')).toContain('Con este cambio el cupón VENCE deja de aplicar (');
     expect(preview.warnings.join(' ')).toContain('Ajusta los productos para mantenerlo.');
     // se revalida excluyendo los usos de ESTA orden
-    expect(ctx.coupons.validate).toHaveBeenCalledWith(expect.objectContaining({ code: 'VENCE' }), { excludeOrderId: ORDER_ID });
+    expect(ctx.coupons.validate).toHaveBeenCalledWith(expect.objectContaining({ code: 'VENCE' }), expect.objectContaining({ excludeOrderId: ORDER_ID }));
     await expect(
       applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' }),
     ).rejects.toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001.code });
@@ -713,5 +716,116 @@ describe('OrderItemChangesService (QUI-650)', () => {
     const data = ctx.db.order_items.create.mock.calls[0][0].data;
     expect(Number(data.tax_amount_item)).toBe(0); // sin impuestos de catálogo
     expect(data).toHaveProperty('tax_amount_item');
+  });
+
+  const rowless = (id: number, over: Record<string, any> = {}) => mkLine(id, {
+    product_id: null, products: null, quantity: 1, unit_price: 100, total_price: 100,
+    discount_amount: 5, tax_amount_item: 9.5, tax_rate: 0.1, order_item_taxes: [], ...over,
+  });
+
+  it('R3-1) línea custom con descuento sin filas: reprice a 3.03 deja el impuesto en 9.70 (sin doble descuento)', async () => {
+    const withRows = mkLine(1, {
+      quantity: 1, unit_price: 100, total_price: 100, discount_amount: 5,
+      order_item_taxes: [{ id: 100, tax_rate_id: 1, tax_name: 'IVA', tax_rate: 0.1, tax_amount: 9.5, tax_type: 'iva', is_compound: false, is_inclusive: false }],
+    });
+    for (const withRate of [true, false]) {
+      const ctx = build([withRows, rowless(2, withRate ? {} : { tax_rate: null })], { discount_amount: 10, coupon_code: 'FIJO', coupon_id: 1 });
+      ctx.coupons.validate.mockResolvedValue({ coupon_id: 1, discount_amount: 3.33 });
+      const p = await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
+      expect(p.totals.after.tax).toBeCloseTo(9.7, 2);
+      await applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' });
+      const upd = ctx.db.order_items.update.mock.calls.find((c: any) => c[0].where.id === 2)![0].data;
+      expect(Number(upd.discount_amount)).toBeCloseTo(3.03, 2);
+      expect(Number(upd.tax_amount_item)).toBeCloseTo(9.7, 2);
+    }
+  });
+
+  it('R3-1b) sin cupón, línea custom con descuento de qty 1 a 2: impuesto 19.50', async () => {
+    const ctx = build([rowless(1)], { discount_amount: 5 });
+    const p = await ctx.service.preview(ORDER_ID, { update: [{ order_item_id: 1, quantity: 2 }] });
+    expect(p.totals.after.tax).toBe(19.5);
+    await applyV(ctx, { update: [{ order_item_id: 1, quantity: 2 }] });
+    expect(Number(ctx.db.order_items.update.mock.calls[0][0].data.tax_amount_item)).toBe(9.75);
+  });
+
+  it('R3-2) las categorías se resuelven por producto y viajan a la promoción y al cupón', async () => {
+    const ctx = build([mkLine(1, { discount_amount: 5 }), mkLine(2, { discount_amount: 5 })], { discount_amount: 10, coupon_code: 'CAT', coupon_id: 1 });
+    ctx.db.product_categories.findMany.mockResolvedValue([{ product_id: 12, category_id: 5 }]);
+    await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
+    const quote = ctx.promotionEngine.quoteDiscounts.mock.calls[0][0];
+    expect(quote.items[0]).toMatchObject({ product_id: 12, category_ids: [5] });
+    const cp = ctx.coupons.validate.mock.calls[0][0];
+    expect(cp.items[0]).toMatchObject({ product_id: 12, category_ids: [5] });
+  });
+
+  it('R3-3) se re-cotiza a la fecha de la orden (as_of / asOf = created_at)', async () => {
+    const ctx = build([mkLine(1, { discount_amount: 5 }), mkLine(2, { discount_amount: 5 })], { discount_amount: 10, coupon_code: 'C', coupon_id: 1 });
+    await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
+    expect(ctx.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(expect.objectContaining({ as_of: ctx.order.created_at }));
+    expect(ctx.coupons.validate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ asOf: ctx.order.created_at, orderCouponId: 1, orderState: 'created' }));
+  });
+
+  it('R3-4) preview y apply coinciden al centavo en una línea custom con descuento (3.33, imp 0.63, desc 0.5, qty 1 -> 7)', async () => {
+    const line = rowless(1, { unit_price: 3.33, total_price: 3.33, discount_amount: 0.5, tax_amount_item: 0.63, tax_rate: null });
+    const ctx = build([line], { discount_amount: 0.5 });
+    const p = await ctx.service.preview(ORDER_ID, { update: [{ order_item_id: 1, quantity: 7 }] });
+    await applyV(ctx, { update: [{ order_item_id: 1, quantity: 7 }] });
+    const persisted = Number(ctx.db.order_items.update.mock.calls[0][0].data.tax_amount_item);
+    // lo que recalc lee: tax_amount_item redondeado × unidades
+    expect(p.totals.after.tax).toBe(Math.round(persisted * 7 * 100) / 100);
+  });
+
+  it('R3-5) orden mixta: se conserva la parte manual de la cabecera', async () => {
+    const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 2.5, order_item_taxes: [] });
+    const ctx = build([mk(1), mk(2)], { discount_amount: 15 });
+    const p = await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
+    expect(p.warnings).toContain('El descuento manual de la orden ($10) se mantiene');
+    expect(p.totals.after.discount).toBe(12.5); // 2.5 de la línea restante + 10 manual
+    await applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' });
+    expect(ctx.orderFlow.recalcOrderTotalsFromActiveLinesInTx).toHaveBeenCalledWith(ctx.db, expect.anything(), ORDER_ID, { discountOverride: 12.5 });
+  });
+
+  it('R3-6a) coupon_uses.discount_applied de ESTA orden sigue al nuevo descuento del cupón', async () => {
+    const ctx = build([mkLine(1, { discount_amount: 5 }), mkLine(2, { discount_amount: 5 })], { discount_amount: 10, coupon_code: 'C', coupon_id: 1 });
+    ctx.db.coupon_uses.findFirst.mockResolvedValue({ id: 33, discount_applied: 10 });
+    ctx.coupons.validate.mockResolvedValue({ coupon_id: 1, discount_amount: 6 });
+    await applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' });
+    expect(ctx.db.coupon_uses.update).toHaveBeenCalledTimes(1);
+    expect(ctx.db.coupon_uses.update.mock.calls[0][0].where).toEqual({ id: 33 });
+    expect(Number(ctx.db.coupon_uses.update.mock.calls[0][0].data.discount_applied)).toBe(6);
+    // y no se toca si no cambió
+    const same = build([mkLine(1, { discount_amount: 5 }), mkLine(2, { discount_amount: 5 })], { discount_amount: 10, coupon_code: 'C', coupon_id: 1 });
+    same.db.coupon_uses.findFirst.mockResolvedValue({ id: 33, discount_applied: 10 });
+    await applyV(same, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' });
+    expect(same.db.coupon_uses.update).not.toHaveBeenCalled();
+  });
+
+  it('R3-7) mensaje propio al editar una orden cobrada o terminal', async () => {
+    const paid = build([mkLine(1)]);
+    paid.orderFlow.getOrderItemCancelBlock.mockReturnValue({
+      code: ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+      message: 'No se puede cancelar un ítem de una orden ya cobrada',
+      reason: 'paid',
+    });
+    const p = await paid.service.preview(ORDER_ID, { update: [{ order_item_id: 1, quantity: 3 }] });
+    expect(p.lines[0].blocked_reason).toBe('No se pueden modificar los productos de una orden ya cobrada');
+    const done = build([mkLine(1)], { state: 'draft' });
+    done.orderFlow.getOrderItemCancelBlock.mockReturnValue({
+      code: ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+      message: "No se puede cancelar un ítem en estado 'finished'",
+      reason: 'terminal_state',
+    });
+    const p2 = await done.service.preview(ORDER_ID, { update: [{ order_item_id: 1, quantity: 3 }] });
+    expect(p2.lines[0].blocked_reason).toBe("No se pueden modificar los productos de una orden en estado 'draft'");
+  });
+
+  it('R3-7b) apply: la guarda transaccional de cancelación se reescribe usando details.reason', async () => {
+    const ctx = build([mkLine(1)]);
+    ctx.orderFlow.assertOrderItemsCancellableInTx.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE, 'No se puede cancelar un ítem de una orden ya cobrada', { reason: 'paid' }),
+    );
+    await expect(
+      ctx.service.apply(ORDER_ID, { update: [{ order_item_id: 1, quantity: 3 }], expected_version: `${VERSION}|x` }),
+    ).rejects.toMatchObject({ message: 'No se pueden modificar los productos de una orden ya cobrada' });
   });
 });

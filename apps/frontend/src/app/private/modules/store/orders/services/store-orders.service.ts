@@ -725,6 +725,7 @@ export class StoreOrdersService {
     );
   }
 
+  /** @deprecated Usar `applyItemChanges` (cambios por diferencias, QUI-650). */
   updateOrderItems(orderId: string, dto: any): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/items`;
     return this.http.put<any>(url, dto).pipe(

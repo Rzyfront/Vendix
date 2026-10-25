@@ -42,4 +42,18 @@ describe('CouponsService.validate — excludeOrderId (QUI-650)', () => {
     const other = build({ max_uses: 1, current_uses: 2 }, { total: 0, own: 1 });
     await expect(other.validate(dto, { excludeOrderId: 55 })).rejects.toMatchObject({ errorCode: 'CPN_LIMIT_001' });
   });
+
+  it('asOf: un cupón vencido hoy pero vigente a la fecha de la orden se conserva', async () => {
+    const svc = build({ valid_from: new Date('2026-01-01'), valid_until: new Date('2026-02-01') }, { total: 0, own: 0 });
+    await expect(svc.validate(dto)).rejects.toMatchObject({ errorCode: 'CPN_EXPIRED_001' });
+    await expect(svc.validate(dto, { asOf: new Date('2026-01-15') })).resolves.toMatchObject({ valid: true });
+  });
+
+  it('L1: sin fila coupon_uses pero con el cupón en una orden no-draft, el uso del editor se descuenta de current_uses', async () => {
+    const svc = build({ id: 1, max_uses: 1, current_uses: 1 }, { total: 0, own: 0 });
+    await expect(svc.validate(dto, { excludeOrderId: 55 })).rejects.toMatchObject({ errorCode: 'CPN_LIMIT_001' });
+    await expect(svc.validate(dto, { excludeOrderId: 55, orderCouponId: 1, orderState: 'created' })).resolves.toMatchObject({ valid: true });
+    // draft: el editor no sube el contador
+    await expect(svc.validate(dto, { excludeOrderId: 55, orderCouponId: 1, orderState: 'draft' })).rejects.toMatchObject({ errorCode: 'CPN_LIMIT_001' });
+  });
 });

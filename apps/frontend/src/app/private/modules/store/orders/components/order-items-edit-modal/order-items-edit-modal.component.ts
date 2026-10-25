@@ -552,6 +552,22 @@ export class OrderItemsEditModalComponent {
     return variant.name || variantLabelOf(variant.attributes) || variant.sku;
   }
 
+  /**
+   * Precio unitario CON impuesto (como `final_unit_price` de las líneas existentes).
+   * Producto simple: `final_price`. Variante: su precio final si el payload lo trae; si no,
+   * se aplica al precio base de la variante el factor de impuesto del producto
+   * (`final_price / precio base efectivo`). Solo visual: los totales vienen del backend.
+   */
+  private finalUnitPrice(product: Product, variant: ProductVariant | null, basePrice: number): number {
+    const productFinal = Number(product.final_price) || 0;
+    if (!variant) return productFinal > 0 ? productFinal : basePrice;
+    const variantFinal = Number((variant as ProductVariant & { final_price?: number }).final_price) || 0;
+    if (variantFinal > 0) return variantFinal;
+    const productBase = resolveBaseUnitPrice(product, null);
+    if (productFinal > 0 && productBase > 0) return round2(basePrice * (productFinal / productBase));
+    return basePrice;
+  }
+
   addProduct(product: Product, variant: ProductVariant | null): void {
     if (!this.isSellable(product)) return;
     if (this.hasVariants(product) && !variant) return;
@@ -573,7 +589,7 @@ export class OrderItemsEditModalComponent {
       product_name: product.name,
       variant_sku: variant?.sku ?? null,
       variant_label: variant ? this.variantName(variant) : '',
-      display_price: !variant && Number(product.final_price) > 0 ? Number(product.final_price) : price,
+      display_price: this.finalUnitPrice(product, variant, price),
       base_price: price,
       quantity: 1,
       original_quantity: 0,
@@ -723,6 +739,9 @@ export class OrderItemsEditModalComponent {
       },
     });
   }
+
+  /** `app-modal` consulta esto en la X y en Escape: mientras guarda no se puede cerrar. */
+  readonly canCloseModal = (): boolean => !this.saving();
 
   close(): void {
     if (this.saving()) return;

@@ -4,6 +4,7 @@
   title="Modificar productos"
   [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
   size="lg"
+  [canClose]="canCloseModal"
 >
   <div class="space-y-4">
     <!-- Líneas del borrador -->

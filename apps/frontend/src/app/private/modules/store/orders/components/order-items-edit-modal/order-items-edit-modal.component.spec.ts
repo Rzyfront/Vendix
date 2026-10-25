@@ -462,4 +462,29 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
       { product_id: 30, product_variant_id: 301, quantity: 2 },
     ]);
   });
+
+  it('cannot be closed (X / Escape) while saving', () => {
+    const { component } = create();
+    expect(component.canCloseModal()).toBeTrue();
+    component.saving.set(true);
+    expect(component.canCloseModal()).toBeFalse();
+    component.close();
+    expect(component.isOpen()).toBeTrue();
+  });
+
+  it('new lines show the tax-inclusive price, also for variants', () => {
+    const { component } = create();
+    const product = {
+      id: 40,
+      name: 'Tenis',
+      base_price: 100,
+      final_price: 119,
+      product_variants: [{ id: 401, sku: 'T-1', price_override: 200 }],
+    } as unknown as Product;
+    component.addProduct(product, product.product_variants![0]);
+    expect(component.draft().at(-1)!.display_price).toBe(238);
+    const simple = { id: 41, name: 'Gorra', base_price: 100, final_price: 119 } as unknown as Product;
+    component.addProduct(simple, null);
+    expect(component.draft().at(-1)!.display_price).toBe(119);
+  });
 });

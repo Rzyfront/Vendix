@@ -532,7 +532,7 @@ export class PromotionEngineService {
   }
 
   async quoteDiscounts(input: PromotionQuoteInput): Promise<PromotionQuoteResult> {
-    const now = input.now ?? new Date();
+    const now = input.as_of ?? input.now ?? new Date();
     const items = input.items ?? [];
     // "Lleva 3" cuenta unidades de VENTA, no de stock. Un producto medido en
     // milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la

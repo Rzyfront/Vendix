@@ -68,6 +68,11 @@ export interface PromotionQuoteInput {
    */
   exclude_order_id?: number | null;
   /**
+   * Aditivo. Fecha de referencia SOLO para la ventana de vigencia (re-cotizar
+   * "a la fecha de la orden"). Tiene precedencia sobre `now`.
+   */
+  as_of?: Date | null;
+  /**
    * Reference date used for date-range eligibility. Defaults to `new Date()`.
    * Useful for deterministic tests and replays.
    */

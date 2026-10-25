@@ -175,6 +175,8 @@ export interface OrderItemCancelBlock {
   message: string;
   /** `delivered` se evalúa antes del motivo; `cancellation_type` después. */
   phase?: 'delivered' | 'cancellation_type';
+  /** Razón de la guarda de orden (pagada / estado terminal); la usan quienes reescriben el mensaje. */
+  reason?: 'paid' | 'terminal_state';
 }
 
 const ORDER_ITEM_CANCEL_SELECT = {
@@ -5281,12 +5283,14 @@ export class OrderFlowService {
       return {
         code: ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         message: 'No se puede cancelar un ítem de una orden ya cobrada',
+        reason: 'paid',
       };
     }
     if (['finished', 'cancelled', 'refunded'].includes(order.state)) {
       return {
         code: ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         message: `No se puede cancelar un ítem en estado '${order.state}'`,
+        reason: 'terminal_state',
       };
     }
     return null;
@@ -5308,6 +5312,7 @@ export class OrderFlowService {
       throw new VendixHttpException(
         ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         `No se puede cancelar un ítem en estado '${lockedOrder.state}'`,
+        { reason: 'terminal_state', state: lockedOrder.state },
       );
     }
     const settledPayment = await tx.payments.findFirst({
@@ -5321,6 +5326,7 @@ export class OrderFlowService {
       throw new VendixHttpException(
         ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         'No se puede cancelar un ítem de una orden ya cobrada',
+        { reason: 'paid' },
       );
     }
   }
