@@ -1778,6 +1778,7 @@
               </div>
             }
 
+            @if (isServiceIndustry()) {
             <section class="rounded-xl border border-[var(--color-border)] p-4 space-y-3">
               <div class="flex flex-col sm:flex-row sm:items-end gap-2">
                 <div class="flex-1 min-w-0">
@@ -1799,6 +1800,7 @@
                 Campos que se llenan en cada atención en estación. Los campos de tipo Cliente se guardan en el perfil del cliente.
               </p>
             </section>
+            }
 
             @if (productForm.get("requires_booking")?.value) {
               <app-selector

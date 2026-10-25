@@ -220,15 +220,20 @@ export class PosServiceStationIntegrationService {
         blocked.push({ name, reason: 'se vende por unidad de medida o escala de precio; cóbralo desde el POS' });
         continue;
       }
+      // La estación no conoce las escalas de precio del POS: cobraría el precio de catálogo.
+      if (it.applied_price_tier_id != null && !it.isPriceOverridden) {
+        const tier = it.applied_price_tier_name ? ` "${it.applied_price_tier_name}"` : '';
+        blocked.push({ name, reason: `tiene la escala de precio${tier}; cóbralo desde el POS` });
+        continue;
+      }
       const unitPrice = Math.max(
         0,
         Math.round(Number(it.unitPrice ?? 0) * (1 + inclusiveRateOf(it.product)) * 100) / 100,
       );
-      const line: PosServiceSessionItemLine = {
-        product_id: productId,
-        quantity,
-        unit_price: unitPrice,
-      };
+      const line: PosServiceSessionItemLine = { product_id: productId, quantity };
+      // Solo un precio editado por el cajero viaja: así el servidor no confunde un redondeo
+      // con una edición (que exige allow_pos_price_override + store:pos:price_override).
+      if (it.isPriceOverridden) line.unit_price = unitPrice;
       if (it.variant_id != null) line.product_variant_id = Number(it.variant_id);
       const note = it.notes?.trim();
       if (note) line.description = note.slice(0, 255);

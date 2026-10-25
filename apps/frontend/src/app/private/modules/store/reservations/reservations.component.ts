@@ -3,6 +3,7 @@ import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
 import { isBookingExpired } from './components/calendar/booking-expired.util';
 import { FormsModule } from '@angular/forms';
 
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -60,6 +61,8 @@ type ReservationView = 'calendar' | 'list';
   styleUrls: ['./reservations.component.scss'],
 })
 export class ReservationsComponent {
+  /** Estaciones y recordatorios de servicio: solo tiendas con industria `service`. */
+  readonly isServiceIndustry = inject(AuthFacade).isServiceIndustry;
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);

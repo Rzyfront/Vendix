@@ -5,6 +5,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -85,6 +86,8 @@ export class ScheduleManagementComponent {
   private toastService = inject(ToastService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
+  /** Estaciones solo existen en tiendas de servicio (el backend responde 403 al resto). */
+  readonly hasStations = inject(AuthFacade).isServiceIndustry;
 
   // Detail modal
   isDetailModalOpen = signal(false);
@@ -221,12 +224,12 @@ export class ScheduleManagementComponent {
   savingBio = signal(false);
 
   // Modal tabs
-  readonly detailTabs = [
+  readonly detailTabs = computed(() => [
     { id: 'services', label: 'Servicios', icon: 'layers' },
-    { id: 'stations', label: 'Estaciones', icon: 'warehouse' },
+    ...(this.hasStations() ? [{ id: 'stations', label: 'Estaciones', icon: 'warehouse' }] : []),
     { id: 'schedule', label: 'Horario', icon: 'clock' },
     { id: 'exceptions', label: 'Excepciones', icon: 'calendar-x' },
-  ];
+  ]);
 
   // Provider table columns
   providerColumns: TableColumn[] = [
@@ -693,6 +696,7 @@ export class ScheduleManagementComponent {
   // --- Stations Management ---
 
   loadAllStations(): void {
+    if (!this.hasStations()) return;
     this.stationsService
       .list(1, 100)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -707,6 +711,10 @@ export class ScheduleManagementComponent {
   }
 
   loadProviderStations(providerId: number): void {
+    if (!this.hasStations()) {
+      this.assignedStationIds.set([]);
+      return;
+    }
     this.loadingStations.set(true);
     this.reservationsService
       .getProviderStations(providerId)

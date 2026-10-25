@@ -267,6 +267,14 @@ export class AuthFacade {
     return this.storeIndustries().includes('restaurant');
   });
   /**
+   * true si la tienda activa tiene la industria `service`: la única que ve
+   * Estaciones de servicio, sus recordatorios y formularios de recepción. Espeja
+   * `ServiceIndustryGuard` del backend, así la UI no llama endpoints que responden 403.
+   */
+  readonly isServiceIndustry = computed<boolean>(() => {
+    return this.storeIndustries().includes('service');
+  });
+  /**
    * Capability resolver: true if the active store is a gym. Reads the SAME
    * industries cascade as `isRestaurant` (settings → login → []) so the two
    * stay in lockstep, and returns whether the list includes `'gym'`. Source

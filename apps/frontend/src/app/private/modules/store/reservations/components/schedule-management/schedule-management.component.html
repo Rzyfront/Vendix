@@ -358,6 +358,7 @@
               <span class="stat-label">Servicios</span>
             </div>
           </div>
+          @if (hasStations()) {
           <div class="stat-card stat-warning">
             <app-icon name="warehouse" [size]="18"/>
             <div class="stat-content">
@@ -365,6 +366,7 @@
               <span class="stat-label">Estaciones</span>
             </div>
           </div>
+          }
           <div class="stat-card stat-info">
             <app-icon name="clock" [size]="18"/>
             <div class="stat-content">
@@ -384,7 +386,7 @@
 
       <!-- ▸ Tabs -->
       <app-scrollable-tabs
-        [tabs]="detailTabs"
+        [tabs]="detailTabs()"
         [activeTab]="activeTab()"
         size="sm"
         (tabChange)="activeTab.set($event); serviceSearchQuery.set(''); stationSearchQuery.set('')"

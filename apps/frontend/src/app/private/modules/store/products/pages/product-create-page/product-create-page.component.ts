@@ -2256,6 +2256,8 @@ export class ProductCreatePageComponent {
   }
 
   private syncIntakeTemplateLink(productId: number | undefined, isService: boolean): Promise<void> {
+    // Los formularios de recepción son de estaciones: fuera de la industria `service` no se tocan (403).
+    if (!this.isServiceIndustry()) return Promise.resolve();
     const next = isService ? this.intakeTemplateId() : 0;
     if (!productId || next === this.originalIntakeTemplateId()) {
       return Promise.resolve();
