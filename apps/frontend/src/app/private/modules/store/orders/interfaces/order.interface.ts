@@ -1361,7 +1361,9 @@ export interface ItemChangesPreview {
 }
 
 export interface ItemChangesApplyResult {
-  order: Order;
+  /** `null` cuando el guardado hizo commit pero falló la relectura (`reload_required`). */
+  order: Order | null;
+  reload_required?: boolean;
   summary: ItemChangesPreview;
   /** Efectos de cocina del apply (misma forma que `POST /store/kitchen-fire`). */
   kitchen?: {

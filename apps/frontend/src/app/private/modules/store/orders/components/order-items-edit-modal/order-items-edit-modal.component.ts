@@ -167,8 +167,8 @@ export class OrderItemsEditModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly order = input.required<Order>();
   readonly saved = output<Order>();
-  /** La orden se recargó tras un conflicto o un resultado desconocido: la página debería refrescarse. */
-  readonly orderReloaded = output<Order>();
+  /** La orden se recargó (o no se pudo recargar: `null`) y la página debería refrescarse. */
+  readonly orderReloaded = output<Order | null>();
 
   readonly draft = signal<OrderItemDraftLine[]>([]);
   readonly saving = signal(false);
@@ -661,6 +661,10 @@ export class OrderItemsEditModalComponent {
     this.conflictMessage.set(null);
     this.ordersService.applyItemChanges(order.id, dto).subscribe({
       next: (result) => {
+        if (result?.reload_required) {
+          this.finishSavedWithReload(order.id, result);
+          return;
+        }
         this.saving.set(false);
         if (!result?.order) {
           this.toastService.error('No se pudo confirmar el guardado de los cambios');
@@ -687,6 +691,30 @@ export class OrderItemsEditModalComponent {
         this.toastService.error(extractApiErrorMessage(err));
         this.previewResult.set(null);
         this.refreshPreview$.next();
+      },
+    });
+  }
+
+  /**
+   * El backend hizo commit pero no pudo releer la orden (`reload_required`): es un guardado
+   * exitoso. Se imprime, se avisa y se recarga la orden por separado.
+   */
+  private finishSavedWithReload(orderId: number, result: ItemChangesApplyResult): void {
+    this.toastService.success('Productos de la orden actualizados');
+    this.afterKitchenEffects(result);
+    this.ordersService.getOrderById(String(orderId)).subscribe({
+      next: (fresh) => {
+        this.saving.set(false);
+        this.saved.emit(fresh);
+        this.isOpen.set(false);
+      },
+      error: () => {
+        this.saving.set(false);
+        this.toastService.warning(
+          'Se guardó, pero no pudimos recargar la orden; actualiza la página',
+        );
+        this.orderReloaded.emit(null);
+        this.isOpen.set(false);
       },
     });
   }

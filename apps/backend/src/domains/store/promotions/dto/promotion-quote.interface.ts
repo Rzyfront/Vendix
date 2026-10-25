@@ -73,6 +73,13 @@ export interface PromotionQuoteInput {
    */
   as_of?: Date | null;
   /**
+   * Aditivo. Re-cotizar una orden ya persistida con SUS promociones: limita
+   * los candidatos a estos ids (no entra ninguna promoción nueva, automática
+   * o no) e ignora el filtro de `state` para ellos. La ventana de fechas
+   * sigue vigente (`as_of`). Sin la opción, comportamiento idéntico.
+   */
+  order_scope?: { promotion_ids: number[] } | null;
+  /**
    * Reference date used for date-range eligibility. Defaults to `new Date()`.
    * Useful for deterministic tests and replays.
    */

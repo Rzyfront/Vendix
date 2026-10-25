@@ -545,6 +545,7 @@ export class PromotionEngineService {
     const saleUnitScale = await this.resolveSaleUnitScales(items);
     const customerId = input.customer_id ?? null;
     const excludeOrderId = input.exclude_order_id ?? null;
+    const orderScopeIds = input.order_scope?.promotion_ids ?? null;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
     const subtotal = this.roundMoney(
@@ -608,14 +609,24 @@ export class PromotionEngineService {
 
     // Fetch candidate promotions: auto-apply OR explicitly requested.
     const candidates = (await this.prisma.promotions.findMany({
-      where: {
-        state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
-        ...(manualIds.length
-          ? { AND: [{ OR: [{ is_auto_apply: true }, { id: { in: manualIds } }] }] }
-          : { is_auto_apply: true }),
-      },
+      where: orderScopeIds
+        ? {
+            // Re-cotización de una orden ya persistida: SOLO sus promociones
+            // (no entra ninguna nueva) y se ignora el `state` (pausada,
+            // cancelada…). La ventana de fechas sigue con `as_of`; una
+            // promoción borrada simplemente no existe y no aparece.
+            id: { in: orderScopeIds },
+            start_date: { lte: now },
+            OR: [{ end_date: null }, { end_date: { gte: now } }],
+          }
+        : {
+            state: { in: ['active', 'scheduled'] },
+            start_date: { lte: now },
+            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            ...(manualIds.length
+              ? { AND: [{ OR: [{ is_auto_apply: true }, { id: { in: manualIds } }] }] }
+              : { is_auto_apply: true }),
+          },
       include: {
         promotion_products: true,
         promotion_categories: true,

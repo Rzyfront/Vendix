@@ -267,7 +267,7 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
     );
     ordersService.getOrderById.and.returnValue(of(freshOrder()));
     const { fixture, component } = create();
-    const reloaded: Order[] = [];
+    const reloaded: Array<Order | null> = [];
     component.orderReloaded.subscribe((o) => reloaded.push(o));
     component.addProduct({ id: 30, name: 'Zapato', base_price: 50000 } as unknown as Product, null);
     await settle(fixture);
@@ -486,5 +486,54 @@ describe('OrderItemsEditModalComponent (cambios por diferencias)', () => {
     const simple = { id: 41, name: 'Gorra', base_price: 100, final_price: 119 } as unknown as Product;
     component.addProduct(simple, null);
     expect(component.draft().at(-1)!.display_price).toBe(119);
+  });
+
+  it('reload_required is a successful save: prints, warns, reloads and emits saved with the fresh order', async () => {
+    const warning = [{ kind: 'product', product_name: 'Cerveza', requested: 2, available: 1 }];
+    ordersService.applyItemChanges.and.returnValue(
+      of({
+        order: null,
+        reload_required: true,
+        summary: previewOf(),
+        kitchen: { kitchen_ticket_ids: [8], stock_warnings: warning as any },
+      }),
+    );
+    const fresh = freshOrder();
+    ordersService.getOrderById.and.returnValue(of(fresh));
+    const { fixture, component } = create();
+    const emitted: Order[] = [];
+    component.saved.subscribe((o) => emitted.push(o));
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(toast.success).toHaveBeenCalledWith('Productos de la orden actualizados');
+    expect(ticketPrint.printAfterFire).toHaveBeenCalledOnceWith([8], jasmine.any(Function));
+    expect(toast.warning).toHaveBeenCalledWith(jasmine.stringContaining('Cerveza'));
+    expect(ordersService.getOrderById).toHaveBeenCalledWith('77');
+    expect(emitted).toEqual([fresh]);
+    expect(component.isOpen()).toBeFalse();
+    expect(component.saving()).toBeFalse();
+  });
+
+  it('reload_required with a failed reload warns, emits orderReloaded and closes', async () => {
+    ordersService.applyItemChanges.and.returnValue(
+      of({ order: null, reload_required: true, summary: previewOf(), kitchen: { kitchen_ticket_ids: [] } }),
+    );
+    ordersService.getOrderById.and.returnValue(throwError(() => new Error('down')));
+    const { fixture, component } = create();
+    const reloaded: Array<Order | null> = [];
+    const saved: Order[] = [];
+    component.orderReloaded.subscribe((o) => reloaded.push(o));
+    component.saved.subscribe((o) => saved.push(o));
+    component.increment(component.draft()[0]);
+    await settle(fixture);
+    component.save();
+    expect(toast.success).toHaveBeenCalledWith('Productos de la orden actualizados');
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Se guardó, pero no pudimos recargar la orden; actualiza la página',
+    );
+    expect(reloaded).toEqual([null]);
+    expect(saved).toEqual([]);
+    expect(component.isOpen()).toBeFalse();
   });
 });

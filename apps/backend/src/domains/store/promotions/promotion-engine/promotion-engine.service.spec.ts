@@ -438,6 +438,34 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
+  describe('order_scope', () => {
+    it('limita los candidatos a los ids de la orden e ignora el state (pausada se conserva, automática nueva no entra)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([buildPromotion({ id: 91, state: 'paused', is_auto_apply: false })]);
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        manual_promotion_ids: [91],
+        order_scope: { promotion_ids: [91] },
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.id).toEqual({ in: [91] }); // ninguna promoción nueva entra
+      expect(where).not.toHaveProperty('state'); // la pausada no se filtra
+      expect(where).not.toHaveProperty('is_auto_apply');
+      expect(result.applied_promotions).toHaveLength(1);
+    });
+
+    it('sin la opción el filtro por state y auto-apply queda igual', async () => {
+      prisma.promotions.findMany.mockResolvedValue([]);
+      await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.state).toEqual({ in: ['active', 'scheduled'] });
+      expect(where.is_auto_apply).toBe(true);
+    });
+  });
+
   describe('as_of', () => {
     it('as_of fija la ventana de vigencia (re-cotizar a la fecha de la orden)', async () => {
       prisma.promotions.findMany.mockResolvedValue([buildPromotion({ id: 90 })]);

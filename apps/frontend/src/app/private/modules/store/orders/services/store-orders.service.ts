@@ -761,7 +761,7 @@ export class StoreOrdersService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => {
         const data = this.unwrapOrThrow<ItemChangesApplyResult>(r);
-        if (!data || typeof data !== 'object' || !data.order) {
+        if (!data || typeof data !== 'object' || (!data.order && !data.reload_required)) {
           throw this.buildApiError({
             error: { message: 'Respuesta inválida al guardar los cambios' },
             status: 502,

@@ -301,6 +301,7 @@ export class OrderItemChangesService {
             where: { id: r.line.id },
             data: {
               discount_amount: new Prisma.Decimal(r.new_discount),
+              updated_at: new Date(),
               ...(r.new_tax_amount_item != null
                 ? { tax_amount_item: new Prisma.Decimal(r.new_tax_amount_item) }
                 : {}),
@@ -573,7 +574,19 @@ export class OrderItemChangesService {
       this.logger.warn(`order.items.changed audit failed: ${(err as Error).message}`);
     }
 
-    const order = await this.ordersService.findOne(orderId);
+    // Lo ya persistido no se revierte: si releer la orden falla, el frontend
+    // recibe `order: null` + `reload_required` y la vuelve a pedir.
+    let order: any = null;
+    let reloadRequired = false;
+    try {
+      order = await this.ordersService.findOne(orderId);
+    } catch (err) {
+      reloadRequired = true;
+      this.logger.error(
+        `findOne post-commit failed order=${orderId}: ${(err as Error).message}`,
+        (err as Error).stack,
+      );
+    }
     // `kitchen`: lo que el frontend necesita para imprimir la comanda
     // (`printAfterFire(kitchen_ticket_ids)`) y mostrar avisos de stock.
     // `stock_warnings` usa el MISMO shape que POST /store/kitchen-fire
@@ -583,7 +596,12 @@ export class OrderItemChangesService {
       kitchen_ticket_ids: kitchenTicketIds,
       stock_warnings: stockWarnings,
     };
-    return { order, summary: plan.preview, kitchen };
+    return {
+      order,
+      summary: plan.preview,
+      kitchen,
+      ...(reloadRequired ? { reload_required: true as const } : {}),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -1353,6 +1371,13 @@ export class OrderItemChangesService {
       );
     }
 
+    // La orden no puede quedar sin productos (para anularla: Cancelar orden).
+    if (resulting.length + adds.length === 0) {
+      throw this.invalid(
+        'La orden debe tener al menos un producto; para anularla usa Cancelar orden',
+      );
+    }
+
     // Promociones / cupón: se RE-COTIZAN sobre el carrito resultante con el
     // mismo motor del editor (`updateOrderFromEditor`).
     const reprices: PlannedReprice[] = [];
@@ -1360,13 +1385,13 @@ export class OrderItemChangesService {
     let redistributedDiscount: number | null = null;
     let promotionSync: Array<{ promotion_id: number; discount_amount: number }> | null = null;
     let couponUseSync: { id: number; discount_applied: number } | null = null;
+    let couponUseRow: { id: number; discount_applied: unknown } | null = null;
     // Convención de la orden. line-driven: Σ descuentos de línea ≈ cabecera.
     // header-only (ecommerce/WhatsApp): líneas sin descuento, descuento solo
     // en la cabecera y el impuesto ya calculado ANTES del descuento: nunca se
     // redistribuye en líneas ni se tocan sus impuestos.
     const lineDriven =
       headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
-    const headerOnly = headerDiscount > 0 && currentLineDiscounts <= 0.01;
     // mixed: descuentos de línea + un descuento manual de cabecera encima.
     const mixed =
       headerDiscount > 0 &&
@@ -1435,6 +1460,9 @@ export class OrderItemChangesService {
           customer_id: order.customer_id ?? undefined,
           manual_promotion_ids: promoIds,
           exclude_order_id: orderId,
+          // Solo las promociones que la orden ya tiene (pausadas incluidas); no
+          // entra ninguna nueva.
+          order_scope: { promotion_ids: promoIds },
           // Re-cotiza A LA FECHA DE LA ORDEN: lo que aplicaba al crearla no se
           // cae por vencer después ni entran promociones automáticas nuevas.
           as_of: order.created_at ? new Date(order.created_at) : undefined,
@@ -1493,19 +1521,10 @@ export class OrderItemChangesService {
             orderCouponId: order.coupon_id ?? null,
             orderState: order.state,
           });
-          const useRow = await db.coupon_uses.findFirst({
+          couponUseRow = await db.coupon_uses.findFirst({
             where: { order_id: orderId, coupon_id: validation?.coupon_id ?? order.coupon_id },
             select: { id: true, discount_applied: true },
           });
-          if (
-            useRow &&
-            Math.abs(Number(useRow.discount_applied) - roundMoney2(Math.min(validation?.discount_amount || 0, remaining))) > 0.001
-          ) {
-            couponUseSync = {
-              id: useRow.id,
-              discount_applied: roundMoney2(Math.min(validation?.discount_amount || 0, remaining)),
-            };
-          }
           couponDiscount = roundMoney2(
             Math.min(validation?.discount_amount || 0, remaining),
           );
@@ -1536,8 +1555,9 @@ export class OrderItemChangesService {
       }
 
       if (quoted) quotedSnapshot = promoSnapshot;
-      if (quoted && headerOnly) {
-        // Solo la cabecera: D' (bruto re-cotizado) vs cabecera actual.
+      if (quoted && !(lineDriven || mixed)) {
+        // Header-only o cabecera 0 con promo/cupón: no se redistribuye en
+        // líneas; solo la cabecera (D' bruto re-cotizado vs cabecera actual).
         const requoted = roundMoney2(promotionDiscount + couponDiscount);
         if (Math.abs(requoted - headerDiscount) > 0.01) {
           headerOverride = requoted;
@@ -1690,10 +1710,26 @@ export class OrderItemChangesService {
     } else {
       discount = Math.min(headerDiscount, subtotal + tax);
       if (headerDiscount > 0) {
-        warnings.push('El descuento fijo de la orden se mantiene igual');
-        if (discount !== headerDiscount) discountOverride = roundMoney2(discount);
+        if (discount !== headerDiscount) {
+          discountOverride = roundMoney2(discount);
+          warnings.push(
+            `El descuento de la orden se ajusta de ${money(headerDiscount)} a ${money(discount)} porque supera el nuevo total`,
+          );
+        } else {
+          warnings.push('El descuento fijo de la orden se mantiene igual');
+        }
       }
       discount = roundMoney2(discount);
+    }
+    // `coupon_uses.discount_applied` sigue la convención de `payOrder`: el
+    // descuento de CABECERA de la orden. Solo si el descuento cambió.
+    if (
+      couponUseRow &&
+      discountTouched &&
+      discountOverride != null &&
+      Math.abs(Number(couponUseRow.discount_applied) - discountOverride) > 0.001
+    ) {
+      couponUseSync = { id: couponUseRow.id, discount_applied: discountOverride };
     }
     const shipping = before.shipping;
     let tip = before.tip;
@@ -1805,6 +1841,9 @@ export class OrderItemChangesService {
    * porque el impuesto persistido ya está sobre la base descontada.
    */
   private impliedRateOfRowlessLine(l: any): number {
+    // Línea legacy (sin filas y `tax_amount_item` NULL): nadie calculó un
+    // impuesto y el recalc tampoco lo persiste; no se inventa uno.
+    if (l.tax_amount_item == null) return 0;
     const rate = Number(l.tax_rate ?? 0);
     if (rate > 0) return rate;
     const net = Number(l.total_price ?? 0) - Number(l.discount_amount ?? 0);
@@ -1824,7 +1863,8 @@ export class OrderItemChangesService {
     rowCount: number,
     exact: number,
   ): number {
-    if (rowCount > 0 || taxAmountItem == null) return exact;
+    if (rowCount > 0) return exact;
+    if (taxAmountItem == null) return 0; // = resolveOrderLineTaxTotal sin desglose
     return resolveOrderLineTaxTotal({
       tax_amount_item: taxAmountItem,
       quantity,
