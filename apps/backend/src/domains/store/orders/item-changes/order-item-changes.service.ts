@@ -1533,7 +1533,50 @@ export class OrderItemChangesService {
           );
           requotedCouponDiscount = couponDiscount;
         } catch (err) {
-          if (err instanceof VendixHttpException) {
+          // `validate` solo encuentra cupones activos (eliminar = desactivar).
+          // Si ESTA orden ya usó el cupón y el comercio lo desactivó después,
+          // se respeta y se conserva el monto que ya tenía: no se re-cotiza.
+          const usedInactive =
+            err instanceof VendixHttpException &&
+            err.errorCode === ErrorCodes.CPN_FIND_001.code
+              ? await db.coupon_uses.findFirst({
+                  where: { order_id: orderId, coupon: { code: couponCode, is_active: false } },
+                  select: { id: true, discount_applied: true },
+                  orderBy: { id: 'desc' },
+                })
+              : null;
+          if (usedInactive) {
+            const remaining = Math.max(
+              0,
+              this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+            );
+            // El checkout (orden sin `coupon_id`) guarda en `discount_applied`
+            // solo el cupón: ese monto se conserva tal cual. El cobro POS
+            // (`commitCouponUseForOrder`, orden con `coupon_id`) guarda TODO el
+            // descuento de la orden: ahí el cupón nunca supera lo que ocupaba
+            // en la cabecera (sin promociones ni descuento manual).
+            const applied = Number(usedInactive.discount_applied ?? 0);
+            const priorPromotions = (order.order_promotions ?? []).reduce(
+              (sum: number, p: any) => sum + Number(p.discount_amount ?? 0),
+              0,
+            );
+            const kept = roundMoney2(
+              Math.max(
+                0,
+                order.coupon_id == null
+                  ? applied
+                  : Math.min(applied, headerDiscount - priorPromotions - manualPart),
+              ),
+            );
+            couponDiscount = roundMoney2(Math.min(kept, remaining));
+            // `requotedCouponDiscount` queda null: la fila `coupon_uses` del
+            // cupón inactivo no se reescribe.
+            warnings.push(
+              couponDiscount < kept
+                ? `El cupón ${couponCode} está desactivado: su descuento se reduce de ${money(kept)} a ${money(couponDiscount)} porque supera el nuevo total`
+                : `El cupón ${couponCode} está desactivado: se conserva su descuento de ${money(couponDiscount)}`,
+            );
+          } else if (err instanceof VendixHttpException) {
             // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
             // se bloquea y el usuario ajusta los productos (igual que el editor).
             quoted = false;
