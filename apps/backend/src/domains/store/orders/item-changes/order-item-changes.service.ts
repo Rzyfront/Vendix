@@ -1550,13 +1550,30 @@ export class OrderItemChangesService {
               0,
               this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
             );
-            couponUseRow = usedInactive;
-            couponDiscount = roundMoney2(
-              Math.min(Number(usedInactive.discount_applied ?? 0), remaining),
+            // El checkout guarda en `discount_applied` solo el cupón, pero el
+            // cobro POS (`commitCouponUseForOrder`) guarda TODO el descuento de
+            // la orden: el monto del cupón nunca supera lo que ocupaba en la
+            // cabecera (sin promociones ni descuento manual).
+            const priorPromotions = (order.order_promotions ?? []).reduce(
+              (sum: number, p: any) => sum + Number(p.discount_amount ?? 0),
+              0,
             );
-            requotedCouponDiscount = couponDiscount;
+            const kept = roundMoney2(
+              Math.max(
+                0,
+                Math.min(
+                  Number(usedInactive.discount_applied ?? 0),
+                  headerDiscount - priorPromotions - manualPart,
+                ),
+              ),
+            );
+            couponDiscount = roundMoney2(Math.min(kept, remaining));
+            // `requotedCouponDiscount` queda null: la fila `coupon_uses` del
+            // cupón inactivo no se reescribe.
             warnings.push(
-              `El cupón ${couponCode} está desactivado: se conserva su descuento de ${money(couponDiscount)}`,
+              couponDiscount < kept
+                ? `El cupón ${couponCode} está desactivado: su descuento se reduce de ${money(kept)} a ${money(couponDiscount)} porque supera el nuevo total`
+                : `El cupón ${couponCode} está desactivado: se conserva su descuento de ${money(couponDiscount)}`,
             );
           } else if (err instanceof VendixHttpException) {
             // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
