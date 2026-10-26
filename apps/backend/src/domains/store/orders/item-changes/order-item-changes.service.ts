@@ -1550,10 +1550,12 @@ export class OrderItemChangesService {
               0,
               this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
             );
-            // El checkout guarda en `discount_applied` solo el cupón, pero el
-            // cobro POS (`commitCouponUseForOrder`) guarda TODO el descuento de
-            // la orden: el monto del cupón nunca supera lo que ocupaba en la
-            // cabecera (sin promociones ni descuento manual).
+            // El checkout (orden sin `coupon_id`) guarda en `discount_applied`
+            // solo el cupón: ese monto se conserva tal cual. El cobro POS
+            // (`commitCouponUseForOrder`, orden con `coupon_id`) guarda TODO el
+            // descuento de la orden: ahí el cupón nunca supera lo que ocupaba
+            // en la cabecera (sin promociones ni descuento manual).
+            const applied = Number(usedInactive.discount_applied ?? 0);
             const priorPromotions = (order.order_promotions ?? []).reduce(
               (sum: number, p: any) => sum + Number(p.discount_amount ?? 0),
               0,
@@ -1561,10 +1563,9 @@ export class OrderItemChangesService {
             const kept = roundMoney2(
               Math.max(
                 0,
-                Math.min(
-                  Number(usedInactive.discount_applied ?? 0),
-                  headerDiscount - priorPromotions - manualPart,
-                ),
+                order.coupon_id == null
+                  ? applied
+                  : Math.min(applied, headerDiscount - priorPromotions - manualPart),
               ),
             );
             couponDiscount = roundMoney2(Math.min(kept, remaining));

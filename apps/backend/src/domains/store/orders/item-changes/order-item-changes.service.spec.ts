@@ -990,6 +990,23 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(ctx.db.coupon_uses.update).not.toHaveBeenCalled();
   });
 
+  it('R7-6) checkout: tras recortar el cupón inactivo, volver a subir el carrito recupera su monto de coupon_uses', async () => {
+    // Segunda edición: la cabecera quedó recortada en $10, coupon_uses conserva $20.
+    const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 25, total_price: 25, discount_amount: 0, order_item_taxes: [] });
+    const ctx = build([mk(1), mk(2)], { discount_amount: 10, coupon_code: null, coupon_id: null });
+    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.db.coupon_uses.findFirst.mockImplementation(async ({ where }: any) =>
+      where.coupon ? { id: 33, discount_applied: 20 } : { coupon: { code: 'GRANDE' } },
+    );
+    const dto = { update: [{ order_item_id: 2, quantity: 2 }] };
+    const p = await ctx.service.preview(ORDER_ID, dto);
+    expect(p.can_apply).toBe(true);
+    expect(p.totals.after.discount).toBe(20);
+    expect(p.warnings.join(' ')).toContain('se conserva su descuento de $20');
+    await applyV(ctx, { ...dto, reason: 'motivo ok' });
+    expect(ctx.db.coupon_uses.update).not.toHaveBeenCalled();
+  });
+
   it('R5-2) una promoción que deja de aplicar queda en 0 (no se borra) y vuelve a aplicar al re-agregar', async () => {
     const mk = (id: number, d = 2.5) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: d, order_item_taxes: [] });
     const base = { discount_amount: 5, order_promotions: [{ id: 71, promotion_id: 1, discount_amount: 5 }] };
