@@ -120,7 +120,7 @@ When removing a workspace:
 - Check the importing workspace declares each package it uses.
 - Check root `package.json` did not gain unnecessary production dependencies.
 - Check Docker contexts still match `docker-compose.yml`.
-- Run `./skills/skill-sync/assets/sync.sh` and `./skills/setup.sh --sync` after skill metadata changes.
+- Run `./skills/setup.sh` after creating, renaming or deleting a skill (see `skill-sync`).
 
 ## Related Skills
 

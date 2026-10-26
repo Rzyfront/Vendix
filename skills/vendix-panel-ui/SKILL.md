@@ -1,12 +1,7 @@
 ---
 name: vendix-panel-ui
 description: >
-  Panel UI module visibility system: industry dimension (stores.industries), store-level
-  ceiling (store_settings.settings.panel_ui), per-user panel_ui, NgRx selectors,
-  MenuFilterService, module flows, and sidebar filtering.
-  Trigger: When adding sidebar modules, configuring panel_ui visibility, editing
-  industry rules in INDUSTRY_HIDDEN_MODULES, adding per-industry module rules,
-  debugging menu filtering, or distinguishing visibility from permissions.
+  Panel UI module visibility: industry rules (INDUSTRY_HIDDEN_MODULES), store/user panel_ui, MenuFilterService, sidebar filtering. Trigger: adding sidebar modules, panel_ui config, debugging why a module is hidden (visibility vs permissions).
 license: Apache-2.0
 metadata:
   author: rzyfront

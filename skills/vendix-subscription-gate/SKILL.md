@@ -1,10 +1,7 @@
 ---
 name: vendix-subscription-gate
 description: >
-  Feature gating by store subscription state: global store write guard, AI feature gate,
-  Redis feature resolution, quota consumption, frontend paywall interceptor, banner, and
-  subscription UI states. Trigger: When adding feature gates, paywalls, subscription-based
-  access control, protecting store write operations, AI feature gates, or rollout flags.
+  Feature gating by store subscription state: store write guard, AI feature gate, Redis feature resolution, frontend paywall and banner. Trigger: feature gates, paywalls, subscription access control, @RequireAIFeature, rollout flags.
 license: Apache-2.0
 metadata:
   author: rzyfront

@@ -1,12 +1,7 @@
 ---
 name: vendix-pila-flatfile
 description: >
-  Generation of the Colombian PILA flat file (Planilla Integrada de
-  Liquidación de Aportes, Resolución 2388/2016) in Vendix: fixed-width type-1
-  header and type-2 contributor records, IBC caps, novelty mapping
-  (ING/RET/VSP/LMA/IGE/VAC/IRL), the positional layout serializer, and the
-  export endpoint. Trigger: generating or editing the PILA flat file, its
-  record layout, novelty flags, or IBC caps.
+  Colombian PILA flat file (Res. 2388/2016): fixed-width type-1/type-2 records, IBC caps, novelties (ING/RET/VSP/LMA/IGE/VAC/IRL), export endpoint. Trigger: generating or editing the PILA file or domains/store/payroll/pila.
 license: MIT
 metadata:
   author: rzyfront

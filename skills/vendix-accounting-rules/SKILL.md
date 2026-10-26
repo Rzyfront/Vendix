@@ -1,11 +1,9 @@
 ---
 name: vendix-accounting-rules
 description: >
-  Colombian accounting rules for Vendix automatic entries: PUC account selection,
-  debit/credit direction, payroll provisions, parafiscales, mapping-key ownership,
-  and validation of balanced journal entries. Trigger: When working with journal
-  entries, mapping keys, PUC accounts, payroll provisions, parafiscales, or any
-  debit/credit logic.
+  Colombian accounting rules for auto entries: PUC account selection, debit/credit direction, payroll
+  provisions, parafiscales, mapping-key ownership, balanced entries. Trigger: journal entries, mapping
+  keys, PUC accounts, debit/credit logic.
 license: MIT
 metadata:
   author: rzyfront

@@ -1,12 +1,7 @@
 ---
 name: vendix-vexi-agent
 description: >
-  The four patterns that make Vexi an integral agent: capabilities derived from the
-  permission catalog, AI applications invoked as vision sub-agents with a feedback
-  loop, a closed loop over the UI (the turn blocks on the browser's real result), and
-  attachments persisted with the rigor of the module that consumes them. Trigger: When
-  widening Vexi's operational reach, adding a UI host, wiring a document flow through
-  the chat, or debugging a Vexi turn that narrates something it never verified.
+  Patterns making Vexi an integral agent: permission-derived capabilities, vision sub-agents, closed UI loop (VexiUiHost), persisted attachments. Trigger: widening Vexi's reach, adding a UI host, chat document flows, Vexi claiming unverified changes.
 license: MIT
 metadata:
   author: rzyfront
@@ -23,6 +18,10 @@ metadata:
     - "Adding a background task on the ai-agent queue"
     - "Auditing what Vexi changed in a store"
 ---
+
+## When to use
+
+The four patterns: capabilities derived from the permission catalog; AI applications invoked as vision sub-agents with a feedback loop; a closed loop over the UI (the turn blocks on the browser's real result); attachments persisted with the rigor of the consuming module. Debug any Vexi turn that narrates something it never verified.
 
 # Vendix Vexi Agent
 

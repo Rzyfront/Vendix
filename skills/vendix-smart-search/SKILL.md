@@ -1,8 +1,7 @@
 ---
 name: vendix-smart-search
 description: >
-  Advanced product search engine (tokenized recall + relevance rank + pg_trgm unaccent) and how to replicate it for other entities.
-  Trigger: Adding or changing product/storefront/picker search, ranking results by relevance, accent-insensitive matching (cafe→Café), or porting the smart-search pattern to another entity.
+  Product smart search (tokenized recall + relevance rank + pg_trgm unaccent) and how to port it. Trigger: product/storefront/picker search, relevance ranking, accent-insensitive matching (cafe→Café), porting to another entity.
 license: MIT
 metadata:
   author: rzyfront
@@ -101,7 +100,7 @@ Follow the D.1/D.2 (pickers) shape for a light port, or the products shape for a
 ## Related Skills
 
 - `vendix-prisma-migrations` - GIN/CONCURRENTLY runbook, resolve flow, checksum discipline
-- `vendix-backend-domain` - Domain layout, module ownership for shared services
+- `vendix-backend` - Domain layout, module ownership for shared services
 - `vendix-multi-tenant-context` - ALS store scoping rules the raw SQL must obey
 - `vendix-ai-embeddings-rag` - Semantic/vector search (different engine, different use cases)
 - `vendix-currency-formatting` - Unrelated to search; listed to avoid confusion with rank/score display

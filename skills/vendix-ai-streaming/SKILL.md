@@ -1,10 +1,9 @@
 ---
 name: vendix-ai-streaming
 description: >
-  AI streaming patterns with provider AsyncGenerators, AIEngineService.runStream,
-  NestJS SSE endpoints, the stream-intent handshake, tool_call/tool_result frames,
-  Angular EventSource wrappers, and streaming UI components.
-  Trigger: When implementing streaming AI responses, working with SSE endpoints, or creating streaming UI components.
+  AI streaming: provider AsyncGenerators, AIEngineService.runStream, NestJS SSE, stream-intent
+  handshake, tool_call/tool_result frames, Angular EventSource wrappers. Trigger: streaming AI
+  responses, SSE endpoints, streaming UI components.
 license: Apache-2.0
 metadata:
   author: rzyfront

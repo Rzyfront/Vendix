@@ -1,8 +1,9 @@
 ---
 name: vendix-business-analysis
 description: >
-  Business discovery for Vendix changes that directly affect the app's economic activity.
-  Trigger: When the user explicitly requests business analysis, or when a change requires decisive business rules about the app's direct economic activity before how-to-plan.
+  Business discovery for Vendix changes that directly affect the app's economic activity. Trigger: the
+  user explicitly requests business analysis, or a change needs decisive business rules before
+  how-to-plan.
 license: MIT
 metadata:
   author: rzyfront
@@ -153,7 +154,7 @@ Use these question types selectively. Do not ask every question in every analysi
 ## Related Skills
 
 - `how-to-plan` - Converts the business brief into an approved implementation plan.
-- `how-to-dev` - Executes the approved plan after business analysis and planning are complete.
-- `agent-teams` - Adds parallel perspectives when discovery spans several domains or risk areas.
+- `AGENTS.md` - Development rules that execute the approved plan after business analysis and planning are complete.
+- Delegation rules in `AGENTS.md` (inline by default) - Add parallel perspectives when discovery spans several domains or risk areas.
 - `vendix-core` - Maps Vendix apps, boundaries, and likely specialized skills.
-- `skill-creator` - Creates or updates skills when analysis exposes a repeatable knowledge gap.
+- Global `skill-creator` skill - Creates or updates skills when analysis exposes a repeatable knowledge gap.

@@ -1,9 +1,9 @@
 ---
 name: vendix-currency-formatting
 description: >
-  Currency formatting patterns: custom Vendix CurrencyPipe, CurrencyFormatService,
-  money inputs with [currency], format_style enum, Decimal string handling, and avoiding
-  hardcoded money formatting. Trigger: When displaying or inputting money/currency values.
+  Currency formatting: Vendix CurrencyPipe, CurrencyFormatService, money inputs with [currency],
+  format_style, Decimal strings, no hardcoded money formatting. Trigger: When displaying or inputting
+  money/currency values.
 license: MIT
 metadata:
   author: rzyfront
@@ -66,5 +66,4 @@ Use shared input currency mode:
 ## Related Skills
 
 - `vendix-product-pricing`
-- `vendix-calculated-pricing`
 - `vendix-angular-forms`

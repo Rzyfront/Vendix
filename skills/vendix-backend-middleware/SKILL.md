@@ -59,4 +59,4 @@ It does not write `req.store_id` / `req.organization_id` / `req.domain_type` dir
 
 - `vendix-multi-tenant-context`
 - `vendix-prisma-scopes`
-- `vendix-backend-domain`
+- `vendix-backend`

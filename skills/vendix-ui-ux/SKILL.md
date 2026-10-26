@@ -1,9 +1,7 @@
 ---
 name: vendix-ui-ux
 description: >
-  Mobile-first UI/UX design philosophy, accessibility standards, visual quality checklist,
-  and skill routing for Vendix frontend work. Trigger: When designing UI screens,
-  implementing mobile-first layouts, checking accessibility, or creating landing pages.
+  Mobile-first UI/UX philosophy, accessibility standards, visual quality checklist and frontend skill routing. Trigger: designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns.
 license: MIT
 metadata:
   author: rzyfront
@@ -64,7 +62,7 @@ This is the broad design checklist. For implementation details, use the speciali
 
 ## Skill Routing
 
-- Angular component structure: `vendix-frontend-component`.
+- Angular component structure: `vendix-frontend`.
 - Zoneless/signals/CVA: `vendix-zoneless-signals`.
 - Reactive forms: `vendix-angular-forms`.
 - Icons: `vendix-frontend-icons`.
@@ -74,7 +72,7 @@ This is the broad design checklist. For implementation details, use the speciali
 - Tables/cards: `vendix-frontend-data-display`.
 - Stats/KPIs: `vendix-frontend-stats-cards`.
 - Sticky headers: `vendix-frontend-sticky-header`.
-- App/domain context: `vendix-app-architecture`.
+- App/domain context: `vendix-core`.
 
 ## Related Skills
 

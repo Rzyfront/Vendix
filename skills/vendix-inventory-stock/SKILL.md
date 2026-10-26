@@ -1,10 +1,7 @@
 ---
 name: vendix-inventory-stock
 description: >
-  Inventory stock management patterns: StockLevelManager, stock_levels source of truth,
-  reservations, variant/base transitions, audit records, and denormalized stock sync.
-  Trigger: When working with stock levels, inventory adjustments, stock transfers,
-  reservations, or any operation that modifies product/variant quantities.
+  Inventory stock: StockLevelManager, stock_levels as source of truth, reservations, variant/base transitions, audit, stock sync. Trigger: stock levels, adjustments, transfers, reservations, INV_STOCK_* errors, quantity changes.
 license: MIT
 metadata:
   author: rzyfront
@@ -94,7 +91,7 @@ stay reserved forever even though they physically left. That is exactly what
 Rule: never write `orders.state` outside `OrderFlowService`. The manual UI
 buttons that need to bypass the state machine go through
 `OrderFlowService.forceOrderState()`, which skips **preconditions only** and
-still runs the release/consume chain. See `vendix-backend-domain` for the seam.
+still runs the release/consume chain. See `vendix-backend` for the seam.
 
 `finished` used to be the ONLY consumption point (pre-2026-09-26). It is not
 anymore — see the next section for why, and for the full reserve→consume

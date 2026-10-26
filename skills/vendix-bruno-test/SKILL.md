@@ -1,10 +1,9 @@
 ---
 name: vendix-bruno-test
 description: >
-  Opt-in Bruno API testing template for Vendix collections: request files, auth inheritance,
-  DTO-aligned payloads, post_response scripting, and pragmatic assertions. NOT an agent
-  verification mechanism — agents verify endpoints with curl (see how-to-dev / how-to-plan).
-  Trigger: ONLY when a developer explicitly asks to write or edit a Bruno (.bru) test.
+  Opt-in Bruno (.bru) API test template for Vendix collections. Not an agent verification mechanism
+  (agents verify with curl). Trigger: ONLY when a developer explicitly asks to write or edit a Bruno
+  test.
 license: MIT
 metadata:
   author: rzyfront
@@ -16,7 +15,7 @@ metadata:
 
 > **Opt-in only.** Bruno is NOT a verification mechanism for agents. Agents must verify
 > endpoints with `curl` (authenticating via a seed owner account or credentials supplied by
-> the user) — see `how-to-dev` and `how-to-plan`. Use this skill **exclusively** when a
+> the user) — see `AGENTS.md` and `how-to-plan`. Use this skill **exclusively** when a
 > developer deliberately asks to author or edit a Bruno `.bru` test; never auto-invoke it as
 > part of a plan's verification.
 
@@ -55,6 +54,6 @@ Existing requests use a mix of `{{url}}`, `{{baseUrl}}`, and `http://{{url}}/...
 
 ## Related Skills
 
-- `vendix-backend-api`
+- `vendix-backend`
 - `vendix-validation`
 - `vendix-error-handling`

@@ -1,11 +1,7 @@
 ---
 name: vendix-vex-agent
 description: >
-  Vex, the full-screen business-managing agent for owner/admin: agent-as-a-row with
-  denied_tools, single-step approval with legacy plan-token compatibility, manipulable UI
-  blocks persisted server-side, and the three-legged vex_agent gate. Trigger: When
-  working on /admin/vex, Vex UI blocks, plan approval, denied_tools, or the
-  vex_agent subscription feature.
+  Vex, full-screen business agent for owner/admin (/admin/vex): denied_tools, plan approval, persisted UI blocks, vex_agent gate. Trigger: /admin/vex, Vex UI blocks, plan approval, denied_tools, vex_agent subscription feature.
 license: MIT
 metadata:
   author: rzyfront

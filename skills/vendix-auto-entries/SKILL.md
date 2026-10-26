@@ -1,10 +1,9 @@
 ---
 name: vendix-auto-entries
 description: >
-  Automatic journal entry system: event-driven accounting, AutoEntryService,
-  AccountingEventsListener, account mapping cascade, and mapping-key sync. Trigger:
-  When adding automatic accounting flows, modifying auto-entry logic, adding mapping keys,
-  or debugging missing journal entries.
+  Automatic journal entries: event-driven accounting, AutoEntryService, AccountingEventsListener,
+  account mapping cascade, mapping-key sync. Trigger: adding automatic accounting flows, auto-entry
+  logic, mapping keys, missing journal entries.
 license: MIT
 metadata:
   author: rzyfront

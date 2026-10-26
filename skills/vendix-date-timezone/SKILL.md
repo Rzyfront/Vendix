@@ -1,10 +1,9 @@
 ---
 name: vendix-date-timezone
 description: >
-  Date and timezone handling patterns: UTC-safe date-only display, form date strings,
-  chart labels, date range queries, print formatting, and off-by-one day prevention.
-  Trigger: When displaying dates, formatting date labels, using DatePipe/toLocaleDateString,
-  querying date ranges, or adding DateTime fields.
+  Date/timezone handling: UTC-safe date-only display, form date strings, chart labels, date range
+  queries, print formatting, off-by-one day bugs. Trigger: displaying dates,
+  DatePipe/toLocaleDateString, date ranges, DateTime fields.
 license: MIT
 metadata:
   author: rzyfront
@@ -96,4 +95,4 @@ See `docs/architecture/store-timezone.md` for the full design and rationale.
 
 - `vendix-angular-forms`
 - `vendix-frontend-data-display`
-- `vendix-prisma-schema`
+- `vendix-prisma`

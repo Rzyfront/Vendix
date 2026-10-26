@@ -1,10 +1,7 @@
 ---
 name: vendix-prisma-migrations
 description: >
-  Production-safe Prisma migration patterns for Vendix: idempotent SQL, enum handling,
-  data-impact headers, destructive-operation bans, failed migration recovery, and Prisma 7
-  config. Trigger: When creating migrations, editing migration SQL, deploying migrations,
-  or recovering from failed Prisma migrations.
+  Production-safe Prisma migrations: idempotent SQL, enums, DATA IMPACT headers, destructive-op bans, failed-migration recovery. Trigger: creating/editing migration SQL, migrate deploy, P3009/P3012, checksum mismatch, any failed migration.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -113,7 +110,7 @@ If clearing a table with inbound FKs is explicitly approved:
 
 ## Related Skills
 
-- `vendix-prisma-schema`
+- `vendix-prisma`
 - `vendix-prisma-scopes`
 - `vendix-prisma-seed`
 - `git-workflow`

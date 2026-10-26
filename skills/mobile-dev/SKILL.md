@@ -114,5 +114,5 @@ Mobile app consumes the same backend API as the frontend. When implementing API 
 
 - `vendix-core` - Repository architecture and app boundary understanding
 - `vendix-monorepo-workspaces` - Monorepo dependency and package management
-- `vendix-backend-api` - Understanding backend API endpoint patterns
-- `vendix-frontend-component` - Reference for UI component patterns
+- `vendix-backend` - Understanding backend API endpoint patterns
+- `vendix-frontend` - Reference for UI component patterns

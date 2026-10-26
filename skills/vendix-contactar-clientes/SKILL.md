@@ -13,6 +13,7 @@ metadata:
     - "Adaptar una plantilla de mensaje comercial a un cliente"
     - "Usar la biblioteca de plantillas de mensajes de Vendix"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # Vendix Contactar Clientes

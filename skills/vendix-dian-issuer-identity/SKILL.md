@@ -1,13 +1,9 @@
 ---
 name: vendix-dian-issuer-identity
 description: >
-  Issuer fiscal identity for Colombian electronic invoicing: who the merchant IS
-  (VAT-responsible, INC-responsible, which printable calidades), how that is
-  derived from RUT box 53, and how it projects into the signed XML and the graphic
-  representation. Trigger: Reading or writing tax_responsibilities / tax_regime,
-  editing PartyTaxScheme or TaxLevelCode, printing anything about the issuer's
-  fiscal status, or debugging an invoice that declares an obligation the merchant
-  does not have.
+  Issuer fiscal identity for Colombian e-invoicing: VAT/INC responsibility and calidades from RUT box
+  53, projected into signed XML and print. Trigger: tax_responsibilities/tax_regime,
+  PartyTaxScheme/TaxLevelCode, issuer fiscal status.
 license: MIT
 metadata:
   author: rzyfront
@@ -25,6 +21,15 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 # Vendix DIAN Issuer Identity
 
+## Cuándo usar
+
+Issuer fiscal identity for Colombian electronic invoicing: who the merchant IS (VAT-responsible,
+INC-responsible, which printable calidades), how that is derived from RUT box 53, and how it
+projects into the signed XML and the graphic representation. Trigger: Reading or writing
+tax_responsibilities / tax_regime, editing PartyTaxScheme or TaxLevelCode, printing anything about
+the issuer's fiscal status, or debugging an invoice that declares an obligation the merchant does
+not have.
+
 ## Purpose
 
 Governs the **issuer's fiscal identity**: whether the merchant is responsible for
@@ -33,7 +38,7 @@ answers reach `cac:PartyTaxScheme`, `cbc:TaxLevelCode` and the paper.
 
 Does **not** govern the classification of a *tax* (`vendix-tax-typing`), which NIT
 owns an accounting entity (`vendix-fiscal-scope`), or tax math
-(`vendix-calculated-pricing`). This skill answers *who the merchant is*, not *what
+(`vendix-product-pricing`). This skill answers *who the merchant is*, not *what
 the tax is*.
 
 ## Core Rules

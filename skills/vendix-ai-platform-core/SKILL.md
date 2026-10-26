@@ -1,10 +1,9 @@
 ---
 name: vendix-ai-platform-core
 description: >
-  Core AI Platform Layer: AIEngineService, providers, run/runStream, rate limiting,
-  response sanitization, logging, cost tracking, and super-admin AI config/app CRUD.
-  Trigger: When working with AIEngineService, adding providers, configuring AI applications,
-  rate limiting, cost tracking, logging, or debugging AI requests.
+  Core AI platform: AIEngineService, providers, run/runStream, rate limiting, sanitization, logging,
+  cost tracking, super-admin AI config CRUD. Trigger: AIEngineService, adding providers, AI
+  applications, AI rate limits/costs, debugging AI requests.
 license: Apache-2.0
 metadata:
   author: rzyfront

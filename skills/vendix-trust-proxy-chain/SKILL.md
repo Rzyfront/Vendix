@@ -1,13 +1,7 @@
 ---
 name: vendix-trust-proxy-chain
 description: >
-  Cadena de proxies de confianza y resolución de la IP real del cliente (`req.ip`) para el
-  rate limit, la auditoría y cualquier regla por IP. Cubre `TRUST_PROXY_HOPS`, el predicado
-  `createTrustProxyPredicate`, la topología verificada de producción, y la ruta de migración
-  para meter un gateway/CDN delante del backend sin abrir un bypass del rate limit.
-  Trigger: Cuando se agrega o quita un proxy, gateway, CDN, ALB o WAF delante del backend;
-  cuando se cambia `TRUST_PROXY_HOPS`; cuando el rate limit bloquea a todos a la vez o no
-  bloquea a nadie; o cuando se lee la IP del cliente en cualquier parte del código.
+  IP real del cliente (`req.ip`) tras la cadena de proxies: `TRUST_PROXY_HOPS`, `createTrustProxyPredicate`, topología de prod. Trigger: añadir/quitar proxy, gateway, CDN, ALB o WAF; rate limit que bloquea a todos o a nadie; leer la IP del cliente.
 license: MIT
 metadata:
   author: rzyfront
@@ -23,6 +17,10 @@ metadata:
     - "Modificando client-ip.util.ts o la configuración de trust proxy en main.ts"
     - "Cambiando la topología de red de producción (nginx, Route53, CloudFront)"
 ---
+
+## Cuándo usar
+
+Rate limit, auditoría o cualquier regla/cuota por IP; ruta de migración para meter un gateway/CDN delante del backend sin abrir un bypass del rate limit; cambios en `client-ip.util.ts`, trust proxy en `main.ts` o topología (nginx, Route53, CloudFront).
 
 # Cadena de proxies de confianza (trust proxy)
 

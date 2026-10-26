@@ -110,6 +110,6 @@ arrives. Full contract, spec + CI guard in `vendix-frontend-state`
 ## Related Skills
 
 - `vendix-zoneless-signals`
-- `vendix-frontend-component`
+- `vendix-frontend`
 - `vendix-angular-forms`
 - `vendix-frontend-state`

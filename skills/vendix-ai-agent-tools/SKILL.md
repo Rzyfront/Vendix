@@ -1,11 +1,9 @@
 ---
 name: vendix-ai-agent-tools
 description: >
-  AI Agent system: AIAgentService ReAct loop, AIToolRegistry, decentralized domain
-  tool registration, the propose→confirm→execute write circuit, read-only and
-  client-side tool categories, permission checks, and provider tool-use integration.
-  Trigger: When creating AI tools, modifying the Tool Registry, working with the
-  ReAct loop, adding a write tool with confirmation, or adding tool-use capabilities.
+  AI Agent: AIAgentService ReAct loop, AIToolRegistry, domain tool registration,
+  propose→confirm→execute write circuit, tool permissions. Trigger: creating AI tools, modifying the
+  Tool Registry or ReAct loop, adding a write tool with confirmation.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -21,6 +19,14 @@ metadata:
     - "Adding a clientSide tool the browser dispatches"
     - "Exposing a tool to the realtime voice surface"
 ---
+
+## Cuándo usar
+
+AI Agent system: AIAgentService ReAct loop, AIToolRegistry, decentralized domain tool registration,
+the propose→confirm→execute write circuit, read-only and client-side tool categories, permission
+checks, and provider tool-use integration. Trigger: When creating AI tools, modifying the Tool
+Registry, working with the ReAct loop, adding a write tool with confirmation, or adding tool-use
+capabilities.
 
 ## Source of Truth
 

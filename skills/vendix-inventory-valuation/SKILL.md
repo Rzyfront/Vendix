@@ -1,9 +1,7 @@
 ---
 name: vendix-inventory-valuation
 description: >
-  Inventory valuation rules for Vendix: current and historical valuation, CPP/FIFO costs,
-  COGS, inventory snapshots, and alignment with accounting entities.
-  Trigger: When implementing or debugging inventory valuation, COGS, cost layers, stock cost snapshots, or inventory valuation reports.
+  Inventory valuation: current/historical valuation, CPP/FIFO costs, COGS, cost layers, snapshots, accounting alignment. Trigger: inventory valuation, COGS, inventory_cost_layers, valuation snapshots or reports.
 license: MIT
 metadata:
   author: rzyfront

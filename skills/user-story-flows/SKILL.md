@@ -1,9 +1,9 @@
 ---
 name: user-story-flows
 description: >
-  Authoring user stories as self-contained, animated HTML flow artifacts saved under docs/ at the repo root.
-  Trigger: When documenting user stories, drawing user-story flow diagrams, or producing a graphical
-  view of a feature's flows to save in docs/ and optionally publish as a Claude Artifact.
+  Author user stories as self-contained animated HTML flow artifacts under docs/. Trigger:
+  /user-story-flows, documenting user stories, user-story flow diagrams, graphical view of a feature's
+  flows.
 license: MIT
 metadata:
   author: rzyfront
@@ -15,6 +15,7 @@ metadata:
     - "Saving user-story artifacts as HTML under docs/ at the repo root"
     - "Producing an animated flow view of a feature to share as a Claude Artifact"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # User Story Flows

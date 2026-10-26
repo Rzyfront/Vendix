@@ -1,10 +1,9 @@
 ---
 name: vendix-error-handling
 description: >
-  Standardized backend/frontend error handling with VendixHttpException, error-codes.ts,
-  AllExceptionsFilter, validation error mapping, frontend parseApiError, and UX message
-  mapping. Trigger: When adding errors, handling exceptions, mapping API errors, or
-  replacing generic Nest exceptions.
+  Backend/frontend error handling: VendixHttpException, error-codes.ts, AllExceptionsFilter,
+  validation error mapping, parseApiError, UX messages. Trigger: adding errors, handling exceptions,
+  mapping API errors, replacing generic Nest exceptions.
 license: MIT
 metadata:
   author: rzyfront
@@ -120,5 +119,5 @@ Never display backend developer details to users.
 ## Related Skills
 
 - `vendix-validation`
-- `vendix-backend-api`
+- `vendix-backend`
 - `vendix-frontend`

@@ -66,5 +66,5 @@ Current tour configs use `TourConfig` and `TourStep` from the service, including
 ## Related Skills
 
 - `vendix-zoneless-signals`
-- `vendix-frontend-component`
+- `vendix-frontend`
 - `vendix-ui-ux`

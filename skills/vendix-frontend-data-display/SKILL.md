@@ -175,5 +175,5 @@ Current caveat: `footerStyle` exists in the interface and is used by module conf
 - `vendix-frontend-icons` - Icons used in actions, avatars, and detail fields
 - `vendix-date-timezone` - Date transforms
 - `vendix-currency-formatting` - Currency transforms
-- `vendix-backend-api` - Backend endpoint patterns including paginated responses
+- `vendix-backend` - Backend endpoint patterns including paginated responses
 

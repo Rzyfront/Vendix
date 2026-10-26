@@ -1,12 +1,7 @@
 ---
 name: vendix-print-geometry
 description: >
-  Regla del "ancho imprimible" para documentos impresos de Vendix (QUI-950): todo ticket en rollo
-  se arma al ancho imprimible del cabezal, nunca al ancho del papel. Cubre la fuente única
-  `printable_width_mm`, el kernel `resolvePrintGeometry`, y los consumidores (composer, PDF de
-  factura, PDF de planilla, DocumentPrintService).
-  Trigger: Editing print formats, print templates, thermal ticket layout or paper geometry; adding a
-  print route or PDF builder for rolls; debugging a ticket cut at the sides.
+  Regla del ancho imprimible (QUI-950): tickets en rollo al ancho del cabezal, no del papel; `printable_width_mm`, `resolvePrintGeometry`. Trigger: print formats/templates, ticket térmico, PDF de rollo, ticket cortado a los lados.
 license: MIT
 metadata:
   author: rzyfront
@@ -19,6 +14,10 @@ metadata:
     - "Adding a new paper format to print formats"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
+
+## Cuándo usar
+
+Consumidores de la geometría: composer, PDF de factura, PDF de planilla, DocumentPrintService. Aplica al editar formatos/plantillas de impresión, añadir rutas de impresión o builders PDF de rollo, o nuevos formatos de papel.
 
 # Vendix Print Geometry
 

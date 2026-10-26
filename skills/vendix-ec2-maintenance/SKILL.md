@@ -1,10 +1,9 @@
 ---
 name: vendix-ec2-maintenance
 description: >
-  Vendix EC2 production maintenance and troubleshooting: GitHub Actions to ECR + EC2 deploy,
-  targeted Docker cleanup, CloudWatch/monitoring-first diagnosis, and safe SSH/AWS access
-  expectations. Trigger: When dealing with EC2 deployment failures, disk pressure, Docker
-  pull/layer errors, or server cleanup.
+  Vendix EC2 production maintenance: GitHub Actions→ECR→EC2 deploy, targeted Docker cleanup,
+  CloudWatch-first diagnosis, safe SSH/AWS access. Trigger: EC2 deploy failures, disk pressure, Docker
+  pull/layer errors, server cleanup.
 license: MIT
 metadata:
   author: rzyfront

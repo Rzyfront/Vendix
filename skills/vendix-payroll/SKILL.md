@@ -1,13 +1,7 @@
 ---
 name: vendix-payroll
 description: >
-  Colombian payroll domain in Vendix: the payroll_runs and settlement state
-  machines, the calculation engine (IBC caps, FSP, Ley 1607 exoneration,
-  integral salary, art.383 withholding), novelty valuation, final settlement
-  indemnification, DIAN electronic payroll (DSPNE), and the accounting events
-  it emits. Trigger: working under apps/backend/src/domains/store/payroll, or
-  editing payroll calculation, run/settlement state, novelties, advances,
-  DIAN payroll, or bank export.
+  Colombian payroll (nómina): run/settlement state machines, calculation engine (IBC, FSP, Ley 1607, art.383), novelties, final settlement, DIAN electronic payroll (DSPNE). Trigger: work under domains/store/payroll, payroll calculation or DIAN payroll.
 license: MIT
 metadata:
   author: rzyfront
@@ -20,6 +14,10 @@ metadata:
     - "Working with DIAN electronic payroll (DSPNE), CUNE, or adjustment note 103"
     - "Working under apps/backend/src/domains/store/payroll"
 ---
+
+## When to use
+
+Includes integral salary, final settlement indemnification, advances, bank export, CUNE / adjustment note 103, and the accounting events payroll emits.
 
 # Vendix Payroll (Colombia)
 
@@ -131,7 +129,7 @@ Run-level DIAN actions live on `PayrollFlowService`: `sendToDian`, `getDianStatu
 | Wiring the event listener / auto-entry service | `vendix-auto-entries` |
 | PILA flat file (Res. 2388/2016) | `vendix-pila-flatfile` |
 | art.383/387 withholding math detail | read `calculation/retefuente-art383.ts` |
-| Schema/migration change to employee/contract fields | `vendix-prisma-schema`, `vendix-prisma-migrations` |
+| Schema/migration change to employee/contract fields | `vendix-prisma`, `vendix-prisma-migrations` |
 
 ## Known Gaps
 
@@ -145,4 +143,4 @@ Run-level DIAN actions live on `PayrollFlowService`: `sendToDian`, `getDianStatu
 - `vendix-auto-entries` — event listener + AutoEntryService wiring.
 - `vendix-pila-flatfile` — social-security flat file.
 - `vendix-tax-typing` — withholding concepts and declarations.
-- `vendix-backend` / `vendix-prisma-schema` — domain and schema conventions.
+- `vendix-backend` / `vendix-prisma` — domain and schema conventions.

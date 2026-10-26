@@ -1,14 +1,9 @@
 ---
 name: vendix-bulk-operations
 description: >
-  Bulk (mass) operations pattern for Vendix modules: dedicated controller +
-  service, DTO with @ArrayMaxSize(100), client-side chunking with concatMap,
-  partial-failure tolerant results, permission per bulk surface. Trigger:
-  When adding bulk operations to a module (orders, purchases, products),
-  adding a dedicated bulk controller, bulk-printing respecting store
-  receipt settings, reusing the QUI-567 / QUI-599 bulk pattern, or
-  building XLSX/CSV file imports (header maps, code-as-text cells, paged
-  session commit, parent/child rows such as product variants).
+  Bulk operations pattern: dedicated controller+service, @ArrayMaxSize(100) DTO, concatMap chunking,
+  partial-failure results, XLSX/CSV imports. Trigger: bulk actions on orders/purchases/products, bulk
+  printing, file imports, QUI-567/QUI-599.
 license: MIT
 metadata:
   author: rzyfront
@@ -28,6 +23,15 @@ metadata:
 ---
 
 # Vendix Bulk Operations
+
+## Cuándo usar
+
+Bulk (mass) operations pattern for Vendix modules: dedicated controller + service, DTO with
+@ArrayMaxSize(100), client-side chunking with concatMap, partial-failure tolerant results,
+permission per bulk surface. Trigger: When adding bulk operations to a module (orders, purchases,
+products), adding a dedicated bulk controller, bulk-printing respecting store receipt settings,
+reusing the QUI-567 / QUI-599 bulk pattern, or building XLSX/CSV file imports (header maps,
+code-as-text cells, paged session commit, parent/child rows such as product variants).
 
 ## Purpose
 

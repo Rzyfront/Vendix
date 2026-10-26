@@ -1,9 +1,9 @@
 ---
 name: vendix-agent-procedural-memory
 description: >
-  Govern F runtime procedural recipes: verified-source capture, signed human quality
-  reviews, private/global publication, progressive retrieval, freshness and quarantine.
-  Trigger: Changing learned runtime recipes, recipe mining, quality gates or publication.
+  Govern F runtime procedural recipes: verified-source capture, signed quality reviews, private/global
+  publication, progressive retrieval, freshness, quarantine. Trigger: changing learned runtime
+  recipes, recipe mining, quality gates or publication.
 license: MIT
 metadata:
   author: rzyfront

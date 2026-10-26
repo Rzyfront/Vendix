@@ -1,13 +1,9 @@
 ---
 name: vendix-analytics-metrics
 description: >
-  Cómo nace bien una analítica de Vendix: una sola definición de ingreso/costo/gasto
-  (analytics-metrics.contract.ts), el día de negocio en la TZ de la tienda distinguiendo
-  TIMESTAMP de BUSINESS-DATE, COGS auditable con cobertura de costo, crecimiento sin base
-  falsa, y caché con el scope de tienda en la llave. OBLIGATORIA al crear, editar, fixear o
-  mejorar cualquier analítica, KPI, tarjeta de dashboard o serie temporal.
-  Trigger: Working on apps/backend/src/domains/store/analytics, the store dashboard cards,
-  or any frontend analytics page/chart/KPI.
+  OBLIGATORIA en analíticas: contrato único ingreso/costo/gasto, día de negocio en TZ de tienda, COGS
+  auditable, crecimiento sin base falsa, caché por tienda. Trigger: crear/editar/fixear KPI,
+  dashboard, serie temporal, domains/store/analytics.
 license: MIT
 metadata:
   author: rzyfront
@@ -29,6 +25,16 @@ metadata:
 ---
 
 # Vendix Analytics Metrics
+
+## Cuándo usar
+
+Cómo nace bien una analítica de Vendix: una sola definición de ingreso/costo/gasto
+(analytics-metrics.contract.ts), el día de negocio en la TZ de la tienda distinguiendo TIMESTAMP de
+BUSINESS-DATE, COGS auditable con cobertura de costo, crecimiento sin base falsa, y caché con el
+scope de tienda en la llave. OBLIGATORIA al crear, editar, fixear o mejorar cualquier analítica,
+KPI, tarjeta de dashboard o serie temporal. Trigger: Working on
+apps/backend/src/domains/store/analytics, the store dashboard cards, or any frontend analytics
+page/chart/KPI.
 
 Regla de oro: **una analítica no es un query, es un contrato.** Dos pantallas que dicen
 "Ingresos" tienen que mostrar el mismo número, o una de las dos está mintiendo.
@@ -186,5 +192,5 @@ FROM orders WHERE store_id = $1;
 - `vendix-inventory-valuation` - de dónde sale el costo (CPP/FIFO) que alimenta el COGS.
 - `vendix-accounting-rules` - causación vs caja para gastos y asientos.
 - `vendix-frontend-stats-cards` - la tarjeta que muestra el número.
-- `vendix-frontend-cache` - patrón de caché del frontend.
+- `vendix-frontend` - patrón de caché del frontend.
 - `buildcheck-dev` - puerta de compilación.

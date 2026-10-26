@@ -1,13 +1,9 @@
 ---
 name: linear-connect
-description: |
-  Bootstrap a developer's local Linear setup for the Vendix project on the
-  Quickss workspace. Use when the user says "configurar Linear", "no tengo
-  credenciales", "conectar a Linear", or when the `linear-issues` skill
-  reports a missing `LINEAR_API_KEY` or absent `.linear/config.json`. Validates
-  the personal API key, resolves and caches the team/project/labels/state
-  UUIDs in `.linear/config.json`, and confirms with a smoke-test read. Do NOT
-  use for creating or mutating issues (use `linear-issues` instead).
+description: >
+  Bootstrap local Linear setup for Vendix (Quickss workspace): validate LINEAR_API_KEY and cache
+  team/project/labels/state UUIDs in .linear/config.json. Trigger: /linear-connect, "configurar
+  Linear", "conectar a Linear", missing LINEAR_API_KEY.
 license: MIT
 metadata:
   author: rzyfront
@@ -19,9 +15,19 @@ metadata:
     - "Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json"
     - "Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # Linear Connect (Vendix · Quickss)
+
+## Cuándo usar
+
+Bootstrap a developer's local Linear setup for the Vendix project on the Quickss workspace. Use when
+the user says "configurar Linear", "no tengo credenciales", "conectar a Linear", or when the
+`linear-issues` skill reports a missing `LINEAR_API_KEY` or absent `.linear/config.json`. Validates
+the personal API key, resolves and caches the team/project/labels/state UUIDs in
+`.linear/config.json`, and confirms with a smoke-test read. Do NOT use for creating or mutating
+issues (use `linear-issues` instead).
 
 This skill exists because the `linear-issues` skill needs a personal API key
 in the environment and a local cache of resolved UUIDs. This skill sets both

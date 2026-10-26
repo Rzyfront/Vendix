@@ -1,14 +1,9 @@
 ---
 name: linear-issues
-description: |
-  Create, search, and list issues in the Vendix project on the Quickss Linear
-  workspace. Use when the user asks to "crear issue en Linear", "crear ticket",
-  "buscar issue", "¿existe un issue de...?", "listar issues de Vendix", "crear
-  bug en Vendix", or describes a task that should become a Vendix issue.
-  Operates ONLY against the Quickss workspace, team "Quickss" (key QUI), and
-  project "Vendix" — hardcoded, not configurable. Do NOT use for editing the
-  workspace, managing teams/projects, or working with a different Linear
-  workspace.
+description: >
+  Create, search and list Vendix issues in Linear (Quickss workspace, team QUI, project Vendix only).
+  Trigger: "crear issue en Linear", "crear ticket", "crear bug en Vendix", "buscar issue", "¿existe un
+  issue de...?", "listar issues de Vendix".
 license: MIT
 metadata:
   author: rzyfront
@@ -27,6 +22,15 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Linear Issues (Vendix · Quickss)
+
+## Cuándo usar
+
+Create, search, and list issues in the Vendix project on the Quickss Linear workspace. Use when the
+user asks to "crear issue en Linear", "crear ticket", "buscar issue", "¿existe un issue de...?",
+"listar issues de Vendix", "crear bug en Vendix", or describes a task that should become a Vendix
+issue. Operates ONLY against the Quickss workspace, team "Quickss" (key QUI), and project "Vendix" —
+hardcoded, not configurable. Do NOT use for editing the workspace, managing teams/projects, or
+working with a different Linear workspace.
 
 ## Inputs to collect
 

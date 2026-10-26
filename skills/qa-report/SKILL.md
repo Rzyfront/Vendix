@@ -1,16 +1,9 @@
 ---
 name: qa-report
 description: >
-  Author a sprint QA report as a self-contained, graphical HTML web presentation (a "slide deck")
-  that summarizes bugs found by QA and tickets/flows validated within a time window, with charts,
-  demonstrative listings, tasteful motion, and a prominent Critical/Urgent section. Data comes from
-  one of two conversationally-negotiated paths: the QA user pastes the info as text, OR the agent
-  autonomously queries Linear for the sprint window. Saved under docs/ and optionally published as a
-  Claude Artifact.
-  Trigger: Creating a QA sprint report as a web presentation, building an HTML slide-deck of bugs
-  found and tickets validated in a sprint window, reporting QA results with charts and a
-  critical/urgent section, or summarizing Linear bugs/validated tickets for a sprint into a visual
-  report.
+  Build a sprint QA report as a self-contained animated HTML slide deck (bugs found, tickets
+  validated, charts, Critical/Urgent section) from pasted text or Linear. Trigger: /qa-report, QA
+  sprint report, reporte de QA.
 license: MIT
 metadata:
   author: rzyfront
@@ -22,9 +15,22 @@ metadata:
     - "Reporting QA results with charts and a critical/urgent section"
     - "Summarizing Linear bugs and validated tickets for a sprint into a visual report"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # QA Report
+
+## Cuándo usar
+
+Author a sprint QA report as a self-contained, graphical HTML web presentation (a "slide deck") that
+summarizes bugs found by QA and tickets/flows validated within a time window, with charts,
+demonstrative listings, tasteful motion, and a prominent Critical/Urgent section. Data comes from
+one of two conversationally-negotiated paths: the QA user pastes the info as text, OR the agent
+autonomously queries Linear for the sprint window. Saved under docs/ and optionally published as a
+Claude Artifact. Trigger: Creating a QA sprint report as a web presentation, building an HTML
+slide-deck of bugs found and tickets validated in a sprint window, reporting QA results with charts
+and a critical/urgent section, or summarizing Linear bugs/validated tickets for a sprint into a
+visual report.
 
 ## Purpose
 

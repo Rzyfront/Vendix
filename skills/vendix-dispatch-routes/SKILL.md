@@ -1,13 +1,9 @@
 ---
 name: vendix-dispatch-routes
 description: >
-  Planillas de despacho (rutas DSD con recaudo) para distribuidoras colombianas:
-  agrupar múltiples remisiones en una ruta con vehículo/conductor/auxiliares y
-  orden de paradas, ejecutar captura progresiva desde la app móvil, y cuadrar
-  el recaudo al regreso reutilizando caja/cartera/refunds/retenciones existentes.
-  Trigger: When working with dispatch_routes, dispatch_route_stops, vehicles,
-  DSD route settlement, withholding breakdown per stop, declared_cash variance,
-  route PDF print, or any "agregador de ruta que orquesta primitivas".
+  Planillas de despacho (rutas DSD con recaudo): agrupar remisiones en ruta con vehículo/conductor y
+  paradas, captura móvil y cuadre de recaudo. Trigger: dispatch_routes, dispatch_route_stops,
+  vehicles, liquidación de ruta, declared_cash, PDF de ruta.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -23,6 +19,15 @@ metadata:
     - "Modifying the planillas-rutas frontend module"
     - "Adding new fields to dispatch_route_stop_history audit log"
 ---
+
+## Cuándo usar
+
+Planillas de despacho (rutas DSD con recaudo) para distribuidoras colombianas: agrupar múltiples
+remisiones en una ruta con vehículo/conductor/auxiliares y orden de paradas, ejecutar captura
+progresiva desde la app móvil, y cuadrar el recaudo al regreso reutilizando
+caja/cartera/refunds/retenciones existentes. Trigger: When working with dispatch_routes,
+dispatch_route_stops, vehicles, DSD route settlement, withholding breakdown per stop, declared_cash
+variance, route PDF print, or any "agregador de ruta que orquesta primitivas".
 
 ## When to Use
 

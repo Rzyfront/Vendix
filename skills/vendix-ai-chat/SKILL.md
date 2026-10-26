@@ -1,10 +1,9 @@
 ---
 name: vendix-ai-chat
 description: >
-  AI Chat system (product name: Vexi): conversation CRUD, the stream-intent handshake,
-  agentic SSE routing, NgRx Vexi state with tool steps and pending proposals, the dock,
-  and the store-wide master switch. Trigger: When working with AI conversations, the Vexi
-  dock/panel, chat API endpoints, or NgRx chat state.
+  Vexi AI chat: conversation CRUD, stream-intent handshake, agentic SSE routing, NgRx Vexi state (tool
+  steps, proposals), dock and store master switch. Trigger: AI conversations, Vexi dock/panel, chat
+  API endpoints, NgRx chat state.
 license: Apache-2.0
 metadata:
   author: rzyfront

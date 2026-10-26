@@ -1,11 +1,7 @@
 ---
 name: vendix-prisma-seed
 description: >
-  Vendix database seed patterns: current seed runner, production seed, flat seed modules,
-  Prisma 7 shared client, idempotency, destructive dev cleanup, and the
-  `syncRolePermissions` helper for canonical role-permission synchronization. Trigger:
-  When creating seeds, editing seed modules, running seed scripts, or resetting
-  development data.
+  Vendix seed patterns: seed runner, production seed, flat seed modules, idempotency, dev cleanup, `syncRolePermissions`. Trigger: creating or editing seeds, running seed scripts, resetting development data.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -141,5 +137,5 @@ system roles (`super_admin`, `owner`, `admin`, `manager`, `supervisor`,
 ## Related Skills
 
 - `vendix-prisma-migrations`
-- `vendix-prisma-schema`
+- `vendix-prisma`
 - `vendix-prisma-scopes`

@@ -1,16 +1,8 @@
 ---
 name: verify-ticket-prod
 description: >
-  Controlled, non-destructive production verification that a Linear ticket is correctly deployed and
-  behaves as its requirement demands. Drives Playwright MCP E2E against the live app at
-  www.vendix.online, ALWAYS logged in as the demo account (never a real tenant). Runs Happy Path and
-  Sad Path like how-to-test, plus a non-destructive Controlled Probe that OBSERVES weaknesses and
-  REPORTS them instead of breaking the system; also reports any disparity between observed behavior
-  and the ticket requirement.
-  Trigger: Verifying a Linear ticket / Vendix issue is correctly applied in production, running a
-  controlled E2E verification of a shipped ticket on www.vendix.online, confirming a production fix
-  matches its requirement or reporting defects/anomalies, or doing non-destructive production
-  verification with the demo account.
+  Non-destructive production E2E verification (Playwright, www.vendix.online, demo account only) that a Linear ticket is deployed and meets its requirement. Trigger: /verify-ticket-prod, verifying a shipped ticket in production.
+disable-model-invocation: true
 license: MIT
 metadata:
   author: rzyfront
@@ -25,6 +17,10 @@ metadata:
     - "Non-destructive production verification with the demo account"
 allowed-tools: Read, Bash, Glob, Grep
 ---
+
+## When to use
+
+Invoked manually via `/verify-ticket-prod`. Drives Playwright MCP E2E against www.vendix.online ALWAYS as the demo account (never a real tenant): Happy Path + Sad Path (like how-to-test) plus a non-destructive Controlled Probe that OBSERVES and REPORTS weaknesses instead of breaking the system; reports any disparity between observed behavior and the ticket requirement. Covers closing the ticket to Done after QA, or returning it to Todo with the Devuelto label and raised priority.
 
 # Verify Ticket in Production
 

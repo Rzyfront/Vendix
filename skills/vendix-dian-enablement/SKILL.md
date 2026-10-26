@@ -1,11 +1,9 @@
 ---
 name: vendix-dian-enablement
 description: >
-  DIAN enablement and numbering rules for Vendix electronic invoicing: internal note series
-  (NCVS/NDVS/NASVS/NAEVS), "in use" and single active note series, logical archiving of resolutions,
-  cross-account numbering guard (INVOICING_RESOLUTION_017), enablement inheritance by PIN + software ID,
-  what DIAN configuration data may never leave the backend, and the single activation wizard.
-  Trigger: When creating or editing DIAN resolutions or note series, working on enablement / test set / promotion to production, enablement inheritance, the cross-account numbering guard, exposing DIAN configuration data over HTTP, or the activation wizard.
+  DIAN e-invoicing enablement and numbering: note series (NCVS/NDVS/NASVS/NAEVS), resolutions,
+  cross-account numbering guard, enablement inheritance, activation wizard. Trigger: DIAN resolutions,
+  note series, test set, promotion to production.
 license: MIT
 metadata:
   author: rzyfront
@@ -23,6 +21,16 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Vendix DIAN Enablement and Numbering
+
+## Cuándo usar
+
+DIAN enablement and numbering rules for Vendix electronic invoicing: internal note series
+(NCVS/NDVS/NASVS/NAEVS), "in use" and single active note series, logical archiving of resolutions,
+cross-account numbering guard (INVOICING_RESOLUTION_017), enablement inheritance by PIN + software
+ID, what DIAN configuration data may never leave the backend, and the single activation wizard.
+Trigger: When creating or editing DIAN resolutions or note series, working on enablement / test set
+/ promotion to production, enablement inheritance, the cross-account numbering guard, exposing DIAN
+configuration data over HTTP, or the activation wizard.
 
 ## Purpose
 

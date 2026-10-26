@@ -1,10 +1,8 @@
 ---
 name: vendix-cloud-operations
 description: >
-  Vendix cloud operations guidance for using the private production runbook,
-  SSH, and AWS CLI to inspect or administer cloud resources. Trigger: When
-  consulting keys/README.md, using AWS CLI for Vendix cloud inventory, checking
-  production resource locations, or deciding whether to use SSH versus AWS CLI.
+  Vendix cloud operations with the private production runbook, SSH and AWS CLI. Trigger: consulting
+  keys/README.md, AWS CLI cloud inventory, locating production resources, choosing SSH vs AWS CLI.
 license: MIT
 metadata:
   author: rzyfront

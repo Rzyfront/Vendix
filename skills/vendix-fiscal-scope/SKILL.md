@@ -1,9 +1,9 @@
 ---
 name: vendix-fiscal-scope
 description: >
-  Organization fiscal scope for Vendix: STORE vs ORGANIZATION legal/tax entity behavior,
-  DIAN configuration ownership, fiscal accounting entities, fiscal reports, and intercompany transfers.
-  Trigger: When working with organizations.fiscal_scope, fiscal accounting entities, DIAN NIT ownership, fiscal reports by NIT, fiscal scope migrations, intercompany stock-transfer entries, or gating a printed/displayed fiscal figure by fiscal state.
+  Organization fiscal scope: STORE vs ORGANIZATION tax entity, DIAN ownership, fiscal accounting
+  entities, fiscal reports, intercompany transfers. Trigger: organizations.fiscal_scope, DIAN NIT
+  ownership, fiscal reports by NIT, intercompany entries.
 license: MIT
 metadata:
   author: rzyfront
@@ -24,6 +24,14 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Vendix Fiscal Scope
+
+## Cuándo usar
+
+Organization fiscal scope for Vendix: STORE vs ORGANIZATION legal/tax entity behavior, DIAN
+configuration ownership, fiscal accounting entities, fiscal reports, and intercompany transfers.
+Trigger: When working with organizations.fiscal_scope, fiscal accounting entities, DIAN NIT
+ownership, fiscal reports by NIT, fiscal scope migrations, intercompany stock-transfer entries, or
+gating a printed/displayed fiscal figure by fiscal state.
 
 ## Purpose
 

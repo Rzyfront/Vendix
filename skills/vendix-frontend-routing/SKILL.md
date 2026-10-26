@@ -81,7 +81,7 @@ Key route files:
 
 ## Related Skills
 
-- `vendix-app-architecture` - AppType/domain routing concepts
+- `vendix-core` - AppType/domain routing concepts
 - `vendix-panel-ui` - Sidebar visibility for private modules
 - `vendix-zoneless-signals` - Component runtime rules
-- `vendix-frontend-module` - Module file structure
+- `vendix-frontend` - Module file structure

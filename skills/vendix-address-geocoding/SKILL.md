@@ -1,16 +1,9 @@
 ---
 name: vendix-address-geocoding
 description: >
-  Patrón unificado de direcciones + geocoding para checkout, clientes, remisiones y planilla.
-  Cubre tabla `addresses`, endpoints `store/addresses`, snapshot `dispatch_notes.customer_address`,
-  componente `app-address-map-picker` (MapLibre), `GeocodingService` frontend/backend, el parser de
-  nomenclatura colombiana (`colombian-address.util.ts`), la cascade de forward-geocoding con
-  precisión graduada (`exact`/`interpolated`/`intersection`/`street`/`area`) y su fallback pago a
-  Google, validación sintáctica + warning no-bloqueante (bloqueante solo para envío a domicilio),
-  cascade `resolveStopCoordinates` y customer-modal crear-mode. Trigger: cuando editar/agregar
-  dirección de cliente, remisión o stop; cuando el mapa del despacho rechaza una dirección; cuando
-  integrar dirección + mapa opcional + geocoding; cuando parsear nomenclatura colombiana o depurar
-  el fallback de Google.
+  Direcciones + geocoding: tabla addresses, app-address-map-picker (MapLibre), GeocodingService,
+  parser de nomenclatura colombiana, cascade de precisión y fallback Google. Trigger: dirección de
+  cliente/remisión/stop, mapa de despacho, geocoding.
 license: MIT
 metadata:
   author: rzyfront
@@ -29,6 +22,19 @@ metadata:
     - "Configuring the Google Geocoding fallback or its monthly cap"
     - "Debugging why a forward-geocode resolves with low precision (street/area) instead of intersection/exact"
 ---
+
+## Cuándo usar
+
+Patrón unificado de direcciones + geocoding para checkout, clientes, remisiones y planilla. Cubre
+tabla `addresses`, endpoints `store/addresses`, snapshot `dispatch_notes.customer_address`,
+componente `app-address-map-picker` (MapLibre), `GeocodingService` frontend/backend, el parser de
+nomenclatura colombiana (`colombian-address.util.ts`), la cascade de forward-geocoding con precisión
+graduada (`exact`/`interpolated`/`intersection`/`street`/`area`) y su fallback pago a Google,
+validación sintáctica + warning no-bloqueante (bloqueante solo para envío a domicilio), cascade
+`resolveStopCoordinates` y customer-modal crear-mode. Trigger: cuando editar/agregar dirección de
+cliente, remisión o stop; cuando el mapa del despacho rechaza una dirección; cuando integrar
+dirección + mapa opcional + geocoding; cuando parsear nomenclatura colombiana o depurar el fallback
+de Google.
 
 ## Purpose
 
@@ -608,14 +614,14 @@ Edit-mode sí persiste el modal directamente (el customer ya existe).
 
 ## Related Skills
 
-- `vendix-frontend-component` — standalone components
+- `vendix-frontend` — standalone components
 - `vendix-zoneless-signals` — **CRÍTICO** en frontend (signals, OnPush, `input`/`output`)
 - `vendix-angular-forms` — Validators, FormGroup
 - `vendix-frontend-modal` — modales
 - `vendix-validation` — patrón validación bloqueante + warning
 - `vendix-customer-auth` — customer / users rol `customer`
 - `vendix-dispatch-routes` — cascade `resolveStopCoordinates`, `unlocated[]`
-- `vendix-backend-api` — endpoints `store/addresses`, `ecommerce/geocoding`
+- `vendix-backend` — endpoints `store/addresses`, `ecommerce/geocoding`
 - `vendix-permissions` — `store:addresses:*`
 - `vendix-naming-conventions` — claves DTO vs Prisma
 - `vendix-redis-quota` — patrón INCR+EXPIRE reusado por el tope mensual de Google

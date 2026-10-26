@@ -79,4 +79,4 @@ Real role enum values include lowercase roles such as `super_admin`, `admin`, `m
 - `vendix-permissions` - Permission names, seed rows, guard behavior
 - `vendix-subscription-gate` - Store write protection by subscription state
 - `vendix-multi-tenant-context` - Request context propagation
-- `vendix-backend-api` - Controller endpoint patterns
+- `vendix-backend` - Controller endpoint patterns

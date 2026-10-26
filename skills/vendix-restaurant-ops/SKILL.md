@@ -1,14 +1,7 @@
 ---
 name: vendix-restaurant-ops
 description: >
-  Suite restaurante para Vendix: modelado plato/insumo, recetas/BOM, producción de
-  sub-recetas en lote, fire-to-kitchen con descuento y COGS, mesas con cuenta
-  abierta y split financiero, KDS en tiempo real vía SSE, menú con carta/secciones/
-  combos/ventanas horarias/ingeniería BCG, e integración POS con gating por
-  industria. Trigger: When working on restaurant suite, recipes, BOM, prepared
-  products, ingredient flags, kitchen fire, KDS, kitchen tickets, table sessions,
-  open tabs, bill split, menu engineering, menu availability windows, or any
-  store whose `industries` includes `restaurant`.
+  Suite restaurante (lado POS/admin): recetas/BOM, productos prepared/insumos, fire-to-kitchen, KDS por SSE, mesas, cuenta abierta, menús. Trigger: recipes, BOM, kitchen fire, KDS, table sessions, bill split, menu engineering, tiendas `restaurant`.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -432,7 +425,7 @@ Physical mode (small kitchens, paper comandas, no KDS screens):
 - Combos are **not** a new model. A combo is a `product_type='prepared'`
   with `is_combo=true`, whose `recipe_items` point to sellable products
   (or other combos). The combo's price is the product's own price
-  (`vendix-calculated-pricing`); at fire, the recipe is exploded and each
+  (`vendix-product-pricing`); at fire, the recipe is exploded and each
   component is consumed.
 - Menu engineering (BCG): `menu-engineering.service.ts` aggregates
   popularity (units sold in a window) × margin (price − recipe unit cost)

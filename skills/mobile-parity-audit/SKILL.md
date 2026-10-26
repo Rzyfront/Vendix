@@ -1,14 +1,9 @@
 ---
 name: mobile-parity-audit
 description: >
-  Audit web↔mobile feature parity for Vendix: produce a granular functional inventory of a named web
-  feature/module/flow (apps/frontend + its backend contracts), compare it capability-by-capability
-  against the React Native mobile app (apps/mobile), emit a strategic gap map (Present / Partial /
-  Absent / N/A), and hand the structured result to how-to-plan → how-to-dev → how-to-test to drive the
-  mobile implementation.
-  Trigger: When a developer asks to analyze/compare a web feature vs mobile, audit mobile parity, map
-  what mobile is missing relative to web, produce a mobile implementation backlog from a web module, or
-  plan mobile work that must mirror an existing web flow.
+  Audit web↔mobile parity: inventory a web feature (apps/frontend + backend contracts), compare it
+  with apps/mobile and emit a Present/Partial/Absent gap map for how-to-plan. Trigger: compare web vs
+  mobile, mobile parity, what mobile is missing.
 license: MIT
 metadata:
   author: rzyfront
@@ -25,6 +20,16 @@ allowed-tools: Read, Glob, Grep, Bash
 
 # Mobile Parity Audit
 
+## Cuándo usar
+
+Audit web↔mobile feature parity for Vendix: produce a granular functional inventory of a named web
+feature/module/flow (apps/frontend + its backend contracts), compare it capability-by-capability
+against the React Native mobile app (apps/mobile), emit a strategic gap map (Present / Partial /
+Absent / N/A), and hand the structured result to how-to-plan → development per AGENTS.md → how-to-test to drive the
+mobile implementation. Trigger: When a developer asks to analyze/compare a web feature vs mobile,
+audit mobile parity, map what mobile is missing relative to web, produce a mobile implementation
+backlog from a web module, or plan mobile work that must mirror an existing web flow.
+
 ## Purpose
 
 Vendix has an **independent React Native (Expo) mobile team** building `apps/mobile` as a **parallel
@@ -35,7 +40,7 @@ with the web client. This skill governs the *analysis* that makes that parity me
 2. Produce an **exhaustive, granular functional inventory** of everything that web target does.
 3. Compare it, capability by capability, against what already exists in `apps/mobile`.
 4. Emit a **strategic gap map**: what is Present, Partial, Absent, or N/A on mobile, prioritized.
-5. Hand that structured result to `how-to-plan` → `how-to-dev` → `how-to-test` to build and verify the
+5. Hand that structured result to `how-to-plan` → development per `AGENTS.md` → `how-to-test` to build and verify the
    mobile implementation.
 
 **This skill does NOT govern:** how to write mobile code (that is `mobile-dev`), how to structure the
@@ -78,13 +83,13 @@ Five phases. Phases 1–4 are the audit (read-only); phase 5 is the handoff.
 | **2. Web inventory** | Enumerate every capability of the web target using the Capability Taxonomy | `Explore`/`Read`, `grep` over `apps/frontend` + backend contracts | Granular capability list (the "web truth") |
 | **3. Mobile inventory** | Enumerate what `apps/mobile` already implements for the same surface | `Explore`/`Read`, `grep` over `apps/mobile` | Mobile capability list |
 | **4. Gap map** | Diff web vs mobile per capability, assign status + priority | synthesis | Strategic gap map (the deliverable) |
-| **5. Handoff** | Feed the gap map to planning/dev/test | `how-to-plan`, then `how-to-dev` + `how-to-test` | Approved mobile implementation plan |
+| **5. Handoff** | Feed the gap map to planning/dev/test | `how-to-plan`, then development per `AGENTS.md` + `how-to-test` | Approved mobile implementation plan |
 
 - **Phase 1** is mandatory and cannot be skipped. If the user's target is vague ("audit orders"),
   resolve *which* orders surface (store POS orders? org-admin orders list? ecommerce checkout?) before
   reading anything.
-- **Phases 2 and 3 are independent** — run them as parallel `Explore` agents via `agent-teams` (one
-  owns web, one owns mobile) and merge in phase 4. Cap at the `how-to-plan` limit of 3 parallel.
+- **Phases 2 and 3 are independent** — run them as parallel `Explore` agents (one
+  owns web, one owns mobile; delegation rules in `AGENTS.md`, inline by default) and merge in phase 4. Cap at the `how-to-plan` limit of 3 parallel.
 - **Phase 4** is pure synthesis: never re-open source to "double check" mid-diff; if the inventory is
   incomplete, return to phase 2/3, don't patch the map.
 - **Phase 5** is where `how-to-plan` takes over. The gap map becomes the plan's `Context` +
@@ -170,7 +175,7 @@ The gap map is the bridge, not the destination. After the report:
    Absent/Partial capability → one or more plan `Steps`; `Recommended Sequencing` → step order. Every
    plan step must list `mobile-dev` in `Skills` (mobile edits are exclusive to `apps/mobile/`), plus
    the domain skills the capability touches (e.g. `vendix-currency-formatting`, `vendix-permissions`).
-2. **`how-to-dev`** — execute the approved plan. `mobile-dev` is loaded first; all writes stay inside
+2. **Development per `AGENTS.md`** — execute the approved plan. `mobile-dev` is loaded first; all writes stay inside
    `apps/mobile/`; backend/frontend are read-only reference for contract alignment.
 3. **`how-to-test`** — verify each shipped capability. Mobile UI is verified on-device / in the Expo
    client, but the **backend contract** each capability consumes is verified with `curl` (Happy / Sad
@@ -196,7 +201,7 @@ The gap map is the bridge, not the destination. After the report:
 | Coarse gap map ("Orders: missing") | Enumerate to actions/fields/states/endpoints per the Capability Taxonomy |
 | Comparing folder trees instead of capabilities | Diff functional capabilities; folder shapes differ by design |
 | Auditing without fixing the `app_type`/surface first | Phase 1 pins the surface before any reading |
-| Writing mobile code from within the audit | Audit is read-only; code comes after `how-to-plan` approval under `how-to-dev` |
+| Writing mobile code from within the audit | Audit is read-only; code comes after `how-to-plan` approval, following `AGENTS.md` |
 | Proposing to re-implement backend logic on mobile | Reuse the shared endpoint/DTO; `mobile-dev` RULE 6 forbids duplicating backend logic |
 | Leaving a capability with no status | Every row is Present / Partial / Absent / N/A-mobile |
 | Dropping web-only capabilities silently | Mark `N/A-mobile` with a written justification |
@@ -208,16 +213,15 @@ The gap map is the bridge, not the destination. After the report:
 - `mobile-dev` — **Required for the handoff.** Governs all mobile code (edits exclusive to
   `apps/mobile/`, other trees read-only). Loaded during phase 5 dev, not the audit.
 - `how-to-plan` — Consumes the gap map to produce the mobile implementation plan.
-- `how-to-dev` — Executes the approved plan under mobile-dev.
+- `AGENTS.md` — Development flow; executes the approved plan under mobile-dev.
 - `how-to-test` — Verifies each capability (curl for the shared backend contract; Expo client for UI).
-- `agent-teams` — Run the web inventory (phase 2) and mobile inventory (phase 3) as parallel agents.
-- `vendix-app-architecture` — `app_type` / persona resolution; how web surfaces map to mobile groups.
+- Delegation rules in `AGENTS.md` (inline by default) — run the web inventory (phase 2) and mobile inventory (phase 3) as parallel agents.
+- `vendix-core` — `app_type` / persona resolution (how web surfaces map to mobile groups) and skill map by domain (route each capability to its owning domain skill).
 - `vendix-panel-ui` — Web module visibility (industry / `panel_ui` / permissions) to inventory in dim 7.
 - `vendix-permissions` — Permission requirements per capability (dim 7 of the taxonomy).
-- `vendix-core` — Skill map by domain, to route each capability to its owning domain skill.
 
 ## Changelog
 
 - **v1.0** — Initial release. Five-phase read-only audit (Scope → Web inventory → Mobile inventory →
   Gap map → Handoff), 12-dimension Capability Taxonomy, Parity Report format with a
-  Present/Partial/Absent/N/A gap map, and explicit handoff to how-to-plan → how-to-dev → how-to-test.
+  Present/Partial/Absent/N/A gap map, and explicit handoff to how-to-plan → development per AGENTS.md → how-to-test.

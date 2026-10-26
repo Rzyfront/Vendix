@@ -1,15 +1,9 @@
 ---
 name: product-catalog-normalizer
 description: >
-  Turn a messy client product list (xlsx, csv, pdf, image, Word, plain text) into a filled copy of
-  an official import template, preserving the template's columns, order, styles, validations and
-  sheets. Governs extraction from any source format, deterministic normalization of names,
-  volumes, prices, categories and brands, a mandatory 3-record preview gate for column-mapping
-  approval before writing, and an .xlsx deliverable plus a processing summary.
-  Trigger: Converting a client price list or product catalog into an import template, filling a
-  product template from a supplier file, normalizing product names/volumes/prices/categories/brands
-  for bulk upload, extracting products from a PDF/image/Word/Excel catalog, or preparing a
-  bulk product upload file for a Vendix store.
+  Turn a messy client product list (xlsx/csv/pdf/image/Word/text) into a filled Vendix import
+  template, with normalization and a 3-record preview gate. Trigger: /product-catalog-normalizer,
+  catalog or price list to import template, bulk product upload.
 license: MIT
 metadata:
   author: rzyfront
@@ -22,9 +16,21 @@ metadata:
     - "Extracting products from a PDF, image, Word or Excel product catalog"
     - "Preparing a bulk product upload file for a Vendix store"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # Product Catalog Normalizer
+
+## Cuándo usar
+
+Turn a messy client product list (xlsx, csv, pdf, image, Word, plain text) into a filled copy of an
+official import template, preserving the template's columns, order, styles, validations and sheets.
+Governs extraction from any source format, deterministic normalization of names, volumes, prices,
+categories and brands, a mandatory 3-record preview gate for column-mapping approval before writing,
+and an .xlsx deliverable plus a processing summary. Trigger: Converting a client price list or
+product catalog into an import template, filling a product template from a supplier file,
+normalizing product names/volumes/prices/categories/brands for bulk upload, extracting products from
+a PDF/image/Word/Excel catalog, or preparing a bulk product upload file for a Vendix store.
 
 ## Purpose
 
@@ -272,4 +278,4 @@ a business fact, so deriving one is not inventing data — but the user still ch
 - `vendix-inventory-stock` — what `Controla Inventario` and initial quantity actually do
 - `vendix-report-xlsx` — the reverse direction: generating xlsx from Vendix data
 - `vendix-currency-formatting` — how money is displayed in-app, not how it is parsed here
-- `how-to-dev` — required before changing the scripts under `assets/`
+- `AGENTS.md` (development rules) — required before changing the scripts under `assets/`

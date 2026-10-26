@@ -1,10 +1,9 @@
 ---
 name: vendix-ai-engine
 description: >
-  High-level AI Engine integration guide for Vendix: choosing the right AI subsystem,
-  creating AI-powered features, and consuming AI Applications. Trigger: When creating
-  AI-powered features, integrating AI Engine into domains, configuring AI providers/apps,
-  or styling AI interaction elements.
+  High-level AI Engine guide: choosing the right AI subsystem, building AI-powered features, consuming
+  AI Applications. Trigger: creating AI-powered features, integrating AI Engine into domains,
+  configuring AI providers/apps.
 license: Apache-2.0
 metadata:
   author: rzyfront

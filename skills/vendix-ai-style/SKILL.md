@@ -1,12 +1,9 @@
 ---
 name: vendix-ai-style
 description: >
-  Vendix AI Style: the single visual language for anything the AI does in the
-  web frontend — global `--vx-ai-*` tokens, `vx-ai-*` utility classes (surface,
-  button, badge, animated border, gradient text, shimmer, skeleton, orbit,
-  analysis stage, result stage, sparkles) and `<app-button variant="ai">`.
-  Trigger: Styling AI buttons, badges, sections, gradient "IA" text, or AI
-  loading/analyzing states in apps/frontend.
+  Vendix AI visual language in apps/frontend: --vx-ai-* tokens, vx-ai-* utility classes and
+  <app-button variant="ai">. Trigger: styling AI buttons, badges, sections, gradient "IA" text, or AI
+  loading/analyzing states.
 license: MIT
 metadata:
   author: rzyfront
@@ -19,6 +16,14 @@ metadata:
 ---
 
 # Vendix AI Style
+
+## Cuándo usar
+
+Vendix AI Style: the single visual language for anything the AI does in the web frontend — global
+`--vx-ai-*` tokens, `vx-ai-*` utility classes (surface, button, badge, animated border, gradient
+text, shimmer, skeleton, orbit, analysis stage, result stage, sparkles) and `<app-button
+variant="ai">`. Trigger: Styling AI buttons, badges, sections, gradient "IA" text, or AI
+loading/analyzing states in apps/frontend.
 
 ## Purpose
 
@@ -165,5 +170,5 @@ check; do not copy them as a pattern.
 
 - `vendix-frontend-theme` — base `--color-*` tokens the AI tokens derive from
 - `vendix-ui-ux` — reduced motion, focus states, contrast
-- `vendix-frontend-component` — reuse `app-button` (`variant="ai"`)
+- `vendix-frontend` — reuse `app-button` (`variant="ai"`)
 - `vendix-zoneless-signals` — component rules for AI UIs

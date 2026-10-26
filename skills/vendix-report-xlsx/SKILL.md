@@ -1,12 +1,7 @@
 ---
 name: vendix-report-xlsx
 description: >
-  Cómo nacen bien los reportes descargables de Vendix: exportación XLSX profesional con
-  ExcelJS (nunca CSV), fechas en la timezone de la tienda (fallback SIEMPRE America/Bogota),
-  dataset completo, agregación única (pantalla == archivo), y flujo de export unificado
-  backend→frontend. OBLIGATORIA al crear, editar, fixear o mejorar cualquier reporte.
-  Trigger: Creating, editing, fixing or improving any downloadable/report/export feature
-  in apps/backend/src/domains/store/analytics or apps/frontend .../store/reports.
+  OBLIGATORIA para reportes descargables: XLSX con ExcelJS (nunca CSV), timezone de tienda (fallback America/Bogota), dataset completo, pantalla == archivo. Trigger: crear, editar o fixear cualquier reporte/export (store/analytics, store/reports).
 license: MIT
 metadata:
   author: rzyfront
@@ -23,6 +18,10 @@ metadata:
     - "Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend)"
     - "Working with ReportDataAdapterService (summary/list/nested adaptation)"
 ---
+
+## Cuándo usar
+
+OBLIGATORIA al crear, editar, fixear o mejorar cualquier reporte: agregación única (pantalla == archivo), flujo de export unificado backend→frontend (`apps/backend/src/domains/store/analytics`, `apps/frontend/.../store/reports`), ReportBuilder, `sendXlsxReport`, `exportReport$`.
 
 # Vendix Report XLSX
 

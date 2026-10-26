@@ -1,11 +1,7 @@
 ---
 name: vendix-saas-billing
 description: >
-  SaaS subscription billing for Vendix stores: plan pricing, invoices, Wompi platform
-  payments, manual payments, partner commissions, payouts, proration, and dunning.
-  Trigger: When creating SaaS invoices, working with partner rev-share, margin/surcharge
-  pricing, invoice sequence allocation, partner payout batches, subscription payments,
-  manual payments, or dunning flows.
+  SaaS subscription billing for stores: plan pricing, invoices, Wompi/manual payments, partner commissions and payouts, proration, dunning. Trigger: SaaS invoices, rev-share, partner margin/surcharge, payout batches, dunning.
 license: Apache-2.0
 metadata:
   author: rzyfront

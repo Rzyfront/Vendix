@@ -1,14 +1,7 @@
 ---
 name: vendix-shipping-distance-pricing
 description: >
-  Cobro de envío por distancia real (calles, no línea recta) en Vendix: escala de tramos por km
-  en `shipping_rates.distance_tiers`, origen pineado por método (`shipping_methods.origin_*`),
-  ruteo compartido Valhalla/OSRM (`RoutingService`), resolución compartida de coords del comprador
-  (`ShippingDistanceService.resolveBuyerCoords`) y la regla de cobertura al confirmar el checkout —
-  rechazo estricto sin tolerancia (`ECOM_CHECKOUT_003`) que desde 2026-09-27 también cubre "sin
-  coordenadas del comprador, sin tarifa" (ya no degrada a zona). Trigger: editar tramos de
-  distancia, tocar `resolveConfirmShippingCost`/`resolveBuyerCoords`, tocar `RoutingService`,
-  depurar `ECOM_CHECKOUT_003`, o "cobro por km impreciso/inconsistente".
+  Cobro de envío por distancia real (Valhalla/OSRM): tramos por km (`distance_tiers`), origen por método, `resolveBuyerCoords`, cobertura estricta en checkout. Trigger: tramos de distancia, `RoutingService`, `ECOM_CHECKOUT_003`, cobro por km impreciso.
 license: MIT
 metadata:
   author: rzyfront
@@ -24,6 +17,10 @@ metadata:
     - "Working with ShippingDistanceService.resolveBuyerCoords"
     - "Debugging a shipping rate excluded or missing because the buyer address could not be geocoded"
 ---
+
+## Cuándo usar
+
+Distancia por calles (no línea recta). Ruteo compartido Valhalla/OSRM (`RoutingService`), origen pineado por método (`shipping_methods.origin_*`), coords del comprador vía `ShippingDistanceService.resolveBuyerCoords`, `resolveConfirmShippingCost` en checkout. Rechazo estricto sin tolerancia (`ECOM_CHECKOUT_003`), que desde 2026-09-27 también cubre "sin coordenadas del comprador, sin tarifa" (ya no degrada a zona). Activar `distance_pricing_enabled`.
 
 ## Purpose
 
@@ -388,6 +385,6 @@ La UI bloquea el avance ANTES de llamar al backend, para no depender solo del 40
 - `vendix-error-handling` — `VendixHttpException` + `ErrorCodes` (`ECOM_CHECKOUT_003`).
 - `vendix-validation` — patrón de DTO + validador `class-validator` custom
   (`IsValidDistanceTiers`).
-- `vendix-backend-api` — convenciones de endpoints/servicios NestJS usadas en `shipping/*`.
+- `vendix-backend` — convenciones de endpoints/servicios NestJS usadas en `shipping/*`.
 - `vendix-redis-quota` — patrón INCR+EXPIRE que también usa el tope mensual del fallback Google
   de `vendix-address-geocoding` (mismo tipo de contador periódico).

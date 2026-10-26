@@ -1,12 +1,7 @@
 ---
 name: vendix-tax-typing
 description: >
-  Typed fiscal tax contract (tax_type) end-to-end: how a tax classification flows
-  through calculation, persistence, accounting events, journal lines, declarations,
-  DIAN scheme codes, reports, and frontend. Trigger: Adding a new tax_type value
-  (INC, IBUA, ICUI, retefuente/reteiva/reteica), wiring a new accounting flow that
-  carries tax, adding a fiscal declaration, or debugging a tax that posts to the
-  wrong PUC account.
+  Typed fiscal tax contract (tax_type) end-to-end: calculation, accounting events, PUC journal lines, declarations, DIAN scheme codes. Trigger: new tax_type (INC, IBUA, ICUI, retefuente/reteiva/reteica), tax posting to wrong PUC account.
 license: MIT
 metadata:
   author: rzyfront
@@ -32,7 +27,7 @@ declaration, and its DIAN scheme code. This skill is the **8-layer checklist** t
 prevents the canonical failure mode — typing a tax in one layer but not another, so
 it silently falls back to IVA (account `2408`).
 
-Does **not** govern: tax *calculation math* (see `vendix-calculated-pricing`),
+Does **not** govern: tax *calculation math* (see `vendix-product-pricing`),
 journal debit/credit rules (`vendix-accounting-rules`), or the event-driven
 mechanics of posting entries (`vendix-auto-entries`). This skill governs only the
 *tax-type dimension* threaded through those systems.
@@ -261,4 +256,4 @@ Withholding source of truth:
 - `vendix-fiscal-scope` — NIT ownership and accounting entity resolution
 - `vendix-prisma-migrations` — enum ADD VALUE in its own migration
 - `vendix-prisma-seed` — seeding the mirrored mapping defaults
-- `vendix-calculated-pricing` — the tax calculation math this contract rides on
+- `vendix-product-pricing` — the tax calculation math this contract rides on

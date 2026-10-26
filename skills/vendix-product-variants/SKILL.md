@@ -1,11 +1,7 @@
 ---
 name: vendix-product-variants
 description: >
-  Product and service variant rules for Vendix: variants as sellable options,
-  inventory-independent availability, service variant booking overrides, and
-  ecommerce/POS/cart behavior. Trigger: When creating, editing, validating, or
-  selling product variants, service variants, products without stock, or any
-  flow where variant availability must not be confused with inventory.
+  Product and service variant rules: variants as sellable options independent of inventory, service booking overrides, POS/ecommerce/cart behavior. Trigger: creating/editing/selling variants, variants blocked by stock_quantity zero.
 license: MIT
 metadata:
   author: rzyfront

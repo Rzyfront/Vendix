@@ -1,10 +1,7 @@
 ---
 name: vendix-prisma-scopes
 description: >
-  Multi-tenant Prisma scoping system for Vendix: BasePrismaService, Global/Organization/Store/Ecommerce
-  scoped services, model registration, scoped unique-operation caveats, manual-scope caveats, and withoutScope rules.
-  Trigger: When working with Prisma scoped services, adding models to scopes, or debugging
-  Forbidden/Unauthorized errors or Prisma WhereUnique/AND errors in database queries.
+  Multi-tenant Prisma scoping: BasePrismaService, Global/Organization/Store/Ecommerce scoped services, model registration, withoutScope. Trigger: scoped Prisma services, adding models to scopes, Forbidden or WhereUnique/AND errors.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -138,6 +135,6 @@ await prisma.domain_settings.updateMany({
 ## Related Skills
 
 - `vendix-multi-tenant-context`
-- `vendix-prisma-schema`
+- `vendix-prisma`
 - `vendix-prisma-migrations`
-- `vendix-backend-domain`
+- `vendix-backend`

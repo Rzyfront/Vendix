@@ -53,5 +53,5 @@ Deprecated APIs such as `applyTheme()` and `transformThemeFromApi()` should not 
 ## Related Skills
 
 - `vendix-ui-ux`
-- `vendix-frontend-component`
-- `vendix-app-architecture`
+- `vendix-frontend`
+- `vendix-core`

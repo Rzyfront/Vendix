@@ -115,5 +115,5 @@ Never rely on hidden frontend UI as a security boundary.
 
 - `vendix-backend-auth` - Global JWT auth and public routes
 - `vendix-panel-ui` - Sidebar visibility
-- `vendix-backend-api` - Controller patterns
+- `vendix-backend` - Controller patterns
 - `vendix-prisma-seed` - Seed safety patterns

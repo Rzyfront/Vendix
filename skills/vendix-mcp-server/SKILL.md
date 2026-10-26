@@ -1,9 +1,7 @@
 ---
 name: vendix-mcp-server
 description: >
-  MCP Gateway for external AI clients: resources, tools, prompts, JWT auth, rate limiting,
-  audit logging, and protocol responses. Trigger: When working with MCP server endpoints,
-  adding MCP resources/tools/prompts, configuring MCP auth, or exposing Vendix data to AI clients.
+  MCP Gateway for external AI clients: resources, tools, prompts, JWT auth, rate limiting, audit. Trigger: MCP server endpoints, McpController, adding MCP resources/tools/prompts, exposing Vendix data to AI clients.
 license: Apache-2.0
 metadata:
   author: rzyfront

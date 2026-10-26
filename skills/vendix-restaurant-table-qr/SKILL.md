@@ -1,15 +1,7 @@
 ---
 name: vendix-restaurant-table-qr
 description: >
-  Flujo QR-de-mesa para comensales escaneando desde el storefront
-  (`{shop-hostname}/?mesa=<public_token>`): tokens, modos de escaneo,
-  re-asociación a sesión activa, cuenta compartida, SSE del comensal y
-  reactivación automática desde mesa en limpieza. Complementa
-  `vendix-restaurant-ops` (lado POS/admin) cubriendo el lado
-  storefront/comensal que la otra skill no gobierna. Trigger: When editing
-  QR de mesa comensal, public_token, table_session desde storefront,
-  `ecommerce/tables/*` endpoints, table-banner UI, or `qr_scan_behavior`
-  in restaurant settings.
+  QR de mesa del comensal en storefront (`?mesa=<public_token>`): modos `qr_scan_behavior`, re-asociación a sesión, cuenta compartida, SSE comensal. Trigger: QR de mesa, public_token, `ecommerce/tables/*`, table-banner, mesa desde storefront.
 license: MIT
 metadata:
   author: rzyfront
@@ -25,6 +17,10 @@ metadata:
     - "Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa)"
     - "Wiring the comensal SSE endpoint `/ecommerce/tables/{token}/stream?store_id=`"
 ---
+
+## Cuándo usar
+
+Complementa `vendix-restaurant-ops` (lado POS/admin) cubriendo el lado storefront/comensal: tokens, modos de escaneo, re-asociación a sesión activa, cuenta compartida, SSE del comensal y reactivación automática desde mesa en limpieza. También `store_settings.restaurant.{qr_scan_behavior, qr_auto_fire, enable_table_checkout}` y el override `scan_mode` por mesa.
 
 # QR de Mesa para Comensales (Storefront Dine-in)
 

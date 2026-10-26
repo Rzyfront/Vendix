@@ -1,9 +1,7 @@
 ---
 name: vendix-operating-scope
 description: >
-  Organization operating scope for Vendix: STORE vs ORGANIZATION behavior for inventory,
-  suppliers, purchases, accounting entities, transfers, reports, and tenant isolation.
-  Trigger: When working with organization account_type, onboarding scope, inventory/accounting visibility, suppliers, locations, transfers, or cross-store data access.
+  Organization operating scope STORE vs ORGANIZATION: inventory, suppliers, purchases, accounting, transfers, reports. Trigger: account_type, onboarding scope, store vs org visibility, locations, cross-store data access.
 license: MIT
 metadata:
   author: rzyfront

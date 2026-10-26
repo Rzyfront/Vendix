@@ -1,10 +1,7 @@
 ---
 name: vendix-validation
 description: >
-  Vendix validation patterns: global Nest ValidationPipe, DTO-first backend validation,
-  class-validator/class-transformer usage, business-rule validation, and Angular reactive
-  form validators. Trigger: When writing validation logic, DTOs, form validators, or
-  request payload handling.
+  Validation patterns: global ValidationPipe, DTO-first backend validation, class-validator/transformer, business rules, Angular form validators. Trigger: writing validation logic, DTOs, form validators, request payloads.
 license: MIT
 metadata:
   author: rzyfront
@@ -71,4 +68,4 @@ Use `VendixHttpException` and domain error codes where available.
 
 - `vendix-error-handling`
 - `vendix-angular-forms`
-- `vendix-backend-api`
+- `vendix-backend`
