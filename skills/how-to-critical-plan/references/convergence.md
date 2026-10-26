@@ -12,7 +12,7 @@ repeat:
   file each finding: `cp-new.sh finding <bundle> "<title>" --sev <s> --persp <n> --round <r> --step <id> --loc "<path:line>"`
   add exactly one checklist line in the owning step for each filed finding
   deduplicate against ALL of `findings/` (every status — open, fixed, accepted, rejected), not just open ones
-  fix every blocker and major as a plan step under `how-to-dev`, inheriting the twelve step fields
+  fix every blocker and major as a plan step, inheriting the twelve step fields
   run `cp-lint.sh <bundle>` — must pass before the round is recorded
   record the round as one row in `log/convergence.md` § Convergence Loop Log, with the round's F-nnn ids
     in the `Findings` column

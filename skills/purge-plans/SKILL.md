@@ -1,24 +1,14 @@
 ---
 name: purge-plans
 description: >
-  Permanently delete old or already-executed plan files to reclaim space and stop stale plans from
-  polluting searches and agent context. Deletion is absolute: there is no archive, no trash, and most
-  plan directories are gitignored, so a purged plan is unrecoverable. Inventories every plan with an
-  inferred state (done / open / unknown), age, size and git recoverability, and refuses to delete
-  anything until a human passes --apply.
-  Trigger: Purging old plans, deleting executed plans, cleaning docs/plans, docs/planes,
-  docs/critical-plans or .claude/plans, reclaiming space taken by plan files, or auditing which
-  plans are still open before a cleanup.
+  Permanently deletes finished or stale plan files (docs/plans, docs/critical-plans, .claude/plans, odd/tasks) after a scan and an explicit human --apply.
+  Trigger: /purge-plans, or Rafael asks to purge old plans.
+disable-model-invocation: true
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
-  auto_invoke:
-    - "Purging or deleting old plan files"
-    - "Cleaning docs/plans, docs/planes, docs/critical-plans or .claude/plans"
-    - "Reclaiming disk space taken by executed plans"
-    - "Auditing which plans are still open before deleting anything"
 allowed-tools: Read, Glob, Grep, Bash
 ---
 
@@ -51,6 +41,12 @@ looked reasonable.
 | `docs/planes/` | Older Spanish-named plans | No |
 | `docs/critical-plans/` | v2 bundles (`CP-<slug>/`) and v1 single files | No, except `README.md` |
 | `.claude/plans/` | Legacy plans from the Claude Code plan mode | No |
+| `odd/tasks/` | ODD feature documents (`<feature>.md` with `## Specs`, `## Tasks`, `## Log`) written by `how-to-plan` | Yes, once committed |
+
+`odd/tasks/` is **not** in the script's default directories: pass it explicitly
+(`$P scan --dir odd/tasks`). A feature doc whose `## Tasks` are all ticked infers as `done`. Because
+it is tracked, a committed feature doc is recoverable from git (`RECOVER` shows it); an uncommitted
+one is not.
 
 A v2 bundle is a **directory**, so purging it is `rm -rf` on the whole bundle: hub, steps,
 registries, findings, logs and its `evidence/`. Purge one only when its work is closed and the
@@ -118,7 +114,7 @@ are documentation living beside the plans, not plans. Delete one by hand if you 
 
 ## Related Skills
 
-- `how-to-plan` — produces the plans this skill deletes
+- `how-to-plan` — produces the ODD feature docs in `odd/tasks/`
 - `how-to-critical-plan` — produces the v2 bundles; a bundle's `evidence/` dies with it
 - `vendix-engram` — persist a decision worth keeping before its plan is purged
 - `git-workflow` — most plan directories are gitignored, so git is not a safety net here

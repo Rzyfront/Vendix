@@ -1,27 +1,13 @@
 ---
 name: how-to-test
 description: >
-  Runtime verification methodology for Vendix: curl for API/auth contracts and Playwright MCP for
-  frontend end-to-end flows, run against the real local vhost (vendix.com). Every feature must be
-  tested across THREE mandatory flow schemes — Happy Path, Sad Path, and Brute-Force.
-  Trigger: Verifying an API endpoint or auth boundary with curl, running an end-to-end frontend
-  flow, driving a browser to confirm UI behavior, designing happy/sad/brute-force test flows,
-  security or data-integrity probing of a flow, installing or configuring Playwright MCP (with agent-browser as fallback), or
-  choosing test credentials (seed accounts vs user-provided).
+  Vendix runtime verification: curl for API/auth, Playwright MCP for frontend E2E on the vendix.com vhost, happy/sad/brute-force flows, test credentials.
+  Trigger: verifying an endpoint, auth boundary or UI flow, or designing feature test flows.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
-  auto_invoke:
-    - "Verifying an API endpoint or auth boundary with curl"
-    - "Running an end-to-end frontend flow in a browser"
-    - "Driving a browser to confirm UI behavior with Playwright MCP"
-    - "Designing happy-path, sad-path, or brute-force test flows for a feature"
-    - "Security, abuse, or data-integrity probing of a specific flow"
-    - "Installing or configuring Playwright MCP (agent-browser as fallback)"
-    - "Choosing test credentials from seeds or asking the user"
-    - "Reaching the app via the local vhost vendix.com instead of localhost"
 allowed-tools: Read, Bash, Glob, Grep
 ---
 
@@ -250,7 +236,7 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://api.vendix.com/api/store/orde
 
 - **Base URL:** `https://api.vendix.com/api` (vhost) or `http://localhost:3000/api` (no-SSL fallback).
 - **`jq`** is available for extraction.
-- For full endpoint conventions and pagination shape, see `vendix-backend-api`.
+- For full endpoint conventions and pagination shape, see `vendix-backend`.
 
 ## Mechanism 2 — Playwright MCP (frontend E2E) — PRIMARY
 
@@ -280,13 +266,11 @@ npx playwright install chrome        # one-time Chromium/Chrome download
 
 Then **restart the agent** so it reloads the MCP subprocess. Verify with a `browser_navigate` to `https://vendix.com` (it should render the app, not a TLS error page).
 
-For other agents, add the same command to that tool's MCP config — always keep `--ignore-https-errors`:
+For Gemini CLI, add the same command to its MCP config — always keep `--ignore-https-errors`:
 
 | Agent | Config file | Entry |
 | --- | --- | --- |
 | Claude Code | `claude mcp add …` (above) | `npx @playwright/mcp@latest --ignore-https-errors` |
-| OpenCode | `opencode.json` → `mcp` | `command: ["npx","@playwright/mcp@latest","--ignore-https-errors"]` |
-| Codex | `~/.codex/config.toml` → `[mcp_servers.playwright]` | `command="npx"`, `args=["@playwright/mcp@latest","--ignore-https-errors"]` |
 | Gemini CLI | `.gemini/settings.json` → `mcpServers.playwright` | same `npx` command + arg |
 
 ### E2E recipe (Playwright MCP tools)
@@ -360,9 +344,8 @@ If you do fall back locally, `agent-browser` needs **both** cert flags: `--heade
 ## Related Skills
 
 - `how-to-plan` — picks verification mechanisms per step; this skill is the catalog's runtime detail.
-- `how-to-dev` — requires running verification before claiming completion.
 - `buildcheck-dev` — build/compile/runtime-log health (run first; complements this skill).
 - `vendix-bruno-test` — opt-in Bruno template; never an agent verification path.
-- `vendix-app-architecture` / `vendix-frontend-domain` — why hostname drives `app_type` resolution.
+- `vendix-core` / `vendix-frontend` — why hostname drives `app_type` resolution.
 - `vendix-backend-auth` / `vendix-customer-auth` — login endpoints, token shape, permissions model.
-- `vendix-backend-api` — endpoint conventions and pagination shape for curl checks.
+- `vendix-backend` — endpoint conventions and pagination shape for curl checks.

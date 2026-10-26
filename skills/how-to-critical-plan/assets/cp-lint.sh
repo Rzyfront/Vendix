@@ -67,7 +67,7 @@ relpath() {
 
 # ---------------------------------------------------------------------------
 # Frontmatter helpers (flat "key: value" / "key: [a, b]" frontmatter only —
-# see cp-bundle-spec.md §2). Reference parser: skills/skill-sync/assets/sync.sh:66-90
+# see references/format.md § Frontmatter). Reference parser: the fm_* helpers below.
 # ---------------------------------------------------------------------------
 
 fm_has() {

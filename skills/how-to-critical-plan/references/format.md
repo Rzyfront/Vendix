@@ -49,7 +49,7 @@ The old single-file format had 22 mandatory sections; this table is where each o
 - Line 1 is `---`; the block ends at the next `---` line.
 - Each line is `key: value`. `key` = up to the first `:`; `value` = the rest, trimmed, no wrapping quotes.
 - Allowed values: scalar (`A.1`, `2026-09-05`, `"text with: a colon"`) or an inline list `[a, b, c]` (may be `[]`). FORBIDDEN: nested maps, block lists (`- item`), multiline values.
-- Reference parser (awk): read between the first and second `---`; `sub(/^[^:]+:[[:space:]]*/,"")`; strip `^"|"$`; for lists strip `[` `]`, split on `,`, trim each element. See `skills/skill-sync/assets/sync.sh:66-90`.
+- Reference parser (awk): read between the first and second `---`; `sub(/^[^:]+:[[:space:]]*/,"")`; strip `^"|"$`; for lists strip `[` `]`, split on `,`, trim each element. Implemented in `assets/cp-lint.sh` (`fm_*` helpers).
 - The `# …` comments in the schemas below are documentation only. Never write them into a real fragment: the parser would read them as part of the value.
 
 ## Fragment types
@@ -87,7 +87,7 @@ Sixteen mandatory H2 sections, in this exact order (an H2 line may carry a trail
 14. `## Rollback Plan` — table `| Phase | Trigger to roll back | Procedure | Data recoverable? | Who decides |`
 15. `## Knowledge Gaps`
 16. `## Approval Request` — the verbatim block:
-    > This critical plan is ready for human review. Reply **"ejecuta"**, **"apruebo"**, or **"procede"** to start execution under `how-to-dev`, with the Living Document Protocol and the Convergence Loop in force. Reply with corrections to revise the plan in place.
+    > This critical plan is ready for human review. Reply **"ejecuta"**, **"apruebo"**, or **"procede"** to start execution, with the Living Document Protocol and the Convergence Loop in force. Reply with corrections to revise the plan in place.
 
 **Generated content — `cp-ledger.sh` writes this, nobody edits it by hand:**
 
@@ -365,7 +365,7 @@ Every actor loads only its fragment via `cp-context.sh`, never the whole bundle.
 
 | Actor | Loads | Command |
 |---|---|---|
-| Human / orchestrator, cold start | `PLAN.md` in full | `cp-context.sh <bundle> hub` |
+| Human / coordinator, cold start | `PLAN.md` in full | `cp-context.sh <bundle> hub` |
 | Executor of step X | step X + its registry rows + its ADRs | `cp-context.sh <bundle> step <X>` |
 | Perspective agent n, on steps S1 S2 … | hub excerpt (Context, Specific Objectives, Blast Radius) + domain registry (perspective 3→fb, 4→db, 5→err; others: none) + steps S1, S2 … + the audit matrix | `cp-context.sh <bundle> perspective <n> <S1> <S2> …` |
 | Contract sweep of one registry | that registry only | `cp-context.sh <bundle> sweep fb\|db\|err` |

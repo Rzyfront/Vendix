@@ -1,25 +1,13 @@
 ---
 name: vendix-known-errors
 description: >
-  Catálogo canónico de errores conocidos de Vendix, agrupado por área
-  (TypeScript, Angular, HTML, CSS/Tailwind, NestJS, Prisma/SQL, build,
-  testing, git). Cada entrada da el síntoma engañoso y la regla que lo evita.
-  Trigger: antes de depurar cualquier fallo cuyo síntoma no señale su causa,
-  y antes de dar por bueno un verde (build, test, curl, PASS de un agente).
+  Catálogo de errores conocidos de Vendix por área (TS, Angular, NestJS, Prisma, build, tests, git): síntoma engañoso y regla que lo evita.
+  Trigger: depurar un fallo cuyo síntoma no señala su causa o validar un verde.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
-  auto_invoke:
-    - "Depurar un error cuyo síntoma no señala su causa"
-    - "Un build, test o sonda pasa en verde y hay dudas de que la cobertura sea real"
-    - "Interpretar un error de compilación de TypeScript, SWC, ngc o tsc"
-    - "Un cambio compila y pasa tests pero falla en runtime"
-    - "El dev server cae en bucle o el dist queda inconsistente"
-    - "Verificar el reporte de compilación o de pruebas de otro agente"
-    - "Escribir o revisar una migración de base de datos"
-    - "Commitear o empujar en un árbol de trabajo compartido con otras sesiones"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
@@ -27,7 +15,7 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 ## Purpose
 
-Catálogo de trampas ya pagadas en este repositorio. Gobierna **cómo interpretar un fallo**, no cómo escribir una feature: cada entrada existe porque su síntoma apunta al lugar equivocado y costó horas.
+Catálogo de trampas ya pagadas en este repositorio. Consúltalo antes de depurar un fallo cuyo síntoma no señala su causa, antes de dar por bueno un verde (build, test, curl, PASS de otro agente), al interpretar errores de TypeScript/SWC/ngc/tsc, cuando algo compila y pasa tests pero falla en runtime, cuando el dev server cae en bucle, al escribir o revisar una migración y al commitear en un árbol compartido con otras sesiones. Gobierna **cómo interpretar un fallo**, no cómo escribir una feature: cada entrada existe porque su síntoma apunta al lugar equivocado y costó horas.
 
 No gobierna las convenciones de cada dominio — para eso están los skills de área (`vendix-frontend`, `vendix-backend`, `vendix-prisma`, `buildcheck-dev`). Este skill es la lista de lo que **no** hay que volver a descubrir.
 
@@ -178,7 +166,7 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 
 ## Related Skills
 
-- `buildcheck-dev` — cómo correr la compilación sin levantar servidores
+- `buildcheck-dev` — verificación por logs y runner de tests acotado
 - `vendix-zoneless-signals` — reglas de Zoneless y señales (obligatorio en frontend)
 - `vendix-prisma-migrations` — patrones seguros y recuperación de migraciones
 - `vendix-permissions` / `vendix-backend-auth` — autorización y guards

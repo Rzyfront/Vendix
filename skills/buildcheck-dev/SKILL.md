@@ -1,25 +1,13 @@
 ---
 name: buildcheck-dev
 description: >
-  Build and runtime verification steps for Vendix development.
-  Trigger: Verifying Build, checking watch-mode output (Docker logs for the backend, `buildcheck.sh --watch` for the native frontend), checking current development app status, or confirming development changes do not introduce compile/runtime errors.
+  Vendix dev verification: watch logs (docker logs, buildcheck.sh --watch), scoped backend test runner, no local builds or typechecks, RAM guards.
+  Trigger: verifying a change, checking dev app status, running a backend spec, or a build request.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
-  auto_invoke:
-    - "Verifying Build"
-    - "Checking Docker development logs after code changes"
-    - "Checking the state of the frontend watch / native ng serve"
-    - "Reading frontend compile errors without a vendix_frontend container"
-    - "Checking whether the dev server is alive and whether the last rebuild passed"
-    - "Checking current development app status"
-    - "Verifying that code compiles without starting any server"
-    - "Running a production compilation check without leaving orphan processes"
-    - "Killing orphan ng serve, ng build, prerender or nest start processes"
-    - "Running backend jest tests without exhausting dev machine memory"
-    - "Diagnosing which node process is consuming the dev machine memory"
 ---
 
 # Buildcheck Dev
@@ -57,6 +45,29 @@ command locally are:
    optional insurance, not a requirement.
 
 Outside those two cases, a task is verified and complete using Docker logs alone.
+
+## Runner ODD Test-First (scoped tests only)
+
+ODD's test-first applies **only to the specs of the change**. A scoped test is allowed during
+development; a build or typecheck is not (CI covers it).
+
+| Allowed | Command (backend; paths relative to `apps/backend`) |
+| --- | --- |
+| One spec file | `npm run buildcheck:test -- src/domains/<area>/<file>.spec.ts` |
+| One path (file or folder) | `npm run test:path -w apps/backend -- src/domains/<area>` |
+
+- **One path per invocation.** Jest positionals are OR-ed regexes: with two paths, one wrong path
+  still exits 0 with the other green. `test:path` refuses to run without a path and validates that
+  each path exists.
+- Both run `--runInBand` (one process, no worker pool) and return the real exit code.
+- **Forbidden:** `npm test` / `npm run buildcheck:test` without a path (the full backend suite is
+  hundreds of specs — 911 `*.spec.ts` files on 2026-10-26 — and takes hours), `test:watch`,
+  `test:debug`, `test:cov` / coverage, `ng test`.
+- **Frontend:** there is no scoped frontend runner (`apps/frontend` only has `ng test`, which is
+  forbidden). Verify frontend changes with `bash scripts/buildcheck.sh --watch` and, for flows,
+  Playwright MCP (`how-to-test`).
+- **No** `tsc`, `ngc`, `ng build`, `npm run build*` or `npm run buildcheck` / `:be` / `:fe` / `:deep`
+  in development — see Core Rule.
 
 ## Current Dev App Status Workflow
 
@@ -170,8 +181,8 @@ PASS/FAIL, and kills its whole process group on exit:
 | Both apps | `npm run buildcheck` | backend `tsc --noEmit` + frontend `ngc` typecheck |
 | Backend only | `npm run buildcheck:be` | `tsc -p apps/backend/tsconfig.build.json --noEmit` |
 | Frontend only | `npm run buildcheck:fe` | `ngc -p apps/frontend/tsconfig.buildcheck.json` (AOT + `strictTemplates`, no bundle) |
-| **One spec you just wrote** | `npm run buildcheck:test -- src/domains/.../x.spec.ts` | that spec only, `--runInBand` (single process, no pool) — ~5s |
-| Whole backend suite | `npm run buildcheck:test` | all 171 specs, `--maxWorkers=2 --workerIdleMemoryLimit=1024MB --ci --forceExit` |
+| **One spec you just wrote** (allowed in dev — see Runner ODD) | `npm run buildcheck:test -- src/domains/.../x.spec.ts` | that spec only, `--runInBand` (single process, no pool) — ~5s |
+| Whole backend suite (never in dev; CI) | `npm run buildcheck:test` | every spec (hundreds; hours), `--maxWorkers=2 --workerIdleMemoryLimit=1024MB --ci --forceExit` |
 | Full bundle (pre-PR / release) | `npm run buildcheck:deep` | `ng build --configuration buildcheck` — real bundle, **no prerender, no SSR** |
 | Sweep leftovers from a killed run | `npm run buildcheck:reap` | TERMs orphan `ng serve` / `ng build` / prerender / `nest start` / `jest-worker` processes |
 | Diagnose a memory spike | `npm run buildcheck:top` | lists every `node` process over 300MB with its command line, plus the Docker VM |
@@ -260,9 +271,10 @@ a pool of `cores - 1` is Jest's default, not Angular's (Angular caps lower).
 | `docker compose --profile docker-fe up -d frontend` while the native one runs | both publish 4200 | pick one; the native path is the default |
 | `ng build --watch` | watcher never exits, and it is not how this repo serves the frontend | `npm run dev:fe` |
 | `npm run build:prod -w apps/frontend`, root `npm run build`, any `npm run buildcheck*` | not a dev-verification step at all — see Core Rule; runs only on explicit request or confirmed release prep | `docker logs` (dev) / CI already covers the rest |
-| `npm test -w apps/backend` to verify one new spec | it does not know what you wrote — it runs **all 171 specs** with a worker pool, holding ~1 GB per worker, and the workers outlive a killed parent | `npm run buildcheck:test -- <path/to/that.spec.ts>` (test execution, not a build — still scoped to avoid the worker-pool blowup) |
-| `npm run test:debug -w apps/backend` | runs `node --inspect-brk`, which halts before the first line and waits **forever** for a debugger to attach — a permanent orphan, not a slow one | `npm run buildcheck:test` |
-| `npm run test:watch -w apps/backend`, `ng test` | watchers never exit; `ng test` also launches a Karma browser | `npm run buildcheck:test` |
+| `npm test -w apps/backend` to verify one new spec | it does not know what you wrote — it runs **the whole suite** (hundreds of specs, hours) with a worker pool, holding ~1 GB per worker, and the workers outlive a killed parent | `npm run buildcheck:test -- <path/to/that.spec.ts>` (test execution, not a build — still scoped to avoid the worker-pool blowup) |
+| `npm run test:debug -w apps/backend` | runs `node --inspect-brk`, which halts before the first line and waits **forever** for a debugger to attach — a permanent orphan, not a slow one | `npm run buildcheck:test -- <path>` |
+| `npm run test:watch -w apps/backend`, `ng test` | watchers never exit; `ng test` also launches a Karma browser | `npm run buildcheck:test -- <path>` |
+| `npm run test:cov -w apps/backend` | full suite plus coverage instrumentation | scoped runner, no coverage |
 
 `npm run build`, `build:prod`, and every `npm run buildcheck*` compile/typecheck command stay
 reserved for the two exceptions in the Core Rule — never for routine development, never as a
@@ -312,6 +324,7 @@ After any restart or recreate, re-run the development log checks and `docker ps`
 - [ ] Dev app status requests include `docker compose ps` and lightweight HTTP checks when containers are running.
 - [ ] Zero relevant errors remain in affected logs.
 - [ ] Fixes were re-verified after changes.
+- [ ] Specs of the change run with the scoped runner, one path per call (if any were written).
 - [ ] No `tsc`, `ngc`, `ng build`, `npm run build*`, or `npm run buildcheck*` command was run — unless
       the human explicitly asked to test a build, or confirmed a suggested release-prep build.
 - [ ] If a build/typecheck command *was* run (one of the two exceptions), no orphan Node process
@@ -320,15 +333,15 @@ After any restart or recreate, re-run the development log checks and `docker ps`
 
 ## Golden Rule
 
-Development means watch-mode output — the `npm run dev:fe` terminal for the frontend, `docker
-logs` for everything else. Nothing else. Never run a build or compile-check unprompted, not even
+Development means watch-mode output — `bash scripts/buildcheck.sh --watch` for the frontend,
+`docker logs` for everything else — plus scoped tests of the change. Never run a build or compile-check unprompted, not even
 before a PR: CI (`ci.yml`) already gates the build before merge/release. A
 build or `npm run buildcheck*` runs only when the human explicitly asks, or when preparing a
 release and the human confirms your suggestion to run one.
 
 ## Related Skills
 
-- `vendix-development-rules` - General development rules
-- `vendix-naming-conventions` - Naming conventions
-- `vendix-backend-domain` - Backend verification patterns
-- `vendix-frontend-component` - Frontend verification patterns
+- `how-to-test` - Runtime verification (curl, Playwright MCP)
+- `vendix-known-errors` - Misleading green results and known traps
+- `vendix-backend` - Backend patterns
+- `vendix-frontend` - Frontend patterns

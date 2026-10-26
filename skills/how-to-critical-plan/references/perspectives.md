@@ -1,6 +1,6 @@
 # The Perspective Fleet
 
-Load this when running Phase 4 (Adversarial Review) or a Phase 7 convergence round: which thirteen perspectives to run, how to route them through `agent-teams`, what each agent receives and must return, and how to vary a later round's entry points. The finding record shape (frontmatter `perspective, severity, step, location` + body) is defined in `references/format.md` § `findings/F-nnn.md`; `assets/cp-*.sh` files findings and generates the audit matrix — this reference does not restate their internals.
+Load this when running Phase 4 (Adversarial Review) or a Phase 7 convergence round: which thirteen perspectives to run, how to run them as parallel read-only subagents, what each agent receives and must return, and how to vary a later round's entry points. The finding record shape (frontmatter `perspective, severity, step, location` + body) is defined in `references/format.md` § `findings/F-nnn.md`; `assets/cp-*.sh` files findings and generates the audit matrix — this reference does not restate their internals.
 
 ## The thirteen mandatory perspectives
 
@@ -24,13 +24,13 @@ Every critical plan must be audited from all thirteen. Perspectives that genuine
 
 ## Orchestration rules
 
-- Route through `agent-teams`. Maximum **4 concurrent** agents; run the thirteen perspectives in **waves**. The cap is on concurrency, not on coverage — all thirteen must run.
+- Run them as read-only subagents (this is the "high-risk verifier" delegation reason). Maximum **4 concurrent** agents; run the thirteen perspectives in **waves**. The cap is on concurrency, not on coverage — all thirteen must run.
 - **Each perspective agent receives ONLY** the output of `cp-context.sh <bundle> perspective <n> <step-ids…>` (hub excerpt + domain registry + the named steps + the audit matrix), plus the concrete file list from Phase 1 for those steps — **never the whole bundle**.
 - The instruction is always the same: attempt to *break* the design from this one perspective, not to validate it.
 - Each agent returns a **findings list**, never a narrative. Each finding carries: perspective, severity (`blocker` / `major` / `minor` / `note`), the concrete location, the failure scenario (inputs → wrong outcome), and a proposed fix.
 - Findings are filed with `cp-new.sh finding <bundle> "<title>" --sev <s> --persp <n> --round <r> --step <id> --loc "<path:line>"`, then referenced by exactly one checklist line in the owning step. A finding that belongs to no existing step creates a new step first.
-- The orchestrator merges findings and deduplicates against **all** of `findings/` (every status, not just open) before filing new ones.
-- **Never let a perspective agent write code.** They investigate and report. Fixes are executed as plan steps, under `how-to-dev`, so they inherit the same twelve fields and the same verification.
+- The coordinating agent merges findings and deduplicates against **all** of `findings/` (every status, not just open) before filing new ones.
+- **Never let a perspective agent write code.** They investigate and report. Fixes are executed as plan steps, so they inherit the same twelve fields and the same verification.
 
 ## Severity definitions
 

@@ -108,5 +108,5 @@ issue: none
 ## Approval Request                    <!-- [MANDATORY] verbatim block -->
 
 > This critical plan is ready for human review. Reply **"ejecuta"**, **"apruebo"**, or **"procede"** to
-> start execution under `how-to-dev`, with the Living Document Protocol and the Convergence Loop in force.
+> start execution, with the Living Document Protocol and the Convergence Loop in force.
 > Reply with corrections to revise the plan in place.

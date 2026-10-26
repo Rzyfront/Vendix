@@ -1,24 +1,13 @@
 ---
 name: pr-code-review
 description: >
-  Skill for reviewing Pull Requests from any GitHub repository using GitHub CLI (gh).
-  Analyzes regression, security, logic, syntax, core files, and code quality.
-  Trigger: When the user asks to review PRs, analyze PR code, or do code review.
+  Evidence-gated PR review with gh: regression, security, logic, syntax, core files, quality. Scores the 80% PR gate (max 2 correction rounds).
+  Trigger: reviewing a PR, analyzing PR code, or a code review request.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
-  auto_invoke:
-    - "revisar PR"
-    - "review PR"
-    - "analizar PR"
-    - "code review"
-    - "revisar pull request"
-    - "Running the 80% pass gate before merging a PR (git-workflow RULE 8)"
-    - "Re-developing solutions identified by a code review below 80%"
-    - "Tagging a Linear issue Aprobado after merging a PR to develop"
-    - "Tagging a Linear issue Requiere cambios after requesting changes on a PR"
 ---
 
 ## When to Use
@@ -167,7 +156,8 @@ A PR with no regression issues starts with a high base score.
 80-100%  → APPROVE — Clean, no issues. Low regression, additive changes.
                                   PASSES the 80% gate (git-workflow RULE 8).
 70-79%   → REQUEST CHANGES — Just below the 80% gate. Re-develop the failing
-                                  items and re-review. Do not merge below 80%.
+                                  items and re-review (max 2 correction rounds).
+                                  Do not merge below 80%.
 50-69%   → REQUEST CHANGES — Medium regression risk OR logic/security bugs.
 30-49%   → REQUEST CHANGES — High regression risk OR critical security issues.
  0-29%   → REQUEST CHANGES — Critical regression: modifies existing flows without protection,
@@ -503,12 +493,12 @@ When the review posts a score **below 80%** or REQUEST CHANGES for any reason, t
 2. **Address them in the same branch** (no new branch, no "I'll fix it later" PR).
 3. **Push the fixes** to the same PR.
 4. **Re-run this skill** on the same PR. The diff is now smaller, the score should rise.
-5. **Repeat** until the score is >= 80% clean.
-6. **APPROVE → merge.**
+5. **Maximum 2 correction rounds.** If the score is still below 80% after the second round, **stop
+   and report to Rafael** with the remaining verified findings — the design or scope may be wrong,
+   not just the implementation. Never loop review/fix "until clean".
+6. **≥ 80% → APPROVE.** Merge only when Rafael asks.
 
 **Escalation rules:**
-
-- If two re-review cycles do not move the score to >= 80%, stop and ask the human for guidance — the design or scope may be wrong, not just the implementation.
 - If a finding is genuinely wrong or the dev disagrees, the dev explains in a PR comment with evidence, and the human decides. The review is not a vote.
 - If the failing items are all in the same module, the dev may pull the offending changes into a new commit (`refactor: address pr-review feedback`) for clarity.
 

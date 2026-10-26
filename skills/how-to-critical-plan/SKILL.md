@@ -1,21 +1,14 @@
 ---
 name: how-to-critical-plan
 description: >
-  Planning protocol for mission-critical, large-scale work that cannot fail. Produces a fragmented plan bundle (hub + steps + registries + findings) so no actor loads more than ~8k tokens of plan.
-  Trigger: EXPLICIT INVOCATION ONLY. Fires only when the user asks in their own words for a critical plan, a massive plan, or a plan that cannot fail, or when the user names or links this skill. Never inferred from how critical the work looks. For everything else — trivial or complex but not critical — use `how-to-plan`.
+  Heavyweight plan for mission-critical work that cannot fail: fragmented bundle (hub, steps, contract registries, findings) plus a convergence loop.
+  Trigger: /how-to-critical-plan or Rafael explicitly asks for a critical plan.
+disable-model-invocation: true
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
-  auto_invoke:
-    - "User explicitly asks for a critical plan (plan crítico, critical plan)"
-    - "User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande)"
-    - "User explicitly says the work cannot fail (esto no puede fallar, cero margen de error)"
-    - "User names or links the how-to-critical-plan skill"
-    - "User explicitly asks for a plan with checklists that tracks execution progress for handoff"
-    - "User explicitly asks for a full contract sweep (frontend to backend, and database) as part of a plan"
-    - "User explicitly asks for parallel multi-perspective auditing of a plan or its implementation"
 ---
 
 # How To Critical Plan
@@ -24,7 +17,7 @@ metadata:
 
 Planning protocol for work that **cannot fail**: critical system functions, or changes broad enough that one
 unnoticed contract break corrupts data, breaks a tenant, or silently produces wrong money. `how-to-plan`
-optimizes for speed of approval; this skill optimizes for **exhaustiveness and zero tolerance to failure**.
+(the ODD feature doc) optimizes for speed of approval; this skill optimizes for **exhaustiveness and zero tolerance to failure**.
 A critical plan is not a summary of the work — it *is* the work, written before it happens and kept alive.
 
 1. **Exhaustive, not representative.** 50 contracts touched → 50 registry rows → 50 verifications. "Etc." is a format break.
@@ -34,7 +27,7 @@ A critical plan is not a summary of the work — it *is* the work, written befor
 
 ## Invocation — Explicit Only
 
-**This skill never activates on its own judgment.** If the human did not ask, it does not run. **The only two triggers:** the user asks in their own words ("hazme un plan crítico", "plan masivo", "esto no puede fallar", "plan gigante con checklists") or names/links the skill. **Complex is not critical.** Trivial → no plan; normal, complex or multi-domain → `how-to-plan`; complex **and** the user asked → this skill.
+**This skill never activates on its own judgment.** If the human did not ask, it does not run. **The only two triggers:** the user asks in their own words ("hazme un plan crítico", "plan masivo", "esto no puede fallar", "plan gigante con checklists") or names/links the skill. **Complex is not critical.** Small (passes the resumption test) → inline, no plan; large → ODD feature doc via `how-to-plan`; critical **and** Rafael asked → this skill. The bundle takes the place of the feature doc; if `odd/tasks/<feature>.md` already exists, link the bundle hub from its Specs and keep its `## Log`.
 
 **Never self-escalate — suggest instead.** Under `how-to-plan`, if you conclude the work carries critical risk, name the risk in one or two sentences and continue the plan you were asked for:
 
@@ -77,7 +70,7 @@ Fragments carry flat YAML frontmatter, parsed with awk alone.
 
 | Actor | Loads | Command |
 |-------|-------|---------|
-| Human / orchestrator, cold start | the hub only | `cp-context.sh <bundle> hub` |
+| Human / coordinator, cold start | the hub only | `cp-context.sh <bundle> hub` |
 | Executor of step X | the step, its registry rows, its ADRs | `cp-context.sh <bundle> step X` |
 | Perspective agent *n* | hub brief + its domain registry + the steps it audits | `cp-context.sh <bundle> perspective n A.1 A.2` |
 | Contract sweep | one registry | `cp-context.sh <bundle> sweep fb\|db\|err` |
@@ -101,7 +94,7 @@ Nobody is handed the whole bundle.
 | **3. Design** | Competing approaches, ADRs, blast radius, rollback | `adr/*.md`, hub sections | 3 |
 | **4. Adversarial Review** | Thirteen perspectives attack the design before code exists | `findings/*.md`, revised ADRs/steps | 4 |
 | **5. Final Plan** | `cp-new.sh`, write every fragment, `cp-lint.sh` exit 0 | Bundle, checklists unticked, hub `status: planning` | 0 |
-| **6. Approval** | Present the hub; obtain "ejecuta" / "apruebo" / "procede" | hub `status: approved` | 0 |
+| **6. Approval** | Present the hub; Rafael approves with "ejecuta" / "apruebo" / "procede" | hub `status: approved` | 0 |
 | **7. Execution & Convergence** | Execute with `cp-context step`; audit until two clean rounds | All ticked, convergence closed, hub `status: done` | 4 |
 
 **Phase-specific rules:**
@@ -125,7 +118,7 @@ Four scripts in `skills/how-to-critical-plan/assets/` (bash + awk, no dependenci
 
 ## Agent Strategy — the Perspective Fleet
 
-Thirteen mandatory perspectives (architecture · implementation · frontend↔backend contracts · database contracts & integrity · error handling & codes · security & authorization · data validation · data load & performance · development strategy · UI/UX & reachability · accessibility · user comprehension · observability & traceability), each blind to the others, in waves of at most **4 concurrent** through `agent-teams`. Each receives only `cp-context perspective n <steps>` plus the instruction to *break* the design, and returns a findings list — never a narrative — that the orchestrator files with `cp-new.sh finding`. Perspectives never write code; fixes become steps. `N/A` needs a written reason. Tables, severities, prompt template: `references/perspectives.md`.
+Thirteen mandatory perspectives (architecture · implementation · frontend↔backend contracts · database contracts & integrity · error handling & codes · security & authorization · data validation · data load & performance · development strategy · UI/UX & reachability · accessibility · user comprehension · observability & traceability), each blind to the others, in waves of at most **4 concurrent** read-only subagents (the "high-risk verifier" delegation reason). Each receives only `cp-context perspective n <steps>` plus the instruction to *break* the design, and returns a findings list — never a narrative — that the coordinating agent files with `cp-new.sh finding`. Perspectives never write code; fixes become steps. `N/A` needs a written reason. Tables, severities, prompt template: `references/perspectives.md`.
 
 ## Convergence Loop
 
@@ -147,17 +140,18 @@ Before requesting approval and before closing any phase or round: `cp-lint.sh` e
 
 ## Relationship With Development
 
-Execution runs under `how-to-dev`: load every skill in the step's `Skills` · work from `cp-context step <id>`, never the whole bundle · update step `status`, checklist and `log/execution.md` **as you go**, then `cp-ledger.sh` · never tick a box before its `Verification` ran · contract sweep gate + `cp-lint.sh` before closing a phase · convergence loop before closing the plan · preserve every `Business decision` and ADR.
+Execution: load every skill in the step's `Skills` · work from `cp-context step <id>`, never the whole bundle · update step `status`, checklist and `log/execution.md` **as you go**, then `cp-ledger.sh` · never tick a box before its `Verification` ran · contract sweep gate + `cp-lint.sh` before closing a phase · convergence loop before closing the plan · preserve every `Business decision` and ADR.
 
-**Gates before "done"** — `git-workflow` RULES 5–8, plus: every `FB-*`, `DB-*`, `ERR-*` row `[x]` with evidence · thirteen perspectives run and resolved or explicitly accepted · two consecutive clean rounds · ledger shows every phase complete, no open blocker · `cp-lint.sh` exit 0 · `pr-code-review` ≥ 80%. Any unmet gate means not done.
+**Gates before "done"** — `git-workflow` (local commits per unit; push/PR only on request), plus: every `FB-*`, `DB-*`, `ERR-*` row `[x]` with evidence · thirteen perspectives run and resolved or explicitly accepted · two consecutive clean rounds · ledger shows every phase complete, no open blocker · `cp-lint.sh` exit 0 · when a PR is requested, `pr-code-review` ≥ 80% within at most 2 correction rounds (else stop and report to Rafael). Any unmet gate means not done.
 
 ## Related Skills
 
-- `how-to-plan` — six base step fields, Skill Selection Matrix and Verification Mechanisms Catalog inherited unchanged · `how-to-dev` · `agent-teams` · `how-to-test` (curl for contracts, Playwright MCP for E2E).
-- `vendix-error-handling` (Registry 3) · `vendix-prisma-migrations` (Data Integrity) · `vendix-prisma-scopes` / `vendix-multi-tenant-context` (Registry 2) · `vendix-backend-api` / `vendix-validation` (Registry 1) · `pr-code-review` · `vendix-engram` · `skill-creator`.
+- `how-to-plan` — Skill Selection Matrix and Verification Catalog inherited unchanged · `parallel` · `how-to-test` (curl for contracts, Playwright MCP for E2E).
+- `vendix-error-handling` (Registry 3) · `vendix-prisma-migrations` (Data Integrity) · `vendix-prisma-scopes` / `vendix-multi-tenant-context` (Registry 2) · `vendix-backend` / `vendix-validation` (Registry 1) · `pr-code-review` · `vendix-engram`.
 
 ## Changelog
 
+- **v2.1** — Manual invocation only (`disable-model-invocation`); aligned with ODD (feature doc, Rafael's approval); removed references to deleted skills; PR gate capped at 2 rounds.
 - **v2.0** — The plan becomes a **bundle**. Diagnosis: 13 `CP-*` plans totalled 1.58 MB (largest 732 KB ≈ 183k tokens; typical 333 KB ≈ 83k, half of it steps). One file served five roles, every actor loaded all five, and findings were pasted inline then closed with a second line. v2.0 keeps every v1.1 rule and changes only where things live and who reads what: hub + fragments, hard budgets, findings as records, generated ledger/index, evidence inside the bundle, four scripts, `references/`. Single-file plans remain historical v1 documents.
 - **v1.1** — Explicit invocation only; `Criticality Justification` quotes the request.
 - **v1.0** — Seven phases with Contract Mapping before design, twelve fields, three registries, thirteen perspectives, convergence loop, Living Document Protocol.
