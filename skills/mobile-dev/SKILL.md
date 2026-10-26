@@ -6,113 +6,37 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
-  auto_invoke:
-    - "Editing or creating any file under apps/mobile"
-    - "Developing features for the mobile app"
-    - "Adding dependencies to apps/mobile/package.json"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Mobile Dev
 
-## Purpose
+`apps/mobile` (`@vendix/mobile`, Expo SDK 54, React Native 0.81) is touched only when the task names
+it (AGENTS.md). Layout: `app/` (routes), `src/core` (api, auth, guards, store…), `src/features/<area>`,
+`src/shared` (components, theme, types…).
 
-This skill governs all development within the mobile app (`apps/mobile`). Its primary purpose is to enforce strict boundaries: **never edit files outside `apps/mobile`**, even when referencing patterns from other projects for alignment.
+## Rules
 
-The mobile app is an Expo/React Native project. It can reference frontend (`apps/frontend`) components/styles for UI alignment and backend (`apps/backend`) DTOs/interfaces for API contract alignment, but must **never modify** those files.
+1. **Edit only inside `apps/mobile/`** (src, app, assets, its `package.json`, `tsconfig.json`,
+   config files). Everything else — `apps/backend`, `apps/frontend`, `libs/*`, root files — is
+   read-only reference (UI patterns, DTOs, Prisma models, shared enums). A needed change outside is a
+   separate cross-project request.
+2. **Dependencies** go only in `apps/mobile/package.json`: `npm install <pkg> -w apps/mobile` from the
+   root (updates the root lock). Never install at root, never add to backend/frontend for mobile's
+   sake. `apps/mobile/package-lock.json` is an isolated lock regenerated from the root resolutions
+   (Dependabot scans it); do not hand-edit it.
+3. **No cross-app runtime imports.** Read the backend DTO/endpoint, then write an equivalent interface
+   inside mobile (e.g. `apps/mobile/src/features/<area>/` or `src/shared/types/`). Never
+   `import … from '../../../backend/…'` or from `libs/` source.
+4. **API consumption:** mobile calls the same backend API as the web; services in mobile adapt request/
+   response shapes. Do not copy backend validation or business logic.
 
-## Core Rules
-
-### RULE 1: Exclusive Mobile Scope (BLOCKING)
-
-**ALL** edits, creations, and modifications are **exclusively** within `apps/mobile/`.
-
-```
-ALLOWED:
-  apps/mobile/src/...
-  apps/mobile/app/...
-  apps/mobile/assets/...
-  apps/mobile/package.json
-  apps/mobile/tsconfig.json
-  apps/mobile/*.config.js
-
-FORBIDDEN:
-  apps/backend/src/...          ← Read only
-  apps/frontend/src/...         ← Read only
-  libs/shared-types/src/...     ← Read only
-  Any file outside apps/mobile/
-```
-
-### RULE 2: Read-Only Access to Other Projects
-
-The mobile project **may read** files from other projects for reference:
-
-| Source | Purpose | Allowed |
-|--------|---------|---------|
-| `apps/frontend/src/...` | UI patterns, component structure, styling conventions | ✅ Read only |
-| `apps/backend/src/...` | DTOs, API contracts, TypeScript interfaces | ✅ Read only |
-| `libs/shared-types/...` | Shared enums, types, constants | ✅ Read only |
-| `apps/backend/prisma/...` | Data models for understanding API entities | ✅ Read only |
-| Any file outside `apps/mobile/` | Reference only | ✅ Read only |
-
-**NEVER** edit, modify, or write to any file outside `apps/mobile/`.
-
-### RULE 3: Dependency Isolation
-
-All mobile-specific dependencies must be declared in `apps/mobile/package.json` only.
-
-```
-ALLOWED:
-  npm install <pkg> --prefix apps/mobile
-  # or edit apps/mobile/package.json directly
-
-FORBIDDEN:
-  npm install <pkg> at root         ← Breaks monorepo isolation
-  Editing root package.json         ← Belongs to vendix-monorepo-workspaces
-  Adding deps to apps/frontend/     ← Not mobile's concern
-  Adding deps to apps/backend/      ← Not mobile's concern
-```
-
-### RULE 4: Interface Alignment Without Modification
-
-When aligning mobile interfaces with backend DTOs or frontend patterns:
-
-1. Read the backend DTO from `apps/backend/...` to understand the API contract.
-2. Create an equivalent TypeScript interface **inside** `apps/mobile/src/...`.
-3. Transform/adapt the data as needed for React Native.
-4. **Never** import directly from backend source files (no cross-app runtime imports).
-
-```
-CORRECT (read backend, create mobile version):
-  // Read: apps/backend/src/domains/product/dto/product.dto.ts
-  // Create: apps/mobile/src/app/products/interfaces/product.interface.ts
-  export interface Product {
-    id: string;
-    name: string;
-    price: number;
-  }
-
-FORBIDDEN (direct import from backend):
-  import { ProductDto } from '../../../../backend/...';  // ✗ NO
-```
-
-### RULE 5: No Shared Project Edits
-
-Do not modify `libs/shared-types/` or any shared library as part of mobile development. If a type needs to be shared, it must be defined independently in `apps/mobile/src/` or requested as a separate cross-project change.
-
-### RULE 6: API Consumption Pattern
-
-Mobile app consumes the same backend API as the frontend. When implementing API calls:
-
-1. Read the backend endpoint and DTO to understand request/response shapes.
-2. Create mobile service functions that call the API and transform responses.
-3. Do not copy backend validation or business logic — keep it in the backend.
+Scripts: `npm run mobile:start | mobile:ios | mobile:android | mobile:web` (root). CI (`ci.yml` job
+`mobile`) runs `tsc --noEmit` and `expo export`; do not run them locally unless asked (`buildcheck-dev`).
 
 ## Related Skills
 
-- `vendix-core` - Repository architecture and app boundary understanding
-- `vendix-monorepo-workspaces` - Monorepo dependency and package management
-- `vendix-backend` - Understanding backend API endpoint patterns
-- `vendix-frontend` - Reference for UI component patterns
+- `mobile-parity-audit` — parity of mobile features against the web
+- `vendix-monorepo-workspaces` — dependency placement

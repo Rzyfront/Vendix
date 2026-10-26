@@ -64,15 +64,18 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash   # optional, top level
 - `metadata.scope` and `metadata.auto_invoke` are optional legacy fields: they no longer generate
   anything. Do not add them to new skills.
 
-Quick check (prints any description over 250 chars or name mismatch):
+Quick check (name mismatch and folded `description` over 250 chars; no Node needed):
 
 ```bash
-for f in skills/*/SKILL.md; do
-  d=$(basename "$(dirname "$f")")
-  n=$(awk '/^---$/{c++;next} c==1&&/^name:/{print $2;exit}' "$f")
-  [ "$n" = "$d" ] || echo "NAME MISMATCH: $d ($n)"
-done
+python3 - <<'PY'
+import glob, os, re
+for f in sorted(glob.glob('skills/*/SKILL.md')):
+    d = os.path.basename(os.path.dirname(f))
+    fm = open(f).read().split('---')[1]
+    n = re.search(r'^name:\s*(\S+)', fm, re.M)
+    if not n or n.group(1) != d: print('NAME MISMATCH:', d)
+    m = re.search(r'^description:[ \t]*[>|]?-?[ \t]*\n?((?:[ \t]+.*\n?)+|.*)', fm, re.M)
+    desc = ' '.join(l.strip() for l in (m.group(1) if m else '').splitlines()).strip()
+    if len(desc) > 250: print('DESC', len(desc), d)
+PY
 ```
-
-Check description length by reading the folded YAML value (e.g. with `node -e` + `js-yaml` from
-`node_modules`) — a line-count check is not enough for `>` folded blocks.

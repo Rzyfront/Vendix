@@ -7,9 +7,8 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
-  auto_invoke: "EC2 maintenance, deployment disk issues, or Docker layer/pull failures"
 ---
 
 # Vendix EC2 Maintenance
@@ -89,11 +88,8 @@ Avoid blanket `docker system prune -a -f` as the default advice.
 
 Prefer the repo’s targeted cleanup sequence when disk pressure or layer registration failures appear:
 
-- container prune
-- image prune
-- volume prune
-- builder prune
-- package/cache cleanup as used in deploy automation
+`docker container prune -f` → `docker image prune -af` → `docker volume prune -f` → `docker builder prune -af`
+(the same sequence the deploy workflow runs).
 
 Be careful with persistent infra components such as shared Docker network/Redis state.
 
@@ -109,13 +105,6 @@ Be careful with persistent infra components such as shared Docker network/Redis 
 
 AWS CLI checks such as `aws sts get-caller-identity` are safe for validating access context. Use live infra reads only when repository evidence is insufficient.
 
-## Changelog
-
-- 2026-10-14: seccion "Deploy blue/green" (slots blue/green, upstream nginx `vendix_api`, orden, rollback, preflight 2500 MB). El `3000` deja de publicarse.
-
 ## Related Skills
 
-- `vendix-cloud-operations` - General AWS CLI, SSH, and private production runbook orientation.
-- `vendix-monorepo-workspaces`
-- `buildcheck-dev`
-- `git-workflow`
+- `vendix-cloud-operations` - AWS CLI inventory, SSH and the private runbook.
