@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
 ---
 
@@ -15,14 +15,14 @@ metadata:
 
 > **Opt-in only.** Bruno is NOT a verification mechanism for agents. Agents must verify
 > endpoints with `curl` (authenticating via a seed owner account or credentials supplied by
-> the user) — see `AGENTS.md` and `how-to-plan`. Use this skill **exclusively** when a
+> the user) — see `how-to-test`. Use this skill **exclusively** when a
 > developer deliberately asks to author or edit a Bruno `.bru` test; never auto-invoke it as
 > part of a plan's verification.
 
 ## Source of Truth
 
-- `bruno/Vendix/collection.bru`
-- Existing request files under `bruno/Vendix/**`
+- `bruno/Vendix/collection.bru` (environments `local.bru`, `staging.bru`); requests under `bruno/Vendix/**`
+- Separate collections: `bruno/subscriptions/`, `bruno/API Factus/`
 - Backend DTOs/controllers for payload alignment
 
 ## Rules

@@ -13,8 +13,8 @@
 
   PUBLISHING AS A CLAUDE ARTIFACT
     Remove the <!DOCTYPE>, <html>, <head>, <body> wrapper below — the Artifact
-    tool injects its own. Keep only the <style> block onward. Load the
-    `artifact-design` skill first. All CSS/JS is already inline and CSP-safe.
+    tool injects its own. Keep only the <style> block onward.
+    All CSS/JS is already inline and CSP-safe.
 
   RULES (see SKILL.md)
     - No external CDN / webfonts / remote images. Inline everything (data: URIs).
@@ -115,6 +115,8 @@
   .story-top h4 { font-size: 1.06rem; margin: 0; font-weight: 650; letter-spacing: -.01em; }
   .as-a { color: var(--ink-2); font-size: .9rem; margin: 8px 0 20px; max-width: 74ch; }
   .as-a em { color: var(--accent-ink); font-style: normal; font-weight: 600; }
+  .acceptance { margin: 12px 0 0 18px; padding: 0; color: var(--ink-2); font-size: .85rem; }
+  .acceptance::before { content: "Criterios de aceptación"; display: block; margin-left: -18px; font-weight: 600; }
 
   /* ---------- flow ---------- */
   .track { overflow-x: auto; padding: 4px 2px 12px; margin: 0 -4px; }
@@ -272,7 +274,7 @@
     <!-- story with a linear flow -->
     <div class="story">
       <div class="story-top"><span class="hu-id">HU-1.1</span><h4>{{Título de la historia}}</h4></div>
-      <p class="as-a">Como <em>{{actor}}</em> quiero <em>{{capacidad}}</em> para {{beneficio}}.</p>
+      <p class="as-a">Como <em>{{rol}}</em> en <em>{{entorno}}</em>, quiero <em>{{funcionalidad}}</em> para {{resultado}}.</p>
       <div class="track"><div class="flow">
         <div class="node action"><span class="tag">Acción</span>{{Abre / completa …}}</div>
         <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
@@ -286,12 +288,13 @@
         <span class="chip">{{regla / invariante}}</span>
         <span class="chip ok">{{evidencia verificada}}</span>
       </div>
+      <ul class="acceptance"><li>{{Lo que la persona ve cuando funciona}}</li></ul>
     </div>
 
     <!-- story with a decision + branch (2+ outcomes) -->
     <div class="story">
       <div class="story-top"><span class="hu-id">HU-1.2</span><h4>{{Historia con bifurcación}}</h4></div>
-      <p class="as-a">Como <em>{{actor}}</em> quiero <em>{{capacidad}}</em> para {{beneficio}}.</p>
+      <p class="as-a">Como <em>{{rol}}</em> en <em>{{entorno}}</em>, quiero <em>{{funcionalidad}}</em> para {{resultado}}.</p>
       <div class="track"><div class="flow">
         <div class="node action"><span class="tag">Acción</span>{{Acción inicial}}</div>
         <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>

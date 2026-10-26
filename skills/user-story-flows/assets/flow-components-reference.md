@@ -18,7 +18,7 @@ is present. Content in Spanish; technical tokens (endpoints, codes, fields) in m
     <span class="hu-id">HU-1.1</span>
     <h4>Título corto de la historia</h4>
   </div>
-  <p class="as-a">Como <em>actor</em> quiero <em>capacidad</em> para beneficio.</p>
+  <p class="as-a">Como <em>rol</em> en <em>entorno</em>, quiero <em>funcionalidad</em> para resultado.</p>
 
   <div class="track"><div class="flow">
     <!-- nodes + connectors go here -->
@@ -28,6 +28,7 @@ is present. Content in Spanish; technical tokens (endpoints, codes, fields) in m
     <span class="chip">regla o invariante</span>
     <span class="chip ok">evidencia verificada</span>
   </div>
+  <ul class="acceptance"><li>lo que la persona ve cuando funciona</li></ul>
 </div>
 ```
 

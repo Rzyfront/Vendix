@@ -1,116 +1,114 @@
-# Bug Issue Template (FIX/)
+# Issue templates (FIX/ and FEAT/ · DEV/ · CHORE/)
 
-Use this template for any issue that reports a defect, broken behavior, or
-unexpected result. The agent MUST collect every field marked **required**
-before calling the Linear API.
+Every issue starts with the **user story**, the **steps a person follows on screen**, and
+**observable acceptance criteria**. Technical detail goes underneath as notes.
 
-## Title format
+## Bug title
 
 ```
 FIX/ <sentence-case description> [<module>]
 ```
 
-**Rules:**
+- Prefix `FIX/` uppercase + single space; no trailing period; ~60 chars max.
+- `[<module>]` optional but recommended: `admin`, `ecommerce`, `mobile`, `core`, `api`, `infra`.
+- Bad: `fix/bug en checkout`, `FIX/Bug en checkout.`, `FIX/ Bug`. Good: `FIX/ Error al finalizar compra [ecommerce]`.
+- If the user's title does not match: propose a correction and wait for confirmation.
 
-- Prefix is **always** `FIX/` (uppercase, slash, single space)
-- After the prefix, the description starts with a capital letter
-- No trailing period
-- Maximum ~60 characters total (Linear truncates aggressively on small screens)
-- The `[<module>]` tag is optional but recommended; use one of:
-  `admin`, `ecommerce`, `mobile`, `core`, `api`, `infra`
-- Bad: `fix/bug en checkout`, `FIX/Bug en checkout.`, `FIX/ Bug`
-- Good: `FIX/ Error al finalizar compra en ecommerce [ecommerce]`
+## Bug fields
 
-**If the user's title does not match this format, the agent MUST:**
+| Field | Required | Notes |
+|---|---|---|
+| Historia de usuario | yes | "Como <rol> en <entorno>, quiero <funcionalidad> para <resultado>" (the role/flow that breaks) |
+| Entorno | yes | app (admin/ecommerce/mobile), store name or NIT, date (default today) |
+| Pasos para reproducir | yes | numbered, what the person does on screen, min 2 |
+| Comportamiento actual | yes | what the person sees now; error text verbatim |
+| Comportamiento esperado / criterios de aceptación | yes | observable checklist of what the person should see |
+| Severidad | yes | Bloqueante (no se puede operar) · Alta (workaround incómodo) · Media (workaround existe) · Baja (cosmético) |
+| Capturas / logs | no | URLs, pasted text or `n/a` |
+| Notas técnicas | no | endpoint, status, stack trace, suspected file |
+| Priority | yes | user value, else inferred from Severidad and confirmed |
+| Assignee | no | "me", email, or unassigned (default) |
+| Labels | no | one of the existing labels (`labels.md`) |
 
-1. Suggest a corrected title following the rules above
-2. Wait for the user to confirm or override before creating the issue
+Missing required field the user cannot give: write `n/a`, create with `priority: 0`, tell the user.
+Never invent stores, NITs, errors or steps.
 
-## Required fields (collected by the agent)
+### Priority from Severidad
 
-The agent MUST ask for every field marked required. If the user cannot
-provide one, mark the issue with `priority: 0` (no priority) and skip
-validation, but still create the issue — never block creation on missing
-optional info.
-
-| Field | Required | Source | Notes |
-|---|---|---|---|
-| **Title** | yes | user input | must follow the `FIX/` format above |
-| **Description** (markdown body) | yes | assembled from the template below | never send an empty description for a bug |
-| **Priority** | yes | user input or inferred | 1=urgent, 2=high, 3=medium, 4=low, 0=none |
-| **App / module tag** | yes | derived from title or asked | drives the `[<module>]` suffix |
-| **Entorno** | yes | asked | app (admin/ecommerce/mobile), store name or NIT, date |
-| **Pasos para reproducir** | yes | asked | numbered list, minimum 2 steps |
-| **Comportamiento actual** | yes | asked | what happens now |
-| **Comportamiento esperado** | yes | asked | what should happen |
-| **Capturas / logs** | no | asked | URLs, pasted text, or "n/a" |
-| **Severidad (Bloqueante/Alta/Media/Baja)** | yes | asked | drives the priority if user does not provide one |
-| **Assignee** | no | user input | "me" or an email; default = unassigned |
-| **Labels** | no | user input | must be one of the six existing labels |
-
-## Priority inference from severity
-
-If the user did not provide a priority, infer it from **Severidad**:
-
-| Severidad | Priority (numeric) |
+| Severidad | Priority |
 |---|---|
 | Bloqueante | 1 (urgent) |
 | Alta | 2 (high) |
 | Media | 3 (medium) |
 | Baja | 4 (low) |
 
-The agent MUST confirm the inferred priority with the user before creating.
-
-## Description template (markdown body)
-
-This is the exact markdown the agent assembles and sends in the
-`description` field of `issueCreate`. The agent fills in user answers
-where there are placeholders.
+## Bug description body (exact section order)
 
 ````markdown
+## Historia de usuario
+Como <rol> en <entorno>, quiero <funcionalidad> para <resultado>.
+
 ## Entorno
 - **App:** <admin | ecommerce | mobile>
 - **Store:** <nombre o NIT>
 - **Fecha:** YYYY-MM-DD
 
 ## Pasos para reproducir
-1. <step>
-2. <step>
-3. <step>
+1. <lo que hace la persona en pantalla>
+2. <...>
 
 ## Comportamiento actual
-<what happens now — be specific, include error messages verbatim>
+<lo que ve la persona; mensajes de error textuales>
 
-## Comportamiento esperado
-<what should happen>
+## Criterios de aceptación
+- [ ] <lo que la persona debe ver cuando esté corregido>
+- [ ] <...>
 
 ## Capturas / logs
-<URLs, pasted output, or "n/a">
+<URLs, texto pegado o "n/a">
 
 ## Severidad
 - [ ] Bloqueante (no se puede operar)
 - [ ] Alta (workaround incómodo)
 - [ ] Media (workaround existe)
 - [ ] Baja (cosmético)
+
+## Notas técnicas
+<endpoint, status, traza, archivo sospechoso o "n/a">
 ````
 
-**Section rules:**
+Rules: all `##` headers mandatory and in this order; exactly one Severidad box ticked; `n/a` inside
+empty sections; `Entorno` bullets use `- **`; steps use `1. ` without nesting.
 
-- All six section headers (`##`) are mandatory, in this order
-- The "Severidad" checkboxes must keep exactly one ticked — the agent
-  reflects the user's choice
-- "Capturas / logs" is required as a section header even if empty —
-  the agent writes `n/a` inside
-- Bullets in "Entorno" must use `- **` for the label
-- Numbered lists in "Pasos" use `1. ` (no nested lists)
+## Feature / task body (FEAT/ · DEV/ · CHORE/)
 
-## Example — fully filled
+Title: sentence-case imperative with prefix (`FEAT/` user-facing, `DEV/` internal/refactor/infra,
+`CHORE/` deps/config/cleanup). `DEV/` and `CHORE/` may skip the story if there is no user-facing
+change; say so in one line.
 
-**Title:** `FIX/ Error al aprobar reseña desde ecommerce [ecommerce]`
+````markdown
+## Historia de usuario
+Como <rol> en <entorno>, quiero <funcionalidad> para <resultado>.
 
-**Description:**
+## Cómo se prueba en pantalla
+1. <paso que sigue la persona>
+2. <...>
+
+## Criterios de aceptación
+- [ ] <lo que la persona ve>
+
+## Notas técnicas
+<alcance, endpoints, módulos, dependencias>
+````
+
+## Example (bug, filled)
+
+Title: `FIX/ Error al aprobar reseña desde ecommerce [ecommerce]`
 
 ```markdown
+## Historia de usuario
+Como moderador en el panel admin de Vendix Demo Store, quiero aprobar reseñas pendientes para publicarlas en la tienda.
+
 ## Entorno
 - **App:** ecommerce
 - **Store:** Vendix Demo Store (NIT 900123456)
@@ -118,43 +116,25 @@ where there are placeholders.
 
 ## Pasos para reproducir
 1. Ingresar al panel admin como moderador
-2. Ir a la sección Reseñas pendientes
+2. Ir a Reseñas pendientes
 3. Hacer clic en "Aprobar" sobre una reseña
-4. Observar la respuesta del servidor
 
 ## Comportamiento actual
-El endpoint devuelve 500 Internal Server Error. En consola del navegador:
-```
-TypeError: Cannot read properties of undefined (reading 'id')
-    at ReviewController.approve (review.controller.ts:127)
-```
+Aparece "Error interno del servidor" y la reseña sigue en pendientes.
 
-## Comportamiento esperado
-La reseña se marca como aprobada, desaparece de pendientes y aparece en
-la lista de aprobadas con un toast de confirmación.
+## Criterios de aceptación
+- [ ] La reseña desaparece de pendientes y aparece en aprobadas
+- [ ] Se muestra un toast de confirmación
 
 ## Capturas / logs
-https://drive.example.com/screenshots/2026-06-08-review-500.png
 Sentry: VENDIX-REVIEW-7421
 
 ## Severidad
-- [x] Alta (workaround incómodo)
 - [ ] Bloqueante (no se puede operar)
+- [x] Alta (workaround incómodo)
 - [ ] Media (workaround existe)
 - [ ] Baja (cosmético)
-```
 
-**Linear payload variables (for reference, see `graphql-mutations.md`):**
-
-```json
-{
-  "input": {
-    "teamId": "64581e80-05a2-40e8-8acb-1f091ad38168",
-    "projectId": "0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59",
-    "title": "FIX/ Error al aprobar reseña desde ecommerce [ecommerce]",
-    "description": "<the markdown body above>",
-    "priority": 2,
-    "labelIds": ["..."]
-  }
-}
+## Notas técnicas
+`POST /api/store/reviews/:id/approve` → 500 `TypeError: Cannot read properties of undefined (reading 'id')`.
 ```

@@ -138,6 +138,10 @@
   .hl-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
   .hl-card h3{margin:2px 0 7px;font-size:15.5px}
   .hl-card .sum{color:var(--muted);font-size:13.5px;line-height:1.6}
+  .hl-card .story{font-size:13.5px;line-height:1.55;margin:0 0 8px;font-style:italic}
+  .hl-card ol.steps{margin:6px 0 8px 18px;padding:0;font-size:13px;color:var(--muted);line-height:1.55}
+  .hl-card .eo{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:13px;margin-bottom:8px}
+  .hl-card .eo b{font-weight:600}
   .hl-card .area{margin-top:auto;padding-top:12px;font-size:12px;color:var(--muted)}
 
   /* ---------- Pills ---------- */
@@ -363,7 +367,7 @@ const REPORT = {
     { id:"QUI-508", url:"https://linear.app/quickss/issue/QUI-508", title:"FIX/ Serial no se registra al confirmar remisión [admin]", impact:"Productos tecnológicos sin trazabilidad de serial.", severity:"Alta", state:"Todo" },
     { id:"QUI-511", url:"https://linear.app/quickss/issue/QUI-511", title:"FIX/ 500 al despachar orden sin dirección [api]", impact:"Bloquea el flujo de despacho para órdenes COD.", severity:"Bloqueante", state:"In Review" },
   ],
-  // Tickets más relevantes del sprint — con un resumen en lenguaje llano de QUÉ TRATAN.
+  // Tickets más relevantes del sprint — historia (story), pasos (steps), esperado vs. observado y resumen de QUÉ TRATAN.
   // kind = etiqueta corta; tone = pill/estado (s-crit|s-warn|s-good|s-info).
   highlights: [
     { id:"QUI-501", url:"https://linear.app/quickss/issue/QUI-501", kind:"Bug bloqueante", tone:"s-crit", title:"Doble descuento de stock al cerrar ruta", area:"Despachos · api",
@@ -371,6 +375,10 @@ const REPORT = {
     { id:"QUI-495", url:"https://linear.app/quickss/issue/QUI-495", kind:"Validado OK", tone:"s-good", title:"Registro de serial en POS diferido", area:"e-tech · seriales",
       summary:"Se verificó E2E que vender productos serializados en POS ya no bloquea el cobro: el serial se difiere a la remisión y se registra al confirmar. La trazabilidad de equipos tecnológicos quedó correcta." },
     { id:"QUI-499", url:"https://linear.app/quickss/issue/QUI-499", kind:"No cumple", tone:"s-crit", title:"Split de cuenta en mesa", area:"miramor · restaurante",
+      story:"Como mesero en el POS de Miramor, quiero dividir la cuenta de una mesa entre comensales para cobrar a cada uno su parte.",
+      steps:["Abrir la mesa 4 con 3 platos", "Clic en \"Dividir cuenta\" → 2 partes iguales", "Revisar el total de cada parte"],
+      expected:"La suma de las partes es igual al total de la mesa, impuestos incluidos.",
+      observed:"Las partes suman $1.200 menos que el total; el IVA no se reparte.",
       summary:"Al dividir la cuenta de una mesa entre comensales, los impuestos no se reparten bien y la suma de las partes no cuadra con el total. No cumple el requerimiento del ticket; requiere corrección antes de liberar." },
     { id:"QUI-497", url:"https://linear.app/quickss/issue/QUI-497", kind:"Con defectos", tone:"s-warn", title:"Cierre de ruta y cuadre de recaudo", area:"tuerca-mia · despachos",
       summary:"El cierre de ruta opera, pero el cuadre de recaudo muestra una diferencia intermitente cuando hay retenciones. Depende del fix de QUI-501; reprogramar una segunda verificación tras aplicarlo." },
@@ -480,6 +488,9 @@ const REPORT = {
             <span class="pill ${esc(h.tone||'s-info')}">${esc(h.kind||'')}</span>
           </div>
           <h3>${esc(h.title)}</h3>
+          ${h.story?`<p class="story">${esc(h.story)}</p>`:''}
+          ${(h.steps&&h.steps.length)?`<ol class="steps">${h.steps.map(st=>`<li>${esc(st)}</li>`).join('')}</ol>`:''}
+          ${(h.expected||h.observed)?`<div class="eo"><b>Esperado</b><span>${esc(h.expected||'sin dato')}</span><b>Observado</b><span>${esc(h.observed||'sin dato')}</span></div>`:''}
           <div class="sum">${esc(h.summary)}</div>
           <div class="area mono">${esc(h.area||'')}</div>
         </article>`).join('');
