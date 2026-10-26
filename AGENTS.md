@@ -16,6 +16,7 @@ Responde en el idioma del usuario.
 - Preguntas, análisis, revisiones y propuestas son de solo lectura: no edites hasta que se pida un cambio.
 - Cambio pequeño (se puede retomar con el pedido + `git diff`) → inline, sin plan previo ni subagentes.
 - Trabajo grande → un único documento de feature `odd/tasks/<feature>.md` (`## Specs`, `## Tasks`, `## Log`). Las Specs incluyen la decisión de negocio, los archivos críticos y lo que se reutiliza. Rafael lo aprueba antes de ejecutar. Si hay un plan aprobado y dice "ejecuta", se ejecuta tal cual.
+- **Historia de usuario primero.** Todo ticket, fix o feature se traduce antes de codificar a "Como <rol> en <entorno>, quiero <funcionalidad> para <resultado>", con pasos humanos en pantalla para reproducir o probar y criterios de aceptación observables (lo que la persona ve). Lo técnico va debajo como notas. Aplica al documento de feature, al resumen de cambios pequeños y a los reportes de QA/validación.
 - Subagentes solo con motivo nombrado (exploración grande, escritores paralelos independientes, contexto agotado, verificador de alto riesgo). Reciben la ruta de la tarea, los skills, los archivos en alcance y el comando de verificación.
 - Worktrees permitidos salvo que Rafael diga lo contrario en la tarea.
 - Carga el skill cuya descripción coincida con el área (backend, frontend, prisma, DIAN, inventario…). Cualquier archivo de frontend → `vendix-zoneless-signals` (sus violaciones son bugs silenciosos). Patrón nuevo sin skill → sugiérelo en una línea al cerrar.
