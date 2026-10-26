@@ -885,6 +885,23 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(Number(ctx.db.coupon_uses.update.mock.calls[0][0].data.discount_applied)).toBe(12);
   });
 
+  it('R6-1) orden de checkout con cupón solo en coupon_uses + promoción: el cupón no se pierde al editar', async () => {
+    const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 0, order_item_taxes: [] });
+    const ctx = build([mk(1), mk(2)], {
+      discount_amount: 15, coupon_code: null, coupon_id: null,
+      order_promotions: [{ id: 71, promotion_id: 1, discount_amount: 10 }],
+    });
+    ctx.promotionEngine.quoteDiscounts.mockResolvedValue({ total_discount: 10, order_promotions_snapshot: [{ promotion_id: 1, discount_amount: 10 }] });
+    ctx.coupons.validate.mockResolvedValue({ coupon_id: 9, discount_amount: 5 });
+    ctx.db.coupon_uses.findFirst
+      .mockResolvedValueOnce({ coupon: { code: 'BIENVENIDA' } })
+      .mockResolvedValue({ id: 33, discount_applied: 5 });
+    const p = await ctx.service.preview(ORDER_ID, { update: [{ order_item_id: 2, quantity: 2 }] });
+    expect(ctx.coupons.validate.mock.calls[0][0].code).toBe('BIENVENIDA');
+    expect(p.totals.after.discount).toBe(15);
+    expect(p.warnings.join(' ')).not.toContain('$15 → $10');
+  });
+
   it('R5-2) una promoción que deja de aplicar queda en 0 (no se borra) y vuelve a aplicar al re-agregar', async () => {
     const mk = (id: number, d = 2.5) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: d, order_item_taxes: [] });
     const base = { discount_amount: 5, order_promotions: [{ id: 71, promotion_id: 1, discount_amount: 5 }] };

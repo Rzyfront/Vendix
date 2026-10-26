@@ -1395,7 +1395,18 @@ export class OrderItemChangesService {
     }
     let headerOverride: number | null = null;
     let quotedSnapshot: Array<{ promotion_id: number; discount_amount: number }> | null = null;
-    const couponCode = String(order.coupon_code ?? '').trim();
+    let couponCode = String(order.coupon_code ?? '').trim();
+    // El checkout (WhatsApp/ecommerce) registra el cupón solo en
+    // `coupon_uses` (sin `orders.coupon_code`/`coupon_id`): se lee de ahí para
+    // re-cotizarlo y no perderlo al editar.
+    if (!couponCode && order.coupon_id == null) {
+      const use = await db.coupon_uses.findFirst({
+        where: { order_id: orderId },
+        select: { coupon: { select: { code: true } } },
+        orderBy: { id: 'desc' },
+      });
+      couponCode = String(use?.coupon?.code ?? '').trim();
+    }
     const promoIds: number[] = (order.order_promotions ?? [])
       .map((p: any) => p.promotion_id)
       .filter((id: unknown): id is number => typeof id === 'number');
