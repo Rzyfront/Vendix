@@ -1533,7 +1533,32 @@ export class OrderItemChangesService {
           );
           requotedCouponDiscount = couponDiscount;
         } catch (err) {
-          if (err instanceof VendixHttpException) {
+          // `validate` solo encuentra cupones activos (eliminar = desactivar).
+          // Si ESTA orden ya usó el cupón y el comercio lo desactivó después,
+          // se respeta y se conserva el monto que ya tenía: no se re-cotiza.
+          const usedInactive =
+            err instanceof VendixHttpException &&
+            err.errorCode === ErrorCodes.CPN_FIND_001.code
+              ? await db.coupon_uses.findFirst({
+                  where: { order_id: orderId, coupon: { code: couponCode, is_active: false } },
+                  select: { id: true, discount_applied: true },
+                  orderBy: { id: 'desc' },
+                })
+              : null;
+          if (usedInactive) {
+            const remaining = Math.max(
+              0,
+              this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+            );
+            couponUseRow = usedInactive;
+            couponDiscount = roundMoney2(
+              Math.min(Number(usedInactive.discount_applied ?? 0), remaining),
+            );
+            requotedCouponDiscount = couponDiscount;
+            warnings.push(
+              `El cupón ${couponCode} está desactivado: se conserva su descuento de ${money(couponDiscount)}`,
+            );
+          } else if (err instanceof VendixHttpException) {
             // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
             // se bloquea y el usuario ajusta los productos (igual que el editor).
             quoted = false;
