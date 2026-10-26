@@ -1,4 +1,4 @@
-import {Component, inject, OnInit, signal, computed, DestroyRef, effect} from '@angular/core';
+import { Component, inject, OnInit, signal, computed, DestroyRef, effect } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -26,6 +26,9 @@ import { NavigationService } from '../../../../core/services/navigation.service'
 import { AppConfigService } from '../../../../core/services/app-config.service';
 import { ConfigFacade } from '../../../../core/store/config';
 import * as ConfigActions from '../../../../core/store/config/config.actions';
+import { DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 
 type RegistrationState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -234,6 +237,17 @@ interface RegistrationError {
   ],
 })
 export class RegisterOwnerComponent implements OnInit {
+  // SEO-TECH-04: título, descripción, robots y canonical propios en el host comercial.
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.register,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);

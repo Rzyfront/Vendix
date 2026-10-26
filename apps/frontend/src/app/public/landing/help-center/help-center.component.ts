@@ -1,10 +1,12 @@
-import { Component, signal, computed, inject, ElementRef, ViewChild, effect } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, signal, computed, inject, ElementRef, ViewChild, effect, DestroyRef } from '@angular/core';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { PublicHeaderComponent } from '../components/public-header/public-header.component';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../marketing-page-metadata';
 
 interface FaqItem {
   id: string;
@@ -58,6 +60,17 @@ interface PopularArticle {
   styleUrls: ['./help-center.component.scss'],
 })
 export class HelpCenterComponent {
+  // SEO-TECH-04: título, descripción, robots y canonical propios en el host comercial.
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.help,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private readonly authFacade = inject(AuthFacade);
 
   /** Ref to the FAQ section so we can scroll to it when a category
