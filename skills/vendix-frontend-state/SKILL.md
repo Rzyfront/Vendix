@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Managing State"
 ---
@@ -42,16 +42,8 @@ Legacy `BehaviorSubject + destroy$ + ngOnDestroy` service templates are not the 
 ## Mutations From Modals In NgRx-Backed Modules
 
 If a module owns `state/actions/*.actions.ts`, **every** mutation goes through an
-action. A component that calls the HTTP service directly bypasses the
-`action → effect → refresh` chain, and the resulting bug is invisible in code
-review because the POST itself succeeds — only the list keeps showing stale data.
-
-This is not hypothetical. It shipped as **QUI-554**: the store-users create modal
-called `StoreUsersManagementService.createUser()` directly, so
-`StoreUsersActions.createUser` was never dispatched, `createUserSuccess` was
-never emitted, and the `mutationSuccess$` effect — which already existed and
-reloads `loadUsers` + `loadStats` — never ran. The user was persisted but the
-table and the stat cards stayed on the old count until a manual page refresh.
+action. Calling the HTTP service from a component skips `action → effect → refresh`:
+the POST succeeds but list and stats stay stale (QUI-554, store-users create modal).
 
 ### Contract
 
@@ -97,8 +89,8 @@ mutationSuccess$ = createEffect(() =>
 - **Never** close the modal in the same tick as the dispatch. Fire-and-forget destroys everything typed when the backend answers 400 (duplicate email, validation).
 - Mutation progress is its own state flag (`entity_saving`), separate from the list-loading flag. Reusing `entities_loading` makes a save swap the table for the list spinner.
 - Toast lives in the effect only. A toast in the component **and** in the effect double-fires.
-- An `output()` that is declared but never emitted is worse than no output: `onUserUpdated` looked like the parent covered the refresh and hid QUI-554 for weeks. Emit it or delete it.
-- A `model()` already publishes an implicit `xChange` output. Declaring `output<T>()` with that same name creates two channels for one value and leaves the `model` desynchronized — the parent's `[(x)]` then works by accident. Close with `isOpen.set(false)`.
+- An `output()` declared but never emitted hides a missing refresh: emit it or delete it.
+- Never declare `output()` named like a `model()`'s implicit `xChange` (see `vendix-frontend-modal`); close with `isOpen.set(false)`.
 
 ### Guard
 

@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Displaying or formatting money/currency values"
@@ -52,6 +52,8 @@ Useful methods:
 - `format(amount, decimals?)`
 - `formatCompact(amount)`
 - `formatChartAxis(value)`
+
+Resolution is a 3-state signal `resolution()`: `pending` → `format()` returns `CURRENCY_PENDING_PLACEHOLDER` (`'…'`, never a provisional number; `'—'` means "no value"); `resolved` → tenant currency; `unresolved` → en-US fallback. Read `format()` inside templates (impure pipe or component helper) so the view repaints when currency resolves; do not cache formatted strings in plain fields.
 
 ## Inputs
 

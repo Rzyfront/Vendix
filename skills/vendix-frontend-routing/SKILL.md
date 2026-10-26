@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Managing Routes"
@@ -34,6 +34,8 @@ Key route files:
 - `routes/private/org_admin.routes.ts`
 - `routes/private/store_admin.routes.ts`
 - `routes/private/ecommerce.routes.ts`
+- `routes/private/store_delivery.routes.ts` (carrier app, `carrierGuard`)
+- `routes/public/default.public.routes.ts`
 - `routes/public/store_ecommerce.public.routes.ts`
 - `routes/public/vendix_landing.public.routes.ts`
 - `routes/public/org_landing.public.routes.ts`
@@ -47,6 +49,8 @@ Key route files:
 - Verify the actual parent route file is active before adding a child route.
 - Public ecommerce/landing routes should not require staff/admin auth unless the page explicitly needs it.
 - Private admin route roots use `AuthGuard`; backend still owns real authorization.
+- Store admin shell (`store_admin.routes.ts`) runs `[AuthGuard, onboardingGuard, panelUiGuard]` on `canActivate` and `[onboardingGuard, panelUiGuard]` on `canActivateChild`. A new store module route must have its key/route in `MODULE_ROUTES` (`shared/constants/store-module-catalog.constant.ts`) so `panelUiGuard` can govern direct URLs (see `vendix-panel-ui`).
+- Existing guards live in `apps/frontend/src/app/core/guards/` (e.g. `manageUsersGuard`, `storeDashboardGuard`, `vexAccessGuard`, `subscription-*`, `operating-scope`, `fiscal-management`); reuse before creating one.
 - Use route `data` for presentation metadata or default filters, not security decisions.
 
 ## Patterns
@@ -76,7 +80,7 @@ Key route files:
 1. Identify the active route tree: public, private app shell, or feature child routes.
 2. Add a lazy `loadComponent` or `loadChildren` route.
 3. Add guards only at the correct boundary.
-4. Add sidebar/menu metadata separately through layout/menu files and `vendix-panel-ui` if this is an admin module.
+4. Add sidebar/menu metadata and `MODULE_ROUTES` entry through `vendix-panel-ui` if this is an admin module.
 5. Verify the path does not conflict with existing public aliases such as localized ecommerce routes.
 
 ## Related Skills

@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Creating or modifying guided tours in frontend"
 ---
@@ -52,7 +52,7 @@ Current tour configs use `TourConfig` and `TourStep` from the service, including
 ## Rules
 
 - Use stable selectors, ideally `data-tour` attributes, for important targets.
-- Keep configs in `shared/components/tour/configs/` when reusable across flows.
+- Keep configs in `shared/components/tour/configs/` and register every tour in `TOUR_CONFIG_MAP` (`configs/tour-registry.ts`). That map (also injectable as `VEXI_TOUR_CONFIGS`) is the single registry read by `store-admin-layout` and Vexi (`core/services/vexi-ui-command.service.ts`); an unregistered tour cannot be listed or started by Vexi.
 - Use `TourService.canShowTour(tourId)` before opening a first-visit tour.
 - Persist completed/skipped state through the service; do not duplicate local storage logic in feature components.
 - Follow zoneless/signal patterns when integrating tour visibility into pages.

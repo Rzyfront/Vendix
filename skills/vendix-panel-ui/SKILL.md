@@ -5,7 +5,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.5"
+  version: "1.6"
   scope: [root]
   auto_invoke:
     - "Adding modules or submodules to the sidebar"
@@ -20,577 +20,66 @@ metadata:
 
 # Vendix Panel UI
 
-## Purpose
+`panel_ui` is UI visibility only, never authorization. Protect APIs with `PermissionsGuard` / `@Permissions` / subscription guards (`vendix-permissions`, `vendix-subscription-gate`).
 
-Use this skill for sidebar/menu visibility. Effective visibility crosses three layers
-— **industry availability**, **store panel UI**, and **per-user panel UI** — plus the
-existing `store_type` / `module_flows` / operating-scope / fiscal-scope / subscription
-filters. `panel_ui` controls what the user sees in admin navigation; it is not backend
-authorization.
+Detail (read on demand): `references/backend-flow.md` (template merge, lazy soft merge, "Nuevo" badge, super_admin backfill, industry DTO plumbing) and `references/frontend-surfaces.md` (key files, `diagnose()`, module catalog, `app-panel-ui-modules-editor` contract and consumers).
 
-## ⚠️ Critical Plan Decisions (mandatory before implementation)
+## Mandatory plan decisions (new module/submodule key)
 
-Any plan that introduces a new module or submodule MUST explicitly answer these two questions in writing. If the plan does not declare these decisions, **block execution** and ask the human.
+The plan must state, with a 1–2 line justification each; otherwise block and ask. PRs adding a key to `PANEL_UI_FALLBACK` without them are rejected.
 
-1. **`default_visible_for_privileged_users`** (`true` / `false`)
-   - `true` (recommended for features useful to everyone): owner / admin / super_admin see the item automatically on next login. Set the fallback value to `true`.
-   - `false` (experimental or super_admin-only): hidden by default; admin must enable it per-user from the settings UI. Set the fallback value to `false`.
+1. `default_visible_for_privileged_users` (`true`/`false`) = the fallback value. `true` for features useful to all; `false` for experimental / super_admin-only.
+2. `show_new_badge` (`yes`/`no`, default `yes`): surfaces in user dropdown banner + Settings → General → "Módulos del Panel". The sidebar never renders "Nuevo".
 
-2. **`show_new_badge`** (`yes` / `no`, default `yes`)
-   - `yes` (recommended whenever the item is meant to be discovered): the **user dropdown banner** ("Tienes N módulos nuevos disponibles") and the **Settings → General → "Módulos del Panel"** section surface the key as new until the user toggles/activates it.
-   - `no`: silent rollout. Only for admin-only utilities that do not need discoverability.
-   - **The sidebar does NOT render a "Nuevo" badge anymore** — it was removed for being too intrusive. Discovery lives only in the user dropdown banner and the Settings module list.
+Sub-cards inside an existing page (e.g. "Módulos de la Tienda" in `settings_general`) add no key → N/A.
 
-The plan must include a one- or two-line justification for each decision. PRs that add a key to `PANEL_UI_FALLBACK` without these decisions documented must be rejected in review.
+## Filter chain (`MenuFilterService`, AND; a later step never widens)
 
-> **Reminder (industry / store-panel-UI plan):** a plan that adds the new
-> "Módulos de la Tienda" card as a *sub-card inside* the existing `settings_general`
-> page adds **no new module key** to `PANEL_UI_FALLBACK` or `APP_MODULES`, so both
-> decisions are **N/A**. If a follow-up plan turns that card into its own submodule
-> key, that plan must record both decisions explicitly.
+1. Industry — `getModulesHiddenByIndustries(industries)`: hidden only if hidden for **every** store industry (set-intersection). Industries fallback: `storeSettings.general.industries` → `authFacade.userIndustries()` → `['retail']`.
+2. Store panel UI — `storeSettings.panel_ui.STORE_ADMIN[key] === false` (strict; absent = allowed, never `!value`).
+3. User panel UI — `user_settings.config.panel_ui[app_type][key] === true`.
+4. `store_type` (`storeTypeHiddenModules`).
+5. `module_flows` (accounting / payroll / invoicing).
+6. Operating / fiscal scope (`vendix-operating-scope`, `vendix-fiscal-scope`).
+7. Subscription gates (`vendix-subscription-gate`).
 
-## Visibility Sources
+Owner bypass: `authFacade.isOwner()` skips step 3 (owner sees every module regardless of own `panel_ui`), mirrored in `panelUiGuard` and `firstActiveModuleRoute`.
 
-Effective visibility = **industry availability ∩ store panel UI ∩ user panel UI** ∩
-`store_type` ∩ `module_flows` ∩ operating-scope ∩ fiscal-scope ∩ subscription gates.
+Direct URL: `panelUiGuard` (`core/guards/panel-ui.guard.ts`, in `store_admin.routes.ts` `canActivate`/`canActivateChild` after `AuthGuard`) maps URL → keys with `resolveKeysForRoute()` and redirects hidden modules (user panel UI or industry) to `firstActiveModuleRoute()` with a toast. `PANEL_UI_TERMINAL_ROUTE` (`/admin/settings/general`, owner) and `PANEL_UI_NO_ACCESS_ROUTE` (`/admin/no-access`) always pass to avoid loops. Still UX, not authorization.
 
-| Source | Role |
-| --- | --- |
-| `stores.industries` (Postgres `industry_enum[]`) | Multi-select industry list on the store row; default `['retail']`; mirrored in `store_settings.settings.general.industries` |
-| `INDUSTRY_HIDDEN_MODULES` (frontend constant) | `Record<StoreIndustry, string[]>` of module keys hidden per industry; OR semantics across the store's industries; consumed by `MenuFilterService` and both per-user config surfaces (single source) |
-| `store_settings.settings.panel_ui` (existing `PanelUISettings`) | Store-wide ceiling; **absent = allowed, `false` = hidden for the whole store**; editable by the owner from "Módulos de la Tienda" card inside `settings_general`; capped by industry (industry-disallowed toggles render disabled) |
-| `user_settings.config.panel_ui` | Main per-user module visibility map (nested by `app_type`) |
-| `user_settings.config.panel_ui_seen_keys` | Per-user record of which module keys the user has interacted with (drives "Nuevo" badge) |
-| `user_settings.config.new_keys` | Computed at read time: defaults keys not yet seen by the user (only for privileged roles) |
-| `user_settings.app_type` | Selects the active app panel map |
-| `DefaultPanelUIService` | Defaults from `default_templates.user_settings_default` deep-merged with hardcoded `PANEL_UI_FALLBACK`, with 5-minute cache |
-| `mergePanelUiSoft` (backend util) | Lazy merge of defaults into `panel_ui` for privileged roles at read time (login/refresh/env-switch/getSettings) |
-| `store_settings.module_flows` | Force-hides operational modules (accounting/payroll/invoicing) when flows disabled |
-| `MenuFilterService` | Applies the triple crossing (industry ∩ store panel UI ∩ user panel UI) plus `store_type` rules and subscription feature requirements |
-| `APP_MODULES` constant | Editable module catalog for settings UI |
+Any new hiding rule goes inside `diagnose()` (first blocker wins; backs Vexi `ui_why_hidden`), never as a separate `if` in a consumer. Authorization prefilters go in `passesAuthorizationGates()` and their inputs in `authorizationGates$`.
 
-## panel_ui Shape (Canonical)
+## Core rules
 
-The only supported shape is **nested by `app_type`**:
+- Canonical shape is nested by `app_type` (`ORG_ADMIN`, `STORE_ADMIN`, `STORE_ECOMMERCE`, `VENDIX_LANDING`). Flat legacy shape is discarded on read; never write it.
+- Defaults: `DefaultPanelUIService` = DB template deep-merged with `PANEL_UI_FALLBACK` (5-min cache). Adding a key to the fallback is enough; no seed/migration/backfill for privileged users.
+- Privileged roles (`PRIVILEGED_ROLE_NAMES` in `privileged-roles.util.ts`: owner, admin, super_admin) get defaults filled into `undefined` keys at read time; `false` is always respected. Other roles get `panel_ui` as stored; admin curates them or super_admin uses `POST /superadmin/users/sync-panel-ui`. Any role list must import `PRIVILEGED_ROLE_NAMES`.
+- Menu filtering is label-driven via `moduleKeyMap` (array = OR). Labels collide: register new entries by key in `store-module-catalog.constant.ts`; `resolveStoreModule()` returns `null` on ambiguity by design.
+- An unmapped leaf with no children is silently dropped. Key-less entries: `alwaysVisible: true` + gate in `passesAuthorizationGates()`.
+- Module tree UI exists only in `app-panel-ui-modules-editor`; consumers own persistence.
 
-```jsonc
-{
-  "ORG_ADMIN":   { "dashboard": true, "stores": true, ... },
-  "STORE_ADMIN": { "dashboard": true, "products": true, "products_list": true, ... },
-  "STORE_ECOMMERCE": { ... },
-  "VENDIX_LANDING": {}
-}
-```
+## Industry rules (single source)
 
-Flat legacy shape (`{ products: true, dashboard: true }` at top level) is **not supported**. The backend `mergePanelUiSoft` detects it (all top-level values are booleans) and discards it as if the user had no `panel_ui`. Privileged users then get defaults filled in; non-privileged users get `{}`.
+All per-industry rules live in `apps/frontend/src/app/shared/constants/industry-modules.constant.ts` (`INDUSTRY_HIDDEN_MODULES`). Never inline in `MenuFilterService`, `settings-modal`, `store-user-edit-modal` or any component.
 
-The store-level `store_settings.settings.panel_ui` reuses the same canonical shape per
-`app_type` (typically only `STORE_ADMIN` is populated — industries are store-scoped and
-do not gate `ORG_ADMIN` modules).
+To add one: add the key to the relevant industries' arrays (inverse gating = list it in every industry except the owner one); verify the key exists in `APP_MODULES.STORE_ADMIN`. Nothing else changes. Industries enum (`StoreIndustry`, Postgres `industry_enum[]`, default `['retail']`) is additive only; DTOs keep `@ArrayMinSize(1)`.
 
-## Core Rules
+## Gating of config surfaces (`STORE_ADMIN`)
 
-- `panel_ui` is UI visibility only. Protect APIs with permissions/guards.
-- Defaults come from `DefaultPanelUIService`, not from the sidebar components.
-- **Privileged roles** (`owner`, `admin`, `super_admin`) receive `panel_ui` with defaults merged in at read time (lazy soft merge). They see new modules without needing DB backfill.
-- Non-privileged roles (`manager`, `cashier`, `employee`, etc.) get `panel_ui` exactly as stored. Admin must explicitly curate their access.
-- `false` values are always respected. Defaults only fill `undefined` keys.
-- Menu filtering is label-driven through `MenuFilterService.moduleKeyMap`; label mismatches hide items unexpectedly.
-- Array mappings in `moduleKeyMap` mean OR logic across multiple keys.
-- Store type, `module_flows`, subscription gates, **industry**, and **store panel UI** may hide a module even when `panel_ui[key] === true`.
-- **Every key added to `PANEL_UI_FALLBACK` appears automatically** for privileged users with no DB write and no seed run. This is guaranteed by the auto-merge in `getUnifiedTemplate()` (see Real Backend Flow).
-- **"Nuevo" badge system**: keys present in defaults but missing from `user_settings.config.panel_ui_seen_keys[app_type]` are surfaced via `new_keys` on every read. Discovery is shown **only in the user dropdown banner** and the **Settings → General → "Módulos del Panel"** section — never in the sidebar (intrusive).
-- For non-privileged users (`manager`, `cashier`, `employee`), the badge does not apply: they only see the key after an admin toggles it in the settings UI or super_admin runs `POST /superadmin/users/sync-panel-ui`.
+For keys hidden by industry or by store panel UI: render the toggle **disabled** (not hidden) with badge "Industria" (precedence) or "Tienda", and **exclude it from the save diff** so the stored user value survives if the ceiling is lifted. The store card ("Módulos de la Tienda") disables industry-hidden toggles and saves only OFF keys.
 
-## Industry Dimension — `stores.industries` + `INDUSTRY_HIDDEN_MODULES`
+## Checklist — add a module/submodule
 
-### Source of truth
+1. Record both plan decisions.
+2. Add key to `PANEL_UI_FALLBACK` (`apps/backend/src/common/services/default-panel-ui.service.ts`) under the right `app_type` with decision #1 value. Seed `default_templates.user_settings_default` optional.
+3. Add key to `APP_MODULES` (`app-modules.constant.ts`) under the right parent (`children[]`). Without it admins cannot toggle it per user (#1 cause of "visible but not configurable").
+4. Map the label in `MenuFilterService.moduleKeyMap` and register the key/route in `store-module-catalog.constant.ts` (also feeds `resolveKeysForRoute()` for `panelUiGuard`).
+5. Add the menu item to the owning layout and the lazy route (`vendix-frontend-routing`).
+6. Add backend permission + guard for its APIs.
+7. If industry-specific, add the rule in `INDUSTRY_HIDDEN_MODULES`.
 
-- Backend: `stores.industries industry_enum[]` (Postgres enum array, default `ARRAY['retail']::industry_enum[]`).
-- Mirrored in `store_settings.settings.general.industries` (same pattern as `store_type`).
-- TS enum: `StoreIndustry` in `apps/backend/src/domains/store/stores/dto/index.ts` — values `retail | restaurant | manufacturing | service`. Closed enum, additive only.
-- DTO validators (body): `@IsOptional() @IsArray() @ArrayMinSize(1) @IsEnum(StoreIndustry, { each: true })`. The `@ArrayMinSize(1)` is load-bearing — it prevents JSON/column drift by rejecting empty arrays with an explicit 400 instead of silently no-opping.
-- DTO transform (query): `@Transform(({ value }) => Array.isArray(value) ? value : [value])` **before** validation so single `?industries=restaurant` works alongside the repeated-param form.
-- Frontend mirror: `apps/frontend/src/app/core/models/store-settings.interface.ts` (`GeneralSettings.industries: StoreIndustry[]`).
+Submodule keys follow `parent_child` (`orders_sales`, `settings_domains`) unless existing code differs. Drift tests: `menu-filter.service.spec.ts`, `apps/backend/src/common/services/default-panel-ui.service.spec.ts`.
 
-### Default
+## Related
 
-`getDefaultStoreSettings().general.industries === ['retail']` (and the column default `ARRAY['retail']`). Existing tenants are unchanged by the migration.
-
-### `INDUSTRY_HIDDEN_MODULES` — single source
-
-```ts
-// apps/frontend/src/app/shared/constants/industry-modules.constant.ts
-export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail:        ['restaurant_ops'],
-  restaurant:    [],   // the ONLY industry that sees the restaurant suite
-  manufacturing: ['restaurant_ops'],
-  service:       ['restaurant_ops'],
-};
-
-export function getModulesHiddenByIndustries(industries: string[]): string[] {
-  // OR semantics: a module is hidden only if hidden for EVERY industry of the store.
-  // Implementation = set-intersection of the per-industry hidden lists.
-  // If `industries` is empty/undefined, returns [] (no module hidden).
-}
-```
-
-**This is the lock.** All per-industry module rules live here — never inline in
-`MenuFilterService`, `settings-modal.component.ts`, or
-`store-user-edit-modal.component.ts`. The three consumers stay in sync because there is
-exactly one source. Adding a new per-industry rule means adding a module key string to
-the relevant industry's array; no other code changes are required.
-
-### Inverse gating rule (Restaurant Suite, Phase I)
-
-The first real per-industry rule is **inverse**: the `restaurant_ops` parent module is
-hidden for **every** industry EXCEPT `restaurant`. `retail`, `manufacturing`, and
-`service` list `restaurant_ops` in their arrays; `restaurant` keeps an **empty** array
-so it stays visible. Because `getModulesHiddenByIndustries` uses **OR / set-intersection**
-semantics (a module is hidden only if it is hidden for *all* of the store's industries),
-a multi-industry store such as a hotel (`service` + `restaurant`) still sees
-`restaurant_ops` — the `restaurant` half of the intersection does not hide it, so the
-intersection is empty.
-
-`restaurant_ops` is a **parent** module with 5 children — `restaurant_ops_recipes`,
-`restaurant_ops_production`, `restaurant_ops_kds`, `restaurant_ops_tables`,
-`restaurant_ops_menus` — all registered (value `true`) under `STORE_ADMIN` in
-`DefaultPanelUIService.PANEL_UI_FALLBACK` (`default-panel-ui.service.ts`), catalogued
-in `APP_MODULES.STORE_ADMIN` (`app-modules.constant.ts`, parent + `children[]`), and
-label-mapped in `MenuFilterService.moduleKeyMap` ("Operaciones de Restaurante",
-"Recetas", "Producción", "Comandas", "Mesas", "Cartas"). Hiding the parent via the
-industry layer hides the whole subtree.
-
-**Crossing semantics enforced by this rule:** effective visibility is
-industry ∩ store ∩ user (AND chain — see Triple-Crossing Order). Because the industry
-layer runs **first** and a later step can never widen a module an earlier step hid, an
-industry that hides `restaurant_ops` means **neither** the store panel UI **nor** the
-per-user config can re-enable it. The two per-user config surfaces render those toggles
-**disabled with an "Industria" badge** and exclude them from the save diff.
-
-Follow-up plans (manufacturing, services) may add more industry rules and may propose a
-dedicated `vendix-store-industries` skill once more per-industry behavior lands. See
-`vendix-restaurant-ops` for the suite behind `restaurant_ops`.
-
-### Snapshot fallback
-
-When `storeSettings` has not loaded yet (first paint before settings request returns),
-`authFacade.userIndustries$` / `userIndustries` signal is the snapshot. **The JWT is
-NOT extended** with `industries` — settings is the source of truth. If both sources
-are empty the runtime falls back to `['retail']` defensively so the filter is always
-defined.
-
-```ts
-// apps/frontend/src/app/core/services/menu-filter.service.ts (read path)
-const industries =
-  storeSettings?.general?.industries?.length
-    ? storeSettings.general.industries
-    : (loginIndustries?.length ? loginIndustries : ['retail']);
-const hiddenByIndustries = getModulesHiddenByIndustries(industries);
-const hiddenByStorePanel = Object.keys(storeSettings?.panel_ui?.STORE_ADMIN ?? {})
-  .filter(k => storeSettings?.panel_ui?.STORE_ADMIN?.[k] === false);
-```
-
-## Store-Level Dimension — `store_settings.settings.panel_ui`
-
-### Source of truth
-
-- Backend: `store_settings.settings.panel_ui` (existing unused `PanelUISettings` interface at `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts:219-224`, field declared at ~303). **Reused as-is — no new shape invented.**
-- Frontend: mirrored on `apps/frontend/src/app/core/models/store-settings.interface.ts` if not already present.
-
-### Editing UI
-
-The store-level config is edited from a new **"Módulos de la Tienda"** card inside
-`/admin/settings/general` (the existing `settings_general` page) — **no new module
-key** is added to `APP_MODULES` (Critical Plan Decisions N/A per the foundation plan).
-The card lists `APP_MODULES.STORE_ADMIN` and renders toggles; industry-disallowed
-modules render **disabled with a "No disponible para tu industria" hint** (once the
-rules map is non-empty; today the card is fully enabled).
-
-### Semantics
-
-- **Absent = allowed** (existing tenants without the key in their settings JSON are unchanged).
-- `false` = hidden for the whole store (overrides the user's per-user `panel_ui` value).
-- `true` = no-op at this layer (user layer still controls).
-
-### Ceiling rule
-
-The store ceiling is **capped by industry**: a module hidden by `INDUSTRY_HIDDEN_MODULES`
-is not toggleable from the store card. The card must reflect this so the owner never
-sees a `true` they can never restore.
-
-## Triple-Crossing Order — `MenuFilterService` Filter Chain
-
-Effective visibility is computed in this exact order. **A later step can never widen
-a module that an earlier step has hidden.** The chain is AND across all steps.
-
-1. **Industry availability** — `getModulesHiddenByIndustries(storeIndustries)`. Hides modules hidden for **all** of the store's industries (set-intersection).
-2. **Store panel UI** — `storeSettings?.panel_ui?.STORE_ADMIN?.[key] === false` hides store-wide. Absent / `true` / `undefined` = allowed at this layer.
-3. **User panel UI** — `user_settings.config.panel_ui[app_type][key] === true` (after `mergePanelUiSoft` for privileged roles). `false` / absent = hidden.
-4. **`store_type`** — existing `storeTypeHiddenModules` map in `MenuFilterService:30-35`.
-5. **Module flows** — `store_settings.module_flows` (operational modules like accounting / payroll / invoicing).
-6. **Operating scope / fiscal scope** — store vs organization visibility (`vendix-operating-scope`, `vendix-fiscal-scope`).
-7. **Subscription gates** — `vendix-subscription-gate` (`sub:features:{storeId}` Redis cache, `StoreOperationsGuard`).
-
-This order matters: industry caps what the store card can toggle, the store card
-caps what the user can toggle, the user choice is the final on/off. Existing layers
-(store_type / flows / scopes / subscription) layer on top and remain unchanged.
-
-## Diagnosis — Why A Module Is Not Visible
-
-`isMenuItemVisible()` is now `return this.diagnose(menuItem).visible;`. The chain
-above is implemented once, in `diagnose()`, which returns **which layer blocked** it
-instead of a bare boolean:
-
-```typescript
-interface ModuleVisibilityDiagnosis {
-  visible: boolean;
-  blockedBy: ModuleBlockReason | null;   // 'fiscal_scope' | 'fiscal_area' |
-                                         // 'operating_scope' | 'industry' |
-                                         // 'store_panel_ui' | 'store_type' |
-                                         // 'user_panel_ui' | 'subscription' |
-                                         // 'permission' | 'empty'
-  detail: string;                        // Spanish, user-facing
-  fixPath: string | null;                // where to go to unblock it
-}
-```
-
-**First blocker wins** — the layers are evaluated in chain order and it returns on
-the first one that hides the item, so `detail` names the *root* cause rather than the
-last check that happened to fail.
-
-`diagnoseModule(key, menuItems?)` addresses the same verdict by `panel_ui` key. Pass
-the menu tree whenever you have one: without it only the key-driven layers run, which
-is enough for "¿por qué no veo Inventario?" but not for a fiscal module.
-
-This is what backs Vexi's `ui_why_hidden` command. Any new hiding rule must be added
-inside `diagnose()`, not as a separate `if` in a consumer — otherwise the module
-vanishes and the assistant says it is available.
-
-### Authorization prefilters
-
-Entries with no `panel_ui` key of their own (`/admin/settings/users`, `/admin/pqrs`,
-`/admin/settings/vexi`) used to be stripped by the layout before filtering. They are
-now folded into `passesAuthorizationGates()` — shared by the observable pass
-(`filterMenuItems`) and the synchronous one (`diagnose`) — so the reason survives.
-
-Their inputs must be listed in the `authorizationGates$` computed key, or the
-observable pass will not re-run when the role or the data hydrates.
-
-## The Module Catalog — Key, Not Label
-
-`apps/frontend/src/app/shared/constants/store-module-catalog.constant.ts` maps every
-`panel_ui` key to its canonical absolute route (`STORE_MODULE_BY_KEY`,
-`resolveStoreModule()`).
-
-It exists because the sidebar joins `allMenuItems` ↔ `APP_MODULES` ↔
-`PANEL_UI_FALLBACK` **by Spanish label**, and that join is already broken in
-production: "Inventario", "Productos", "Clientes", "Reseñas", "Compras", "Ventas",
-"Resumen", "Financiero", "Contabilidad" and "Nómina" each name two different entries.
-
-`resolveStoreModule()` resolves in this order — exact key → exact label (single hit)
-→ single substring hit → `null` when ambiguous. **Returning `null` on ambiguity is
-the point**: navigating to the wrong "Inventario" is worse than asking.
-
-Two orphan tests in `menu-filter.service.spec.ts` gate the catalog both ways
-(`MODULE_ROUTES` ⊆ `APP_MODULES` and vice versa), and
-`default-panel-ui.service.spec.ts` parses the backend defaults and the frontend
-constant off disk with `readFileSync` (a cross-app import is impossible and karma has
-no `fs`) to catch backend/frontend drift. That test already caught `payroll_novelties`
-and `payroll_pila` missing from the backend fallback.
-
-**New menu entries should declare their module key explicitly rather than rely on the
-visible text.** Every label collision above is a latent mis-join.
-
-## Render Único — `app-panel-ui-modules-editor`
-
-**Single render source.** The module-tree UI (parent→children grouping, "Herramientas
-Directas", parent/child cascade, gating display, search, "Nuevo" badge) lives in ONE
-shared presentational component — never re-implement the tree in a consumer:
-
-`apps/frontend/src/app/shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component.ts`
-
-It is **storage-agnostic**: receives a resolved `Record<string, boolean>` for a single
-`app_type` and emits the updated map. The consumer owns persistence + save semantics.
-Adding a module to `APP_MODULES` therefore appears in **every** surface automatically.
-
-### Contract
-
-| Member | Meaning |
-| --- | --- |
-| `appType` (input, required) | Which `APP_MODULES[appType]` catalog to render |
-| `value` (input, required) | Resolved `Record<string,boolean>` for that `app_type`; absent / `true` = allowed |
-| `hiddenByIndustry` / `hiddenByStore` (inputs) | Gated keys → rendered disabled + reason badge ("Industria"/"Tienda") |
-| `newKeys` (input) | Keys that show the "Nuevo" badge (per-user discovery) |
-| `searchable`, `parentSync`, `readOnly` (inputs) | UI toggles |
-| `valueChange` (output) | Full `Record<string,boolean>` for the `app_type`, **omitting gated keys** so the consumer merges straight into its store |
-
-### Consumers (all four use the shared component)
-
-| Surface | Storage the consumer owns | Save semantics |
-| --- | --- | --- |
-| `general-settings-form` (store, `/admin/settings/general`) | mirror map from `panelUi` input | emits `{ STORE_ADMIN: { key:false } }` (only OFF keys) |
-| `settings-modal` (user's own config) | nested `FormGroup` `panel_ui.{appType}.{key}` | `buildPanelUiDiff` excludes gated, preserves stored value |
-| `store-user-edit-modal` (admin edits a store user) | signal `localPanelUI[appType][key]` | `buildPanelUIDiff` from `originalPanelUI` snapshot, excludes gated |
-| `user-config-modal` (org user) | `localPanelUi` map per `app_type` | full nested map; catalog tabs use the editor, `STORE_ECOMMERCE`/`VENDIX_LANDING` stay on "Avanzado (JSON)" (no catalog yet) |
-
-## Gating of Per-User Config Surfaces
-
-The two per-user panel-UI config UIs must **gate** their toggles by the **industry ∩
-store panel UI** ceiling, so a user toggle can never enable a module above the
-ceiling. Both render through `app-panel-ui-modules-editor` (see above); each computes
-the gating arrays from the single sources and passes them in — the component only
-displays the disabled state + badge and omits gated keys on emit.
-
-| Surface | File | App type(s) gated |
-| --- | --- | --- |
-| User's own config ("Módulos del Panel") | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` | `STORE_ADMIN` (industries are store-scoped; `ORG_ADMIN` is untouched) |
-| Admin edits another user (pestaña "Modulos") | `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts` | `STORE_ADMIN` |
-
-### Gating rule (mandatory)
-
-For each toggle in `APP_MODULES.STORE_ADMIN`:
-
-- Compute `hiddenByIndustries = getModulesHiddenByIndustries(storeIndustries)`.
-- Compute `hiddenByStorePanel = panel_ui?.STORE_ADMIN?.[key] === false`.
-- If `hiddenByIndustries.includes(key)` or `hiddenByStorePanel`:
-  - Render the toggle **disabled** (not hidden).
-  - Attach a **reason badge**: `"Industria"` (industry) or `"Tienda"` (store panel UI). When both apply, the industry badge takes precedence.
-  - **Exclude the toggle from the save payload diff.** The stored user value is preserved untouched — if the industry later re-allows the module, the user's previous preference resurfaces.
-
-This is the only way a user can discover **why** a module cannot be enabled. Hiding it
-silently would have users wondering where it went.
-
-## Per-Industry Rules — Single Source of Truth
-
-**Lock:** all per-industry module rules belong in
-`apps/frontend/src/app/shared/constants/industry-modules.constant.ts`. They must
-**never** be inlined in `MenuFilterService`, `settings-modal.component.ts`,
-`store-user-edit-modal.component.ts`, or any other component. This is what prevents
-the three consumers (menu filter + two config surfaces) from drifting.
-
-Workflow to add a new per-industry rule:
-
-1. Open `apps/frontend/src/app/shared/constants/industry-modules.constant.ts`.
-2. Add the module key string to the relevant industry's array in `INDUSTRY_HIDDEN_MODULES`.
-3. (Optional) Verify the module key already exists in `APP_MODULES.STORE_ADMIN` — the rule is meaningless otherwise because the key would not be in any user config surface.
-4. (Optional) Update `default-templates.seed.ts` if a fresh-store default should differ from `'retail'`.
-
-No other code change is required. `getModulesHiddenByIndustries` re-computes, the
-three consumers pick it up, and the gating rule in the two config surfaces disables
-matching toggles automatically.
-
-## API Surface Touch Points
-
-The industry field is plumbed through these touch points (no behavior change to the
-existing panel-UI API; only additive):
-
-| Touch point | File | Notes |
-| --- | --- | --- |
-| `StoreIndustry` TS enum | `apps/backend/src/domains/store/stores/dto/index.ts` | Mirrors the Prisma enum exactly |
-| `CreateStoreDto.industries` | `apps/backend/src/domains/store/stores/dto/index.ts` | `@IsOptional() @IsArray() @ArrayMinSize(1) @IsEnum(StoreIndustry, { each: true })` |
-| `UpdateStoreDto.industries` | same | Same validators |
-| `StoreQueryDto.industries` | same | Same validators + `@Transform(({ value }) => Array.isArray(value) ? value : [value])` **before** validation so single-value query params parse |
-| `GeneralSettings.industries` (backend) | `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts` | Mirror of column |
-| `GeneralSettingsDto.industries` | `apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts` | Validators |
-| `getDefaultStoreSettings().general.industries` | `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts` | `['retail']` |
-| `settings.service.ts` sync block | `apps/backend/src/domains/store/settings/settings.service.ts:397-453` | Mirrors `dto.general.industries` → `stores.industries` (`if (industries !== undefined) storeUpdateData.industries = industries;`) |
-| `SetupStoreWizardDto.industries` | `apps/backend/src/domains/organization/onboarding/dto/setup-store-wizard.dto.ts` | Onboarding path |
-| Onboarding create path | `apps/backend/src/domains/organization/onboarding/onboarding-wizard.service.ts` (~719) | Passes `industries ?? ['retail']` through `storeBootstrapHelper.createStoreWithDefaultLocation()` |
-| Onboarding update path | same (~662) | Sets `industries` when provided |
-| `INDUSTRY_HIDDEN_MODULES` constant | `apps/frontend/src/app/shared/constants/industry-modules.constant.ts` | **New** — single source for industry rules |
-| `getModulesHiddenByIndustries(industries)` | same | OR semantics helper |
-| `auth.selectors.ts` — `selectUserIndustries` | `apps/frontend/src/app/core/store/auth/auth.selectors.ts` | Snapshot fallback selector |
-| `auth.facade.ts` — `userIndustries$` / `userIndustries` signal | `apps/frontend/src/app/core/store/auth/auth.facade.ts` | Snapshot fallback signal (with `initialValue` for `toSignal`) |
-| `general-settings-form` (Frontend) | `apps/frontend/src/app/private/modules/store/settings/general/components/general-settings-form/general-settings-form.component.ts` | "Tipos de Negocio" multi-select + "Módulos de la Tienda" card |
-| Super-admin / org-admin store modals | `apps/frontend/src/app/private/modules/super-admin/stores/components/store-create-modal.component.ts` (+ edit + org-admin create) | `industries` control via `app-multi-selector` |
-
-## Real Backend Flow (Read Path)
-
-### Template resolution — `DefaultPanelUIService.getUnifiedTemplate()`
-
-This method now performs a **deep merge** between the DB template and the hardcoded `PANEL_UI_FALLBACK`:
-
-1. Load template from DB (`default_templates.user_settings_default`).
-2. For each `app_type` in `PANEL_UI_FALLBACK`:
-   - For each `key: value`:
-     - If the DB template already has the key → respect DB (including `false`).
-     - If the DB template does NOT have the key → take the fallback value.
-3. Cache the merged template for 5 minutes.
-
-**Consequence**: adding a key to `PANEL_UI_FALLBACK` is sufficient for it to appear in production for privileged users. No seed run, no migration, no DB write required. The (optional) seed update remains good hygiene for fresh user creation but is no longer load-bearing for visibility.
-
-### Per-user lazy soft merge
-
-Every endpoint that ships `user_settings` to the frontend runs `mergeUserConfigPanelUi(config, defaults, roles)`:
-
-1. Load `user_settings` + user roles + defaults (`DefaultPanelUIService.generatePanelUI('')`, which already includes the auto-merge above).
-2. Detect legacy flat shape → discard.
-3. If roles match `PRIVILEGED_ROLE_NAMES` → fill `undefined` keys from defaults per `app_type`. Otherwise return user's `panel_ui` as-is.
-4. Compute `new_keys` (see "Nuevo" Badge System).
-5. Return new `config` (in-memory only — no DB write).
-
-Read-path call sites:
-
-- `apps/backend/src/domains/auth/auth.service.ts`
-  - `getSettings()` — explicit settings refresh endpoint
-  - `registerOwner()` response
-  - `registerCustomer()` response
-  - Main `login()` response
-- `apps/backend/src/domains/auth/environment-switch.service.ts` — `userSettingsForResponse` in env switch payload
-
-Backend helpers:
-
-- `apps/backend/src/common/utils/privileged-roles.util.ts` — `PRIVILEGED_ROLE_NAMES = { owner, admin, super_admin }`, `hasPrivilegedRole(roles)`
-- `apps/backend/src/common/utils/panel-ui-merge.util.ts` — `mergePanelUiSoft`, `mergeUserConfigPanelUi`, internal `isLegacyFlatPanelUi`
-- `apps/backend/src/common/services/default-panel-ui.service.ts` — defaults source (template + fallback auto-merge)
-
-`PRIVILEGED_ROLE_NAMES` is the **single source of truth** for "who sees everything automatically". Anywhere else that filters by role (e.g. `ELIGIBLE_ROLES` in `superadmin/users/users.service.ts`) reuses this constant via `Array.from(PRIVILEGED_ROLE_NAMES)`.
-
-> **Note:** the store panel UI is **set** (not read) by the user-settings pipeline. It is persisted in `store_settings` and shipped to the frontend as part of the `storeSettings` payload; the per-user `mergePanelUiSoft` does **not** intersect with it. The intersection happens client-side in `MenuFilterService` (see Triple-Crossing Order).
-
-## "Nuevo" Badge System
-
-### Computation
-
-On every read path (login, refresh, env switch, `getSettings`), the backend computes:
-
-```ts
-new_keys[app_type] = defaults[app_type].keys.filter(
-  k => !user.panel_ui_seen_keys[app_type]?.includes(k)
-);
-```
-
-Only computed for privileged roles. Returned on `user_settings.config.new_keys`.
-
-### Marking a key as seen
-
-- Endpoint: `POST /api/auth/panel-ui/mark-seen`
-- Body: `{ key: string, app_type: string }`
-- Effect: appends `key` to `user_settings.config.panel_ui_seen_keys[app_type]`.
-- Auth: any authenticated user.
-
-### Frontend surfaces (where "Nuevo" is visible)
-
-- **User dropdown banner** — renders "Tienes N módulos nuevos disponibles. Actívalos en Configuración." using `new_keys.length`.
-- **User dropdown settings link badge** — shows the count `N` next to the "Configuración" entry.
-- **Settings → General → "Módulos del Panel"** — every module row whose key is in `new_keys` shows the "Nuevo" indicator. Toggling/saving consumes the key via `authFacade.markPanelUiSeen(key, app_type)`.
-
-`MenuFilterService.isNewModule(label)` and `getNewKeyForLabel(label)` remain exported so other UI surfaces can opt-in to render discovery hints — but the **sidebar must not** (decision after rev1 UX feedback).
-
-> **Industry / store-panel-UI note:** the "Nuevo" badge reflects defaults vs the user's
-> `panel_ui_seen_keys`. Industry and store-panel-UI layers do **not** contribute
-> "Nuevo" badges — a key is either surfaced in `new_keys` for a privileged role or it
-> isn't. The store card never marks a key as new for the user; it only toggles.
-
-### Compatibility
-
-Clients without `panel_ui_seen_keys` (first request after deploy) see **all** existing module keys as "Nuevo" in the dropdown banner and Settings list. The keys are then consumed gradually as the user activates them in Settings. This is intentional and self-healing.
-
-## Persisted Backfill (Super Admin)
-
-The lazy soft merge does not write to DB. To persist the merge for users (e.g. before changing defaults again, or to capture a snapshot of current state), super_admin uses:
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET  /superadmin/users/panel-ui-preview` | Dry-run: counts eligible users, lists missing keys per `app_type`. No writes. |
-| `POST /superadmin/users/sync-panel-ui` | Persists merge for eligible users. Body: `{ user_ids?: number[], app_types?: string[], strategy?: 'merge' \| 'replace' }`. Default `merge` (fills missing keys, keeps `false`). `replace` overwrites entire `app_type` map. |
-
-- Guard: `@Roles(UserRole.SUPER_ADMIN)`. No additional permission row required.
-- Eligible target users are filtered by `PRIVILEGED_ROLE_NAMES` (i.e. only `owner`, `admin`, `super_admin` are touched by default; other roles are not auto-backfilled).
-- Implementation: `apps/backend/src/domains/superadmin/users/users.service.ts:syncPanelUI`.
-
-## Real Frontend Flow
-
-1. Auth state stores `user_settings` from login/session restore (already merged by backend if user is privileged; includes `new_keys`).
-2. Selectors read `user_settings.config.panel_ui`.
-3. Selectors choose the active map using `user_settings.app_type`.
-4. `selectVisibleModules` returns keys whose value is `true`, after module-flow adjustments.
-5. `MenuFilterService.filterMenuItems(...)` filters layout menu items recursively. Internally it now applies the **triple crossing** (industry ∩ store panel UI ∩ user panel UI) before the existing `storeTypeHiddenModules` filter.
-6. The sidebar does NOT call `isNewModule(label)` for badges anymore. Discovery hints are rendered by the user-dropdown banner and the Settings → General "Módulos del Panel" section.
-7. `authFacade.markPanelUiSeen(key, app_type)` is dispatched from those surfaces (e.g. when the user toggles a module ON in Settings), never from a sidebar click.
-8. The "Módulos de la Tienda" card in `/admin/settings/general` ships `panel_ui` to the backend via the existing settings PUT; industry-disallowed toggles render disabled.
-
-Frontend key files:
-
-- `apps/frontend/src/app/core/store/auth/auth.selectors.ts`
-- `apps/frontend/src/app/core/store/auth/auth.facade.ts`
-- `apps/frontend/src/app/core/services/menu-filter.service.ts`
-- `apps/frontend/src/app/shared/constants/app-modules.constant.ts`
-- `apps/frontend/src/app/shared/constants/industry-modules.constant.ts` (**new**)
-- `apps/frontend/src/app/private/layouts/store-admin/store-admin-layout.component.ts`
-- `apps/frontend/src/app/private/layouts/organization-admin/organization-admin-layout.component.ts`
-- `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts`
-- `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts`
-- `apps/frontend/src/app/private/modules/store/settings/general/components/general-settings-form/general-settings-form.component.ts`
-
-## Adding A Module Or Submodule — Checklist
-
-**Before any code edit**, the plan must record:
-
-- [ ] Decision `default_visible_for_privileged_users` (`true` / `false`) — mandatory.
-- [ ] Decision `show_new_badge` (`yes` / `no`, default `yes`) — mandatory.
-- [ ] One- or two-line justification for each decision.
-
-**Implementation steps**:
-
-1. Add the key to `DefaultPanelUIService.PANEL_UI_FALLBACK` under the correct `app_type`, with the value chosen in decision #1.
-2. (Optional, hygienic) Add the key to the seed `default_templates.user_settings_default` as well — not required, since auto-merge in `getUnifiedTemplate()` covers visibility.
-3. Add the key to `APP_MODULES` (frontend constant `apps/frontend/src/app/shared/constants/app-modules.constant.ts`) under the right `app_type` and parent (e.g. submodules of "Configuración" go inside `settings.children[]`). **This is the pillar of admin curation**: without this entry the module cannot be toggled from `Settings → "Módulos del Panel"` nor from `Settings → Users → "Editar usuario"`, even if it shows up correctly in the sidebar. Forgetting this is the #1 cause of "I added a module but admin cannot enable/disable it per user".
-4. Verify the label mapping in `MenuFilterService.moduleKeyMap` (single string or array for OR logic).
-5. Add the menu item in the owning layout. The sidebar will not render any "Nuevo" badge — discoverability comes from the user-dropdown banner and Settings → "Módulos del Panel".
-6. Add the lazy route. Apply backend permission/guard on the route if the feature exposes protected APIs.
-7. Add the backend permission row and guard separately for the protected APIs.
-
-Submodule keys should follow `parent_child`, for example `orders_sales` or `settings_domains`, unless existing code already uses a different key.
-
-**No DB backfill needed for privileged users.** Owners/admins/super_admins see the new key automatically on next request (auto-merge in template + lazy soft merge per user). For non-privileged users the admin must either toggle the key in the settings UI per user, or super_admin can run `POST /superadmin/users/sync-panel-ui` after temporarily widening the eligible role set if a bulk operation is needed.
-
-## Pitfalls
-
-- **Skipping Critical Plan Decisions**: any PR that adds a key to `PANEL_UI_FALLBACK` without the two decisions documented in the plan must be rejected in review.
-- **Trusting `panel_ui` for security**: it's UI only. Always pair with `PermissionsGuard` / `@Permissions` on the backend.
-- **Flat `panel_ui` in DB**: the read-path utility discards it. Don't write flat shape from any handler or seed. If you find one, sync it via the super_admin endpoint (`strategy: 'replace'`) to overwrite cleanly.
-- **`ELIGIBLE_ROLES` drift**: any role list outside `PRIVILEGED_ROLE_NAMES` will silently mis-match the seed and act as a no-op. Always import from `privileged-roles.util.ts`.
-- **Forgetting label mapping**: a new menu item with a label not in `MenuFilterService.moduleKeyMap` falls into the "no mapping" branch and is only shown if it has visible children. Easy to miss in tests.
-- **Forgetting `APP_MODULES` entry**: the module appears in the sidebar but **admin cannot toggle it** from `Settings → "Módulos del Panel"` nor from the per-user edit modal. Symptom: "the module is visible to me but I cannot enable/disable it for other users". Fix: add an entry under the correct `app_type` and parent in `apps/frontend/src/app/shared/constants/app-modules.constant.ts`.
-- **`generatePanelUI(_app_type)` ignores its argument** — the underscore is a hint. It always returns the full nested map.
-- **"Nuevo" badge does not appear**: verify (a) auto-merge in `getUnifiedTemplate()` actually includes the new key in the resolved template, (b) the user has a privileged role, (c) the template cache is not stale beyond the 5-minute TTL after a redeploy.
-- **Relying on the seed for visibility**: the seed only affects newly-created `default_templates` rows. Auto-merge in `getUnifiedTemplate()` is what covers the "key added after the initial seed" case — no re-seed required, but keep the seed in sync for hygiene.
-- **Inlining per-industry rules in components**: an inline `if (industry === 'restaurant') hide(...)` in `MenuFilterService` or one of the config surfaces causes the three consumers to drift. The single source of truth is `INDUSTRY_HIDDEN_MODULES` in `apps/frontend/src/app/shared/constants/industry-modules.constant.ts`.
-- **Hiding industry/store-disallowed toggles instead of disabling them**: silent hiding confuses users — they wonder where the module went. Render the toggle **disabled with a reason badge** ("Industria" / "Tienda") so the user understands the ceiling.
-- **Saving the disabled toggles as `false`**: when the user saves a panel-UI edit, disabled toggles must be **excluded from the diff**. Forcing them to `false` would overwrite the user's previous preference and lose it permanently if the industry later re-allows the module.
-- **Empty `panel_ui` settings JSON treated as "hide everything"**: absent = allowed is the contract. The runtime must use `panel_ui?.[key] === false` (strict) — never `!panel_ui?.[key]` (which would treat absent as hidden).
-- **Empty industries array as a "no-op"**: the DTO's `@ArrayMinSize(1)` is the safety net. An empty array is an explicit 400 — never a silent no-op, or the JSON/column will drift.
-- **Forgetting the `['retail']` defensive fallback**: if both `storeSettings.general.industries` and `authFacade.userIndustries()` are empty, the runtime must default to `['retail']` so the filter is always defined.
-- **Adding a hiding rule outside `diagnose()`**: the module disappears from the sidebar but `diagnoseModule()` still reports it visible, so Vexi tells the user to click something that is not there. Every layer belongs in the chain.
-- **Joining a new menu entry by its Spanish label**: ten labels already collide. Register the entry in `store-module-catalog.constant.ts` under its `panel_ui` key.
-- **A leaf entry with no `moduleKeyMap` mapping and no children is dropped**: `filterItemsRecursive` Case 3 only keeps unmapped items that have visible children, so a new settings leaf silently never renders. Meanwhile `diagnose()` skips the key-driven layers when `moduleKeys` is empty and reports it **visible** — the two paths disagree. If the entry is intentionally key-less (a store-wide capability, not a per-user module) mark it `alwaysVisible: true` and gate it in `passesAuthorizationGates()`; that is how `/admin/settings/vexi` works.
-- **Adding an authorization prefilter without extending `authorizationGates$`**: the item stays hidden until some unrelated emission re-runs `filterMenuItems`, which usually means "until the next navigation".
-
-## Visibility vs Authorization
-
-| Concern | System |
-| --- | --- |
-| Hide/show sidebar item | `panel_ui` (per-user + per-store), `INDUSTRY_HIDDEN_MODULES`, `module_flows`, store type, operating scope, fiscal scope, subscription filtering |
-| Allow/deny API operation | `PermissionsGuard`, roles, auth guards, subscription guards |
-| Show a module but block writes | Feature gate/subscription guard |
-| Grant permission but hide menu | Possible; visibility and authorization are separate |
-
-The industry / store panel UI layers are **visibility only**. They do not authorize any
-backend operation — APIs remain protected by permissions/guards as today. The runtime
-client-side filter plus the gated config UIs are sufficient; the plan explicitly
-rejected a backend clamp of user `panel_ui` writes against the industry ceiling
-(unnecessary because visibility != authorization).
-
-## Related Skills
-
-- `vendix-permissions` - Backend authorization (visibility is NOT authorization)
-- `vendix-settings-system` - Settings persistence and defaults (`store_settings`, `organization_settings`)
-- `vendix-subscription-gate` - Subscription-based feature access
-- `vendix-frontend-routing` - Lazy routes for modules
-- `vendix-operating-scope` - STORE vs ORGANIZATION visibility
-- `vendix-fiscal-scope` - Fiscal scope filtering
-- `vendix-restaurant-ops` - Suite behind the `restaurant_ops` module gated by the inverse industry rule
-- `how-to-plan` - Must record the two Critical Plan Decisions whenever a plan introduces a module or submodule
-- `planning/industry-field-foundation-plan.md` - Foundation plan that introduced the industry dimension + store panel UI ceiling (Step 11 = this skill update)
+`vendix-permissions`, `vendix-settings-system`, `vendix-subscription-gate`, `vendix-frontend-routing`, `vendix-operating-scope`, `vendix-fiscal-scope`, `vendix-restaurant-ops`, `how-to-plan`.

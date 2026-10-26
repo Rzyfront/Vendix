@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns"
 ---
@@ -32,8 +32,8 @@ This is the broad design checklist. For implementation details, use the speciali
 | App | Priority |
 | --- | --- |
 | `STORE_ECOMMERCE` | Mobile conversion, speed, trust |
-| `STORE_ADMIN` | Efficient admin workflows across mobile/desktop |
-| `STORE_POS` | Touch-first speed and low friction |
+| `STORE_ADMIN` | Efficient admin workflows across mobile/desktop; POS screens inside it are touch-first, low friction |
+| `STORE_DELIVERY` | Carrier (repartidor) app, mobile-first |
 | `ORG_ADMIN` | Dense data, reporting, multi-store management |
 
 ## Mobile-First Checklist
@@ -72,6 +72,8 @@ This is the broad design checklist. For implementation details, use the speciali
 - Tables/cards: `vendix-frontend-data-display`.
 - Stats/KPIs: `vendix-frontend-stats-cards`.
 - Sticky headers: `vendix-frontend-sticky-header`.
+- Sidebar/module visibility: `vendix-panel-ui`.
+- Guided tours: `vendix-tour`.
 - App/domain context: `vendix-core`.
 
 ## Related Skills
