@@ -1382,8 +1382,13 @@ export class OrderItemChangesService {
     // header-only (ecommerce/WhatsApp): líneas sin descuento, descuento solo
     // en la cabecera y el impuesto ya calculado ANTES del descuento: nunca se
     // redistribuye en líneas ni se tocan sus impuestos.
+    // Una orden POS sin descuento también es line-driven: si con el cambio
+    // entra una promoción (p. ej. escala por volumen), se reparte por línea y
+    // el impuesto va sobre la base descontada, como al cobrar en el POS.
     const lineDriven =
-      headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
+      headerDiscount > 0
+        ? Math.abs(currentLineDiscounts - headerDiscount) <= 0.01
+        : order.channel === 'pos';
     // mixed: descuentos de línea + un descuento manual de cabecera encima.
     const mixed =
       headerDiscount > 0 &&
@@ -1412,7 +1417,10 @@ export class OrderItemChangesService {
       .filter((id: unknown): id is number => typeof id === 'number');
     const hasPromoOrCoupon =
       couponCode.length > 0 || order.coupon_id != null || promoIds.length > 0;
-    if (hasPromoOrCoupon) {
+    // Se cotiza SIEMPRE, aunque la orden no tenga promoción ni cupón: como en
+    // el POS, una promoción automática (escala por volumen) puede empezar a
+    // aplicar al cambiar las cantidades.
+    {
       const plannedLines: PlannedOrderLine[] = [
         ...resulting.map((r) => this.plannedLineOfRow(r.line, r.base)),
         ...adds.map((a) => a.planned),
@@ -1463,11 +1471,11 @@ export class OrderItemChangesService {
           customer_id: order.customer_id ?? undefined,
           manual_promotion_ids: promoIds,
           exclude_order_id: orderId,
-          // Solo las promociones que la orden ya tiene (pausadas incluidas); no
-          // entra ninguna nueva.
-          order_scope: { promotion_ids: promoIds },
+          // Las de la orden (pausadas incluidas) más las automáticas activas,
+          // como el POS: una escala por volumen entra al subir la cantidad.
+          order_scope: { promotion_ids: promoIds, include_auto_apply: true },
           // Re-cotiza A LA FECHA DE LA ORDEN: lo que aplicaba al crearla no se
-          // cae por vencer después ni entran promociones automáticas nuevas.
+          // cae por vencer después ni entran automáticas creadas después.
           as_of: order.created_at ? new Date(order.created_at) : undefined,
           items: quoteItems.map((it, index) => ({
             line_id: index,
@@ -1497,6 +1505,23 @@ export class OrderItemChangesService {
           ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
           msg,
         );
+      }
+
+      // Orden sin promoción ni cupón: solo cuenta si entra una automática.
+      // Sin ella, la orden queda exactamente como estaba (sus descuentos
+      // manuales incluidos).
+      if (quoted && !hasPromoOrCoupon) {
+        if (promotionDiscount <= 0) {
+          quoted = false;
+        } else if (headerDiscount > 0.01) {
+          quoted = false;
+          const msg = `Con este cambio entra una promoción automática, pero la orden ya tiene un descuento manual de ${money(headerDiscount)} y no se pueden combinar al editar. Ajusta las cantidades o crea la orden de nuevo en el POS.`;
+          warnings.push(msg);
+          planBlock = new VendixHttpException(
+            ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+            msg,
+          );
+        }
       }
 
       let couponDiscount = 0;
@@ -1624,17 +1649,22 @@ export class OrderItemChangesService {
 
       if (quoted) {
         quotedSnapshot = promoSnapshot;
-        if (promoIds.length > 0) {
+        const next = new Map(promoSnapshot.map((p) => [p.promotion_id, p.discount_amount]));
+        // Automáticas que la orden no tenía y que entran con este cambio.
+        const newIds = promoSnapshot
+          .filter((p) => p.discount_amount > 0 && !promoIds.includes(p.promotion_id))
+          .map((p) => p.promotion_id);
+        const watchedIds = [...promoIds, ...newIds];
+        if (watchedIds.length > 0) {
           const prior = new Map<number, number>(
             (order.order_promotions ?? []).map((p: any) => [
               p.promotion_id,
               Number(p.discount_amount ?? 0),
             ]),
           );
-          const next = new Map(promoSnapshot.map((p) => [p.promotion_id, p.discount_amount]));
           const named: Array<{ id: number; name: string }> =
             (await db.promotions.findMany({
-              where: { id: { in: promoIds } },
+              where: { id: { in: watchedIds } },
               select: { id: true, name: true },
             })) ?? [];
           const nameOf = new Map(named.map((p) => [p.id, p.name]));
@@ -1649,6 +1679,11 @@ export class OrderItemChangesService {
             } else if (a <= 0 && b > 0) {
               warnings.push(`La promoción «${name}» vuelve a aplicar`);
             }
+          }
+          for (const id of newIds) {
+            warnings.push(
+              `La promoción «${nameOf.get(id) ?? `#${id}`}» aplica con este cambio (${money(next.get(id) ?? 0)})`,
+            );
           }
         }
       }

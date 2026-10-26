@@ -542,10 +542,13 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(created[0]).toMatchObject({ order_id: ORDER_ID, promotion_id: 3 });
   });
 
-  it('P2) sin cupón ni promociones no se toca order_promotions', async () => {
+  it('P2) sin cupón ni promociones (y sin promoción automática que aplique) no se toca order_promotions', async () => {
     const ctx = build([mkLine(1, { discount_amount: 2 }), mkLine(2)], { discount_amount: 2 });
     await applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok'});
-    expect(ctx.promotionEngine.quoteDiscounts).not.toHaveBeenCalled();
+    // Se cotiza igual (puede entrar una automática por volumen), pero no aplica ninguna.
+    expect(ctx.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(
+      expect.objectContaining({ order_scope: { promotion_ids: [], include_auto_apply: true } }),
+    );
     expect(ctx.db.order_promotions.deleteMany).not.toHaveBeenCalled();
     expect(ctx.db.order_promotions.updateMany).not.toHaveBeenCalled();
     expect(ctx.db.order_promotions.createMany).not.toHaveBeenCalled();
@@ -853,13 +856,13 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(p2.totals.after.tax).toBeLessThanOrEqual(20);
   });
 
-  it('R4-2) re-cotiza solo con las promociones de la orden (pausadas incluidas)', async () => {
+  it('R4-2) re-cotiza con las promociones de la orden (pausadas incluidas) más las automáticas', async () => {
     const ctx = build([mkLine(1, { discount_amount: 5 }), mkLine(2, { discount_amount: 5 })], {
       discount_amount: 10, order_promotions: [{ id: 71, promotion_id: 4 }],
     });
     await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
     expect(ctx.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(
-      expect.objectContaining({ order_scope: { promotion_ids: [4] }, manual_promotion_ids: [4] }),
+      expect.objectContaining({ order_scope: { promotion_ids: [4], include_auto_apply: true }, manual_promotion_ids: [4] }),
     );
   });
 
@@ -1063,7 +1066,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
     back.promotionEngine.quoteDiscounts.mockResolvedValue({ total_discount: 4, order_promotions_snapshot: [{ promotion_id: 1, discount_amount: 4 }] });
     back.db.products.findMany.mockResolvedValue([sellable({ track_inventory: false })]);
     const p2 = await back.service.preview(ORDER_ID, { add: [{ product_id: 11, quantity: 1 }] });
-    expect(back.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(expect.objectContaining({ order_scope: { promotion_ids: [1] } }));
+    expect(back.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(expect.objectContaining({ order_scope: { promotion_ids: [1], include_auto_apply: true } }));
     expect(p2.warnings).toContain('La promoción «Promo X» vuelve a aplicar');
     await applyV(back, { add: [{ product_id: 11, quantity: 1 }] });
     expect(Number(back.db.order_promotions.updateMany.mock.calls[0][0].data.discount_amount)).toBe(4);
@@ -1095,6 +1098,84 @@ describe('OrderItemChangesService (QUI-650)', () => {
     await applyV(ctx, { remove: [{ order_item_id: 1 }], reason: 'motivo ok' });
     expect(ctx.db.order_item_taxes.update).not.toHaveBeenCalled();
     expect(ctx.orderFlow.recalcOrderTotalsFromActiveLinesInTx).toHaveBeenCalledWith(ctx.db, expect.anything(), ORDER_ID, { discountOverride: 10 });
+  });
+
+  describe('V) precio por volumen (promoción automática por escalas) como en el POS', () => {
+    // Orden POS sin descuento: 5 unidades a $100 con IVA 10 %. La promoción
+    // automática por escalas (50+ → 10 %) no aplicaba con 5 unidades.
+    const mkVol = (qty: number) => mkLine(1, {
+      quantity: qty, unit_price: 100, final_unit_price: 110, total_price: 100 * qty,
+      discount_amount: null, tax_amount_item: 10,
+      order_item_taxes: [{ id: 100, tax_rate_id: 1, tax_name: 'IVA', tax_rate: 0.1, tax_amount: 10 * qty, tax_type: 'iva', is_compound: false, is_inclusive: false }],
+    });
+    const buildVol = () => {
+      const ctx = build([mkVol(5)], { channel: 'pos', discount_amount: 0, order_promotions: [] });
+      ctx.db.promotions.findMany.mockResolvedValue([{ id: 7, name: 'Mayoreo 50+' }]);
+      ctx.promotionEngine.quoteDiscounts.mockImplementation(async (input: any) => {
+        const qty = input.items[0].quantity;
+        const discount = qty >= 50 ? 0.1 * 110 * qty : 0;
+        return {
+          total_discount: discount,
+          order_promotions_snapshot: discount > 0 ? [{ promotion_id: 7, discount_amount: discount }] : [],
+        };
+      });
+      return ctx;
+    };
+
+    it('V1) 5 → 50 unidades: entra la escala automática vigente a la fecha de la orden y el total es el del POS', async () => {
+      const ctx = buildVol();
+      const dto = { update: [{ order_item_id: 1, quantity: 50 }] };
+      const p = await ctx.service.preview(ORDER_ID, dto);
+      expect(ctx.promotionEngine.quoteDiscounts).toHaveBeenCalledWith(expect.objectContaining({
+        order_scope: { promotion_ids: [], include_auto_apply: true },
+        as_of: ctx.order.created_at,
+      }));
+      expect(ctx.promotionEngine.quoteDiscounts.mock.calls[0][0].items[0]).toMatchObject({ quantity: 50, unit_price: 110 });
+      // Contrato POS (`applyGrossDiscountToPlannedLines`): descuento bruto 550
+      // → base 500, impuesto sobre la base descontada (5000 − 500) × 10 % = 450.
+      expect(p.totals.after.subtotal).toBe(5000);
+      expect(p.totals.after.discount).toBe(500);
+      expect(p.totals.after.tax).toBe(450);
+      expect(p.warnings.join(' ')).toContain('La promoción «Mayoreo 50+» aplica con este cambio');
+      expect(p.can_apply).toBe(true);
+
+      await applyV(ctx, dto);
+      // apply persiste lo mismo que mostró el preview
+      expect(ctx.orderFlow.recalcOrderTotalsFromActiveLinesInTx).toHaveBeenCalledWith(
+        ctx.db, expect.anything(), ORDER_ID, { discountOverride: 500 },
+      );
+      const upd = ctx.db.order_items.update.mock.calls.find((c: any) => c[0].where.id === 1)!;
+      expect(Number(upd[0].data.discount_amount)).toBe(500);
+      expect(Number(upd[0].data.total_price)).toBe(5000);
+      const tax = ctx.db.order_item_taxes.update.mock.calls.find((c: any) => c[0].where.id === 100)!;
+      expect(Number(tax[0].data.tax_amount)).toBe(450);
+      const created = ctx.db.order_promotions.createMany.mock.calls[0][0].data;
+      expect(created).toEqual([expect.objectContaining({ order_id: ORDER_ID, promotion_id: 7 })]);
+      expect(Number(created[0].discount_amount)).toBe(550);
+    });
+
+    it('V2) 5 → 6 unidades: bajo la escala no hay descuento ni filas nuevas', async () => {
+      const ctx = buildVol();
+      const dto = { update: [{ order_item_id: 1, quantity: 6 }] };
+      const p = await ctx.service.preview(ORDER_ID, dto);
+      expect(p.totals.after.discount).toBe(0);
+      expect(p.totals.after.tax).toBe(60);
+      await applyV(ctx, dto);
+      expect(ctx.db.order_promotions.createMany).not.toHaveBeenCalled();
+    });
+
+    it('V3) si entra la escala y la orden ya tiene un descuento manual, se bloquea (no se mezcla a ciegas)', async () => {
+      const ctx = buildVol();
+      ctx.order.discount_amount = 20;
+      const dto = { update: [{ order_item_id: 1, quantity: 50 }] };
+      const p = await ctx.service.preview(ORDER_ID, dto);
+      expect(p.can_apply).toBe(false);
+      expect(p.warnings.join(' ')).toContain('ya tiene un descuento manual de $20');
+      await expect(applyV(ctx, dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001.code,
+      });
+      expect(ctx.db.order_items.update).not.toHaveBeenCalled();
+    });
   });
 
   it('R4-6) si findOne falla post-commit: { order: null, reload_required: true } sin lanzar', async () => {
