@@ -8291,3 +8291,47 @@ describe('OrderFlowService.updateItemNotes — nota por ítem en cualquier orden
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });
+
+describe('OrderFlowService.commitCouponUseForOrder — cupón desactivado (QUI-650)', () => {
+  const buildCommit = (coupon: Record<string, unknown>) => {
+    const tx: any = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 70, coupon_id: 9, coupon_code: 'DIEZ', discount_amount: 25, store_id: 4,
+        }),
+      },
+      coupon_uses: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 1 }),
+      },
+      coupons: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 9, is_active: true, current_uses: 0, max_uses: null, ...coupon,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new OrderFlowService(
+      tx, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, { logCustom: jest.fn() } as any,
+    );
+    return { tx, service };
+  };
+
+  it('regla 1: la orden POS sin cobrar con cupón desactivado después se cobra y registra el uso', async () => {
+    const { tx, service } = buildCommit({ is_active: false });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).resolves.toBeUndefined();
+    expect(tx.coupon_uses.create).toHaveBeenCalledWith({
+      data: { coupon_id: 9, order_id: 70, customer_id: null, discount_applied: 25 },
+    });
+    expect(tx.coupons.updateMany.mock.calls[0][0].where).not.toHaveProperty('is_active');
+  });
+
+  it('un cupón agotado sigue bloqueando el cobro (sin cambios)', async () => {
+    const { tx, service } = buildCommit({ max_uses: 1, current_uses: 1 });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).rejects.toMatchObject({
+      errorCode: 'ORD_EDIT_COUPON_COMMIT_001',
+    });
+    expect(tx.coupon_uses.create).not.toHaveBeenCalled();
+  });
+});
