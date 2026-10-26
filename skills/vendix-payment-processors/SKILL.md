@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke: "Adding new payment processors, modifying payment gateway logic, working with payment webhooks"
 ---
@@ -34,14 +34,9 @@ metadata:
 
 `system_payment_methods` is the global catalog. `store_payment_methods` activates/configures methods per store. `PaymentsModule.onModuleInit()` registers processor instances in `PaymentGatewayService`, keyed by `system_payment_methods.type`.
 
-Currently registered processor types:
+Currently registered processor types (`onModuleInit`): `cash`, `cash_on_delivery`, `card` (Stripe), `paypal`, `bank_transfer`, `wompi`, `wallet`.
 
-- `cash`
-- `card` through Stripe
-- `paypal`
-- `bank_transfer`
-- `wompi`
-- `wallet`
+`system_payment_methods.processing_mode` (`DIRECT` | `ONLINE` | `ON_DELIVERY`) drives which methods each channel shows (ecommerce filter: `vendix-ecommerce-checkout`).
 
 The Prisma enum also includes `voucher`; verify registration/usage before assuming a processor exists.
 

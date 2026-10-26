@@ -70,6 +70,8 @@ describe('OrdersService', () => {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
       findMany: jest.fn(),
+      // QUI-650 — pre-check de líneas bloqueadas antes del deleteMany.
+      findFirst: jest.fn(),
     },
     // C.8 — F-035/F-047: `assertNoPersistedTaxBreakdown` consulta esto ANTES
     // del `deleteMany` de `order_items` en `updateOrderItems` /
@@ -2475,6 +2477,70 @@ describe('OrdersService', () => {
       } finally {
         contextSpy.mockRestore();
       }
+    });
+
+    it('QUI-650 — línea con comanda/movimientos -> 409 ORD_EDIT_LINES_LOCKED_001 sin deleteMany', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+        mockPrismaService.order_items.findFirst.mockResolvedValue({ id: 77 } as any);
+
+        await expect(service.updateOrderFromEditor(500, fullDto)).rejects.toMatchObject({
+          errorCode: ErrorCodes.ORD_EDIT_LINES_LOCKED_001.code,
+        });
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        const where = mockPrismaService.order_items.findFirst.mock.calls[0][0].where;
+        expect(Object.keys(where.OR.reduce((a: any, c: any) => ({ ...a, ...c }), {}))).toEqual(
+          ['kitchen_ticket_items', 'inventory_transactions', 'refund_items', 'financial_lines'],
+        );
+      } finally {
+        mockPrismaService.order_items.findFirst.mockReset();
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('QUI-650 — helpers de updateOrderItems/editor: pre-check y P2003 -> ORD_EDIT_LINES_LOCKED_001', async () => {
+      const tx: any = {
+        order_items: {
+          findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+          deleteMany: jest.fn(),
+        },
+      };
+      await expect((service as any).assertOrderLinesNotLockedInTx(tx, 9)).rejects.toMatchObject({
+        errorCode: 'ORD_EDIT_LINES_LOCKED_001',
+      });
+      expect(tx.order_items.deleteMany).not.toHaveBeenCalled();
+
+      tx.order_items.findFirst.mockResolvedValue(null);
+      await expect((service as any).assertOrderLinesNotLockedInTx(tx, 9)).resolves.toBeUndefined();
+
+      tx.order_items.deleteMany.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('fk', { code: 'P2003', clientVersion: 'x' }),
+      );
+      await expect((service as any).deleteOrderItemsMappingLockInTx(tx, 9)).rejects.toMatchObject({
+        errorCode: 'ORD_EDIT_LINES_LOCKED_001',
+      });
+    });
+
+    it('QUI-650 — hasPendingKitchen usa solo la ÚLTIMA fila KDS de la línea', () => {
+      const build = (rows: any[], cancelled_at: Date | null = null) =>
+        (service as any).buildOrderAvailableActions(
+          { state: 'processing', order_items: [{ id: 1, cancelled_at, kitchen_ticket_items: rows }], payments: [] },
+          false,
+        );
+      const reasons = (acts: any[]) => acts.map((a) => a.reason);
+      const pendingCode = ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code;
+      // Fila vieja pending superada por una última delivered: no bloquea.
+      expect(reasons(build([{ id: 2, status: 'delivered' }, { id: 1, status: 'pending' }]))).not.toContain(pendingCode);
+      // Última fila pending: sí bloquea.
+      expect(reasons(build([{ id: 2, status: 'pending' }, { id: 1, status: 'delivered' }]))).toContain(pendingCode);
+      // Misma compuerta que la entrega/despacho: `findOne` entrega la última fila
+      // primero; una última fila CANCELADA con una anterior viva también bloquea.
+      expect(reasons(build([{ id: 2, status: 'cancelled' }, { id: 1, status: 'pending' }]))).toContain(pendingCode);
     });
 
     it('reutiliza solo la dirección huérfana ya asociada al borrador alias', async () => {

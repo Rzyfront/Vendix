@@ -7,112 +7,50 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Changing ToolExecutionResult or semantic tool outcomes"
     - "Changing successful-tool quotas or bounded agent recovery"
 ---
 
-# Agent Execution Contract
+# Agent Execution Contract (D0)
+
+Source: `ai-engine/tools/interfaces/tool.interface.ts`, `ai-engine/tools/tool-result.normalizer.ts`, `ai-engine/agent-execution.contract.ts`, `ai-engine/tools/ai-tool-registry.ts`. Design notes: `docs/agentic-execution-contract-D0.md`.
 
 ## Critical rules
 
-- Autonomy capabilities are standard, without environment switches.
+- `executeTool()` keeps its string ABI, aliases and confirmation exceptions for MCP/voice/apply. `executeToolResult()` runs the SAME permission, validation, preview and token checks; it is not a bypass. Do not rewrite handlers or the global HTTP envelope.
+- `ok` means a tool answered, NOT an objective verified. D0 never emits `completed_verified` (that is D2, `vendix-agent-durable-tasks`).
+- `pending_confirmation`, `needs_user_input` and `unknown_effect` are distinct non-success states. A preview refusal without a token is NOT a proposal. A proposal never runs the handler nor consumes successful-tool quota.
+- A timeout/5xx after entering a write handler may have committed. A legacy `applied:false` network error without definitive status, or `applied:true` wrapping an HTTP 200 failure, is `unknown_effect`: stop and reconcile before any retry. A single-use token is not distributed exactly-once.
 
-- `AIToolRegistry.executeTool()` keeps its string ABI, aliases and existing
-  confirmation exceptions for MCP/voice/apply consumers. The standard
-  `executeToolResult()` uses the SAME permission, validation, preview and token
-  checks; it is not an execution bypass. Do not rewrite hundreds of handlers or
-  the global HTTP envelope.
-- `ok` means a tool answered, NOT an objective verified. D0 never emits
-  `completed_verified`; independent domain verification belongs to D2.
-- Preserve `pending_confirmation`, `needs_user_input` and `unknown_effect` as
-  distinct non-success states. A preview refusal without a token is NOT a
-  proposal. A proposal never runs the handler or consumes successful-tool quota.
-- A timeout/5xx after entering a write handler may have committed. A legacy
-  `applied:false` network error without definitive status, or an `applied:true`
-  wrapping an HTTP200 failure, is `unknown_effect`. Stop; reconcile before any
-  future retry. A single-use approval token is not distributed exactly-once.
+## `applied` is fail-closed
 
-## User-visible text (hotfix P0, 2026-10)
+`markInProcessWriteApplied` stamps `applied: true` on a confirmed in-process write ONLY when the result is not a protocol failure. `isProtocolFailure` treats as failure: `success/ok/applied === false`, `statusCode` ≥ 400, an error `status`, or `error` with `next_step`, `error_code` or string `code` (the `toolError(msg, undefined, code)` shape). Unknown shapes are never stamped applied.
 
-- The model's answer is never replaced on read/analysis turns (truncated,
-  compacted, `ui_*` OK, `search_tools`, failed reads). Only a blocker, an
-  uncertain effect, a pending card, a missing datum or an applied-unverified
-  write APPEND one line from `USER_NOTICES`. Loop failure/exhaustion (text that
-  is not the model's) uses fixed human copy.
-- `next_action` / objective `next_step` are model guidance. `clientSafeStream`,
-  `clientSafeExecution/Receipt/Objective/Chunk` strip them from every SSE frame,
-  POST response, persisted message metadata, task GET and Vex apply response.
-- Transport compaction (>6000 chars) sets `compacted:true` and keeps
-  `freshness:'observed'`; it is not `truncated` nor `incomplete_data`.
+## User-visible text (hotfix P0)
 
-## Contract and interpretation
+- The model's answer is never replaced on read/analysis turns (truncated, compacted, `ui_*` OK, `search_tools`, failed reads). Only a blocker, uncertain effect, pending card, missing datum or applied-unverified write APPEND one line from `USER_NOTICES`. Loop failure/exhaustion uses fixed human copy.
+- `next_action` / objective `next_step` are model guidance: `clientSafeStream` and `clientSafeExecution/Receipt/Objective/Chunk` strip them from every SSE frame, POST response, persisted metadata, task GET and Vex apply response.
+- Transport compaction (>6000 chars) sets `compacted:true`, keeps `freshness:'observed'`; it is not `truncated` nor `incomplete_data`.
 
-Source: `apps/backend/src/ai-engine/tools/interfaces/tool.interface.ts` and
-`tool-result.normalizer.ts`. Receipt fields: schema version, status, error code,
-retryability, next action, evidence references, explicit resource IDs, pagination,
-freshness and effect status. `data` preserves the handler payload; streamed and
-persisted receipts survive separately from truncated display summaries.
+## Interpretation
 
-Normalize only known protocol envelopes (`tool/version/data`, `error/next_step`,
-HTTP failure flags/status and D0). Do not interpret an arbitrary business record's
-`error` column or a phrase such as “ya quedó” as a technical outcome or evidence.
-Legacy text/malformed JSON and truncated pages carry insufficient evidence. A
-cursor/character count is not a complete dataset or a business postcondition.
+Receipt: schema version, status, error code, retryability, next action, evidence refs, resource IDs, pagination, freshness, effect status; `data` keeps the handler payload. Normalize only known protocol envelopes (`tool/version/data`, `error/next_step`, HTTP failure flags/status, D0). Never read a business record's `error` column or a phrase like «ya quedó» as an outcome. Legacy text, malformed JSON, truncated pages and cursors are insufficient evidence.
 
 ## Quotas and recovery
 
-- Consume the existing successful-tool unit only for `ok`, observed structured
-  results with evidence and an applicable reported effect. Preserve the original
-  per-call operation/request dedup ID. Errors, proposals, legacy ambiguous text
-  and unknown UI outcomes do not count. Inference usage/cost remains real even
-  when the business task fails; no new provider retry layer.
-- `ToolRecovery` is turn-local: canonical sorted argument hashes, no raw args in
-  telemetry. Never repeat a failed identical call; permit at most one changed-arg
-  correction. Permission/plan blocks and unknown effects halt execution. Catalog
-  expansion is deferred to B; durable retry/reconciliation to D1/D2.
-- With D0 enabled, exhaustion closes deterministically from receipts, without a
-  closing inference or automatic continuation after uncertainty. Keep budgets and
-  existing plan authority unchanged. No instructions to rephrase the original
-  request and no invented IDs/effects.
+- Consume the successful-tool unit only for `ok` observed structured results with evidence and an applicable effect; keep the per-call dedup ID. Errors, proposals, ambiguous legacy text and unknown UI outcomes do not count. Inference cost stays real when the task fails; no new provider retry layer.
+- `ToolRecovery` is turn-local with canonical sorted arg hashes (no raw args in telemetry). Never repeat a failed identical call; at most one changed-arg correction. Permission/plan blocks and unknown effects halt.
+- Exhaustion closes deterministically from receipts; no automatic continuation after uncertainty, no invented IDs/effects.
 
 ## Consumers and verification
 
-`agent-execution.contract.ts` decorates the shared loop. Chat persists/returns
-`execution`; worker events and task rows preserve it independently of BullMQ's
-operational `completed` status. Web trace uses waiting/unknown labels instead of
-past-tense successes; a finished background job with D0 metadata is “para revisar”.
-Anthropic maps recoverable/blocked D0 receipts to native `is_error`, not proposals.
+Chat persists/returns `execution`; worker events/task rows keep it independent of BullMQ `completed`. Web trace uses waiting/unknown labels; a finished background job with D0 metadata is «para revisar». Anthropic maps recoverable/blocked receipts to native `is_error`, not proposals.
 
-Run exact changed specs one at a time (`jest --runInBand --runTestsByPath`). The
-50-case contract smoke uses `test/agentic/jest.d0.config.json` with isolatedModules
-and a bounded heap: it is transpile-only, not Angular DI/E2E or a measured baseline.
-Do not expand the TypeScript graph or increase memory after an OOM. Use the
-backend specs to typecheck affected seams, CI for full compilation and authorized
-QA/Playwright for runtime. Missing live receipts remain `not_run`.
-
-## Boundaries
-
-No durable objective repository, business verifier, new tool router, autonomous
-writes, new voice consent or sandbox in D0.Use the existing general Vex/Vexi control to stop operation; preserve evidence.
-removing JSON metadata, pending proposals or A's evidence.
+Specs: `test/agentic/jest.d0.config.json` (isolatedModules, transpile-only, not DI/E2E). Do not raise memory after an OOM. Missing live receipts stay `not_run`.
 
 ## Related skills
 
-- `vendix-ai-agent-tools` — registry and single-use approvals.
-- `vendix-redis-quota`, `vendix-subscription-gate` — units, dedup and authorization.
-- `vendix-agent-evals-observability` — truthful outcomes and cost evidence.
-- `vendix-ai-chat`, `vendix-vex-agent`, `vendix-vexi-agent` — surfaces and ownership.
-
-## D2 robust execution
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.
+`vendix-ai-agent-tools`, `vendix-redis-quota`, `vendix-subscription-gate`, `vendix-agent-evals-observability`, `vendix-ai-chat`, `vendix-vex-agent`, `vendix-vexi-agent`.

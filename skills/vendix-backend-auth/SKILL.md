@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Implementing authentication"
@@ -24,11 +24,13 @@ Use this skill for backend auth and endpoint protection. Use `vendix-permissions
 
 `AppModule` registers global guards/interceptors:
 
-1. `ThrottlerGuard`
-2. `JwtAuthGuard`
-3. `StoreOperationsGuard`
-4. `RequestContextInterceptor`
-5. `AuditInterceptor`
+1. `PerformanceInterceptor`
+2. `VendixThrottlerGuard` (`common/guards/vendix-throttler.guard.ts`)
+3. `JwtAuthGuard`
+4. `DomainScopeGuard` (`common/guards/domain-scope.guard.ts`): token `app_type=STORE_ADMIN` only `/api/store/*`, `ORG_ADMIN` only `/api/organization/*`; super_admin and `@Public()` bypass
+5. `StoreOperationsGuard` (subscription write gate)
+6. `RequestContextInterceptor`
+7. `AuditInterceptor`
 
 Key file: `apps/backend/src/app.module.ts`.
 
@@ -46,7 +48,7 @@ Key files:
 
 - `apps/backend/src/domains/auth/guards/jwt-auth.guard.ts`
 - `apps/backend/src/domains/auth/decorators/public.decorator.ts`
-- `apps/backend/src/domains/auth/decorators/optional-auth.decorator.ts`
+- `apps/backend/src/common/decorators/optional-auth.decorator.ts`
 - `apps/backend/src/domains/auth/strategies/jwt.strategy.ts`
 
 ## Request User Shape
@@ -62,7 +64,7 @@ Key files:
 - Super admin bypass behavior lives in `PermissionsGuard`.
 - Permission checks support route/method metadata OR named permission matching.
 
-Real role enum values include lowercase roles such as `super_admin`, `admin`, `manager`, `supervisor`, `employee`, `staff`, `owner`, plus `CUSTOMER`.
+Real role enum values include lowercase roles such as `super_admin`, `admin`, `manager`, `supervisor`, `employee`, `staff`, `owner`, `customer` (`domains/auth/enums/user-role.enum.ts`).
 
 ## Endpoint Protection Rules
 
@@ -79,4 +81,4 @@ Real role enum values include lowercase roles such as `super_admin`, `admin`, `m
 - `vendix-permissions` - Permission names, seed rows, guard behavior
 - `vendix-subscription-gate` - Store write protection by subscription state
 - `vendix-multi-tenant-context` - Request context propagation
-- `vendix-backend-api` - Controller endpoint patterns
+- `vendix-backend` - Controller endpoint patterns

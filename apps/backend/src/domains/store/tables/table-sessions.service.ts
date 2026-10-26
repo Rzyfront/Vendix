@@ -23,24 +23,26 @@ import {
   groupRatesByProductId,
   resolveOrderLineFinals,
   resolveLineUnits,
-  roundMoney2,
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
-import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { FullTaxRow, resolveFullTaxRowsByProductId } from '../taxes/utils/product-tax-rows.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { serviceBudgetBlocks, serviceOrderTxOptions } from '../orders/utils/service-budget-cap.util';
-import { resolvePriceUnitScale } from '../products/services/price-unit.util';
+import {
+  resolveCatalogLine,
+  resolveCatalogUnitPrice,
+} from '../orders/utils/catalog-line-pricing.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 // `FullTaxRow` y su resolver viven en taxes/utils/product-tax-rows.util.ts
-// (compartidos con las cuentas de estaciones de servicio).
+// (compartidos con las cuentas de estaciones de servicio y con
+// `OrderItemChangesService` vía catalog-line-pricing.util, QUI-650).
 
 /**
  * Public shape returned by `openSession` and `findOne`.
@@ -931,25 +933,9 @@ export class TableSessionsService {
           item.product_variant_id != null
             ? variantById.get(item.product_variant_id)
             : undefined;
-        const salePrice =
-          variant?.is_on_sale === true ? Number(variant.sale_price ?? 0) : 0;
-        const overridePrice = Number(
-          (variant?.price_override as number | null | undefined) ?? NaN,
-        );
-        // P2-2 — misma escalera que `PaymentsService.resolveCatalogUnitBasePrice`
-        // (cobro POS): oferta de variante → override de variante → oferta del
-        // producto → base. Sin el tercer peldaño la mesa cobraba el base a un
-        // producto sin variantes en oferta, y el POS lo cobraba en oferta.
-        const productSalePrice =
-          product.is_on_sale === true ? Number(product.sale_price ?? 0) : 0;
-        const catalogUnitPrice =
-          salePrice > 0
-            ? salePrice
-            : Number.isFinite(overridePrice) && overridePrice > 0
-              ? (overridePrice as number)
-              : productSalePrice > 0
-                ? productSalePrice
-                : Number(product.base_price ?? 0);
+        // P2-2 — escalera compartida con el cobro POS (oferta de variante →
+        // override → oferta de producto → base), ver catalog-line-pricing.util.
+        const catalogUnitPrice = resolveCatalogUnitPrice(product, variant);
 
         // ADR-08 commit 5 (F-038/F-042/F-050/F-093) — el precio del catálogo
         // (`catalogUnitPrice`) es el precio FINAL publicado, igual que
@@ -959,33 +945,21 @@ export class TableSessionsService {
         // cambio `unit_price` guardaba el precio publicado tal cual: correcto
         // para exclusivo, pero base INFLADA para inclusivo, y en ambos casos
         // `tax_amount_item` quedaba NULL (IVA 0 en la cuenta abierta).
-        const priceUnitQuantity = resolvePriceUnitScale(
-          product.price_unit_quantity,
-        );
-        const lineUnits = resolveLineUnits({
-          quantity: item.quantity,
-          price_unit_quantity: priceUnitQuantity,
-        });
         const rows = taxRowsByProductId.get(item.product_id) ?? [];
-        const resolved = resolveLineTotals(catalogUnitPrice, rows);
-        const unitBase = resolved.base;
-        const totalPrice = roundMoney2(unitBase * lineUnits);
-        // Misma convención que `buildOrderItemSnapshot` (payments.service.ts):
-        // `tax_amount_item` es POR UNIDAD de precio (nunca por línea) salvo
-        // línea de peso — la mesa no captura peso, así que siempre es la rama
-        // por-unidad. El lector del cierre (`applyPosPaymentToTableSession`) y
-        // el de la cuenta abierta (más abajo, F-050) YA multiplican por
-        // `resolveLineUnits`/`resolvePriceUnits`; escribir acá el total de
-        // línea en vez del por-unidad haría que ambos lectores lo cobraran
-        // dos veces.
-        const taxAmountItem = roundMoney2(resolved.total_tax_amount);
-        const taxRate =
-          Math.round((resolved.total_rate + Number.EPSILON) * 100000) /
-          100000;
-        // F-093 — la normalización escribe `final_unit_price` explícito
-        // (antes quedaba NULL): es el bruto por unidad que ADR-06 declara
-        // fuente única de verdad para las superficies comerciales.
-        const finalUnitPrice = roundMoney2(resolved.total);
+        const line = resolveCatalogLine({
+          catalogUnitPrice,
+          quantity: item.quantity,
+          priceUnitQuantityRaw: product.price_unit_quantity,
+          rows,
+        });
+        const {
+          priceUnitQuantity,
+          unitBase,
+          totalPrice,
+          taxAmountItem,
+          taxRate,
+          finalUnitPrice,
+        } = line;
 
         const createdItem = await tx.order_items.create({
           data: {
@@ -1030,15 +1004,13 @@ export class TableSessionsService {
             ...(rows.length > 0
               ? {
                   order_item_taxes: {
-                    create: rows.map((row, index) => ({
+                    create: line.taxRows.map(({ row, tax_amount }) => ({
                       tax_rate_id: row.tax_rate_id,
                       tax_name: row.name,
                       tax_rate:
                         Math.round((row.rate + Number.EPSILON) * 100000) /
                         100000,
-                      tax_amount: roundMoney2(
-                        resolved.taxes[index].amount * lineUnits,
-                      ),
+                      tax_amount,
                       // QUI-INC — SIN `??`. El default fiscal ya se
                       // resolvió en la fila fuente
                       // (`resolveFullTaxRowsByProductId`, contra
@@ -3274,16 +3246,10 @@ export class TableSessionsService {
   }
 
   /**
-   * ADR-08 commit 5 (F-038/F-042/F-048/F-050/F-093/F-094) — UN batch (no
-   * N+1, F-094 punto 1) de `product_tax_assignments`, pero a diferencia de
-   * `resolveLineRatesByProductId` (display-only, solo `{rate, is_inclusive}`)
-   * conserva `tax_rate_id`/`name`/`tax_type`: `addItems` los necesita para
-   * crear las filas `order_item_taxes` (DB-08), que la sombra de `findOne`
-   * nunca escribe. Misma agrupación por producto y misma precedencia de
-   * `is_inclusive` (asignación → categoría → primera tasa → false) que
-   * `TaxesService.calculateProductTaxes` — no se reimplementa el despeje en
-   * sí, sólo el armado de filas; `resolveLineTotals` (importado, puro) hace
-   * la cuenta igual que el resto del dominio (F-003).
+   * Delegado fino: la lógica vive en `taxes/utils/product-tax-rows.util`
+   * (compartida con estaciones de servicio y con `OrderItemChangesService`,
+   * QUI-650). Se conserva el método para que los specs y llamadores
+   * existentes no cambien.
    */
   private async resolveFullTaxRowsByProductId(
     productIds: number[],

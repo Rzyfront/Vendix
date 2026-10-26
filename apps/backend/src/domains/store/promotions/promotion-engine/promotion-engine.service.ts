@@ -128,6 +128,8 @@ export class PromotionEngineService {
         where: {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
+          // Una fila en 0 (la promoción dejó de aplicar) no consume el límite.
+          discount_amount: { gt: 0 },
         },
         _count: { _all: true },
       });
@@ -343,6 +345,7 @@ export class PromotionEngineService {
         where: {
           promotion_id: promotion.id,
           customer_id: customerId,
+          discount_amount: { gt: 0 },
         },
       });
       if (customerUsage >= promotion.per_customer_limit) {
@@ -532,7 +535,7 @@ export class PromotionEngineService {
   }
 
   async quoteDiscounts(input: PromotionQuoteInput): Promise<PromotionQuoteResult> {
-    const now = input.now ?? new Date();
+    const now = input.as_of ?? input.now ?? new Date();
     const items = input.items ?? [];
     // "Lleva 3" cuenta unidades de VENTA, no de stock. Un producto medido en
     // milímetros llega con `quantity = 3000` para 3 metros: sin normalizar, la
@@ -544,6 +547,8 @@ export class PromotionEngineService {
     // por qué el dinero no puede usar el piso que sí usa la cantidad.
     const saleUnitScale = await this.resolveSaleUnitScales(items);
     const customerId = input.customer_id ?? null;
+    const excludeOrderId = input.exclude_order_id ?? null;
+    const orderScopeIds = input.order_scope?.promotion_ids ?? null;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
     const subtotal = this.roundMoney(
@@ -607,14 +612,24 @@ export class PromotionEngineService {
 
     // Fetch candidate promotions: auto-apply OR explicitly requested.
     const candidates = (await this.prisma.promotions.findMany({
-      where: {
-        state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
-        ...(manualIds.length
-          ? { AND: [{ OR: [{ is_auto_apply: true }, { id: { in: manualIds } }] }] }
-          : { is_auto_apply: true }),
-      },
+      where: orderScopeIds
+        ? {
+            // Re-cotización de una orden ya persistida: SOLO sus promociones
+            // (no entra ninguna nueva) y se ignora el `state` (pausada,
+            // cancelada…). La ventana de fechas sigue con `as_of`; una
+            // promoción borrada simplemente no existe y no aparece.
+            id: { in: orderScopeIds },
+            start_date: { lte: now },
+            OR: [{ end_date: null }, { end_date: { gte: now } }],
+          }
+        : {
+            state: { in: ['active', 'scheduled'] },
+            start_date: { lte: now },
+            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            ...(manualIds.length
+              ? { AND: [{ OR: [{ is_auto_apply: true }, { id: { in: manualIds } }] }] }
+              : { is_auto_apply: true }),
+          },
       include: {
         promotion_products: true,
         promotion_categories: true,
@@ -628,12 +643,25 @@ export class PromotionEngineService {
     // candidate promo.
     const customerUsageByPromotion = new Map<number, number>();
     const candidateIds = candidates.map((c) => Number(c.id));
+    // Promociones que ESTA orden ya consumió (su parte de `usage_count`).
+    const ownPromotionIds = new Set<number>();
+    if (excludeOrderId != null && candidateIds.length > 0) {
+      const own = await this.prisma.order_promotions.findMany({
+        where: { order_id: excludeOrderId, promotion_id: { in: candidateIds } },
+        select: { promotion_id: true },
+      });
+      for (const r of own) ownPromotionIds.add(Number(r.promotion_id));
+    }
     if (customerId && candidateIds.length > 0) {
       const rows = await this.prisma.order_promotions.groupBy({
         by: ['promotion_id'],
         where: {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
+          discount_amount: { gt: 0 },
+          ...(excludeOrderId != null
+            ? { order_id: { not: excludeOrderId } }
+            : {}),
         },
         _count: { _all: true },
       });
@@ -658,7 +686,12 @@ export class PromotionEngineService {
     for (const promo of candidates) {
       const isManual = !promo.is_auto_apply;
       if (isManual && !manualIds.includes(promo.id)) continue;
-      if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
+      if (
+        promo.usage_limit &&
+        promo.usage_count - (ownPromotionIds.has(Number(promo.id)) ? 1 : 0) >=
+          promo.usage_limit
+      )
+        continue;
       if (promo.per_customer_limit && customerId) {
         const customerUsage = customerUsageByPromotion.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;

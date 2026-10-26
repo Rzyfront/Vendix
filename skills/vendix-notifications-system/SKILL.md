@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Adding or modifying notification types"
@@ -30,12 +30,14 @@ Use this skill for full-stack store notifications: persisted notification rows, 
 3. Sends Web Push through `NotificationsPushService`.
 4. Catches/logs errors so notification failures do not break the business flow.
 
+`NotificationsService.sendToUser(store_id, user_id, ...)` is the targeted variant: stores `data.target_user_id`, pushes only to that user's SSE subject and push subscriptions. List/unread return store-wide rows plus rows targeted at the caller.
+
 ## Delivery Channels
 
 | Channel | Behavior |
 | --- | --- |
 | REST list/unread | Store-scoped persisted notifications |
-| SSE | One `Subject` per `store_id`; every connected user for that store receives events |
+| SSE | Staff (`STORE_ADMIN`/`ORG_ADMIN`/`VENDIX_ADMIN`) get the shared per-store subject merged with their per-user subject; customers get only their per-user subject, never store broadcasts. The bell stream filters out foreign events (`membership-access`, `order.*`) multiplexed on the store subject |
 | Web Push | Browser push via VAPID and `push_subscriptions`; filtered by `notification_subscriptions.in_app` |
 | Email/WhatsApp preferences | Stored in `notification_subscriptions`, not used by generic notification delivery |
 
@@ -48,6 +50,7 @@ Use this skill for full-stack store notifications: persisted notification rows, 
 - `apps/backend/src/domains/store/notifications/notifications-events.listener.ts`
 - `apps/backend/src/domains/store/notifications/dto/update-subscription.dto.ts`
 - `apps/backend/src/domains/store/notifications/dto/push-subscription.dto.ts`
+- `apps/backend/src/domains/store/notifications/notification-sounds-catalog.controller.ts` (`GET /notification-sounds`, sound catalog)
 
 ## Frontend Files
 
@@ -75,7 +78,7 @@ Use this skill for full-stack store notifications: persisted notification rows, 
 
 ## Prisma Reality
 
-- `notifications` has `store_id`, `type`, `severity`, `title`, `body`, `data`, `is_read`; no `user_id`.
+- `notifications` has `store_id`, `type`, `severity`, `title`, `body`, `data`, `is_read`; no `user_id` column (targeting lives in `data.target_user_id`).
 - `notification_subscriptions` has `store_id`, `user_id`, `type`, `in_app`, `email`, `whatsapp`.
 - `push_subscriptions` stores browser endpoints and keys per `store_id`, `user_id`, and endpoint.
 - `notification_type_enum` is the source of valid types. Listener-emitted types must exist in this enum.
@@ -91,8 +94,8 @@ Use this skill for full-stack store notifications: persisted notification rows, 
 
 ## Known Current Mismatches To Watch
 
-- Some listener-emitted booking/data request types may not exist in `notification_type_enum`; those creates fail and are swallowed by `createAndBroadcast()`.
-- `update-subscription.dto.ts` and default subscription initialization cover only a subset of enum values.
+- Listener-emitted types currently all exist in `notification_type_enum` (verified 2026-10-26); a new one missing from the enum fails silently inside `createAndBroadcast()`.
+- `update-subscription.dto.ts` (`NOTIFICATION_TYPES` + `@IsIn`) and default subscription initialization cover only a subset of enum values; add new user-controllable types there.
 - SSE ignores per-user preferences; Web Push enforces `notification_subscriptions.in_app`.
 - There is a subscription effects SSE consumer for `subscription.updated`; confirm backend emits that type before relying on it.
 

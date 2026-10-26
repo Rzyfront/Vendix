@@ -1,94 +1,81 @@
 ---
 name: skill-sync
 description: >
-  Syncs skill metadata to AGENTS.md Auto-invoke sections.
-  Trigger: When updating skill metadata (metadata.scope/metadata.auto_invoke), regenerating Auto-invoke tables, or running ./skills/skill-sync/assets/sync.sh (including --dry-run/--scope).
+  Checklist after creating, editing, renaming or deleting a Vendix skill: edit skills/<name>/SKILL.md, run ./skills/setup.sh, validate frontmatter.
+  Trigger: /skill-sync, or right after changing anything under skills/.
+disable-model-invocation: true
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.0"
   scope: [root]
-  auto_invoke:
-    - "After creating/modifying a skill"
-    - "Regenerate AGENTS.md Auto-invoke tables (sync.sh)"
-    - "Troubleshoot why a skill is missing from AGENTS.md auto-invoke"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Skill Sync
 
-## Purpose
+## Source of Truth
 
-Use this skill to keep `AGENTS.md` auto-invoke tables and provider-specific skill copies aligned with the source files in `skills/`.
+- The only editable copy is `skills/<name>/SKILL.md` (plus its `references/` and `assets/`).
+- `.claude/skills/<name>` and `.agents/skills/<name>` are **symlinks** created by `./skills/setup.sh`.
+  Never edit through them or copy files into them.
+- `CLAUDE.md` and `GEMINI.md` are symlinks to `AGENTS.md`. There is no generated Auto-invoke table:
+  agents discover skills through their `description`.
 
-## Source Of Truth
+## Workflow
 
-- Source skills live in `skills/{skill-name}/SKILL.md`.
-- `metadata.scope` and `metadata.auto_invoke` generate `AGENTS.md` auto-invoke rows.
-- Provider copies live in `.claude/skills`, `.opencode/skills`, `.agent/skills`, and `.agents/skills` after setup sync.
-- Do not manually edit generated provider copies; edit `skills/` and sync.
+1. Create / edit / rename / delete under `skills/<name>/` only. Rename = `git mv` the folder and
+   update `name:`; delete = `git rm -r skills/<name>`.
+2. Run the setup script so the symlinks match `skills/`:
 
-## Standard Frontmatter
+   ```bash
+   ./skills/setup.sh            # = --all
+   ./skills/setup.sh --claude   # .claude/skills/<name> -> skills/<name>
+   ./skills/setup.sh --gemini   # .agents/skills/<name> -> skills/<name> (Gemini CLI reads it there)
+   ```
+
+   Both modes prune broken symlinks (renamed/deleted skills) and recreate `CLAUDE.md` / `GEMINI.md`
+   → `AGENTS.md`.
+3. Validate the frontmatter (below).
+4. Search the other skills for references to a renamed or deleted skill and fix them:
+   `grep -rn "<old-name>" skills/ AGENTS.md`.
+
+## Frontmatter Rules
 
 ```yaml
 ---
-name: my-skill
+name: my-skill                 # MUST equal the folder name
 description: >
-  Short description.
-  Trigger: Specific situation that should load this skill.
+  What it is, in one sentence.
+  Trigger: when to load it.
+disable-model-invocation: true # optional, top level: hide it; usable only as /my-skill
 license: MIT
 metadata:
   author: rzyfront
   version: "1.0"
-  scope: [root]
-  auto_invoke:
-    - "Action that should load this skill"
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash   # optional, top level
 ---
 ```
 
-`allowed-tools` is optional and stays at the top level, not inside `metadata`.
+- `description` = what it is + `Trigger: …`, **≤ 250 characters**. It is loaded in every session;
+  detail belongs in the body, which loads only on invocation.
+- Valid YAML (quote values containing `: `). `name` equal to the folder.
+- Use `disable-model-invocation: true` for skills that should run only on explicit request.
+- `metadata.scope` and `metadata.auto_invoke` are optional legacy fields: they no longer generate
+  anything. Do not add them to new skills.
 
-## Scope Values
-
-| Scope | Target |
-| --- | --- |
-| `root` | `AGENTS.md` |
-| `backend` | `apps/backend/AGENTS.md` if present |
-| `frontend` | `apps/frontend/AGENTS.md` if present |
-| `ecommerce` | `apps/ecommerce/AGENTS.md` if present |
-
-If a scoped `AGENTS.md` file does not exist, the sync script warns and skips that scope.
-
-## Commands
+Quick check (name mismatch and folded `description` over 250 chars; no Node needed):
 
 ```bash
-# Update AGENTS.md auto-invoke tables from metadata
-./skills/skill-sync/assets/sync.sh
-
-# Preview auto-invoke table changes
-./skills/skill-sync/assets/sync.sh --dry-run
-
-# Sync only one scope
-./skills/skill-sync/assets/sync.sh --scope root
-
-# Copy source skills to provider-specific locations
-./skills/setup.sh --sync
+python3 - <<'PY'
+import glob, os, re
+for f in sorted(glob.glob('skills/*/SKILL.md')):
+    d = os.path.basename(os.path.dirname(f))
+    fm = open(f).read().split('---')[1]
+    n = re.search(r'^name:\s*(\S+)', fm, re.M)
+    if not n or n.group(1) != d: print('NAME MISMATCH:', d)
+    m = re.search(r'^description:[ \t]*[>|]?-?[ \t]*\n?((?:[ \t]+.*\n?)+|.*)', fm, re.M)
+    desc = ' '.join(l.strip() for l in (m.group(1) if m else '').splitlines()).strip()
+    if len(desc) > 250: print('DESC', len(desc), d)
+PY
 ```
-
-## Required Workflow
-
-After creating or modifying a skill:
-
-1. Update the source file under `skills/`.
-2. Ensure frontmatter has `metadata.scope` and `metadata.auto_invoke` when the skill should auto-load.
-3. Run `./skills/skill-sync/assets/sync.sh`.
-4. Run `./skills/setup.sh --sync`.
-5. Run `./skills/skill-sync/assets/sync.sh` again if provider sync rewrote generated root instructions.
-6. Verify the source skill, generated provider copy, and `AGENTS.md` entries.
-
-## Troubleshooting
-
-- Missing from `AGENTS.md`: check `metadata.scope` and `metadata.auto_invoke`.
-- Warning for missing scoped `AGENTS.md`: either create that scoped file intentionally or use `scope: [root]`.
-- Provider copy stale: run `./skills/setup.sh --sync` after editing source skills.

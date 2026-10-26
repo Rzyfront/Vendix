@@ -1,13 +1,11 @@
 ---
 name: vendix-inventory-valuation
 description: >
-  Inventory valuation rules for Vendix: current and historical valuation, CPP/FIFO costs,
-  COGS, inventory snapshots, and alignment with accounting entities.
-  Trigger: When implementing or debugging inventory valuation, COGS, cost layers, stock cost snapshots, or inventory valuation reports.
+  Inventory valuation: current/historical valuation, CPP/FIFO costs, COGS, cost layers, snapshots, accounting alignment. Trigger: inventory valuation, COGS, inventory_cost_layers, valuation snapshots or reports.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Working with inventory valuation"
@@ -40,7 +38,7 @@ Use this skill for inventory value, historical inventory value, COGS, cost layer
 
 ## Snapshot Rules
 
-- Record valuation snapshots after stock mutations.
+- Record valuation snapshots (`inventory_valuation_snapshots`) after stock mutations.
 - Snapshot dimensions should include organization, store, accounting entity, location, product, variant, operating scope, costing method, quantities, unit cost, and total value.
 - Historical reports must query the latest snapshot at or before `as_of` for each stock key.
 - Data before snapshot rollout is best-effort only unless enough movement/cost history exists.
@@ -53,13 +51,9 @@ Use this skill for inventory value, historical inventory value, COGS, cost layer
 - Surplus: DR `1435`, CR `5295` using real input cost.
 - Entries must resolve the correct accounting entity from operating scope.
 
-## Restaurant Suite — Minimum Integer Stock Unit Rule (MVP)
+## Restaurant Suite
 
-- The inventory core stays `Int`: `stock_levels.quantity_*`, `inventory_cost_layers.quantity`, and movements were **NOT** migrated to `Decimal`.
-- Each ingredient is modeled in its **minimum integer stock unit** (g, ml, unit) via `products.stock_unit` / `products.purchase_unit` / `products.purchase_to_stock_factor`. The factor converts purchase units → stock units at receipt time, so cost layers and valuation accumulate in the integer minimal unit.
-- Recipes (`recipe_items`) reference quantities in the ingredient's **minimal integer unit**. `waste_percent` (merma) and `yield`/`rendimiento` factors are applied as decimals, and the resulting consumed/produced quantity is **rounded to integer** in the stock unit before hitting `StockLevelManager`.
-- Residual risk: rounding error accumulates in recipes with many tiny components. Mitigation: model in milli-units (mg, µl) — still integer.
-- Deferred alternative: a `Decimal(18,4)` migration of the inventory core. It is intentionally deferred and **must** follow the anti-destructive rules in `vendix-prisma-migrations` and global §6 of `CLAUDE.md`.
+- Inventory quantities stay `Int` (no `Decimal` migration in the MVP); ingredients use their minimum integer stock unit and `purchase_to_stock_factor` converts at receipt, so cost layers accumulate in that unit. Full rule: `vendix-restaurant-ops` (`references/domain-recipes-menus.md`).
 
 ### COGS recognition for prepared products
 

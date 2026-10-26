@@ -1,9 +1,7 @@
 ---
 name: vendix-s3-storage
 description: >
-  S3 storage patterns for Vendix uploads: store S3 keys, never signed URLs, validate safe
-  keys, centralize upload paths, use image presets, and sign URLs only for reads. Trigger:
-  When uploading files, handling S3 URLs, or saving image/logo/favicon URLs to database.
+  S3 uploads: store keys not signed URLs, validate safe keys, central upload paths, image presets, sign only on read. Trigger: uploading files, handling S3 URLs, saving image/logo/favicon URLs to database.
 license: MIT
 metadata:
   author: rzyfront

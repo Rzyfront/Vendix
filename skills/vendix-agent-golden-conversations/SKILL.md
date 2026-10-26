@@ -1,10 +1,9 @@
 ---
 name: vendix-agent-golden-conversations
 description: >
-  Standardize the live golden-conversation E2E suite for Vex/Vexi: real chats with
-  topic changes against a local backend, graders, SQL oracles, cost ceiling and the
-  baseline-vs-candidate token comparison.
-  Trigger: Running, extending or grading the golden-conversations E2E suite, or comparing agent token cost against a baseline.
+  Live golden-conversation E2E suite for Vex/Vexi: real multi-topic chats, graders, SQL oracles, cost
+  ceiling, baseline-vs-candidate token comparison. Trigger: running, extending or grading golden
+  conversations, or comparing agent token cost.
 license: MIT
 metadata:
   author: rzyfront

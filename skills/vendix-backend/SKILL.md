@@ -1,30 +1,36 @@
 ---
 name: vendix-backend
 description: >
-  NestJS backend patterns for Vendix domains, controllers, services, DTOs, scoped Prisma,
-  auth/permissions, validation, and module registration. Trigger: When editing files in
-  apps/backend/, creating modules, or working with Prisma.
+  NestJS backend patterns for Vendix: domain architecture, API endpoints, ResponseService,
+  DTOs, scoped Prisma, guards, module registration. Trigger: editing apps/backend, creating
+  modules or API endpoints, working on backend domains.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.2"
   scope: [root]
-  auto_invoke: "Editing files in apps/backend/, creating modules, or working with Prisma"
+  auto_invoke:
+    - "Editing files in apps/backend/, creating modules, or working with Prisma"
+    - "Creating API endpoints"
+    - "Working on backend domains"
 ---
 
 # Vendix Backend
+
+## Source of Truth
+
+- `apps/backend/src/domains/` (controllers: `domains/**/**/*.controller.ts`)
+- `apps/backend/src/app.module.ts`
+- `apps/backend/src/prisma/services/`
+- `apps/backend/src/common/responses/response.service.ts`
+- `apps/backend/src/common/errors/`
+- `apps/backend/src/main.ts`
 
 ## Architecture
 
 Backend code lives mainly under `apps/backend/src/domains/`, plus shared `common/`, `prisma/`, `ai-engine/`, and infrastructure modules. Do not create new feature folders under the old `src/features/` pattern.
 
-Common domain areas:
-
-- `domains/superadmin/`
-- `domains/organization/`
-- `domains/store/`
-- `domains/ecommerce/`
-- `domains/auth/`
+Domain folders: `superadmin/`, `organization/`, `store/`, `ecommerce/`, `auth/`, `public/`, plus `fiscal-operations/`, `received-documents/`, `support/`, `help-center/`, `video-library/`.
 
 ## Standard Module Shape
 
@@ -39,6 +45,20 @@ apps/backend/src/domains/<domain>/<module>/
 ```
 
 Some established modules have nested submodules or shared services. Match the nearest existing pattern.
+
+## Domain Runtime (cross-cutting)
+
+Domain services run under:
+
+- global `JwtAuthGuard`
+- global `DomainScopeGuard` (token `app_type` STORE_ADMIN → only `/api/store/*`, ORG_ADMIN → only `/api/organization/*`)
+- global `StoreOperationsGuard` (subscription write gate)
+- `RequestContextInterceptor`
+- scoped Prisma services and AsyncLocalStorage request context
+
+Understand these layers before adding manual tenant/auth logic. Current tenancy does not depend on route params like `domains/:domain_id/...`.
+
+**Shared service ownership:** if a shared service is exported by another module, import the owning module instead of duplicating the provider in your module. This avoids dependency drift when shared services gain new dependencies.
 
 ## Prisma Services
 
@@ -55,17 +75,40 @@ If adding a new model, register it in scoped Prisma services before relying on a
 
 Module registration: never add the scoped Prisma services to `providers:`/`exports:` of a domain module (nor import `PrismaModule`); they are `@Global()` singletons from `PrismaModule`. A re-declaration spawns another `PrismaClient` (~68 MB heap each) and drops `@Optional` deps. See "Singleton Rule" in `vendix-prisma-scopes`; the CI guard "Prisma Singleton Audit" enforces it (`npm run prisma-singleton:audit`).
 
-## Controller Rules
+## API Endpoints
 
-- Controllers should stay thin: parse params, apply guards/decorators, call services.
-- Use DTOs for request bodies and query payloads.
+### Routing
+
+Controllers use flat namespaced prefixes: `store/...`, `organization/...`, `superadmin/...`, `public/...`. Do not document old `domains/:domain_id/...` route patterns unless explicitly working with legacy code.
+
+### Controller Rules
+
+- Controllers stay thin: params/query/body DTOs, decorators/guards, one call into a service.
+- Services own business logic and Prisma access.
+- Use DTOs with global `ValidationPipe` rather than ad-hoc parsing.
 - Protect routes with the existing auth/permissions patterns where needed.
-- Domain services own business logic and Prisma calls.
+
+### ResponseService
+
+`ResponseService` exposes helpers including:
+
+- `success(data, message?, meta?)`
+- `paginated(data, total, page, limit, message?)`
+- `noContent(message?)`
+- `created(data, message?)`
+- `updated(data, message?)`
+- `deleted(message?)`
+
+Use the helper that matches the intent rather than always falling back to `success()`.
+
+### Pagination
+
+Paginated services typically return raw `data + total + page + limit` inputs to the controller/response helper, not a nested `{ data, meta }` structure for `ResponseService.paginated()`.
 
 ## Validation And Errors
 
 - Global `ValidationPipe` is configured in `main.ts`; use class-validator DTOs.
-- Use `VendixHttpException` and registered `ErrorCodes` where available.
+- Use `VendixHttpException` and registered `ErrorCodes` when standardized domain errors exist.
 - Keep validation/business checks as early throws in services.
 
 ## Commands
@@ -86,6 +129,6 @@ Do not run destructive reset/clean commands unless explicitly requested.
 - `vendix-prisma`
 - `vendix-prisma-scopes`
 - `vendix-backend-auth`
-- `vendix-backend-api`
+- `vendix-backend-middleware`
 - `vendix-validation`
 - `vendix-error-handling`

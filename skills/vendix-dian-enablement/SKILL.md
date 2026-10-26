@@ -1,15 +1,13 @@
 ---
 name: vendix-dian-enablement
 description: >
-  DIAN enablement and numbering rules for Vendix electronic invoicing: internal note series
-  (NCVS/NDVS/NASVS/NAEVS), "in use" and single active note series, logical archiving of resolutions,
-  cross-account numbering guard (INVOICING_RESOLUTION_017), enablement inheritance by PIN + software ID,
-  what DIAN configuration data may never leave the backend, and the single activation wizard.
-  Trigger: When creating or editing DIAN resolutions or note series, working on enablement / test set / promotion to production, enablement inheritance, the cross-account numbering guard, exposing DIAN configuration data over HTTP, or the activation wizard.
+  DIAN e-invoicing enablement and numbering: note series (NCVS/NDVS/NASVS/NAEVS), resolutions,
+  cross-account numbering guard, enablement inheritance, activation wizard. Trigger: DIAN resolutions,
+  note series, test set, promotion to production.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Creating or editing DIAN resolutions or internal note series (NCVS/NDVS/NASVS/NAEVS)"
@@ -92,32 +90,10 @@ Paths below are under `apps/backend/src/domains/store/invoicing/` (`BE`) unless 
 ## Rule 7 - One activation wizard (D8)
 
 - `/admin/invoicing/activation` (store route `apps/frontend/src/app/private/modules/store/invoicing/invoicing.routes.ts`; organization route reuses the same component) is the ONLY entry to enable electronic invoicing: company, software, certificate, test set, production ranges, promotion. The fiscal wizard step `dian_config` and the old DIAN wizard redirect there.
-- Progress is DERIVED from backend state (`fiscal-readiness`, `production-readiness`, `enablement_status`), never persisted (`activation-wizard/activation-step.util.ts`). One source of truth: do not add a second progress flag or a parallel flow.
+- Progress is DERIVED from backend state (`fiscal-readiness`, `production-readiness`, `enablement_status`), never persisted (`private/modules/store/invoicing/components/activation-wizard/activation-step.util.ts`). One source of truth: do not add a second progress flag or a parallel flow.
 - Steps compose the shared panels in `apps/frontend/src/app/shared/components/dian/`; do not fork them.
 - Frontend work also requires `vendix-zoneless-signals`.
 
-## Anti-patterns
+## Review
 
-- Physical `DELETE` on `invoice_resolutions`, or an "Eliminar" button.
-- Resetting/lowering `current_number`, or reopening a prefix an archived row occupies.
-- A second implementation of the "active resolution" `where`, or of the internal-series defaults (preview vs emission diverge).
-- Writing to `invoice_resolutions` without `lockResolutionSeries`.
-- Applying the cross-account guard to internal note series (violates D10), or skipping it for archived rows.
-- Returning a raw `invoice_resolutions` / `dian_configurations` row from a controller.
-- Restricting inheritance to superadmin, or revalidating the source's suspension.
-- Migrating existing `NC`/`ND` series to `NCVS`/`NDVS`.
-- Persisting wizard progress or adding a parallel activation flow.
-- Migrations with `UPDATE`/`DELETE`/`DROP`/`CASCADE` on these tables (see `vendix-prisma-migrations`).
-
-## Review checklist
-
-- [ ] New series use `buildInternalSeriesDefaults`; no hardcoded range/validity/prefix.
-- [ ] "In use" computed by `activeResolutionWhere`; note types keep a single active series, under `lockResolutionSeries`.
-- [ ] Used series stay immutable (`_005`); unused note series editable/creatable (D10).
-- [ ] Delete paths archive; archive validations `_012`..`_016` intact in all three lanes.
-- [ ] New create/update/apply-range paths call `assertNoCrossTenantNumberingOverlap` (with `lock_in_transaction` in a tx); internal series excluded.
-- [ ] Responses use `toPublicResolution` / `maskSensitiveFields`; no `technical_key*`, fingerprints or foreign ids.
-- [ ] Any `withoutScope()` read is fiscal-control only and returns counts/booleans/ranges.
-- [ ] Inheritance requires PIN match, writes `enablement_evidence.inheritance` + audit log, copies no foreign evidence.
-- [ ] Wizard entry points route to `/admin/invoicing/activation`; no persisted progress.
-- [ ] Specs touched: `invoice-number-generator.spec.ts`, `resolution-archive.util.spec.ts`, `cross-tenant-numbering-guard.util.spec.ts`, `dian-config.enablement-inheritance.spec.ts`, `resolutions.service.spec.ts`.
+Anti-patterns and review checklist (with the specs to run): `references/review-checklist.md` (read before closing a change here).

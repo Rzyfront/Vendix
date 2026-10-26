@@ -1,14 +1,11 @@
 ---
 name: vendix-validation
 description: >
-  Vendix validation patterns: global Nest ValidationPipe, DTO-first backend validation,
-  class-validator/class-transformer usage, business-rule validation, and Angular reactive
-  form validators. Trigger: When writing validation logic, DTOs, form validators, or
-  request payload handling.
+  Validation patterns: global ValidationPipe, DTO-first backend validation, class-validator/transformer, business rules, Angular form validators. Trigger: writing validation logic, DTOs, form validators, request payloads.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Writing Validation Logic"
 ---
@@ -22,7 +19,8 @@ Global validation is configured in `apps/backend/src/main.ts` with Nest `Validat
 - `transform: true`
 - `whitelist: true`
 - `forbidNonWhitelisted: true`
-- `enableImplicitConversion: true`
+- `transformOptions.enableImplicitConversion: true`
+- custom `exceptionFactory`: bulk-upload errors (`<collection>.<rowIndex>.<field>`) become 400 `CUST_BULK_VALIDATION` with `validationErrors: BulkRowError[]` (`row`, `column`, `value`, `code`, `suggestion`; see `vendix-bulk-operations`); others become 400 with `message: string[]` flattened from nested paths (e.g. `items.0.total_price`)
 
 Design APIs assuming DTO validation runs before controller methods.
 
@@ -71,4 +69,5 @@ Use `VendixHttpException` and domain error codes where available.
 
 - `vendix-error-handling`
 - `vendix-angular-forms`
-- `vendix-backend-api`
+- `vendix-backend`
+- `vendix-bulk-operations`

@@ -56,4 +56,4 @@ The core service at `src/app/core/services/country.service.ts` is a separate sta
 
 - `vendix-angular-forms`
 - `vendix-zoneless-signals`
-- `vendix-frontend-component`
+- `vendix-frontend`

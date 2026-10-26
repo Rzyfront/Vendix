@@ -1,4 +1,5 @@
 import type { OrderReview } from '../../customers/reviews/models/review.model';
+import type { InsufficientStockItem } from '../../../../../core/utils/parse-api-error';
 
 // Order channel types
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
@@ -1296,4 +1297,79 @@ export interface OrderBooking {
       avatar_url?: string;
     } | null;
   } | null;
+}
+
+
+// ── QUI-650: edición de productos por diferencias ────────────────────────
+export type ItemCancellationType = 'after_fire_waste' | 'after_fire_reused';
+
+export interface ItemChangesDto {
+  add?: Array<{
+    product_id: number;
+    product_variant_id?: number | null;
+    quantity: number;
+    notes?: string;
+  }>;
+  update?: Array<{ order_item_id: number; quantity: number }>;
+  remove?: Array<{ order_item_id: number; cancellation_type?: ItemCancellationType }>;
+  reason?: string;
+  expected_version?: string;
+}
+
+export interface ItemChangesTotals {
+  subtotal: number;
+  discount: number;
+  tax: number;
+  tip: number;
+  shipping: number;
+  grand_total: number;
+}
+
+export interface ItemChangesPreviewLine {
+  /** 'existing:<order_item_id>' | 'add:<index en add[]>' */
+  key: string;
+  order_item_id: number | null;
+  product_name: string;
+  variant_label: string | null;
+  /** 'reprice': línea no tocada cuyo descuento se recalcula (promoción/cupón). */
+  action: 'add' | 'increase' | 'decrease' | 'remove' | 'reprice';
+  quantity_before: number | null;
+  quantity_after: number;
+  kitchen_status: 'none' | 'pending' | 'in_preparation' | 'ready' | 'delivered';
+  kitchen_ticket_number: number | null;
+  kitchen_effect: 'none' | 'fire' | 'cancel_ticket_item';
+  stock_effect:
+    | 'none'
+    | 'reserve'
+    | 'release'
+    | 'ingredients_reused'
+    | 'ingredients_wasted'
+    | 'ingredients_consumed';
+  requires_cancellation_type: boolean;
+  blocked: boolean;
+  blocked_reason: string | null;
+  messages: string[];
+}
+
+export interface ItemChangesPreview {
+  order_id: number;
+  version: string;
+  can_apply: boolean;
+  lines: ItemChangesPreviewLine[];
+  totals: { before: ItemChangesTotals; after: ItemChangesTotals };
+  warnings: string[];
+}
+
+export interface ItemChangesApplyResult {
+  /** `null` cuando el guardado hizo commit pero falló la relectura (`reload_required`). */
+  order: Order | null;
+  reload_required?: boolean;
+  summary: ItemChangesPreview;
+  /** Efectos de cocina del apply (misma forma que `POST /store/kitchen-fire`). */
+  kitchen?: {
+    kitchen_ticket_ids?: number[];
+    stock_warnings?: InsufficientStockItem[];
+  };
+  /** Algunas respuestas lo traen a nivel raíz; se toleran ambos. */
+  stock_warnings?: InsufficientStockItem[];
 }

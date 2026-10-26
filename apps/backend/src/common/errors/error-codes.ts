@@ -1175,6 +1175,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
   },
+  ORD_EDIT_LINES_LOCKED_001: {
+    code: 'ORD_EDIT_LINES_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden tiene productos ya enviados a cocina o con movimientos de inventario. Modifícalos desde el detalle de la orden (Modificar productos), que conserva su historial.',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,
@@ -1528,6 +1534,14 @@ export const ErrorCodes = {
     code: 'ORD_EDIT_INVALID_STATE_001',
     httpStatus: 409,
     devMessage: 'Order could not be claimed for editing; reload and try again',
+  },
+  // QUI-650 — el change-set de líneas (add/update/remove) es inválido: vacío,
+  // ids repetidos, línea ajena/cancelada, producto no vendible, falta motivo o
+  // versión esperada. 422: la petición está bien formada pero no es aplicable.
+  ORD_ITEM_CHANGES_INVALID_001: {
+    code: 'ORD_ITEM_CHANGES_INVALID_001',
+    httpStatus: 422,
+    devMessage: 'The order item change set is invalid or cannot be applied',
   },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — promoción o cupón seleccionado ya no aplica
   // al carrito editado. 422 porque la petición está bien formada; lo que cambió

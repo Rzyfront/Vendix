@@ -6,6 +6,7 @@ import {
   DestroyRef,
   computed,
   signal,
+  effect,
 } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
@@ -30,6 +31,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { StoreSeoService } from '../../services/store-seo';
 
 interface HomeSectionConfig {
   enabled?: boolean;
@@ -135,6 +137,17 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HomeComponent implements OnInit {
+  // SEO de la tienda: portada con canonical propio en el host de la tienda.
+  private readonly storeSeo = inject(StoreSeoService);
+  private readonly storeSeoOwner = {};
+  private readonly storeSeoSync = effect(() => {
+    const page = this.storeSeo.listingPage('/', null);
+    if (page) this.storeSeo.apply(this.storeSeoOwner, page);
+  });
+  private readonly storeSeoCleanup = inject(DestroyRef).onDestroy(() =>
+    this.storeSeo.release(this.storeSeoOwner),
+  );
+
   readonly featured_products = signal<EcommerceProduct[]>([]);
   readonly new_arrivals = signal<EcommerceProduct[]>([]);
   readonly sale_products = signal<EcommerceProduct[]>([]);

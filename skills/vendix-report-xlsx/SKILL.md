@@ -1,16 +1,11 @@
 ---
 name: vendix-report-xlsx
 description: >
-  Cómo nacen bien los reportes descargables de Vendix: exportación XLSX profesional con
-  ExcelJS (nunca CSV), fechas en la timezone de la tienda (fallback SIEMPRE America/Bogota),
-  dataset completo, agregación única (pantalla == archivo), y flujo de export unificado
-  backend→frontend. OBLIGATORIA al crear, editar, fixear o mejorar cualquier reporte.
-  Trigger: Creating, editing, fixing or improving any downloadable/report/export feature
-  in apps/backend/src/domains/store/analytics or apps/frontend .../store/reports.
+  OBLIGATORIA para reportes descargables: XLSX con ExcelJS (nunca CSV), timezone de tienda (fallback America/Bogota), dataset completo, pantalla == archivo. Trigger: crear, editar o fixear cualquier reporte/export (store/analytics, store/reports).
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Creating a new downloadable report (backend export endpoint + frontend registry entry)"
@@ -23,6 +18,10 @@ metadata:
     - "Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend)"
     - "Working with ReportDataAdapterService (summary/list/nested adaptation)"
 ---
+
+## Cuándo usar
+
+OBLIGATORIA al crear, editar, fixear o mejorar cualquier reporte: agregación única (pantalla == archivo), flujo de export unificado backend→frontend (`apps/backend/src/domains/store/analytics`, `apps/frontend/.../store/reports`), ReportBuilder, `sendXlsxReport`, `exportReport$`.
 
 # Vendix Report XLSX
 
@@ -37,7 +36,7 @@ obligatoria para crear/editar/fixear/mejorar cualquier reporte descargable.
 - `apps/backend/src/common/reports/report-response.util.ts` — `sendXlsxReport(res, buffer, filename)`, `buildReportFilename(base, {date?, tz?})`, `XLSX_CONTENT_TYPE`.
 - `apps/backend/src/common/utils/store-timezone.util.ts` — `resolveStoreTimezone(prisma, storeId)` (columna-primero), `DEFAULT_STORE_TIMEZONE = 'America/Bogota'`, `resolveLocalDateRange`.
 - `apps/backend/src/domains/store/analytics/utils/date.util.ts` — `parseDateRange(query, tz)`.
-- `apps/backend/src/domains/store/analytics/dto/*` — DTOs de query que extienden `BaseReportQueryDto`.
+- `apps/backend/src/common/reports/base-report-query.dto.ts` — `BaseReportQueryDto`; los DTOs de query de `domains/store/analytics/dto/*` lo extienden.
 - `apps/backend/src/domains/store/analytics/analytics.controller.ts` — patrón de referencia: `resolveReportTz()`, `toSheet()`, `emitReport()`.
 
 **Frontend (flujo único de export):**
@@ -60,20 +59,7 @@ obligatoria para crear/editar/fixear/mejorar cualquier reporte descargable.
 
 ## Backend: crear un export XLSX
 
-```ts
-// controller
-async exportVentas(@Query() query: SalesReportQueryDto, @Res() res: Response): Promise<void> {
-  const tz = await this.resolveReportTz();                 // store TZ, fallback America/Bogota
-  const rows = await this.salesService.getSalesForExport(query); // RAW: Date + números
-  const sheet = this.toSheet('Ventas', [
-    { key: 'created_at', header: 'Fecha',   type: 'date',     tz },
-    { key: 'order_code', header: 'Orden',   type: 'text' },
-    { key: 'total',      header: 'Total',   type: 'currency' },
-    { key: 'margin',     header: 'Margen',  type: 'percent' }, // percent = fracción (0.15 = 15%)
-  ], rows, tz);
-  await this.emitReport(res, 'reporte_ventas', tz, [sheet]);
-}
-```
+Patrón de referencia `resolveReportTz()` → servicio crudo → `toSheet()` → `emitReport()` en `analytics.controller.ts`. Ejemplo completo: `references/export-example.md` (leer bajo demanda).
 
 - `type`: `'text' | 'number' | 'currency' | 'date' | 'percent'`. `percent` recibe **fracción** (0.15 → 15 %), no 15.
 - `buildReportFilename(base, { date, tz })` añade el sufijo de fecha **local de la tienda**.
@@ -98,7 +84,6 @@ async exportVentas(@Query() query: SalesReportQueryDto, @Res() res: Response): P
 - [ ] Registry con `exportEndpoint`, `columns.type`, `footer`.
 - [ ] Página despacha `exportReport`; sin CSV cliente.
 - [ ] Botón export oculto si no hay `exportEndpoint`.
-- [ ] `npm run build:prod` del frontend en verde.
 
 ## Anti-patrones (rechazar en review)
 

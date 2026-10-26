@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Implementing customer auth in e-commerce"
@@ -25,6 +25,7 @@ metadata:
 
 - `POST /auth/register-customer` is `@Public()`.
 - `POST /auth/login-customer` is `@Public()`.
+- `POST /auth/forgot-customer-password` / `POST /auth/reset-customer-password` (customer-only reset; modal "forgot" mode via `AuthFacade.forgotCustomerPassword(email, store_id)`).
 - Both collect `ip_address` and `user_agent` from the request.
 
 Files:
@@ -38,7 +39,7 @@ Files:
 
 `RegisterCustomerDto` requires `email`, `first_name`, `last_name`, and `store_id`.
 
-`password` is optional in the backend DTO. If provided, it must be at least 8 chars and contain at least one non-alphanumeric character. The current frontend modal requires a password during registration.
+`password` is optional in the backend DTO. If provided it must pass `@IsStrongPassword()` (`apps/backend/src/common/validators/password-policy.ts`: 8–72 chars, lowercase, uppercase, number, symbol). That file is the single source; frontend `core/utils/password-policy.ts` (`passwordPolicyValidator` + `<app-password-requirements>`) mirrors it and `password-policy.parity.spec.ts` fails if they diverge. The modal requires a password during registration.
 
 Optional registration fields include `phone`, `document_type`, and `document_number`. Phone allows digits plus `+ # * ( ) -` and spaces.
 
@@ -80,52 +81,13 @@ Files:
 - `apps/frontend/src/app/core/store/auth/auth.effects.ts`
 - `apps/frontend/src/app/core/store/auth/auth.reducer.ts`
 
-The layout uses signals:
-
-```typescript
-readonly is_auth_modal_open = signal(false);
-readonly auth_modal_mode = signal<'login' | 'register'>('login');
-
-login(): void {
-  this.auth_modal_mode.set('login');
-  this.is_auth_modal_open.set(true);
-}
-```
-
-Template binding:
-
-```html
-<app-auth-modal
-  [isOpen]="is_auth_modal_open()"
-  [initialMode]="auth_modal_mode()"
-  [storeLogo]="store_logo()"
-  [storeName]="store_name()"
-  (closed)="closeAuthModal()"
-/>
-```
+The layout holds signals `is_auth_modal_open` and `auth_modal_mode` (`'login' | 'register'`) and renders `<app-auth-modal [isOpen] [initialMode] [storeLogo] [storeName] (closed)>`.
 
 ## Auth Modal Behavior
 
 `AuthModalComponent` uses signal `input()`/`output()` APIs and signal state. It auto-closes with an `effect()` when `authFacade.isAuthenticated()` becomes true while the modal is open.
 
-Login calls:
-
-```typescript
-const storeId = this.tenantFacade.getCurrentStoreId();
-this.authFacade.loginCustomer(email, password, storeId);
-```
-
-Registration calls:
-
-```typescript
-this.authFacade.registerCustomer({
-  email,
-  password,
-  first_name,
-  last_name,
-  store_id: storeId,
-});
-```
+Login calls `authFacade.loginCustomer(email, password, storeId)` with `storeId = tenantFacade.getCurrentStoreId()`; registration calls `authFacade.registerCustomer({ email, password, first_name, last_name, store_id })`.
 
 The modal requires pending legal documents to be accepted before registration when any are returned by the legal service.
 
@@ -150,7 +112,7 @@ Legal document APIs use `x-store-id` and live in `apps/frontend/src/app/public/e
 - Use `loginCustomer`/`registerCustomer`, not admin login/register, for ecommerce customers.
 - Use signals for modal state; do not copy old plain boolean examples.
 - Use lowercase `customer` when reasoning about backend role names.
-- Keep frontend password validators aligned with backend password requirements when a password is collected.
+- Never hand-roll password rules; change `password-policy.ts` on backend, frontend (and mobile mirror) together.
 - Do not redirect customers to admin routes after login.
 - Keep document acceptance in the registration flow when pending legal documents exist.
 

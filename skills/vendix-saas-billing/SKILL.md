@@ -1,15 +1,11 @@
 ---
 name: vendix-saas-billing
 description: >
-  SaaS subscription billing for Vendix stores: plan pricing, invoices, Wompi platform
-  payments, manual payments, partner commissions, payouts, proration, and dunning.
-  Trigger: When creating SaaS invoices, working with partner rev-share, margin/surcharge
-  pricing, invoice sequence allocation, partner payout batches, subscription payments,
-  manual payments, or dunning flows.
+  SaaS subscription billing for stores: plan pricing, invoices, Wompi/manual payments, partner commissions and payouts, proration, dunning. Trigger: SaaS invoices, rev-share, partner margin/surcharge, payout batches, dunning.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Creating SaaS subscription invoices or rev-share splits"
@@ -35,7 +31,7 @@ metadata:
 - State/dunning/proration: `apps/backend/src/domains/store/subscriptions/services/`
 - Super-admin plans/partners/payouts: `apps/backend/src/domains/superadmin/subscriptions/`
 - Platform gateway: `apps/backend/src/domains/superadmin/subscriptions/gateway/`
-- Jobs: `apps/backend/src/jobs/commission-accrual.job.ts`, `partner-payout-batch.job.ts`
+- Jobs: `apps/backend/src/jobs/commission-accrual.job.ts`, `partner-payout-batch.job.ts`; `domains/store/subscriptions/jobs/reconcile-stuck-pending.job.ts` (voids invoices stuck in `pending_payment` after 60 min)
 - Frontend store subscription UI: `apps/frontend/src/app/private/modules/store/subscription/`
 - Frontend super-admin UI: `apps/frontend/src/app/private/modules/super-admin/subscriptions/`
 
@@ -57,7 +53,7 @@ Current behavior:
 
 - Uses `GlobalPrismaService`.
 - Locks the `store_subscriptions` row with `FOR UPDATE`.
-- Allocates invoice numbers with `pg_advisory_xact_lock(0x53414153)` and format `SAAS-YYYYMMDD-00001`.
+- Allocates invoice numbers with `pg_advisory_xact_lock(ADVISORY_LOCK_KEY_INVOICE_NUMBER = 0x5341_4153)` and format `SAAS-YYYYMMDD-00001`.
 - Computes price as `base_price + margin_amount + fixed_surcharge`.
 - Clamps partner margin against plan cap.
 - Writes `tax_amount=0`, `currency=sub.currency`, `line_items`, and `split_breakdown`.
@@ -112,37 +108,13 @@ Manual/offline payments are implemented.
 - Excess amount becomes `store_subscriptions.metadata.pending_credit`.
 - Attempts to transition the subscription to `active` in the same transaction.
 
-## Plans And Partners
+## Plans, Partners, Commissions
 
-Super-admin plan service facts:
+- `is_free` forces `base_price=0`; `plan_type` is `base` | `partner_custom` | `promotional`; one default plan (`setDefault()` in a serializable transaction).
+- Partners are `organizations.is_partner=true`; overrides `partner_plan_overrides(organization_id, base_plan_id)` enforce `margin_pct <= plan.max_partner_margin_pct`. Overrides on promotional plans are not fully blocked (billing skips commission for promotional plans).
+- Known gap: `commission-accrual.job.ts` promotes commissions to `pending_payout`, but `partner-payout-batch.job.ts` (`0 4 5 * *`) selects only `accrued`. Verify before changing payouts.
 
-- `is_free` forces `base_price=0` and `setup_fee=null`.
-- `plan_type` supports `base`, `partner_custom`, and `promotional`.
-- Promotional flag mirrors `plan_type === 'promotional'`.
-- `setDefault()` clears existing default and sets one active plan as default in a serializable transaction.
-
-Partner facts:
-
-- Partners are `organizations` with `is_partner=true`.
-- Overrides are `partner_plan_overrides` keyed by `(organization_id, base_plan_id)`.
-- `PartnersService.createOverride()` enforces `margin_pct <= plan.max_partner_margin_pct`.
-- Current code does not fully block overrides on promotional plans in `PartnersService`; billing skips commission for promotional plans. Treat this as a known implementation gap if product policy requires blocking overrides.
-
-## Commissions And Payouts
-
-Commission accrual paths:
-
-- `PartnerCommissionsService.accrueCommission(invoiceId)` upserts `partner_commissions(state='accrued')` from `invoice.split_breakdown.partner_share`.
-- `commission-accrual.job.ts` processes `commission_accrual_pending`, upserts commission as `pending_payout`, and promotes existing `accrued` to `pending_payout`.
-- `partner-payout-batch.job.ts` runs `0 4 5 * *`, creates monthly draft batches for previous-month `accrued` commissions, and transitions them to `pending_payout`.
-
-Known current inconsistency: `commission-accrual.job.ts` promotes commissions to `pending_payout`, while `partner-payout-batch.job.ts` selects only `accrued`. Do not document the payout lifecycle as perfectly consistent until this is resolved.
-
-Admin payout service:
-
-- `approve()` moves draft batch to approved.
-- `rejectBatch()` releases commissions back to `accrued`.
-- `markPaid()` requires approved batch and sets batch plus commissions to `paid`.
+Detail (services, jobs, payout approve/reject/markPaid): `references/partners-commissions.md` (read on demand).
 
 ## Platform Webhooks
 
@@ -153,18 +125,13 @@ Admin payout service:
 - Validation uses platform Wompi credentials, not store payment methods.
 - Invalid platform webhook validation returns `400`; this differs from store Wompi webhooks.
 
-## Frontend Subscription UI
+## Platform Fiscal Rail (DIAN)
 
-Store subscription routes include overview, plans, picker, payment, history, timeline, invoice detail, checkout, and dunning.
+SaaS invoices are also issued electronically to DIAN through the super-admin rail `apps/backend/src/domains/superadmin/subscriptions/fiscal/` (`subscription-fiscal.service.ts`/`.listener.ts`, `platform-invoicing.service.ts`, credit notes, support documents). `PlatformInvoicingService` is a facade over the store invoicing rail (`InvoicingService`): never duplicate tax arithmetic or DIAN validations there. Load `vendix-dian-enablement` before touching it.
 
-Key frontend facts:
+## Frontend
 
-- `SubscriptionFacade` exposes observables and signals with `toSignal(..., { initialValue })`.
-- Plan catalog groups by billing cycle and supports coupon validation.
-- Picker is the soft `no_plan` path and filters promotional plans unless `show_in_picker === true`.
-- Checkout preview/commit handles free plans, trial swap, proration, resubscribe, scheduled-cancel revert, Wompi widget, polling, and invoice gateway sync fallback.
-- Dunning board shows deadline, total due, overdue invoices, features lost/kept, retry payment, and support CTA.
-- Super-admin plan form includes overview, AI matrix, pricing, trial/grace tabs; pricing default drives canonical `base_price`, `billing_cycle`, and `currency`.
+Store and super-admin subscription UI detail: `references/frontend.md` (read on demand).
 
 ## Anti-Patterns
 
@@ -183,3 +150,4 @@ Key frontend facts:
 - `vendix-currency-formatting` - Currency display/input
 - `vendix-date-timezone` - UTC period and display rules
 - `vendix-auto-entries` - Accounting entries for subscription payments
+- `vendix-dian-enablement` - Platform fiscal rail

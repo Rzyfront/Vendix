@@ -36,8 +36,11 @@ Thumbs.db
 # Documentation
 docs/
 .claude/
+# Legacy provider copies (OpenCode / Antigravity); no longer generated
 .agent/
 .opencode/
+# gentle-ai skill registry (regenerated per session)
+.atl/
 # Engram: ignore local DB, but keep sync chunks (shared with the team)
 .engram/*
 !.engram/chunks/

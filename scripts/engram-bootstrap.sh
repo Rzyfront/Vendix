@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./scripts/engram-bootstrap.sh
-#   ./scripts/engram-bootstrap.sh --agent <opencode|claude-code|gemini-cli|codex|pi>
+#   ./scripts/engram-bootstrap.sh --agent <claude-code|gemini-cli>
 #   ./scripts/engram-bootstrap.sh --yes   # skip interactive prompts where safe
 
 set -euo pipefail
@@ -30,7 +30,7 @@ Engram bootstrap for Vendix.
 
 Options:
   --agent <name>   Configure the MCP integration for a specific agent.
-                   One of: opencode, claude-code, gemini-cli, codex, pi.
+                   One of: claude-code, gemini-cli.
                    If omitted, attempts to auto-detect from the user's env.
   --yes, -y        Skip confirmations where safe (doctor, import).
   --help, -h       Show this help.
@@ -59,10 +59,8 @@ esac
 
 # Auto-detect agent if not provided
 if [ -z "$AGENT" ]; then
-  if [ -d "$HOME/.config/opencode" ]; then AGENT="opencode"
-  elif [ -d "$HOME/.claude" ]; then AGENT="claude-code"
+  if [ -d "$HOME/.claude" ]; then AGENT="claude-code"
   elif [ -d "$HOME/.gemini" ]; then AGENT="gemini-cli"
-  elif [ -d "$HOME/.codex" ]; then AGENT="codex"
   else AGENT=""; fi
 fi
 

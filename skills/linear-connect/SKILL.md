@@ -1,17 +1,13 @@
 ---
 name: linear-connect
-description: |
-  Bootstrap a developer's local Linear setup for the Vendix project on the
-  Quickss workspace. Use when the user says "configurar Linear", "no tengo
-  credenciales", "conectar a Linear", or when the `linear-issues` skill
-  reports a missing `LINEAR_API_KEY` or absent `.linear/config.json`. Validates
-  the personal API key, resolves and caches the team/project/labels/state
-  UUIDs in `.linear/config.json`, and confirms with a smoke-test read. Do NOT
-  use for creating or mutating issues (use `linear-issues` instead).
+description: >
+  Bootstrap local Linear setup for Vendix (Quickss workspace): validate LINEAR_API_KEY and cache
+  team/project/labels/state UUIDs in .linear/config.json. Trigger: /linear-connect, "configurar
+  Linear", "conectar a Linear", missing LINEAR_API_KEY.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "2.0"
   scope: [root]
   auto_invoke:
     - "Bootstrapping local Linear credentials for Vendix"
@@ -19,267 +15,49 @@ metadata:
     - "Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json"
     - "Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+disable-model-invocation: true
 ---
 
 # Linear Connect (Vendix · Quickss)
 
-This skill exists because the `linear-issues` skill needs a personal API key
-in the environment and a local cache of resolved UUIDs. This skill sets both
-up. It is a **one-shot bootstrap** — run it once per developer per machine,
-not on every issue creation.
+One-shot bootstrap per developer/machine: `LINEAR_API_KEY` in the user's shell env + UUID cache in
+`.linear/config.json`. Issue work is `linear-issues`.
 
-## Inputs to collect
+## Key storage (security rule)
 
-Ask the user only what is missing.
-
-- **`LINEAR_API_KEY`** — Linear personal API key. Format: `lin_api_...`. The
-  user pastes it once. **Never write it to any file inside the Vendix repo
-  (including `.linear/config.json`), even with gitignore.** Store it in
-  the user's shell environment only — see step 2 of the Procedure for the
-  acceptable storage options.
-
-The team, project, and workspace are all hardcoded to Quickss / Vendix. Do
-not ask the user to choose — there is no choice to make.
+- The key lives **only** in the user's environment, never in a repo file (not `.linear/config.json`,
+  not a repo `.env`, even gitignored: backups, syncs and reflog keep it).
+- Options, in order: macOS Keychain (`security add-generic-password -s linear-mavis -a $USER -w '<key>'`
+  + `security find-generic-password` wrapper in `~/.zshrc`); 1Password
+  (`export LINEAR_API_KEY="$(op read 'op://Private/Linear/api_key')"`); plain export in `~/.zshrc`
+  (fallback `~/.bashrc`) with `chmod 600`.
+- The agent appends the line itself if absent (`grep -q '^export LINEAR_API_KEY='` first), never
+  echoes the key, and refuses any request to store it in the repo.
+- Agents load an existing key with `source scripts/load-linear-key.sh` (prints only length/prefix).
 
 ## Procedure
 
-1. **Check existing state**
-   - `LINEAR_API_KEY` env var → if set, skip to step 3 (validation).
-   - `.linear/config.json` at repo root → if exists, read it. Confirm the
-     cached `team_id` and `project_id` match the constants below. If they
-     do not, warn the user that the cache points to a different setup and
-     ask whether to rebuild.
+1. If `LINEAR_API_KEY` is set, skip to 3. If `.linear/config.json` exists, check its `team_id` /
+   `project_id` match the constants; if not, warn and ask before rebuilding.
+2. Generate the key: `https://linear.app/quickss/settings/account/security/api-keys/new`, label
+   `Vendix (<hostname>)`, default scopes (not Admin). Shown once. Store it as above.
+3. Validate: `viewer { id name email }`. Errors → regenerate. Show "Conectado como <name> <email>";
+   identity not theirs → STOP.
+4. Confirm access: `team(id: "64581e80-05a2-40e8-8acb-1f091ad38168") { id name key }` (Quickss, QUI)
+   and `project(id: "0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59") { id name }` (Vendix).
+5. Verify every cached UUID resolves (dead labels/states fail silently at write time):
+   `issueLabels(first: 100, includeArchived: true) { nodes { id name archivedAt } }` and the team's
+   `states`. Report any UUID that does not resolve; ask before overwriting with new ones.
+6. Write `.linear/config.json` (2-space JSON, `chmod 600`, no secrets): `version`, `workspace`,
+   `team_id`, `team_key`, `project_id`, `user_id` (viewer), `labels` and `states` name → UUID maps
+   from `linear-issues/references/labels.md` and `states.md`. If `.linear/` cannot be created, use
+   `~/.config/vendix-linear/config.json` and tell the user.
+7. Confirm `.linear/config.json` is in `.gitignore` (it is today); append and warn if missing.
+8. Smoke test: `issues(filter: { project: { id: { eq: "<PROJECT_ID>" } } }, first: 1)`.
 
-2. **Guide the user to generate a key**
-   - URL for this workspace:
-     `https://linear.app/quickss/settings/account/security/api-keys/new`
-   - Label suggestion: `Vendix (Mavis on <hostname>)`
-   - Scopes: default (full access to issues and projects the user can see).
-     Avoid "Admin" scope.
-   - The key is shown ONCE. Tell the user to copy it.
-   - **Where the key MUST live** (read this carefully):
-     - **In the shell env of the user's own machine.** Three acceptable
-       options, in order of preference:
-       1. **macOS Keychain** (most secure on macOS):
-          `security add-generic-password -s linear-mavis -a $USER -w 'lin_api_...'`
-          then load it in `~/.zshrc` with a `security find-generic-password`
-          wrapper. Cifrado por el sistema, no aparece en texto plano en
-          ningún archivo.
-       2. **1Password / Bitwarden CLI** (best for teams that already use
-          a password manager): `op read 'op://Private/Linear/api_key'` in
-          `~/.zshrc`. Cifrado, auditable, portable entre máquinas.
-       3. **Dotfile de shell privado** (acceptable, less secure):
-          `echo 'export LINEAR_API_KEY="lin_api_..."' >> ~/.zshrc`.
-          `chmod 600 ~/.zshrc`. Nunca commitees `~/.zshrc` a un repo de
-          dotfiles público.
-     - **Where the key MUST NOT live** (these are never acceptable, even
-       if gitignored):
-       - En `~/.linear/config.json` (es un archivo del repo y gitignore no
-         es seguridad).
-       - En un `.env` dentro del repo (gitignored no es seguridad — el
-         archivo existe en disco, viaja en backups, en syncs de iCloud,
-         en `git stash`, en `git reflog`).
-       - En un dotfile de shell commiteado a un repo (aunque sea privado,
-         una vez que sale de tu máquina ya perdiste control).
-   - **Do the write yourself** (this is the agent, not the user — saving a
-     click is part of the value). Concrete recipe for option 3 (the
-     default; safest cross-platform, works on mac/linux/wsl):
-     ```bash
-     KEYFILE="$HOME/.zshrc"
-     [ -f "$HOME/.bashrc" ] && [ ! -f "$KEYFILE" ] && KEYFILE="$HOME/.bashrc"
-     LINE="export LINEAR_API_KEY=\"<key>\""
-     if grep -q "^export LINEAR_API_KEY=" "$KEYFILE" 2>/dev/null; then
-       echo "LINEAR_API_KEY ya estaba en $KEYFILE — no toco nada"
-     else
-       echo "$LINE" >> "$KEYFILE"
-       chmod 600 "$KEYFILE"
-       echo "LINEAR_API_KEY agregada a $KEYFILE (permiso 0600)"
-     fi
-     ```
-     - Detect which shell rc file to use: prefer `~/.zshrc` on macOS
-       (default since Catalina), fall back to `~/.bashrc` if `~/.zshrc`
-       does not exist but `~/.bashrc` does.
-     - If neither exists, fall back to the **current shell only** (export
-       in the current process) and tell the user "for permanence, run
-       `echo $LINE >> ~/.zshrc` yourself in a normal terminal".
-     - If the user picked option 1 (Keychain) or 2 (1Password), do NOT
-       run the recipe above. Instead, write the corresponding wrapper to
-       the rc file and have it pull the key from the secure source.
-     - **Never** log the appended line — it contains the raw key. Echo
-       only the confirmation message above.
-   - **Do NOT store the key in any file under the Vendix repo, including
-     `.linear/config.json`.** The cache there contains only UUIDs and the
-     user's own `user_id` — no secrets.
+## Output
 
-3. **Validate the key**
-   - Run `viewer { id name email }` against `https://api.linear.app/graphql`.
-   - If `errors` is non-empty → key is invalid/expired. Ask the user to
-     re-generate.
-   - If success → show the user which identity the workspace sees ("Conectado
-     como `<name>` `<email>`"). This is a security check — if the identity is
-     not theirs, STOP.
-
-4. **Confirm the team and project exist**
-   - The constants are baked into this skill:
-     - `TEAM_ID = 64581e80-05a2-40e8-8acb-1f091ad38168` (Quickss, key QUI)
-     - `PROJECT_ID = 0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59` (Vendix)
-   - Run a quick `team(id: TEAM_ID) { id name key }` and
-     `project(id: PROJECT_ID) { id name }` to confirm both still exist and
-     that the user can see them. If either fails, surface the error — the
-     user may have lost access.
-
-5. **Discover labels and states (or use baked-in defaults)**
-   - The expected labels and states for Vendix-on-Quickss are listed in
-     step 6 below. To be safe, run a one-off discovery query against Linear
-     and verify the cache matches reality. If the user has created new
-     labels in Linear since the skill was last updated, surface them and ask
-     the user whether to overwrite the cache.
-   - **Verify every baked-in UUID actually resolves — do not trust the
-     constants.** Labels and states get renamed, archived, or deleted in the
-     Linear UI without anyone touching this repo, and a dead UUID fails
-     silently at write time (`Entity not found: IssueLabel`) while the rest
-     of the mutation succeeds. In July 2026 four cached labels (`prod`,
-     `dev`, `Focus`, `Revisado`) had been dead for an unknown period and
-     `pr-code-review` was writing against one of them on every merge.
-     ```graphql
-     query { issueLabels(first: 100, includeArchived: true) {
-       nodes { id name archivedAt } } }
-     ```
-     Use `includeArchived: true` — an archived label still occupies its name
-     (creating a duplicate fails) but does not appear in the default listing.
-     Report any cached UUID that does not resolve instead of silently
-     dropping it.
-   - Cache the user's own `viewer.id` as `user_id` so `linear-issues` can
-     resolve "asignármelo a mí" without an extra query.
-
-6. **Write `.linear/config.json`**
-   - Location: `<repo-root>/.linear/config.json`.
-   - Schema:
-     ```json
-     {
-       "version": 1,
-       "workspace": "quickss",
-       "team_id": "64581e80-05a2-40e8-8acb-1f091ad38168",
-       "team_key": "QUI",
-       "project_id": "0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59",
-       "user_id": "<uuid from viewer>",
-       "labels": {
-         "Aprobado": "c41a06ad-bc03-4baf-a36a-93df6230054b",
-         "Requiere cambios": "1b0a8cac-be15-4aaf-9e68-ba9f86f57574",
-         "Devuelto": "dbdfcb7c-af6f-49bb-825f-3f38f9df218e",
-         "IA": "b8d3e68a-9409-4b8e-b609-2eb4372f35bf",
-         "Invesigacion": "c10a0a2e-f720-46ee-a743-1607c9c3a8ca",
-         "Bug": "cc489b0b-2b1e-4d58-92de-8c261f74b67e",
-         "Feature": "bb28dc3f-2774-44c5-ad88-5092a744c4d8",
-         "Improvement": "94555d1b-7006-4e51-a71e-6e7dfb98b420"
-       },
-       "states": {
-         "Backlog": "4b74cd22-2daa-4220-bccc-002a6b4121de",
-         "Todo": "1c3e8e81-3fa4-46fa-9674-0d46e6bb003f",
-         "In Progress": "e24cd9a7-66db-4e49-93cb-d3f1c99df2f7",
-         "Code Review": "17d15a4c-92b4-4d6e-92d7-bc7c201fb465",
-         "In Review": "d123e233-1f17-422e-b7c0-06f463e798df",
-         "Done": "30f4c5c5-e1de-43a7-b00e-b737fc6e73a4",
-         "Canceled": "6081e147-8c02-4531-9437-e9d6115559fd",
-         "Duplicate": "226e301e-6078-4ebd-81b2-d0177d2683ac"
-       }
-     }
-     ```
-   - Pretty-print with 2-space indent. `chmod 600` the file (it contains
-     UUIDs and the user's own user_id — not secrets, but dev-local).
-
-7. **Update `.gitignore`**
-   - Confirm `.linear/config.json` is in `.gitignore`. If not, append it.
-   - This is already done at the repo level by the time the skill is in
-     use, but verify and warn if it is missing.
-
-8. **Smoke test**
-   - Run a read against the API to confirm end-to-end:
-     `issues(filter: { project: { id: { eq: "0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59" } } }, first: 1)`
-   - Show the user the result.
-
-## Output contract
-
-A short summary printed to the user, in this order:
-
-1. **Restart your terminal to load `LINEAR_API_KEY`** — the most important
-   line, top of the message, easy to miss otherwise. The new export is in
-   `~/.zshrc` (or `~/.bashrc`) but shells do not re-read rc files on the
-   fly. The user must open a new terminal window, or run
-   `source ~/.zshrc` (or `~/.bashrc`) in the current one, for `linear-issues`
-   to find the env var.
-2. Their Linear identity (name + email)
-3. Team: Quickss (QUI)
-4. Project: Vendix
-5. Counts: 8 labels cached, 8 states cached, user_id resolved
-6. Full path to `.linear/config.json` and a reminder that the cache
-   contains no secrets
-7. Confirmation that the API key was added to `~/.zshrc` (or whatever rc
-   file was used), with permission `0600`
-8. One example of what they can do next, e.g. "Di 'crea un issue en Vendix
-   con label prod y prioridad alta'"
-
-## Failure handling
-
-- **No API key after step 2** → the user closed the terminal or did not
-  paste. Re-ask. Do not skip validation.
-- **Identity mismatch** (key works but the viewer is not the expected user)
-  → STOP. The user may have pasted a teammate's key by mistake.
-- **User insists on storing the key in the repo** (e.g. "ponlo en
-  `.linear/config.json` y ya", "úsalo en un `.env` del proyecto") → REFUSE.
-  Explain: gitignore is not a security boundary; the file still exists in
-  the filesystem, in backups, in cloud syncs, and in git's reflog. The
-  acceptable storage is the user's shell env (or Keychain / password
-  manager). Re-offer step 2.
-- **Team or project not visible** → the user may have lost access in Linear.
-  Surface the error and ask them to confirm with the workspace admin.
-- **`.linear/` creation fails** → fall back to
-  `~/.config/vendix-linear/config.json` and update the path in the success
-  message. The `linear-issues` skill should also be updated to look at the
-  fallback path if the primary one is missing — for now, surface the
-  divergence to the user.
-- **`.gitignore` write fails** → still complete the config; warn the user
-  to add `.linear/config.json` to gitignore manually before committing.
-
-## Examples
-
-### Example 1 — First-time setup
-
-Input: "Quiero empezar a usar Linear desde el repo Vendix"
-
-- Walks the user to
-  `https://linear.app/quickss/settings/account/security/api-keys/new`
-- User pastes `lin_api_...`
-- **Agent appends the export line to `~/.zshrc` automatically** (with
-  permission `0600`), using the recipe in step 2 — does not ask the user
-  to copy-paste a command
-- Validates the key with a `viewer` query
-- Confirms Quickss team and Vendix project are visible
-- Writes `.linear/config.json` with the baked-in constants, plus the
-  resolved `user_id`
-- Smoke test returns 0 issues (empty board) or N issues if the project
-  already has work
-- Output contract top line: "Reinicia tu terminal (o `source ~/.zshrc`)
-  para que `LINEAR_API_KEY` esté disponible en el próximo comando"
-
-### Example 2 — Key exists but config is missing
-
-Input: "Tengo la API key en mi shell pero no hay config"
-
-- Confirms `LINEAR_API_KEY` is set in the current shell
-- Skips key generation and rc-file append, runs validation directly
-- Resolves `user_id` and writes `.linear/config.json`
-- Output contract skips the "restart terminal" line because the key is
-  already loaded
-
-### Example 3 — User has 1Password / wants Keychain
-
-Input: "Tengo 1Password, configurálo con eso"
-
-- Walks the user to store the key in 1Password under a "Linear" entry
-- Writes the wrapper to `~/.zshrc` (NOT the raw key):
-  ```bash
-  export LINEAR_API_KEY="$(op read 'op://Private/Linear/api_key')"
-  ```
-- Validates by running `viewer` after `source ~/.zshrc`
-- Output contract still leads with "restart your terminal"
+1. First line: restart the terminal or `source ~/.zshrc` (omit if the key was already loaded).
+2. Identity, team Quickss (QUI), project Vendix, counts of labels/states cached, `user_id` resolved.
+3. Path of the config (no secrets) and the rc file used (0600).
+4. One next step, e.g. "Di 'crea un bug en Vendix'".

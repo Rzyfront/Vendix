@@ -1,13 +1,11 @@
 ---
 name: vendix-ui-ux
 description: >
-  Mobile-first UI/UX design philosophy, accessibility standards, visual quality checklist,
-  and skill routing for Vendix frontend work. Trigger: When designing UI screens,
-  implementing mobile-first layouts, checking accessibility, or creating landing pages.
+  Mobile-first UI/UX philosophy, accessibility standards, visual quality checklist and frontend skill routing. Trigger: designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns"
 ---
@@ -34,8 +32,8 @@ This is the broad design checklist. For implementation details, use the speciali
 | App | Priority |
 | --- | --- |
 | `STORE_ECOMMERCE` | Mobile conversion, speed, trust |
-| `STORE_ADMIN` | Efficient admin workflows across mobile/desktop |
-| `STORE_POS` | Touch-first speed and low friction |
+| `STORE_ADMIN` | Efficient admin workflows across mobile/desktop; POS screens inside it are touch-first, low friction |
+| `STORE_DELIVERY` | Carrier (repartidor) app, mobile-first |
 | `ORG_ADMIN` | Dense data, reporting, multi-store management |
 
 ## Mobile-First Checklist
@@ -64,7 +62,7 @@ This is the broad design checklist. For implementation details, use the speciali
 
 ## Skill Routing
 
-- Angular component structure: `vendix-frontend-component`.
+- Angular component structure: `vendix-frontend`.
 - Zoneless/signals/CVA: `vendix-zoneless-signals`.
 - Reactive forms: `vendix-angular-forms`.
 - Icons: `vendix-frontend-icons`.
@@ -74,7 +72,9 @@ This is the broad design checklist. For implementation details, use the speciali
 - Tables/cards: `vendix-frontend-data-display`.
 - Stats/KPIs: `vendix-frontend-stats-cards`.
 - Sticky headers: `vendix-frontend-sticky-header`.
-- App/domain context: `vendix-app-architecture`.
+- Sidebar/module visibility: `vendix-panel-ui`.
+- Guided tours: `vendix-tour`.
+- App/domain context: `vendix-core`.
 
 ## Related Skills
 

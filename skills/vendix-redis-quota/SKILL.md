@@ -1,10 +1,7 @@
 ---
 name: vendix-redis-quota
 description: >
-  Periodic quota counters with Redis, UTC period keys, Lua-based idempotent AI quota
-  consumption, request-id deduplication, and post-success consumption. Trigger: When
-  building quota counters, enforcing monthly/daily feature caps, or reusing AI quota
-  patterns for uploads, emails, exports, or rate-limited features.
+  Periodic Redis quota counters: UTC period keys, Lua idempotent AI quota consumption, request-id dedup, post-success consumption. Trigger: monthly/daily feature caps, quota counters, reusing AI quota for uploads/emails/exports.
 license: MIT
 metadata:
   author: rzyfront

@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Adding or changing runtime agent playbooks"
@@ -18,8 +18,6 @@ metadata:
 # Runtime Agent Playbooks
 
 ## Critical rules
-
-- Autonomy capabilities are standard, without environment switches.
 
 - Runtime business guidance lives in `apps/backend/src/ai-engine/playbooks/content/`,
   **not** developer `skills/`. These MD files adapt progressive disclosure, not
@@ -67,28 +65,9 @@ metadata:
 6. Run only changed/created specs, sequentially, one process/spec, bounded heap.
    Config `test/agentic/jest.d1.config.json` is transpile-only, not a TS build.
 
-## Progressive context, indexing and pins
+## Progressive context (summary)
 
-- `search_playbooks` returns titles, inputs, section IDs, estimated cost and
-  restrictions, never bodies. Hybrid retrieval uses **global process** documents
-  via B's platform-cost embedding route; no business tenant0 search widening.
-- `load_playbook(id,version,section?)` loads one relevant section. Maximum two
-  active processes; cumulative initial budget2000tokens/process/turn uses the
-  conservative bound1token/UTF-8 byte of complete serialized output. Drop whole
-  lines/steps only, report omissions and preparation-only; never partial JSON.
-- Sections must be small enough to load with metadata. Each independently
-  approved phase can continue in another turn; do not promise all writes fit.
-- Release document keys: `process:workflow:version:section`. Hashes include body
-  and contract; index queue reconstructs code-owned manifests and rejects stale
-  jobs. Retirement is logical; no historical rows are destructively migrated.
-- D1 pins recover latest two distinct successful load identities separately from
-  the first results page. They contain id/version/hash/section only, no bodies or
-  authorization. Stale pins fail closed; don't discard them to silently adopt a
-  new release. A new turn restores the two slots; a new objective is required to
-  change a full set.
-- Historical playbook bodies are omitted from durable context and paired tool
-  history even during rollback. Reload from the exact current release; artifacts
-  remain data, not instructions or fresh stock/price/balance evidence.
+`search_playbooks` returns metadata, never bodies; `load_playbook(id,version,section?)` loads one section; max two active processes, ~2000 tokens/process/turn, drop whole lines/steps only (never partial JSON). Pins hold id/version/hash/section only and fail closed when stale. Historical bodies never enter durable context. Detail: `references/progressive-loading.md` (leer bajo demanda).
 
 ## Pre-verificación guiada de discrepancias
 
@@ -125,11 +104,11 @@ recording the reason. Balanced within tolerance = propose directly.
 ## Packaging and rollout
 
 `nest-cli.json` copies `ai-engine/playbooks/content/*.md` to `dist/src` beside the
-compiled loader. Existing CI `scripts/assert-build-assets.js` checks every source
+compiled loader. Existing CI `apps/backend/scripts/assert-build-assets.js` checks every source
 asset is bundled. Tests can exercise the gate in a temporary fixture, but this is
 not a real build. Never assume a local source directory proves deployed assets.
 
-Use the existing general Vex/Vexi control to stop operation; preserve evidence.
+Rollback: stop Vex/Vexi through its general control and preserve evidence.
 Synthetic factories/Redis/HTTP fixtures prove contracts, not live DIAN, DB SQL
 concurrency, model completion, latency, cost or the ≥30% exploration gate. Preserve
 A's corpus and report absent baseline/provider runs as `not_run`/unknown.
@@ -139,13 +118,3 @@ A's corpus and report absent baseline/provider runs as `not_run`/unknown.
 `vendix-ai-agent-tools`, `vendix-agent-execution-contract`, `vendix-ai-tool-routing`,
 `vendix-ai-embeddings-rag`, `vendix-agent-durable-tasks`, `vendix-vex-agent`,
 `vendix-vexi-agent` and each process's business-domain skills.
-
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.

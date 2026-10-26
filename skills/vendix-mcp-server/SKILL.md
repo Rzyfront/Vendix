@@ -1,20 +1,12 @@
 ---
 name: vendix-mcp-server
 description: >
-  MCP Gateway for external AI clients: resources, tools, prompts, JWT auth, rate limiting,
-  audit logging, and protocol responses. Trigger: When working with MCP server endpoints,
-  adding MCP resources/tools/prompts, configuring MCP auth, or exposing Vendix data to AI clients.
+  MCP Gateway for external AI clients: resources, tools, prompts, JWT auth, rate limiting, audit. Trigger: MCP server endpoints, McpController, adding MCP resources/tools/prompts, exposing Vendix data to AI clients.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
-  auto_invoke:
-    - "Working with MCP server"
-    - "Adding MCP resources or tools"
-    - "Configuring MCP authentication"
-    - "Exposing Vendix data to AI clients"
-    - "Working with McpController"
 ---
 
 ## Source of Truth
@@ -76,11 +68,14 @@ Security caveat: product detail currently exposes business-sensitive fields such
 
 MCP tools come from `AIToolRegistry`.
 
-- Listing uses `context.permissions || context.roles` for availability.
-- Calls use `toolRegistry.executeTool()`.
-- Errors are converted to MCP style `{ isError: true, content: [...] }`.
+- Listing uses `getAvailableDefinitions(context.permissions || context.roles)`; each tool carries
+  `version` and, if deprecated, a `deprecated` field plus a "(DEPRECADO desde v… ; usa …)" line in the
+  description (SDKs may strip extra keys).
+- Calls use `toolRegistry.executeTool()`; errors become `{ isError: true, content: [...] }`.
 
-Tool quality caveat: many AI tools are placeholders; only inventory tools are currently service-backed.
+Tools are service-backed across ~49 domain files in `apps/backend/src/ai-engine/tools/domains/`
+(the old "only inventory is real" caveat is closed). Still check the service behind a tool before
+documenting it as production-ready.
 
 ## Prompts
 

@@ -1,8 +1,7 @@
 ---
 name: vendix-settings-system
 description: >
-  Store and organization settings persistence, defaults, templates, branding, and frontend integration.
-  Trigger: When working with settings configuration, adding settings sections, modifying store_settings/organization_settings, or debugging settings defaults/sync.
+  Store and organization settings: persistence, defaults, templates, branding, frontend integration. Trigger: settings sections, store_settings/organization_settings, default_templates, debugging settings defaults/sync.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -84,12 +83,12 @@ Key files:
 | Sidebar/module visibility | `vendix-panel-ui` |
 | Theme tokens and CSS variables | `vendix-frontend-theme` |
 | S3 logo/favicon handling | `vendix-s3-storage` |
-| Prisma schema changes | `vendix-prisma-schema` and `vendix-prisma-migrations` |
-| Mobile-native settings UI | Knowledge gap until mobile skills exist |
+| Prisma schema changes | `vendix-prisma` and `vendix-prisma-migrations` |
+| Mobile-native settings UI | `mobile-dev` (only when the task names mobile) |
 
 ## Related Skills
 
 - `vendix-panel-ui` - `panel_ui` menu visibility
 - `vendix-s3-storage` - Logo/favicon URL handling
 - `vendix-zoneless-signals` - Frontend signals patterns
-- `vendix-prisma-schema` - Settings schema changes
+- `vendix-prisma` - Settings schema changes
