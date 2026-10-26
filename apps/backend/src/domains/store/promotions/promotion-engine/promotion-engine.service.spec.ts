@@ -455,6 +455,35 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.applied_promotions).toHaveLength(1);
     });
 
+    it('include_auto_apply: además de las de la orden entran las automáticas vigentes (escala por volumen al subir la cantidad)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 92,
+          rule_type: 'quantity_tiered',
+          scope: 'order',
+          value: 0,
+          promotion_quantity_tiers: [buildTier({ promotion_id: 92, min_quantity: 50, value: 10 })],
+        }),
+      ]);
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 50 }],
+        manual_promotion_ids: [91],
+        order_scope: { promotion_ids: [91], include_auto_apply: true },
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.AND).toEqual([
+        {
+          OR: [
+            { id: { in: [91] } },
+            { is_auto_apply: true, state: { in: ['active', 'scheduled'] } },
+          ],
+        },
+      ]);
+      expect(where).not.toHaveProperty('state');
+      expect(result.total_discount).toBe(500);
+    });
+
     it('sin la opción el filtro por state y auto-apply queda igual', async () => {
       prisma.promotions.findMany.mockResolvedValue([]);
       await service.quoteDiscounts({
