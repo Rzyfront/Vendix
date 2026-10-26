@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
     - "Working with the Vex full-screen business agent (/admin/vex)"
@@ -20,218 +20,49 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 
 # Vendix Vex Agent
 
-## Purpose
-
-Vex is the second agent on the existing engine, not new infrastructure: row
-`vex` in `ai_agents` + application `vex_assistant` in
-`ai_engine_applications`, talking through `store/ai-chat` with
-`agent_key='vex'` from its own full-screen view (`/admin/vex`). It reuses
-`AIAgentService`, `AIToolRegistry`, the endpoint bridge, confirmations,
-attachments, queue and audit from Vexi. This skill governs what is Vex-only:
-the managed-row identity with `denied_tools`, single-step approval, UI blocks,
-and the `vex_agent` gate. It does not govern the shared loop, the bridge, or
-the Vexi dock — those stay in their own skills.
+Vex is the second agent on the existing engine: row `vex` in `ai_agents` + app `vex_assistant`, talking through `store/ai-chat` with `agent_key='vex'` from `/admin/vex`. It reuses the Vexi loop, registry, bridge, confirmations, attachments, queue and audit. This skill governs only the Vex-specific parts.
 
 ## Source of Truth
 
-- `apps/backend/prisma/seeds/ai-agents.seed.ts` — `vex` row (40 iterations, 25 `ui_*` denied).
-- `apps/backend/prisma/migrations/20261001120000_vex_agent_registration/migration.sql` — app `vex_assistant` (max_tokens 4096), agent `vex`, `denied_tools` column.
-- `apps/backend/src/domains/store/vex/vex.controller.ts` — `plans/:id/approve`, `confirmations/apply`, `blocks/:id`, `blocks/:id/interaction`, `activity-feed`, `attachments`.
-- `apps/backend/src/domains/store/vex/services/plan-approval.service.ts` — plan token (TTL 900 s), `(tool, canonical args)` hashes, irreversible segments.
-- `apps/backend/src/domains/store/vex/services/vex-block.service.ts` — `ai_ui_blocks` store (`MAX_BLOCK_ROWS = 5000`).
-- `apps/backend/src/domains/store/vex/services/vex-activity-feed.service.ts` — business log (`FeedCategory`: sale, inventory, cash, alert, agent).
-- `apps/backend/src/domains/store/vex/guards/vex-enabled.guard.ts` — store toggle, mirror of `VexiEnabledGuard`.
-- `apps/backend/src/ai-engine/tools/domains/vex-blocks.tools.ts` — the 7 block tools, all `readOnly`.
-- `apps/backend/src/ai-engine/ai-agent.service.ts` — `denied_tools` filter, per-agent budget, `ui_block` emission, result compaction (>6000 chars, vex only), offered-catalog execution guard, single `plan_approval` frame, `vex_agent` metering.
-- `apps/backend/src/ai-engine/tools/irreversible-coverage.spec.ts` — registry-wide spec: a write whose name matches the irreversible pattern must declare `irreversible: true`.
-- `apps/backend/src/domains/store/ai-chat/ai-chat.plan.spec.ts` — wiring specs (`plan_approval` + `block_sink` present for vex, absent for vexi) and `metadata.blocks/plan` persistence specs.
-- `apps/backend/src/ai-engine/tools/ai-tool-registry.ts` — catalog scoping (deny applied last).
-- `apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts` — chunk types `ui_block` and `plan_approval`.
-- `apps/backend/src/ai-engine/providers/anthropic-compatible.provider.ts` — `cache_control: ephemeral` on system + tools.
-- `apps/backend/src/domains/store/ai-chat/ai-chat.service.ts` — `metadata.agent_key` thread separation, Vex gate, snapshot without `ui_context`.
-- `apps/backend/src/domains/store/subscriptions/types/access.types.ts` — `vex_agent` feature key.
-- `apps/frontend/src/app/private/modules/store/vex/` — page, stores, `vex-api.service.ts`, block/markdown/plan-card/trace components.
-- `apps/frontend/src/app/core/guards/vex-access.guard.ts` — route gate (owner/admin + `vex.enabled`).
-- `apps/frontend/src/app/private/modules/store/settings/ai-agents/` — "Agentes IA" settings (Vexi + Vex tabs).
+- Seed `apps/backend/prisma/seeds/ai-agents.seed.ts` (`vex`: 40 iterations, 25 `ui_*` denied); migrations `20261001120000_vex_agent_registration`, `20261002150000_vex_hidden_plan_prompt`.
+- `apps/backend/src/domains/store/vex/` — `vex.controller.ts` (plans approve/reject/step confirmation, `confirmations/apply`, objectives, `blocks/:id`, `blocks/:id/interaction`, `activity-feed`, `attachments`), `services/plan-approval.service.ts`, `services/vex-block.service.ts`, `services/vex-activity-feed.service.ts`, `guards/vex-enabled.guard.ts`.
+- `apps/backend/src/ai-engine/tools/domains/vex-blocks.tools.ts` (7 block tools, all `readOnly`); `ai-agent.service.ts` (deny filter, per-agent budget, `ui_block`, compaction, single `plan_approval` frame, `vex_agent` metering); `ai-chat/ai-chat.plan.spec.ts` (wiring).
+- Frontend `apps/frontend/src/app/private/modules/store/vex/`, `core/guards/vex-access.guard.ts`, settings `private/modules/store/settings/ai-agents/` (Vexi/Vex tabs).
 
-## Pattern 1 — Agent as a managed row with `denied_tools`
+## Managed row with `denied_tools`
 
-Vex is configuration, not code: superadmin edits prompt, model, `max_tokens`,
-`max_iterations` and tool scope from the AI Engine without a deploy. The turn
-catalog is user permissions ∩ plan allowlist ∩ agent `allowed_tools` (when
-non-empty) − agent `denied_tools`, **deny applied last, never inverted**
-(`ai-tool-registry.ts`). Vex denies the 25 `ui_*` tools (it never navigates
-screens); Vexi denies nothing and behaves unchanged. Both lists accept bare
-tool names and domain names.
+Vex is configuration: superadmin edits prompt, model, `max_tokens`, `max_iterations` and tool scope without a deploy. Catalog = permissions ∩ plan ∩ `allowed_tools` (if non-empty) − `denied_tools`, deny last (`vendix-ai-tool-routing`). Vex denies the 25 `ui_*` tools; Vexi denies nothing.
 
-Rules that are not stylistic:
+1. A new `ui_*` tool goes into the Vex `denied_tools` in the seed AND a corrective migration.
+2. A hallucinated denied `ui_*` call dies at execution with `AI_AGENT_TOOL_NOT_ALLOWED` before the `clientSide` branch: no browser dispatch, no execution, no quota.
+3. Never reintroduce `ui_context` into the Vex snapshot (`buildVexSnapshot`, with `vex_blocks`).
 
-1. A new `ui_*` tool must be added to the Vex `denied_tools` in the seed AND
-   a corrective migration — the seed docblock says so explicitly.
-2. `max_iterations`/timeout come from the agent row (Vex: 40 iterations).
-3. Never reintroduce `ui_context` into the Vex snapshot: the turn would pay
-   for screen state the agent cannot act on.
+## One write per approval
 
-## Pattern 2 — One write per approval; plan-token compatibility is not policy
+- Hidden-plan flow proposes **one business write per turn**: the first proposal closes the turn with one single-step `plan_approval` frame (`plan_id` + steps, hashes via `setStepHashes`); a second write in the same response is deferred. Never tell the user a whole workflow was approved after one card.
+- `PlanApprovalService` / `POST store/vex/plans/:id/approve` keep legacy plan tokens (TTL 900 s, ordered canonical arg hashes, single-use, user/plan-bound). Approve validates conversation ownership (else 403) and server hashes (`getStepHashes`; client `steps` only select a subset). Steps are identified by `step_id`, never tool name. Irreversible or drifted/missing/replayed steps return to their own card; execution still goes through `executeTool` with fresh permission checks.
+- Compatibility is not policy: never restore multi-write collection or auto-execute the rest of a plan.
+- `agent_key='vex'` turns ALWAYS receive `plan_approval` (PlanApprovalService + VexiPlanStateService) and `block_sink` (VexBlockService); Vexi turns receive neither. Assert at the seam — a spec that mocks the loop proves nothing (`vendix-known-errors`).
+- Irreversible flag and coverage spec: `vendix-ai-agent-tools`.
 
-The current hidden-plan flow (`20261002150000_vex_hidden_plan_prompt`) proposes
-**one business write per turn**. The first proposal closes the turn in one
-`plan_approval` frame; a second write in the same model response is deferred.
-The plan stays internal, and continuation uses its stored state. Do not tell the
-user that a whole workflow has been approved or applied after one card.
+## UI blocks stay queryable server-side
 
-`PlanApprovalService` and `POST store/vex/plans/:id/approve` still support existing
-plan tokens (TTL 15 min, ordered canonical argument hashes). That compatibility
-must not be removed casually, but it does NOT authorize new grouped-approval
-policy. Tokens are single-use, user/plan-bound, and authorize no permission bypass.
-An irreversible or drifted/missing/replayed step returns to its own confirmation
-card; execution still traverses `executeTool` with fresh permission checks.
+- `vex_render_table|chart|kpi|image|file` validate and persist to `ai_ui_blocks` (store-scoped, registered on `StorePrismaService`; `create()` verifies conversation ownership) and emit `ui_block {block_id, kind, spec, data}`. `vex_block_read` pages tables (default 50, max 500) and markdown (`text_offset`/`text_limit` ≤ 3000; follow `next_offset`; `total_chars` is not a record count). `vex_block_transform` filters/sorts/groups/aggregates and versions the block. Blocks are scratch state, not business writes.
+- Limits: 5000 rows/block (`MAX_BLOCK_ROWS`), 100 blocks/conversation; beyond that it's a module export.
+- Images/files persist S3 keys only; signed URL minted per read (900 s), never written back. Reads filter by `store_id`; foreign ids answer 404, never 403.
+- `POST blocks/:id/interaction` stores selections as next-turn context. Results > 6000 chars are compacted to `{summary, block_id, rows}` (`compactToolResult`) and persisted through the sink.
+- Turn close stores `blocks: [{block_id, version, kind}]` and `plan: {plan_id, steps[], status}` in `ai_messages.metadata`; frontend rehydrates with `GET blocks/:id`.
 
-**Anti-pattern:** restoring multi-write collection or auto-executing the remaining
-plan because an earlier step was approved. Grouped approval requires an explicit
-product/security decision and compatibility tests, not a latency optimization.
+## Gate and threads
 
-## Pattern 3 — UI blocks stay queryable server-side
+- Opens only for owner/admin with `store_settings.settings.vex.enabled === true` (default `false`, independent from Vexi) and plan feature `vex_agent` (`monthly_tool_calls_cap`, `daily_messages_cap`, `monthly_tokens_cap`). `VexController` uses `RolesGuard + VexEnabledGuard`; `AiAccessGuard` only on `attachments` (approve/apply/interaction/feed spend no provider tokens). In `ai-chat` the `vex_agent` check is inline (decorators cannot see `agent_key`).
+- Threads by `metadata.agent_key`: `vex` lists only Vex; `vexi` lists Vexi + legacy NULL; unfiltered lists exclude Vex.
+- Frontend: `/admin/vex` behind `vexAccessGuard`; `/admin/settings/ai-agents` (model picker hidden). `activity-feed` unions domain notifications with applied Vex/Vexi actions over the notifications SSE.
 
-A block is data the model rendered that later turns can read and transform:
-`vex_render_table|chart|kpi|image|file` validate the payload and persist it to
-`ai_ui_blocks` (store-scoped, registered on `StorePrismaService`), emitting a
-`ui_block {block_id, kind, spec, data}` frame; `vex_block_read` pages data
-back (tables: default 50 rows, max 500). Markdown results use `text_offset`
-(default 0) / `text_limit` (default and max 3000), with `text`, `total_chars`,
-`has_more` and `next_offset`. Follow the returned cursor: escaped content can
-shorten a chunk. `total_chars` is NOT a record count; text fragments may be partial
-JSON. Table paging remains unchanged. `vex_block_transform` applies
-filter/sort/group/aggregate and versions the block. All seven tools are
-`readOnly`: persisting a block is agent scratch state, not a business write.
+## Measurement
 
-Limits and rules:
-
-- 5000 rows per block, 100 blocks per conversation. Beyond that it is a data
-  export and belongs in the module.
-- Images/files persist S3 KEYS only; the signed URL is minted fresh per read
-  (TTL 900 s) as `signed_url` and never written back.
-- Every read filters by `store_id` explicitly; a foreign block id answers
-  404, never 403 (which would confirm existence).
-- `POST blocks/:id/interaction` stores row selections / chart points as next-turn context.
-- Tool results over 6000 chars are compacted to `{summary, block_id, rows}`
-  (`compactToolResult`); trace, transcript and model never see the full
-  payload twice.
-
-## Pattern 4 — Three-legged gate and separated threads
-
-Vex opens only for owner/admin (`@Roles(OWNER, ADMIN)`) with
-`store_settings.settings.vex.enabled === true` (default `false`, only
-explicit `true` enables — same three-legged contract as `vexi`, independent
-toggle) and plan feature `vex_agent` in `ai_feature_flags` (caps
-`monthly_tool_calls_cap`, `daily_messages_cap`, `monthly_tokens_cap`).
-`VexController` carries `RolesGuard + VexEnabledGuard`; `AiAccessGuard` gates
-only `attachments` — approve/apply/interaction/feed deliberately omit it
-(each handler documents why: no provider spend happens there and rejecting
-would strand an already-reviewed approval or blind the next turn). In
-`ai-chat` the `vex_agent` check runs inline because decorators cannot see the
-conversation's `agent_key`.
-
-Threads separate by `metadata.agent_key`: `vex` lists only Vex; `vexi` lists
-Vexi plus legacy rows with NULL metadata; unfiltered lists exclude Vex so the
-Vexi dock never shows a thread it cannot open. Frontend: `/admin/vex` behind
-`vexAccessGuard`, header button conditioned on role + `vexEnabled()`,
-`/admin/settings/ai-agents` with Vexi/Vex tabs (`/admin/settings/vexi`
-redirects to the Vexi tab), model picker hidden (superadmin governs the
-model). The business log (`activity-feed`) unions domain notifications with
-applied Vex/Vexi actions as `{category, title, description, created_at,
-is_new}` and goes live over the existing notifications SSE.
-
-## Remediation rules (irreversible, wiring, identity, persistence)
-
-Learned closing the gaps where specs were green but the wiring was missing.
-All five are enforced by specs, not by convention.
-
-1. **Explicit `irreversible` + coverage spec.** Irreversible = external or
-   accounting effect not undone by a normal write: DIAN sends (invoice, note,
-   payroll, support document), payments, collections, refunds, cash/period
-   closes, order/invoice void/cancel, declarations, every
-   `delete`/`archive`. Each such typed tool declares `irreversible: true`
-   explicitly; the shared segment list is only the safety net. The coverage
-   spec (`irreversible-coverage.spec.ts`) walks the real factories and fails
-   if a write matching
-   `send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_`
-   lacks the flag — reads (`readOnly`) and UI tools (`clientSide`) are
-   excluded even when their names match. A new tool in a dangerous domain
-   without the flag breaks the build on purpose.
-2. **Execution-time offered-catalog validation.** The model may only execute
-   tools from the catalog offered that turn (permissions ∩ plan ∩
-   `allowed_tools` − `denied_tools`). A call outside it returns a
-   `tool_result` error (`AI_AGENT_TOOL_NOT_ALLOWED`) **before** the
-   `clientSide` branch and before `executeTool` — no browser dispatch, no
-   execution, no quota burn. Catalog filtering is not enough: a hallucinated
-   `ui_*` must die at execution, not at offer time.
-3. **Mandatory hook/sink for vex turns, forbidden for vexi.** In
-   `ai-chat`, `agent_key='vex'` turns always receive `plan_approval`
-   (backed by `PlanApprovalService` + `VexiPlanStateService`) and
-   `block_sink` (backed by `VexBlockService` with
-   `conversation_id`/`message_id`); vexi turns receive neither. The loop
-   records only the first write proposal and emits **one single-step**
-   `plan_approval` frame (`plan_id` + steps), saving hashes via
-   `setStepHashes`; results > 6000 chars persist as real blocks through the
-   sink instead of being dropped by compaction. Wire specs assert the args
-   at the seam — a spec that mocks the loop never proves this (see
-   `vendix-known-errors`, mocked wire point).
-4. **`step_id` identity, server-verified approve.** Steps are identified by
-   `step_id`, never by tool name (two `create_product` = two steps). Approve
-   (`POST store/vex/plans/:id/approve`) validates: caller owns the
-   conversation (else 403), steps equal the server hashes (`getStepHashes` —
-   client `steps` are ignored except as a subset selection), single-use
-   token TTL 15 min. Approved reversible steps run without further
-   confirmation; irreversible steps stay `pending_confirmation` and emit
-   their own card.
-5. **`metadata.blocks/plan` persistence.** At vex turn close, the agent
-   message stores `blocks: [{block_id, version, kind}]` and
-   `plan: {plan_id, steps[], status}` in `ai_messages.metadata`; plan status
-   moves on approve/reject/apply. The frontend rehydrates with
-   `GET blocks/:id` (signed data minted on read, never persisted). Turn
-   context uses `buildVexSnapshot` (with `vex_blocks`) and never emits
-   `ui_context`. `ai_ui_blocks` is registered on `StorePrismaService` and
-   `VexBlockService.create()` verifies the conversation belongs to the
-   store and user.
-
-## Context budget
-
-Two mechanisms keep a 240+-tool, 40-iteration turn affordable: prompt caching
-(`cache_control: {type:'ephemeral'}` on system + tools in the Anthropic
-provider only) and the block-backed compaction from Pattern 3. Measure on
-`ai_engine_logs` (`cache_read_input_tokens` > 0 from the second iteration).
-
-## Verification
-
-| What | How |
-|------|-----|
-| Agent row | `psql "$DATABASE_URL" -c "select key, app_key, max_iterations from ai_agents where key='vex'"` — 25 `ui_*` in `denied_tools` |
-| Deny filter | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — `ui_navigate` absent from vex catalog, present for vexi |
-| Plan approval | `npx jest --runInBand src/domains/store/vex/services/plan-approval.service.spec.ts` — legacy token coverage plus the single-step loop policy; drifted args and `send_invoice_dian` reconfirm; token replay rejected |
-| Irreversible coverage | `npx jest --runInBand src/ai-engine/tools/irreversible-coverage.spec.ts` — fails if a dangerous-domain write lacks `irreversible: true` (check by reverting `close_cash_session` locally) |
-| Offered-catalog guard | `npx jest --runInBand src/ai-engine/ai-agent.service.spec.ts` — simulated `ui_navigate` call in a vex turn → `AI_AGENT_TOOL_NOT_ALLOWED`, 0 `executeTool`/client dispatches |
-| Wiring | `npx jest --runInBand src/domains/store/ai-chat/ai-chat.plan.spec.ts` — vex turn receives `plan_approval` + `block_sink`, vexi receives neither; closing message persists `metadata.blocks/plan` |
-| Blocks | `npx jest --runInBand src/domains/store/vex/services/vex-block.service.spec.ts` — schema validation, transform, cross-store 404 |
-| Gating | cashier token → 403; owner with `vex.enabled=false` → disabled-agent error; owner with `true` → 200 |
-| Thread split | list `?agent_key=vex` shows only Vex threads; Vexi list excludes them |
-| Caching | provider spec asserts `cache_control`; `ai_engine_logs.usage` shows `cache_read_input_tokens` > 0 |
-| E2E | Playwright on `/admin/vex`: plan card approve → applied; irreversible step asks again; select block rows → "suma las seleccionadas" answers the correct total |
-
-## Process And Measurement
-
-See `docs/vex-agent-improvement-process.md`. Keep approvals, tenant isolation,
-quota controls and UI honesty unchanged while optimizing. Context compaction is
-useful only if the real loop→sink→reader recovers the payload; a mocked sink alone
-cannot prove it. Measure calls, serialized context, cache usage and latency by
-phase before claiming performance gains.
+Prompt caching (`cache_control` on system + tools, Anthropic only) plus the dynamic working set keep turns affordable; check `cache_read_input_tokens` > 0 in `ai_engine_logs` from the second iteration. Optimization process: `docs/vex-agent-improvement-process.md`. Verification checklist (specs, SQL, gating, E2E): `references/verification.md` (leer bajo demanda).
 
 ## Related Skills
 
-`vendix-vexi-agent` (shared loop, bridge, confirmations, attachments),
-`vendix-ai-agent-tools` (propose→confirm→execute), `vendix-ai-chat`
-(conversations), `vendix-ai-streaming` (SSE frames), `vendix-ai-platform-core`
-(`AIEngineService.run`, providers), `vendix-subscription-gate`
-(`vex_agent` caps), `vendix-settings-system` (`vex` block),
-`vendix-s3-storage`, `vendix-report-xlsx` (blocks `file`), `vendix-permissions`,
-`vendix-known-errors` (mocked wire point: green specs that never touch the seam).
+`vendix-vexi-agent`, `vendix-ai-agent-tools`, `vendix-ai-tool-routing`, `vendix-ai-chat`, `vendix-ai-streaming`, `vendix-subscription-gate`, `vendix-settings-system`, `vendix-s3-storage`, `vendix-report-xlsx`, `vendix-permissions`, `vendix-known-errors`.

@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Changing Vex/Vexi spoken consent or voice confirmation challenges"
@@ -17,8 +17,6 @@ metadata:
 # Agent Voice Consent
 
 ## Critical rules
-
-- Autonomy capabilities are standard, without environment switches.
 
 - Audio is NOT authentication/biometrics. Use the authenticated user, org, store,
   owned conversation, server agent identity, objective and current step. Derive
@@ -91,21 +89,7 @@ original proposal expiry. Never automatically fall back to click after failure. 
 
 ## Verification and rollout
 
-- Run only exact created/modified specs, one process at a time, bounded heap and
-  `test/agentic/jest.d1.config.json`. Core Lua tests use a synthetic Redis command
-  model; integration G uses actual registry/consent/host/D1 on a SQL memory transport.
-  Neither certifies real Redis Lua, PostgreSQL locks, bootstrap, providers or audio.
-- Keep frozen A corpus unchanged. Cases47/48 baseline unsupported are NOT comparable
-  measured completions after G. Synthetic receipts are not acoustic fixtures.
-- CI/real Angular/NgRx and Playwright audio Happy/Sad/Brute remain mandatory live
-  gates. Negative echo/noise/negation/replay/cross-scope must yield zero writes;
-  >=95% explicit clean acceptance requires an agreed acoustic corpus, not unit tests.
-- Measure STT/proposal/consent/ack separately from human reading. No provider spend
-  or QA remote without approval. Use the existing general Vex/Vexi control to stop operation; preserve evidence.
-- Billing close is post-success/deterministic-dedup but close→quota crash recovery
-  is not exactly-once charging. Do not change economic policy to hide this gap.
-Use the existing general Vex/Vexi control to stop operation; preserve evidence.
-  Never replay a write because audio or transport was lost. No mandatory G migration.
+Exact specs one at a time with `test/agentic/jest.d1.config.json`; synthetic Redis/SQL models do not certify real Lua, locks, providers or audio. Negative echo/noise/negation/replay/cross-scope must yield zero writes. Never replay a write because audio or transport was lost. Gates and limits: `references/verification-rollout.md` (leer bajo demanda).
 
 ## Related skills
 
@@ -113,13 +97,3 @@ Use the existing general Vex/Vexi control to stop operation; preserve evidence.
 `vendix-agent-durable-tasks`, `vendix-agent-execution-contract`, `vendix-vex-agent`,
 `vendix-permissions`, `vendix-subscription-gate`, `vendix-multi-tenant-context`,
 `vendix-zoneless-signals`, `vendix-agent-evals-observability`.
-
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.

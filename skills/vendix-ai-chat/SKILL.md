@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "3.1"
   scope: [root]
   auto_invoke:
     - "Adding chat features"
@@ -21,151 +21,42 @@ metadata:
 
 ## Naming
 
-**Vexi is the product name of the assistant. `ai-chat` is the persistence layer.**
-The backend route stays `/store/ai-chat` and the Prisma models stay `ai_conversations`
-/ `ai_messages`; the frontend state, services and components are `vexi-*`. Do not
-rename one to match the other — the split is deliberate.
+Vexi is the product name; `ai-chat` is the persistence layer. Backend route `/store/ai-chat`, Prisma `ai_conversations` / `ai_messages`; frontend state/services/components are `vexi-*`. Do not rename one to match the other.
 
 ## Source of Truth
 
-- Backend chat: `apps/backend/src/domains/store/ai-chat/`
-- Backend Vexi (voice, context, confirmations): `apps/backend/src/domains/store/vexi/`
-- Stream intents: `apps/backend/src/domains/store/vexi/vexi-stream-intent.service.ts`
-- Business snapshot: `apps/backend/src/domains/store/vexi/vexi-context.service.ts`
-- Frontend state: `apps/frontend/src/app/core/store/vexi/`
-- Frontend API: `apps/frontend/src/app/core/services/vexi-api.service.ts`
-- UI commands: `apps/frontend/src/app/core/services/vexi-ui-command.service.ts`
-- Dock/panel: `apps/frontend/src/app/shared/components/vexi-dock/`
+- Backend chat: `apps/backend/src/domains/store/ai-chat/` (`ai-chat.service.ts`, `ai-chat.controller.ts`).
+- Backend Vexi: `apps/backend/src/domains/store/vexi/` (`vexi-context.service.ts` snapshot, `vexi-stream-intent.service.ts`, confirmations, voice).
+- Frontend: state `apps/frontend/src/app/core/store/vexi/`, API `core/services/vexi-api.service.ts`, UI commands `core/services/vexi-ui-command.service.ts`, dock `shared/components/vexi-dock/`.
 
-## Backend Endpoints
+## Endpoints
 
-Base route: `/store/ai-chat`.
+`/store/ai-chat`: `POST conversations` (`AiAccessGuard` + `@RequireAIFeature('conversations')`), `GET conversations`, `GET conversations/:id`, `POST conversations/:id/messages` and `SSE conversations/:id/stream?stream_id=` (`streaming_chat`), `POST conversations/:id/stream-intent`, `PATCH conversations/:id/archive|title`. The prompt never travels in the SSE query string: stream-intent handshake (`vendix-ai-streaming`).
 
-- `POST /conversations` — `AiAccessGuard` + `@RequireAIFeature('conversations')`.
-- `GET /conversations`
-- `GET /conversations/:id`
-- `POST /conversations/:id/messages` — `@RequireAIFeature('streaming_chat')`.
-- `POST /conversations/:id/stream-intent` — stores the message + UI context, returns
-  an opaque `stream_id`.
-- `SSE /conversations/:id/stream?stream_id=...` — `@RequireAIFeature('streaming_chat')`.
-- `PATCH /conversations/:id/archive`
-- `PATCH /conversations/:id/title`
+`/store/vexi` (owner/admin): `GET context` (exact variables interpolated into the prompt), `POST confirmations/apply`, `ui-result`, `attachments`, `objectives/*`, `tasks`, `activity`, voice confirmations.
 
-Base route `/store/vexi` (owner/admin only, `VexiEnabledGuard`):
+## Service behavior
 
-- `GET /context` — the exact variable map interpolated into the system prompt.
-- `POST /confirmations/apply` — applies a write the user approved.
+- Conversation queries filter by `user_id`; store/org scope via `StorePrismaService`. Default app key `chat_assistant`.
+- Context window: last 20 `system|user|assistant` messages + the new one. Sync send rejects archived (`AI_CHAT_002`); streaming yields an error chunk. Listing excludes `deleted` only (archived may come back unless filtered).
+- Routing (sync = streaming): `metadata.agent_enabled === true` → `AIAgentService.runAgent()` / `runAgentStream()`; `metadata.rag_enabled === true` → `RAGService.queryWithContext()` (sync only); otherwise `AIEngineService.run()` / `runStream()`.
+- Agent branch passes `variables: vexiContext.buildSnapshot({ uiContext })`. Tool calls persist in `ai_messages.tool_calls`, truncated to `PERSISTED_TOOL_RESULT_CHARS` (1000).
+- `ui_context` is untrusted prompt material from the browser (capped at `MAX_REPORTED_MODULES`); it never decides authorization.
+- Threads separate by `metadata.agent_key` (Vex vs Vexi): `vendix-vex-agent`.
 
-### Why the handshake exists
+## Frontend state
 
-`EventSource` cannot send a body, so the prompt used to travel in the query string,
-where it lands in access logs and proxy caches. The intent lives in Redis for 60s,
-is consumed with `getdel` (single use), and is rejected if the consuming user is not
-its creator.
+`VexiFacade` exposes observables plus `toSignal(..., { initialValue })` parallels, including `toolSteps` (live trace) and `pendingProposal` (write awaiting approval). Actions: `streamStarted`, `toolCallStarted`, `toolCallFinished`, `proposalReceived`, `confirmProposal(+Success/Failure)`, `rejectProposal`. `VexiEffects.sendMessage$` creates the intent and `switchMap`s into the `EventSource` Observable. `ui_*` calls run locally in `VexiUiCommandService`; UI hosts, `ui_refresh` cascade (`VEXI_REFRESH_ACTIONS`) and `VexiPosBridgeService`: `vendix-vexi-agent`.
 
-## Backend Service Behavior
+## Master switch
 
-- Conversation queries filter by `user_id`; store/org scope via `StorePrismaService`.
-- Default app key is `chat_assistant`.
-- Context window: last 20 `system|user|assistant` messages plus the new user message.
-- Sync send rejects archived conversations with `AI_CHAT_002`.
-- Streaming archived conversations yield an error chunk.
-- Listing excludes `deleted`, so archived conversations may still be returned unless
-  the frontend filters them.
+`store_settings.vexi.enabled`, edited at `/admin/settings/ai-agents` (Vexi tab; `/admin/settings/vexi` redirects), guarded by `aiAgentsSettingsGuard` (`vexiSettingsGuard` is a deprecated alias). **Absent means disabled**; only explicit `true` enables. Enforced by:
 
-Routing — **sync and streaming now agree**:
-
-| `metadata` | Sync | Streaming |
-|---|---|---|
-| `agent_enabled === true` | `AIAgentService.runAgent()` | `AIAgentService.runAgentStream()` |
-| `rag_enabled === true` | `RAGService.queryWithContext()` | — |
-| otherwise | `AIEngineService.run()` | `AIEngineService.runStream()` |
-
-The agent branch passes `variables: await vexiContext.buildSnapshot({ uiContext })`,
-so the model sees the business snapshot *and* what is currently on the user's screen.
-Tool calls are persisted to `ai_messages.tool_calls`, truncated to
-`PERSISTED_TOOL_RESULT_CHARS`.
-
-> `ui_context` is **untrusted prompt material**: it is composed in the browser and
-> capped at `MAX_REPORTED_MODULES`. Never let it decide authorization.
-
-## Frontend State
-
-`VexiFacade` exposes observables and signal parallels with `initialValue` for
-conversations, active id, messages, streaming content, flags, errors, plus:
-
-- `toolSteps: ToolStep[]` — the live trace of the current turn.
-- `pendingProposal: VexiProposal | null` — the write awaiting approval.
-
-Actions: `streamStarted`, `toolCallStarted`, `toolCallFinished`, `proposalReceived`,
-`confirmProposal(+Success/Failure)`, `rejectProposal`.
-
-`VexiEffects.sendMessage$` creates the intent, then `switchMap`s into an
-`EventSource` Observable whose teardown closes the socket. Chunks whose tool name
-starts with `ui_` are executed locally by `VexiUiCommandService` instead of being
-awaited from the server.
-
-## UI Commands
-
-`VexiUiCommandService.handles(name)` is `name.startsWith('ui_')`. `navigate()`
-verifies both the `router.navigate()` promise **and** `router.url`, returning
-`{ status: 'redirected', landed_on }` when a guard bounced the user — otherwise Vexi
-would claim it took you somewhere it did not.
-
-POS actions go through `VexiPosBridgeService`, which the POS component registers
-itself against on construction and unregisters (identity-checked) on destroy.
-
-`ui_refresh` reads `VEXI_REFRESH_ACTIONS` (`core/store/vexi/vexi-refresh.map.ts`).
-
-> **That table is empty today.** None of the five write domains (products,
-> inventory, customers, orders, dispatch) has module-level NgRx state to dispatch
-> into, so `ui_refresh` degrades to `no_refresh_available` and Vexi tells the user
-> to reload. Populate the map as those modules gain NgRx; do not invent a parallel
-> refresh mechanism (see `state-refresh-audit.sh` / QUI-554: the effect is the sole
-> owner of refresh).
-
-## Dock And Master Switch
-
-`app-vexi-dock` mounts in the store-admin and organization-admin layouts, gated by
-`StoreSettingsFacade.vexiEnabled()`.
-
-The switch is `store_settings.vexi.enabled`, edited at `/admin/settings/vexi`
-(`vexiSettingsGuard`, owner/admin only) and enforced four ways:
-
-1. `VexiEnabledGuard` on `vexi.controller.ts` and `vexi-realtime.controller.ts`.
-2. `vexiSettingsGuard` on the route.
-3. `MenuFilterService.canConfigureVexi()` hides the submenu entry.
-4. `@if (vexiEnabled())` keeps the dock from mounting.
-
-**Absent means disabled.** Vexi acts on the commerce's own data with the operator's
-permissions, so a store opts in deliberately: only an explicit `true` enables it.
-
-Four places have to agree, and the fourth is the one that is easy to miss:
-
-- `VexiEnabledGuard` refuses anything that is not `true`.
-- `StoreSettingsFacade.vexiEnabled` returns `enabled === true`.
-- `default-store-settings.ts` ships `vexi: { enabled: false }`.
-- The defaults are the BASE of `mergeStoreSettingsWithDefaults`, and `updateSettings`
-  persists the merged object — so a `true` in the defaults hands the assistant to
-  every store that never persisted the block, and stamps it into the row the next
-  time anybody saves an unrelated section.
-
-Flipping the guard without flipping the default is a no-op that looks applied.
-
-## Rules
-
-- Keep user scoping on all conversation reads/writes.
-- Never put the prompt in the SSE query string — always the intent handshake.
-- Keep `toSignal(..., { initialValue })` in facades.
-- Treat `ui_context` as untrusted.
-- Do not gate authorization on the frontend switch alone; the backend guard is the
-  real boundary.
+1. Backend: `VexiSurfaceEnabledGuard` on `vexi.controller.ts` (wraps `VexiEnabledGuard`; voice-confirmation endpoints defer to their bound conversation) and `VexiEnabledGuard` on `vexi-voice.controller.ts`. The backend guard is the real boundary.
+2. `aiAgentsSettingsGuard` on the route; `MenuFilterService.canConfigureAiAgents()` hides the menu entry.
+3. `StoreSettingsFacade.vexiEnabled()` (`enabled === true`) gates mounting `app-vexi-dock` in store-admin and organization-admin layouts.
+4. `default-store-settings.ts` ships `vexi: { enabled: false }`. Defaults are the BASE of `mergeStoreSettingsWithDefaults` and `updateSettings` persists the merge, so `true` there would enable every store that never saved the block. Flipping the guard without the default is a no-op.
 
 ## Related Skills
 
-- `vendix-ai-platform-core`
-- `vendix-ai-streaming`
-- `vendix-ai-agent-tools`
-- `vendix-ai-embeddings-rag`
-- `vendix-subscription-gate`
-- `vendix-panel-ui`
+`vendix-ai-streaming`, `vendix-vexi-agent`, `vendix-ai-agent-tools`, `vendix-ai-platform-core`, `vendix-subscription-gate`, `vendix-panel-ui`.

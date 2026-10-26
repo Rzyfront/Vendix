@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.3"
+  version: "3.4"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -20,234 +20,70 @@ metadata:
     - "Exposing a tool to the realtime voice surface"
 ---
 
-## Cuándo usar
-
-AI Agent system: AIAgentService ReAct loop, AIToolRegistry, decentralized domain tool registration,
-the propose→confirm→execute write circuit, read-only and client-side tool categories, permission
-checks, and provider tool-use integration. Trigger: When creating AI tools, modifying the Tool
-Registry, working with the ReAct loop, adding a write tool with confirmation, or adding tool-use
-capabilities.
-
 ## Source of Truth
 
-- Agent loop: `apps/backend/src/ai-engine/ai-agent.service.ts`
+- Loop: `apps/backend/src/ai-engine/ai-agent.service.ts`
 - Registry: `apps/backend/src/ai-engine/tools/ai-tool-registry.ts`
-- Tool interfaces: `apps/backend/src/ai-engine/tools/interfaces/tool.interface.ts`
-- Domain tools: `apps/backend/src/ai-engine/tools/domains/`
-- Barrel: `apps/backend/src/ai-engine/tools/index.ts`
-- Confirmation apply endpoint: `apps/backend/src/domains/store/vexi/vexi.controller.ts`
+- Contract: `apps/backend/src/ai-engine/tools/interfaces/tool.interface.ts`
+- Factories: `apps/backend/src/ai-engine/tools/domains/<domain>.tools.ts`, barrel `tools/index.ts`
+- Apply endpoint: `POST /store/vexi/confirmations/apply` (`domains/store/vexi/vexi.controller.ts`)
 
-## Tool Contract
+## Tool contract and categories
 
-```typescript
-interface RegisteredTool {
-  name: string;
-  domain: string;
-  description: string;
-  parameters: Record<string, any>;
-  requiredPermissions?: string[];
-  requiresConfirmation?: boolean;
-  readOnly?: boolean;      // opt-in, fail-closed: gates the voice surface
-  clientSide?: boolean;    // dispatched by the browser, never by the server
-  irreversible?: boolean;  // explicit per-tool mark, enforced by a coverage spec
-  preview?: (args, context) => Promise<ToolPreview>;
-  handler?: (args, context) => Promise<string>;  // absent for clientSide tools
-}
-```
+`RegisteredTool`: `name`, `domain`, `description`, `parameters` (JSON Schema), `requiredPermissions?`, `requiresConfirmation?`, `readOnly?`, `clientSide?`, `irreversible?`, `preview?`, `handler?` (returns a string; `JSON.stringify` structured data; absent for clientSide).
 
-Handlers must return strings. Use `JSON.stringify()` for structured data.
+| Category | Declares | Executes | Voice |
+|---|---|---|---|
+| Read | `readOnly: true` | server `handler` | exposed |
+| Write | `requiresConfirmation: true` + `preview` | `handler` only after a token | hidden |
+| UI | `clientSide: true`, no handler, `ui_` prefix | browser | exposed |
 
-### The three categories
+- `readOnly` is opt-in and fail-closed: `getReadOnlyDefinitions()` filters `readOnly === true`; voice has no confirmation step to fall back on.
+- A tool is never `clientSide` and data-mutating; writes go through confirmation.
 
-| Category | Declares | Who executes | Voice surface |
-|----------|----------|--------------|---------------|
-| Read | `readOnly: true` | `handler` on the server | Exposed |
-| Write | `requiresConfirmation: true` + `preview` | `handler`, only after a token | Hidden |
-| UI | `clientSide: true`, no `handler` | The browser | Exposed |
+## Registry
 
-`readOnly` is **opt-in and fail-closed**: `getReadOnlyToolDefinitions()` filters on
-`readOnly === true`, so a tool that forgets the flag is excluded from voice rather
-than silently reachable. Voice acts on a transcription the user never reviewed —
-there is no confirmation step to fall back on.
+- Unique `name`; permissions filter with `requiredPermissions.every(...)`, runtime permissions from `requestContext.permissions || context.roles || []`.
+- Narrowing (agent row, plan, caller `tools`) uses `matchesScope` on canonical names/aliases or domains (normalize with `canonicalName` first). Permissions filter first, `denied_tools` subtracts last. Authority/working-set rules: `vendix-ai-tool-routing`.
+- `executeTool()` rejects `clientSide` tools with `AI_AGENT_004` (guards voice/MCP); the loop short-circuits them before.
 
-A tool is never `clientSide` **and** data-mutating. If it writes to the database it
-goes through the confirmation circuit instead.
+## Write circuit: propose → confirm → execute
 
-## Registry Behavior
+- Invoking a `requiresConfirmation` tool without `confirmationToken` runs `preview()` and throws `AI_AGENT_005` with the diff and a single-use token bound to `(user, tool, args)`. **The rejection is the proposal**: callers turn it into a `tool_result` with `pending_confirmation`, never a failure.
+- Token consumed by Lua compare-and-delete (double click applies once). It proves the user saw this diff; it authorizes nothing: `executeTool()` re-checks permissions and the `handler` must re-verify preconditions (`preview` is a projection, not a dry-run).
+- `ToolPreview` mirrors `BulkEditPreviewItemDto`; `domain` tells the browser which module to refresh. Name a human subject ("Coca Cola 1L", not "#4821").
+- A write without `preview` makes the user approve blind; `create_stock_adjustment` (`inventory.tools.ts`) still lacks one.
+- Result semantics (`ok`, `unknown_effect`, `applied`): `vendix-agent-execution-contract`.
 
-- Tools are stored by unique `name`.
-- Permission filtering uses `requiredPermissions.every(...)`.
-- Every subsequent narrowing (agent row, subscription plan, caller `tools`) uses
-  `matchesScope`: canonical names/aliases or domains. Normalize scope entries with
-  `canonicalName` first. A domain like `orders` must not be re-filtered as an exact
-  function name. Permissions filter first, `denied_tools` subtracts last; the
-  offered-catalog guard also checks calls at execution, before UI dispatch.
-- `executeTool()` reads `RequestContextService.getContext()`.
-- Runtime permissions come from `requestContext.permissions || context.roles || []`.
-- `executeTool()` **rejects** `clientSide` tools with `AI_AGENT_004`. This is
-  deliberate and guards the voice and MCP paths; the agent loop short-circuits them
-  before reaching here (see below).
-- `requiresConfirmation` **is enforced**. See the next section.
+## Registration is decentralized
 
-## Write Circuit: propose → confirm → execute
+`AIEngineModule` is `@Global()` and exports `AIToolRegistry`. Each domain module calls `toolRegistry.registerMany(createXTools(...))` in its own `onModuleInit()` (products, inventory, orders, customers, accounting, payments, expenses, menus, vex, vexi… ~39 modules). `AIEngineModule.onModuleInit()` keeps only ownerless families (discovery, UI, planning, playbooks, recipes, code execution, bridge). Never add domain tools there: it reintroduces the DI cycle.
 
-`requiresConfirmation: true` is no longer metadata. When such a tool is invoked
-**without** a `confirmationToken`, `executeTool()` runs `preview()` and throws
-`AI_AGENT_005` carrying the diff plus a single-use token bound to
-`(user, tool, arguments)`.
+## Agent loop
 
-**The rejection is the proposal.** There is no separate "propose" call — the error
-path is the happy path for the first invocation. Consequences:
+- `runAgentStream()` (AsyncGenerator yielding frames, returning the result) and `runAgent()` (drains it) share one implementation; keep it that way.
+- Budgets live in `ai-agent.service.ts` and agent rows (Vexi default 10 iterations / 60 s, 25 / 180 s with a plan; Vex row 40). Iterations ≠ provider calls (empty-completion retries and closing inference add calls). Events: `ai.agent.iteration`, `ai.agent.tool_executed`, `ai.agent.completed`.
+- Frames: `tool_call` before, `tool_result` after. Tool errors return to the model as results.
+- UI tools never reach `executeTool()`; the loop awaits the browser result (closed loop: `vendix-vexi-agent`).
 
-- The agent loop must not treat `AI_AGENT_005` as a failure; it turns it into a
-  `tool_result` frame with `pending_confirmation` for the browser to render.
-- The token is consumed with a Lua compare-and-delete, so a double-clicked
-  "Aprobar" applies exactly once.
-- The token proves *this user saw this exact diff* — it authorizes nothing.
-  `executeTool()` still checks permissions on the way through, and `handler` must
-  re-verify its own preconditions: `preview` is a projection, not a dry-run
-  transaction, and the world may have moved between the two.
+## Adding a tool
 
-Apply path: `POST /store/vexi/confirmations/apply` → `executeTool(tool, args,
-{ confirmationToken })`.
+1. Factory in `tools/domains/<domain>.tools.ts`, snake_case unique name, clear JSON Schema, `requiredPermissions` for sensitive reads/writes.
+2. Pick the category (above); return scoped, safe data only.
+3. Export from `tools/index.ts`; register from the owning domain module's `onModuleInit()`.
+4. Schema validation in the registry is partial (`type/enum/required/properties/items`, coerces numeric strings, ignores `minimum/maximum`): enforce bounds in the handler/service.
 
-`ToolPreview` mirrors `BulkEditPreviewItemDto` so one frontend card renders both
-agent proposals and bulk-edit previews. Its `domain` field tells the browser which
-module to refresh after the apply.
+## Coverage specs for cross-cutting flags
 
-> **A write tool with `requiresConfirmation: true` and no `preview` makes the user
-> approve blind.** The registry will still gate it, but the card has nothing to show.
-> `create_stock_adjustment` (`inventory.tools.ts`) is in this state today.
+A flag every dangerous tool must carry needs a registry-wide spec, not review. Exemplar `tools/irreversible-coverage.spec.ts` (`irreversible: true` for writes matching `send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_`): walk real factories on a real registry; scope to `requiresConfirmation` writes (exclude `readOnly`/`clientSide` even if the name matches); pin exclusions with a test; each spec covers only its own factories.
 
-## Registration Is Decentralized
+## Gates and anti-patterns
 
-`AIEngineModule` is `@Global()` and exports `AIToolRegistry`. Each domain module
-registers its own tool families from its own `onModuleInit()`:
-
-```typescript
-// apps/backend/src/domains/store/products/products.module.ts
-onModuleInit(): void {
-  this.toolRegistry.registerMany(createProductTools({ productsService: this.products }));
-}
-```
-
-Modules that self-register today: `products`, `inventory`, `orders`, `customers`,
-`accounting`, `vexi`. `AIEngineModule.onModuleInit()` keeps only the families that
-have no domain owner (search, the UI tools, the generic bridge).
-
-This inversion exists to break the DI cycle: a central registration list would make
-`AIEngineModule` depend on every domain, and those domains already depend on it.
-**Do not add a domain's tools to `AIEngineModule`'s spread list** — register them in
-the domain module.
-
-## Agent Loop
-
-`AIAgentService` exposes two entry points over one implementation:
-
-- `runAgentStream()` is an `AsyncGenerator<AIStreamChunk, AgentResult>` — it yields
-  frames as they happen and *returns* the final result.
-- `runAgent()` drains that generator and returns only the result.
-
-Keeping one implementation is what stops the streaming and non-streaming paths from
-drifting in tool handling.
-
-Default Vexi budgets are 10 iterations / 60 s (25 / 180 s with a plan);
-Vex and explicit agent rows have their own budgets. See `ai-agent.service.ts`, not
-a copied hardcoded table. Emits `ai.agent.iteration`, `ai.agent.tool_executed`,
-`ai.agent.completed`. Iterations are not provider-call counts: empty-completion
-retries and the iteration-exhaustion closing inference add calls. A clock-expired
-turn does **not** start that closing inference; this is not in-flight cancellation.
-
-Per-tool frames: `tool_call` before execution, `tool_result` after (success,
-"Esperando confirmación del usuario.", or failure). Trace and persisted result
-limits are not a model context budget.
-
-**ClientSide short-circuit.** Never pass UI tools to `executeTool()`. In chat, the
-loop awaits the browser's real result on `(stream_id, tool_call_id)`; missing or
-late results mean `result_unknown: true`, not success. Browser wait is deducted
-from the agent clock budget. See `vendix-vexi-agent` for this closed-loop contract.
-
-Tool errors are returned to the model as tool results so it can recover.
-
-## Adding A Tool
-
-1. Add a `RegisteredTool` to a factory in
-   `apps/backend/src/ai-engine/tools/domains/{domain}.tools.ts`.
-2. Use snake_case unique names. `ui_` prefix is reserved for `clientSide` tools.
-3. Provide JSON Schema parameters with clear descriptions.
-4. Add `requiredPermissions` for sensitive reads/writes.
-5. Pick the category:
-   - pure read → `readOnly: true`
-   - write → `requiresConfirmation: true` **and** a `preview` that names a human
-     subject ("Coca Cola 1L", not "#4821")
-   - interface action → `clientSide: true`, no `handler`
-6. Return safe, scoped data only.
-7. Export the factory from `tools/index.ts`.
-8. Call `registry.registerMany(...)` from the **owning domain module**'s
-   `onModuleInit()`, not from `AIEngineModule`.
-
-## Coverage Specs For Cross-Cutting Flags
-
-A flag every dangerous tool must carry cannot rely on review. Add a
-registry-wide coverage spec that registers the real factories and fails when
-a write matching the danger pattern lacks the flag. Exemplar:
-`apps/backend/src/ai-engine/tools/irreversible-coverage.spec.ts` for
-`irreversible: true` (pattern
-`send_.*dian|close_|void_|cancel_|refund|pay_|collect_|delete_|archive_`).
-
-Rules for the pattern:
-
-- Walk the real factories on a real `AIToolRegistry`, not fixtures.
-- Scope to writes (`requiresConfirmation`): exclude `readOnly` and
-  `clientSide` tools even when their names match (`preview_refund`,
-  `list_close_sessions`).
-- Pin explicit exclusions with a test, not a comment: an evaluator
-  (`run_close_checks`) that one day executes must break the pin instead of
-  inheriting silence.
-- Scope the spec to the factories its step owns; other domains belong to
-  their owners' specs.
-
-## Improvement Gates
-
-- `readOnly` is NOT `parallelSafe`: block tools mutate scratch state and reads can
-  depend on IDs from another call. Parallel execution needs explicit independence.
-- Registry schema validation is partial (`type/enum/required/properties/items`),
-  not full JSON Schema. It coerces numeric strings and ignores unknown keywords,
-  including `minimum/maximum`; enforce bounds in the handler/service as well.
-- A resolved Promise containing `{error}` is not proof of success. Do not change
-  quota or completion semantics without a discriminated result contract and tests.
-- Prefer scoped discovery + existing domain seams over hundreds of handwritten
-  wrappers. Persist resolved IDs and verify postconditions; do not infer a full
-  dataset from a truncated string or incomplete page.
-- Follow `docs/vex-agent-improvement-process.md` for Happy/Sad/Brute coverage and
-  benchmark gates. Synthetic contract tests are not live model or UI E2E.
-
-## Anti-Patterns
-
-- Registering domain tools centrally in `AIEngineModule` (reintroduces the DI cycle).
-- `requiresConfirmation: true` without a `preview`.
-- Omitting `readOnly` on a read tool and then wondering why voice cannot see it.
-- Giving a `clientSide` tool a `handler` — `executeTool()` rejects it anyway.
-- Treating `AI_AGENT_005` as an error in a new caller. It is a proposal.
-- Trusting `preview`'s snapshot inside `handler` instead of re-checking.
-- Adding a cross-cutting tool flag without a coverage spec that fails when a new tool forgets it.
+- `readOnly` is not `parallelSafe`; parallel reads need explicit audited metadata (`vendix-agent-durable-tasks`).
+- A resolved Promise containing `{error}` is not success; don't change quota/completion semantics without a discriminated contract.
+- Prefer scoped discovery + existing domain seams over hundreds of wrappers; never infer a full dataset from a truncated page. Benchmarks: `docs/vex-agent-improvement-process.md`.
+- Anti-patterns: central registration; write without `preview`; read tool without `readOnly`; `clientSide` with `handler`; treating `AI_AGENT_005` as an error; trusting the preview snapshot in `handler`; a cross-cutting flag without a coverage spec.
 
 ## Related Skills
 
-- `vendix-ai-platform-core`
-- `vendix-ai-chat`
-- `vendix-ai-streaming`
-- `vendix-ai-embeddings-rag`
-- `vendix-mcp-server`
-- `vendix-inventory-stock`
-
-## G voice proposal/consent
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.
+`vendix-ai-tool-routing`, `vendix-agent-execution-contract`, `vendix-ai-chat`, `vendix-ai-streaming`, `vendix-mcp-server`, `vendix-inventory-stock`.

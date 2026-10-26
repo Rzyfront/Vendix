@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Creating AI-powered features"
@@ -22,76 +22,31 @@ metadata:
     - "Styling AI interaction buttons or loading states"
 ---
 
-## When to Use
-
-- Adding AI generation to a domain service or frontend flow.
-- Deciding whether to use direct AI Engine, chat, RAG, tools, streaming, queue, or MCP.
-- Creating/configuring AI providers or AI Applications in super-admin.
-- Adding frontend AI action buttons/loading states.
-
-## AI Subsystems
+## Which subsystem
 
 | Need | Skill |
 | --- | --- |
-| Core providers, `run()`, logging, rate limits, costs | `vendix-ai-platform-core` |
-| Chat conversations/widget | `vendix-ai-chat` |
+| Providers, `run()`, logging, rate limits, costs | `vendix-ai-platform-core` |
+| Chat conversations, Vexi dock | `vendix-ai-chat` |
 | SSE/token streaming | `vendix-ai-streaming` |
 | Embeddings, semantic search, RAG | `vendix-ai-embeddings-rag` |
-| ReAct agent and tools | `vendix-ai-agent-tools` |
-| BullMQ async AI jobs | `vendix-ai-queue` |
-| MCP external client gateway | `vendix-mcp-server` |
+| Agent loop and tools | `vendix-ai-agent-tools` (+ `vendix-ai-tool-routing`, `vendix-agent-*`) |
+| Vex / Vexi agent behavior | `vendix-vex-agent`, `vendix-vexi-agent` |
+| Async jobs, OCR/vision scans | `vendix-ai-queue` |
+| MCP external gateway | `vendix-mcp-server` |
 | Subscription feature/quota gate | `vendix-subscription-gate` |
+| AI visual language (buttons, loaders) | `vendix-ai-style` |
 
-## Core Rule
+## Core rules
 
-For domain features, prefer `AIEngineService.run(appKey, variables, extraMessages?)` over hardcoded `complete()` prompts.
+- Domain features call `AIEngineService.run(appKey, variables, extraMessages?)` with a configured AI Application, never hardcoded `complete()` prompts. `run()` brings prompt template, provider, retry, rate limit, subscription gate/quota, sanitization, logging and cost.
+- Check `response.success`; on failure throw `VendixHttpException(ErrorCodes.AI_REQUEST_001)`.
+- Anything that can exceed 60 s (OCR, vision, image generation) goes async through the `ai-scan` queue (`vendix-ai-queue`), never inside the HTTP request.
+- Image input: call `run(appKey, {}, [imageMessage])` directly (see the `runByApplicationType` gotcha in `vendix-ai-platform-core`).
+- Applications live in `ai_engine_applications` (super-admin CRUD). `ai_feature_category` is required and drives gate/quota; `metadata.agent_enabled` / `metadata.rag_enabled` drive chat routing and are not edited by the app modal.
 
-```typescript
-const response = await this.aiEngine.run('product_description_creator', {
-  name: dto.name,
-  context: JSON.stringify(productData),
-});
-
-if (!response.success) {
-  throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
-}
-```
-
-`run()` uses the configured AI Application: prompt template, system prompt, provider config, temperature, max tokens, retry config, rate limit, subscription gate/quota, response sanitization, logging, and cost tracking.
-
-## Real Integrations
+## Reference integrations
 
 - Product descriptions: `apps/backend/src/domains/store/products/products.service.ts`.
-- Invoice OCR/multimodal image input (SYNC): `apps/backend/src/domains/store/orders/purchase-orders/invoice-scanner.service.ts`.
-- Async OCR scans (202 + `job_id` + poll, dedicated BullMQ queues): dispatch-notes `receipt-scan` and expenses `expense-scan` → see `vendix-ai-queue` ("Per-domain OCR scan queues"). Prefer this pattern for new heavy image scans so the OCR does not block the HTTP request.
+- Invoice OCR (sync, multimodal): `apps/backend/src/domains/store/orders/purchase-orders/invoice-scanner.service.ts`.
 - Chat routing: `apps/backend/src/domains/store/ai-chat/ai-chat.service.ts`.
-
-> **Multimodal gotcha:** image scans must call `aiEngine.run(appKey, {}, [imageMessage])` DIRECTLY. `runByApplicationType` drops `extra_messages` on `image` execution types and silently loses the image.
-
-## AI Applications
-
-Applications live in `ai_engine_applications` and are managed by super-admin backend/controllers.
-
-Current caveats:
-
-- Backend DTO accepts `metadata`, but the current frontend app modal does not expose metadata JSON.
-- `metadata.agent_enabled` and `metadata.rag_enabled` drive chat routing, but may need backend/API tooling to set if frontend does not expose it.
-- `ai_feature_category` exists in schema and drives subscription gate/quota, but current app DTO/frontend do not expose it.
-
-## Frontend AI Button Pattern
-
-- Use signals: `isGenerating`, `aiUsesLeft`, and `aiLimitReached`.
-- Default UI-only use limit remains 3 per component instance unless product requirements say otherwise.
-- Decrement only on successful AI responses.
-- Use registered icons `sparkles` and `loader-2`.
-- Prefer theme variables (`--color-primary-rgb`, `--color-secondary-rgb`) over hardcoded colors.
-
-## Related Skills
-
-- `vendix-ai-platform-core`
-- `vendix-ai-chat`
-- `vendix-ai-streaming`
-- `vendix-ai-embeddings-rag`
-- `vendix-ai-agent-tools`
-- `vendix-ai-queue`
-- `vendix-mcp-server`

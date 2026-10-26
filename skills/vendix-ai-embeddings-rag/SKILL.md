@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "3.1"
   scope: [root]
   auto_invoke:
     - "Working with AI embeddings or RAG"
@@ -38,7 +38,7 @@ metadata:
 
 - `ai-engine/embeddings/embedding.service.ts`, `rag.service.ts`.
 - `embedding-events.listener.ts` (canonical `EMBEDDABLE_ENTITY_TYPES`).
-- `embedding-backfill.service.ts`, `jobs/embedding-sync.job.ts`.
+- `embedding-backfill.service.ts`, `src/jobs/embedding-sync.job.ts`.
 - `queue/processors/ai-embedding.processor.ts` (EmbeddingModule registration).
 - `tools/domains/search.tools.ts` (`semantic_search`).
 - `embeddings/knowledge-{search,embedding}.service.ts`,
@@ -80,22 +80,7 @@ a permission grant, freshness guarantee or independent business verifier.
 
 ## Platform knowledge (B)
 
-See `vendix-ai-tool-routing` for the full lifecycle:
-
-- Documents: `ai_knowledge_documents`, global/tenant-null, release-owned keys/hash/version,
-  no tenant write API. Embeddings: `knowledge_scope='global' AND store_id=0 AND organization_id=0`,
-  only tool/skill/process/recipe, internal `storeGlobalKnowledgeEmbedding`, validated document ID.
-- CHECK NOT VALID protects new rows without scanning or rejecting historical data
-  at deploy. No historical DML, preflight RAISE, FK removal or weakening NOT NULL/
-  unique/HNSW. Optional validation is separate maintenance; never relax StorePrisma.
-- Index AFTER domain registration; job `index-knowledge`, ≤50 code-reconstructed docs,
-  bounded retries, active-ready/CAS, logical retirement. Selector uses ONLY authorized IDs.
-- Separate app `agent_knowledge_embeddings`, explicit matching config/model1536, category `rag_embeddings` (NOT NULL schema), no merchant
-  store in isolated platform ALS and no SDK/product-quota fallback. Budget defaults0; platform isolated ALS
-  and normal Engine logging/rate limits. Input-byte spend reservations count failures
-  conservatively, distinct from post-success merchant quota.
-- Fingerprint model/config/dimension; wrong vector or drift rejects before INSERT.
-  Global retrieval uses exact/lexical/vector RRF and degrades locally, never into business SQL.
+Global tool/skill/process/recipe knowledge (`ai_knowledge_documents`, `knowledge_scope='global'`, store/org 0 only via internal `storeGlobalKnowledgeEmbedding`) has its own app, budget and lifecycle: `vendix-ai-tool-routing`. Its CHECK constraint is NOT VALID by design (no historical DML, no weakening NOT NULL/unique/HNSW, never relax StorePrisma); global retrieval degrades locally, never into business SQL.
 
 ## Verification
 

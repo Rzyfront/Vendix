@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "4.0"
+  version: "4.1"
   scope: [root]
   auto_invoke:
     - "Implementing AI streaming"
@@ -33,28 +33,7 @@ metadata:
 
 `AIEngineService.runStream(appKey, variables?, extraMessages?)` validates app/provider, runs subscription gate, checks rate limit, builds messages, requires provider `chatStream()`, yields chunks, consumes quota on final `done`, and logs in `finally`.
 
-Chunk shape (`apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts`):
-
-```typescript
-interface AIStreamChunk {
-  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
-  content?: string;
-  tool?: {
-    id: string;                          // correlates tool_call ↔ tool_result
-    name: string;
-    arguments?: Record<string, any>;     // tool_call only
-    summary?: string;                    // tool_result only, truncated
-    failed?: boolean;                    // tool_result only
-  };
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-  error?: string;
-}
-```
-
-`tool_call` / `tool_result` exist so the UI can narrate an agent turn instead of
-showing a spinner for 30-40s. **Only the agent loop emits them** — a plain
-completion still produces just `text` / `done` / `error`, so a consumer that only
-handles those three keeps working.
+`AIStreamChunk` (`apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts`) types: `text`, `progress`, `tool_call`, `tool_result`, `done`, `error`, `plan_continue`, `ui_block` (Vex), `plan_approval`; optional `objective` (D1 progress), `tool` (`id` correlates call ↔ result, `arguments`, `summary`, `failed`), `usage`. Only the agent loop emits the non-basic frames; a plain completion yields `text` / `done` / `error`.
 
 `tool_result` also carries the confirmation proposal: when a write tool throws
 `AI_AGENT_005`, the frame's payload holds `pending_confirmation` (diff + token) and
@@ -94,19 +73,9 @@ Emits `ai-chunk` events and completes on `done`/`error`.
 
 Current caveat: `app-ai-text-stream` cleans up on component destroy, but replacing `stream$` is not a full old-stream cleanup pattern. Verify before using it for frequently swapped streams.
 
-## Chat Streaming Is Wired
+## Chat streaming
 
-The frontend chat path streams. `VexiEffects.sendMessage$` calls
-`createStreamIntent(...)`, then `switchMap`s into a manual `Observable` wrapping
-`EventSource`, dispatching a store action per chunk type. State lives in
-`apps/frontend/src/app/core/store/vexi/` (`toolSteps`, `pendingProposal`).
-
-Teardown is the `return () => source.close()` of that Observable — unsubscribing the
-effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
-
-`ui_`-prefixed tool calls are intercepted in the effect and handed to
-`VexiUiCommandService` instead of being awaited from the server; see
-`vendix-ai-agent-tools` § ClientSide short-circuit.
+`VexiEffects.sendMessage$` (state in `apps/frontend/src/app/core/store/vexi/`, see `vendix-ai-chat`) wraps `EventSource` in a manual Observable whose teardown `return () => source.close()` closes the socket; do not add a parallel `ngOnDestroy` cleanup. `ui_*` calls are intercepted there (closed loop: `vendix-vexi-agent`).
 
 ## Rules
 
@@ -119,6 +88,9 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
   understand rather than treating an unknown `type` as an error.
 
 ## H safety, replay and recoverable results
+
+Design notes: `docs/agentic-streaming-H.md`.
+
 
 - Compact envelope has structural deterministic summary, IDs, source pagination,
   units/evidence refs and complete:false. Guards/proposals/errors remain intact.
@@ -141,13 +113,3 @@ effect closes the socket. Do not add a parallel `ngOnDestroy` cleanup.
 - `vendix-ai-chat`
 - `vendix-ai-agent-tools`
 - `vendix-notifications-system`
-
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.
