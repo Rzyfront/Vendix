@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Reading or writing fiscal_data.tax_responsibilities or tax_regime"
@@ -20,15 +20,6 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Vendix DIAN Issuer Identity
-
-## Cuándo usar
-
-Issuer fiscal identity for Colombian electronic invoicing: who the merchant IS (VAT-responsible,
-INC-responsible, which printable calidades), how that is derived from RUT box 53, and how it
-projects into the signed XML and the graphic representation. Trigger: Reading or writing
-tax_responsibilities / tax_regime, editing PartyTaxScheme or TaxLevelCode, printing anything about
-the issuer's fiscal status, or debugging an invoice that declares an obligation the merchant does
-not have.
 
 ## Purpose
 
@@ -67,72 +58,23 @@ the tax is*.
   Always run `normalizeFiscalResponsibilityCode` first.
 - Fail-closed: no signal at all ⇒ `responsible: false`, `indeterminate: true`.
 
-## The Two Code Universes (the root of most bugs)
+## Codes, PartyTaxScheme and Print (summary)
 
-RUT box 53 codes and electronic-invoicing codes are **different catalogs**. They
-look alike and are not interchangeable.
+Tables and legal citations: `references/dian-codes-and-print.md` (read on demand).
 
-| | RUT box 53 (`fiscal_data.tax_responsibilities`) | FE anexo (`cbc:TaxLevelCode`) |
-| --- | --- | --- |
-| Size | Dozens (`O-05`, `O-07`, `O-13`, `O-14`, `O-15`, `O-23`, `O-33`, `O-42`, `O-47`, `O-48`, `O-49`, `O-50`, `O-52`, `O-55`…) | **Exactly 5** |
-| Values | what the merchant declared to DIAN | `O-13`, `O-15`, `O-23`, `O-47`, `R-99-PN` |
-| Purpose | source of truth for responsibility | what travels in the XML |
-
-`O-33`, `O-48`, `O-49` and `O-50` **do not exist in electronic invoicing**.
-`toDianTaxLevelCode` filtering seven declared codes down to `R-99-PN` is **correct
-behaviour, not a bug** — do not "fix" it.
-
-- `R-99-PN` is **exclusive**: it never combines with the other four.
-- Multiple values join with `;` and the field caps at
-  `DIAN_TAX_LEVEL_CODE_MAX_LENGTH = 30` (rule FAJ26, `1..1`).
-
-## Issuer `PartyTaxScheme` — DIAN table 13.2.6.2
-
-Four states, never two. Derive with `resolveDianPartyTaxScheme({vat_responsible,
-inc_responsible})`:
-
-| `vat` | `inc` | `cbc:ID` | `cbc:Name` |
-| --- | --- | --- | --- |
-| ✔ | ✔ | `ZA` | IVA e INC |
-| ✔ | ✘ | `01` | IVA |
-| ✘ | ✔ | `04` | INC |
-| ✘ | ✘ | `ZZ` | No aplica |
-
-Never reconstruct this from `tax_regime === '49'`. That binary was the defect: it
-made `04` and `ZA` unreachable, so a restaurant declared itself under the IVA
-scheme in a **signed** document.
-
-## What May Be Printed
-
-Only the **four calidades** of num. 12, art. 11, Res. DIAN 000165/2023 (restated by
-Res. 000227/2025), and only «cuando corresponda»:
-
-`O-23` agente retenedor de IVA · `O-15` autorretenedor de renta ·
-`O-13` gran contribuyente · `O-47` régimen simple (SIMPLE)
-
-- **The regime legend is deleted, not replaced.** No norm requires it: art. 506
-  E.T. is derogated and art. 617 lit. i) only requires stating the RETENEDOR
-  calidad. Printing «No responsable de IVA» instead is the same error with the
-  sign flipped.
-- If the issuer holds none of the four, **the line is not printed at all** —
-  return `undefined`, never `''` (an empty string leaves a blank row on paper).
-- Anexo FEV 1.9 §5.8 requires that what is printed be in the XML. A legend the XML
-  does not carry is non-compliance on its own.
-- Order is fixed by the enumeration, not by storage order, so two issuers with the
-  same calidades print the same string and a spec can pin it.
-
-> Res. 000042/2020 is **derogated** by art. 72 of Res. 000165/2023. Cite
-> Res. 000165/2023 / Res. 000227/2025.
+- RUT box 53 codes and FE `cbc:TaxLevelCode` are different catalogs. FE accepts only `O-13`, `O-15`, `O-23`, `O-47`, `R-99-PN` (`R-99-PN` exclusive; `;`-joined, max 30 chars). `O-33`/`O-48`/`O-49`/`O-50` do not exist in FE: `toDianTaxLevelCode` collapsing to `R-99-PN` is correct.
+- Issuer `PartyTaxScheme` has four states via `resolveDianPartyTaxScheme({vat_responsible, inc_responsible})`: `ZA` (IVA e INC), `01` (IVA), `04` (INC), `ZZ` (No aplica). Never derive it from `tax_regime === '49'`.
+- Print only the four calidades `O-23`, `O-15`, `O-13`, `O-47` (Res. DIAN 000165/2023, restated by 000227/2025), in fixed enumeration order, only if held; none → return `undefined` (no line), never `''`. No regime legend and no «No responsable de IVA». What is printed must be in the XML. Res. 000042/2020 is derogated.
 
 ## Source of Truth
 
 - `apps/backend/src/common/helpers/vat-responsibility.helper.ts` — `resolveVatResponsibility`, `resolveIncResponsibility`, `isVatResponsible`, `isIncResponsible`, `resolveFiscalResponsibilityFlags`, `assertCanChargeVat`
 - `apps/backend/src/common/constants/fiscal-responsibilities.ts` — `normalizeFiscalResponsibilityCode`
 - `apps/backend/src/common/helpers/fiscal-identity.helper.ts` — `resolveTenantFiscalIdentity`, `projectTenantIdentityToDian`
-- `.../dian-direct/constants/dian-tax-codes.ts` — `DIAN_PARTY_TAX_SCHEMES`, `resolveDianPartyTaxScheme`
-- `.../dian-direct/constants/dian-tax-level-codes.ts` — `DIAN_TAX_LEVEL_CODES`, `toDianTaxLevelCode`, `DIAN_TAX_LEVEL_CODE_MAX_LENGTH`
-- `.../dian-direct/xml/ubl-common.builder.ts` — `buildSupplierParty` (serves invoice, credit note, debit note, POS equivalent document and support document)
-- `.../print-formats/services/fiscal-issuer-identity.ts` — `PRINTABLE_FISCAL_QUALITIES`, `resolveFiscalQualitiesLine` (**sole owner** of the printed line)
+- `apps/backend/src/domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes.ts` — `DIAN_PARTY_TAX_SCHEMES`, `resolveDianPartyTaxScheme`
+- `apps/backend/src/domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes.ts` — `DIAN_TAX_LEVEL_CODES`, `toDianTaxLevelCode`, `DIAN_TAX_LEVEL_CODE_MAX_LENGTH`
+- `apps/backend/src/domains/store/invoicing/providers/dian-direct/xml/ubl-common.builder.ts` — `buildSupplierParty` (serves invoice, credit note, debit note, POS equivalent document and support document)
+- `apps/backend/src/domains/store/print-formats/services/fiscal-issuer-identity.ts` — `PRINTABLE_FISCAL_QUALITIES`, `resolveFiscalQualitiesLine` (**sole owner** of the printed line)
 
 ## Decision Rules
 

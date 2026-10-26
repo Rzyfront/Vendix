@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
     - "Adding a new tax_type value to the fiscal system"
@@ -34,37 +34,16 @@ mechanics of posting entries (`vendix-auto-entries`). This skill governs only th
 
 ## Core Rules
 
-- `tax_type_enum` = `iva | inc | ica | withholding | reteiva | reteica`. Adding a
+- `tax_type_enum` = `iva | inc | ica | withholding | reteiva | reteica | icui | ibua` (`icui`/`ibua` today only in the purchase tax kernel `common/money-kernel/purchase-line-taxes.ts`; not wired through the 8 sales layers). Adding a
   value requires its **own** migration (`ALTER TYPE ... ADD VALUE IF NOT EXISTS`),
   separate from any migration that uses it (Postgres restriction).
 - **Untyped rows mean IVA.** Every read filter and breakdown builder treats a
   `null`/missing `tax_type` as `'iva'`. Backfill heuristic order:
   reteiva/reteica before withholding; ica/inc before iva; ELSE iva.
-- **Resolve the default at the SOURCE ROW, never at the write point.** Because
-  untyped means IVA, a `?? 'iva'` next to a `prisma.create` cannot tell «category
-  genuinely untyped» from «category typed INC and nobody propagated it» — it turns
-  the second into the first. Measured: `calculateTaxCategoryTaxes` omitted
-  `tax_type`, `buildOrderItemSnapshot` filled it with `?? 'iva'`, and
-  `order_item_taxes` persisted the right `tax_rate_id`/`tax_name`/`tax_rate` from
-  an INC row beside a fabricated `tax_type='iva'` — DIAN then accepted an «8 % IVA»
-  that does not exist in Colombia. Make `tax_type` **required** in the resolver's
-  return type so a resolver that omits it does not compile, and let an unresolvable
-  category throw instead of persisting an invented classification. This antipattern
-  was found in 5 places in one sweep.
+- **Resolve the default at the SOURCE ROW, never at the write point.** A `?? 'iva'` beside a `prisma.create` turns «typed INC but not propagated» into IVA (real case: `calculateTaxCategoryTaxes` omitted `tax_type`, `buildOrderItemSnapshot` filled `?? 'iva'`, DIAN accepted a non-existent «8 % IVA»; found in 5 places). Make `tax_type` **required** in the resolver's return type and let an unresolvable category throw.
 - **A tax must be typed in ALL layers or none.** Half-typing is the bug. If the
   calculation emits `tax_type` but the journal line ignores it, INC posts to 2408.
-- **`support_document.accepted` DOES post a full accounting entry** — it is not
-  excluded from accounting, only from the *typed tax breakdown*. `AutoEntryService
-  .onSupportDocumentAccepted()` (`auto-entry.service.ts`) creates a balanced entry
-  with expense/purchase debit, accounts payable credit, a `vat_deductible` debit
-  line when `tax_amount > 0`, and withholding credit line(s) (typed
-  `withholding_breakdown` when present, else the legacy scalar
-  `withholding_payable`). What is genuinely excluded is the **multi-type tax
-  breakdown** (`tax_breakdown: TaxBreakdownItem[]`): purchases only ever post the
-  single scalar `vat_deductible` line — INC is non-deductible, so there is no
-  INC-vs-IVA split to make on the purchase side. Do not "fix" this by adding a
-  `tax_breakdown` there; withholding, which purchases DO need multi-type, already
-  has its own breakdown (`withholding_breakdown`) wired through this same handler.
+- **`support_document.accepted` DOES post a full entry** (`onSupportDocumentAccepted`: expense debit, AP credit, scalar `vat_deductible` debit, withholding credits via `withholding_breakdown` or legacy `withholding_payable`). Only the multi-type `tax_breakdown` is excluded on purchases (INC is non-deductible). Do not add `tax_breakdown` there.
 - Every accounting emit that carries tax MUST pass `tax_breakdown: TaxBreakdownItem[]`
   alongside the scalar `tax_amount`. The scalar is the legacy fallback; the
   breakdown is the typed truth.
@@ -129,16 +108,9 @@ the authoritative source and groups correctly by `tax_type` via
 `resolveTaxCodeFromTax`. Do not attempt per-line typing in the UBL builder beyond
 the header limitation already documented in the code comment.
 
-## Adding A New Tax Type — Workflow
+## Adding A New Tax Type
 
-1. **Enum migration** (own file, `ADD VALUE IF NOT EXISTS`) per `vendix-prisma-migrations`. Regenerate Prisma client in container + host.
-2. **Mapping keys** in BOTH `DEFAULT_ACCOUNT_MAPPINGS` and the seed (dual-source). Pick PUC account per `vendix-accounting-rules`.
-3. **Calculation** returns the new `tax_type`.
-4. **`resolveTaxLines`** auto-handles the new type via the key convention — verify the legacy fallback still balances.
-5. **Declaration**: add a `calculateX` + dispatcher route if the tax declares separately; add the obligation enum value (own migration) if it has its own return.
-6. **DIAN**: add the scheme code branch in `resolveTaxCodeFromTax`.
-7. **Reports + frontend**: extend filters (untyped→iva fallback) and `UI_TO_FISCAL_TAX_TYPE` + UI selector options.
-8. **Verify**: backend `tsc -p tsconfig.build.json --noEmit`; confirm enum live in DB; SQL-check the typed mapping materialized per org; create one order with the new tax → validate invoice → inspect the journal line lands on the right PUC.
+Step-by-step workflow (enum migration, mappings, calculation, journal, declaration, DIAN, reports, verification): `references/new-tax-type-workflow.md`.
 
 ## Decision Rules
 
@@ -150,103 +122,20 @@ the header limitation already documented in the code comment.
 | Per-store account override needed | Add row to `accounting_account_mappings`; otherwise dual-source const+seed is enough |
 | Reading taxes to aggregate by type | Filter `tax_type`, treat null as `'iva'` |
 
-## Pending Pattern Repetitions (known future work)
+## Pending
 
-- **New consumption taxes** (IBUA bebidas azucaradas, ICUI ultraprocesados, INC
-  variants): each walks all 8 layers.
-- **`fiscal-obligation.service.ts` role-aware generation**: withholding-return
-  obligations are still generated generically; making them conditional on the
-  presence of `role='practiced'` rows in the period is a marked `// TODO role-aware`.
+- ICUI/IBUA (and new INC variants) on the sales side: each must walk all 8 layers; today they exist only in the enum and purchase kernel.
 
-## Withholding Chain (role-aware, WIRED)
+## Withholding Chain (summary)
 
-Withholding (`retefuente`/`reteiva`/`reteica`) is now wired end-to-end, but it adds
-an axis the 8-layer `tax_type` model does **not** have: the **role**. The same
-`withholding_type` posts to a different PUC depending on who withholds whom.
+Full rules, gates and known gaps: `references/withholding-chain.md` (read on demand). Invariants:
 
-- **Two enums.** `withholding_type_enum` = `retefuente | reteiva | reteica`.
-  `withholding_role_enum` = `practiced | suffered`.
-  - `practiced` (CASO 1): the tenant buys and withholds a SUPPLIER → **liability,
-    credit**. PUC `2365xx` (retefuente) / `2367xx` (reteIVA) / `2368xx` (reteICA).
-  - `suffered` (CASO 2): the tenant sells and a withholding-agent CUSTOMER
-    withholds the tenant → **asset (anticipo), debit**. PUC `1355xx`.
-- **Mapping key shape differs.** Not `{prefix}.{tax_type}_{suffix}` but
-  `withholding.{role}.{type}_{payable|receivable}` (e.g.
-  `withholding.practiced.retefuente_payable` → 236525,
-  `withholding.suffered.retefuente_receivable` → 135510). Dual-source as always
-  (const in `account-mapping.service.ts` + `default-account-mappings.seed.ts`).
-- **Determinism is the contract — never arbitrary.** Applicability is decided by a
-  PURE resolver (`WithholdingResolverService.evaluate()`), unit-tested, on the
-  fiscal classification of BOTH parties + concept + UVT threshold. Gates:
-  - practiced: tenant.`is_withholding_agent` true; skip retefuente if supplier
-    `is_self_withholder` or `regimen_simple`; `base ≥ min_uvt × uvt`;
-    `supplier_type_filter` matches.
-  - suffered: customer.`is_withholding_agent` true; skip retefuente if tenant is
-    simple-regime or self-withholder; threshold; applies_to; **and**
-    `supplier_type_filter !== 'any'` is discarded outright, never compared — the
-    retained party in `suffered` is the TENANT, not a supplier, so a concept like
-    `RTE_HONOR_PN` (`supplier_type_filter: 'persona_natural'`) classifies nobody
-    real. Before this gate the same condition still fed `specificity: 1`, so
-    `RTE_HONOR_PN` (10%) always outranked the any-filter `RTE_COMPRAS`/
-    `RTE_SERV_GEN` (`specificity: 0`) regardless of what was actually sold — every
-    sale to a withholding-agent customer came out `RTE_HONOR_PN`.
-  - At most ONE line per `withholding_type` (specificity → highest threshold →
-    lowest code). No counterparty / `is_withholding_agent=false` ⇒ `[]`
-    (zero-regression default; B2C anonymous sale never suffers). Data note: the
-    seed's `RTE_SERV_DEC` and `RTE_SERV_GEN` are identical on every gate (both
-    `applies_to: 'service'`, `supplier_type_filter: 'any'`, threshold 4 UVT, rate
-    4%), so the code tiebreak always resolves to `RTE_SERV_DEC` (`'D' < 'G'`
-    lexicographically). Harmless today only because their rate matches — a future
-    service concept with a different rate must not rely on this tiebreak.
-- **`suffered` is ALWAYS resolved by operation type — never call `resolveSuffered`
-  directly.** Every caller goes through
-  `WithholdingFlowService.resolveSufferedByOperation(items)`
-  (`withholding-flow.service.ts`): POS (`payments.service.ts`),
-  `invoicing.service.ts`, `invoice-flow.service.ts`, the preview
-  (`withholding-tax.service.ts`, whose `PreviewWithholdingDto` takes an optional
-  `product_type` defaulting to goods), and `order-flow.service.ts`
-  `payOrder`/`confirmPayment` (wired in `fbcca71a0`, on top of this fix). It groups
-  the sale's line items by operation — `product_type === 'service'` →
-  `appliesTo: 'service'`; `physical`, `prepared`, `custom`, no product, or no
-  determinable type → `appliesTo: 'purchase'` (owner decision, 2026-09-26: goods
-  and services are ALWAYS split, never averaged or picked by dominant type) — and
-  resolves each group with its OWN summed base, IVA, and UVT threshold: a mixed
-  sale of goods + services yields one withholding line per group, not one line for
-  the whole ticket. Resolution across groups is sequential, not `Promise.all` —
-  `client` is typically an interactive Prisma `tx`, which does not support
-  concurrent queries on the same connection.
-  - **Anti-pattern:** calling `resolveSuffered` without `appliesTo`. That is
-    exactly the bug this fixed: `WithholdingResolverService.evaluate()` saw every
-    concept unfiltered by `applies_to`, leaving the `supplier_type_filter` discard
-    above as the only gate between a services sale and `RTE_HONOR_PN`.
-  - **Knowledge gap:** there is no reliable tenant counterparty-type field today,
-    so the `supplier_type_filter` gate in `suffered` is a blanket discard, not a
-    real comparison. If a tenant fiscal profile is ever modeled (e.g. a natural
-    person providing honorarios), replace the discard with a genuine comparison —
-    see the code comment at that gate in `withholding-resolver.service.ts`.
-- **reteIVA base ≠ subtotal.** reteIVA is computed on the IVA amount of the
-  operation (`ivaAmount`), not the subtotal; retefuente/reteICA use the subtotal.
-  The UVT threshold gate always uses the subtotal. Pass both `base` and `ivaAmount`.
-- **Flow adapter + preview.** `WithholdingFlowService` (`resolvePracticed` /
-  `resolveSuffered` / `persistWithholdingLines`) reads tenant fiscal_data
-  (parameterized prisma read, NOT `getFiscalData()` which throws without store
-  context) + counterparty, calls the resolver, persists `withholding_calculations`
-  (with `role`, `withholding_type`, `customer_id`/`supplier_id`,
-  `counterparty_type`). Flow services attach `withholding_breakdown:
-  WithholdingLine[]` to the emit; the listener/`auto-entry` reduces AR/AP by the
-  total and posts the offsetting per-type lines. `POST
-  /api/store/withholding-tax/preview` exposes the resolver to POS/POP carts so the
-  UI never re-implements the legal logic.
-- **Reports are role-split.** Declaration (form 350) and exógena **1001** =
-  `role:'practiced'` (third party = supplier). Exógena **1003** =
-  `role:'suffered'` (third party = the agent CUSTOMER, NIT from
-  `users.document_number`). Suffered rows are a credit-to-favor, never part of the
-  declaration's `balance_due`.
-
-Withholding source of truth:
-`apps/backend/src/domains/store/withholding-tax/withholding-resolver.service.ts`,
-`withholding-flow.service.ts`, `withholding-classification.util.ts`;
-`apps/backend/src/common/interfaces/withholding-breakdown.interface.ts`.
+- Extra axis `withholding_role_enum` = `practiced` (tenant withholds a supplier → liability credit, `2365xx`/`2367xx`/`2368xx`) | `suffered` (agent customer withholds the tenant → asset debit `1355xx`). Mapping keys `withholding.{role}.{type}_{payable|receivable}`, dual-source.
+- Applicability only via the pure `WithholdingResolverService.evaluate()`; at most one line per `withholding_type`; no counterparty / not an agent ⇒ `[]`.
+- `suffered` ALWAYS through `WithholdingFlowService.resolveSufferedByOperation(items)`: goods and services split into separate groups with their own base/IVA/threshold (owner 2026-09-26), resolved sequentially (interactive `tx`). Never call `resolveSuffered` without `appliesTo`. In `suffered`, `supplier_type_filter !== 'any'` concepts are discarded.
+- reteIVA base = IVA amount; retefuente/reteICA = subtotal; UVT threshold always on subtotal.
+- UI uses `POST /api/store/withholding-tax/preview`; never re-implement the legal logic.
+- Reports: form 350 and exógena 1001 = `practiced`; exógena 1003 = `suffered` (credit in favor, never in `balance_due`). Withholding obligations are generated only when `practiced` rows exist in the period (`fiscal-obligation.service.ts`).
 
 ## Related Skills
 

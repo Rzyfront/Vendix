@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "When editing product schemas, pricing logic, or advanced product forms"
@@ -42,7 +42,9 @@ Product variants:
 
 Do not document or add `product_variants.base_price`; variants use `price_override`.
 
-Tax links persist in `product_tax_assignments` (many-to-many through tax categories).
+- `products.price_unit_quantity` (default 1): stock units that `base_price` covers ("$5.000 per meter" with stock in mm → `price_unit_quantity = 1000`). Line total = `unit_price * quantity / price_unit_quantity`; use `resolveLineUnits`, never `quantity` alone.
+- Tax links persist in `product_tax_assignments` at PRODUCT level only; variants inherit the product's rates.
+- Price lists: `price_tiers` + `product_price_tier_overrides` (`apps/backend/src/domains/store/price-tiers/`).
 
 ## Calculations
 
@@ -54,8 +56,10 @@ Tax links persist in `product_tax_assignments` (many-to-many through tax categor
 
 **Core rule:** do not persist calculated display prices for products. Persist base/sale inputs and tax assignments; calculate the final display price on read.
 
-- Formula: `final_price = effectiveBase * (1 + sum(taxRates))`.
-- Effective base uses `sale_price` when `is_on_sale` is true and the sale price is valid; otherwise base (or variant `price_override`).
+- Shared pure helpers: `apps/backend/src/domains/store/taxes/utils/final-price.util.ts` (+ `tax-inclusive-math.util.ts`). Reuse them; do not re-implement the formula.
+- Effective price ladder (same as checkout charge): variant sale > variant `price_override` > product sale > product `base_price` (`resolveVariantEffectivePrice`). Sale applies only when `is_on_sale` and valid.
+- Rates come from `extractTypedRates`, honoring inclusive taxes (`assignment.is_inclusive ?? category.is_inclusive ?? first rate.is_inclusive ?? false`); `calculateVariantFinalPrice` resolves exclusive and inclusive via `resolveLineTotals`. Simple `effectiveBase * (1 + Σrates)` is only correct when every rate is exclusive.
+- Order/table line finals: `resolveOrderLineFinals` over persisted `unit_price × line_units`, rounded to 2.
 - Current product API uses `final_price` for calculated tax-inclusive responses. Do not standardize new code on `price_with_tax` unless the existing endpoint/interface already uses that name.
 
 ### Snapshot Exception

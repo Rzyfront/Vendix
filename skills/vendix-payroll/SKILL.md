@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic"
@@ -14,10 +14,6 @@ metadata:
     - "Working with DIAN electronic payroll (DSPNE), CUNE, or adjustment note 103"
     - "Working under apps/backend/src/domains/store/payroll"
 ---
-
-## When to use
-
-Includes integral salary, final settlement indemnification, advances, bank export, CUNE / adjustment note 103, and the accounting events payroll emits.
 
 # Vendix Payroll (Colombia)
 
@@ -35,7 +31,7 @@ Base dir: `apps/backend/src/domains/store/payroll/`. Schema: `apps/backend/prism
 
 ## State Machine (payroll_runs)
 
-Enum `payroll_status_enum` (`schema.prisma:3836`): `draft, calculated, approved, sent, accepted, rejected, paid, cancelled`.
+Enum `payroll_status_enum` (`schema.prisma`): `draft, calculated, approved, sent, accepted, rejected, paid, cancelled`.
 
 Flow service: `payroll-runs/payroll-flow.service.ts` (`PayrollFlowService`). Valid transitions (`VALID_TRANSITIONS`):
 
@@ -52,7 +48,7 @@ Always validate through `validateTransition()` (throws `VendixHttpException(PAYR
 ### Events emitted (EventEmitter2) — consumed by accounting
 
 - `calculate()` → `payroll.calculated` `{ payroll_run_id, employee_count }`.
-- `approve()` → **no event** (approval only stamps `approved_by_user_id`/`approved_at`).
+- `approve()` → **no event** (only stamps `approved_by_user_id`/`approved_at`). There is no `payroll.approved` listener; accrual accounting enters via `payroll.dian_accepted`.
 - `send()` → on success persists withholdings + emits DIAN-accepted accounting.
 - `pay()` → `payroll.paid` with a rich payload (per-item earnings/deductions/employer_costs/provisions/net_pay). This is the payment-side accounting trigger.
 - `emitPayrollDianAcceptedAccounting()` → `payroll.dian_accepted` (totals, health/pension deductions, retention, `cost_center_breakdown`). This is the accrual-side trigger on the electronic path.
@@ -76,7 +72,7 @@ Employee deductions: health 4%, pension 4%, plus FSP. Employer costs and provisi
 
 ## Novelties
 
-Valuation: `calculation/novelty-valuation.ts` (pure `valuateNovelty`). Enum `payroll_novelty_type_enum` (`schema.prisma:3934`). Invariant: `amount === employer_amount + reimbursable_amount`.
+Valuation: `calculation/novelty-valuation.ts` (pure `valuateNovelty`). Enum `payroll_novelty_type_enum` (`schema.prisma`). Invariant: `amount === employer_amount + reimbursable_amount`.
 
 - **incapacity_general**: days 1–2 at 66.67% employer cost; day 3+ reimbursable by **EPS** (daily floor `SMMLV/30`).
 - **incapacity_laboral**: 100% from day 1, reimbursable by **ARL**, never employer cost.
@@ -87,18 +83,9 @@ Valuation: `calculation/novelty-valuation.ts` (pure `valuateNovelty`). Enum `pay
 
 Service: `novelties/novelties.service.ts` (`findPendingForPeriod`, `attachToRun`, `releaseFromRun` — cancelling a run releases its novelties).
 
-## Final Settlement & Indemnification
+## Final Settlement (summary)
 
-Service: `settlements/settlement-calculation.service.ts` (`calculateSettlement`). State enum `settlement_status_enum` (draft, calculated, approved, paid, cancelled); flow `settlements/settlement-flow.service.ts` (paying also terminates the employee in the same tx).
-
-Indemnification (Art.64 CST, `calculateIndemnification`) only when `termination_reason === 'without_just_cause'`, branched by `contract_type`:
-
-- **fixed_term**: salaries for the remaining time up to `contract_end_date` (returns 0 + warn if the date is missing).
-- **obra_labor**: remaining time, minimum 15 days.
-- **apprentice / service**: 0.
-- **indefinite / default**: `≤10 SMMLV` → 30 days first year + 20/year; `>10 SMMLV` → 20 + 15/year.
-
-All day math is 30/360 (`calculateWorkedDays360`).
+`settlements/settlement-calculation.service.ts` + `settlement-flow.service.ts` (paying terminates the employee in the same tx). Indemnification (Art. 64 CST) only for `termination_reason === 'without_just_cause'`, by `contract_type`; all day math 30/360. Detail, key models and endpoints: `references/settlement-models-endpoints.md` (read on demand). Advances model is `employee_advances` (not `payroll_advances`).
 
 ## DIAN Electronic Payroll (DSPNE)
 
@@ -111,15 +98,6 @@ Dir: `providers/dian-payroll/`. `DianPayrollProvider` (implements `PayrollProvid
 - Generic adapter: `providers/payroll-provider.interface.ts` (`PAYROLL_PROVIDER`), with `mock-payroll.provider.ts` for dev.
 
 Run-level DIAN actions live on `PayrollFlowService`: `sendToDian`, `getDianStatus` (may transition `sent→accepted|rejected`), `sendAdjustment`.
-
-## Key Models (schema.prisma)
-
-`employees` (contract_type, contract_end_date, salary_type, base_salary, EPS/pension/CCF, termination_*), `employee_stores` (N:M multi-store), `employee_fiscal_profiles` (art.387 dependents/deductions, retention_procedure), `payroll_runs` (status, DIAN fields, `applied_rules` snapshot, `accounting_entry_id`), `payroll_items` (per-employee JSON earnings/deductions/employer_costs/provisions, per-item DIAN fields), `payroll_novelties`, `payroll_settlements`, `employee_advances` (note: **not** "payroll_advances") + `employee_advance_payments` + `employee_advance_installments`, `pila_submissions`, `payroll_system_defaults` (yearly legal rules JSON), `uvt_values`, `withholding_calculations` (RTE_SALARIOS).
-
-## Key Endpoints
-
-- Runs `store/payroll/runs`: `POST :id/calculate`, `PATCH :id/approve|send|pay|cancel`, `POST :id/send-dian`, `GET :id/dian-status`, `GET :id/validate-bank-data`, `POST :id/items/:itemId/send-adjustment`, `POST :id/export-ach`, `GET bank-export/banks`.
-- Employees `store/payroll/employees` (+ `/bulk`, fiscal-profile), Novelties `store/payroll/novelties`, Advances `store/payroll/advances`, Settlements `store/payroll/settlements`, Rules `store/payroll/rules`, Paystubs, Settings, PILA `store/payroll/pila`.
 
 ## Decision Rules
 

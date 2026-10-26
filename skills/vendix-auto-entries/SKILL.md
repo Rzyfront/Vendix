@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Splitting withholding across multi-tender payment legs"
@@ -44,63 +44,15 @@ Accounting failures are logged in listeners and must not roll back the already-c
 
 Mapping key convention: `{event}.{account_role}`. Cost-center variants use `{event}.{role}.{cost_center}`.
 
-## Current Listener Events
+## Listener Events
 
-Source of truth for this list: `grep -n "@OnEvent(" accounting-events.listener.ts`.
+Source of truth (the list grows often): `grep -n "@OnEvent(" apps/backend/src/domains/store/accounting/auto-entries/accounting-events.listener.ts`. Non-obvious cases:
 
-- `invoice.accepted` — handler `handleInvoiceAccepted` calls
-  `AutoEntryService.onInvoiceValidated()` (method name and the persisted
-  `source_type: 'invoice.validated'` were NOT renamed when the event name
-  changed from `invoice.validated` to `invoice.accepted`; do not confuse the
-  EventEmitter2 event name with the `source_type` string stored on
-  `accounting_entries` — they now differ on purpose/by history). Credit notes
-  arrive on this SAME event (`invoice_type === 'credit_note'`) and branch to
-  `onCreditNoteAccepted` (a reversal, never additional revenue).
-- `support_document.accepted`
-- `payment.received`
-- `credit_sale.created`
-- `expense.approved`
-- `expense.paid`
-- `payroll.approved`
-- `payroll.dian_accepted`
-- `payroll.paid`
-- `order.completed`
-- `production.completed`
-- `kitchen.fired`
-- `refund.completed`
-- `purchase_order.received`
-- `purchase_order.payment`
-- `inventory.adjusted`
-- `layaway.payment_received`
-- `layaway.completed`
-- `layaway.cancelled`
-- `installment_payment.received`
-- `settlement.approved`
-- `settlement.paid`
-- `depreciation.posted`
-- `disposal.fixed_asset`
-- `withholding.applied`
-- `stock_transfer.completed`
-- `cash_register.opened`
-- `cash_register.closed`
-- `cash_register.movement`
-- `dispatch_route.closed`
-- `ar.written_off`
-- `ap.payment_registered`
-- `ap.written_off`
-- `commission.calculated`
-- `wallet.credited`
-- `wallet.debited`
-- `expense.refunded`
-- `expense.cancelled`
-- `accounting.saas_subscription_payment.succeeded`
-- `subscription.payment.refunded`
-- `subscription.payment.failed`
-- `partner_payout_batch.paid`
-- `intercompany_transfer.shipped` and `intercompany_transfer.received` are generated internally from `stock_transfer.completed` when fiscal scope is STORE and source/destination stores differ.
-
-This list grows frequently — re-run the grep above before trusting it verbatim
-for anything load-bearing (e.g. auditing which flows are wired).
+- `invoice.accepted` → `handleInvoiceAccepted` → `AutoEntryService.onInvoiceValidated()`; the persisted `source_type` is still `'invoice.validated'` (event name and `source_type` differ on purpose). Credit notes arrive on the same event (`invoice_type === 'credit_note'`) and branch to `onCreditNoteAccepted` (reversal, never extra revenue).
+- `intercompany_transfer.shipped|received` are not events: they are generated inside `stock_transfer.completed` (see Intercompany below).
+- `dispatch_route.closed` posts only the driver cash variance.
+- No `payroll.approved` event is emitted: payroll accrual enters via `payroll.dian_accepted` and payment via `payroll.paid`; `'payroll.approved'` remains only as `source_type`/mapping-key prefix.
+- Every handler checks the fiscal gate (`isFlowEnabled(store_id, <subflow>)`); an inactive fiscal area silently skips the entry by design.
 
 ## createAutoEntry Rules
 
@@ -146,42 +98,21 @@ each leg's `withholding_breakdown` carries only its prorated share:
   Σ portions = original line to the cent. `legAmounts.length <= 1` returns the
   original lines untouched (historical payload).
 - Used in `payments.service.ts` in the per-leg emission loop
-  (`withholdingByLeg[legIndex]`, ~:1815).
+  (`withholdingByLeg[legIndex]`).
 - Why: all withholding on one leg unbalances that entry (every
   `payment.received` must balance on its own); repeating it on every leg posts
   it N times.
 - Anti-pattern: `withholding_breakdown: wh.lines` inside the per-leg loop.
   (`credit_sale.created` is a single event and keeps `wh.lines`.)
-- Known issue (QUI-576, open): the no-invoice branch of
-  `AutoEntryService.onPaymentReceived` (`auto-entry.service.ts` ~:3386-3476)
-  debits cash/bank for the leg's GROSS `amount` and also DR 1355 for the
-  withholding → imbalance equal to the withholding (E2E evidence:
-  `debit=33000, credit=30000`, rows in `accounting_entry_failures`). Net vs
-  gross decision pending — do NOT "fix" the proration to compensate.
+- QUI-576 (reported imbalance equal to the withholding in the no-invoice
+  branch of `onPaymentReceived`, rows in `accounting_entry_failures`): the
+  code now documents "cash stays net-received, debits (cash + 1355) =
+  credits"; confirm in `accounting_entry_failures` before assuming it is
+  open. Never "fix" it by changing the proration.
 
-## Third-Party Snapshot On Journal Lines
+## Third-Party Snapshot (summary)
 
-`accounting_entry_lines` carries an optional, denormalized third-party snapshot:
-`third_party_id`, `third_party_type`, `third_party_name`, `third_party_tax_id`.
-These are populated from an `AutoEntryThirdParty` object attached to individual
-`AutoEntryLine`s (e.g. the AP line in `onPurchaseOrderReceived` carries the
-`supplier` third party; the AR/revenue line in `onInvoiceValidated` can carry the
-`customer`).
-
-- **It is a historical snapshot, never a live lookup.** `createAutoEntry` reads
-  `line.third_party?.id/.type/.name/.tax_id` directly from the payload the
-  emitter already attached — it does NOT query `suppliers`/`users`/`customers`
-  here. Emitters must resolve and attach the third party themselves (e.g.
-  `purchase-orders.service.ts` already loads `result.updated_po.suppliers`) and
-  pass it through the event payload; do not add a lookup inside
-  `AutoEntryService`.
-- Optional per line — most lines (cash, inventory, tax lines) have no
-  counterparty and leave all four fields `null`.
-- Used for third-party-hierarchical auxiliary books/ledgers (`libros
-  auxiliares por tercero`) added in this epic's Ola 3 hydration pass; wired on
-  purchase (`supplier`) and sales/invoice (`customer`) flows so far — extend the
-  same pattern (attach `AutoEntryThirdParty` on the relevant line) when a new
-  flow needs its counterparty to show up in third-party reports.
+`accounting_entry_lines.third_party_*` is a historical snapshot attached by the EMITTER on each `AutoEntryLine` (`AutoEntryThirdParty`); never add a lookup inside `AutoEntryService`. Detail: `references/third-party-and-intercompany.md`.
 
 ## Adding A New Auto Entry Flow
 
@@ -195,23 +126,9 @@ These are populated from an `AutoEntryThirdParty` object attached to individual
 8. Emit the event after the main transaction succeeds.
 9. Run the seed in the target environment so org mappings exist.
 
-## Intercompany Stock Transfer Entries
+## Intercompany Stock Transfers (summary)
 
-When `operating_scope=ORGANIZATION` and `fiscal_scope=STORE`, a cross-store stock transfer is operationally allowed but fiscally intercompany. The `stock_transfer.completed` listener calls `AutoEntryService.onStockTransferCompleted()`, which branches to intercompany handling through `FiscalScopeService.isIntercompanyTransfer()`.
-
-Required mapping keys:
-
-- `intercompany_transfer.shipped.receivable` — debit CxC vinculados, default PUC `1365`.
-- `intercompany_transfer.shipped.inventory` — credit inventory from source store, default PUC `1435`.
-- `intercompany_transfer.received.inventory` — debit inventory in destination store, default PUC `1435`.
-- `intercompany_transfer.received.payable` — credit CxP vinculados, default PUC `2355`.
-
-Rules:
-
-- Create two posted accounting entries, one for the source store entity and one for the destination store entity.
-- Link them through `intercompany_transactions` with `origin='stock_transfer'`, `source_type='stock_transfer'`, and `source_id=transfer_id`.
-- If fiscal scope is ORGANIZATION or source/destination stores are the same/missing, fall back to the normal stock-transfer entry.
-- Log when stock-transfer auto-entry flow is disabled or when a transfer is not intercompany; silent skips make accounting diagnosis difficult.
+With `operating_scope=ORGANIZATION` + `fiscal_scope=STORE` and different stores, `onStockTransferCompleted()` creates two posted entries (source and destination entity) linked via `intercompany_transactions`, using keys `intercompany_transfer.shipped.{receivable,inventory}` / `intercompany_transfer.received.{inventory,payable}` (defaults 1365/1435/1435/2355); otherwise normal stock-transfer entry. Log skips. Detail: `references/third-party-and-intercompany.md`.
 
 ## Current Risk To Know
 
