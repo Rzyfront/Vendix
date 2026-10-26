@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Editing files in apps/backend/, creating modules, or working with Prisma"
@@ -30,7 +30,7 @@ metadata:
 
 Backend code lives mainly under `apps/backend/src/domains/`, plus shared `common/`, `prisma/`, `ai-engine/`, and infrastructure modules. Do not create new feature folders under the old `src/features/` pattern.
 
-Domain folders: `superadmin/`, `organization/`, `store/`, `ecommerce/`, `auth/`, `public/`.
+Domain folders: `superadmin/`, `organization/`, `store/`, `ecommerce/`, `auth/`, `public/`, plus `fiscal-operations/`, `received-documents/`, `support/`, `help-center/`, `video-library/`.
 
 ## Standard Module Shape
 
@@ -51,7 +51,8 @@ Some established modules have nested submodules or shared services. Match the ne
 Domain services run under:
 
 - global `JwtAuthGuard`
-- global `StoreOperationsGuard`
+- global `DomainScopeGuard` (token `app_type` STORE_ADMIN → only `/api/store/*`, ORG_ADMIN → only `/api/organization/*`)
+- global `StoreOperationsGuard` (subscription write gate)
 - `RequestContextInterceptor`
 - scoped Prisma services and AsyncLocalStorage request context
 

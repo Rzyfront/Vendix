@@ -5,7 +5,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
   auto_invoke:
     - "Working with Prisma scoped services"
@@ -31,7 +31,7 @@ metadata:
 | `StorePrismaService` | `store_id` plus org where applicable | store admin/POS/store domains |
 | `EcommercePrismaService` | `store_id` plus user/customer where applicable | customer ecommerce domains |
 
-`PrismaModule` exports all four services plus `RequestContextService`, `AccessValidationService`, and `StoreContextRunner`.
+`PrismaModule` (`@Global()`) exports the four services plus `RequestContextService`, `AccessValidationService`, `StoreContextRunner`, `OperatingScopeService` and the fiscal scope/gate services. Inject them directly.
 
 ## BasePrismaService
 
@@ -64,26 +64,7 @@ When adding a model:
 
 ## Service Caveats
 
-`OrganizationPrismaService`:
-
-- Scopes read/update/delete/count/group/aggregate/upsert operations.
-- Does not scope `create`/`createMany`.
-- `roles` includes org roles plus system roles where `organization_id = null`.
-- Some getters return `scoped_client` but are not registered in org model lists; inspect source before assuming scope.
-- `organization_payment_policies` is registered but getter currently returns `baseClient`.
-
-`StorePrismaService`:
-
-- Scopes reads/updates/deletes and injects `store_id` on create only for `store_scoped_models`.
-- Has direct store models, relational scopes, and org-scoped model lists.
-- Several getters intentionally return `baseClient` and require manual scoping, including examples like `users`, `stores`, `audit_logs`, `product_categories`, `customer_queue`, and `invoice_data_requests`.
-
-`EcommercePrismaService`:
-
-- Requires `store_id`; throws if missing.
-- Injects `store_id` and user/customer fields on create when model type supports it.
-- Some getters return `scoped_client` for models not registered in all model lists; inspect source before relying on automatic scope.
-- `review_votes` and `review_reports` currently return `baseClient`.
+Each service scopes different operations and several getters intentionally return `baseClient` (manual scoping required). Per-service list: `references/service-caveats.md` (read on demand). Inspect the getter before assuming scope.
 
 ## Scoped Unique Operations
 
@@ -102,20 +83,7 @@ Rules:
 - Do not bypass this by calling `withoutScope()` in request handlers. Use `withoutScope()` only for the approved cases in this skill and add explicit tenant filters manually.
 - Repeated access to scoped singleton rows, such as `store_settings`, should live behind a helper that encodes the safe query shape.
 
-Example:
-
-```ts
-// Avoid in scoped services when the extension may add tenant filters.
-await prisma.store_settings.findUnique({ where: { store_id } });
-await prisma.domain_settings.update({ where: { id }, data });
-
-// Prefer scope-safe shapes.
-await prisma.store_settings.findFirst({ where: { store_id } });
-await prisma.domain_settings.updateMany({
-  where: { id, store_id, domain_type: 'ecommerce' },
-  data,
-});
-```
+Example (avoid vs prefer): `references/service-caveats.md`.
 
 ## withoutScope Rules
 

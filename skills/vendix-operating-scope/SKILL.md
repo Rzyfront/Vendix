@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Working with organization operating scope STORE vs ORGANIZATION"
@@ -33,8 +33,10 @@ Do not introduce mixed per-store scope unless the business explicitly changes th
 
 - `SINGLE_STORE` onboarding maps to `operating_scope = STORE`.
 - `MULTI_STORE_ORG` onboarding maps to `operating_scope = ORGANIZATION`.
-- Upgrade `SINGLE_STORE -> MULTI_STORE_ORG` may change `STORE -> ORGANIZATION`.
-- Downgrade `ORGANIZATION -> STORE` is blocked by default because splitting historical inventory/accounting data is unsafe.
+- Scope changes go only through `OperatingScopeMigrationService` (`common/services/operating-scope-migration.service.ts`), which writes `operating_scope_audit_log` and invalidates the scope cache:
+  - UP `STORE -> ORGANIZATION`: requires ≥2 active stores; ensures per-store and consolidated `accounting_entities`; history stays put.
+  - DOWN `ORGANIZATION -> STORE`: rejected while consolidated POs (PENDING/APPROVED) or cross-store transfers are open, or while `fiscal_scope = ORGANIZATION` (change fiscal mode first, see `vendix-fiscal-scope`); forced downgrade requires a reason (≥10 chars).
+  - Partners (`organizations.is_partner = true`) are locked to `STORE`; other targets → 403.
 - In `STORE`, a store must not see another store's inventory, locations, suppliers, purchases, accounting, valuation, or reports.
 - In `ORGANIZATION`, stores behave as channels/locations/segments under one organization scope.
 
@@ -53,3 +55,4 @@ Do not introduce mixed per-store scope unless the business explicitly changes th
 - `vendix-inventory-stock`
 - `vendix-auto-entries`
 - `vendix-accounting-rules`
+- `vendix-fiscal-scope`

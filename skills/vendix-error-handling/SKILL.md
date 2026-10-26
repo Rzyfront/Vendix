@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Handling Errors"
@@ -48,8 +48,8 @@ Reference implementations with zero `try/catch`:
 `apps/backend/src/domains/store/tables/tables.controller.ts` and its sibling
 `table-sessions.controller.ts`.
 
-Measured 2026-07-30: **358** `responseService.error` calls across **54** controllers
-still carry the pattern, plus **16** frontend reads of `success === false` compensating
+Measured 2026-10-26: **261** `responseService.error` calls across **53** controllers
+still carry the pattern, plus **12** frontend reads of `success === false` compensating
 for it. Repo-wide sweep ticket: **QUI-571**.
 
 **Deliberate exception — do not "fix" it.** `apps/backend/src/domains/auth/auth.controller.ts`

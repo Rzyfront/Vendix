@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Understanding Vendix architecture"
@@ -29,8 +29,8 @@ Use this skill as the architecture map for Vendix. It explains the major apps, a
 | --- | --- | --- | --- |
 | Backend API | `apps/backend` | NestJS + Prisma: domains, domain resolution, jobs, auth, tenant context | `vendix-backend`, `vendix-prisma`, `vendix-multi-tenant-context` |
 | Frontend web | `apps/frontend` | Angular 20: public landing/ecommerce and private admin panels | `vendix-frontend`, `vendix-frontend-*`, `vendix-zoneless-signals`, `vendix-ui-ux` |
-| Mobile app | `apps/mobile` | Expo/React Native mobile app | Knowledge gap until mobile-specific skills are created |
-| Shared types | `libs/shared-types` | Cross-app TypeScript type package | `vendix-monorepo-workspaces` |
+| Mobile app | `apps/mobile` | Expo/React Native mobile app (touch only when the task names it) | `mobile-dev`, `mobile-parity-audit` |
+| Shared libs | `libs/shared-types`, `libs/print-formats` | Cross-app TypeScript types and print formats | `vendix-monorepo-workspaces`, `vendix-print-geometry` |
 | Skills | `skills` | Source of AI agent guidance | global `skill-creator`, `skill-sync` |
 
 ## Core Rules
@@ -38,7 +38,7 @@ Use this skill as the architecture map for Vendix. It explains the major apps, a
 - Use the app-specific skill before editing inside an app.
 - Frontend web work under `apps/frontend` must also use `vendix-zoneless-signals`.
 - Backend work under `apps/backend` must use backend/Prisma skills that match the change.
-- Mobile work under `apps/mobile` is a current knowledge gap unless a mobile-specific skill exists for the task.
+- Mobile work under `apps/mobile` only when the task names it explicitly; then load `mobile-dev`.
 - Cross-app dependencies, package placement, Docker, and CI/CD belong to `vendix-monorepo-workspaces`.
 - Shared types should stay framework-neutral and avoid importing app-specific code.
 - Do not duplicate detailed rules here; link to the owning skill.
@@ -58,6 +58,7 @@ Use this skill as the architecture map for Vendix. It explains the major apps, a
 | `STORE_LANDING` | Public | Store visitors | `/` on store domain |
 | `STORE_ADMIN` | Private | Store staff/admin | `/admin/*` |
 | `STORE_ECOMMERCE` | Public/customer | Store customers | `/`, catalog, cart, checkout |
+| `STORE_DELIVERY` | Private | Carriers (Vendix Repartos) | internal delivery app |
 
 `AppEnvironment` exists as a compatibility alias for `AppType`; prefer `AppType` in new code.
 
@@ -88,11 +89,7 @@ Use this skill as the architecture map for Vendix. It explains the major apps, a
 | `store_settings` / `organization_settings` structure | `vendix-settings-system` |
 | Branding and settings source of truth | `vendix-settings-system` / `vendix-frontend-theme` |
 | Sidebar/module visibility through `panel_ui` | `vendix-panel-ui` |
-| How are mobile-native (Expo/React Native) patterns handled? | Knowledge gap until mobile skill exists |
-
-## Mobile Knowledge Gap
-
-`apps/mobile` is a real Expo/React Native workspace, but the current skill set is mostly backend and web frontend. Existing frontend web skills describe responsive web behavior, not native mobile behavior. When planning or editing mobile work, mark missing native-mobile guidance as a knowledge gap and propose a focused skill such as `vendix-mobile` or `vendix-mobile-navigation` before standardizing patterns.
+| Mobile-native (Expo/React Native) patterns and web parity | `mobile-dev` / `mobile-parity-audit` |
 
 ## Related Skills
 

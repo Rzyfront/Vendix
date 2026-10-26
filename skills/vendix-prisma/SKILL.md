@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "When editing schema.prisma, creating migrations, or using Prisma client"
@@ -28,7 +28,7 @@ metadata:
 - Prisma config path: `apps/backend/prisma.config.ts`.
 - Scoped services: `apps/backend/src/prisma/services/`.
 - Client uses `@prisma/adapter-pg` and `pg.Pool` in backend Prisma services.
-- Current schema is large: 200+ models and 140+ enums. Do not duplicate exhaustive model lists in skills; inspect the schema before editing.
+- Current schema is large: 300+ models and 200+ enums. Do not duplicate exhaustive model lists in skills; inspect the schema before editing.
 
 ### Prisma 7 Datasource
 

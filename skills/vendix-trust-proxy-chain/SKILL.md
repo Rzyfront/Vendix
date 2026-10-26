@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Poniendo un gateway, CDN, ALB o WAF delante del backend"
@@ -41,9 +41,7 @@ y falla de dos maneras **asimétricas**:
 | **Muy bajo** | `req.ip` colapsa a la IP de tu propio proxy. Todos los clientes comparten una cubeta. Diez peticiones legítimas bloquean a la plataforma entera. | Caída de disponibilidad. **Ruidosa, visible, recuperable.** |
 | **Muy alto** | El cliente antepone una entrada falsa en `X-Forwarded-For` y se le cree. IP nueva en cada petición ⇒ cubeta nueva en cada petición. | **Bypass total del rate limit. Silencioso.** Nadie se entera. |
 
-> **Ante la duda, quedate corto.** Un número bajo se nota el mismo día; uno alto no se nota
-> nunca. El apagón global que originó este skill fue el caso "muy bajo" (sin `trust proxy`
-> del todo) y se detectó en horas. El caso "muy alto" no se habría detectado.
+> **Ante la duda, quedate corto.** Un número bajo se nota el mismo día; uno alto no se nota nunca.
 
 ## Por qué un predicado y no un número
 
@@ -53,175 +51,31 @@ y falla de dos maneras **asimétricas**:
 app.getHttpAdapter().getInstance().set('trust proxy', createTrustProxyPredicate(trustProxyHops));
 ```
 
-Tres valores posibles, dos malos:
+- **`true`**: Express toma el PRIMER elemento del XFF, el que escribe el cliente. Nunca.
+- **`N` pelado**: confía en N saltos incondicionalmente; una conexión directa también es el salto 0 y su XFF se acepta.
+- **Predicado** `(addr, hop) => hop === 0 ? isPrivateAddress(addr) : hop < hops`: el salto 0 se confía sólo si viene de una dirección privada (proxy propio); un golpe directo desde internet conserva la IP real.
 
-- **`true`** — Express toma el PRIMER elemento de `X-Forwarded-For`, que es exactamente el
-  que escribe el cliente. Falsificación trivial. Nunca.
-- **`N` (número pelado)** — confía en los N saltos más cercanos *incondicionalmente*. El
-  problema: **una conexión directa también es el salto 0**. Antes del blue/green el contenedor publicaba
-  `-p 3000:3000` y los security groups abrían el puerto a `0.0.0.0/0`, así que cualquiera
-  le hablaba al backend saltándose nginx, y su XFF se acepta como si viniera del proxy.
-  Reproducido: `curl -H 'X-Forwarded-For: 6.6.6.6' http://localhost:3000/api/health`
-  devolvía `client_ip: 6.6.6.6`.
-- **Predicado** — `(addr, hop) => hop === 0 ? isPrivateAddress(addr) : hop < hops`.
-  El salto 0 se confía **sólo si viene de una dirección privada**, o sea de un proxy tuyo
-  en la red interna. Un golpe directo desde internet es salto 0 público ⇒ no se confía ⇒
-  `proxy-addr` se queda con la IP real del atacante e ignora la cabecera.
+El predicado **sólo protege el salto 0**; desde el salto 1 decide por conteo, así que el conteo tiene que ser exacto. Si hace falta más margen, confiar por **dirección** (rangos de egreso del gateway) dentro de `createTrustProxyPredicate`, nunca subir el número.
 
-### El límite del predicado (leer antes de meter un gateway)
+## Topología de producción (resumen)
 
-El predicado **sólo protege el salto 0**. A partir del salto 1 decide por conteo, y por
-conteo **una entrada legítima del gateway y una entrada falsificada son indistinguibles**.
-Por eso el conteo tiene que ser exacto: es la única defensa que queda ahí.
+`api.vendix.online` → registro A a la EIP del EC2 → nginx en el host (añade `X-Forwarded-For` con `$proxy_add_x_forwarded_for`) → contenedor `vendix-backend-blue` (127.0.0.1:3001) o `-green` (:3002). El puerto 3000 ya no se publica. **Un solo proxy propio ⇒ `TRUST_PROXY_HOPS=1`.** CloudFront **no** está delante de la API (solo `sitemap.xml`, `robots.txt`, `manifest.webmanifest`, `pwa/*`, sin rate limit). El DNS es la autoridad sobre el camino real, no el diagrama ni la consola.
 
-Si algún día necesitás más margen, la solución no es tocar el número sino confiar por
-**dirección** — los rangos de egreso conocidos del gateway — dentro de
-`createTrustProxyPredicate`. Ese es el punto de extensión previsto.
+## Meter un gateway/ALB/WAF/CDN delante
 
-## Topología de producción (verificada 2026-09-01; blue/green documentado 2026-10-14)
+1. Contar saltos desde el DNS (`dig +short api.vendix.online`).
+2. Verificar si cada salto **añade** o **reemplaza** el XFF (uno que reemplaza no suma salto).
+3. Desplegar el gateway **sin** tocar `TRUST_PROXY_HOPS` (estado degradado esperado: `client_ip` = IP de egreso del gateway).
+4. Recién ahí subir el valor en Secrets Manager `vendix/production/app` (leer, fusionar, verificar conteo de claves: `put-secret-value` reemplaza el JSON entero) y redesplegar.
+5. Correr la sonda de dos curls.
 
-```
-navegador ──HTTPS──> api.vendix.online (32.195.142.115 = EIP del EC2)
-                       └─> nginx en el HOST (systemd, /etc/nginx/conf.d/vendix.conf)
-                             proxy_pass http://vendix_api;
-                             upstream vendix_api { server 127.0.0.1:<3001|3002>; }
-                               (/etc/nginx/conf.d/vendix-upstream.conf)
-                             X-Forwarded-For $proxy_add_x_forwarded_for   ← AÑADE
-                             └─> contenedor vendix-backend-blue (127.0.0.1:3001->3000)
-                                 o vendix-backend-green (127.0.0.1:3002->3000), solo uno activo
-                                   peer visto = gateway del bridge Docker (privado)
-```
+**Siempre gateway primero, `hops` después.** Al revés se abre una ventana de falsificación activa.
 
-El puerto 3000 ya NO se publica en el host. El primer deploy tras el cambio aún puede
-tener el legado `vendix-backend` en 3000 hasta que se retire.
+**Sonda (obligatoria tras cualquier cambio de topología):** `/api/health` expone `client_ip` y `trust_proxy_hops`. A) sin cabecera debe devolver tu IP pública. B) con `-H 'X-Forwarded-For: 6.6.6.6'` debe devolver tu IP igual; si devuelve `6.6.6.6`, el valor está muy alto: bajarlo ya. B es la que importa.
 
-**Un solo proxy propio ⇒ `TRUST_PROXY_HOPS=1`.**
+**Trampa local:** en macOS el bridge de Docker es privado, así que la sonda B contra `localhost:3000` devuelve `6.6.6.6` y está bien. En local lo que discrimina es `-H 'X-Forwarded-For: 1.1.1.1, 2.2.2.2'`: con hops=1 debe dar `2.2.2.2`; si da `1.1.1.1`, el valor efectivo es `true` (emergencia).
 
-CloudFront (`E1I27OYFJX7VYJ`, alias `vendix.online` y `*.vendix.online`) **NO está delante
-de la API**, aunque su origen se llame `api.vendix.online`:
-
-- Route53 tiene un registro **A explícito** `api.vendix.online → 32.195.142.115`, que gana
-  sobre el comodín `*.vendix.online → CloudFront`.
-- El frontend llama `https://api.vendix.online/api` directo (`environment.ts`).
-- CloudFront sólo enruta 4 rutas al origen backend: `sitemap.xml`, `robots.txt`,
-  `manifest.webmanifest`, `pwa/*`. **Ninguna tiene rate limit.**
-
-> Una distribución que existe pero no está en DNS recibe cero tráfico. **El DNS es la
-> autoridad sobre qué camino recorre el tráfico, no el diagrama ni la consola.**
-
-## Ruta de migración: meter un gateway delante del backend
-
-Éste es el procedimiento cuando agregues un API Gateway, ALB, WAF o CDN.
-
-### El orden importa, y sólo hay un orden seguro
-
-Hay dos ventanas posibles durante la migración. Una es aceptable, la otra no:
-
-| Orden | Ventana que se abre | ¿Aceptable? |
-| --- | --- | --- |
-| Subir `hops` **primero**, gateway después | El conteo declara un proxy que todavía no existe ⇒ **falsificación activa** | **NO. Nunca.** |
-| Gateway **primero**, subir `hops` después | `req.ip` es la IP de egreso del gateway ⇒ todos comparten cubeta (degradado) | **Sí.** Ruidoso y reversible. |
-
-**Siempre: gateway primero, `hops` después.** Se acepta la ventana degradada, jamás la de
-falsificación.
-
-### Pasos
-
-**1. Contá los saltos desde el DNS, no desde el diagrama.**
-
-```bash
-dig +short api.vendix.online        # ¿A la EIP, o a un CDN/ALB?
-```
-
-Un registro A a tu EIP significa que no hay nada delante, sin importar qué
-distribuciones/gateways existan en la cuenta.
-
-**2. Verificá si cada salto AÑADE o REEMPLAZA el `X-Forwarded-For`.**
-
-Esto cambia el número. nginx con `$proxy_add_x_forwarded_for` **añade** (el XFF del cliente
-sobrevive y se le concatena la IP real). Un gateway que **reemplaza** el XFF con la IP del
-cliente **no suma un salto** — el conteo se queda como estaba por más cajas que agregues.
-
-```bash
-# nginx de prod
-ssh -i keys/vendix-production-key.pem ec2-user@<EIP> \
-  'sudo grep -rn "X-Forwarded-For" /etc/nginx/conf.d/'
-```
-
-**3. Desplegá el gateway SIN tocar `TRUST_PROXY_HOPS`.**
-
-Verificá con la sonda (abajo) que `client_ip` ahora muestra la IP de egreso del gateway.
-Eso confirma que el gateway está de verdad en el camino. Es el estado degradado esperado:
-seguro, visible, temporal.
-
-**4. Recién ahí subí el valor** en Secrets Manager y redesplegá:
-
-```bash
-CUR=$(aws secretsmanager get-secret-value --secret-id vendix/production/app \
-      --query SecretString --output text)
-NEW=$(printf '%s' "$CUR" | python3 -c "
-import sys, json
-d = json.load(sys.stdin); before = len(d)
-d['TRUST_PROXY_HOPS'] = '2'
-assert len(d) == before, 'clave nueva inesperada'
-sys.stdout.write(json.dumps(d))")
-aws secretsmanager put-secret-value --secret-id vendix/production/app --secret-string "$NEW"
-```
-
-> `put-secret-value` **reemplaza el JSON entero**. Siempre leer, fusionar en memoria y
-> verificar el conteo de claves. La versión anterior queda como `AWSPREVIOUS` (rollback).
-
-**5. Corré la sonda de dos curls y no des el paso por hecho hasta que pase.**
-
-### La sonda de dos curls (obligatoria tras cualquier cambio de topología)
-
-`/api/health` expone `client_ip` y `trust_proxy_hops` justamente para esto.
-
-```bash
-MI_IP=$(curl -s https://api.ipify.org)
-
-# A — camino legítimo: debe devolver TU IP pública real
-curl -s https://api.vendix.online/api/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_ip'))"
-# esperado: $MI_IP   → si devuelve la IP de nginx/gateway, el número está MUY BAJO
-
-# B — intento de falsificación por el camino legítimo: debe devolver TU IP igual
-curl -s -H 'X-Forwarded-For: 6.6.6.6' https://api.vendix.online/api/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_ip'))"
-# esperado: $MI_IP   → si devuelve 6.6.6.6, el número está MUY ALTO. Bajalo YA.
-```
-
-**B es la que importa.** A puede pasar con un valor demasiado alto; sólo B lo delata.
-
-### En local la sonda B NO significa lo mismo (trampa)
-
-Contra el backend de desarrollo, `curl -H 'X-Forwarded-For: 6.6.6.6' localhost:3000/api/health`
-**devuelve `6.6.6.6`, y eso está bien**. En macOS (Docker Desktop / Colima) todo lo que sale
-del host llega al contenedor SNAT'd por el gateway del bridge (`172.18.0.1`), que es una
-dirección **privada** — o sea, ocupa exactamente la posición de nginx. El predicado confía en
-ese salto 0 y camina la cadena, como debe.
-
-Consecuencia: **el golpe directo de producción (salto 0 público) no se puede reproducir desde
-el host en macOS.** No lo intentes y no leas ese `6.6.6.6` como un agujero.
-
-Lo que SÍ discrimina en local es una cadena de **dos** entradas:
-
-```bash
-curl -s -H 'X-Forwarded-For: 1.1.1.1, 2.2.2.2' localhost:3000/api/health \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_ip'))"
-# esperado con hops=1: 2.2.2.2  (la ÚLTIMA entrada)
-# si devuelve 1.1.1.1 → el valor efectivo es `true`: el cliente manda. Emergencia.
-```
-
-Las dos garantías del caso directo de producción se verifican por otro lado:
-
-1. **Docker preserva la IP de origen en el puerto publicado** — regla `DNAT ... 0.0.0.0/0
-   → 172.18.0.3:3000` en la EC2; los `MASQUERADE` cubren sólo el tráfico *saliente* de las
-   subredes Docker. Un atacante externo llega al contenedor con su IP pública real.
-   ```bash
-   ssh -i keys/vendix-production-key.pem ec2-user@<EIP> \
-     'sudo iptables -t nat -L DOCKER -n | grep -E "300[0-2]"; sudo iptables -t nat -L POSTROUTING -n'
-   ```
-2. **El predicado rechaza un salto 0 público** — cubierto por `client-ip.util.spec.ts` contra
-   la librería `proxy-addr` real, la misma que usa Express por dentro.
+Comandos, diagrama completo, verificación de iptables y deuda conocida: `references/topologia-y-migracion.md` (leer bajo demanda).
 
 ## Reglas de código
 
@@ -240,16 +94,6 @@ inseparables: una sin la otra no sirve.
 
 **Llaveá con `bucketHash()` lo que sea PII.** Redis es texto plano para cualquiera con
 acceso al contenedor; `KEYS rl:login:*` no debe ser un censo de usuarios.
-
-## Deuda conocida
-
-- ~~Puerto 3000 abierto a `0.0.0.0/0`~~ **Resuelta con el deploy blue/green** (2026-10-14):
-  los slots publican sólo en `127.0.0.1:3001/3002` y el 3000 se cierra en los security groups
-  (`vendix-ec2-sg`, `vendix-ec2-backend`). Verificar tras el primer deploy que el legado
-  `vendix-backend` en 3000 ya no existe y que la regla del SG fue retirada. El predicado
-  sigue siendo la defensa del salto 0.
-- El predicado decide por **conteo** a partir del salto 1. Confiar por **dirección** (rangos
-  de egreso del gateway) es la evolución natural cuando haya un gateway real.
 
 ## Archivos
 

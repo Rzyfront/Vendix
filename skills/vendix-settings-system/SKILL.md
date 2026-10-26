@@ -84,7 +84,7 @@ Key files:
 | Theme tokens and CSS variables | `vendix-frontend-theme` |
 | S3 logo/favicon handling | `vendix-s3-storage` |
 | Prisma schema changes | `vendix-prisma` and `vendix-prisma-migrations` |
-| Mobile-native settings UI | Knowledge gap until mobile skills exist |
+| Mobile-native settings UI | `mobile-dev` (only when the task names mobile) |
 
 ## Related Skills
 
