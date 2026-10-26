@@ -6,6 +6,7 @@ import {
   computed,
   inject,
   signal,
+  effect,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -49,6 +50,7 @@ import {
   PromotionStackItem,
   PromotionScope,
 } from '../../../../../shared/components/promotion-stack/promotion-stack.component';
+import { StoreSeoService, catalogCanonicalPath } from '../../services/store-seo';
 
 interface CatalogSettings {
   products_per_page: number;
@@ -92,6 +94,20 @@ const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CatalogComponent implements OnInit {
+  // SEO de la tienda: /catalog, /products y /productos comparten canonical /catalog;
+  // /new → /novedades y /sale → /ofertas (store-seo.ts).
+  private readonly storeSeo = inject(StoreSeoService);
+  private readonly storeSeoOwner = {};
+  private readonly storeSeoRoute = inject(ActivatedRoute);
+  private readonly storeSeoSync = effect(() => {
+    const routeTitle = this.storeSeoRoute.snapshot.data['title'] as string | undefined;
+    const page = this.storeSeo.listingPage(catalogCanonicalPath(routeTitle), routeTitle ?? 'Catálogo');
+    if (page) this.storeSeo.apply(this.storeSeoOwner, page);
+  });
+  private readonly storeSeoCleanup = inject(DestroyRef).onDestroy(() =>
+    this.storeSeo.release(this.storeSeoOwner),
+  );
+
   readonly products = signal<EcommerceProduct[]>([]);
   readonly categories = signal<Category[]>([]);
   readonly brands = signal<Brand[]>([]);

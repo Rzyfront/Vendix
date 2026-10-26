@@ -101,6 +101,34 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(get).toHaveBeenCalledWith('seo:sitemap:tienda.example');
   });
 
+  it('ecommerce listings use the latest product update as lastmod, never the request time', async () => {
+    resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE', store_id: 42 });
+    findMany.mockResolvedValue([
+      { slug: 'nuevo', updated_at: new Date('2026-10-16T06:11:52Z') },
+      { slug: 'viejo', updated_at: new Date('2026-10-01T03:13:58Z') },
+      { slug: 'sin-fecha', updated_at: null },
+    ]);
+    const xml = await service.generateSitemap('tienda.example');
+    const entry = (loc: string) =>
+      xml.split('<url>').find((block) => block.includes(`<loc>${loc}</loc>`)) ?? '';
+
+    for (const path of ['/', '/catalog', '/novedades', '/ofertas']) {
+      expect(entry(`https://tienda.example${path}`)).toContain('<lastmod>2026-10-16T06:11:52.000Z</lastmod>');
+    }
+    expect(entry('https://tienda.example/products/viejo')).toContain('<lastmod>2026-10-01T03:13:58.000Z</lastmod>');
+    expect(entry('https://tienda.example/products/sin-fecha')).not.toContain('<lastmod>');
+    const today = new Date().toISOString().slice(0, 10);
+    expect(xml).not.toContain(`<lastmod>${today}`);
+  });
+
+  it('ecommerce store without products omits listing lastmod', async () => {
+    resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE', store_id: 42 });
+    findMany.mockResolvedValue([]);
+    const xml = await service.generateSitemap('tienda.example');
+    expect(xml.match(/<loc>/g)).toHaveLength(4);
+    expect(xml).not.toContain('<lastmod>');
+  });
+
   it('does not query products without an ecommerce store id', async () => {
     resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE' });
     const xml = await service.generateSitemap('tienda.example');
