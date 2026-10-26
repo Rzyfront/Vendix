@@ -1501,29 +1501,31 @@ export class OrderItemChangesService {
 
       let couponDiscount = 0;
       if (quoted && couponCode) {
+        const remaining = Math.max(
+          0,
+          this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+        );
+        const couponDto = {
+          code: couponCode,
+          cart_subtotal: remaining,
+          customer_id: order.customer_id ?? undefined,
+          items: quoteItems.map((it) => ({
+            product_id: it.product_id as number,
+            category_id: null,
+            category_ids: categoriesOf(it.product_id),
+            line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
+          })),
+          store_id: storeId,
+        } as any;
+        const couponOpts = {
+          excludeOrderId: orderId,
+          asOf: order.created_at ? new Date(order.created_at) : undefined,
+          // `current_uses` que el editor subió SIN fila coupon_uses.
+          orderCouponId: order.coupon_id ?? null,
+          orderState: order.state,
+        };
         try {
-          const remaining = Math.max(
-            0,
-            this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
-          );
-          const validation = await this.couponsService.validate({
-            code: couponCode,
-            cart_subtotal: remaining,
-            customer_id: order.customer_id ?? undefined,
-            items: quoteItems.map((it) => ({
-              product_id: it.product_id as number,
-              category_id: null,
-              category_ids: categoriesOf(it.product_id),
-              line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
-            })),
-            store_id: storeId,
-          } as any, {
-            excludeOrderId: orderId,
-            asOf: order.created_at ? new Date(order.created_at) : undefined,
-            // `current_uses` que el editor subió SIN fila coupon_uses.
-            orderCouponId: order.coupon_id ?? null,
-            orderState: order.state,
-          });
+          const validation = await this.couponsService.validate(couponDto, couponOpts);
           couponUseRow = await db.coupon_uses.findFirst({
             where: { order_id: orderId, coupon_id: validation?.coupon_id ?? order.coupon_id },
             select: { id: true, discount_applied: true },
@@ -1534,28 +1536,47 @@ export class OrderItemChangesService {
           requotedCouponDiscount = couponDiscount;
         } catch (err) {
           // `validate` solo encuentra cupones activos (eliminar = desactivar).
-          // Si ESTA orden ya usó el cupón y el comercio lo desactivó después,
-          // se respeta y se conserva el monto que ya tenía: no se re-cotiza.
-          const usedInactive =
+          // Si ESTA orden ya tiene el cupón (`orders.coupon_id`, p. ej. la
+          // orden POS sin cobrar, o su fila `coupon_uses`) y el comercio lo
+          // desactivó después, se respeta: `keepInactiveUsedByOrder` lo cotiza.
+          const keptCoupon =
             err instanceof VendixHttpException &&
             err.errorCode === ErrorCodes.CPN_FIND_001.code
-              ? await db.coupon_uses.findFirst({
-                  where: { order_id: orderId, coupon: { code: couponCode, is_active: false } },
-                  select: { id: true, discount_applied: true },
-                  orderBy: { id: 'desc' },
-                })
+              ? await this.couponsService
+                  .validate(couponDto, { ...couponOpts, keepInactiveUsedByOrder: true })
+                  .catch(() => null)
               : null;
-          if (usedInactive) {
-            const remaining = Math.max(
-              0,
-              this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+          if (keptCoupon?.kept_inactive && keptCoupon.discount_type === 'PERCENTAGE') {
+            // Porcentual: el porcentaje es la fuente de verdad y el monto se
+            // recalcula sobre el nuevo subtotal; nunca se congela en pesos.
+            couponUseRow = await db.coupon_uses.findFirst({
+              where: { order_id: orderId, coupon_id: keptCoupon.coupon_id },
+              select: { id: true, discount_applied: true },
+            });
+            couponDiscount = roundMoney2(
+              Math.min(keptCoupon.discount_amount || 0, remaining),
             );
-            // El checkout (orden sin `coupon_id`) guarda en `discount_applied`
+            requotedCouponDiscount = couponDiscount;
+            const pct = `${String(keptCoupon.discount_value).replace('.', ',')} %`;
+            warnings.push(
+              `El cupón ${couponCode} (${pct}) está desactivado: su descuento se recalcula al ${pct} del nuevo subtotal: ${money(couponDiscount)}`,
+            );
+          } else if (keptCoupon?.kept_inactive) {
+            // Monto fijo: se conserva el monto que la orden ya tenía. El
+            // checkout (orden sin `coupon_id`) guarda en `discount_applied`
             // solo el cupón: ese monto se conserva tal cual. El cobro POS
             // (`commitCouponUseForOrder`, orden con `coupon_id`) guarda TODO el
             // descuento de la orden: ahí el cupón nunca supera lo que ocupaba
-            // en la cabecera (sin promociones ni descuento manual).
-            const applied = Number(usedInactive.discount_applied ?? 0);
+            // en la cabecera (sin promociones ni descuento manual). La orden
+            // POS sin cobrar aún no tiene fila: vale el monto del cupón.
+            const usedInactive = await db.coupon_uses.findFirst({
+              where: { order_id: orderId, coupon: { code: couponCode, is_active: false } },
+              select: { id: true, discount_applied: true },
+              orderBy: { id: 'desc' },
+            });
+            const applied = usedInactive
+              ? Number(usedInactive.discount_applied ?? 0)
+              : Number(keptCoupon.discount_amount ?? 0);
             const priorPromotions = (order.order_promotions ?? []).reduce(
               (sum: number, p: any) => sum + Number(p.discount_amount ?? 0),
               0,
@@ -1563,14 +1584,14 @@ export class OrderItemChangesService {
             const kept = roundMoney2(
               Math.max(
                 0,
-                order.coupon_id == null
+                order.coupon_id == null || !usedInactive
                   ? applied
                   : Math.min(applied, headerDiscount - priorPromotions - manualPart),
               ),
             );
             couponDiscount = roundMoney2(Math.min(kept, remaining));
             // `requotedCouponDiscount` queda null: la fila `coupon_uses` del
-            // cupón inactivo no se reescribe.
+            // cupón inactivo de monto fijo no se reescribe.
             warnings.push(
               couponDiscount < kept
                 ? `El cupón ${couponCode} está desactivado: su descuento se reduce de ${money(kept)} a ${money(couponDiscount)} porque supera el nuevo total`

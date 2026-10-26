@@ -902,6 +902,15 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(p.warnings.join(' ')).not.toContain('$15 → $10');
   });
 
+  // `validate` solo encuentra cupones activos (CPN_FIND_001); con
+  // `keepInactiveUsedByOrder` CouponsService cotiza el desactivado que la orden ya usa.
+  const keepInactive = (type: 'FIXED_AMOUNT' | 'PERCENTAGE', value: number) =>
+    async (d: any, opts?: any) => {
+      if (!opts?.keepInactiveUsedByOrder) throw new VendixHttpException(ErrorCodes.CPN_FIND_001);
+      const amount = type === 'PERCENTAGE' ? Math.round(d.cart_subtotal * value) / 100 : value;
+      return { valid: true, coupon_id: 9, code: d.code, discount_type: type, discount_value: value, discount_amount: amount, kept_inactive: true };
+    };
+
   it('R7-1) cupón usado por la orden y desactivado después: se acepta y conserva su descuento', async () => {
     const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 0, order_item_taxes: [] });
     const ctx = build([mk(1), mk(2)], {
@@ -910,7 +919,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
     });
     ctx.promotionEngine.quoteDiscounts.mockResolvedValue({ total_discount: 10, order_promotions_snapshot: [{ promotion_id: 1, discount_amount: 10 }] });
     // `validate` solo busca cupones activos: el desactivado da CPN_FIND_001.
-    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 5));
     ctx.db.coupon_uses.findFirst.mockImplementation(async ({ where }: any) =>
       where.coupon ? { id: 33, discount_applied: 5 } : { coupon: { code: 'BIENVENIDA' } },
     );
@@ -946,7 +955,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
   it('R7-3) cupón desactivado y usado en orden con descuento por línea: el monto se conserva al quitar un producto', async () => {
     const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 5, order_item_taxes: [] });
     const ctx = build([mk(1), mk(2)], { discount_amount: 10, coupon_code: 'FIJO10', coupon_id: 1 });
-    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 10));
     ctx.db.coupon_uses.findFirst.mockResolvedValue({ id: 33, discount_applied: 10 });
     const p = await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
     expect(p.can_apply).toBe(true);
@@ -962,7 +971,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
       order_promotions: [{ id: 71, promotion_id: 1, discount_amount: 10 }],
     });
     ctx.promotionEngine.quoteDiscounts.mockResolvedValue({ total_discount: 10, order_promotions_snapshot: [{ promotion_id: 1, discount_amount: 10 }] });
-    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 5));
     // `commitCouponUseForOrder` guarda `order.discount_amount` (15), no solo el cupón (5).
     ctx.db.coupon_uses.findFirst.mockResolvedValue({ id: 33, discount_applied: 15 });
     const dto = { update: [{ order_item_id: 2, quantity: 2 }] };
@@ -977,7 +986,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
   it('R7-5) cupón inactivo mayor que el nuevo total: se recorta, se avisa y no se reescribe coupon_uses', async () => {
     const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 10, total_price: 10, discount_amount: 0, order_item_taxes: [] });
     const ctx = build([mk(1), mk(2)], { discount_amount: 15, coupon_code: null, coupon_id: null });
-    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 15));
     ctx.db.coupon_uses.findFirst.mockImplementation(async ({ where }: any) =>
       where.coupon ? { id: 33, discount_applied: 15 } : { coupon: { code: 'GRANDE' } },
     );
@@ -994,7 +1003,7 @@ describe('OrderItemChangesService (QUI-650)', () => {
     // Segunda edición: la cabecera quedó recortada en $10, coupon_uses conserva $20.
     const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 25, total_price: 25, discount_amount: 0, order_item_taxes: [] });
     const ctx = build([mk(1), mk(2)], { discount_amount: 10, coupon_code: null, coupon_id: null });
-    ctx.coupons.validate.mockRejectedValue(new VendixHttpException(ErrorCodes.CPN_FIND_001));
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 20));
     ctx.db.coupon_uses.findFirst.mockImplementation(async ({ where }: any) =>
       where.coupon ? { id: 33, discount_applied: 20 } : { coupon: { code: 'GRANDE' } },
     );
@@ -1005,6 +1014,38 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(p.warnings.join(' ')).toContain('se conserva su descuento de $20');
     await applyV(ctx, { ...dto, reason: 'motivo ok' });
     expect(ctx.db.coupon_uses.update).not.toHaveBeenCalled();
+  });
+
+  it('R7-7) regla 1: orden POS sin cobrar (coupon_id, sin fila coupon_uses) con cupón fijo desactivado: se edita y conserva el descuento', async () => {
+    const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 5, order_item_taxes: [] });
+    const ctx = build([mk(1), mk(2)], { discount_amount: 10, coupon_code: 'FIJO10', coupon_id: 9 });
+    ctx.coupons.validate.mockImplementation(keepInactive('FIXED_AMOUNT', 10));
+    const p = await ctx.service.preview(ORDER_ID, { remove: [{ order_item_id: 1 }] });
+    expect(p.can_apply).toBe(true);
+    expect(p.totals.after.discount).toBe(10);
+    expect(p.warnings.join(' ')).toContain('El cupón FIJO10 está desactivado: se conserva su descuento de $10');
+    expect(ctx.coupons.validate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ code: 'FIJO10' }),
+      expect.objectContaining({ excludeOrderId: ORDER_ID, orderCouponId: 9, keepInactiveUsedByOrder: true }),
+    );
+  });
+
+  it('R7-8) regla 2: cupón porcentual desactivado se recalcula con su % sobre el nuevo subtotal y lo informa', async () => {
+    const mk = (id: number) => mkLine(id, { quantity: 1, unit_price: 100, total_price: 100, discount_amount: 10, order_item_taxes: [] });
+    const ctx = build([mk(1), mk(2)], { discount_amount: 20, coupon_code: 'DIEZ', coupon_id: 9 });
+    ctx.coupons.validate.mockImplementation(keepInactive('PERCENTAGE', 10));
+    ctx.db.coupon_uses.findFirst.mockResolvedValue({ id: 33, discount_applied: 20 });
+    const dto = { update: [{ order_item_id: 2, quantity: 3 }] };
+    const p = await ctx.service.preview(ORDER_ID, dto);
+    expect(p.can_apply).toBe(true);
+    // 10 % de $400, no los $20 congelados.
+    expect(p.totals.after.discount).toBe(40);
+    expect(p.warnings.join(' ')).toContain('El cupón DIEZ (10 %) está desactivado: su descuento se recalcula al 10 % del nuevo subtotal: $40');
+    await applyV(ctx, { ...dto, reason: 'motivo ok' });
+    expect(ctx.db.coupon_uses.update).toHaveBeenCalledWith({
+      where: { id: 33 }, data: { discount_applied: expect.anything() },
+    });
+    expect(Number(ctx.db.coupon_uses.update.mock.calls[0][0].data.discount_applied)).toBe(40);
   });
 
   it('R5-2) una promoción que deja de aplicar queda en 0 (no se borra) y vuelve a aplicar al re-agregar', async () => {

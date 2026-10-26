@@ -9672,9 +9672,9 @@ export class OrderFlowService {
    *    el método es idempotente, así un retry de `flow/pay` o un webhook
    *    duplicado de `confirmPayment` no produce doble consumo.
    *  - Incrementa `coupons.current_uses` con un `updateMany` idempotente
-   *    (`current_uses < max_uses`, `state='active'`). count=0 ⇒ el cupón
-   *    ya no es consumible (agotado o desactivado) y se aborta con
-   *    `ORD_EDIT_COUPON_COMMIT_001` (la orden NO queda pagada).
+   *    (`current_uses < max_uses`). count=0 ⇒ el cupón se agotó y se aborta
+   *    con `ORD_EDIT_COUPON_COMMIT_001` (la orden NO queda pagada). Un cupón
+   *    desactivado después de aplicarse a la orden NO bloquea (QUI-650).
    *
    * El descuento persistido se toma de `orders.discount_amount` que el
    * editor / POS ya calculó y guardó; acá NO recalculamos para no
@@ -9723,7 +9723,7 @@ export class OrderFlowService {
 
     // El cupón pudo haber sido desactivado o cambiado por el operador
     // entre el editor y el cobro. Re-leemos su estado actual bajo el
-    // scope del store para confirmar que sigue consumible.
+    // scope del store para confirmar que le queda cupo.
     const coupon = await client.coupons.findFirst({
       where: { id: order.coupon_id, store_id: order.store_id },
       select: {
@@ -9740,17 +9740,9 @@ export class OrderFlowService {
         { stage: 'commit_coupon_lookup', coupon_id: order.coupon_id },
       );
     }
-    if (!coupon.is_active) {
-      throw new VendixHttpException(
-        ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
-        undefined,
-        {
-          stage: 'commit_coupon_state',
-          coupon_id: order.coupon_id,
-          is_active: coupon.is_active,
-        },
-      );
-    }
+    // QUI-650 — un cupón desactivado (o eliminado = desactivado) DESPUÉS de
+    // aplicarse a esta orden no bloquea el cobro: el descuento ya está en la
+    // orden. Se registra su uso igual que el de un cupón activo.
     if (
       coupon.max_uses !== null &&
       coupon.max_uses !== undefined &&
@@ -9794,7 +9786,6 @@ export class OrderFlowService {
       const inc = await tx.coupons.updateMany({
         where: {
           id: order.coupon_id as number,
-          is_active: true,
           // Sin límite (`max_uses = null`) ⇒ siempre incrementa.
           // Con límite ⇒ todavía hay cupo.
           OR: [

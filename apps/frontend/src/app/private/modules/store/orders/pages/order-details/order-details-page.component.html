@@ -2535,6 +2535,11 @@
                         ></app-icon>
                         <span class="text-text-secondary truncate">
                           Cupón
+                          @if (cp.percent) {
+                            <span class="font-semibold text-gray-900"
+                              >{{ cp.percent }} %</span
+                            >
+                          }
                           <span class="font-semibold text-gray-900">{{
                             cp.code
                           }}</span>
