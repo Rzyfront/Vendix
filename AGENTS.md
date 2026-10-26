@@ -1,7 +1,7 @@
 # Vendix — instrucciones para agentes
 
 Fuente única para Claude Code y Gemini CLI: `CLAUDE.md` y `GEMINI.md` son symlinks a este archivo.
-Los skills viven en `skills/<name>/SKILL.md`; `./skills/setup.sh` los enlaza en `.claude/skills/` y `.agents/skills/`.
+Los skills viven en `skills/<name>/SKILL.md`; `./skills/setup.sh` los enlaza en `.claude/skills/` y `.agents/skills/`. Setup de agentes por máquina (gentle-ai): `skills/SETUP-AGENTES.md`.
 Responde en el idioma del usuario.
 
 ## Repo
@@ -18,7 +18,8 @@ Responde en el idioma del usuario.
 - Trabajo grande → un único documento de feature `odd/tasks/<feature>.md` (`## Specs`, `## Tasks`, `## Log`). Las Specs incluyen la decisión de negocio, los archivos críticos y lo que se reutiliza. Rafael lo aprueba antes de ejecutar. Si hay un plan aprobado y dice "ejecuta", se ejecuta tal cual.
 - **Historia de usuario primero.** Todo ticket, fix o feature se traduce antes de codificar a "Como <rol> en <entorno>, quiero <funcionalidad> para <resultado>", con pasos humanos en pantalla para reproducir o probar y criterios de aceptación observables (lo que la persona ve). Lo técnico va debajo como notas. Aplica al documento de feature, al resumen de cambios pequeños y a los reportes de QA/validación.
 - Subagentes solo con motivo nombrado (exploración grande, escritores paralelos independientes, contexto agotado, verificador de alto riesgo). Reciben la ruta de la tarea, los skills, los archivos en alcance y el comando de verificación.
-- Worktrees permitidos salvo que Rafael diga lo contrario en la tarea.
+- Trabajo grande que delega → carga `sopus` (modelo por rol y lista cerrada de modelos permitidos como workers).
+- Worktrees permitidos salvo que Rafael diga lo contrario en la tarea. Bórralos (`git worktree remove` + `prune`) en cuanto su trabajo quede commiteado o publicado, igual que los temporales, documentos de prueba y exports de un proceso.
 - Carga el skill cuya descripción coincida con el área (backend, frontend, prisma, DIAN, inventario…). Cualquier archivo de frontend → `vendix-zoneless-signals` (sus violaciones son bugs silenciosos). Patrón nuevo sin skill → sugiérelo en una línea al cerrar.
 - Alto riesgo (cargar su skill y marcarlo para RDD): migraciones y datos, DIAN y fiscal, dinero/pagos/suscripciones, auth y permisos, scoping por tenant.
 - Cambio mínimo y en alcance; reutiliza patrones existentes; TypeScript sin `any` injustificado; no cambies comportamiento fuera del alcance; respeta los cambios ajenos del árbol.
