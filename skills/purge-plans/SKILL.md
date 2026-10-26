@@ -115,6 +115,5 @@ are documentation living beside the plans, not plans. Delete one by hand if you 
 ## Related Skills
 
 - `how-to-plan` — produces the ODD feature docs in `odd/tasks/`
-- `how-to-critical-plan` — produces the v2 bundles; a bundle's `evidence/` dies with it
 - `vendix-engram` — persist a decision worth keeping before its plan is purged
 - `git-workflow` — most plan directories are gitignored, so git is not a safety net here
