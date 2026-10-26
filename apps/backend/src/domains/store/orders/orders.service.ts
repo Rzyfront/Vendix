@@ -81,8 +81,10 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   computeItemActions,
+  hasKitchenLinesAwaitingHandoff,
   OrderActionSnapshot,
 } from './order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import {
@@ -131,7 +133,7 @@ type ResolvedLineTax = {
  * filas de `order_item_taxes` que la respaldan. `line_tax_total` es lo que la
  * línea aporta a `orders.tax_amount`.
  */
-type PlannedOrderLine = {
+export type PlannedOrderLine = {
   unit_price: number;
   total_price: number;
   tax_rate: number | null;
@@ -247,7 +249,7 @@ export class OrdersService {
    * temprano si el comercio SÍ es responsable (camino feliz mayoritario).
    * Indeterminado ⇒ responsable (no bloquea).
    */
-  private async assertSaleVatAllowed(
+  async assertSaleVatAllowed(
     items: Array<{ product_id?: number | null; tax_amount_item?: number | null }>,
   ): Promise<void> {
     const taxedProductIds = Array.from(
@@ -1364,7 +1366,7 @@ export class OrdersService {
         ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
       include: {
-        stores: { select: { id: true, name: true, store_code: true } },
+        stores: { select: { id: true, name: true, store_code: true, industries: true } },
         order_items: {
           include: {
             products: {
@@ -1529,6 +1531,8 @@ export class OrdersService {
         // Persisted discount snapshots — read what was actually charged,
         // never recalculate against current promotions/coupons.
         order_promotions: {
+          // Filas en 0 = promociones que dejaron de aplicar tras una edición.
+          where: { discount_amount: { gt: 0 } },
           select: {
             id: true,
             promotion_id: true,
@@ -1855,6 +1859,51 @@ export class OrdersService {
   }
 
   /**
+   * QUI-650 — `PUT /items` y `PUT /editor` reemplazan todas las líneas
+   * (deleteMany + create). Si alguna ya tiene comanda de cocina, movimientos
+   * de inventario, reembolsos o líneas financieras, el borrado chocaría con
+   * FKs Restrict (P2003) o perdería historial: se rechaza con 409 tipado.
+   */
+  private async assertOrderLinesNotLockedInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+  ): Promise<void> {
+    const locked = await tx.order_items.findFirst({
+      where: {
+        order_id: orderId,
+        OR: [
+          { kitchen_ticket_items: { some: {} } },
+          { inventory_transactions: { some: {} } },
+          { refund_items: { some: {} } },
+          { financial_lines: { some: {} } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (locked) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_LINES_LOCKED_001);
+    }
+  }
+
+  /** `order_items.deleteMany` con red de seguridad: P2003 -> ORD_EDIT_LINES_LOCKED_001. */
+  private async deleteOrderItemsMappingLockInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+  ): Promise<void> {
+    try {
+      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
+        throw new VendixHttpException(ErrorCodes.ORD_EDIT_LINES_LOCKED_001);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * order-truth-and-invoice-tz plan — Step 2. Mirrors
    * `OrderFlowService.getAvailableActions`'s per-state orchestration
    * action-for-action (same codes, same `label_key`s, same util predicates)
@@ -1897,10 +1946,12 @@ export class OrdersService {
     const isKitchenOrder = (order.order_items ?? []).some(
       (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
     );
-    const hasPendingKitchen = (order.order_items ?? []).some((item: any) =>
-      (item.kitchen_ticket_items ?? []).some(
-        (k: any) => k.status !== 'delivered' && k.status !== 'cancelled',
-      ),
+    // Misma compuerta que la entrega/despacho reales (`OrderFlowService`):
+    // por línea no cancelada manda la ÚLTIMA fila KDS (una cancelada también
+    // bloquea) y una línea `prepared` sin ticket cuenta solo en restaurantes.
+    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(
+      (order.order_items ?? []) as any[],
+      { isRestaurant: storeIsRestaurant(order.stores?.industries) },
     );
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
@@ -2689,7 +2740,7 @@ export class OrdersService {
     });
   }
 
-  private async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
+  async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
     // ADR-07: una sesión nueva abierta manda sobre cualquier historial cerrado.
     const openSession = await this.prisma.table_sessions.findFirst({
       where: { order_id: orderId, store_id: storeId, closed_at: null },
@@ -2922,10 +2973,9 @@ export class OrdersService {
       // Delete existing items. P0-4: primero el desglose fiscal (FK
       // `order_item_taxes_order_item_id_fkey` requerida, sin `onDelete`),
       // dentro de esta misma tx; se recrea anidado en cada línea de abajo.
+      await this.assertOrderLinesNotLockedInTx(tx, id);
       await this.deletePersistedTaxBreakdown(tx, id);
-      await tx.order_items.deleteMany({
-        where: { order_id: id },
-      });
+      await this.deleteOrderItemsMappingLockInTx(tx, id);
 
       // Pre-resolve variant image S3 keys for items that have a variant
       const variantIds = dto.items
@@ -4145,8 +4195,9 @@ export class OrdersService {
       // `order_items`; se borra primero, en esta misma tx, y se recrea
       // anidado en cada línea de abajo (antes: 409
       // `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`).
+      await this.assertOrderLinesNotLockedInTx(tx, orderId);
       await this.deletePersistedTaxBreakdown(tx, orderId);
-      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+      await this.deleteOrderItemsMappingLockInTx(tx, orderId);
 
       const variantIds = dto.items
         .map((it) => (it.product_id ? it.product_variant_id : null))
@@ -4812,6 +4863,7 @@ export class OrdersService {
             orderBy: { installment_number: 'asc' },
           },
           order_promotions: {
+            where: { discount_amount: { gt: 0 } },
             select: {
               id: true,
               promotion_id: true,
@@ -5974,7 +6026,7 @@ export class OrdersService {
    * tarifa y precio (base y, si viene, bruto) al centavo. Consume el candidato
    * elegido para que dos líneas iguales no reclamen la misma fila previa.
    */
-  private preservePersistedOrderLine(
+  preservePersistedOrderLine(
     item: {
       product_id?: number | null;
       product_variant_id?: number | null;
@@ -6056,7 +6108,7 @@ export class OrdersService {
   }
 
   /** Payload anidado `order_item_taxes: { create }` desde el plan de línea. */
-  private toOrderItemTaxesCreate(line: PlannedOrderLine) {
+  toOrderItemTaxesCreate(line: PlannedOrderLine) {
     if (line.taxes.length === 0) return undefined;
     return {
       create: line.taxes.map((t) => ({
@@ -6160,7 +6212,7 @@ export class OrdersService {
   }
 
   /** Bruto (base + impuesto pre-descuento) de un plan de líneas. */
-  private grossOfPlannedLines(lines: PlannedOrderLine[]): number {
+  grossOfPlannedLines(lines: PlannedOrderLine[]): number {
     return roundMoney(
       lines.reduce(
         (sum, l) =>
@@ -6178,7 +6230,7 @@ export class OrdersService {
    * impuesto total y el descuento de base total. Sin descuento reconstruye el
    * impuesto desde la tarifa (restituye líneas antes descontadas).
    */
-  private applyGrossDiscountToPlannedLines(
+  applyGrossDiscountToPlannedLines(
     lines: PlannedOrderLine[],
     grossDiscount: number,
   ): {

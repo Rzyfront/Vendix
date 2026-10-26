@@ -1,69 +1,208 @@
 <app-modal
   [isOpen]="isOpen()"
-  (isOpenChange)="isOpen.set($event)"
+  (isOpenChange)="onOpenChange($event)"
   title="Modificar productos"
   [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
   size="lg"
+  [canClose]="canCloseModal"
 >
   <div class="space-y-4">
     <!-- Líneas del borrador -->
     <div class="space-y-2">
       @for (line of draft(); track line.key) {
-        <div class="flex items-center gap-3 p-3 border border-border rounded-lg">
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-text-primary truncate">{{ line.product_name }}</p>
-            @if (line.variant_label) {
-              <p class="text-xs text-text-secondary truncate">{{ line.variant_label }}</p>
+        @let pl = previewFor(line);
+        <div
+          class="p-3 border rounded-lg space-y-2"
+          [class.border-border]="!line.removed && !(pl?.blocked)"
+          [class.border-red-300]="pl?.blocked"
+          [class.bg-red-50]="line.removed"
+          [class.border-red-200]="line.removed && !pl?.blocked"
+        >
+          <div class="flex items-center gap-3">
+            <div class="flex-1 min-w-0" [class.opacity-60]="line.removed">
+              <p
+                class="text-sm font-medium text-text-primary truncate"
+                [class.line-through]="line.removed"
+              >
+                {{ line.product_name }}
+              </p>
+              @if (line.variant_label) {
+                <p class="text-xs text-text-secondary truncate">{{ line.variant_label }}</p>
+              }
+              <p class="text-xs text-text-secondary">{{ line.display_price | currency }}</p>
+              <div class="flex flex-wrap gap-1 mt-1">
+                @if (line.delivered) {
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">
+                    <app-icon name="check" [size]="12" /> Entregado
+                  </span>
+                }
+                @if (line.in_kitchen) {
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    <app-icon name="chef-hat" [size]="12" />
+                    En cocina
+                    @if (line.kitchen_ticket_number) {
+                      · Comanda #{{ line.kitchen_ticket_number }}
+                    }
+                    · {{ line.kitchen_status_label }}
+                  </span>
+                }
+                @if (!line.existing) {
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                    @if (line.from_locked) {
+                      Nuevo · irá a cocina
+                    } @else {
+                      Nuevo
+                    }
+                  </span>
+                }
+                @if (line.removed) {
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+                    Se quitará
+                  </span>
+                }
+              </div>
+            </div>
+
+            @if (line.removed) {
+              <button
+                type="button"
+                class="h-8 px-2 rounded border border-border text-xs"
+                [disabled]="busy()"
+                (click)="restore(line)"
+              >
+                Deshacer
+              </button>
+            } @else {
+              @if (line.weighted && line.existing) {
+                <span class="text-xs text-text-secondary">{{ line.quantity }} (por peso)</span>
+              } @else {
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="w-9 h-9 rounded border border-border flex items-center justify-center disabled:opacity-40"
+                    [disabled]="line.quantity <= 1 || isLocked(line) || busy()"
+                    aria-label="Disminuir cantidad"
+                    (click)="decrement(line)"
+                  >
+                    <app-icon name="minus" [size]="14" />
+                  </button>
+                  <span class="w-8 text-center text-sm font-semibold">{{ line.quantity }}</span>
+                  <button
+                    type="button"
+                    class="w-9 h-9 rounded border border-border flex items-center justify-center disabled:opacity-40"
+                    [disabled]="busy()"
+                    [attr.aria-label]="isLocked(line) ? 'Agregar una unidad nueva' : 'Aumentar cantidad'"
+                    (click)="increment(line)"
+                  >
+                    <app-icon name="plus" [size]="14" />
+                  </button>
+                </div>
+              }
+
+              <button
+                type="button"
+                class="w-9 h-9 rounded flex items-center justify-center text-red-600 hover:bg-red-50 disabled:opacity-40"
+                [disabled]="busy() || line.delivered"
+                aria-label="Quitar producto"
+                (click)="remove(line)"
+              >
+                <app-icon name="trash-2" [size]="16" />
+              </button>
             }
-            <p class="text-xs text-text-secondary">{{ line.display_price | currency }}</p>
           </div>
 
-          @if (line.weighted) {
-            <span class="text-xs text-text-secondary">{{ line.quantity }} (por peso)</span>
-          } @else {
-            <div class="flex items-center gap-1">
-              <button
-                type="button"
-                class="w-8 h-8 rounded border border-border flex items-center justify-center disabled:opacity-40"
-                [disabled]="line.quantity <= 1 || saving()"
-                aria-label="Disminuir cantidad"
-                (click)="decrement(line)"
-              >
-                <app-icon name="minus" [size]="14" />
-              </button>
-              <span class="w-8 text-center text-sm font-semibold">{{ line.quantity }}</span>
-              <button
-                type="button"
-                class="w-8 h-8 rounded border border-border flex items-center justify-center disabled:opacity-40"
-                [disabled]="saving()"
-                aria-label="Aumentar cantidad"
-                (click)="increment(line)"
-              >
-                <app-icon name="plus" [size]="14" />
-              </button>
-            </div>
+          @if (line.delivered) {
+            <p class="text-xs text-text-secondary">
+              Ya se entregó; para devolverlo usa 'Revertir entrega' en el detalle
+            </p>
+          } @else if (line.in_kitchen && !line.removed) {
+            <p class="text-xs text-text-secondary">
+              Ya está en cocina: no se puede reducir; quítalo completo y se cancelará su comanda
+            </p>
           }
 
-          <button
-            type="button"
-            class="w-8 h-8 rounded flex items-center justify-center text-red-600 hover:bg-red-50 disabled:opacity-40"
-            [disabled]="saving()"
-            aria-label="Quitar producto"
-            (click)="remove(line)"
-          >
-            <app-icon name="trash-2" [size]="16" />
-          </button>
+          <!-- Consecuencias (preview) -->
+          @if (pl) {
+            <div class="space-y-1" [class.opacity-60]="previewPending()" aria-live="polite">
+              @if (pl.blocked && pl.blocked_reason) {
+                <p class="flex items-start gap-1 text-xs text-red-700" role="alert">
+                  <app-icon name="alert-triangle" [size]="14" class="mt-0.5" />
+                  {{ pl.blocked_reason }}
+                </p>
+              }
+              @let rc = repriceChip(pl);
+              @if (rc) {
+                <div class="flex flex-wrap gap-1">
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-900 border border-sky-200">
+                    <app-icon [name]="rc.icon" [size]="12" /> {{ rc.text }}
+                  </span>
+                </div>
+              }
+              @let kc = kitchenChip(pl);
+              @let sc = stockChip(pl);
+              @if (kc || sc) {
+                <div class="flex flex-wrap gap-1">
+                  @if (kc) {
+                    <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200">
+                      <app-icon [name]="kc.icon" [size]="12" /> {{ kc.text }}
+                    </span>
+                  }
+                  @if (sc) {
+                    <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-800 border border-slate-200">
+                      <app-icon [name]="sc.icon" [size]="12" /> {{ sc.text }}
+                    </span>
+                  }
+                </div>
+              }
+              @for (msg of pl.messages; track $index) {
+                <p class="flex items-start gap-1 text-xs text-text-secondary">
+                  <app-icon name="info" [size]="14" class="mt-0.5" />
+                  {{ msg }}
+                </p>
+              }
+              @if (line.removed && pl.requires_cancellation_type) {
+                <fieldset class="pt-1">
+                  <legend class="text-xs font-medium text-text-primary">
+                    ¿Qué hacer con los insumos?
+                  </legend>
+                  <div class="flex gap-4 mt-1">
+                    <label class="inline-flex items-center gap-1 text-sm">
+                      <input
+                        type="radio"
+                        [name]="'ct-' + line.key"
+                        [checked]="cancellationTypes()[line.existing!.id] === 'after_fire_reused'"
+                        (change)="setCancellationType(line, 'after_fire_reused')"
+                      />
+                      Reutilizar
+                    </label>
+                    <label class="inline-flex items-center gap-1 text-sm">
+                      <input
+                        type="radio"
+                        [name]="'ct-' + line.key"
+                        [checked]="cancellationTypes()[line.existing!.id] === 'after_fire_waste'"
+                        (change)="setCancellationType(line, 'after_fire_waste')"
+                      />
+                      Desechar
+                    </label>
+                  </div>
+                </fieldset>
+              }
+            </div>
+          }
         </div>
       }
     </div>
 
-    @if (hasCancelledLines()) {
-      <p
-        class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3"
-        role="alert"
-      >
-        Esta orden tiene productos anulados; no se puede modificar desde aquí sin perder ese registro.
-      </p>
+    @if (cancelledLines().length > 0) {
+      <div class="space-y-1">
+        <p class="text-xs font-medium text-text-secondary">Productos anulados (solo lectura)</p>
+        @for (item of cancelledLines(); track item.id) {
+          <div class="flex items-center justify-between gap-2 p-2 border border-border rounded-lg opacity-60">
+            <span class="text-sm truncate line-through">{{ item.quantity }} × {{ item.product_name }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Anulado</span>
+          </div>
+        }
+      </div>
     }
 
     @if (isEmpty()) {
@@ -86,6 +225,7 @@
           autocomplete="off"
           [ngModel]="searchTerm()"
           (ngModelChange)="onSearchInput($event)"
+          [disabled]="busy()"
         />
         <app-icon name="search" [size]="16" class="absolute left-3 top-3 text-text-secondary" />
       </div>
@@ -101,7 +241,7 @@
               <button
                 type="button"
                 class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted disabled:opacity-50"
-                [disabled]="!isSellable(product)"
+                [disabled]="busy() || !isSellable(product)"
                 (click)="onProductClick(product)"
               >
                 <span class="min-w-0">
@@ -123,6 +263,7 @@
                       <button
                         type="button"
                         class="w-full flex items-center justify-between gap-2 pl-6 pr-3 py-2 text-left hover:bg-muted"
+                        [disabled]="busy()"
                         (click)="addProduct(product, variant)"
                       >
                         <span class="text-sm truncate">{{ variantName(variant) }}</span>
@@ -140,25 +281,98 @@
       }
     </div>
 
-    <!-- Total estimado -->
-    <div class="flex items-center justify-between pt-2 border-t border-border">
-      <span class="text-sm font-medium">Total estimado</span>
-      <span class="text-base font-bold">{{ estimatedTotal() | currency }}</span>
-    </div>
-    <p class="text-xs text-text-secondary">
-      Estimado; impuestos y total final los calcula el sistema al guardar
-    </p>
+    <!-- Motivo -->
+    @if (hasRemovals()) {
+      <div class="space-y-1">
+        <label class="text-sm font-medium text-text-primary" for="order-items-edit-reason">
+          Motivo de los productos quitados
+        </label>
+        <textarea
+          id="order-items-edit-reason"
+          rows="2"
+          maxlength="500"
+          class="w-full p-2 border border-border rounded-lg text-sm bg-surface"
+          placeholder="Ej: el cliente cambió de opinión"
+          [ngModel]="reason()"
+          (ngModelChange)="reason.set($event)"
+          [disabled]="busy()"
+        ></textarea>
+        @if (!reasonValid()) {
+          <p class="text-xs text-red-600" role="alert">Escribe un motivo de al menos 3 caracteres</p>
+        }
+      </div>
+    }
+
+    <!-- Estado del preview -->
+    @if (conflictMessage()) {
+      <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3" role="alert">
+        {{ conflictMessage() }}
+      </p>
+    }
+    @if (previewPending()) {
+      <p class="flex items-center gap-2 text-xs text-text-secondary" role="status">
+        <app-icon name="loader-2" [size]="14" [spin]="true" /> Calculando consecuencias...
+      </p>
+    }
+    @if (previewError()) {
+      <p class="flex items-start gap-1 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3" role="alert">
+        <app-icon name="alert-triangle" [size]="16" class="mt-0.5" />
+        No se pudo calcular la vista previa: {{ previewError() }}
+      </p>
+    }
+
+    @if (preview(); as p) {
+      @if (p.warnings.length > 0) {
+        <div class="space-y-1 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          @for (w of p.warnings; track $index) {
+            <p class="flex items-start gap-1 text-xs text-amber-900">
+              <app-icon name="alert-triangle" [size]="14" class="mt-0.5" /> {{ w }}
+            </p>
+          }
+        </div>
+      }
+
+      <!-- Totales antes → después -->
+      <div class="border border-border rounded-lg overflow-hidden" [class.opacity-60]="previewPending()">
+        <div class="grid grid-cols-3 gap-2 px-3 py-2 bg-muted text-xs font-medium text-text-secondary">
+          <span>Concepto</span>
+          <span class="text-right">Antes</span>
+          <span class="text-right">Después</span>
+        </div>
+        @for (row of totalsRows(); track row.label) {
+          <div
+            class="grid grid-cols-3 gap-2 px-3 py-1.5 text-sm border-t border-border"
+            [class.bg-amber-50]="row.changed"
+            [class.font-bold]="row.strong"
+          >
+            <span>{{ row.label }}</span>
+            <span class="text-right">{{ row.before | currency }}</span>
+            <span class="text-right" [class.font-semibold]="row.changed">{{ row.after | currency }}</span>
+          </div>
+        }
+      </div>
+    }
   </div>
 
-  <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-    <app-button variant="outline" [disabled]="saving()" (clicked)="close()">Cancelar</app-button>
-    <app-button
-      variant="primary"
-      [disabled]="!canSave()"
-      [loading]="saving()"
-      (clicked)="save()"
-    >
-      Guardar cambios
-    </app-button>
+  <div slot="footer" class="p-4 border-t border-border space-y-2">
+    <div class="flex items-center justify-end gap-2">
+      <app-button variant="outline" [disabled]="busy()" (clicked)="close()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [disabled]="!canSave()"
+        [loading]="saving()"
+        (clicked)="save()"
+      >
+        Guardar cambios
+      </app-button>
+    </div>
+    @if (summaryParts(); as sum) {
+      <p class="text-xs text-text-secondary text-right">
+        @for (t of sum.texts; track $index) {
+          {{ t }} ·
+        }
+        Total {{ sum.before | currency }} → {{ sum.after | currency }}
+      </p>
+    }
   </div>
 </app-modal>

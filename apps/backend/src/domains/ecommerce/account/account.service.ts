@@ -311,6 +311,8 @@ export class AccountService {
         // Persisted discount snapshots — read what was actually charged,
         // never recalculate against current promotions/coupons.
         order_promotions: {
+          // Filas en 0 = promociones que dejaron de aplicar tras una edición.
+          where: { discount_amount: { gt: 0 } },
           select: {
             id: true,
             promotion_id: true,

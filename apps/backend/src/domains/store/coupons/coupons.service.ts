@@ -285,7 +285,27 @@ export class CouponsService {
     });
   }
 
-  async validate(dto: ValidateCouponDto) {
+  /**
+   * `opts.excludeOrderId` (aditivo, SOLO uso interno — deliberadamente fuera
+   * del DTO HTTP para que un cliente no pueda saltarse los límites): al
+   * revalidar el cupón YA aplicado a una orden, los usos que esa misma orden
+   * registró (`coupon_uses`/`current_uses`) no cuentan contra los límites
+   * global ni por cliente. Sin la opción el comportamiento es el de siempre.
+   */
+  async validate(
+    dto: ValidateCouponDto,
+    opts: {
+      excludeOrderId?: number;
+      /**
+       * Fecha de referencia para la ventana de vigencia (re-cotizar "a la
+       * fecha de la orden"). Solo uso interno; nunca en el DTO HTTP.
+       */
+      asOf?: Date;
+      /** Cupón y estado de la orden: el editor sube `current_uses` SIN crear fila `coupon_uses`. */
+      orderCouponId?: number | null;
+      orderState?: string;
+    } = {},
+  ) {
     const coupon = await this.prisma.coupons.findFirst({
       where: { code: dto.code, is_active: true },
       include: {
@@ -298,7 +318,7 @@ export class CouponsService {
       throw new VendixHttpException(ErrorCodes.CPN_FIND_001);
     }
 
-    const now = new Date();
+    const now = opts.asOf ?? new Date();
 
     // Check dates
     if (
@@ -308,8 +328,28 @@ export class CouponsService {
       throw new VendixHttpException(ErrorCodes.CPN_EXPIRED_001);
     }
 
+    let ownUses =
+      opts.excludeOrderId != null
+        ? await this.prisma.coupon_uses.count({
+            where: { coupon_id: coupon.id, order_id: opts.excludeOrderId },
+          })
+        : 0;
+    // El editor sube `current_uses` al pasar de draft a created SIN crear fila
+    // `coupon_uses`: si la orden ya tiene este cupón y no es draft, su uso
+    // está en el contador aunque no haya fila que contar.
+    if (
+      opts.excludeOrderId != null &&
+      ownUses === 0 &&
+      opts.orderCouponId != null &&
+      opts.orderCouponId === coupon.id &&
+      opts.orderState &&
+      opts.orderState !== 'draft'
+    ) {
+      ownUses = 1;
+    }
+
     // Check global usage limit
-    if (coupon.max_uses && coupon.current_uses >= coupon.max_uses) {
+    if (coupon.max_uses && coupon.current_uses - ownUses >= coupon.max_uses) {
       throw new VendixHttpException(ErrorCodes.CPN_LIMIT_001);
     }
 
@@ -321,7 +361,17 @@ export class CouponsService {
           customer_id: dto.customer_id,
         },
       });
-      if (customerUses >= coupon.max_uses_per_customer) {
+      const ownCustomerUses =
+        opts.excludeOrderId != null
+          ? await this.prisma.coupon_uses.count({
+              where: {
+                coupon_id: coupon.id,
+                customer_id: dto.customer_id,
+                order_id: opts.excludeOrderId,
+              },
+            })
+          : 0;
+      if (customerUses - ownCustomerUses >= coupon.max_uses_per_customer) {
         throw new VendixHttpException(ErrorCodes.CPN_LIMIT_002);
       }
     }

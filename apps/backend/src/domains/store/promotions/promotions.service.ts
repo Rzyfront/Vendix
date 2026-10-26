@@ -108,7 +108,8 @@ export class PromotionsService {
         },
         _count: {
           select: {
-            order_promotions: true,
+            // Aplicaciones reales: las filas en 0 dejaron de aplicar.
+            order_promotions: { where: { discount_amount: { gt: 0 } } },
           },
         },
       },

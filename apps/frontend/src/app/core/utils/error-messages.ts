@@ -1247,6 +1247,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Revisa la dirección, el método y el costo de envío.',
   ORD_EDIT_INVALID_STATE_001:
     'No se pudo guardar la orden. Vuelve a cargarla.',
+  ORD_EDIT_LINES_LOCKED_001:
+    'Esta orden tiene productos ya enviados a cocina o con movimientos de inventario. Modifícalos desde el detalle de la orden (Modificar productos).',
+  ORD_ITEM_CHANGES_INVALID_001:
+    'Los cambios no son válidos. Revisa los productos e intenta de nuevo.',
   ORD_EDIT_PROMOTION_INVALID_001:
     'La promoción o cupón ya no está disponible.',
   ORD_EDIT_COUPON_COMMIT_001:

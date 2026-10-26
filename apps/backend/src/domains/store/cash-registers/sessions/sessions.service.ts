@@ -1221,7 +1221,9 @@ export class SessionsService {
     const [order_promos, coupon_uses] = discounted_ids.length
       ? await Promise.all([
           this.prisma.order_promotions.findMany({
-            where: { order_id: { in: discounted_ids } },
+            // Filas en 0 = promociones que dejaron de aplicar tras una edición:
+            // no se cuentan ni se suman.
+            where: { order_id: { in: discounted_ids }, discount_amount: { gt: 0 } },
             select: {
               order_id: true,
               discount_amount: true,
