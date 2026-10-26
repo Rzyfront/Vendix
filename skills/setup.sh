@@ -2,232 +2,101 @@
 # ============================================================================
 # AI Skills Setup Script
 # ============================================================================
-# Synchronizes skills to provider-specific directories:
-# - OpenCode:  .opencode/skills/
-# - Claude:    .claude/skills/
-# - Gemini:    .agent/skills/
-# - Agents:    .agents/skills/
-# - Mavis:     ~/.mavis/agents/mavis/skills/   (Mavis agent-level skills)
+# `skills/` is the single source of truth. Providers get per-skill SYMLINKS
+# (never copies, so they cannot drift):
+# - Claude Code: .claude/skills/<name> -> ../../skills/<name>   (gitignored, local)
+#                CLAUDE.md -> AGENTS.md
+# - Gemini CLI:  .agents/skills/<name> -> ../../skills/<name>   (versioned)
+#                GEMINI.md -> AGENTS.md
 #
-# Also generates entry point configurations (CLAUDE.md, etc.)
+# Run after creating, renaming or deleting a skill. Idempotent.
 # ============================================================================
 
 set -e
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
-BOLD='\033[1m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 log_info() { printf "${BLUE}[INFO]${NC} %s\n" "$1"; }
+log_warn() { printf "${YELLOW}[WARN]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"; }
 
-# ============================================================================
-# Sync Logic
-# ============================================================================
-
-sync_skills_to_dir() {
-    local dest_dir="$1"
+# Link every skills/<name>/ into <dest_dir>/<name>; prune broken links.
+link_skills_to_dir() {
+    local dest_dir="$REPO_ROOT/$1"
     local source_dir="$REPO_ROOT/skills"
-    
-    log_info "Syncing skills to $dest_dir..."
+
+    log_info "Linking skills into $1..."
     mkdir -p "$dest_dir"
-    
-    # Copy each skill directory, excluding the setup script itself if it's there
-    for skill_path in "$source_dir"/*; do
-        if [ -d "$skill_path" ]; then
-            local skill_name=$(basename "$skill_path")
-            local target_path="$dest_dir/$skill_name"
-            
-            mkdir -p "$target_path"
-            
-            # Copy contents recursively (SKILL.md, assets, etc.)
-            cp -r "$skill_path"/* "$target_path/" 2>/dev/null || true
-            
-            # Ensure SKILL.md exists
-            if [ ! -f "$target_path/SKILL.md" ]; then
-                echo "Warning: No SKILL.md found in $skill_name"
-            fi
+
+    # Prune symlinks whose skill no longer exists.
+    for entry in "$dest_dir"/*; do
+        if [ -L "$entry" ] && [ ! -e "$entry" ]; then
+            rm "$entry"
+            log_info "Removed broken link $(basename "$entry")"
+        fi
+    done
+
+    for skill_path in "$source_dir"/*/; do
+        local skill_name
+        skill_name=$(basename "$skill_path")
+        local target="$dest_dir/$skill_name"
+
+        if [ ! -f "$skill_path/SKILL.md" ]; then
+            log_warn "No SKILL.md in skills/$skill_name, skipped"
+            continue
+        fi
+
+        # Old setups copied skills; replace those stale copies with a link.
+        if [ -d "$target" ] && [ ! -L "$target" ]; then
+            rm -rf "$target"
+        fi
+
+        ln -sfn "../../skills/$skill_name" "$target"
+    done
+
+    # Real directories left here have no source skill: report, never delete.
+    for entry in "$dest_dir"/*; do
+        if [ -d "$entry" ] && [ ! -L "$entry" ]; then
+            log_warn "$1/$(basename "$entry") is not in skills/ (stale copy or local skill); review it"
         fi
     done
 }
 
-# ============================================================================
-# Provider Generators
-# ============================================================================
-
-generate_claude() {
-    local agents_file="$REPO_ROOT/AGENTS.md"
-    local claude_file="$REPO_ROOT/CLAUDE.md"
-    local skills_dest=".claude/skills"
-
-    log_info "Configuring for Claude Code..."
-    
-    # 1. Sync Skills
-    sync_skills_to_dir "$REPO_ROOT/$skills_dest"
-    
-    # 2. Generate CLAUDE.md
-    cat > "$claude_file" << 'CLAUDE_EOF'
-# Claude Code Instructions
-
-> **Auto-generated from AGENTS.md** - Do not edit directly.
-> Run `./skills/setup.sh --claude` to regenerate.
-
-CLAUDE_EOF
-    
-    if [ -f "$agents_file" ]; then
-        cat "$agents_file" >> "$claude_file"
+link_instructions() {
+    local file="$1"
+    if [ -e "$REPO_ROOT/$file" ] && [ ! -L "$REPO_ROOT/$file" ]; then
+        rm "$REPO_ROOT/$file"
     fi
-    
-    log_success "Created $claude_file and synced to $skills_dest"
+    ln -sfn AGENTS.md "$REPO_ROOT/$file"
 }
 
-generate_copilot() {
-    local agents_file="$REPO_ROOT/AGENTS.md"
-    local copilot_dir="$REPO_ROOT/.github"
-    local copilot_file="$copilot_dir/copilot-instructions.md"
-    
-    log_info "Configuring for GitHub Copilot..."
-    
-    mkdir -p "$copilot_dir"
-
-    cat > "$copilot_file" << 'COPILOT_EOF'
-# GitHub Copilot Instructions
-
-> **Auto-generated from AGENTS.md** - Do not edit directly.
-> Run `./skills/setup.sh --copilot` to regenerate.
-
-COPILOT_EOF
-
-    if [ -f "$agents_file" ]; then
-        cat "$agents_file" >> "$copilot_file"
-    fi
-    
-    log_success "Created $copilot_file"
+generate_claude() {
+    link_skills_to_dir ".claude/skills"
+    link_instructions "CLAUDE.md"
+    log_success "Claude Code: .claude/skills linked, CLAUDE.md -> AGENTS.md"
 }
 
 generate_gemini() {
-    local agents_file="$REPO_ROOT/AGENTS.md"
-    local gemini_file="$REPO_ROOT/GEMINI.md"
-    local skills_dest=".agent/skills"
-
-    log_info "Configuring for Gemini..."
-    
-    # 1. Sync Skills
-    sync_skills_to_dir "$REPO_ROOT/$skills_dest"
-
-    # 2. Generate GEMINI.md
-    cat > "$gemini_file" << 'GEMINI_EOF'
-# Gemini Instructions
-
-> **Auto-generated from AGENTS.md** - Do not edit directly.
-> Run `./skills/setup.sh --gemini` to regenerate.
-
-GEMINI_EOF
-
-    if [ -f "$agents_file" ]; then
-        cat "$agents_file" >> "$gemini_file"
-    fi
-    
-    log_success "Created $gemini_file and synced to $skills_dest"
-}
-
-generate_opencode() {
-    local agents_file="$REPO_ROOT/AGENTS.md"
-    local opencode_file="$REPO_ROOT/opencode.json"
-    local skills_dest=".opencode/skills"
-    
-    log_info "Configuring for OpenCode..."
-    
-    # 1. Sync Skills
-    sync_skills_to_dir "$REPO_ROOT/$skills_dest"
-    
-    # 2. Generate opencode.json
-    local description="AI Agent Skills System"
-    if [ -f "$agents_file" ]; then
-        local first_line=$(head -n 1 "$agents_file" | sed 's/^# //')
-        if [ ! -z "$first_line" ]; then
-            description="$first_line"
-        fi
-    fi
-
-    local prompt_content=""
-    if [ -f "$agents_file" ]; then
-        # Use awk for cross-platform compatibility (macOS BSD sed doesn't support the complex sed command)
-        prompt_content=$(awk '{gsub(/"/, "\\\""); printf "%s\\\\n", $0}' "$agents_file" | sed 's/\\\\n$//')
-    fi
-
-    cat > "$opencode_file" << OPENCODE_EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-anthropic-auth"],
-  "theme": "rzyfront",
-  "autoupdate": true,
-  "agent": {
-    "primary": {
-      "mode": "primary",
-      "description": "$description",
-      "prompt": "You are a helpful AI assistant. Always consult AGENTS.md for project-specific rules and skills.\\n\\n$prompt_content",
-      "tools": {
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
-    }
-  }
-}
-OPENCODE_EOF
-    
-    log_success "Created $opencode_file and synced to $skills_dest"
-}
-
-generate_agents() {
-    local skills_dest=".agents/skills"
-
-    log_info "Configuring for generic Agents..."
-
-    sync_skills_to_dir "$REPO_ROOT/$skills_dest"
-
-    log_success "Synced skills to $skills_dest"
-}
-
-generate_mavis() {
-    local skills_dest="$HOME/.mavis/agents/mavis/skills"
-
-    log_info "Configuring for Mavis (agent-level)..."
-
-    mkdir -p "$skills_dest"
-
-    sync_skills_to_dir "$skills_dest"
-
-    log_success "Synced skills to $skills_dest"
+    link_skills_to_dir ".agents/skills"
+    link_instructions "GEMINI.md"
+    log_success "Gemini CLI: .agents/skills linked, GEMINI.md -> AGENTS.md"
 }
 
 main() {
     cd "$REPO_ROOT"
-    
-    if [ $# -eq 0 ] || [ "$1" == "--all" ] || [ "$1" == "--sync" ]; then
-        generate_claude
-        generate_copilot
-        generate_gemini
-        generate_opencode
-        generate_agents
-        generate_mavis
-    else
-        case "$1" in
-            --claude) generate_claude ;;
-            --copilot) generate_copilot ;;
-            --gemini) generate_gemini ;;
-            --opencode) generate_opencode ;;
-            --agents) generate_agents ;;
-            --mavis) generate_mavis ;;
-            *) echo "Usage: $0 [--all|--sync|--claude|--copilot|--gemini|--opencode|--agents|--mavis]" ;;
-        esac
-    fi
+
+    case "${1:---all}" in
+        --all|--sync) generate_claude; generate_gemini ;;
+        --claude) generate_claude ;;
+        --gemini) generate_gemini ;;
+        *) echo "Usage: $0 [--all|--claude|--gemini]"; exit 1 ;;
+    esac
 }
 
 main "$@"
