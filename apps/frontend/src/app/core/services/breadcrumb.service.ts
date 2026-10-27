@@ -838,6 +838,18 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'tag',
     },
+    {
+      path: '/admin/hospitality/front-desk',
+      title: 'Recepción',
+      parent: 'Hotelería',
+      icon: 'concierge-bell',
+    },
+    {
+      path: '/admin/hospitality/exempt-services',
+      title: 'Servicios exentos',
+      parent: 'Hotelería',
+      icon: 'file-check',
+    },
 
     // Customers
     {

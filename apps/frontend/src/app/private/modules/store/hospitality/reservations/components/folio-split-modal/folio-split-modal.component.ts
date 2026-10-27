@@ -11,9 +11,11 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
   IconComponent,
+  InputComponent,
   ModalComponent,
   SelectorComponent,
   SelectorOption,
@@ -47,7 +49,15 @@ function newRequestId(): string {
   selector: 'app-folio-split-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ModalComponent, ButtonComponent, IconComponent, SelectorComponent, PosCustomerSelectorComponent],
+  imports: [
+    FormsModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    InputComponent,
+    SelectorComponent,
+    PosCustomerSelectorComponent,
+  ],
   template: `
     <app-modal [isOpen]="open()" (isOpenChange)="!$event && closed.emit()" title="Dividir folio" size="md">
       <div class="space-y-4 text-sm" data-testid="folio-split-modal">
@@ -56,17 +66,16 @@ function newRequestId(): string {
           @for (account of accounts(); track $index; let i = $index) {
             <div class="space-y-2 rounded-lg border border-border px-3 py-2" data-testid="split-account">
               <div class="flex items-end gap-2">
-                <div class="flex-1">
-                  <label class="text-xs text-text-secondary" [for]="'split-label-' + i">Nombre de la cuenta</label>
-                  <input
-                    [id]="'split-label-' + i"
-                    type="text"
-                    maxlength="60"
-                    class="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
-                    [value]="account.label"
-                    (input)="onLabelInput(i, $event)"
-                  />
-                </div>
+                <app-input
+                  class="flex-1"
+                  label="Nombre de la cuenta"
+                  size="sm"
+                  customWrapperClass="mt-0"
+                  [maxlength]="60"
+                  [ngModel]="account.label"
+                  (ngModelChange)="setLabel(i, $event)"
+                  data-testid="split-account-label"
+                />
                 @if (accounts().length > 2) {
                   <app-button variant="ghost" size="sm" ariaLabel="Quitar cuenta" (clicked)="removeAccount(i)">
                     <app-icon slot="icon" name="trash-2" [size]="14" />
@@ -198,8 +207,7 @@ export class FolioSplitModalComponent {
     return this.currency.format(Number(amount), 0);
   }
 
-  onLabelInput(index: number, event: Event): void {
-    const label = (event.target as HTMLInputElement).value;
+  setLabel(index: number, label: string): void {
     this.accounts.update((list) => list.map((a, i) => (i === index ? { ...a, label } : a)));
     this.preview.set(null);
   }

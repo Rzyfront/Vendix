@@ -200,10 +200,11 @@ export interface GuestFormTarget {
             ley (Tarjeta de Registro de Alojamiento del MinCIT y SIRE de Migración Colombia), según
             la Ley 1581 de 2012. El titular puede conocer, actualizar y rectificar sus datos.
           </p>
-          <label class="flex items-center gap-2 text-sm text-text-primary">
-            <input type="checkbox" formControlName="data_consent" data-testid="guest-data-consent" />
-            El huésped conoce y acepta el aviso
-          </label>
+          <app-toggle
+            formControlName="data_consent"
+            label="El huésped conoce y acepta el aviso"
+            data-testid="guest-data-consent"
+          />
         </div>
       </form>
 

@@ -14,6 +14,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { startWith } from 'rxjs/operators';
 import {
+  BadgeComponent,
   ButtonComponent,
   IconComponent,
   InputComponent,
@@ -21,6 +22,7 @@ import {
   SelectorOption,
   TextareaComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
@@ -61,11 +63,13 @@ function newRequestId(): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    BadgeComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    ToggleComponent,
     FolioSplitModalComponent,
   ],
   template: `
@@ -180,17 +184,13 @@ function newRequestId(): string {
         }
         @if (f.vat_exemption; as vx) {
           <div class="space-y-1 border-b border-border px-3 py-2" data-testid="folio-vat-exemption">
-            <label class="flex items-center gap-2 text-sm font-medium">
-              <input
-                type="checkbox"
-                class="h-4 w-4 accent-primary"
-                [checked]="vx.applied"
-                [disabled]="!editable() || !!split() || busy() || (!vx.applied && !vx.available)"
-                (change)="setVatExemption($event)"
-                data-testid="folio-vat-exempt-box"
-              />
-              No residente – exento de IVA
-            </label>
+            <app-toggle
+              label="No residente – exento de IVA"
+              [checked]="vatPending() ?? vx.applied"
+              [disabled]="!editable() || !!split() || busy() || (!vx.applied && !vx.available)"
+              (changed)="setVatExemption($event)"
+              data-testid="folio-vat-exempt-box"
+            />
             @if (vx.applied) {
               <p class="text-xs text-text-secondary">
                 Las noches salen con IVA 0 % «Exento – art. 481 lit. d ET». Los consumos conservan su impuesto.
@@ -298,13 +298,13 @@ function newRequestId(): string {
                     <p class="text-xs text-text-secondary">{{ account.customer_name }}</p>
                   }
                 </div>
-                <span
-                  class="rounded-full border border-border px-2 py-0.5 text-xs"
-                  [class.text-success]="account.payment_state === 'paid'"
+                <app-badge
+                  size="sm"
+                  [variant]="account.payment_state === 'paid' ? 'success' : account.payment_state === 'partial' ? 'warning' : 'neutral'"
                   data-testid="folio-split-state"
                 >
                   {{ paymentStateLabel(account.payment_state) }}
-                </span>
+                </app-badge>
               </div>
               <ul class="text-xs text-text-secondary">
                 @for (line of account.lines; track line.order_item_id) {
@@ -547,6 +547,8 @@ export class FolioPanelComponent {
   readonly changed = output<void>();
 
   readonly folio = signal<FolioDetail | null>(null);
+  /** VAT-exemption value the desk just toggled, until the server answers. */
+  readonly vatPending = signal<boolean | null>(null);
   readonly loading = signal(false);
   readonly busy = signal(false);
   readonly action = signal<Action>(null);
@@ -788,20 +790,21 @@ export class FolioPanelComponent {
    * H3.9 — "No residente – exento de IVA": the nights are re-priced at VAT 0 %
    * (or back to their IVA). The total changes, so the D11 review asks again.
    */
-  setVatExemption(event: Event): void {
-    const box = event.target as HTMLInputElement;
-    const enabled = box.checked;
+  setVatExemption(enabled: boolean): void {
+    this.vatPending.set(enabled);
     this.busy.set(true);
     this.reservationsService
       .setFolioVatExemption(this.reservationId(), enabled)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (folio) => {
+          this.vatPending.set(null);
           this.applied(folio);
           this.toastService.success(enabled ? 'Exención de IVA aplicada a las noches' : 'Exención de IVA quitada');
         },
         error: (message: string) => {
-          box.checked = !enabled;
+          // Dropping the pending value moves the toggle back to the saved state.
+          this.vatPending.set(null);
           this.failed(message);
         },
       });
