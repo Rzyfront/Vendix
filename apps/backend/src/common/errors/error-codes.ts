@@ -5870,6 +5870,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El pago no es válido para el folio',
   },
+  LODGING_DEPOSIT_001: {
+    code: 'LODGING_DEPOSIT_001',
+    httpStatus: 400,
+    devMessage: 'El depósito no es válido para la reserva',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

@@ -328,3 +328,61 @@ export interface RoomChangeQuote {
   /** proposed − current total (negative = cheaper). */
   difference: string;
 }
+
+/** H3.5 — one movement of the reservation deposit (wallet advance, not a folio payment). */
+export interface LodgingDepositMovement {
+  id: number;
+  kind: 'received' | 'applied' | 'retained';
+  status: 'pending' | 'completed' | 'cancelled';
+  amount: number;
+  /** cash | card | bank_transfer | wompi_link | null */
+  method: string | null;
+  method_label: string;
+  /** Wompi link URL for `wompi_link` rows. */
+  checkout_url: string | null;
+  created_at: string;
+}
+
+/** H3.5 — outcome of a cancelled / no-show reservation against its deposit. */
+export interface LodgingDepositSettlement {
+  penalty: number;
+  penalty_detail: string | null;
+  retained: number;
+  to_collect: number;
+  to_refund: number;
+}
+
+/** H3.5 — deposit summary of a reservation. */
+export interface LodgingDepositSummary {
+  reservation_id: number;
+  reservation_number: string;
+  required: { percent: string | null; amount: string };
+  received: number;
+  applied: number;
+  retained: number;
+  /** received − applied − retained (still held). */
+  balance: number;
+  /** Default amount for "Cobrar depósito". */
+  pending: number;
+  /** True only while tentative / confirmed. */
+  can_collect: boolean;
+  movements: LodgingDepositMovement[];
+  settlement: LodgingDepositSettlement | null;
+}
+
+export interface LodgingDepositRequest {
+  amount: number;
+  store_payment_method_id: number;
+  /** One key per attempt: a double click registers it once. */
+  request_id: string;
+}
+
+/** H2.4 / H3.5 — penalty of cancelling now and what the deposit covers. */
+export interface CancellationQuote {
+  penalty_amount: string | null;
+  penalty_detail: string | null;
+  deposit_balance?: string;
+  deposit_retained?: string;
+  to_collect?: string;
+  to_refund?: string;
+}

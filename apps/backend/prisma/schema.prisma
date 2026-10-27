@@ -1079,6 +1079,7 @@ model stores {
   lodging_allotments             lodging_allotments[]
   lodging_guests                 lodging_guests[]
   lodging_folios                 lodging_folios[]
+  lodging_deposits               lodging_deposits[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -1893,6 +1894,8 @@ model payments {
   bank_account            bank_accounts?            @relation(fields: [bank_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
+  // Hospitality Suite (H3.5) — the deposit applied to a folio with this payment.
+  lodging_deposit         lodging_deposits?
 
   @@index([gateway_reference])
   @@index([order_id])
@@ -2419,6 +2422,7 @@ model lodging_reservations {
   events     lodging_reservation_events[]
   guests     lodging_guests[]
   folio      lodging_folios?
+  deposits   lodging_deposits[]
 
   @@unique([store_id, reservation_number])
   @@index([store_id, arrival_date])
@@ -2519,6 +2523,51 @@ model lodging_guests {
   @@index([store_id])
   @@index([reservation_room_id])
   @@index([customer_id])
+}
+
+enum lodging_deposit_kind_enum {
+  received
+  applied
+  retained
+}
+
+enum lodging_deposit_status_enum {
+  pending
+  completed
+  cancelled
+}
+
+// Hospitality Suite (H3.5) — deposit ledger of a reservation (owner decision
+// D3: a deposit is a customer advance kept in the holder's wallet, never a
+// folio payment). `received` credits the wallet (cash/card/transfer at the
+// desk, or a Wompi link that stays `pending` until paid); `applied` debits it
+// into a folio payment ("Anticipo aplicado"); `retained` debits it as the
+// cancellation/no-show penalty. Balance = received - applied - retained.
+model lodging_deposits {
+  id                      Int                         @id @default(autoincrement())
+  store_id                Int
+  reservation_id          Int
+  kind                    lodging_deposit_kind_enum
+  status                  lodging_deposit_status_enum @default(completed)
+  amount                  Decimal                     @db.Decimal(14, 2)
+  method                  String?                     @db.VarChar(30)
+  store_payment_method_id Int?
+  payment_link_id         Int?                        @unique
+  wallet_transaction_id   Int?                        @unique
+  payment_id              Int?                        @unique
+  request_id              String?                     @db.VarChar(64)
+  created_by_user_id      Int?
+  created_at              DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                   @default(now()) @db.Timestamp(6)
+
+  store              stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation        lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_link       payment_links?       @relation(fields: [payment_link_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  wallet_transaction wallet_transactions? @relation(fields: [wallet_transaction_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment            payments?            @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, request_id])
+  @@index([reservation_id])
 }
 
 enum lodging_folio_status_enum {
@@ -10530,6 +10579,8 @@ model wallet_transactions {
   created_at     DateTime                      @default(now()) @db.Timestamp(6)
 
   wallet wallets @relation(fields: [wallet_id], references: [id])
+  // Hospitality Suite (H3.5) — the deposit movement behind this wallet row.
+  lodging_deposit lodging_deposits?
 
   @@index([wallet_id, created_at])
   @@index([reference_type, reference_id])
@@ -10687,6 +10738,8 @@ model payment_links {
 
   stores stores  @relation(fields: [store_id], references: [id], onDelete: Cascade)
   orders orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  // Hospitality Suite (H3.5) — the reservation deposit this link collects.
+  lodging_deposit  lodging_deposits?
 
   @@index([store_id, status])
   @@index([store_id, created_at])

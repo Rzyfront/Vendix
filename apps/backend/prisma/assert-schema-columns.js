@@ -128,6 +128,9 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H3.4 · noches y cargos manuales en el folio
   'lodging_room_nights.posted_order_item_id',
+
+  // --- Hotelería H3.5 · depósitos y anticipos
+  'lodging_deposits.wallet_transaction_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

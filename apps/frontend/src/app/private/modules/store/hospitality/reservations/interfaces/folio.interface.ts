@@ -23,6 +23,8 @@ export interface FolioPayment {
   amount: number;
   method: string;
   paid_at: string | null;
+  /** H3.5 — 'deposit' = advance applied from the reservation deposit (D3). */
+  kind?: 'payment' | 'deposit';
 }
 
 /** H3.4 — guest folio during the stay: charges, payments and balance. */
@@ -41,6 +43,8 @@ export interface FolioDetail {
   balance: number;
   /** Nights up to today the folio does not have yet ("Cargar noche"). */
   pending_nights: number;
+  /** H3.5 — deposit balance that can still be applied ("Aplicar anticipo"). */
+  deposit_available?: number;
 }
 
 export interface FolioChargeRequest {

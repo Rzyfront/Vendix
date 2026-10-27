@@ -5,9 +5,12 @@ import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import { parseApiError, ParsedApiError } from '../../../../../../core/utils/parse-api-error';
 import {
+  CancellationQuote,
   CheckInRequest,
   CreateReservationRequest,
   FrontDeskBoard,
+  LodgingDepositRequest,
+  LodgingDepositSummary,
   LodgingReservation,
   Rack,
   ReservationListQuery,
@@ -86,11 +89,9 @@ export class LodgingReservationsService {
   }
 
   /** H2.4 — penalty of cancelling now (null amount = free). */
-  cancellationQuote(
-    id: number,
-  ): Observable<{ penalty_amount: string | null; penalty_detail: string | null }> {
+  cancellationQuote(id: number): Observable<CancellationQuote> {
     return this.http
-      .get<ApiResponse<{ penalty_amount: string | null; penalty_detail: string | null }>>(
+      .get<ApiResponse<CancellationQuote>>(
         `${this.baseUrl}/${id}/cancellation-quote`,
       )
       .pipe(map((res) => res.data), catchError(this.handleError));
@@ -230,6 +231,51 @@ export class LodgingReservationsService {
     return this.http
       .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/payments`, body)
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.5 — deposit summary (wallet advance, never a folio payment). */
+  getDeposits(reservationId: number): Observable<LodgingDepositSummary> {
+    return this.http
+      .get<ApiResponse<LodgingDepositSummary>>(`${this.baseUrl}/${reservationId}/deposits`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** "Cobrar depósito" in cash, card or transfer. */
+  registerDeposit(
+    reservationId: number,
+    body: LodgingDepositRequest,
+  ): Observable<{ summary: LodgingDepositSummary; message: string }> {
+    return this.http
+      .post<ApiResponse<LodgingDepositSummary>>(`${this.baseUrl}/${reservationId}/deposits`, body)
+      .pipe(
+        map((res) => ({ summary: res.data, message: res.message ?? 'Depósito registrado' })),
+        catchError(this.handleError),
+      );
+  }
+
+  /** "Cobrar depósito" with a Wompi payment link. */
+  createDepositLink(
+    reservationId: number,
+    amount: number,
+  ): Observable<{ summary: LodgingDepositSummary; message: string }> {
+    return this.http
+      .post<ApiResponse<LodgingDepositSummary>>(`${this.baseUrl}/${reservationId}/deposits/link`, {
+        amount,
+      })
+      .pipe(
+        map((res) => ({ summary: res.data, message: res.message ?? 'Link de pago creado' })),
+        catchError(this.handleError),
+      );
+  }
+
+  /** "Aplicar anticipo": moves the held deposit onto the folio. */
+  applyFolioDeposit(reservationId: number): Observable<{ folio: FolioDetail; message: string }> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/deposit`, {})
+      .pipe(
+        map((res) => ({ folio: res.data, message: res.message ?? 'Anticipo aplicado' })),
+        catchError(this.handleError),
+      );
   }
 
   /** Rejects with the user-facing message so screens can show it as-is. */

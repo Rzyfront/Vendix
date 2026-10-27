@@ -36,43 +36,58 @@ export class WalletBalanceService {
       created_by?: number;
     },
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      await this.lockWallet(tx, walletId);
-      // 1. Lock and read current wallet
-      const wallet = await tx.wallets.findUnique({
-        where: { id: walletId },
-      });
-      if (!wallet) throw new BadRequestException('Wallet not found');
-      if (!wallet.is_active)
-        throw new BadRequestException('Wallet is inactive');
+    return this.prisma.$transaction((tx) =>
+      this.creditInTransaction(tx, walletId, amount, params),
+    );
+  }
 
-      const balance_before = Number(wallet.balance);
-      const balance_after = balance_before + amount;
-
-      // 2. Update wallet balance
-      await tx.wallets.update({
-        where: { id: walletId },
-        data: { balance: balance_after, updated_at: new Date() },
-      });
-
-      // 3. Create transaction record
-      const transaction = await tx.wallet_transactions.create({
-        data: {
-          wallet_id: walletId,
-          type: 'credit',
-          state: 'completed',
-          amount,
-          balance_before,
-          balance_after,
-          reference_type: params.reference_type,
-          reference_id: params.reference_id,
-          description: params.description,
-          created_by: params.created_by,
-        },
-      });
-
-      return { transaction, balance_after };
+  /** Same wallet lock + ledger writer as `credit`, joined to the caller's tx. */
+  async creditInTransaction(
+    tx: Prisma.TransactionClient,
+    walletId: number,
+    amount: number,
+    params: {
+      reference_type: string;
+      reference_id?: number;
+      description?: string;
+      created_by?: number;
+    },
+  ) {
+    await this.lockWallet(tx, walletId);
+    // 1. Lock and read current wallet
+    const wallet = await tx.wallets.findUnique({
+      where: { id: walletId },
     });
+    if (!wallet) throw new BadRequestException('Wallet not found');
+    if (!wallet.is_active)
+      throw new BadRequestException('Wallet is inactive');
+
+    const balance_before = Number(wallet.balance);
+    const balance_after = balance_before + amount;
+
+    // 2. Update wallet balance
+    await tx.wallets.update({
+      where: { id: walletId },
+      data: { balance: balance_after, updated_at: new Date() },
+    });
+
+    // 3. Create transaction record
+    const transaction = await tx.wallet_transactions.create({
+      data: {
+        wallet_id: walletId,
+        type: 'credit',
+        state: 'completed',
+        amount,
+        balance_before,
+        balance_after,
+        reference_type: params.reference_type,
+        reference_id: params.reference_id,
+        description: params.description,
+        created_by: params.created_by,
+      },
+    });
+
+    return { transaction, balance_after };
   }
 
   /**

@@ -19,6 +19,8 @@ import { getSettledOrderAmount } from '../../../payments/services/payment-valida
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
 import { SettingsService } from '../../../settings/settings.service';
+import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
+import { depositTotals } from '../deposits/lodging-deposit-math';
 import { AddFolioChargeDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
 import { nightLineDescription } from './folio-nights';
 
@@ -80,6 +82,7 @@ export class LodgingFolioService {
     private readonly cashMovements: MovementsService,
     private readonly settings: SettingsService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly walletBalance: WalletBalanceService,
   ) {}
 
   // ------------------------------------------------------------------ read
@@ -130,6 +133,7 @@ export class LodgingFolioService {
                 system_payment_method: { select: { display_name: true, type: true } },
               },
             },
+            lodging_deposit: { select: { id: true } },
           },
           orderBy: { id: 'asc' },
         },
@@ -150,6 +154,13 @@ export class LodgingFolioService {
 
     const total = Number(order.grand_total);
     const paid = Number(order.total_paid ?? 0);
+    // H3.5 — deposit still held for the stay, applicable as "Anticipo aplicado".
+    const deposit = depositTotals(
+      await this.prisma.lodging_deposits.findMany({
+        where: { reservation_id },
+        select: { kind: true, status: true, amount: true },
+      }),
+    );
     return {
       id: folio.id,
       status: folio.status,
@@ -176,11 +187,13 @@ export class LodgingFolioService {
       }),
       payments: order.payments.map((p) => ({
         id: p.id,
+        kind: p.lodging_deposit ? ('deposit' as const) : ('payment' as const),
         amount: Number(p.amount),
-        method:
-          p.store_payment_method?.display_name ||
-          p.store_payment_method?.system_payment_method?.display_name ||
-          'Pago',
+        method: p.lodging_deposit
+          ? 'Anticipo aplicado'
+          : p.store_payment_method?.display_name ||
+            p.store_payment_method?.system_payment_method?.display_name ||
+            'Pago',
         paid_at: p.paid_at ?? p.created_at,
       })),
       subtotal: Number(order.subtotal_amount),
@@ -189,6 +202,7 @@ export class LodgingFolioService {
       paid,
       balance: Math.max(0, Math.round((total - paid) * 100) / 100),
       pending_nights,
+      deposit_available: Number(deposit.balance.toFixed(2)),
     };
   }
 
@@ -574,6 +588,114 @@ export class LodgingFolioService {
     );
     // After commit, so the accounting listener reads the committed payment.
     if (emitted) this.eventEmitter.emit('lodging.folio_payment.received', emitted);
+    return this.getFolio(reservation_id);
+  }
+
+  // --------------------------------------------------------------- deposit
+
+  /**
+   * H3.5 — "Aplicar anticipo": the reservation deposit (a wallet advance, D3)
+   * pays the folio up to its balance, shown as "Anticipo aplicado". The
+   * wallet is debited and the folio gets a payment linked to the deposit
+   * ledger row. No accounting entry: the money already sits in 2805 customer
+   * advance since the deposit was received, as every folio payment does, and
+   * the folio invoice (H3.7) crosses it. Applying again only takes what is
+   * left; the check-out (H3.7) applies the rest.
+   */
+  async applyDeposit(reservation_id: number) {
+    const folio = await this.findFolio(reservation_id);
+    this.assertOpen(folio);
+    const store_id = this.requireStoreId();
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        const order = await this.lockFolioOrder(tx, folio, store_id);
+        if (!order.customer_id) {
+          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'El folio no tiene titular');
+        }
+        const rows = await tx.lodging_deposits.findMany({
+          where: { store_id, reservation_id },
+          select: { kind: true, status: true, amount: true },
+        });
+        const heldCents = toCents(depositTotals(rows).balance.toString());
+        if (heldCents <= 0) {
+          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'No hay anticipo por aplicar');
+        }
+        const balanceCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
+        if (balanceCents <= 0) {
+          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'El folio no tiene saldo por cubrir');
+        }
+        const wallet = await tx.wallets.findFirst({
+          where: { store_id, customer_id: order.customer_id },
+          select: { id: true, balance: true, held_balance: true },
+        });
+        const availableCents = wallet ? toCents(wallet.balance) - toCents(wallet.held_balance) : 0;
+        const amountCents = Math.min(heldCents, balanceCents, availableCents);
+        if (!wallet || amountCents <= 0) {
+          throw new VendixHttpException(
+            ErrorCodes.LODGING_DEPOSIT_001,
+            'La wallet del titular no tiene saldo para el anticipo',
+          );
+        }
+        const amount = amountCents / 100;
+        const now = new Date();
+        const applied = rows.filter((row) => row.kind === 'applied').length;
+        const payment = await tx.payments.create({
+          data: {
+            order_id: order.id,
+            customer_id: order.customer_id,
+            amount,
+            currency: order.currency,
+            state: 'succeeded',
+            paid_at: now,
+            transaction_id: `FOLIO-${folio.id}-DEPOSIT-${applied + 1}`,
+            gateway_response: {
+              lodging_folio: {
+                folio_id: folio.id,
+                created_by_user_id: user_id,
+                accounting: 'customer_advance',
+                source: 'deposit',
+              },
+            },
+            updated_at: now,
+          },
+        });
+        const debit = await this.walletBalance.debitInTransaction(tx, wallet.id, amount, {
+          reference_type: 'lodging_deposit',
+          reference_id: reservation_id,
+          description: `Anticipo aplicado al folio ${order.order_number}`,
+          created_by: user_id ?? undefined,
+          expected_store_id: store_id,
+          expected_customer_id: order.customer_id,
+        });
+        await tx.lodging_deposits.create({
+          data: {
+            store_id,
+            reservation_id,
+            kind: 'applied',
+            status: 'completed',
+            amount,
+            wallet_transaction_id: debit.transaction.id,
+            payment_id: payment.id,
+            created_by_user_id: user_id,
+          },
+        });
+        await tx.orders.update({
+          where: { id: order.id },
+          data: { total_paid: { increment: amount }, updated_at: now },
+        });
+        await this.recalcTotals(tx, order.id);
+        await this.orderHistory.record(tx, {
+          orderId: order.id,
+          storeId: store_id,
+          type: 'payment_registered',
+          paymentId: payment.id,
+          amount,
+        });
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
     return this.getFolio(reservation_id);
   }
 

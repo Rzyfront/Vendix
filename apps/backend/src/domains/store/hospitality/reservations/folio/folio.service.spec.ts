@@ -22,7 +22,7 @@ interface Item {
  * H3.4 — folio of H-0001 (order 500): one Doble room 101 with the nights of
  * 10-nov and 11-nov at $250.000 + IVA 19 %, store in Bogotá.
  */
-function build(options: { paid?: number; allowOverride?: boolean } = {}) {
+function build(options: { paid?: number; allowOverride?: boolean; deposit?: number } = {}) {
   const nights = [
     { id: 1, night_date: new Date('2026-11-10T00:00:00Z'), posted_order_item_id: null as number | null },
     { id: 2, night_date: new Date('2026-11-11T00:00:00Z'), posted_order_item_id: null as number | null },
@@ -46,6 +46,10 @@ function build(options: { paid?: number; allowOverride?: boolean } = {}) {
       return payments;
     },
   };
+  // H3.5 — deposit ledger of the reservation and the holder's wallet.
+  const deposits: Array<{ kind: string; status: string; amount: number; payment_id?: number }> = [];
+  if (options.deposit) deposits.push({ kind: 'received', status: 'completed', amount: options.deposit });
+  const wallet = { id: 60, balance: options.deposit ?? 0, held_balance: 0 };
   const lineTotal = (it: Item) =>
     it.total_price + it.order_item_taxes.reduce((s, t) => s + t.tax_amount, 0);
 
@@ -59,6 +63,14 @@ function build(options: { paid?: number; allowOverride?: boolean } = {}) {
 
   const tx = {
     $queryRaw: jest.fn(async () => [{ id: 500 }]),
+    lodging_deposits: {
+      findMany: jest.fn(async () => deposits.map((d) => ({ ...d }))),
+      create: jest.fn(async ({ data }: any) => {
+        deposits.push({ ...data, amount: Number(data.amount) });
+        return { id: deposits.length };
+      }),
+    },
+    wallets: { findFirst: jest.fn(async () => ({ ...wallet })) },
     orders: {
       findUnique: jest.fn(async () => order),
       update: jest.fn(async ({ data }: any) => {
@@ -187,6 +199,12 @@ function build(options: { paid?: number; allowOverride?: boolean } = {}) {
   const settings = { getSettings: jest.fn(async () => ({ pos: { cash_register: { enabled: true } } })) };
   const events: string[] = [];
   const eventEmitter = { emit: jest.fn((name: string) => events.push(name)) };
+  const walletBalance = {
+    debitInTransaction: jest.fn(async (_tx: unknown, _wallet: number, amount: number) => ({
+      transaction: { id: 900 },
+      balance_after: 225000 - amount,
+    })),
+  };
 
   const service = new LodgingFolioService(
     prisma as any,
@@ -196,10 +214,24 @@ function build(options: { paid?: number; allowOverride?: boolean } = {}) {
     cashMovements as any,
     settings as any,
     eventEmitter as any,
+    walletBalance as any,
   );
   // The folio view is a plain read; these specs assert the writes.
   jest.spyOn(service, 'getFolio').mockResolvedValue({} as any);
-  return { service, prisma, tx, nights, items, order, payments, orderFlow, eventEmitter, cashMovements };
+  return {
+    service,
+    prisma,
+    tx,
+    nights,
+    items,
+    order,
+    payments,
+    orderFlow,
+    eventEmitter,
+    cashMovements,
+    deposits,
+    walletBalance,
+  };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<VendixHttpException> {
@@ -468,6 +500,60 @@ describe('LodgingFolioService (H3.4)', () => {
       );
 
       expect(error.errorCode).toBe(ErrorCodes.LODGING_FOLIO_PAYMENT_001.code);
+      expect(payments).toHaveLength(0);
+    });
+  });
+
+  describe('applying the deposit (H3.5)', () => {
+    it('"Aplicar anticipo" pays the folio with the deposit, up to its balance', async () => {
+      const { service, payments, order, deposits, walletBalance, eventEmitter, cashMovements } = build({
+        deposit: 225000,
+      });
+      await service.postNights(1); // $250.000 + IVA = $297.500
+
+      await service.applyDeposit(1);
+
+      expect(payments).toHaveLength(1);
+      expect(payments[0]).toMatchObject({
+        order_id: 500,
+        customer_id: 9,
+        amount: 225000,
+        state: 'succeeded',
+        transaction_id: 'FOLIO-70-DEPOSIT-1',
+      });
+      expect(order.total_paid).toBe(225000);
+      expect(walletBalance.debitInTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        60,
+        225000,
+        expect.objectContaining({ reference_type: 'lodging_deposit', reference_id: 1, expected_customer_id: 9 }),
+      );
+      expect(deposits.at(-1)).toMatchObject({ kind: 'applied', amount: 225000, payment_id: payments[0].id });
+      // Already a 2805 advance since received: no new entry, no register money.
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(cashMovements.recordSaleMovement).not.toHaveBeenCalled();
+    });
+
+    it('applies only the folio balance when the deposit is larger, and nothing twice', async () => {
+      const { service, payments, deposits } = build({ deposit: 400000 });
+      await service.postNights(1); // $297.500
+
+      await service.applyDeposit(1);
+      const error = await errorOf(service.applyDeposit(1));
+
+      expect(payments).toHaveLength(1);
+      expect(payments[0].amount).toBe(297500);
+      expect(deposits.filter((d) => d.kind === 'applied')).toHaveLength(1);
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_DEPOSIT_001.code);
+    });
+
+    it('refuses when the reservation holds no deposit', async () => {
+      const { service, payments } = build();
+      await service.postNights(1);
+
+      const error = await errorOf(service.applyDeposit(1));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_DEPOSIT_001.code);
       expect(payments).toHaveLength(0);
     });
   });

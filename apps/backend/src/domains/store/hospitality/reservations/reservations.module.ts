@@ -23,6 +23,10 @@ import { LodgingFrontDeskService } from './front-desk/lodging-front-desk.service
 import { LodgingFolioController } from './folio/folio.controller';
 import { LodgingFolioService } from './folio/folio.service';
 import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
+import { WalletModule } from '../../wallet/wallet.module';
+import { PaymentLinksModule } from '../../payment-links/payment-links.module';
+import { LodgingDepositsController } from './deposits/deposits.controller';
+import { LodgingDepositsService } from './deposits/deposits.service';
 
 @Module({
   imports: [
@@ -35,6 +39,10 @@ import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
     OrderHistoryModule,
     CashRegistersModule,
     SettingsModule,
+    // H3.5 — the deposit is a wallet advance, collected at the desk or with a
+    // Wompi payment link.
+    WalletModule,
+    PaymentLinksModule,
   ],
   controllers: [
     LodgingReservationsController,
@@ -43,6 +51,7 @@ import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
     LodgingGuestsController,
     LodgingFrontDeskController,
     LodgingFolioController,
+    LodgingDepositsController,
   ],
   providers: [
     LodgingReservationsService,
@@ -56,6 +65,7 @@ import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
     LodgingFrontDeskService,
     LodgingFolioService,
     LodgingNightAuditJob,
+    LodgingDepositsService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

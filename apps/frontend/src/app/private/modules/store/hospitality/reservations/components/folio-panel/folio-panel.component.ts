@@ -82,6 +82,18 @@ function newRequestId(): string {
               <app-icon slot="icon" name="plus" [size]="14" />
               Agregar cargo
             </app-button>
+            @if ((folio()?.deposit_available ?? 0) > 0) {
+              <app-button
+                variant="outline"
+                size="sm"
+                [loading]="busy()"
+                (clicked)="applyDeposit()"
+                data-testid="folio-apply-deposit"
+              >
+                <app-icon slot="icon" name="piggy-bank" [size]="14" />
+                Aplicar anticipo
+              </app-button>
+            }
             <app-button
               variant="outline"
               size="sm"
@@ -141,10 +153,23 @@ function newRequestId(): string {
             <li class="px-3 py-2 text-xs text-text-secondary">Sin cargos todavía</li>
           }
           @for (payment of f.payments; track payment.id) {
-            <li class="flex items-center justify-between gap-2 px-3 py-2" data-testid="folio-payment">
-              <p class="font-medium">Pago · {{ payment.method }}</p>
-              <span class="whitespace-nowrap font-medium text-success">− {{ money(payment.amount) }}</span>
-            </li>
+            @if (payment.kind === 'deposit') {
+              <li
+                class="flex items-center justify-between gap-2 bg-primary/5 px-3 py-2"
+                data-testid="folio-deposit-applied"
+              >
+                <p class="flex items-center gap-1 font-medium text-primary">
+                  <app-icon name="piggy-bank" [size]="14" />
+                  Anticipo aplicado
+                </p>
+                <span class="whitespace-nowrap font-medium text-primary">− {{ money(payment.amount) }}</span>
+              </li>
+            } @else {
+              <li class="flex items-center justify-between gap-2 px-3 py-2" data-testid="folio-payment">
+                <p class="font-medium">Pago · {{ payment.method }}</p>
+                <span class="whitespace-nowrap font-medium text-success">− {{ money(payment.amount) }}</span>
+              </li>
+            }
           }
         </ul>
         <dl class="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border px-3 py-2">
@@ -152,6 +177,10 @@ function newRequestId(): string {
           <dd class="text-right">{{ money(f.total) }}</dd>
           <dt class="text-text-secondary">Pagado</dt>
           <dd class="text-right">{{ money(f.paid) }}</dd>
+          @if (editable() && (f.deposit_available ?? 0) > 0) {
+            <dt class="text-text-secondary">Anticipo disponible</dt>
+            <dd class="text-right" data-testid="folio-deposit-available">{{ money(f.deposit_available ?? 0) }}</dd>
+          }
           <dt class="font-semibold text-text-primary">Saldo</dt>
           <dd class="text-right font-semibold" data-testid="folio-balance">{{ money(f.balance) }}</dd>
         </dl>
@@ -272,6 +301,8 @@ export class FolioPanelComponent {
   readonly reservationId = input.required<number>();
   /** The reservation is in house: the folio takes charges and payments. */
   readonly inHouse = input<boolean>(false);
+  /** Bump to re-fetch (e.g. after a deposit was collected). */
+  readonly refreshKey = input<number>(0);
   /** Emitted after every change so the detail refreshes its summary. */
   readonly changed = output<void>();
 
@@ -323,6 +354,7 @@ export class FolioPanelComponent {
   constructor() {
     effect(() => {
       const id = this.reservationId();
+      this.refreshKey();
       untracked(() => this.load(id));
     });
   }
@@ -352,6 +384,21 @@ export class FolioPanelComponent {
     this.busy.set(true);
     this.reservationsService
       .postFolioNights(this.reservationId())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ folio, message }) => {
+          this.applied(folio);
+          this.toastService.success(message);
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
+  /** H3.5 — moves the held deposit onto the folio ("Anticipo aplicado"). */
+  applyDeposit(): void {
+    this.busy.set(true);
+    this.reservationsService
+      .applyFolioDeposit(this.reservationId())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ folio, message }) => {

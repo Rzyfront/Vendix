@@ -13,6 +13,7 @@ import {
   ReservationQuoteDto,
 } from './dto';
 import { LodgingAvailabilityService } from './lodging-availability.service';
+import { DepositRetainedEvent, LodgingDepositsService } from './deposits/deposits.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { loadPlanPricing, PlanTerms } from '../rates/rate-plans.service';
 import {
@@ -160,6 +161,7 @@ export class LodgingReservationsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly availability: LodgingAvailabilityService,
+    private readonly deposits: LodgingDepositsService,
   ) {}
 
   /** Search by guest/number, status and stay dates, newest first. */
@@ -259,6 +261,8 @@ export class LodgingReservationsService {
     return {
       penalty_amount: penalty ? penalty.amount.toFixed(2) : null,
       penalty_detail: penalty?.detail ?? null,
+      // H3.5 — "retenido $225.000 · por cobrar $25.000" / "por devolver".
+      ...(await this.deposits.quoteSettlement(id, penalty?.amount ?? null)),
     };
   }
 
@@ -339,10 +343,11 @@ export class LodgingReservationsService {
     const now = new Date();
     const event = PENALTY_EVENTS[to];
     const timing = event ? await this.loadPenaltyTiming(this.requireStoreId()) : null;
-    return this.prisma.$transaction(async (tx) => {
+    let retained: DepositRetainedEvent | null = null;
+    const changed = await this.prisma.$transaction(async (tx) => {
       const current = await tx.lodging_reservations.findFirst({
         where: { id, status: { in: from } },
-        select: { id: true, store_id: true, status: true },
+        select: { id: true, store_id: true, status: true, reservation_number: true, customer_id: true },
       });
       if (!current) return false;
       const updated = await tx.lodging_reservations.updateMany({
@@ -360,6 +365,15 @@ export class LodgingReservationsService {
               cancellation_penalty_amount: penalty.amount,
               cancellation_penalty_detail: penalty.detail.slice(0, 200),
             },
+          });
+          // H3.5 — the deposit held covers the penalty first.
+          retained = await this.deposits.retainInTx(tx, {
+            store_id: current.store_id,
+            reservation_id: id,
+            reservation_number: current.reservation_number,
+            customer_id: current.customer_id,
+            penalty: penalty.amount,
+            user_id,
           });
         }
       }
@@ -384,6 +398,8 @@ export class LodgingReservationsService {
       });
       return true;
     });
+    if (changed) this.deposits.announceRetained(retained);
+    return changed;
   }
 
   /** Store time zone and check-in time: the penalty windows count to it. */

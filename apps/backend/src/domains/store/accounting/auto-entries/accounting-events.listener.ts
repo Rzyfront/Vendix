@@ -1240,6 +1240,74 @@ export class AccountingEventsListener {
     }
   }
 
+  // H3.5 — reservation deposit received (customer advance, D3).
+  @OnEvent('lodging.deposit.received')
+  async handleLodgingDeposit(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    reservation_number: string;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingDeposit({
+        deposit_id: event.deposit_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for lodging.deposit - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.deposit - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // H3.5 — deposit retained as a cancellation / no-show penalty.
+  @OnEvent('lodging.deposit.retained')
+  async handleLodgingDepositRetained(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingDepositRetained({
+        deposit_id: event.deposit_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for lodging.deposit_retained - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.deposit_retained - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== LAYAWAY (PLAN SEPARÉ) =====
 
   @OnEvent('layaway.payment_received')

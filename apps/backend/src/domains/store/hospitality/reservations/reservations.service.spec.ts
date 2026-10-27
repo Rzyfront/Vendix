@@ -363,11 +363,18 @@ describe('LodgingReservationsService', () => {
     allotments: Record<string, any>[] = [],
   ) => {
     const fake = createFakeStore(units, overbooking_allowance, restrictions, allotments);
+    const deposits = {
+      retainInTx: jest.fn(async (): Promise<unknown> => null),
+      announceRetained: jest.fn(),
+      quoteSettlement: jest.fn(async () => ({})),
+    };
     const service = new LodgingReservationsService(
       fake.prisma as any,
       new LodgingAvailabilityService(fake.prisma as any),
+      // H3.5 — no deposit held unless a test says so (deposits.service.spec).
+      deposits as any,
     );
-    return { ...fake, service };
+    return { ...fake, service, deposits };
   };
 
   beforeEach(() => {
@@ -1084,6 +1091,26 @@ describe('LodgingReservationsService', () => {
         cancellation_penalty_amount: new Prisma.Decimal(250000),
         cancellation_penalty_detail: '1 noche',
       });
+    });
+
+    it('H3.5 — la penalidad se cubre con el depósito y se anuncia tras el commit', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, deposits, prisma } = build(2);
+      await service.create(flexible);
+      const retained = { store_id: 5, deposit_id: 41, reservation_number: 'H-0001', amount: 225000 };
+      deposits.retainInTx.mockResolvedValueOnce(retained);
+
+      at('2026-12-06T20:00:00Z');
+      await service.cancel(1, 'Cambio de planes');
+
+      expect(deposits.retainInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reservation_id: 1, penalty: new Prisma.Decimal(250000), user_id: 9 }),
+      );
+      expect(deposits.announceRetained).toHaveBeenCalledWith(retained);
+      expect(deposits.announceRetained.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.$transaction.mock.invocationCallOrder.at(-1)!,
+      );
     });
 
     it('cancelar 72 h antes es gratis', async () => {

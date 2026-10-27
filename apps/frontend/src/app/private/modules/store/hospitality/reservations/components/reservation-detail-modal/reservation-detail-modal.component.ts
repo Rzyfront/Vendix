@@ -43,6 +43,7 @@ import {
 } from '../room-change-modal/room-change-modal.component';
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
 import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
+import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
@@ -69,8 +70,10 @@ function todayLocal(): string {
  * Both free the nights for sale. "Mover" (H1.4) changes the room or the
  * dates without dragging (the mobile path of the rack). With several rooms
  * (H1.5) each one can be moved or cancelled alone; the others stay active.
- * H2.4: shows the cancellation policy booked (snapshot), the pending deposit
- * and the penalty before and after cancelling (charged in H3.5).
+ * H2.4: shows the cancellation policy booked (snapshot) and the penalty
+ * before and after cancelling.
+ * H3.5: deposit panel (required, received, movements, settlement) and the
+ * cancel dialog tells what the deposit covers.
  * H3.1: guest register (holder and companions by room).
  * H3.2: "Check-in" picks the room of each unassigned room, asks to confirm a
  * dirty one and opens the folio ("Folio · Abierto · $0").
@@ -92,6 +95,7 @@ function todayLocal(): string {
     RoomChangeModalComponent,
     GuestRegisterComponent,
     FolioPanelComponent,
+    DepositPanelComponent,
   ],
   template: `
     <app-modal
@@ -133,14 +137,6 @@ function todayLocal(): string {
             <dd data-testid="reservation-policy">{{ policySummary() }}</dd>
           </dl>
 
-          @if (depositLabel(); as deposit) {
-            <p
-              class="rounded-lg bg-warning/10 px-3 py-2 font-medium text-text-primary"
-              data-testid="reservation-deposit"
-            >
-              {{ deposit }}
-            </p>
-          }
           @if (penaltyLabel(); as penalty) {
             <p
               class="rounded-lg bg-error/10 px-3 py-2 font-medium text-text-primary"
@@ -150,8 +146,19 @@ function todayLocal(): string {
             </p>
           }
 
+          <app-deposit-panel
+            [reservationId]="r.id"
+            [refreshKey]="depositVersion()"
+            (changed)="refreshFolio()"
+          />
+
           @if (r.folio) {
-            <app-folio-panel [reservationId]="r.id" [inHouse]="r.status === 'checked_in'" />
+            <app-folio-panel
+              [reservationId]="r.id"
+              [inHouse]="r.status === 'checked_in'"
+              [refreshKey]="folioVersion()"
+              (changed)="refreshDeposit()"
+            />
           }
 
           <div>
@@ -344,6 +351,17 @@ export class ReservationDetailModalComponent {
   /** Room picked for `cancel_room`. */
   readonly pendingRoomId = signal<number | null>(null);
   readonly moveTarget = signal<RoomChangeTarget | null>(null);
+  /** H3.5 — bumped to make the deposit and folio panels re-fetch each other. */
+  readonly depositVersion = signal(0);
+  readonly folioVersion = signal(0);
+
+  refreshFolio(): void {
+    this.folioVersion.update((v) => v + 1);
+  }
+
+  refreshDeposit(): void {
+    this.depositVersion.update((v) => v + 1);
+  }
   /** H2.4 — "Penalidad: $250.000 (1 noche)" of cancelling now. */
   readonly quoteLabel = signal<string>('Calculando penalidad…');
   /** H3.2 — physical rooms to pick at check-in, and the room picked per reservation room. */
@@ -407,17 +425,6 @@ export class ReservationDetailModalComponent {
       if (policy) snapshots.set(policy.id, `${policy.name}: ${describePolicy(policy)}`);
     }
     return snapshots.size ? [...snapshots.values()].join(' / ') : 'Sin política: cancelación gratis';
-  });
-  /** H2.4 — "Depósito pendiente: 30 % ($150.000)"; nothing when none is asked. */
-  readonly depositLabel = computed(() => {
-    const r = this.reservation();
-    const deposit = r?.deposit;
-    if (!r || !deposit || Number(deposit.amount) <= 0) return '';
-    if (!['tentative', 'confirmed'].includes(r.status)) return '';
-    const amount = this.currency.format(Number(deposit.amount), 0);
-    return deposit.percent
-      ? `Depósito pendiente: ${Number(deposit.percent)} % (${amount})`
-      : `Depósito pendiente: ${amount}`;
   });
   /** H2.4 — penalty kept when it was cancelled or marked no-show. */
   readonly penaltyLabel = computed(() => {
@@ -601,12 +608,21 @@ export class ReservationDetailModalComponent {
       .cancellationQuote(reservation.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (quote) =>
-          this.quoteLabel.set(
-            quote.penalty_amount
-              ? this.formatPenalty(quote.penalty_amount, quote.penalty_detail)
-              : 'Sin penalidad: la cancelación es gratis',
-          ),
+        next: (quote) => {
+          if (!quote.penalty_amount) {
+            this.quoteLabel.set('Sin penalidad: la cancelación es gratis');
+            return;
+          }
+          let label = this.formatPenalty(quote.penalty_amount, quote.penalty_detail);
+          // H3.5 — what the held deposit covers: "· retenido $X · por cobrar $Y".
+          if (Number(quote.deposit_balance) > 0) {
+            const money = (value: string | undefined) => this.currency.format(Number(value ?? 0), 0);
+            label = `Penalidad ${money(quote.penalty_amount)} · retenido ${money(quote.deposit_retained)}`;
+            if (Number(quote.to_collect) > 0) label += ` · por cobrar ${money(quote.to_collect)}`;
+            if (Number(quote.to_refund) > 0) label += ` · por devolver ${money(quote.to_refund)}`;
+          }
+          this.quoteLabel.set(label);
+        },
         error: () => this.quoteLabel.set('No se pudo calcular la penalidad'),
       });
   }

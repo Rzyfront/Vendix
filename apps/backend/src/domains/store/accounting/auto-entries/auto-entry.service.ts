@@ -6252,6 +6252,106 @@ export class AutoEntryService {
     });
   }
 
+  /**
+   * lodging.deposit: DR Caja/Banco → CR Anticipos de Clientes (2805).
+   * A reservation deposit (owner decision D3) is a customer advance held in
+   * the holder's wallet, never revenue: it is applied to the folio (still
+   * 2805, crossed by the folio invoice in H3.7) or retained as a penalty
+   * (`lodging.deposit_retained`). VAT on the advance is pending the
+   * accountant's review (plan risk R5). `source_id` = `lodging_deposits.id`.
+   */
+  async onLodgingDeposit(data: {
+    deposit_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash' ? 'lodging.deposit.cash' : 'lodging.deposit.bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Depósito reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit.customer_advance',
+        `Anticipo reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.deposit',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Depósito de reserva hotelera ${data.reservation_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.deposit_retained: DR Anticipos de Clientes (2805) → CR Ingreso
+   * por penalidad. A cancellation or no-show keeps the deposit up to the
+   * penalty; what is left stays in 2805, owed back to the guest.
+   * `source_id` = the `retained` `lodging_deposits.id`.
+   */
+  async onLodgingDepositRetained(data: {
+    deposit_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.customer_advance',
+        `Anticipo retenido reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.penalty_income',
+        `Penalidad reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.deposit_retained',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Penalidad retenida del depósito ${data.reservation_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
   // ===== LAYAWAY (PLAN SEPARÉ) =====
 
   /**

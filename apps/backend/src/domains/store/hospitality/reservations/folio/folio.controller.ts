@@ -59,6 +59,14 @@ export class LodgingFolioController {
     return this.responseService.success(result, 'Cargo anulado');
   }
 
+  @ApiOperation({ summary: 'Aplicar al folio el depósito de la reserva (anticipo)' })
+  @Post('deposit')
+  @Permissions('store:lodging:folio:close')
+  async applyDeposit(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.lodgingFolioService.applyDeposit(id);
+    return this.responseService.success(result, 'Anticipo aplicado');
+  }
+
   @ApiOperation({ summary: 'Registrar un pago parcial del saldo del folio' })
   @Post('payments')
   @Permissions('store:lodging:folio:close')

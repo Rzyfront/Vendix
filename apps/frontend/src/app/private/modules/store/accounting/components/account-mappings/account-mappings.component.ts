@@ -145,7 +145,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'lodging',
     label: 'Hotelería',
     icon: 'bed-double',
-    prefixes: ['lodging.folio_payment.'],
+    prefixes: ['lodging.folio_payment.', 'lodging.deposit.', 'lodging.deposit_retained.'],
   },
   {
     key: 'layaway',

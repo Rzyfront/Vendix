@@ -465,6 +465,28 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2805',
     description: 'Anticipos de Clientes (folio hotelero)',
   },
+  // Hotelería (H3.5) — reservation deposit: a customer advance (D3), applied
+  // to the folio or retained as the cancellation / no-show penalty.
+  'lodging.deposit.cash': {
+    code: '1105',
+    description: 'Caja (depósito de reserva)',
+  },
+  'lodging.deposit.bank': {
+    code: '1110',
+    description: 'Banco (depósito de reserva)',
+  },
+  'lodging.deposit.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (depósito de reserva)',
+  },
+  'lodging.deposit_retained.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (depósito retenido)',
+  },
+  'lodging.deposit_retained.penalty_income': {
+    code: '4295',
+    description: 'Ingresos Diversos (penalidad de reserva)',
+  },
   // Layaway (Plan Separé)
   'layaway.payment.cash': {
     code: '1105',
@@ -1123,6 +1145,8 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'layaway.completed': 'Plan separe completado',
   'layaway.payment': 'Pago plan separe',
   'lodging.folio_payment': 'Pago de folio hotelero',
+  'lodging.deposit': 'Depósito de reserva hotelera',
+  'lodging.deposit_retained': 'Penalidad retenida del depósito',
   'order.completed': 'Orden completada',
   'order_item.prepared_waste': 'Merma de plato preparado',
   'order_item.prepared_reuse': 'Reuso de insumos de plato preparado',
