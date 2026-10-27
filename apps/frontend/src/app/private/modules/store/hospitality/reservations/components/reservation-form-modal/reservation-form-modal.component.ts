@@ -38,9 +38,11 @@ import {
   LodgingReservation,
   ReservationQuote,
   ReservationQuoteRequest,
+  RESTRICTION_OVERRIDE_PERMISSION,
 } from '../../interfaces/reservation.interface';
 import { describePolicy, SellableRatePlan } from '../../../rates/interfaces/rate-plan.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 interface RoomLineForm {
   unit_type_id: FormControl<number | null>;
@@ -264,7 +266,11 @@ export function formatShortDate(date: string): string {
           }
         </div>
 
-        @if (canBook() && restrictionMessages().length) {
+        @if (canBook() && restrictionMessages().length && !canOverride()) {
+          <p class="text-sm text-text-secondary" data-testid="reservation-override-denied">
+            Pide a un usuario con permiso de tarifas que fuerce la reserva.
+          </p>
+        } @else if (canBook() && restrictionMessages().length) {
           <app-input
             [formControl]="overrideControl"
             label="Motivo para forzar la reserva"
@@ -306,6 +312,7 @@ export class ReservationFormModalComponent {
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input(false);
   readonly unitTypes = input<UnitType[]>([]);
@@ -369,11 +376,19 @@ export class ReservationFormModalComponent {
     return [...new Set(state.quotes.flatMap((q) => q.restrictions ?? []))];
   });
 
-  /** Free rooms, and a reason when the stay breaks a restriction. */
+  /** H2.3 — only owners or users with rates:write may force restrictions. */
+  readonly canOverride = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.userPermissions().includes(RESTRICTION_OVERRIDE_PERMISSION),
+  );
+
+  /** Free rooms, and a reason from a user who may force a broken restriction. */
   readonly canConfirm = computed(
     () =>
       this.canBook() &&
-      (this.restrictionMessages().length === 0 || this.overrideReason().trim().length > 0),
+      (this.restrictionMessages().length === 0 ||
+        (this.canOverride() && this.overrideReason().trim().length > 0)),
   );
 
   /**

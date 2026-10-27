@@ -11,6 +11,8 @@ import { lodgingBusinessDate } from './folio/folio-nights';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
 import { loadPlanPricing } from '../rates/rate-plans.service';
 import { resolveNightRate } from '../rates/lodging-rate-resolver';
+import { restrictionViolations } from '../rates/lodging-restriction-validator';
+import { assertCanOverrideRestrictions, loadStayRestrictions } from '../rates/restrictions.service';
 import { isSellableHousekeeping } from '../housekeeping/housekeeping-status';
 
 /** Same queue and limits as a sale: changes wait on the store's sale lock. */
@@ -75,6 +77,8 @@ interface ChangePlan {
   unit_changed: boolean;
   type_changed: boolean;
   nights: ReturnType<typeof diffStayNights>;
+  /** H2.3 — restrictions the change breaks that the current stay did not. */
+  restrictions: string[];
   current: StaySide;
   proposed: StaySide;
 }
@@ -103,6 +107,7 @@ export class LodgingRoomChangesService {
       reservation_id: plan.reservation_id,
       current: plan.current,
       proposed: plan.proposed,
+      restrictions: plan.restrictions,
       difference: plan.nights.total.sub(plan.current.total_amount).toFixed(2),
     };
   }
@@ -128,8 +133,9 @@ export class LodgingRoomChangesService {
         await tx.$executeRaw`SELECT id FROM lodging_reservations WHERE id = ${head.reservation_id} AND store_id = ${store_id} FOR UPDATE`;
 
         const plan = await this.plan(tx, store_id, room_id, dto);
+        const forced = forcedRestrictions(plan.restrictions, dto.restriction_override_reason);
         targetCode = plan.proposed.unit?.code ?? null;
-        await this.write(tx, plan, store_id, user_id);
+        await this.write(tx, plan, store_id, user_id, forced);
         return plan.reservation_id;
       }, CHANGE_TX_OPTIONS);
     } catch (error) {
@@ -292,6 +298,42 @@ export class LodgingRoomChangesService {
       }
     }
 
+    // H2.3 — new dates or a new type are a new sale: they must respect the
+    // restrictions like a booking does. Only what the change adds counts:
+    // stop-sell on the nights it sells again (added or repriced) and the
+    // stay rules the current stay did not already break.
+    let restrictions: string[] = [];
+    if (type_changed || arrival !== currentArrival || departure !== currentDeparture) {
+      // Scoped client: inside `$transaction` the tx would read every store.
+      const rows = await loadStayRestrictions(
+        this.prisma,
+        arrival < currentArrival ? arrival : currentArrival,
+        departure > currentDeparture ? departure : currentDeparture,
+      );
+      const resold = new Set([...diff.added, ...diff.repriced]);
+      // An in-house guest already arrived: the arrival-day rules (MLOS, max
+      // stay, closed to arrival) belong to the original sale.
+      const arrived = (row: (typeof rows)[number]) =>
+        status === 'checked_in' && row.date === arrival
+          ? { ...row, min_stay: null, max_stay: null, closed_to_arrival: false }
+          : row;
+      const before = new Set(
+        restrictionViolations(
+          {
+            arrival_date: currentArrival,
+            departure_date: currentDeparture,
+            nights: stayNights(currentArrival, currentDeparture),
+            unit_type: room.unit_type,
+          },
+          rows,
+        ),
+      );
+      restrictions = restrictionViolations(
+        { arrival_date: arrival, departure_date: departure, nights, unit_type: { id: type.id, name: type.name } },
+        rows.map((row) => arrived(resold.has(row.date) ? row : { ...row, stop_sell: false })),
+      ).filter((message) => !before.has(message));
+    }
+
     // The physical room must be free on every night of the new stay.
     if (unit) {
       const taken = await client.lodging_room_nights.findFirst({
@@ -340,6 +382,7 @@ export class LodgingRoomChangesService {
       unit_changed,
       type_changed,
       nights: diff,
+      restrictions,
       current: {
         unit: room.unit,
         unit_type: room.unit_type,
@@ -364,6 +407,7 @@ export class LodgingRoomChangesService {
     plan: ChangePlan,
     store_id: number,
     user_id: number | null,
+    forced: string | null,
   ): Promise<void> {
     const now = new Date();
     const { proposed, nights } = plan;
@@ -451,11 +495,24 @@ export class LodgingRoomChangesService {
         reservation_id: plan.reservation_id,
         from_status: plan.status,
         to_status: plan.status,
-        reason: describeChange(plan.current, proposed),
+        reason: [describeChange(plan.current, proposed), forced].filter(Boolean).join(' · ').slice(0, 500),
         user_id,
       },
     });
   }
+}
+
+/**
+ * H2.3 — a change that breaks restrictions needs a reason and a user who may
+ * force them (`rates:write`, owner or super admin); returns the history part.
+ */
+function forcedRestrictions(restrictions: string[], reason: string | undefined): string | null {
+  if (restrictions.length === 0) return null;
+  if (!reason?.trim()) {
+    throw new VendixHttpException(ErrorCodes.LODGING_RESTRICTION_STAY_001, restrictions.join('. '));
+  }
+  assertCanOverrideRestrictions();
+  return `Restricciones forzadas: ${restrictions.join('; ')} — ${reason.trim()}`;
 }
 
 /** History line of a change: "Habitación: Sin asignar → 101 · Fechas: …". */

@@ -53,7 +53,7 @@ export async function loadPlanPricing(
       is_active: true,
       deposit_percent: true,
       cancellation_policy: {
-        select: { id: true, name: true, rules: true, no_show_penalty: true },
+        select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
       },
     },
   });
@@ -101,7 +101,8 @@ export async function loadPlanPricing(
     plan: { id: plan.id, name: plan.name },
     prices,
     terms: {
-      policy: toPolicySnapshot(plan.cancellation_policy),
+      // A switched-off policy is no longer sold: the stay is booked without one.
+      policy: plan.cancellation_policy?.is_active ? toPolicySnapshot(plan.cancellation_policy) : null,
       deposit_percent: new Prisma.Decimal(plan.deposit_percent ?? 0),
     },
   };
@@ -223,7 +224,7 @@ export class LodgingRatePlansService {
       await this.assertTypesInStore(dto.prices);
       await this.assertSeasonsInStore(dto.prices);
     }
-    await this.assertPolicyInStore(dto.cancellation_policy_id);
+    await this.assertPolicyInStore(dto.cancellation_policy_id, current.cancellation_policy_id);
     const is_active = dto.is_active ?? current.is_active;
     // An inactive plan cannot stay the default.
     const is_default = is_active && (dto.is_default ?? current.is_default);
@@ -315,12 +316,18 @@ export class LodgingRatePlansService {
     }
   }
 
-  /** H2.4 — the assigned policy must belong to the store (scoped lookup). */
-  private async assertPolicyInStore(id: number | null | undefined) {
-    if (id == null) return;
-    const found = await this.prisma.lodging_cancellation_policies.count({ where: { id } });
+  /**
+   * H2.4 — a newly assigned policy must be active and belong to the store
+   * (scoped lookup). The plan's current policy may stay assigned.
+   */
+  private async assertPolicyInStore(id: number | null | undefined, current: number | null = null) {
+    if (id == null || id === current) return;
+    const found = await this.prisma.lodging_cancellation_policies.count({ where: { id, is_active: true } });
     if (found !== 1) {
-      throw new VendixHttpException(ErrorCodes.LODGING_CANCEL_POLICY_FIND_001);
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CANCEL_POLICY_FIND_001,
+        'La política de cancelación no existe o está inactiva',
+      );
     }
   }
 

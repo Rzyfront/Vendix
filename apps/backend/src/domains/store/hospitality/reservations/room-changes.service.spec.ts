@@ -33,6 +33,14 @@ interface Options {
   ratePlanId?: number;
   /** H5.3 — active block of a room (maintenance). */
   block?: { unit_id: number; from_date: string; to_date: string };
+  /** H2.3 — restriction rows of the store (all types when `unit_type_id` is null). */
+  restrictions?: Array<{
+    date: string;
+    unit_type_id?: number | null;
+    min_stay?: number;
+    closed_to_arrival?: boolean;
+    stop_sell?: boolean;
+  }>;
 }
 
 /**
@@ -151,6 +159,19 @@ function createFake(options: Options = {}) {
           ? { from_date: D(b.from_date) }
           : null;
       }),
+    },
+    lodging_restrictions: {
+      findMany: jest.fn(async () =>
+        (options.restrictions ?? []).map((r) => ({
+          unit_type_id: r.unit_type_id ?? null,
+          date: D(r.date),
+          min_stay: r.min_stay ?? null,
+          max_stay: null,
+          closed_to_arrival: r.closed_to_arrival ?? false,
+          closed_to_departure: false,
+          stop_sell: r.stop_sell ?? false,
+        })),
+      ),
     },
     lodging_reservations: { update: jest.fn(async () => ({})) },
     lodging_reservation_events: { create: jest.fn(async () => ({})) },
@@ -441,6 +462,93 @@ describe('LodgingRoomChangesService', () => {
       const { service } = createFake({ unit: { id: 1, code: '101' } });
       const error = await rejection(service.quote(5, { unit_id: 1 }));
       expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_NOCHANGE_001');
+    });
+  });
+
+  describe('stay restrictions (H2.3)', () => {
+    const asDesk = (permissions: string[]) =>
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 1, user_id: 7, permissions } as any);
+
+    it('lengthening onto a stop-sell night is quoted and rejected without a reason, writing nothing', async () => {
+      const { service, client } = createFake({
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-13', stop_sell: true }],
+      });
+      const quote = await service.quote(5, { departure_date: '2026-11-14' });
+      expect(quote.restrictions).toEqual(['Venta cerrada de Doble estándar el 13-nov']);
+
+      const error = await rejection(service.apply(5, { departure_date: '2026-11-14' }));
+      expect(codeOf(error)).toBe('LODGING_RESTRICTION_STAY_001');
+      expect(messageOf(error)).toBe('Venta cerrada de Doble estándar el 13-nov');
+      expect(client.lodging_room_nights.createMany).not.toHaveBeenCalled();
+      expect(client.lodging_reservation_events.create).not.toHaveBeenCalled();
+    });
+
+    it('a reason without rates:write cannot force it', async () => {
+      asDesk(['store:lodging:reservations:write']);
+      const { service, client } = createFake({
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-13', stop_sell: true }],
+      });
+      const error = await rejection(
+        service.apply(5, { departure_date: '2026-11-14', restriction_override_reason: 'VIP' }),
+      );
+      expect(codeOf(error)).toBe('LODGING_RESTRICTION_OVERRIDE_001');
+      expect(client.lodging_room_nights.createMany).not.toHaveBeenCalled();
+    });
+
+    it('a reason with rates:write forces it and records it in the history', async () => {
+      asDesk(['store:lodging:rates:write']);
+      const { service, client } = createFake({
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-13', stop_sell: true }],
+      });
+      await service.apply(5, { departure_date: '2026-11-14', restriction_override_reason: 'VIP' });
+      expect(client.lodging_room_nights.createMany).toHaveBeenCalled();
+      expect(client.lodging_reservation_events.create.mock.calls[0][0].data.reason).toBe(
+        'Fechas: 10-nov al 13-nov (3 noches) → 10-nov al 14-nov (4 noches) · ' +
+          'Restricciones forzadas: Venta cerrada de Doble estándar el 13-nov — VIP',
+      );
+    });
+
+    it('moving the arrival to a day closed to arrival is rejected', async () => {
+      const { service } = createFake({
+        restrictions: [{ date: '2026-11-11', closed_to_arrival: true }],
+      });
+      const error = await rejection(service.apply(5, { arrival_date: '2026-11-11' }));
+      expect(messageOf(error)).toBe('No se admiten llegadas el 11-nov');
+    });
+
+    it('an in-house guest shortening the stay is not held to the arrival-day minimum stay', async () => {
+      const { service } = createFake({
+        status: 'checked_in',
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-10', min_stay: 3 }],
+      });
+      const quote = await service.quote(5, { departure_date: '2026-11-12' });
+      expect(quote.restrictions).toEqual([]);
+    });
+
+    it('a confirmed stay shortened below the arrival-day minimum stay needs a reason', async () => {
+      const { service } = createFake({
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-10', min_stay: 3 }],
+      });
+      const error = await rejection(service.apply(5, { departure_date: '2026-11-12' }));
+      expect(messageOf(error)).toBe('Estancia mínima de 3 noches para llegar el 10-nov');
+    });
+
+    it('a stop-sell on a night the room already holds does not block a change', async () => {
+      const { service, client } = createFake({
+        unit: { id: 1, code: '101' },
+        restrictions: [{ date: '2026-11-11', stop_sell: true }],
+      });
+      const quote = await service.quote(5, { departure_date: '2026-11-14' });
+      expect(quote.restrictions).toEqual([]);
+      await service.apply(5, { departure_date: '2026-11-14' });
+      expect(client.lodging_room_nights.createMany).toHaveBeenCalled();
     });
   });
 

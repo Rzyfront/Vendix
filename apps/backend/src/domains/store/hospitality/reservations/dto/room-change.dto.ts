@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, Matches, Min } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -27,4 +27,13 @@ export class RoomChangeDto {
   @Matches(DATE_ONLY)
   @IsDateString({ strict: true })
   departure_date?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Motivo para forzar un cambio que rompe restricciones de venta (requiere permiso de tarifas).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  restriction_override_reason?: string;
 }

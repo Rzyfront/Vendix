@@ -348,11 +348,16 @@ export interface Rack {
   types: RackType[];
 }
 
+/** H2.3 — permission that lets the desk force a stay that breaks restrictions. */
+export const RESTRICTION_OVERRIDE_PERMISSION = 'store:lodging:rates:write';
+
 /** Change of a reservation room (H1.4): room and/or stay dates. */
 export interface RoomChangeRequest {
   unit_id?: number;
   arrival_date?: string;
   departure_date?: string;
+  /** H2.3 — required (with rates:write) when the change breaks restrictions. */
+  restriction_override_reason?: string;
 }
 
 /** One side of a room change quote. */
@@ -371,6 +376,8 @@ export interface RoomChangeQuote {
   reservation_id: number;
   current: RoomChangeSide;
   proposed: RoomChangeSide;
+  /** H2.3 — restrictions the change breaks that the current stay did not. */
+  restrictions?: string[];
   /** proposed − current total (negative = cheaper). */
   difference: string;
 }

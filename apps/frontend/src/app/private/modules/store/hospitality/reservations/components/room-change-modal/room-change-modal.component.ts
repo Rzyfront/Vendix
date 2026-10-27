@@ -10,8 +10,8 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap, tap } from 'rxjs/operators';
 import { format, parseISO } from 'date-fns';
@@ -28,8 +28,10 @@ import {
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
 import { LodgingUnitsService } from '../../../rooms/services/units.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import {
   LodgingReservation,
+  RESTRICTION_OVERRIDE_PERMISSION,
   RoomChangeQuote,
   RoomChangeRequest,
   RoomChangeSide,
@@ -135,6 +137,28 @@ const shortDate = (date: string) => format(parseISO(date), 'd MMM', { locale: es
                 {{ differenceLabel() }}
               </p>
             </div>
+            @if (restrictionMessages().length) {
+              <ul class="space-y-1 text-warning" data-testid="room-change-restrictions">
+                @for (message of restrictionMessages(); track message) {
+                  <li>{{ message }}</li>
+                }
+              </ul>
+              @if (canOverride()) {
+                <app-input
+                  [formControl]="overrideControl"
+                  label="Motivo para forzar el cambio"
+                  type="text"
+                  placeholder="Ej. Cliente frecuente, autorizado por gerencia"
+                  helperText="Queda en el historial de la reserva."
+                  customWrapperClass="mt-0"
+                  data-testid="room-change-override-reason"
+                />
+              } @else {
+                <p class="text-text-secondary" data-testid="room-change-override-denied">
+                  Pide a un usuario con permiso de tarifas que fuerce el cambio.
+                </p>
+              }
+            }
           }
           @default {
             <p class="text-text-secondary">Elige otra habitación o cambia las fechas.</p>
@@ -147,7 +171,7 @@ const shortDate = (date: string) => format(parseISO(date), 'd MMM', { locale: es
         <app-button
           variant="primary"
           [loading]="saving()"
-          [disabled]="quoteState().kind !== 'ready'"
+          [disabled]="!canConfirm()"
           (clicked)="confirm()"
         >
           <app-icon slot="icon" name="check" [size]="16" />
@@ -164,6 +188,7 @@ export class RoomChangeModalComponent {
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   /** Room to change; `null` keeps the modal closed. */
   readonly target = input<RoomChangeTarget | null>(null);
@@ -180,6 +205,29 @@ export class RoomChangeModalComponent {
     arrival_date: this.fb.nonNullable.control(''),
     departure_date: this.fb.nonNullable.control(''),
   });
+
+  /** H2.3 — reason to force a change that breaks restrictions. */
+  readonly overrideControl = new FormControl('', { nonNullable: true });
+  private readonly overrideReason = toSignal(this.overrideControl.valueChanges, { initialValue: '' });
+
+  readonly restrictionMessages = computed(() => {
+    const state = this.quoteState();
+    return state.kind === 'ready' ? (state.quote.restrictions ?? []) : [];
+  });
+
+  /** H2.3 — only owners or users with rates:write may force restrictions. */
+  readonly canOverride = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.userPermissions().includes(RESTRICTION_OVERRIDE_PERMISSION),
+  );
+
+  readonly canConfirm = computed(
+    () =>
+      this.quoteState().kind === 'ready' &&
+      (this.restrictionMessages().length === 0 ||
+        (this.canOverride() && this.overrideReason().trim().length > 0)),
+  );
 
   readonly subtitle = computed(() => {
     const t = this.target();
@@ -262,6 +310,7 @@ export class RoomChangeModalComponent {
       },
       { emitEvent: false },
     );
+    this.overrideControl.reset('');
     this.quoteState.set(target.quote ? { kind: 'ready', quote: target.quote } : { kind: 'idle' });
   }
 
@@ -292,7 +341,10 @@ export class RoomChangeModalComponent {
   confirm(): void {
     const target = this.target();
     const request = this.request();
-    if (!target || !request || this.quoteState().kind !== 'ready') return;
+    if (!target || !request || !this.canConfirm()) return;
+    if (this.restrictionMessages().length) {
+      request.restriction_override_reason = this.overrideControl.value.trim();
+    }
     this.saving.set(true);
     this.reservationsService
       .changeRoom(target.reservation_room_id, request)

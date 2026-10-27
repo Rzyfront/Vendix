@@ -67,7 +67,7 @@ const RATE_PLANS: Record<string, unknown>[] = [
     name: 'Flexible',
     is_active: true,
     deposit_percent: new Prisma.Decimal(30),
-    cancellation_policy: FLEXIBLE,
+    cancellation_policy: { ...FLEXIBLE, is_active: true },
   },
 ];
 const RATE_PRICES = [

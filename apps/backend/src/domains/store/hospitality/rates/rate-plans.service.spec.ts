@@ -27,7 +27,7 @@ const withBreakfast = (): CreateRatePlanDto => ({
   ],
 });
 
-function build({ defaults = 0, types = [11, 12], seasons = [1], policies = [8] } = {}) {
+function build({ defaults = 0, types = [11, 12], seasons = [1], policies = [8], inactivePolicies = [] as number[] } = {}) {
   const plans: any[] = [];
   const prices: any[] = [];
   const tables = {
@@ -72,7 +72,9 @@ function build({ defaults = 0, types = [11, 12], seasons = [1], policies = [8] }
       ),
     },
     lodging_cancellation_policies: {
-      count: jest.fn(async ({ where }: any) => (policies.includes(where.id) ? 1 : 0)),
+      count: jest.fn(async ({ where }: any) =>
+        policies.includes(where.id) || (!where.is_active && inactivePolicies.includes(where.id)) ? 1 : 0,
+      ),
     },
   };
   const prisma: any = {
@@ -155,6 +157,21 @@ describe('LodgingRatePlansService (H2.1)', () => {
       plainToInstance(CreateRatePlanDto, { ...withBreakfast(), deposit_percent: 101 }),
     );
     expect(errors.map((e) => e.property)).toEqual(['deposit_percent']);
+  });
+
+  it('H2.4 — rejects assigning an inactive policy, but a plan may keep the one it has', async () => {
+    const { service, plans } = build({ inactivePolicies: [9] });
+    expect(await codeOf(service.create({ ...withBreakfast(), cancellation_policy_id: 9 }))).toBe(
+      'LODGING_CANCEL_POLICY_FIND_001',
+    );
+    const plan = await service.create(withBreakfast());
+    expect(await codeOf(service.update(plan.id, { cancellation_policy_id: 9 }))).toBe(
+      'LODGING_CANCEL_POLICY_FIND_001',
+    );
+    plans[0].cancellation_policy_id = 9;
+    await expect(
+      service.update(plan.id, { name: 'Desayuno incluido', cancellation_policy_id: 9 }),
+    ).resolves.toMatchObject({ name: 'Desayuno incluido', cancellation_policy_id: 9 });
   });
 
   it('a duplicate name is a 409', async () => {
@@ -247,6 +264,30 @@ describe('LodgingRatePlansService seasons (H2.2)', () => {
         ]),
       ),
     ).toBe('LODGING_RATE_PLAN_PRICES_001');
+  });
+
+  it('H2.4 — loadPlanPricing sells without an inactive policy (nothing to snapshot)', async () => {
+    const policy = { id: 8, name: 'Flexible', rules: [], no_show_penalty: null };
+    const client = (is_active: boolean): any => ({
+      lodging_rate_plans: {
+        findFirst: jest.fn(async () => ({
+          id: 3,
+          name: 'Con desayuno',
+          is_active: true,
+          deposit_percent: null,
+          cancellation_policy: { ...policy, is_active },
+        })),
+      },
+      lodging_rate_prices: {
+        findMany: jest.fn(async () => [
+          { day_of_week: null, price: new Prisma.Decimal(250000), season: null },
+        ]),
+      },
+    });
+    const active = await loadPlanPricing(client(true), 5, 3, { id: 11, name: 'Doble' });
+    expect(active.terms.policy).toMatchObject({ id: 8, name: 'Flexible' });
+    const inactive = await loadPlanPricing(client(false), 5, 3, { id: 11, name: 'Doble' });
+    expect(inactive.terms.policy).toBeNull();
   });
 
   it('loadPlanPricing only reads active seasons and prices 14-dic regular, 15-dic in season', async () => {
