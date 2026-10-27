@@ -262,12 +262,13 @@
     }
 
     <!-- Agregar producto -->
-    <section class="space-y-2.5 p-3 sm:p-4 rounded-xl border border-border bg-surface">
+    <section class="flex flex-col gap-3 p-3 sm:p-4 rounded-xl border border-border bg-surface">
       <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">
         <app-icon name="plus-circle" [size]="16" class="text-primary" />
         Agregar producto
       </h3>
       <app-inputsearch
+        class="block"
         placeholder="Buscar por nombre o SKU"
         ariaLabel="Buscar producto para agregar"
         [ngModel]="searchTerm()"
@@ -293,7 +294,19 @@
                 [disabled]="busy() || !isSellable(product)"
                 (click)="onProductClick(product)"
               >
-                <span class="min-w-0">
+                <span class="shrink-0 w-11 h-11 rounded-lg overflow-hidden border border-border bg-muted flex items-center justify-center">
+                  @if (product.image_url) {
+                    <img
+                      [src]="product.image_url"
+                      [alt]="product.name"
+                      class="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  } @else {
+                    <app-icon name="package" [size]="18" class="text-text-secondary" />
+                  }
+                </span>
+                <span class="flex-1 min-w-0">
                   <span class="block text-sm font-medium text-text-primary truncate">{{ product.name }}</span>
                   @if (!isSellable(product)) {
                     <span class="block text-xs text-text-secondary">No vendible</span>
@@ -330,7 +343,19 @@
                         [disabled]="busy()"
                         (click)="addProduct(product, variant)"
                       >
-                        <span class="text-sm text-text-primary truncate">{{ variantName(variant) }}</span>
+                        <span class="shrink-0 w-8 h-8 rounded-md overflow-hidden border border-border bg-muted flex items-center justify-center">
+                          @if (variant.image?.image_url || product.image_url) {
+                            <img
+                              [src]="variant.image?.image_url || product.image_url"
+                              [alt]="variantName(variant)"
+                              class="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          } @else {
+                            <app-icon name="package" [size]="14" class="text-text-secondary" />
+                          }
+                        </span>
+                        <span class="flex-1 min-w-0 text-sm text-text-primary truncate">{{ variantName(variant) }}</span>
                         <span class="shrink-0 flex items-center gap-2">
                           <span class="text-sm font-medium text-text-primary tabular-nums">{{
                             priceOf(product, variant) | currency
