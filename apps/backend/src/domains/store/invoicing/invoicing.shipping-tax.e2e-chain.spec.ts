@@ -50,6 +50,8 @@ describe('InvoicingService.createFromOrder → UBL — cadena con envío gravado
 
     prisma = createPrismaMock({
       orders: ['findFirst'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
       invoices: ['findFirst', 'create', 'update'],
       invoice_items: ['findMany', 'deleteMany'],
       invoice_taxes: ['createMany', 'deleteMany'],

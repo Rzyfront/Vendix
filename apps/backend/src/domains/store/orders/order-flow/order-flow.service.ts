@@ -53,6 +53,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { assertOrderNotInvoiceLocked } from '../utils/invoice-lock.util';
 import { Prisma, order_delivery_type_enum, order_state_enum, payment_methods_type_enum, payments_state_enum } from '@prisma/client';
 import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -1816,6 +1817,19 @@ export class OrderFlowService {
       `Order #${orderId} promoted from draft${alreadyClaimedForPayment ? ' under payment claim' : ' to created'}`,
     );
     return true;
+  }
+
+  /**
+   * Facturar a crédito una orden guardada sin cobrar (POS «Guardar»): la saca
+   * de `draft` a `created` con la MISMA reserva de stock que el cobro, para que
+   * una orden facturada nunca quede sin existencias apartadas. Idempotente: si
+   * ya no es `draft` devuelve `false` y no toca nada.
+   */
+  async promoteDraftForCreditInvoicing(
+    orderId: number,
+    storeId: number,
+  ): Promise<boolean> {
+    return this.promoteDraftToCreated(orderId, storeId);
   }
 
   /**
@@ -5477,6 +5491,8 @@ export class OrderFlowService {
     if (orderBlock) {
       throw new VendixHttpException(orderBlock.code, orderBlock.message);
     }
+    // Con factura electrónica vigente la línea queda congelada: nota crédito.
+    await assertOrderNotInvoiceLocked(this.prisma, orderId);
 
     // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
     //    filtrar nada de otra orden/tenant, igual que `deliverOrderItem`).
@@ -6112,6 +6128,7 @@ export class OrderFlowService {
         { state: order.state },
       );
     }
+    await assertOrderNotInvoiceLocked(this.prisma, orderId);
 
     // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
     //    filtrar nada de otra orden/tenant, igual que el seam).

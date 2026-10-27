@@ -1501,6 +1501,16 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'The selected customer does not belong to the current store',
   },
+  // Orden con factura electrónica vigente (validated/sent/accepted/rejected):
+  // sus líneas, precios, descuentos y envío quedan congelados; la corrección
+  // es la nota crédito. Abonos, despacho y notas siguen permitidos. 409 por
+  // el mismo motivo que `ORD_TITULAR_INVOICED_001`.
+  ORD_INVOICED_LOCKED_001: {
+    code: 'ORD_INVOICED_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden ya tiene factura electrónica. Para corregirla emite una nota crédito.',
+  },
   // Release-853 paso 10 — la orden ya tiene factura `sales_invoice` vigente
   // (cualquier estado fuera de draft/voided/cancelled) y su adquiriente es
   // inmutable; la vía de corrección es la nota crédito. 409 porque la
@@ -2332,6 +2342,29 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
+  },
+  // Facturar a crédito una orden sin cobrar: el `credit` del cuerpo del emit
+  // no se puede honrar. 409 (estado de la orden) salvo la fecha, que es 400.
+  INVOICING_CREDIT_CUSTOMER_REQUIRED_001: {
+    code: 'INVOICING_CREDIT_CUSTOMER_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Asigna un cliente identificado para facturar a crédito.',
+  },
+  INVOICING_CREDIT_PARTIAL_PAYMENT_001: {
+    code: 'INVOICING_CREDIT_PARTIAL_PAYMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene abonos; registra el saldo o anula los abonos para facturar a crédito.',
+  },
+  INVOICING_CREDIT_ORDER_STATE_001: {
+    code: 'INVOICING_CREDIT_ORDER_STATE_001',
+    httpStatus: 409,
+    devMessage: 'La orden está cancelada o reembolsada y no se puede facturar a crédito.',
+  },
+  INVOICING_CREDIT_DUE_DATE_001: {
+    code: 'INVOICING_CREDIT_DUE_DATE_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de vencimiento no puede ser anterior a hoy.',
   },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',

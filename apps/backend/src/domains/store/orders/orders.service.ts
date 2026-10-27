@@ -2,6 +2,7 @@ import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { assertOrderNotInvoiceLocked } from './utils/invoice-lock.util';
 import {
   CreateOrderDto,
   CreateOrderItemDto,
@@ -1445,6 +1446,9 @@ export class OrdersService {
             transmission_status: true,
             send_status: true,
             issue_date: true,
+            // «Facturada · Crédito, vence DD/MM» del detalle de orden.
+            due_date: true,
+            payment_form: true,
           },
           orderBy: { id: 'desc' },
           take: 1,
@@ -1769,6 +1773,10 @@ export class OrdersService {
     const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
       SETTLED_PAYMENT_STATES.has(p.state),
     );
+    // Same statuses `assertOrderNotInvoiceLocked` rejects on.
+    const invoiceLocked = ['validated', 'sent', 'accepted', 'rejected'].includes(
+      activeTitularInvoice?.status ?? '',
+    );
     // Modo cocina: UNA lectura por orden (no por item). Solo gobierna la
     // elegibilidad de `deliver` (fisico: sin KDS, entregable desde pending).
     const kitchenMode = await resolveKitchenMode(
@@ -1787,6 +1795,7 @@ export class OrdersService {
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
         kitchen_mode: kitchenMode,
+        invoiceLocked,
       }),
     }));
 
@@ -2336,6 +2345,24 @@ export class OrdersService {
     ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
     }
+    // Orden facturada: los campos económicos se congelan (el titular conserva
+    // su propia guarda `ORD_TITULAR_INVOICED_001`, más abajo).
+    const invoiceLockedKeys = [
+      'items',
+      'subtotal',
+      'total_amount',
+      'tax_amount',
+      'discount_amount',
+      'currency',
+    ];
+    // Reasignar método/tarifa SIN cambiar el costo no mueve el monto
+    // facturado: sólo el costo de envío entra en el bloqueo.
+    if (
+      differsByAtLeastCents(nextShippingCost, persistedShippingCost, 1) ||
+      invoiceLockedKeys.some((key) => hasShippingKey(key))
+    ) {
+      await this.assertOrderNotInvoiceLocked(id);
+    }
     // Regla vigente — titular vs factura electrónica. El titular es
     // inmutable SOLO cuando la orden tiene un documento electrónico
     // TRANSMITIDO y vigente (`sales_invoice` / `export_invoice` /
@@ -2740,6 +2767,10 @@ export class OrdersService {
     });
   }
 
+  private assertOrderNotInvoiceLocked(orderId: number): Promise<void> {
+    return assertOrderNotInvoiceLocked(this.prisma, orderId);
+  }
+
   async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
     // ADR-07: una sesión nueva abierta manda sobre cualquier historial cerrado.
     const openSession = await this.prisma.table_sessions.findFirst({
@@ -2779,6 +2810,7 @@ export class OrdersService {
     }
 
     await this.assertTableOrderEditable(id, order.store_id);
+    await this.assertOrderNotInvoiceLocked(id);
 
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
@@ -3199,6 +3231,7 @@ export class OrdersService {
 
     // ADR-07: protege ambos escritores de ítems con la misma regla.
     await this.assertTableOrderEditable(orderId, storeId);
+    await this.assertOrderNotInvoiceLocked(orderId);
 
     const isDraft = existingOrder.state === 'draft';
 
@@ -5161,6 +5194,11 @@ export class OrdersService {
       throw new VendixHttpException(
         ErrorCodes.ORD_SHIP_CHARGED_COST_CHANGE_001,
       );
+    }
+    // Orden facturada: sólo se bloquea si el costo cambia (el monto facturado);
+    // reasignar método/tarifa al mismo costo sigue permitido.
+    if (shippingCostChanged) {
+      await this.assertOrderNotInvoiceLocked(orderId);
     }
 
     // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa

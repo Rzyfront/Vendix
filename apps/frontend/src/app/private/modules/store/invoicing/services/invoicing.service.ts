@@ -30,6 +30,17 @@ import {
 } from '../interfaces/invoice.interface';
 
 /**
+ * Cuerpo opcional de `POST orders/:id/emit`: `credit` factura una orden sin
+ * pagos como venta a crédito (forma de pago 2) con su fecha de vencimiento.
+ */
+export interface EmitOrderBody {
+  credit?: {
+    due_date: string;
+    payment_means_code?: string;
+  };
+}
+
+/**
  * Resultado de la emisión de un clic (`POST orders/:id/emit` y
  * `POST financial-accounts/:id/emit`): `issued` = aceptada, `pending` = en
  * proceso ante la DIAN, `failed` = no emitida (se puede reintentar).
@@ -108,10 +119,13 @@ export class InvoicingService {
   }
 
   /** Facturación de un clic de la orden completa (crea, valida y envía). */
-  emitOrder(orderId: number): Observable<ApiResponse<InvoiceEmitResult>> {
+  emitOrder(
+    orderId: number,
+    body?: EmitOrderBody,
+  ): Observable<ApiResponse<InvoiceEmitResult>> {
     return this.http.post<ApiResponse<InvoiceEmitResult>>(
       this.getApiUrl(`orders/${orderId}/emit`),
-      {},
+      body ?? {},
     );
   }
 

@@ -1,6 +1,7 @@
 import { VendixHttpException, FinancialSplitErrors } from 'src/common/errors';
 import { OneShotEmissionService } from './one-shot-emission.service';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 
 /**
  * Facturación en un solo paso: el documento es una fila con estado propio
@@ -11,6 +12,11 @@ describe('OneShotEmissionService', () => {
   const build = (opts: { order?: any } = {}) => {
     let inv: any = null;
     const prisma: any = {
+      store_settings: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }),
+      },
       orders: {
         findFirst: jest.fn().mockResolvedValue(
           opts.order ?? { id: 1, active_financial_split_id: null },
@@ -78,8 +84,37 @@ describe('OneShotEmissionService', () => {
       { findFiscalAccountingEntityId: jest.fn().mockResolvedValue(77) } as any,
       { record: jest.fn() } as any,
     );
-    const service = new OneShotEmissionService(prisma, emission);
-    return { service, invoicing, invoice_flow, retry_queue, setInv: (v: any) => (inv = v) };
+    const receivables: any = {
+      createCreditSaleFromEvent: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+    const order_flow: any = {
+      promoteDraftForCreditInvoicing: jest.fn().mockResolvedValue(true),
+    };
+    const module_ref: any = {
+      get: jest.fn((token: unknown) => {
+        if (token === OrderFlowService) return order_flow;
+        throw new Error('unexpected token');
+      }),
+    };
+    const service = new OneShotEmissionService(
+      prisma,
+      emission,
+      receivables,
+      module_ref,
+      invoicing,
+    );
+    const emitSpy = jest.spyOn(emission, 'emitForOrder');
+    return {
+      service,
+      prisma,
+      invoicing,
+      invoice_flow,
+      retry_queue,
+      receivables,
+      order_flow,
+      emitSpy,
+      setInv: (v: any) => (inv = v),
+    };
   };
 
   it('orden: crea + valida + transmite y devuelve issued', async () => {
@@ -172,5 +207,261 @@ describe('OneShotEmissionService', () => {
     });
     expect(invoice_flow.validate).not.toHaveBeenCalled();
     expect(invoice_flow.send).not.toHaveBeenCalled();
+  });
+
+  describe('facturar a crédito una orden sin cobrar (S1/S2)', () => {
+    const unpaid = (over: Record<string, unknown> = {}) => ({
+      id: 1,
+      store_id: 1,
+      state: 'draft',
+      customer_id: 12,
+      payment_form: null,
+      grand_total: '1000.00',
+      active_financial_split_id: null,
+      payments: [],
+      ...over,
+    });
+    const tomorrow = () => {
+      const d = new Date(Date.now() + 2 * 86400000);
+      return d.toISOString().slice(0, 10);
+    };
+
+    it('sin credit: 409 INVOICING_ORDER_UNPAID_001 con details y sin crear factura', async () => {
+      const { service, invoicing, receivables, emitSpy } = build({ order: unpaid() });
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_ORDER_UNPAID_001',
+          details: {
+            order_id: 1,
+            remaining_balance: '1000.00',
+            credit_eligible: true,
+            credit_blocker: null,
+          },
+        }),
+      });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+      expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('pago en vuelo (pending/authorized): blocker partial_payment, no se convierte', async () => {
+      const { service, receivables } = build({
+        order: unpaid({ payments: [{ state: 'pending', amount: '1000.00' }] }),
+      });
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({
+            credit_eligible: false,
+            credit_blocker: 'partial_payment',
+          }),
+        }),
+      });
+      await expect(
+        service.emitOrder(1, { due_date: tomorrow() } as any),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_CREDIT_PARTIAL_PAYMENT_001',
+        }),
+      });
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+    });
+
+    it('tienda sin facturación electrónica: con credit NO convierte ni crea cartera', async () => {
+      const { service, prisma, invoicing, receivables, order_flow } = build({
+        order: unpaid(),
+      });
+      invoicing.getElectronicEmissionEligibility.mockResolvedValue({
+        eligible: false,
+        reason: 'disabled',
+      });
+      await service.emitOrder(1, { due_date: tomorrow() } as any);
+      expect(order_flow.promoteDraftForCreditInvoicing).not.toHaveBeenCalled();
+      expect(prisma.orders.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ payment_form: '2' }),
+        }),
+      );
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('sin credit y sin cliente: credit_eligible=false, blocker customer_required', async () => {
+      const { service } = build({ order: unpaid({ customer_id: null }) });
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({
+            credit_eligible: false,
+            credit_blocker: 'customer_required',
+          }),
+        }),
+      });
+    });
+
+    it('sin credit con abono parcial: blocker partial_payment', async () => {
+      const { service } = build({
+        order: unpaid({ payments: [{ state: 'succeeded', amount: '400.00' }] }),
+      });
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({
+            remaining_balance: '600.00',
+            credit_eligible: false,
+            credit_blocker: 'partial_payment',
+          }),
+        }),
+      });
+    });
+
+    it('orden cancelada: blocker order_state', async () => {
+      const { service } = build({ order: unpaid({ state: 'cancelled' }) });
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({ credit_blocker: 'order_state' }),
+        }),
+      });
+    });
+
+    it('con credit sin cliente: 409 INVOICING_CREDIT_CUSTOMER_REQUIRED_001 y no toca la orden', async () => {
+      const { service, prisma, emitSpy } = build({ order: unpaid({ customer_id: null }) });
+      await expect(
+        service.emitOrder(1, { due_date: tomorrow() }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_CREDIT_CUSTOMER_REQUIRED_001',
+        }),
+      });
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('con credit y abono: 409 INVOICING_CREDIT_PARTIAL_PAYMENT_001', async () => {
+      const { service } = build({
+        order: unpaid({ payments: [{ state: 'captured', amount: '1.00' }] }),
+      });
+      await expect(
+        service.emitOrder(1, { due_date: tomorrow() }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_CREDIT_PARTIAL_PAYMENT_001',
+        }),
+      });
+    });
+
+    it('due_date anterior al hoy de la tienda: 400 INVOICING_CREDIT_DUE_DATE_001 y nada se persiste', async () => {
+      const { service, prisma, order_flow, emitSpy } = build({ order: unpaid() });
+      await expect(
+        service.emitOrder(1, { due_date: '2020-01-01' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_CREDIT_DUE_DATE_001',
+        }),
+      });
+      expect(order_flow.promoteDraftForCreditInvoicing).not.toHaveBeenCalled();
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('fecha imposible (2026-02-31): 400 INVOICING_CREDIT_DUE_DATE_001', async () => {
+      const { service } = build({ order: unpaid() });
+      await expect(
+        service.emitOrder(1, { due_date: '2099-02-31' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'INVOICING_CREDIT_DUE_DATE_001',
+        }),
+      });
+    });
+
+    it('con credit: promueve el borrador, marca crédito, crea la cartera y emite con due_date y medio', async () => {
+      const { service, prisma, order_flow, receivables, emitSpy, invoicing } = build({
+        order: unpaid(),
+      });
+      const due = tomorrow();
+      const r = await service.emitOrder(1, {
+        due_date: due,
+        payment_means_code: '47',
+      });
+      expect(r.state).toBe('issued');
+      expect(order_flow.promoteDraftForCreditInvoicing).toHaveBeenCalledWith(1, 1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 1,
+            OR: [{ payment_form: null }, { payment_form: { not: '2' } }],
+          },
+          data: expect.objectContaining({
+            payment_form: '2',
+            remaining_balance: 1000,
+          }),
+        }),
+      );
+      expect(receivables.createCreditSaleFromEvent).toHaveBeenCalledWith({
+        order_id: 1,
+        total_amount: 1000,
+        store_id: 1,
+        due_date: new Date(`${due}T00:00:00.000Z`),
+      });
+      expect(emitSpy).toHaveBeenCalledWith(1, {
+        due_date: new Date(`${due}T00:00:00.000Z`),
+        payment_means_code: '47',
+      });
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
+        due_date: new Date(`${due}T00:00:00.000Z`),
+        payment_means_code: '47',
+      });
+    });
+
+    it('orden ya en created: no vuelve a promover', async () => {
+      const { service, order_flow } = build({ order: unpaid({ state: 'created' }) });
+      await service.emitOrder(1, { due_date: tomorrow() });
+      expect(order_flow.promoteDraftForCreditInvoicing).not.toHaveBeenCalled();
+    });
+
+    it('orden que ya es crédito (payment_form 2): va directo a emitir, sin reconvertir ni duplicar cartera', async () => {
+      const { service, prisma, receivables, emitSpy } = build({
+        order: unpaid({ state: 'created', payment_form: '2' }),
+      });
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(prisma.orders.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ payment_form: '2' }),
+        }),
+      );
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+      expect(emitSpy).toHaveBeenCalledWith(1, undefined);
+    });
+
+    it('orden pagada: comportamiento previo, emite sin opciones ni conversión', async () => {
+      const { service, prisma, emitSpy } = build({
+        order: unpaid({
+          state: 'finished',
+          payments: [{ state: 'succeeded', amount: '1000.00' }],
+        }),
+      });
+      await service.emitOrder(1);
+      expect(emitSpy).toHaveBeenCalledWith(1);
+      expect(prisma.orders.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ payment_form: '2' }),
+        }),
+      );
+    });
+
+    it('con factura ya numerada y saldo: reintenta la transmisión sin 409', async () => {
+      const { service, setInv, emitSpy } = build({ order: unpaid({ state: 'created' }) });
+      setInv({
+        id: 50,
+        invoice_number: 'FE-1',
+        status: 'rejected',
+        transmission_status: null,
+        cufe: null,
+        pdf_url: null,
+        contingency_deadline: null,
+      });
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(emitSpy).toHaveBeenCalledWith(1);
+    });
   });
 });

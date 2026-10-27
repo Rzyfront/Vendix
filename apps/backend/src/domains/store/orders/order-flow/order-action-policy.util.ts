@@ -725,6 +725,10 @@ export interface OrderItemActionSnapshot {
   /** Modo cocina de la tienda. `physical`: sin KDS, un plato con ticket
    * `pending`/`in_preparation` es entregable. Ausente/`virtual`: exige `ready`. */
   kitchen_mode?: KitchenMode;
+  /** The order has a current sales document (`validated|sent|accepted|
+   * rejected`): lines are frozen, corrections go through a credit note —
+   * mirrors `assertOrderNotInvoiceLocked` (`ORD_INVOICED_LOCKED_001`). */
+  invoiceLocked?: boolean;
 }
 
 const ITEM_UNDELIVERABLE_ORDER_STATES = new Set(['cancelled', 'refunded']);
@@ -781,6 +785,9 @@ export function canCancelItem(item: OrderItemActionSnapshot): OrderActionResult 
   if (item.orderHasSettledPayment) {
     return { enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' };
   }
+  if (item.invoiceLocked) {
+    return { enabled: false, reason: 'ORD_INVOICED_LOCKED_001' };
+  }
   if (item.delivered_at) {
     return { enabled: false, reason: 'ITEM_ALREADY_DELIVERED' };
   }
@@ -798,6 +805,9 @@ export function canReverseDeliveredItem(item: OrderItemActionSnapshot): OrderAct
   }
   if (item.orderHasSettledPayment) {
     return { enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' };
+  }
+  if (item.invoiceLocked) {
+    return { enabled: false, reason: 'ORD_INVOICED_LOCKED_001' };
   }
   if (!item.delivered_at) {
     return { enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' };

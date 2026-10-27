@@ -56,7 +56,11 @@ describe('InvoicingService.createFromOrder — forma base con impuesto incluido'
       invoices: ['findFirst', 'create'],
       invoice_items: ['findMany'],
       invoice_taxes: ['createMany'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
     });
+    prisma.accounts_receivable.findFirst.mockResolvedValue(null);
+    prisma.order_installments.findFirst.mockResolvedValue(null);
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.invoices.create.mockImplementation(
       async ({ data }: { data: Record<string, unknown> }) => ({

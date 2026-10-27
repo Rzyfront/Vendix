@@ -298,6 +298,12 @@ export interface InvoiceTaxRowInput {
  */
 export type DocumentLineTaxes = InvoiceTaxRowInput[][];
 
+/** Plazo y medio de pago declarados al facturar una orden a crédito. */
+export interface CreateFromOrderOptions {
+  due_date?: Date;
+  payment_means_code?: string;
+}
+
 /**
  * ¿El documento nacido de una orden parte sus tributos por línea?
  *
@@ -3064,7 +3070,7 @@ export class InvoicingService {
     );
   }
 
-  async createFromOrder(order_id: number) {
+  async createFromOrder(order_id: number, opts?: CreateFromOrderOptions) {
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
@@ -3677,10 +3683,21 @@ export class InvoicingService {
      * «Método de pago» de los reportes. Si divergiera, una orden podría
      * imprimirse «Tarjeta» y declararse «Efectivo».
      */
-    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans(
-      order,
-      order.payments,
-    );
+    const resolved_means = resolveOrderDianPaymentMeans(order, order.payments);
+    const payment_form = resolved_means.payment_form;
+    // Crédito: el medio lo puede declarar quien factura (modal «Facturar a
+    // crédito»); con contado se queda el que salió de los pagos cobrados.
+    const payment_means_code =
+      payment_form === '2' && opts?.payment_means_code
+        ? opts.payment_means_code
+        : resolved_means.payment_means_code;
+    // Crédito: el vencimiento declarado manda; si no, el de la cuenta por
+    // cobrar de la orden y, en su defecto, el de la primera cuota. Sin esto el
+    // XML llevaba `PaymentDueDate = issue_date` en facturas «a crédito».
+    const due_date =
+      payment_form === '2'
+        ? (opts?.due_date ?? (await this.resolveCreditDueDate(order.id)))
+        : undefined;
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -3744,6 +3761,7 @@ export class InvoicingService {
         // desde los pagos cobrados de la orden.
         payment_form,
         payment_means_code,
+        ...(due_date ? { due_date } : {}),
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,
@@ -3784,6 +3802,37 @@ export class InvoicingService {
       `Invoice #${created.id} created numberless from order #${order_id} (A.1: numbered at validate)`,
     );
     return created;
+  }
+
+  /**
+   * Vencimiento de una orden a crédito sin plazo declarado: su cuenta por
+   * cobrar, o su primera cuota. Un plazo heredado que ya venció no se declara:
+   * un `PaymentDueDate` anterior a la emisión contradice el documento, y sin
+   * él la factura sale como antes (vence al emitirse).
+   */
+  private async resolveCreditDueDate(order_id: number): Promise<Date | null> {
+    const due_date = await this.findCreditDueDate(order_id);
+    if (!due_date) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    return due_date.toISOString().slice(0, 10) < today ? null : due_date;
+  }
+
+  private async findCreditDueDate(order_id: number): Promise<Date | null> {
+    const receivable = await this.prisma.accounts_receivable.findFirst({
+      where: {
+        source_id: order_id,
+        source_type: { in: ['credit_sale', 'order'] },
+      },
+      orderBy: { id: 'asc' },
+      select: { due_date: true },
+    });
+    if (receivable?.due_date) return receivable.due_date;
+    const installment = await this.prisma.order_installments.findFirst({
+      where: { order_id },
+      orderBy: { installment_number: 'asc' },
+      select: { due_date: true },
+    });
+    return installment?.due_date ?? null;
   }
 
   /** Independently invoiceable account: no new physical order or inventory line. */

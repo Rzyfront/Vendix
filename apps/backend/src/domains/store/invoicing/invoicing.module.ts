@@ -52,6 +52,7 @@ import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { AccountsReceivableModule } from '../accounts-receivable/accounts-receivable.module';
 import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
 import { StoreDocumentEmailReceptionController } from '../../received-documents/store-document-email-reception.controller';
 import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
@@ -63,6 +64,9 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     PrismaModule,
     S3Module,
     OrderHistoryModule,
+    // Cartera de la orden facturada a crédito (`OneShotEmissionService`). Sin
+    // ciclo: AccountsReceivableModule solo importa Prisma/Response/AP.
+    AccountsReceivableModule,
     InvoiceProviderModule,
     DianDirectModule,
     WithholdingTaxModule,
