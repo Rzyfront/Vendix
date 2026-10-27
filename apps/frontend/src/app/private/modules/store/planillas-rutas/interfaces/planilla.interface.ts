@@ -157,6 +157,7 @@ export interface DispatchRoute {
   status: DispatchRouteStatus;
   vehicle_id?: number | null;
   driver_user_id?: number | null;
+  dispatched_by_user_id?: number | null;
   external_driver_name?: string | null;
   external_driver_id_number?: string | null;
   is_primary_driver_external: boolean;

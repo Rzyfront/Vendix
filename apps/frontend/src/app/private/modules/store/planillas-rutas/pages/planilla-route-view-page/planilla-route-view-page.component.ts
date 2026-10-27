@@ -13,7 +13,11 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { RouteTrackingService, RouteTrackingWatch } from '../../services/route-tracking.service';
-import { RoutePositionPublisherService } from '../../services/route-position-publisher.service';
+import {
+  RoutePositionPublisherService,
+  dispatchByOtherWarning,
+} from '../../services/route-position-publisher.service';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { RouteOptimizerService, GeoStop } from '../../services/route-optimizer.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -233,11 +237,11 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
           <div class="ml-auto flex flex-wrap items-center gap-2">
             @if (r.status === 'draft') {
               <div class="flex flex-col items-end">
-                <app-button variant="primary" size="sm" [loading]="actionLoading()" [disabled]="!canDispatchNow()" (clicked)="dispatch()">
+                <app-button variant="primary" size="sm" [loading]="actionLoading()" (clicked)="dispatch()">
                   <app-icon slot="icon" name="send" [size]="16"></app-icon>
                   Despachar
                 </app-button>
-                @if (dispatchBlockedText(); as txt) {
+                @if (dispatchByOtherText(); as txt) {
                   <span class="mt-1 text-xs text-text-secondary">{{ txt }}</span>
                 }
               </div>
@@ -248,6 +252,20 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
             </app-button>
           </div>
         </div>
+
+        @if (needsLocationSync()) {
+          <div class="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+            <app-icon name="map-pin" [size]="18" class="shrink-0 text-amber-600"></app-icon>
+            <p class="min-w-0 flex-1">
+              Esta ruta fue despachada por otro usuario y aún no rastrea tu recorrido.
+              Sincroniza tu ubicación para ver la ruta respecto a ti y que tu equipo pueda seguirte.
+            </p>
+            <app-button variant="primary" size="sm" (clicked)="syncLocation()">
+              <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+              Sincronizar mi ubicación
+            </app-button>
+          </div>
+        }
 
         @if (isResponsible() && inProgress() && (publisher.state() === 'denied' || publisher.state() === 'unavailable')) {
           <div class="flex shrink-0 items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
@@ -356,6 +374,7 @@ export class PlanillaRouteViewPageComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly dispatchNotes = inject(DispatchNotesService);
   readonly publisher = inject(RoutePositionPublisherService);
+  private readonly dialog = inject(DialogService);
 
   readonly nextColor = NEXT_COLOR;
 
@@ -383,6 +402,10 @@ export class PlanillaRouteViewPageComponent {
   readonly detailStop = signal<DispatchRouteStop | null>(null);
   readonly detailNote = signal<DispatchNote | null>(null);
   readonly detailLoading = signal(false);
+  /** The tracking snapshot request failed (link state unknown). */
+  private readonly trackingFailed = signal(false);
+  /** The responsible pressed "Sincronizar mi ubicación" in this session. */
+  private readonly syncRequested = signal(false);
 
   private watchHandle: RouteTrackingWatch | null = null;
 
@@ -429,6 +452,33 @@ export class PlanillaRouteViewPageComponent {
 
   readonly trackingEnabled = computed(() => this.responsibleUserId() != null);
 
+  /**
+   * The responsible's journey is tracked when they dispatched the route
+   * themselves, already synced (snapshot) or is sharing right now.
+   */
+  readonly responsibleLinked = computed(() => {
+    const r = this.route();
+    if (!r) return false;
+    return (
+      (r.dispatched_by_user_id != null &&
+        r.dispatched_by_user_id === this.responsibleUserId()) ||
+      this.tracking()?.is_responsible_linked === true ||
+      this.syncRequested() ||
+      // Already sharing for this route (e.g. synced from the detail page).
+      (this.publisher.state() !== 'idle' &&
+        this.publisher.currentRouteId === r.id)
+    );
+  });
+
+  /** Responsible on a route dispatched by someone else, not yet synced. */
+  readonly needsLocationSync = computed(
+    () =>
+      this.isResponsible() &&
+      this.inProgress() &&
+      (this.tracking() !== null || this.trackingFailed()) &&
+      !this.responsibleLinked(),
+  );
+
   readonly chip = computed<{ text: string; cls: string; icon: any }>(() => {
     const neutral = 'border-border bg-surface text-text-secondary';
     if (!this.trackingEnabled()) {
@@ -461,15 +511,17 @@ export class PlanillaRouteViewPageComponent {
       }
       return { text: `Última señal · hace ${ago}`, cls: neutral, icon: 'radio' };
     }
+    if (this.inProgress() && this.tracking() && !this.responsibleLinked()) {
+      return { text: 'El encargado aún no sincroniza su ubicación', cls: neutral, icon: 'radio' };
+    }
     return { text: 'Esperando ubicación del encargado', cls: neutral, icon: 'loader-2' };
   });
 
-  readonly canDispatchNow = computed(() => this.dispatchBlockedText() === null);
-
-  readonly dispatchBlockedText = computed<string | null>(() => {
+  /** Informative (non-blocking) note when the viewer is not the encargado. */
+  readonly dispatchByOtherText = computed<string | null>(() => {
     const id = this.responsibleUserId();
     if (id != null && id !== this.currentUserId()) {
-      return `Solo ${this.responsibleName()} puede despachar esta ruta`;
+      return `Sin rastreo hasta que ${this.responsibleName()} sincronice su ubicación`;
     }
     return null;
   });
@@ -613,10 +665,11 @@ export class PlanillaRouteViewPageComponent {
       // this page (it stops on 403/409 or when the route stops being active).
     });
 
-    // Only the responsible, on an in-progress route, publishes position.
+    // Only the responsible, on an in-progress route they are linked to,
+    // publishes position.
     effect(() => {
       const loaded = !!this.route();
-      const run = this.isResponsible() && this.inProgress();
+      const run = this.isResponsible() && this.inProgress() && this.responsibleLinked();
       untracked(() => {
         if (run) this.publisher.start(this.routeId());
         else if (loaded && this.publisher.currentRouteId === this.routeId()) {
@@ -665,11 +718,13 @@ export class PlanillaRouteViewPageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (t) => {
+          this.trackingFailed.set(false);
           this.applySnapshot(t);
           if (openChannel && t.tracking_enabled) this.openChannel();
         },
         error: () => {
           /* tracking is optional: the route view works without it */
+          this.trackingFailed.set(true);
         },
       });
   }
@@ -699,8 +754,33 @@ export class PlanillaRouteViewPageComponent {
     this.router.navigate(['/admin/orders/planillas', this.routeId()]);
   }
 
+  /** Starts sharing the responsible's location on a route dispatched by someone else. */
+  syncLocation(): void {
+    if (!this.isResponsible() || !this.inProgress()) return;
+    this.syncRequested.set(true);
+    // Called from the click so the browser ties the permission prompt to it.
+    this.publisher.start(this.routeId());
+    this.toast.success('Sincronizando tu ubicación con la ruta');
+  }
+
   dispatch(): void {
-    if (!this.canDispatchNow()) return;
+    if (this.dispatchByOtherText() === null) {
+      this.runDispatch();
+      return;
+    }
+    void this.dialog
+      .confirm({
+        title: '¿Despachar la ruta?',
+        message: dispatchByOtherWarning(this.responsibleName()),
+        confirmText: 'Despachar',
+        cancelText: 'Cancelar',
+      })
+      .then((confirmed) => {
+        if (confirmed) this.runDispatch();
+      });
+  }
+
+  private runDispatch(): void {
     this.actionLoading.set(true);
     this.service
       .dispatch(this.routeId())
