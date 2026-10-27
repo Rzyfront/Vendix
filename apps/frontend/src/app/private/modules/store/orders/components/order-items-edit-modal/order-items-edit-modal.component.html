@@ -4,6 +4,7 @@
   title="Modificar productos"
   [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
   size="xl-mid"
+  customClasses="md:[&>div]:min-h-[min(700px,90vh)]"
   [canClose]="canCloseModal"
 >
   <!-- PC: orden a la izquierda, buscador a la derecha. Móvil: una columna (orden → buscador → resto). -->
