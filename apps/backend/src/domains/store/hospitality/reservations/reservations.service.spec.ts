@@ -67,7 +67,11 @@ const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
  * `pg_advisory_xact_lock`. Reads and writes yield, so without the lock two
  * parallel sales would both see the last room free.
  */
-function createFakeStore(units: number | Record<number, number>, overbooking_allowance = 0) {
+function createFakeStore(
+  units: number | Record<number, number>,
+  overbooking_allowance = 0,
+  restrictions: Record<string, unknown>[] = [],
+) {
   const nights: NightRow[] = [];
   const reservations: {
     id: number;
@@ -212,6 +216,13 @@ function createFakeStore(units: number | Record<number, number>, overbooking_all
           RATE_PLANS.find((p) => p.id === where.id && p.store_id === where.store_id) ?? null,
       ),
     },
+    lodging_restrictions: {
+      findMany: jest.fn(async ({ where }: any) =>
+        restrictions.filter(
+          (r: any) => r.date >= where.date.gte && r.date <= where.date.lte,
+        ),
+      ),
+    },
     lodging_rate_prices: {
       findMany: jest.fn(async ({ where }: any) =>
         RATE_PRICES.filter(
@@ -276,8 +287,12 @@ describe('LodgingReservationsService', () => {
     return body;
   };
 
-  const build = (units: number | Record<number, number>, overbooking_allowance = 0) => {
-    const fake = createFakeStore(units, overbooking_allowance);
+  const build = (
+    units: number | Record<number, number>,
+    overbooking_allowance = 0,
+    restrictions: Record<string, unknown>[] = [],
+  ) => {
+    const fake = createFakeStore(units, overbooking_allowance, restrictions);
     const service = new LodgingReservationsService(
       fake.prisma as any,
       new LodgingAvailabilityService(fake.prisma as any),
@@ -348,6 +363,7 @@ describe('LodgingReservationsService', () => {
           { night_date: '2026-11-12', rate_amount: '250000.00' },
         ],
         total_amount: '750000.00',
+        restrictions: [],
       });
     });
 
@@ -797,6 +813,88 @@ describe('LodgingReservationsService', () => {
       await service.cancel(1, 'Motivo');
       await expectCode(service.cancelRoom(102, 'Motivo'), 'LODGING_RESERVATION_ROOM_STATUS_001');
       await expectCode(service.cancelRoom(999, 'Motivo'), 'LODGING_RESERVATION_ROOM_FIND_001');
+    });
+  });
+
+  describe('restricciones (H2.3)', () => {
+    /** 7-dic "Mín. 3 noches" and 8-dic "Cerrado a la llegada", every type. */
+    const row = (date: string, patch: Record<string, unknown>) => ({
+      date: new Date(`${date}T00:00:00.000Z`),
+      unit_type_id: null,
+      min_stay: null,
+      max_stay: null,
+      closed_to_arrival: false,
+      closed_to_departure: false,
+      stop_sell: false,
+      ...patch,
+    });
+    const DECEMBER = [
+      row('2026-12-07', { min_stay: 3 }),
+      row('2026-12-08', { closed_to_arrival: true }),
+    ];
+    const dec = (arrival_date: string, departure_date: string) => ({
+      ...stay,
+      arrival_date,
+      departure_date,
+    });
+
+    it('la cotización muestra "Estancia mínima de 3 noches para llegar el 7-dic"', async () => {
+      const { service } = build(2, 0, DECEMBER);
+      const quote = await service.quote(dec('2026-12-07', '2026-12-08'));
+      expect(quote.restrictions).toEqual(['Estancia mínima de 3 noches para llegar el 7-dic']);
+      const ok = await service.quote(dec('2026-12-07', '2026-12-10'));
+      expect(ok.restrictions).toEqual([]);
+    });
+
+    it('crear con llegada el 8-dic falla con "No se admiten llegadas el 8-dic" y no vende noches', async () => {
+      const { service, nights, reservations } = build(2, 0, DECEMBER);
+      const body = await expectCode(
+        service.create(sale(dec('2026-12-08', '2026-12-09'))),
+        'LODGING_RESTRICTION_STAY_001',
+      );
+      expect(body.message).toBe('No se admiten llegadas el 8-dic');
+      expect(nights).toHaveLength(0);
+      expect(reservations).toHaveLength(0);
+    });
+
+    it('con rates:write y motivo se fuerza la reserva y el motivo queda en el historial', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 5, user_id: 9, permissions: ['store:lodging:rates:write'] } as any);
+      const { service, events, nights } = build(2, 0, DECEMBER);
+      await service.create({
+        ...sale(dec('2026-12-07', '2026-12-08')),
+        restriction_override_reason: 'Cliente frecuente',
+      });
+      expect(nights).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        to_status: 'confirmed',
+        user_id: 9,
+        reason:
+          'Restricciones forzadas: Estancia mínima de 3 noches para llegar el 7-dic — Cliente frecuente',
+      });
+    });
+
+    it('sin rates:write el motivo no basta para forzar', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 5, user_id: 9, permissions: ['store:lodging:reservations:write'] } as any);
+      const { service, nights } = build(2, 0, DECEMBER);
+      await expectCode(
+        service.create({
+          ...sale(dec('2026-12-08', '2026-12-09')),
+          restriction_override_reason: 'Cliente frecuente',
+        }),
+        'LODGING_RESTRICTION_OVERRIDE_001',
+      );
+      expect(nights).toHaveLength(0);
+    });
+
+    it('una estadía sin restricciones no guarda motivo en el historial', async () => {
+      const { service, events } = build(2, 0, DECEMBER);
+      await service.create(sale(dec('2026-12-10', '2026-12-12')));
+      expect(events[0]).toMatchObject({ to_status: 'confirmed' });
+      expect(events[0]).not.toHaveProperty('reason');
     });
   });
 

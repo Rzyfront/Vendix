@@ -1,6 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  input,
+  OnInit,
+  output,
+  signal,
+} from '@angular/core';
 import { IconComponent } from '../../../../../../../shared/components/index';
-import { Season, seasonRange, winningSeason } from '../../interfaces/rate-plan.interface';
+import {
+  LodgingRestriction,
+  restrictionLabels,
+  Season,
+  seasonRange,
+  winningSeason,
+} from '../../interfaces/rate-plan.interface';
 
 const MONTH_NAMES = [
   'Enero',
@@ -21,6 +35,10 @@ interface CalendarDay {
   date: string;
   day: number;
   season: Season | null;
+  /** H2.3 — short labels of the night's restrictions ("Mín. 3", "CTA"…). */
+  labels: string[];
+  /** Full description for the tooltip. */
+  title: string;
 }
 
 const pad = (value: number) => `${value}`.padStart(2, '0');
@@ -28,7 +46,8 @@ const pad = (value: number) => `${value}`.padStart(2, '0');
 /**
  * Hospitality Suite (H2.2) — rates calendar: one month, each night colored by
  * the season that prices it (highest priority when seasons overlap), with a
- * legend of the active seasons. Later slices add per-day restrictions here.
+ * legend of the active seasons. H2.3: each night shows its restrictions and a
+ * click opens them for editing.
  */
 @Component({
   selector: 'app-rates-calendar',
@@ -69,21 +88,37 @@ const pad = (value: number) => `${value}`.padStart(2, '0');
           <span></span>
         }
         @for (day of days(); track day.date) {
-          <div
-            class="flex min-h-12 flex-col rounded-md border border-border p-1 text-left"
+          <button
+            type="button"
+            class="flex min-h-12 flex-col rounded-md border border-border p-1 text-left hover:ring-2 hover:ring-primary/40"
             [style.background-color]="day.season ? day.season.color + '33' : null"
             [style.border-color]="day.season ? day.season.color : null"
-            [attr.title]="day.season ? day.season.name : 'Precio normal'"
+            [attr.title]="day.title"
             [attr.data-season]="day.season?.name ?? null"
+            [attr.data-date]="day.date"
             data-testid="rates-calendar-day"
+            (click)="daySelected.emit(day.date)"
           >
             <span class="text-xs font-semibold text-text-primary">{{ day.day }}</span>
             @if (day.season) {
               <span class="truncate text-[10px] text-text-secondary">{{ day.season.name }}</span>
             }
-          </div>
+            @for (label of day.labels; track label) {
+              <span
+                class="mt-0.5 truncate rounded bg-red-100 px-1 text-[10px] font-semibold text-red-700"
+                data-testid="rates-calendar-restriction"
+              >
+                {{ label }}
+              </span>
+            }
+          </button>
         }
       </div>
+
+      <p class="text-xs text-text-secondary">
+        Toca una noche para fijar sus restricciones. Mín./Máx.: estancia para llegar esa noche ·
+        CTA: cerrado a la llegada · CTD: cerrado a la salida · Stop: venta detenida.
+      </p>
 
       <div class="flex flex-wrap gap-3 text-xs text-text-secondary">
         <span class="flex items-center gap-1">
@@ -100,8 +135,16 @@ const pad = (value: number) => `${value}`.padStart(2, '0');
     </div>
   `,
 })
-export class RatesCalendarComponent {
+export class RatesCalendarComponent implements OnInit {
   readonly seasons = input<Season[]>([]);
+  /** H2.3 — restrictions of the shown month and the names of the room types. */
+  readonly restrictions = input<LodgingRestriction[]>([]);
+  readonly unitTypeNames = input<ReadonlyMap<number, string>>(new Map());
+
+  /** A night was clicked (`YYYY-MM-DD`). */
+  readonly daySelected = output<string>();
+  /** The shown month changed: its first and last night. */
+  readonly monthChanged = output<{ from: string; to: string }>();
 
   readonly weekdayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   /** First day of the shown month, `YYYY-MM-01`. */
@@ -129,11 +172,25 @@ export class RatesCalendarComponent {
     const [year, month] = this.month().split('-').map(Number);
     const count = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const seasons = this.activeSeasons();
+    const names = this.unitTypeNames();
     return Array.from({ length: count }, (_, i) => {
       const date = `${year}-${pad(month)}-${pad(i + 1)}`;
-      return { date, day: i + 1, season: winningSeason(date, seasons) };
+      const season = winningSeason(date, seasons);
+      // Every-type rows read "Mín. 3"; a type row reads "Suite: Stop".
+      const labels = this.restrictions()
+        .filter((r) => r.date === date)
+        .flatMap((r) => {
+          const prefix = r.unit_type_id == null ? '' : `${names.get(r.unit_type_id) ?? 'Tipo'}: `;
+          return restrictionLabels(r).map((label) => prefix + label);
+        });
+      const title = [season ? season.name : 'Precio normal', ...labels].join(' · ');
+      return { date, day: i + 1, season, labels, title };
     });
   });
+
+  ngOnInit(): void {
+    this.emitMonth();
+  }
 
   range(season: Season): string {
     return seasonRange(season);
@@ -143,5 +200,12 @@ export class RatesCalendarComponent {
     const [year, month] = this.month().split('-').map(Number);
     const next = new Date(Date.UTC(year, month - 1 + delta, 1));
     this.month.set(`${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-01`);
+    this.emitMonth();
+  }
+
+  private emitMonth(): void {
+    const [year, month] = this.month().split('-').map(Number);
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    this.monthChanged.emit({ from: this.month(), to: `${year}-${pad(month)}-${pad(last)}` });
   }
 }

@@ -142,6 +142,8 @@ export interface ReservationQuote {
   rate_plan: { id: number; name: string } | null;
   night_rates: NightRate[];
   total_amount: string;
+  /** H2.3 — restrictions the stay breaks ("No se admiten llegadas el 8-dic"). */
+  restrictions: string[];
 }
 
 /** One room of a new reservation: type and occupancy (H1.5). */
@@ -159,6 +161,8 @@ export interface CreateReservationRequest {
   rooms: ReservationRoomRequest[];
   customer_id: number;
   notes?: string;
+  /** H2.3 — reason to sell despite the restrictions (needs rates:write). */
+  restriction_override_reason?: string;
 }
 
 /** Date-only ISO from the API (`2026-11-10T00:00:00.000Z`) → `2026-11-10`. */

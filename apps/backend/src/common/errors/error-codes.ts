@@ -5773,6 +5773,26 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La temporada se solapa con otra de la misma prioridad',
   },
+  LODGING_RESTRICTION_STAY_001: {
+    code: 'LODGING_RESTRICTION_STAY_001',
+    httpStatus: 409,
+    devMessage: 'La estadía no cumple las restricciones de venta de esas fechas',
+  },
+  LODGING_RESTRICTION_OVERRIDE_001: {
+    code: 'LODGING_RESTRICTION_OVERRIDE_001',
+    httpStatus: 403,
+    devMessage: 'Solo un usuario con permiso para editar tarifas puede forzar las restricciones',
+  },
+  LODGING_RESTRICTION_RANGE_001: {
+    code: 'LODGING_RESTRICTION_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'La estancia máxima no puede ser menor que la mínima',
+  },
+  LODGING_RESTRICTION_DATES_001: {
+    code: 'LODGING_RESTRICTION_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última fecha debe ser igual o posterior a la primera, en un rango de hasta 366 días',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

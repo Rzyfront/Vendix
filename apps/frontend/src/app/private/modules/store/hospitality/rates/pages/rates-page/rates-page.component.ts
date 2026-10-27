@@ -23,14 +23,17 @@ import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import { RatePlanFormModalComponent } from '../../components/rate-plan-form-modal/rate-plan-form-modal.component';
 import { RatesCalendarComponent } from '../../components/rates-calendar/rates-calendar.component';
+import { RestrictionFormModalComponent } from '../../components/restriction-form-modal/restriction-form-modal.component';
 import { SeasonFormModalComponent } from '../../components/season-form-modal/season-form-modal.component';
 import {
+  LodgingRestriction,
   MEAL_PLAN_LABELS,
   RatePlan,
   Season,
   seasonRange,
 } from '../../interfaces/rate-plan.interface';
 import { RatePlansService } from '../../services/rate-plans.service';
+import { RestrictionsService } from '../../services/restrictions.service';
 import { SeasonsService } from '../../services/seasons.service';
 
 interface RatePlanRow extends RatePlan {
@@ -49,7 +52,8 @@ interface SeasonRow extends Season {
  * Hospitality Suite (H2.1, H2.2) — Tarifas: rate plans ("Solo alojamiento",
  * "Con desayuno") with a nightly price per room type and weekday, demand
  * seasons ("Alta") priced inside each plan, and the rates calendar colored by
- * season. The default plan is preselected when booking.
+ * season. The default plan is preselected when booking. H2.3: clicking a
+ * night of the calendar sets its stay restrictions (min stay, CTA/CTD, stop-sell).
  */
 @Component({
   selector: 'app-hospitality-rates-page',
@@ -65,6 +69,7 @@ interface SeasonRow extends Season {
     RatePlanFormModalComponent,
     SeasonFormModalComponent,
     RatesCalendarComponent,
+    RestrictionFormModalComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -169,7 +174,13 @@ interface SeasonRow extends Season {
             </h2>
           </div>
           <div class="px-2 pb-2 pt-3 md:px-6 md:pb-6">
-            <app-rates-calendar [seasons]="seasons()" />
+            <app-rates-calendar
+              [seasons]="seasons()"
+              [restrictions]="restrictions()"
+              [unitTypeNames]="unitTypeNames()"
+              (monthChanged)="loadRestrictions($event)"
+              (daySelected)="openRestrictionForm($event)"
+            />
           </div>
         </app-card>
       </div>
@@ -182,6 +193,15 @@ interface SeasonRow extends Season {
         [hasDefault]="hasDefault()"
         (isOpenChange)="isFormOpen.set($event)"
         (saved)="refresh()"
+      />
+
+      <app-restriction-form-modal
+        [isOpen]="isRestrictionFormOpen()"
+        [date]="restrictionDate()"
+        [unitTypes]="unitTypes()"
+        [restrictions]="restrictions()"
+        (isOpenChange)="isRestrictionFormOpen.set($event)"
+        (saved)="reloadRestrictions()"
       />
 
       <app-season-form-modal
@@ -197,6 +217,7 @@ export class HospitalityRatesPageComponent implements OnInit {
   private readonly ratePlansService = inject(RatePlansService);
   private readonly unitTypesService = inject(UnitTypesService);
   private readonly seasonsService = inject(SeasonsService);
+  private readonly restrictionsService = inject(RestrictionsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -209,6 +230,15 @@ export class HospitalityRatesPageComponent implements OnInit {
   readonly seasonsLoading = signal(true);
   readonly isSeasonFormOpen = signal(false);
   readonly editingSeason = signal<Season | null>(null);
+  /** H2.3 — restrictions of the month shown in the calendar. */
+  readonly restrictions = signal<LodgingRestriction[]>([]);
+  private readonly restrictionMonth = signal<{ from: string; to: string } | null>(null);
+  readonly isRestrictionFormOpen = signal(false);
+  readonly restrictionDate = signal<string | null>(null);
+
+  readonly unitTypeNames = computed(
+    () => new Map(this.unitTypes().map((t) => [t.id, t.name] as const)),
+  );
 
   readonly hasDefault = computed(() => this.plans().some((p) => p.is_default));
 
@@ -339,6 +369,33 @@ export class HospitalityRatesPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  loadRestrictions(month: { from: string; to: string }): void {
+    this.restrictionMonth.set(month);
+    this.restrictionsService
+      .list(month.from, month.to)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          // A late answer for a month already left behind is dropped.
+          if (this.restrictionMonth() === month) this.restrictions.set(rows);
+        },
+        error: (message: unknown) =>
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudieron cargar las restricciones',
+          ),
+      });
+  }
+
+  reloadRestrictions(): void {
+    const month = this.restrictionMonth();
+    if (month) this.loadRestrictions(month);
+  }
+
+  openRestrictionForm(date: string): void {
+    this.restrictionDate.set(date);
+    this.isRestrictionFormOpen.set(true);
   }
 
   openSeasonForm(season: Season | null): void {

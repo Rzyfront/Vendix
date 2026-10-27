@@ -123,4 +123,15 @@ export class CreateReservationDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'H2.3 — motivo para vender aunque la estadía rompa restricciones (requiere store:lodging:rates:write). Queda en el historial.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  restriction_override_reason?: string;
 }

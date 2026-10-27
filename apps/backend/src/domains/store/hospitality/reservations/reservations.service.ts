@@ -16,6 +16,11 @@ import { LodgingAvailabilityService } from './lodging-availability.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { loadPlanPricing } from '../rates/rate-plans.service';
 import { PricedNight, resolveNightRates, sumNights } from '../rates/lodging-rate-resolver';
+import { restrictionViolations } from '../rates/lodging-restriction-validator';
+import {
+  assertCanOverrideRestrictions,
+  loadStayRestrictions,
+} from '../rates/restrictions.service';
 import {
   canTransition,
   NIGHT_HOLDING_STATUSES,
@@ -311,6 +316,11 @@ export class LodgingReservationsService {
     const unitType = await this.loadSellableType(dto.unit_type_id);
     assertCapacity(unitType, dto.adults, dto.children ?? 0);
     const priced = await this.priceStay(store_id, unitType, dto.rate_plan_id, nights);
+    // H2.3 — what the stay breaks, so the form shows it before confirming.
+    const restrictions = restrictionViolations(
+      { arrival_date: dto.arrival_date, departure_date: dto.departure_date, nights, unit_type: unitType },
+      await loadStayRestrictions(this.prisma, dto.arrival_date, dto.departure_date),
+    );
     const inventory = await this.availability.getInventory(
       unitType.id,
       dto.arrival_date,
@@ -329,6 +339,7 @@ export class LodgingReservationsService {
         rate_amount: n.rate_amount.toFixed(2),
       })),
       total_amount: priced.total.toFixed(2),
+      restrictions,
     };
   }
 
@@ -358,6 +369,7 @@ export class LodgingReservationsService {
       lines.push({ unitType, adults: room.adults, children, ...priced });
     }
     await this.assertCustomerInStore(store_id, dto.customer_id);
+    const overrideReason = await this.checkRestrictions(dto, nights, [...types.values()]);
 
     const total = lines.reduce((sum, line) => sum.add(line.total), new Prisma.Decimal(0));
     const arrival = dateOnlyToDb(dto.arrival_date);
@@ -438,6 +450,7 @@ export class LodgingReservationsService {
           reservation_id: reservation.id,
           from_status: null,
           to_status: 'confirmed',
+          ...(overrideReason ? { reason: overrideReason } : {}),
           user_id: context?.user_id ?? null,
         },
       });
@@ -532,6 +545,35 @@ export class LodgingReservationsService {
       return reservation.id;
     }, SALE_TX_OPTIONS);
     return this.findOne(reservationId);
+  }
+
+  /**
+   * H2.3 — the stay must respect the restrictions of every room type it
+   * sells. A user with `rates:write` may force it with a reason; returns the
+   * history line for the creation event (null when nothing was forced).
+   */
+  private async checkRestrictions(
+    dto: CreateReservationDto,
+    nights: string[],
+    types: SellableType[],
+  ): Promise<string | null> {
+    const rows = await loadStayRestrictions(this.prisma, dto.arrival_date, dto.departure_date);
+    const violations = [
+      ...new Set(
+        types.flatMap((unit_type) =>
+          restrictionViolations(
+            { arrival_date: dto.arrival_date, departure_date: dto.departure_date, nights, unit_type },
+            rows,
+          ),
+        ),
+      ),
+    ];
+    if (violations.length === 0) return null;
+    if (!dto.restriction_override_reason) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESTRICTION_STAY_001, violations.join('. '));
+    }
+    assertCanOverrideRestrictions();
+    return `Restricciones forzadas: ${violations.join('; ')} — ${dto.restriction_override_reason}`.slice(0, 500);
   }
 
   /**

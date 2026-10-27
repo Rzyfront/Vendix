@@ -16,7 +16,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap, tap } from 'rxjs/operators';
 import {
@@ -213,6 +213,13 @@ export function formatShortDate(date: string): string {
               <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-red-600'">
                 {{ quoteMessage() }}
               </span>
+              @if (restrictionMessages().length) {
+                <ul class="mt-1 space-y-0.5 text-xs font-semibold text-red-600" data-testid="reservation-restrictions">
+                  @for (message of restrictionMessages(); track message) {
+                    <li>{{ message }}</li>
+                  }
+                </ul>
+              }
               @if (canBook() && overbookingAlert()) {
                 <p
                   class="mt-1 text-xs font-semibold text-primary"
@@ -247,6 +254,18 @@ export function formatShortDate(date: string): string {
           }
         </div>
 
+        @if (canBook() && restrictionMessages().length) {
+          <app-input
+            [formControl]="overrideControl"
+            label="Motivo para forzar la reserva"
+            type="text"
+            placeholder="Ej. Cliente frecuente, autorizado por gerencia"
+            helperText="Requiere permiso para editar tarifas. Queda en el historial de la reserva."
+            customWrapperClass="mt-0"
+            data-testid="reservation-override-reason"
+          />
+        }
+
         <app-input
           formControlName="notes"
           label="Notas"
@@ -261,7 +280,7 @@ export function formatShortDate(date: string): string {
         <app-button
           variant="primary"
           [loading]="saving()"
-          [disabled]="!canBook() || !customer()"
+          [disabled]="!canConfirm() || !customer()"
           (clicked)="onSubmit()"
         >
           <app-icon slot="icon" name="calendar-check" [size]="16" />
@@ -333,6 +352,20 @@ export class ReservationFormModalComponent {
     () => this.quoteState().kind === 'ready' && this.shortage() === null,
   );
 
+  /** H2.3 — restrictions the stay breaks, once per message across the rooms. */
+  readonly restrictionMessages = computed(() => {
+    const state = this.quoteState();
+    if (state.kind !== 'ready') return [];
+    return [...new Set(state.quotes.flatMap((q) => q.restrictions ?? []))];
+  });
+
+  /** Free rooms, and a reason when the stay breaks a restriction. */
+  readonly canConfirm = computed(
+    () =>
+      this.canBook() &&
+      (this.restrictionMessages().length === 0 || this.overrideReason().trim().length > 0),
+  );
+
   /**
    * H1.6 — the sale fits only thanks to the type's overbooking allowance:
    * "Sobreventa: 3/2 Doble estándar" (rooms sold after it / active rooms).
@@ -378,6 +411,16 @@ export class ReservationFormModalComponent {
     notes: this.fb.nonNullable.control('', { validators: [Validators.maxLength(1000)] }),
   });
 
+  /**
+   * H2.3 — reason to force a stay that breaks restrictions. Outside the form
+   * on purpose: typing it must not quote the stay again.
+   */
+  readonly overrideControl = new FormControl('', {
+    nonNullable: true,
+    validators: [Validators.maxLength(300)],
+  });
+  readonly overrideReason = toSignal(this.overrideControl.valueChanges, { initialValue: '' });
+
   constructor() {
     this.form.valueChanges
       .pipe(
@@ -422,6 +465,7 @@ export class ReservationFormModalComponent {
       rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 2, children: 0 }],
       notes: '',
     });
+    this.overrideControl.reset('');
     this.customer.set(null);
     this.customerSelector()?.reset();
     this.quoteState.set({ kind: 'idle' });
@@ -493,7 +537,7 @@ export class ReservationFormModalComponent {
   onSubmit(): void {
     const request = this.quoteRequest();
     const customer = this.customer();
-    if (!request || !customer || !this.canBook()) return;
+    if (!request || !customer || !this.canConfirm()) return;
 
     this.saving.set(true);
     const raw = this.form.getRawValue();
@@ -508,6 +552,9 @@ export class ReservationFormModalComponent {
       })),
       customer_id: Number(customer.id),
       notes: raw.notes.trim() || undefined,
+      restriction_override_reason: this.restrictionMessages().length
+        ? this.overrideControl.value.trim()
+        : undefined,
     };
     this.reservationsService
       .create(payload)

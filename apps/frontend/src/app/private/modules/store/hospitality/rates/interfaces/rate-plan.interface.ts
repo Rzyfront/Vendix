@@ -123,3 +123,43 @@ export function winningSeason(night: string, seasons: readonly Season[]): Season
   }
   return best;
 }
+
+/**
+ * Hospitality Suite (H2.3) — stay restrictions of one night as returned by
+ * `/store/hospitality/restrictions`. `unit_type_id` null = every room type;
+ * min/max stay apply to arrivals that night.
+ */
+export interface LodgingRestriction {
+  id: number;
+  /** `YYYY-MM-DD`. */
+  date: string;
+  unit_type_id: number | null;
+  min_stay: number | null;
+  max_stay: number | null;
+  closed_to_arrival: boolean;
+  closed_to_departure: boolean;
+  stop_sell: boolean;
+}
+
+/** Sets (or clears, when all empty) a range of nights for one scope. */
+export interface RestrictionPayload {
+  from_date: string;
+  to_date: string;
+  unit_type_id: number | null;
+  min_stay: number | null;
+  max_stay: number | null;
+  closed_to_arrival: boolean;
+  closed_to_departure: boolean;
+  stop_sell: boolean;
+}
+
+/** Short calendar labels of a restriction: "Mín. 3", "CTA", "Stop"… */
+export function restrictionLabels(r: LodgingRestriction): string[] {
+  return [
+    r.min_stay ? `Mín. ${r.min_stay}` : '',
+    r.max_stay ? `Máx. ${r.max_stay}` : '',
+    r.closed_to_arrival ? 'CTA' : '',
+    r.closed_to_departure ? 'CTD' : '',
+    r.stop_sell ? 'Stop' : '',
+  ].filter(Boolean);
+}

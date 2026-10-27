@@ -1072,6 +1072,7 @@ model stores {
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
   lodging_seasons                lodging_seasons[]
+  lodging_restrictions           lodging_restrictions[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2332,6 +2333,7 @@ model lodging_unit_types {
   reservation_rooms lodging_reservation_rooms[]
   room_nights       lodging_room_nights[]
   rate_prices       lodging_rate_prices[]
+  restrictions      lodging_restrictions[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -2531,6 +2533,30 @@ model lodging_seasons {
 
   @@unique([store_id, name])
   @@index([store_id, from_date, to_date])
+}
+
+// Hospitality Suite (H2.3) — stay restrictions of one night (`date`): minimum
+// and maximum stay for arrivals that night, closed to arrival or departure,
+// and stop-sell. `unit_type_id` null = every room type. One row per store,
+// date and scope (partial unique indexes in the migration).
+model lodging_restrictions {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  unit_type_id        Int?
+  date                DateTime  @db.Date
+  min_stay            Int?
+  max_stay            Int?
+  closed_to_arrival   Boolean   @default(false)
+  closed_to_departure Boolean   @default(false)
+  stop_sell           Boolean   @default(false)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types? @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, date])
+  @@index([unit_type_id])
 }
 
 // Hospitality Suite (H1.1) — sellable inventory per night. Availability of a
