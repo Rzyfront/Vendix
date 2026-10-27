@@ -686,6 +686,11 @@ export class MenuFilterService {
             fallbackModuleKeys,
             userPermissions,
           );
+          // A group with every child hidden is an empty header (e.g.
+          // "Configuración" for a receptionist, H0.5): drop it.
+          if (alwaysVisibleItem.children.length === 0) {
+            return filtered;
+          }
         }
 
         filtered.push(alwaysVisibleItem);

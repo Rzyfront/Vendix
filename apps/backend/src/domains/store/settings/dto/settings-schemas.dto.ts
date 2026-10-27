@@ -1196,6 +1196,38 @@ export class DispatchSettingsDto {
   enable_dispatch_to_pool?: boolean;
 }
 
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export class HospitalitySettingsDto {
+  @ApiProperty({
+    example: '15:00',
+    required: false,
+    description: 'Hotel check-in time (HH:mm, store time zone).',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'check_in_time debe tener formato HH:mm' })
+  check_in_time?: string;
+
+  @ApiProperty({
+    example: '12:00',
+    required: false,
+    description: 'Hotel check-out time (HH:mm, store time zone).',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'check_out_time debe tener formato HH:mm' })
+  check_out_time?: string;
+
+  @ApiProperty({
+    example: '12345',
+    required: false,
+    description: 'Registro Nacional de Turismo (RNT) number of the hotel.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  rnt_number?: string;
+}
+
 export class RestaurantSettingsDto {
   @ApiProperty({
     example: false,

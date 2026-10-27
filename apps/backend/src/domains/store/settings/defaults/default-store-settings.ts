@@ -479,6 +479,14 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_dispatch_to_pool: true,
     },
 
+    // Hotelería (H0.5) - check-in/check-out hours a hotel can change, and its
+    // RNT number (empty until the owner fills it).
+    hospitality: {
+      check_in_time: '15:00',
+      check_out_time: '12:00',
+      rnt_number: '',
+    },
+
     // Restaurant - restaurant suite behavior toggles. Table checkout is
     // opt-in (false by default) so existing stores keep paying via POS.
     // QR scan defaults to `menu_only` (show menu, no table state change)

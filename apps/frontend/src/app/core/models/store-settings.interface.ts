@@ -37,6 +37,7 @@ export interface StoreSettings {
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
   membership?: MembershipSettings;
+  hospitality?: HospitalitySettings;
   carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
@@ -389,6 +390,13 @@ export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'requi
  * - `physical`: printed kitchen tickets; dishes are marked delivered manually.
  */
 export type KitchenMode = 'virtual' | 'physical';
+
+/** Hotelería (H0.5): check-in/check-out hours (`HH:mm`) and RNT number. */
+export interface HospitalitySettings {
+  check_in_time: string;
+  check_out_time: string;
+  rnt_number: string;
+}
 
 export interface RestaurantSettings {
   /**

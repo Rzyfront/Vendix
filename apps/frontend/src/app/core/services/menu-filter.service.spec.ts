@@ -540,4 +540,19 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     setAreas(['payroll']);
     expect(await routes()).toEqual(['/admin/invoicing/activation']);
   });
+
+  it('H0.5: an alwaysVisible group with every child hidden is not rendered', async () => {
+    const tree: MenuItem[] = [{
+      label: 'Configuración', icon: 'settings', alwaysVisible: true,
+      children: [{ label: 'General', icon: 'circle', route: '/admin/settings/general' }],
+    }];
+    const labels = async () => (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1)))).map((i) => i.label);
+
+    // Receptionist preset: settings_general is off → no empty "Configuración".
+    expect(await labels()).toEqual([]);
+
+    // Control: with the child visible the group still shows.
+    visibleModules$.next(['fiscal_operations', 'settings', 'settings_general']);
+    expect(await labels()).toEqual(['Configuración']);
+  });
 });

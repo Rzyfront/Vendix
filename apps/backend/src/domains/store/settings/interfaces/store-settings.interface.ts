@@ -584,6 +584,9 @@ export interface StoreSettings {
   // Membership - gym/membership suite behavior toggles
   membership?: MembershipSettings;
 
+  // Hotelería - check-in/check-out hours and RNT
+  hospitality?: HospitalitySettings;
+
   // Vexi - the AI assistant's master switch
   vexi?: VexiSettings;
 
@@ -1138,6 +1141,18 @@ export interface PromotionsSettings {
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
   ticket_closing_hour?: number;
+}
+
+// ============================================================================
+// HOSPITALITY (Hotelería) - hotel operation settings
+// ============================================================================
+export interface HospitalitySettings {
+  /** Check-in time, `HH:mm` in the store time zone. Default `15:00`. */
+  check_in_time?: string;
+  /** Check-out time, `HH:mm` in the store time zone. Default `12:00`. */
+  check_out_time?: string;
+  /** Registro Nacional de Turismo number. Empty until the owner sets it. */
+  rnt_number?: string;
 }
 
 // ============================================================================

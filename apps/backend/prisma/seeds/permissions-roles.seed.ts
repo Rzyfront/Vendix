@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 import { syncRolePermissions } from './shared/sync-role-permissions';
+import {
+  HOUSEKEEPER_ROLE,
+  LODGING_ROLE_PERMISSIONS,
+  RECEPTIONIST_ROLE,
+} from '../../src/common/constants/lodging-roles.constant';
 
 export interface SeedPermissionsResult {
   permissionsCreated: number;
@@ -465,6 +470,81 @@ export async function seedPermissionsAndRoles(
       description: 'Crear y editar tipos de habitación y habitaciones del hotel',
       path: '/api/store/hospitality/unit-types',
       method: 'POST',
+    },
+    // Hotelería (H0.5): resto de permisos `store:lodging:*` (plan §3.4). Los
+    // roles base `receptionist` y `housekeeper` los reciben por lista explícita
+    // (`LODGING_ROLE_PERMISSIONS`); owner/admin/manager por prefijo `store:`.
+    {
+      name: 'store:lodging:rates:read',
+      description: 'Ver planes de tarifa, temporadas y restricciones del hotel',
+      path: '/api/store/hospitality/rates',
+      method: 'GET',
+    },
+    {
+      name: 'store:lodging:rates:write',
+      description: 'Crear y editar tarifas, temporadas y restricciones del hotel',
+      path: '/api/store/hospitality/rates',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:reservations:read',
+      description: 'Ver reservas del hotel',
+      path: '/api/store/hospitality/reservations',
+      method: 'GET',
+    },
+    {
+      name: 'store:lodging:reservations:write',
+      description: 'Crear, modificar y cancelar reservas del hotel',
+      path: '/api/store/hospitality/reservations',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:front_desk:operate',
+      description: 'Operar la recepción: check-in, check-out y asignación de habitación',
+      path: '/api/store/hospitality/front-desk',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:folio:charge',
+      description: 'Cargar noches y consumos a la cuenta del huésped',
+      path: '/api/store/hospitality/folios/charges',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:folio:close',
+      description: 'Cerrar la cuenta del huésped y cobrar el saldo',
+      path: '/api/store/hospitality/folios/close',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:housekeeping:read',
+      description: 'Ver el estado de limpieza y las tareas de habitaciones',
+      path: '/api/store/hospitality/housekeeping',
+      method: 'GET',
+    },
+    {
+      name: 'store:lodging:housekeeping:operate',
+      description: 'Actualizar el estado de limpieza y las tareas de habitaciones',
+      path: '/api/store/hospitality/housekeeping',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:compliance:operate',
+      description: 'Registrar huéspedes ante TRA y SIRE',
+      path: '/api/store/hospitality/compliance',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:channels:manage',
+      description: 'Gestionar canales de venta del hotel',
+      path: '/api/store/hospitality/channels',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:reports:read',
+      description: 'Ver reportes del hotel',
+      path: '/api/store/hospitality/reports',
+      method: 'GET',
     },
     // Tarifas de Precios (CRUD multi-tarifa)
     {
@@ -4685,10 +4765,22 @@ export async function seedPermissionsAndRoles(
     'Cocina (restaurante): prepara y marca tickets, sin datos de dinero',
   );
 
+  // H0.5 — roles base de hotelería. Nombres internos en inglés, como
+  // waiter/kitchen; la UI los muestra como Recepcionista y Camarera.
+  const receptionistRole = await findOrCreateSystemRole(
+    RECEPTIONIST_ROLE,
+    'Recepcionista (hotel): reservas, check-in/out y cuenta del huésped',
+  );
+
+  const housekeeperRole = await findOrCreateSystemRole(
+    HOUSEKEEPER_ROLE,
+    'Camarera (hotel): estado de limpieza de las habitaciones, sin datos de dinero',
+  );
+
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.
 
-  const rolesCreated = 12;
+  const rolesCreated = 14;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
@@ -5474,6 +5566,18 @@ export async function seedPermissionsAndRoles(
         `   🗑️  Revoked ${revokeKitchen.count} non-canonical permissions from kitchen (QUI-727 F.1 H1 — ADR-10 + QUI-730b sobre-otorgado)`,
       );
     }
+  }
+
+  // H0.5 — roles base de hotelería (D10): lista explícita y canónica en
+  // `LODGING_ROLE_PERMISSIONS`, cubierta por su spec. Roles nuevos: el sync
+  // aditivo basta, no hay asignaciones previas que revocar.
+  for (const role of [receptionistRole, housekeeperRole]) {
+    const names = LODGING_ROLE_PERMISSIONS[role.name];
+    const ids = allPermissions
+      .filter((p) => names.includes(p.name))
+      .map((p) => p.id);
+    const sync = await syncRolePermissions(client, role.id, ids, role.name);
+    assignmentsCreated += sync.added;
   }
 
   return {

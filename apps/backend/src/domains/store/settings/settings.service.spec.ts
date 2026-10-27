@@ -5,7 +5,12 @@ import { VendixHttpException } from '@common/errors';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { GeneralSettingsDto } from './dto/settings-schemas.dto';
+import {
+  GeneralSettingsDto,
+  HospitalitySettingsDto,
+} from './dto/settings-schemas.dto';
+import { mergeStoreSettingsWithDefaults } from './defaults/default-store-settings';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
 
 /**
  * QUI-560 — regresión del guard de transición de settings.
@@ -513,6 +518,73 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       ).rejects.toMatchObject({ errorCode: 'SYS_FORBIDDEN_001' });
 
       expect(stored.vex).toEqual({ enabled: false });
+    });
+  });
+
+  // ------------------------------------------------ sección hotelería (H0.5)
+
+  /**
+   * Configuración → Hotelería guarda check-in, check-out y RNT. Una sección
+   * fuera de `KNOWN_SECTIONS` o de `UpdateSettingsDto` se pierde en silencio
+   * con 200, así que se prueba el PATCH completo y los defaults al leer.
+   */
+  describe('sección hospitality (H0.5)', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      stored = { ...STORED_WITH_CASH_REGISTER_ON };
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('una tienda sin la sección lee check-in 15:00, check-out 12:00 y RNT vacío', () => {
+      expect(mergeStoreSettingsWithDefaults({}).hospitality).toEqual({
+        check_in_time: '15:00',
+        check_out_time: '12:00',
+        rnt_number: '',
+      });
+    });
+
+    it('persiste los ajustes guardados', async () => {
+      await service.updateSettings({
+        hospitality: {
+          check_in_time: '14:00',
+          check_out_time: '11:30',
+          rnt_number: '12345',
+        },
+      } as any);
+
+      expect(stored.hospitality).toEqual({
+        check_in_time: '14:00',
+        check_out_time: '11:30',
+        rnt_number: '12345',
+      });
+    });
+
+    it('el DTO acepta la sección y rechaza una hora fuera de HH:mm', async () => {
+      const ok = plainToInstance(UpdateSettingsDto, {
+        hospitality: { check_in_time: '15:00', rnt_number: '12345' },
+      });
+      expect(await validate(ok)).toEqual([]);
+
+      const bad = plainToInstance(HospitalitySettingsDto, {
+        check_in_time: '3pm',
+        check_out_time: '24:00',
+      });
+      const errors = await validate(bad);
+      expect(errors.map((e) => e.property).sort()).toEqual([
+        'check_in_time',
+        'check_out_time',
+      ]);
     });
   });
 });

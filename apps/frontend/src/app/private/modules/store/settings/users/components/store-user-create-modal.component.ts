@@ -1,4 +1,5 @@
 import {Component,
+  computed,
   output,
   model,
   inject,
@@ -23,6 +24,7 @@ import { passwordPolicyValidator } from '../../../../../../core/utils/password-p
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import { selectUserSaving } from '../state/selectors/store-users.selectors';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * QUI-581 — Roles asignables al crear, espejo de `ASSIGNABLE_SYSTEM_ROLES.store`
@@ -40,6 +42,12 @@ const CREATE_USER_ROLE_OPTIONS: readonly SelectorOption[] = [
   { value: 'supervisor', label: 'Supervisor' },
   { value: 'manager', label: 'Gerente' },
   { value: 'carrier', label: 'Repartidor' },
+];
+
+/** H0.5 — roles base de hotelería; sólo se ofrecen en tiendas Hotelería. */
+const HOSPITALITY_ROLE_OPTIONS: readonly SelectorOption[] = [
+  { value: 'receptionist', label: 'Recepcionista' },
+  { value: 'housekeeper', label: 'Camarera' },
 ];
 
 @Component({
@@ -118,7 +126,7 @@ const CREATE_USER_ROLE_OPTIONS: readonly SelectorOption[] = [
           <app-selector
             formControlName="role"
             label="Rol *"
-            [options]="roleOptions"
+            [options]="roleOptions()"
             [disabled]="isCreating()"
             helpText="Define que puede hacer el usuario. Se puede cambiar despues."
           ></app-selector>
@@ -176,8 +184,13 @@ export class StoreUserCreateModalComponent {
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
-  /** Constante, no señal: la lista no depende del estado. */
-  readonly roleOptions = CREATE_USER_ROLE_OPTIONS as SelectorOption[];
+  private readonly authFacade = inject(AuthFacade);
+  /** Los roles de hotelería se suman sólo si la tienda es un hotel. */
+  readonly roleOptions = computed<SelectorOption[]>(() =>
+    this.authFacade.isHospitality()
+      ? [...CREATE_USER_ROLE_OPTIONS, ...HOSPITALITY_ROLE_OPTIONS]
+      : [...CREATE_USER_ROLE_OPTIONS],
+  );
   private store = inject(Store);
   private actions$ = inject(Actions);
   /** Progreso real de la mutación, tomado del state (no un flag local). */

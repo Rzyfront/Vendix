@@ -91,6 +91,9 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     // cocina→kitchen) por requisito del dueño del proyecto.
     'waiter',
     'kitchen',
+    // H0.5 — roles base de hotelería (Recepcionista, Camarera).
+    'receptionist',
+    'housekeeper',
   ],
   store: [
     'manager',
@@ -101,6 +104,9 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     // QUI-730b — roles de operación restaurante, asignables en tienda.
     'waiter',
     'kitchen',
+    // H0.5 — roles base de hotelería (Recepcionista, Camarera).
+    'receptionist',
+    'housekeeper',
   ],
 };
 

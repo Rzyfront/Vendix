@@ -73,6 +73,8 @@ export const KNOWN_SECTIONS = [
   'dispatch',
   'restaurant',
   'membership',
+  // Hotelería (H0.5): check-in/check-out y RNT.
+  'hospitality',
   'services', // appointment redesign phase 1: offer_home_service + local_address
   // Appointment redesign phase 2: reschedule policy (directo vs aprobación)
   // and per-product home service eligibility live here.
