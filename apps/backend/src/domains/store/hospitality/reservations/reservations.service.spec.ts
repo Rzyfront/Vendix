@@ -3,12 +3,18 @@ import { validate } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
-import { LodgingReservationsService, nextReservationNumber } from './reservations.service';
+import {
+  AUTO_NO_SHOW_REASON,
+  LodgingReservationsService,
+  nextReservationNumber,
+} from './reservations.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { formatShortDate, stayNights } from './stay-dates';
-import { CreateReservationDto } from './dto';
+import { CancelReservationDto, CreateReservationDto } from './dto';
+import { canTransition, noShowArrivalCutoff } from './reservation-status';
 
 interface NightRow {
+  reservation_room_id: number;
   unit_type_id: number;
   night_date: Date;
   is_active: boolean;
@@ -35,7 +41,15 @@ const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
  */
 function createFakeStore(units: number) {
   const nights: NightRow[] = [];
-  const reservations: { id: number; reservation_number: string }[] = [];
+  const reservations: {
+    id: number;
+    reservation_number: string;
+    status: string;
+    store_id: number;
+    arrival_date: Date;
+  }[] = [];
+  const rooms: { id: number; reservation_id: number }[] = [];
+  const events: Record<string, unknown>[] = [];
   let lock: Promise<void> = Promise.resolve();
 
   const tables = {
@@ -62,14 +76,39 @@ function createFakeStore(units: number) {
         nights.push(...data.map((d: any) => ({ ...d, is_active: true })));
         return { count: data.length };
       }),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        const roomIds = rooms
+          .filter((r) => r.reservation_id === where.reservation_room.reservation_id)
+          .map((r) => r.id);
+        const hit = nights.filter(
+          (n) => roomIds.includes(n.reservation_room_id) && n.is_active === where.is_active,
+        );
+        hit.forEach((n) => (n.is_active = data.is_active));
+        return { count: hit.length };
+      }),
     },
     lodging_reservations: {
       findFirst: jest.fn(async (args: any) => {
         if (args?.where?.id !== undefined) {
-          const r = reservations.find((x) => x.id === args.where.id);
-          return r ? { ...r, status: 'confirmed', rooms: [] } : null;
+          const r = reservations.find(
+            (x) =>
+              x.id === args.where.id &&
+              (!args.where.status?.in || args.where.status.in.includes(x.status)),
+          );
+          return r ? { ...r, rooms: [], events: [] } : null;
         }
         return reservations[reservations.length - 1] ?? null;
+      }),
+      findMany: jest.fn(async ({ where }: any) =>
+        reservations.filter(
+          (r) => r.status === where.status && r.arrival_date < where.arrival_date.lt,
+        ),
+      ),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        await yieldTurn();
+        const hit = reservations.filter((r) => r.id === where.id && r.status === where.status);
+        hit.forEach((r) => (r.status = data.status));
+        return { count: hit.length };
       }),
       create: jest.fn(async ({ data }: any) => {
         const row = { id: reservations.length + 1, ...data };
@@ -78,7 +117,17 @@ function createFakeStore(units: number) {
       }),
     },
     lodging_reservation_rooms: {
-      create: jest.fn(async ({ data }: any) => ({ id: 100 + reservations.length, ...data })),
+      create: jest.fn(async ({ data }: any) => {
+        const row = { id: 100 + reservations.length, ...data };
+        rooms.push(row);
+        return row;
+      }),
+    },
+    lodging_reservation_events: {
+      create: jest.fn(async ({ data }: any) => {
+        events.push(data);
+        return data;
+      }),
     },
   };
 
@@ -86,6 +135,9 @@ function createFakeStore(units: number) {
     ...tables,
     lodging_unit_types: { findFirst: jest.fn(async () => DOUBLE) },
     users: { findFirst: jest.fn(async () => ({ id: 77 })) },
+    store_settings: {
+      findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })),
+    },
     $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
       let release = () => {};
       const tx = {
@@ -103,7 +155,7 @@ function createFakeStore(units: number) {
       }
     }),
   };
-  return { prisma, nights, reservations };
+  return { prisma, nights, reservations, events };
 }
 
 const stay = {
@@ -286,6 +338,146 @@ describe('LodgingReservationsService', () => {
       prisma.lodging_unit_types.findFirst.mockResolvedValueOnce({ ...DOUBLE, is_active: false });
 
       await expectCode(service.create(stay), 'LODGING_RESERVATION_TYPE_001');
+    });
+  });
+
+  /**
+   * H1.2 — cancel and no-show free the nights (is_active=false, never
+   * deleted) and leave a history line; invalid changes are rejected.
+   */
+  describe('cancelación y no-show', () => {
+    const activeNightsOf = (nights: NightRow[], roomId: number) =>
+      nights.filter((n) => n.reservation_room_id === roomId && n.is_active).length;
+
+    it('crear deja en el historial la línea "Confirmada" con quien la creó', async () => {
+      const { service, events } = build(1);
+      await service.create(stay);
+      expect(events).toEqual([
+        { store_id: 5, reservation_id: 1, from_status: null, to_status: 'confirmed', user_id: 9 },
+      ]);
+    });
+
+    it('tras cancelar con motivo queda "Cancelada", las noches se liberan y la reserva nueva se crea', async () => {
+      const { service, nights, reservations, events } = build(1);
+      await service.create(stay);
+      await expectCode(service.create(stay), 'LODGING_RESERVATION_AVAILABILITY_001');
+
+      await service.cancel(1, 'El huésped cambió de planes');
+
+      expect(reservations[0].status).toBe('cancelled');
+      expect(nights).toHaveLength(3); // nothing deleted
+      expect(activeNightsOf(nights, 101)).toBe(0);
+      expect(events[1]).toEqual({
+        store_id: 5,
+        reservation_id: 1,
+        from_status: 'confirmed',
+        to_status: 'cancelled',
+        reason: 'El huésped cambió de planes',
+        user_id: 9,
+      });
+
+      await service.create(stay);
+      expect(reservations[1]).toMatchObject({ reservation_number: 'H-0002', status: 'confirmed' });
+    });
+
+    it('cancelar una reserva ya cancelada o no-show es una transición inválida', async () => {
+      const { service, reservations, events } = build(2);
+      await service.create(stay);
+      await service.cancel(1, 'Motivo');
+
+      const body = await expectCode(service.cancel(1, 'Otra vez'), 'LODGING_RESERVATION_TRANSITION_001');
+      expect(body.message).toBe('No se puede pasar una reserva cancelada a cancelada');
+      await expectCode(service.markNoShow(1), 'LODGING_RESERVATION_TRANSITION_001');
+      expect(reservations[0].status).toBe('cancelled');
+      expect(events).toHaveLength(2);
+    });
+
+    it('máquina de estados: válidas e inválidas', () => {
+      expect(canTransition('confirmed', 'cancelled')).toBe(true);
+      expect(canTransition('confirmed', 'no_show')).toBe(true);
+      expect(canTransition('tentative', 'cancelled')).toBe(true);
+      expect(canTransition('tentative', 'no_show')).toBe(false);
+      expect(canTransition('checked_in', 'cancelled')).toBe(false);
+      expect(canTransition('checked_out', 'checked_in')).toBe(false);
+      expect(canTransition('no_show', 'confirmed')).toBe(false);
+    });
+
+    it('no-show manual solo desde el día de llegada (zona de la tienda)', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+      try {
+        const { service, reservations } = build(1);
+        await service.create(stay);
+
+        // 9-nov 23:00 in Bogotá is already 10-nov in UTC: still before arrival.
+        jest.setSystemTime(new Date('2026-11-10T04:00:00Z'));
+        const body = await expectCode(service.markNoShow(1), 'LODGING_RESERVATION_NO_SHOW_001');
+        expect(body.message).toBe('Solo se puede marcar no-show desde el día de llegada');
+
+        jest.setSystemTime(new Date('2026-11-10T23:00:00Z'));
+        await service.markNoShow(1);
+        expect(reservations[0].status).toBe('no_show');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('el no-show automático mueve solo las llegadas vencidas y libera sus noches', async () => {
+      const { service, nights, reservations, events } = build(3);
+      await service.create(stay); // arrives 10-nov
+      await service.create({ ...stay, arrival_date: '2026-11-11', departure_date: '2026-11-12' });
+      await service.create(stay);
+      await service.cancel(3, 'Motivo');
+
+      expect(await service.autoNoShow('2026-11-11')).toBe(1);
+
+      expect(reservations.map((r) => r.status)).toEqual(['no_show', 'confirmed', 'cancelled']);
+      expect(activeNightsOf(nights, 101)).toBe(0);
+      expect(activeNightsOf(nights, 102)).toBe(1);
+      expect(events[events.length - 1]).toEqual({
+        store_id: 5,
+        reservation_id: 1,
+        from_status: 'confirmed',
+        to_status: 'no_show',
+        reason: AUTO_NO_SHOW_REASON,
+        user_id: null,
+      });
+    });
+
+    it('cancelación y job a la vez: solo uno cambia el estado y el otro lo informa', async () => {
+      const { service, reservations, events } = build(1);
+      await service.create(stay);
+
+      const [cancel, auto] = await Promise.allSettled([
+        service.cancel(1, 'Motivo'),
+        service.autoNoShow('2026-11-11'),
+      ]);
+
+      expect(events.filter((e) => e.from_status === 'confirmed')).toHaveLength(1);
+      if (reservations[0].status === 'no_show') {
+        expect(cancel.status).toBe('rejected');
+        expect((cancel as PromiseRejectedResult).reason.getResponse().message).toBe(
+          'La reserva ya está no-show',
+        );
+      } else {
+        expect(reservations[0].status).toBe('cancelled');
+        expect(auto).toEqual({ status: 'fulfilled', value: 0 });
+      }
+    });
+
+    it('el motivo de la cancelación es obligatorio', async () => {
+      const errorsOf = async (reason: unknown) =>
+        (await validate(plainToInstance(CancelReservationDto, { reason }))).map((e) => e.property);
+      expect(await errorsOf('   ')).toEqual(['reason']);
+      expect(await errorsOf(undefined)).toEqual(['reason']);
+      expect(await errorsOf('Cambio de planes')).toEqual([]);
+    });
+
+    it('hora límite: el día siguiente a la llegada a la hora configurada', () => {
+      // 11-nov 05:59 with limit 06:00: only arrivals before 10-nov are overdue.
+      expect(noShowArrivalCutoff('2026-11-11', '05:59', '06:00')).toBe('2026-11-10');
+      // 11-nov 06:00: the 10-nov arrival is overdue too.
+      expect(noShowArrivalCutoff('2026-11-11', '06:00', '06:00')).toBe('2026-11-11');
+      expect(noShowArrivalCutoff('2026-03-01', '00:00')).toBe('2026-02-28');
     });
   });
 

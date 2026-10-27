@@ -395,6 +395,8 @@ export type KitchenMode = 'virtual' | 'physical';
 export interface HospitalitySettings {
   check_in_time: string;
   check_out_time: string;
+  /** Day after arrival, `HH:mm`: unarrived confirmed reservations become no-show. */
+  no_show_time: string;
   rnt_number: string;
 }
 

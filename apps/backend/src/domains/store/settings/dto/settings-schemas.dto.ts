@@ -1218,6 +1218,16 @@ export class HospitalitySettingsDto {
   check_out_time?: string;
 
   @ApiProperty({
+    example: '06:00',
+    required: false,
+    description:
+      'Time (HH:mm, store time zone) of the day after arrival when an unarrived confirmed reservation becomes no-show.',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'no_show_time debe tener formato HH:mm' })
+  no_show_time?: string;
+
+  @ApiProperty({
     example: '12345',
     required: false,
     description: 'Registro Nacional de Turismo (RNT) number of the hotel.',

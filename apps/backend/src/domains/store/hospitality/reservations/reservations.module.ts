@@ -4,11 +4,12 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { LodgingReservationsController } from './reservations.controller';
 import { LodgingReservationsService } from './reservations.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
+import { LodgingNoShowJob } from './jobs/lodging-no-show.job';
 
 @Module({
   imports: [ResponseModule, PrismaModule],
   controllers: [LodgingReservationsController],
-  providers: [LodgingReservationsService, LodgingAvailabilityService],
+  providers: [LodgingReservationsService, LodgingAvailabilityService, LodgingNoShowJob],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })
 export class LodgingReservationsModule {}

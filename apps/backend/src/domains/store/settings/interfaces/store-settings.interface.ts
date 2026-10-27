@@ -1151,6 +1151,11 @@ export interface HospitalitySettings {
   check_in_time?: string;
   /** Check-out time, `HH:mm` in the store time zone. Default `12:00`. */
   check_out_time?: string;
+  /**
+   * Time (`HH:mm`, store time zone) of the day after arrival when a confirmed
+   * reservation whose guest never arrived becomes no-show. Default `06:00`.
+   */
+  no_show_time?: string;
   /** Registro Nacional de Turismo number. Empty until the owner sets it. */
   rnt_number?: string;
 }

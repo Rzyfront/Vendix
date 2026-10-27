@@ -7,13 +7,13 @@ import { HospitalitySettings } from '../../../../../../../core/models/store-sett
 /** Same `HH:mm` rule the backend DTO enforces. */
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Hotelería (H0.5): check-in/check-out hours and the RNT number. */
+/** Hotelería (H0.5/H1.2): check-in/check-out and no-show hours and the RNT number. */
 @Component({
   selector: 'app-hospitality-settings-form',
   standalone: true,
   imports: [ReactiveFormsModule, InputComponent],
   template: `
-    <form [formGroup]="form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <form [formGroup]="form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <app-input
         [formControl]="checkInControl"
         type="time"
@@ -27,6 +27,14 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
         type="time"
         label="Hora de check-out"
         helperText="Hasta esta hora el huésped debe entregar la habitación."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+      <app-input
+        [formControl]="noShowControl"
+        type="time"
+        label="Hora de no-show"
+        helperText="El día siguiente a la llegada, a esta hora, la reserva sin llegada pasa a No-show y libera sus noches."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
@@ -53,6 +61,10 @@ export class HospitalitySettingsForm {
     nonNullable: true,
     validators: [Validators.required, Validators.pattern(HH_MM)],
   });
+  readonly noShowControl = new FormControl('06:00', {
+    nonNullable: true,
+    validators: [Validators.required, Validators.pattern(HH_MM)],
+  });
   readonly rntControl = new FormControl('', {
     nonNullable: true,
     validators: [Validators.maxLength(20)],
@@ -61,6 +73,7 @@ export class HospitalitySettingsForm {
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
     check_out_time: this.checkOutControl,
+    no_show_time: this.noShowControl,
     rnt_number: this.rntControl,
   });
 

@@ -205,6 +205,7 @@ model users {
   bookings_created                bookings[]                    @relation("bookings_created_by")
   lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
+  lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
@@ -1066,6 +1067,7 @@ model stores {
   lodging_units                  lodging_units[]
   lodging_reservations           lodging_reservations[]
   lodging_reservation_rooms      lodging_reservation_rooms[]
+  lodging_reservation_events     lodging_reservation_events[]
   lodging_room_nights            lodging_room_nights[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
@@ -2394,10 +2396,31 @@ model lodging_reservations {
   customer   users                       @relation("lodging_reservations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by users?                      @relation("lodging_reservations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   rooms      lodging_reservation_rooms[]
+  events     lodging_reservation_events[]
 
   @@unique([store_id, reservation_number])
   @@index([store_id, arrival_date])
   @@index([customer_id])
+}
+
+// Hospitality Suite (H1.2) — status history of a reservation: one row per
+// change (creation included), with the reason and who made it. `user_id` is
+// null for automatic changes (no-show job).
+model lodging_reservation_events {
+  id             Int                              @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  from_status    lodging_reservation_status_enum?
+  to_status      lodging_reservation_status_enum
+  reason         String?                          @db.VarChar(500)
+  user_id        Int?
+  created_at     DateTime?                        @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user        users?               @relation("lodging_reservation_events_user", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([reservation_id])
 }
 
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,

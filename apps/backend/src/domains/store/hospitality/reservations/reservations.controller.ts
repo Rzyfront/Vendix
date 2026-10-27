@@ -13,9 +13,15 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { LodgingReservationsService } from './reservations.service';
-import { CreateReservationDto, ReservationQuoteDto } from './dto';
+import {
+  CancelReservationDto,
+  CreateReservationDto,
+  NoShowReservationDto,
+  ReservationQueryDto,
+  ReservationQuoteDto,
+} from './dto';
 
-/** Hospitality Suite (H1.1) — nightly reservations of a hotel store. */
+/** Hospitality Suite (H1.1/H1.2) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
 @UseGuards(PermissionsGuard)
 export class LodgingReservationsController {
@@ -27,8 +33,16 @@ export class LodgingReservationsController {
   @ApiOperation({ summary: 'Listar las reservas del hotel' })
   @Get()
   @Permissions('store:lodging:reservations:read')
-  async findAll() {
-    const result = await this.lodgingReservationsService.findAll();
+  async findAll(@Query() query: ReservationQueryDto) {
+    const { data, total, page, limit } = await this.lodgingReservationsService.findAll(query);
+    return this.responseService.paginated(data, total, page, limit);
+  }
+
+  @ApiOperation({ summary: 'Llegadas de hoy, en casa y ocupación de hoy' })
+  @Get('stats')
+  @Permissions('store:lodging:reservations:read')
+  async stats() {
+    const result = await this.lodgingReservationsService.stats();
     return this.responseService.success(result);
   }
 
@@ -54,5 +68,21 @@ export class LodgingReservationsController {
   async create(@Body() dto: CreateReservationDto) {
     const result = await this.lodgingReservationsService.create(dto);
     return this.responseService.created(result, 'Reserva creada exitosamente');
+  }
+
+  @ApiOperation({ summary: 'Cancelar una reserva y liberar sus noches' })
+  @Post(':id/cancel')
+  @Permissions('store:lodging:reservations:write')
+  async cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelReservationDto) {
+    const result = await this.lodgingReservationsService.cancel(id, dto.reason);
+    return this.responseService.success(result, 'Reserva cancelada');
+  }
+
+  @ApiOperation({ summary: 'Marcar una reserva como no-show y liberar sus noches' })
+  @Post(':id/no-show')
+  @Permissions('store:lodging:reservations:write')
+  async noShow(@Param('id', ParseIntPipe) id: number, @Body() dto: NoShowReservationDto) {
+    const result = await this.lodgingReservationsService.markNoShow(id, dto.reason);
+    return this.responseService.success(result, 'Reserva marcada como no-show');
   }
 }

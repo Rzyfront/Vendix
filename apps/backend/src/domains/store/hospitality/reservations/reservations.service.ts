@@ -1,11 +1,26 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { lodging_reservation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { CreateReservationDto, ReservationQuoteDto } from './dto';
+import {
+  localDateString,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
+import {
+  CreateReservationDto,
+  ReservationQueryDto,
+  ReservationQuoteDto,
+} from './dto';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
+import {
+  canTransition,
+  NIGHT_HOLDING_STATUSES,
+  statusesThatCanReach,
+} from './reservation-status';
+
+type ReservationStatus = lodging_reservation_status_enum;
 
 /**
  * Sales of a store queue on one lock: give a waiting sale room to get it
@@ -32,6 +47,17 @@ const RESERVATION_INCLUDE = {
   },
 } satisfies Prisma.lodging_reservationsInclude;
 
+const RESERVATION_DETAIL_INCLUDE = {
+  ...RESERVATION_INCLUDE,
+  events: {
+    include: { user: { select: { id: true, first_name: true, last_name: true } } },
+    orderBy: { id: 'asc' },
+  },
+} satisfies Prisma.lodging_reservationsInclude;
+
+/** Reason stored when the no-show job moves an overdue arrival. */
+export const AUTO_NO_SHOW_REASON = 'Llegada vencida';
+
 interface SellableType {
   id: number;
   name: string;
@@ -56,24 +82,197 @@ export class LodgingReservationsService {
     private readonly availability: LodgingAvailabilityService,
   ) {}
 
-  async findAll() {
-    // H1.2 adds search, filters and paging.
-    return this.prisma.lodging_reservations.findMany({
-      include: RESERVATION_INCLUDE,
-      orderBy: [{ id: 'desc' }],
-      take: 100,
-    });
+  /** Search by guest/number, status and stay dates, newest first. */
+  async findAll(query: ReservationQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const where: Prisma.lodging_reservationsWhereInput = {};
+    if (query.status) where.status = query.status;
+    // A stay overlaps the range when it arrives before the range ends and
+    // leaves after it starts (departure night is not occupied).
+    if (query.date_to) where.arrival_date = { lte: dateOnlyToDb(query.date_to) };
+    if (query.date_from) where.departure_date = { gt: dateOnlyToDb(query.date_from) };
+    if (query.search) {
+      const contains = { contains: query.search, mode: 'insensitive' as const };
+      const terms = query.search.split(/\s+/).filter(Boolean);
+      where.OR = [
+        { reservation_number: contains },
+        { customer: { email: contains } },
+        { customer: { phone: contains } },
+        // "Juan Pérez": every word must match the first or last name.
+        {
+          AND: terms.map((term) => ({
+            customer: {
+              OR: [
+                { first_name: { contains: term, mode: 'insensitive' as const } },
+                { last_name: { contains: term, mode: 'insensitive' as const } },
+              ],
+            },
+          })),
+        },
+      ];
+    }
+    const [data, total] = await Promise.all([
+      this.prisma.lodging_reservations.findMany({
+        where,
+        include: RESERVATION_INCLUDE,
+        orderBy: [{ id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.lodging_reservations.count({ where }),
+    ]);
+    return { data, total, page, limit };
+  }
+
+  /** Today's front desk numbers, in the store's civil date. */
+  async stats() {
+    const store_id = this.requireStoreId();
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = dateOnlyToDb(localDateString(new Date(), timezone));
+    const [arrivals_today, in_house, units, occupied] = await Promise.all([
+      this.prisma.lodging_reservations.count({
+        where: { arrival_date: today, status: { in: ['confirmed', 'checked_in'] } },
+      }),
+      this.prisma.lodging_reservations.count({ where: { status: 'checked_in' } }),
+      this.prisma.lodging_units.count({ where: { is_active: true } }),
+      this.prisma.lodging_room_nights.count({ where: { night_date: today, is_active: true } }),
+    ]);
+    return {
+      arrivals_today,
+      in_house,
+      occupied_tonight: occupied,
+      active_units: units,
+      occupancy_percent: units > 0 ? Math.round((occupied / units) * 100) : 0,
+    };
   }
 
   async findOne(id: number) {
     const reservation = await this.prisma.lodging_reservations.findFirst({
       where: { id },
-      include: RESERVATION_INCLUDE,
+      include: RESERVATION_DETAIL_INCLUDE,
     });
     if (!reservation) {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_FIND_001);
     }
     return reservation;
+  }
+
+  /** Cancels a reservation and frees its nights for sale. */
+  async cancel(id: number, reason: string) {
+    return this.transition(id, 'cancelled', reason);
+  }
+
+  /** Marks a guest that did not arrive; allowed from the arrival day on. */
+  async markNoShow(id: number, reason?: string) {
+    const store_id = this.requireStoreId();
+    const reservation = await this.findOne(id);
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = localDateString(new Date(), timezone);
+    if (
+      canTransition(reservation.status, 'no_show') &&
+      reservation.arrival_date.toISOString().slice(0, 10) > today
+    ) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_NO_SHOW_001);
+    }
+    return this.transition(id, 'no_show', reason || null);
+  }
+
+  /**
+   * Moves the store's confirmed reservations that arrive before
+   * `arrivalCutoff` (exclusive) to no-show. Used by the no-show job inside
+   * the store context. Returns how many moved.
+   */
+  async autoNoShow(arrivalCutoff: string): Promise<number> {
+    const overdue = await this.prisma.lodging_reservations.findMany({
+      where: { status: 'confirmed', arrival_date: { lt: dateOnlyToDb(arrivalCutoff) } },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+      take: 200,
+    });
+    let moved = 0;
+    for (const { id } of overdue) {
+      if (await this.applyTransition(id, 'no_show', AUTO_NO_SHOW_REASON, null)) moved += 1;
+    }
+    return moved;
+  }
+
+  /** Validated status change with history; throws on an invalid one. */
+  private async transition(id: number, to: ReservationStatus, reason: string | null) {
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+    const reservation = await this.findOne(id);
+    if (!canTransition(reservation.status, to)) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_RESERVATION_TRANSITION_001,
+        `No se puede pasar una reserva ${STATUS_LABELS[reservation.status]} a ${STATUS_LABELS[to]}`,
+      );
+    }
+    const changed = await this.applyTransition(id, to, reason, user_id);
+    if (!changed) {
+      // Someone else (desk or job) changed it first: report its real status.
+      const current = await this.findOne(id);
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_RESERVATION_TRANSITION_001,
+        `La reserva ya está ${STATUS_LABELS[current.status]}`,
+      );
+    }
+    return this.findOne(id);
+  }
+
+  /**
+   * Atomic status change: only applies while the reservation is still in a
+   * status that can reach `to`, so the desk and the job never both win.
+   * Leaving a night-holding status frees the nights (`is_active=false`, never
+   * deleted). Returns false when the reservation was no longer eligible.
+   */
+  private async applyTransition(
+    id: number,
+    to: ReservationStatus,
+    reason: string | null,
+    user_id: number | null,
+  ): Promise<boolean> {
+    const from = statusesThatCanReach(to);
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.lodging_reservations.findFirst({
+        where: { id, status: { in: from } },
+        select: { id: true, store_id: true, status: true },
+      });
+      if (!current) return false;
+      const updated = await tx.lodging_reservations.updateMany({
+        where: { id, status: current.status },
+        data: { status: to, updated_at: now },
+      });
+      if (updated.count !== 1) return false;
+      if (
+        NIGHT_HOLDING_STATUSES.includes(current.status) &&
+        !NIGHT_HOLDING_STATUSES.includes(to)
+      ) {
+        await tx.lodging_room_nights.updateMany({
+          where: { is_active: true, reservation_room: { reservation_id: id } },
+          data: { is_active: false, updated_at: now },
+        });
+      }
+      await tx.lodging_reservation_events.create({
+        data: {
+          store_id: current.store_id,
+          reservation_id: id,
+          from_status: current.status,
+          to_status: to,
+          reason,
+          user_id,
+        },
+      });
+      return true;
+    });
+  }
+
+  private requireStoreId(): number {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return store_id;
   }
 
   /** "2 disponibles · 3 noches · $750.000" before confirming. */
@@ -173,6 +372,15 @@ export class LodgingReservationsService {
           updated_at: now,
         })),
       });
+      await tx.lodging_reservation_events.create({
+        data: {
+          store_id,
+          reservation_id: reservation.id,
+          from_status: null,
+          to_status: 'confirmed',
+          user_id: context?.user_id ?? null,
+        },
+      });
       return reservation.id;
     }, SALE_TX_OPTIONS);
 
@@ -219,6 +427,16 @@ export class LodgingReservationsService {
     }
   }
 }
+
+/** Spanish status names for transition messages. */
+const STATUS_LABELS: Record<ReservationStatus, string> = {
+  tentative: 'tentativa',
+  confirmed: 'confirmada',
+  checked_in: 'en casa',
+  checked_out: 'con salida',
+  cancelled: 'cancelada',
+  no_show: 'no-show',
+};
 
 /** Occupancy must fit the room type (adults, children and total). */
 export function assertCapacity(

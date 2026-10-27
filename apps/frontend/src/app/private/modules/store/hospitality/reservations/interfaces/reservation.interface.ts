@@ -13,7 +13,7 @@ export const RESERVATION_STATUS_LABELS: Record<LodgingReservationStatus, string>
   checked_in: 'En casa',
   checked_out: 'Salida',
   cancelled: 'Cancelada',
-  no_show: 'No show',
+  no_show: 'No-show',
 };
 
 export interface LodgingReservationRoom {
@@ -43,6 +43,45 @@ export interface LodgingReservation {
     phone: string | null;
   };
   rooms: LodgingReservationRoom[];
+  created_at?: string;
+  /** Status history, oldest first (detail only). */
+  events?: LodgingReservationEvent[];
+}
+
+/** One status change of a reservation (H1.2). `user` null = automatic. */
+export interface LodgingReservationEvent {
+  id: number;
+  from_status: LodgingReservationStatus | null;
+  to_status: LodgingReservationStatus;
+  reason: string | null;
+  created_at: string;
+  user: { id: number; first_name: string; last_name: string | null } | null;
+}
+
+/** List search: guest/number text, status and stay range (`YYYY-MM-DD`). */
+export interface ReservationListQuery {
+  search?: string;
+  status?: LodgingReservationStatus | '';
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface ReservationListResult {
+  data: LodgingReservation[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+/** Today's front desk numbers (store date). */
+export interface ReservationStats {
+  arrivals_today: number;
+  in_house: number;
+  occupied_tonight: number;
+  active_units: number;
+  occupancy_percent: number;
 }
 
 /** Stay to price: dates are `YYYY-MM-DD`, departure exclusive. */

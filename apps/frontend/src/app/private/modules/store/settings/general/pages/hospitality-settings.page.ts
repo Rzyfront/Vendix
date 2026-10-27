@@ -54,6 +54,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
             store.settings().hospitality || {
               check_in_time: '15:00',
               check_out_time: '12:00',
+              no_show_time: '06:00',
               rnt_number: ''
             }
           "

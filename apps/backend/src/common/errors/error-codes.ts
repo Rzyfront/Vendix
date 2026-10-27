@@ -5665,6 +5665,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en esta tienda',
   },
+  LODGING_RESERVATION_TRANSITION_001: {
+    code: 'LODGING_RESERVATION_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'Cambio de estado de reserva no permitido',
+  },
+  LODGING_RESERVATION_NO_SHOW_001: {
+    code: 'LODGING_RESERVATION_NO_SHOW_001',
+    httpStatus: 400,
+    devMessage: 'Solo se puede marcar no-show desde el día de llegada',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,
