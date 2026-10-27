@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
@@ -40,8 +40,11 @@ export class LodgingCheckOutController {
   @ApiOperation({ summary: 'PDF de la factura del folio' })
   @Get('folio/invoice/pdf')
   @Permissions('store:lodging:folio:close')
-  async invoicePdf(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.lodgingCheckOutService.invoicePdf(id);
+  async invoicePdf(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('account_id', new ParseIntPipe({ optional: true })) account_id?: number,
+  ) {
+    const result = await this.lodgingCheckOutService.invoicePdf(id, account_id);
     return this.responseService.success(result);
   }
 }

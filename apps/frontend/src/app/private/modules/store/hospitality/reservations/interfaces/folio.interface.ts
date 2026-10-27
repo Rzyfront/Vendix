@@ -75,9 +75,22 @@ export interface FolioInvoiceStatus {
   invoice_status: string | null;
 }
 
+/** H3.8 — one invoiced account of a split folio, as the check-out reports it. */
+export interface SplitAccountInvoice {
+  account_id: number;
+  label: string;
+  grand_total: string;
+  invoice: FolioInvoiceStatus | null;
+  invoice_id: number | null;
+  invoice_number: string | null;
+  status: string | null;
+}
+
 export interface CheckOutResult {
   folio: FolioDetail;
   invoice: FolioInvoiceStatus | null;
+  /** H3.8 — present only when the folio was split: one invoice per account. */
+  invoices?: SplitAccountInvoice[];
 }
 
 export interface FolioChargeRequest {
@@ -123,4 +136,51 @@ export interface RoomChargeResult {
   amount: number;
   /** "Cargado a 101 · Juan Pérez". */
   message: string;
+}
+
+/** H3.8 — folio split: one account per payer, each with its own payment and invoice. */
+export type SplitPaymentState = 'unpaid' | 'pending' | 'partial' | 'paid';
+
+export interface SplitAccountInput {
+  label?: string;
+  customer_id?: number;
+  order_item_ids: number[];
+}
+
+export interface SplitAccount {
+  id: number;
+  ordinal: number;
+  label: string;
+  customer_id: number | null;
+  customer_name: string | null;
+  /** Money fields are decimal strings ("595000.00"). */
+  grand_total: string;
+  total_paid: string;
+  remaining_balance: string;
+  payment_state: SplitPaymentState;
+  invoice: { id: number; invoice_number: string | null; status: string } | null;
+  lines: Array<{ order_item_id: number; product_name: string; total: string }>;
+}
+
+export interface SplitResult {
+  source_order_id: number;
+  /** Null on a preview. */
+  split_group_id: number | null;
+  source_version: string;
+  original_total: string;
+  accounts: SplitAccount[];
+  undo: { allowed: boolean; blockers: Array<{ account_label: string; reason: string }> };
+}
+
+export interface SplitConfirmRequest {
+  accounts: SplitAccountInput[];
+  source_version: string;
+  request_id: string;
+}
+
+export interface SplitPaymentRequest {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  request_id: string;
 }

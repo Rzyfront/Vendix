@@ -17,6 +17,7 @@ function build(
     verificationSetting?: boolean;
     invoice?: { invoice_id: number | null; state: string };
     closeCount?: number;
+    split?: boolean;
   } = {},
 ) {
   const total = options.total ?? 595000;
@@ -82,7 +83,19 @@ function build(
       findFirst: jest.fn(async () => ({ id: 7, status: state.reservation, customer_id: 9 })),
     },
     users: { findFirst: jest.fn(async ({ where }: any) => (where.id === 77 ? { id: 77 } : null)) },
-    orders: { findFirst: jest.fn(async () => ({ grand_total: total })) },
+    orders: {
+      findFirst: jest.fn(async () => ({
+        grand_total: total,
+        active_financial_split_id: options.split ? 90 : null,
+      })),
+    },
+    // H3.8 — split folio: lodging to the company, consumptions to the guest.
+    order_financial_accounts: {
+      findMany: jest.fn(async () => [
+        { id: 301, label: 'Empresa ABC', grand_total: 476000 },
+        { id: 302, label: 'Juan', grand_total: 119000 },
+      ]),
+    },
     lodging_folios: { updateMany: jest.fn(async () => ({ count: 1 })) },
     stores: { findFirst: jest.fn(async () => ({ timezone: 'America/Bogota' })) },
     store_settings: { findFirst: jest.fn(async () => null) },
@@ -98,6 +111,11 @@ function build(
         : { order_id: 500, state: 'pending', invoice_id: null, invoice_number: null, message: '' },
     ),
     emitForOrder: jest.fn(async () => issued),
+    emitForFinancialAccount: jest.fn(async (account_id: number) => ({
+      ...issued,
+      invoice_id: account_id + 1000,
+      invoice_number: `FE-${account_id}`,
+    })),
   };
   const receivables = { createCreditSaleFromEvent: jest.fn(async () => ({ id: 1 })) };
   const settings = {
@@ -321,5 +339,76 @@ describe('LodgingCheckOutService (H3.7)', () => {
 
     await expect(service.invoicePdf(7)).resolves.toEqual({ url: 'https://signed/fe-120.pdf' });
     expect(pdf.getPdf).toHaveBeenCalledWith(120);
+  });
+
+  describe('H3.8 — folio dividido', () => {
+    it('con las dos cuentas cobradas cierra y emite UNA factura por cuenta, no la del folio', async () => {
+      const { service, folios, fiscal, tx } = build({ split: true, paid: 595000 });
+
+      const result = await service.checkOut(7, { request_id: REQUEST }, DESK);
+
+      expect(folios.applyDeposit).not.toHaveBeenCalled();
+      expect(folios.registerPayment).not.toHaveBeenCalled();
+      expect(tx.lodging_folios.updateMany).toHaveBeenCalled();
+      expect(fiscal.emitForOrder).not.toHaveBeenCalled();
+      expect(fiscal.emitForFinancialAccount).toHaveBeenCalledTimes(2);
+      expect(fiscal.emitForFinancialAccount).toHaveBeenNthCalledWith(1, 301);
+      expect(fiscal.emitForFinancialAccount).toHaveBeenNthCalledWith(2, 302);
+      expect(result.invoice).toBeNull();
+      expect((result as any).invoices).toEqual([
+        expect.objectContaining({ account_id: 301, label: 'Empresa ABC', grand_total: 476000, invoice_number: 'FE-301', status: 'issued' }),
+        expect.objectContaining({ account_id: 302, label: 'Juan', grand_total: 119000, invoice_number: 'FE-302', status: 'issued' }),
+      ]);
+      expect(result.reservation).toMatchObject({ status: 'checked_out' });
+    });
+
+    it('con una cuenta sin cobrar no hace check-out ni aplica el anticipo', async () => {
+      const { service, folios, tx, fiscal } = build({ split: true, paid: 476000, deposit: 50000 });
+
+      await expect(service.checkOut(7, { request_id: REQUEST }, DESK)).rejects.toMatchObject({
+        errorCode: ErrorCodes.LODGING_CHECKOUT_BALANCE_001.code,
+      });
+      expect(folios.applyDeposit).not.toHaveBeenCalled();
+      expect(folios.registerPayment).not.toHaveBeenCalled();
+      expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+      expect(fiscal.emitForFinancialAccount).not.toHaveBeenCalled();
+    });
+
+    it('no admite crédito ni "facturar a": cada cuenta se factura a su titular', async () => {
+      const { service, tx } = build({ split: true, paid: 595000 });
+
+      await expect(
+        service.checkOut(7, { bill_to_customer_id: 77, charge_to_credit: true, request_id: REQUEST }, DESK),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.LODGING_CHECKOUT_BILL_TO_001.code });
+      await expect(
+        service.checkOut(7, { bill_to_customer_id: 77, request_id: REQUEST }, DESK),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.LODGING_CHECKOUT_BILL_TO_001.code });
+      expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('un check-out repetido reintenta la misma factura de cada cuenta (idempotente)', async () => {
+      const { service, tx, fiscal } = build({
+        split: true,
+        paid: 595000,
+        status: 'checked_out',
+        folioStatus: 'closed',
+      });
+
+      const result = await service.checkOut(7, { request_id: REQUEST }, DESK);
+
+      expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+      expect(fiscal.emitForFinancialAccount).toHaveBeenCalledTimes(2);
+      expect((result as any).invoices).toHaveLength(2);
+    });
+
+    it('el PDF se pide por cuenta', async () => {
+      const { service, prisma } = build({ split: true });
+
+      await service.invoicePdf(7, 302);
+
+      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ order_id: 500, financial_account_id: 302 }) }),
+      );
+    });
   });
 });

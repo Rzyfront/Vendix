@@ -5891,6 +5891,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El cliente a facturar no es válido',
   },
+  // H3.8 — split folio.
+  LODGING_FOLIO_SPLIT_001: {
+    code: 'LODGING_FOLIO_SPLIT_001',
+    httpStatus: 409,
+    devMessage: 'No se puede dividir el folio',
+  },
   LODGING_ROOM_CHARGE_001: {
     code: 'LODGING_ROOM_CHARGE_001',
     httpStatus: 409,

@@ -32,6 +32,10 @@ import {
   RoomChargeResult,
   CheckOutRequest,
   CheckOutResult,
+  SplitAccountInput,
+  SplitConfirmRequest,
+  SplitPaymentRequest,
+  SplitResult,
 } from '../interfaces/folio.interface';
 
 interface ApiResponse<T> {
@@ -322,11 +326,56 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
-  /** H3.7 — signed URL of the folio invoice PDF. */
-  getFolioInvoicePdf(reservationId: number): Observable<string> {
+  /** H3.7 — signed URL of the folio invoice PDF (H3.8: of one account when split). */
+  getFolioInvoicePdf(reservationId: number, accountId?: number): Observable<string> {
+    const params = accountId !== undefined ? new HttpParams().set('account_id', accountId) : undefined;
     return this.http
-      .get<ApiResponse<{ url: string }>>(`${this.baseUrl}/${reservationId}/folio/invoice/pdf`)
+      .get<ApiResponse<{ url: string }>>(`${this.baseUrl}/${reservationId}/folio/invoice/pdf`, { params })
       .pipe(map((res) => res.data.url), catchError(this.handleError));
+  }
+
+  /** H3.8 — current folio split, or null when the folio is a single account. */
+  getFolioSplit(reservationId: number): Observable<SplitResult | null> {
+    return this.http
+      .get<ApiResponse<SplitResult | null>>(`${this.baseUrl}/${reservationId}/folio/split`)
+      .pipe(map((res) => res.data ?? null), catchError(this.handleError));
+  }
+
+  /** H3.8 — "Vista previa": totals per account, nothing is saved. */
+  previewFolioSplit(reservationId: number, accounts: SplitAccountInput[]): Observable<SplitResult> {
+    return this.http
+      .post<ApiResponse<SplitResult>>(`${this.baseUrl}/${reservationId}/folio/split/preview`, { accounts })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.8 — "Confirmar división". */
+  confirmFolioSplit(reservationId: number, body: SplitConfirmRequest): Observable<SplitResult> {
+    return this.http
+      .post<ApiResponse<SplitResult>>(`${this.baseUrl}/${reservationId}/folio/split`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.8 — "Quitar división": back to the single folio. */
+  cancelFolioSplit(reservationId: number, sourceVersion: string): Observable<FolioDetail> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/split/cancel`, {
+        source_version: sourceVersion,
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.8 — "Cobrar" one account of the split folio. */
+  payFolioSplitAccount(
+    reservationId: number,
+    accountId: number,
+    body: SplitPaymentRequest,
+  ): Observable<SplitResult> {
+    return this.http
+      .post<ApiResponse<SplitResult>>(
+        `${this.baseUrl}/${reservationId}/folio/split/accounts/${accountId}/pay`,
+        body,
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
   /** Rejects with the user-facing message so screens can show it as-is. */

@@ -19,6 +19,24 @@ import { CheckOutDto } from './check-out.dto';
 /** Dedicated permission of the review before the folio invoice (D11). */
 export const FOLIO_VERIFY_PERMISSION = 'store:lodging:folio:verify';
 
+/** Account of a split folio (H3.8). */
+interface SplitAccountRow {
+  id: number;
+  label: string;
+  grand_total: Prisma.Decimal;
+}
+
+/** Invoice of one account of a split folio (H3.8). */
+export interface FolioAccountInvoice {
+  account_id: number;
+  label: string;
+  grand_total: number;
+  invoice: PosFiscalStatus | null;
+  invoice_id: number | null;
+  invoice_number: string | null;
+  status: string | null;
+}
+
 /** Housekeeping states a departure turns into "Sucia". */
 const DIRTY_FROM = ['clean', 'inspected'] as const;
 
@@ -92,6 +110,15 @@ export class LodgingCheckOutService {
       throw new VendixHttpException(ErrorCodes.LODGING_CHECKOUT_001);
     }
 
+    // H3.8 — split folio: each account is paid apart and invoiced to its payer.
+    const split = await this.activeSplitAccounts(folio.order_id);
+    if (split && (dto.charge_to_credit || dto.bill_to_customer_id != null)) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CHECKOUT_BILL_TO_001,
+        'El folio está dividido: cada cuenta se factura a su titular',
+      );
+    }
+
     const billTo = dto.bill_to_customer_id ?? null;
     if (billTo !== null && billTo !== reservation.customer_id) {
       const customer = await this.prisma.users.findFirst({
@@ -117,11 +144,17 @@ export class LodgingCheckOutService {
 
     // 3. Deposit still held → "Anticipo aplicado".
     let current = await this.folios.getFolio(reservation_id);
-    if (current.deposit_available > 0 && current.balance > 0) {
+    if (!split && current.deposit_available > 0 && current.balance > 0) {
       current = await this.folios.applyDeposit(reservation_id);
     }
 
     // 4. Balance: paid now, charged to credit, or the check-out stops.
+    if (split && current.balance > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CHECKOUT_BALANCE_001,
+        'El folio está dividido: cobra cada cuenta antes del check-out',
+      );
+    }
     if (current.balance > 0 && !dto.charge_to_credit) {
       if (!dto.store_payment_method_id) {
         throw new VendixHttpException(
@@ -176,7 +209,8 @@ export class LodgingCheckOutService {
           orderId: order.id,
           storeId: store_id,
           type: 'state_changed',
-          fromState: 'draft',
+          // A paid split already moved the order on (draft → processing).
+          fromState: order.state,
           toState: 'finished',
         });
 
@@ -253,11 +287,13 @@ export class LodgingCheckOutService {
   }
 
   /** Signed URL of the folio invoice PDF (the desk has no invoicing:read). */
-  async invoicePdf(reservation_id: number): Promise<{ url: string }> {
+  async invoicePdf(reservation_id: number, account_id?: number): Promise<{ url: string }> {
     const folio = await this.folios.findFolio(reservation_id);
     const invoice = await this.prisma.invoices.findFirst({
       where: {
         order_id: folio.order_id,
+        // H3.8 — a split folio has one invoice per account.
+        ...(account_id ? { financial_account_id: account_id } : {}),
         invoice_type: 'sales_invoice',
         status: { notIn: ['voided', 'cancelled'] },
       },
@@ -277,6 +313,15 @@ export class LodgingCheckOutService {
    * emission; otherwise the current status is only read.
    */
   private async result(reservation_id: number, order_id: number, emit: boolean) {
+    const split = await this.activeSplitAccounts(order_id);
+    if (split) {
+      return {
+        reservation: await this.reservations.findOne(reservation_id),
+        folio: await this.folios.getFolio(reservation_id),
+        invoice: null,
+        invoices: await this.splitInvoices(split, emit),
+      };
+    }
     let invoice: PosFiscalStatus | null = null;
     try {
       invoice = emit
@@ -292,6 +337,63 @@ export class LodgingCheckOutService {
       folio: await this.folios.getFolio(reservation_id),
       invoice,
     };
+  }
+
+  /**
+   * H3.8 — one invoice per account of the split folio, each to its payer.
+   * `emitForFinancialAccount` is idempotent (it reuses the account's document
+   * and never takes a second number); without `emit` only the stored
+   * document is read.
+   */
+  private async splitInvoices(accounts: SplitAccountRow[], emit: boolean) {
+    const result: FolioAccountInvoice[] = [];
+    for (const account of accounts) {
+      let invoice: PosFiscalStatus | null = null;
+      if (emit) {
+        try {
+          invoice = await this.fiscalEmission.emitForFinancialAccount(account.id);
+        } catch (error) {
+          this.logger.error(
+            `Folio account ${account.id}: invoice emission failed: ${(error as Error).message}`,
+          );
+        }
+      }
+      const stored = invoice
+        ? null
+        : await this.prisma.invoices.findFirst({
+            where: {
+              financial_account_id: account.id,
+              invoice_type: 'sales_invoice',
+              status: { notIn: ['voided', 'cancelled'] },
+            },
+            select: { id: true, invoice_number: true, status: true },
+            orderBy: { id: 'desc' },
+          });
+      result.push({
+        account_id: account.id,
+        label: account.label,
+        grand_total: Number(account.grand_total),
+        invoice,
+        invoice_id: invoice?.invoice_id ?? stored?.id ?? null,
+        invoice_number: invoice?.invoice_number ?? stored?.invoice_number ?? null,
+        status: invoice?.state ?? stored?.status ?? null,
+      });
+    }
+    return result;
+  }
+
+  /** Payable accounts of the folio order's active split, or null without one. */
+  private async activeSplitAccounts(order_id: number): Promise<SplitAccountRow[] | null> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: { active_financial_split_id: true },
+    });
+    if (!order?.active_financial_split_id) return null;
+    return this.prisma.order_financial_accounts.findMany({
+      where: { split_id: order.active_financial_split_id, role: 'payable', state: 'active' },
+      select: { id: true, label: true, grand_total: true },
+      orderBy: { ordinal: 'asc' },
+    });
   }
 
   /** Emits only when there is no document yet or the last attempt failed. */

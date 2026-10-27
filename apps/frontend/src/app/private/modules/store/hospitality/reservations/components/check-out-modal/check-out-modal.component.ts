@@ -11,6 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { forkJoin } from 'rxjs';
 import {
   ButtonComponent,
   IconComponent,
@@ -24,7 +25,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
 import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-customer-selector/pos-customer-selector.component';
 import { PosCustomer } from '../../../../pos/models/customer.model';
-import { CheckOutResult, FolioDetail } from '../../interfaces/folio.interface';
+import { CheckOutResult, FolioDetail, SplitAccountInvoice, SplitResult } from '../../interfaces/folio.interface';
 import { LodgingReservation } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
@@ -72,7 +73,24 @@ function newRequestId(): string {
             <app-icon name="log-out" [size]="16" />
             Salida registrada · folio cerrado · habitación sucia
           </p>
-          @if (r.invoice; as inv) {
+          @if (r.invoices; as list) {
+            @for (row of list; track row.account_id) {
+              <div class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2" data-testid="check-out-split-invoice">
+                <div>
+                  <p class="font-medium text-text-primary">{{ row.label }} · {{ money(Number(row.grand_total)) }}</p>
+                  <p class="text-xs text-text-secondary">
+                    {{ row.invoice_number ? 'Factura ' + row.invoice_number : 'Factura electrónica' }}{{ row.status ? ' · ' + (row.status === 'issued' ? 'aceptada por DIAN' : row.status) : '' }}
+                  </p>
+                </div>
+                @if (row.invoice_id) {
+                  <app-button variant="outline" size="sm" [loading]="busy()" (clicked)="downloadPdf(row)">
+                    <app-icon slot="icon" name="download" [size]="14" />
+                    Descargar PDF
+                  </app-button>
+                }
+              </div>
+            }
+          } @else if (r.invoice; as inv) {
             <div class="rounded-lg border border-border px-3 py-2" data-testid="check-out-invoice">
               @if (inv.state === 'issued') {
                 <p class="font-medium text-text-primary">Factura {{ inv.invoice_number }} aceptada por DIAN</p>
@@ -105,6 +123,23 @@ function newRequestId(): string {
             <p class="text-xs text-text-secondary">Las noches ya dormidas que falten se cargan al confirmar.</p>
           }
 
+          @if (split(); as sp) {
+            <div class="space-y-2" data-testid="check-out-split">
+              <p class="font-medium text-text-primary">Cuentas del folio dividido</p>
+              @for (a of sp.accounts; track a.id) {
+                <div class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                  <span>{{ a.label }} · {{ money(Number(a.grand_total)) }}</span>
+                  <span class="text-xs" [class.text-success]="a.payment_state === 'paid'" [class.text-error]="a.payment_state !== 'paid'">
+                    {{ a.payment_state === 'paid' ? 'Pagada' : 'Saldo ' + money(Number(a.remaining_balance)) }}
+                  </span>
+                </div>
+              }
+              @if (!allPaid()) {
+                <p class="text-xs text-error" data-testid="check-out-split-unpaid">Cobra cada cuenta antes del check-out</p>
+              }
+            </div>
+          }
+
           <div class="space-y-1">
             @if (f.verified_current) {
               <p class="flex items-center gap-1 font-medium text-success" data-testid="check-out-verified">
@@ -124,6 +159,7 @@ function newRequestId(): string {
             }
           </div>
 
+          @if (!split()) {
           <div class="space-y-2">
             <p class="font-medium text-text-primary">Facturar a</p>
             <div class="flex flex-wrap gap-2">
@@ -158,7 +194,9 @@ function newRequestId(): string {
             }
           </div>
 
-          @if (due() > 0) {
+          }
+
+          @if (!split() && due() > 0) {
             <div class="space-y-2">
               @if (billTo() === 'company') {
                 <app-toggle
@@ -185,10 +223,10 @@ function newRequestId(): string {
 
       <div slot="footer" class="flex flex-wrap justify-end gap-2">
         @if (result(); as r) {
-          @if (r.invoice?.state === 'failed' || r.invoice === null) {
+          @if (!r.invoices && (r.invoice?.state === 'failed' || r.invoice === null)) {
             <app-button variant="outline" [loading]="busy()" (clicked)="confirm()">Reintentar factura</app-button>
           }
-          @if (r.invoice?.invoice_id) {
+          @if (!r.invoices && r.invoice?.invoice_id) {
             <app-button variant="outline" [loading]="busy()" (clicked)="downloadPdf()" data-testid="check-out-pdf">
               <app-icon slot="icon" name="download" [size]="14" />
               Descargar PDF
@@ -226,6 +264,8 @@ export class CheckOutModalComponent {
   readonly checkedOut = output<void>();
 
   readonly folio = signal<FolioDetail | null>(null);
+  /** H3.8 — accounts of a split folio; null while it is a single account. */
+  readonly split = signal<SplitResult | null>(null);
   readonly result = signal<CheckOutResult | null>(null);
   readonly loading = signal(false);
   readonly busy = signal(false);
@@ -236,6 +276,7 @@ export class CheckOutModalComponent {
   readonly methodId = signal<number | null>(null);
   readonly methodOptions = signal<SelectorOption[]>([]);
   private requestId = newRequestId();
+  readonly allPaid = computed(() => this.split()?.accounts.every((a) => a.payment_state === 'paid') ?? true);
   protected readonly Number = Number;
 
   readonly subtitle = computed(() => {
@@ -256,6 +297,7 @@ export class CheckOutModalComponent {
     const f = this.folio();
     if (!f || this.busy()) return false;
     if (!f.verified_current && !this.verifyNow()) return false;
+    if (this.split()) return this.allPaid();
     if (this.billTo() === 'company' && !this.company()) return false;
     return this.due() === 0 || this.credit() || this.methodId() !== null;
   });
@@ -290,18 +332,22 @@ export class CheckOutModalComponent {
   confirm(): void {
     const reservation = this.reservation();
     if (!reservation || this.busy()) return;
-    const company = this.billTo() === 'company' ? this.company() : null;
+    const isSplit = this.split() !== null;
+    const company = !isSplit && this.billTo() === 'company' ? this.company() : null;
     this.busy.set(true);
     this.reservationsService
       .checkOut(reservation.id, {
         request_id: this.requestId,
         ...(this.verifyNow() ? { verify: true } : {}),
         ...(company ? { bill_to_customer_id: Number(company.id) } : {}),
-        ...(this.credit()
-          ? { charge_to_credit: true }
-          : this.methodId() !== null
-            ? { store_payment_method_id: this.methodId()! }
-            : {}),
+        // A split folio is collected per account: no payer, credit or method here.
+        ...(isSplit
+          ? {}
+          : this.credit()
+            ? { charge_to_credit: true }
+            : this.methodId() !== null
+              ? { store_payment_method_id: this.methodId()! }
+              : {}),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -318,12 +364,12 @@ export class CheckOutModalComponent {
       });
   }
 
-  downloadPdf(): void {
+  downloadPdf(row?: SplitAccountInvoice): void {
     const reservation = this.reservation();
     if (!reservation) return;
     this.busy.set(true);
     this.reservationsService
-      .getFolioInvoicePdf(reservation.id)
+      .getFolioInvoicePdf(reservation.id, row?.account_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (url) => {
@@ -344,12 +390,12 @@ export class CheckOutModalComponent {
   private open(id: number): void {
     this.reset();
     this.loading.set(true);
-    this.reservationsService
-      .getFolio(id)
+    forkJoin({ folio: this.reservationsService.getFolio(id), split: this.reservationsService.getFolioSplit(id) })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (folio) => {
+        next: ({ folio, split }) => {
           this.folio.set(folio);
+          this.split.set(split);
           this.loading.set(false);
         },
         error: (message: string) => {
@@ -372,6 +418,7 @@ export class CheckOutModalComponent {
 
   private reset(): void {
     this.folio.set(null);
+    this.split.set(null);
     this.result.set(null);
     this.verifyNow.set(false);
     this.billTo.set('guest');

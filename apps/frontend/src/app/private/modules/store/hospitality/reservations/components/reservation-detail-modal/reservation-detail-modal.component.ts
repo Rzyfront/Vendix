@@ -160,6 +160,7 @@ function todayLocal(): string {
               [reservationId]="r.id"
               [inHouse]="r.status === 'checked_in'"
               [refreshKey]="folioVersion()"
+              [holder]="{ id: r.customer.id, name: (r.customer.first_name + ' ' + (r.customer.last_name ?? '')).trim() }"
               (changed)="refreshDeposit()"
             />
           }

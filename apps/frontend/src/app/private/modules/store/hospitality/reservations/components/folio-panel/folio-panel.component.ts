@@ -27,10 +27,18 @@ import { PaymentMethodsCatalogService } from '../../../../../../../shared/servic
 import { ProductsService } from '../../../../products/services/products.service';
 import { Product } from '../../../../products/interfaces/product.interface';
 import { FOLIO_STATUS_LABELS } from '../../interfaces/reservation.interface';
-import { FolioDetail, FolioLine } from '../../interfaces/folio.interface';
+import { FolioDetail, FolioLine, SplitAccount, SplitResult } from '../../interfaces/folio.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { FolioSplitModalComponent } from '../folio-split-modal/folio-split-modal.component';
 
-type Action = 'charge' | 'payment' | 'void' | null;
+type Action = 'charge' | 'payment' | 'void' | 'splitPay' | null;
+
+const PAYMENT_STATE_LABELS: Record<string, string> = {
+  unpaid: 'Sin pagar',
+  pending: 'Pendiente',
+  partial: 'Pago parcial',
+  paid: 'Pagada',
+};
 
 /** Methods the desk registers by hand; gateways settle themselves. */
 const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
@@ -58,6 +66,7 @@ function newRequestId(): string {
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    FolioSplitModalComponent,
   ],
   template: `
     <div class="rounded-lg border border-border" data-testid="folio-panel">
@@ -68,6 +77,13 @@ function newRequestId(): string {
         </p>
         @if (editable() && !action()) {
           <div class="flex flex-wrap gap-1">
+            @if (canSplit()) {
+              <app-button variant="outline" size="sm" (clicked)="splitOpen.set(true)" data-testid="folio-split">
+                <app-icon slot="icon" name="split" [size]="14" />
+                Dividir
+              </app-button>
+            }
+            @if (!split()) {
             <app-button
               variant="outline"
               size="sm"
@@ -115,6 +131,7 @@ function newRequestId(): string {
               <app-icon slot="icon" [name]="folio()?.charges_blocked ? 'unlock' : 'lock'" [size]="14" />
               {{ folio()?.charges_blocked ? 'Permitir cargos' : 'Bloquear cargos' }}
             </app-button>
+            }
             @if (!folio()?.verified_current) {
               <app-button
                 variant="ghost"
@@ -151,6 +168,11 @@ function newRequestId(): string {
             Folio verificado para facturar
           </p>
         }
+        @if (split(); as sp) {
+          <p class="border-b border-border px-3 py-2 text-xs font-medium text-primary" data-testid="folio-split-banner">
+            Folio dividido: cobra y factura cada cuenta
+          </p>
+        }
         @if (f.charges_blocked) {
           <p class="border-b border-border px-3 py-2 text-xs font-medium text-error" data-testid="folio-charges-blocked-note">
             Cargos bloqueados: el POS y las mesas no pueden cargar a esta habitación.
@@ -184,7 +206,7 @@ function newRequestId(): string {
                 <span class="whitespace-nowrap font-medium" [class.line-through]="line.cancelled_at">
                   {{ money(line.total) }}
                 </span>
-                @if (editable() && !line.cancelled_at && !line.origin && !action()) {
+                @if (editable() && !split() && !line.cancelled_at && !line.origin && !action()) {
                   <app-button
                     variant="ghost"
                     size="sm"
@@ -232,6 +254,131 @@ function newRequestId(): string {
           <dt class="font-semibold text-text-primary">Saldo</dt>
           <dd class="text-right font-semibold" data-testid="folio-balance">{{ money(f.balance) }}</dd>
         </dl>
+      }
+
+      @if (split(); as sp) {
+        <div class="space-y-2 border-t border-border px-3 py-3" data-testid="folio-split-view">
+          @for (account of sp.accounts; track account.id) {
+            <div class="space-y-2 rounded-lg border border-border px-3 py-2" data-testid="folio-split-account">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p class="font-medium text-text-primary">{{ account.label }}</p>
+                  @if (account.customer_name) {
+                    <p class="text-xs text-text-secondary">{{ account.customer_name }}</p>
+                  }
+                </div>
+                <span
+                  class="rounded-full border border-border px-2 py-0.5 text-xs"
+                  [class.text-success]="account.payment_state === 'paid'"
+                  data-testid="folio-split-state"
+                >
+                  {{ paymentStateLabel(account.payment_state) }}
+                </span>
+              </div>
+              <ul class="text-xs text-text-secondary">
+                @for (line of account.lines; track line.order_item_id) {
+                  <li class="flex justify-between gap-2">
+                    <span>{{ line.product_name }}</span>
+                    <span>{{ money(line.total) }}</span>
+                  </li>
+                }
+              </ul>
+              <dl class="grid grid-cols-2 gap-x-4 gap-y-1">
+                <dt class="text-text-secondary">Total</dt>
+                <dd class="text-right font-medium">{{ money(account.grand_total) }}</dd>
+                <dt class="text-text-secondary">Pagado</dt>
+                <dd class="text-right">{{ money(account.total_paid) }}</dd>
+                <dt class="text-text-secondary">Saldo</dt>
+                <dd class="text-right font-medium">{{ money(account.remaining_balance) }}</dd>
+              </dl>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                @if (account.invoice; as inv) {
+                  <span class="text-xs text-text-secondary" data-testid="folio-split-invoice">
+                    Factura {{ inv.invoice_number ?? '' }} · {{ inv.status }}
+                  </span>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [loading]="busy()"
+                    (clicked)="downloadAccountInvoice(account)"
+                  >
+                    <app-icon slot="icon" name="download" [size]="14" />
+                    Descargar factura
+                  </app-button>
+                } @else if (editable() && Number(account.remaining_balance) > 0 && action() === null) {
+                  <app-button variant="primary" size="sm" (clicked)="startSplitPay(account)" data-testid="folio-split-pay">
+                    Cobrar
+                  </app-button>
+                }
+              </div>
+            </div>
+          }
+          @if (editable() && !action()) {
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              @if (!sp.undo.allowed) {
+                <p class="text-xs text-text-secondary" data-testid="folio-split-blockers">
+                  @if (sp.undo.blockers[0]; as b) {
+                    {{ b.account_label }} ya tiene
+                    {{ b.reason === 'invoice_transmitted' ? 'factura enviada a la DIAN' : 'pagos registrados' }}: no se puede quitar la división
+                  }
+                </p>
+              }
+              @if (confirmingUndo()) {
+                <div class="ml-auto flex items-center gap-2">
+                  <span class="text-xs">¿Volver al folio único?</span>
+                  <app-button variant="ghost" size="sm" (clicked)="confirmingUndo.set(false)">No</app-button>
+                  <app-button variant="danger" size="sm" [loading]="busy()" (clicked)="undoSplit()">Sí, quitar</app-button>
+                </div>
+              } @else {
+                <app-button
+                  class="ml-auto"
+                  variant="outline"
+                  size="sm"
+                  [disabled]="!sp.undo.allowed"
+                  (clicked)="confirmingUndo.set(true)"
+                  data-testid="folio-split-undo"
+                >
+                  Quitar división
+                </app-button>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      @if (action() === 'splitPay') {
+        <form [formGroup]="paymentForm" class="space-y-2 border-t border-border px-3 py-3" data-testid="folio-split-pay-form">
+          <p class="font-medium">Cobrar «{{ payTarget()?.label }}»</p>
+          <div class="grid grid-cols-2 gap-2">
+            <app-input
+              [formControl]="paymentForm.controls.amount"
+              type="number"
+              [min]="1"
+              label="Monto"
+              size="sm"
+              [helperText]="'Saldo ' + money(payTarget()?.remaining_balance ?? 0)"
+            />
+            <app-selector
+              [formControl]="paymentForm.controls.method_id"
+              label="Medio de pago"
+              placeholder="Elige el medio"
+              [options]="methodOptions()"
+            />
+          </div>
+          <div class="flex justify-end gap-2">
+            <app-button variant="ghost" size="sm" (clicked)="cancelAction()">Volver</app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              [loading]="busy()"
+              [disabled]="paymentStatus() !== 'VALID'"
+              (clicked)="saveSplitPayment()"
+              data-testid="folio-split-pay-save"
+            >
+              Cobrar
+            </app-button>
+          </div>
+        </form>
       }
 
       @if (action() === 'charge') {
@@ -336,6 +483,15 @@ function newRequestId(): string {
         </div>
       }
     </div>
+
+    <app-folio-split-modal
+      [open]="splitOpen()"
+      [reservationId]="reservationId()"
+      [lines]="folio()?.lines ?? []"
+      [holder]="holder()"
+      (closed)="splitOpen.set(false)"
+      (split)="onSplitCreated()"
+    />
   `,
 })
 export class FolioPanelComponent {
@@ -349,6 +505,8 @@ export class FolioPanelComponent {
   readonly reservationId = input.required<number>();
   /** The reservation is in house: the folio takes charges and payments. */
   readonly inHouse = input<boolean>(false);
+  /** Reservation holder: default customer of the second split account. */
+  readonly holder = input<{ id: number; name: string } | null>(null);
   /** Bump to re-fetch (e.g. after a deposit was collected). */
   readonly refreshKey = input<number>(0);
   /** Emitted after every change so the detail refreshes its summary. */
@@ -361,6 +519,12 @@ export class FolioPanelComponent {
   readonly voidTarget = signal<FolioLine | null>(null);
   private readonly products = signal<Product[]>([]);
   readonly methodOptions = signal<SelectorOption[]>([]);
+  /** H3.8 — split of the folio, or null while it is a single account. */
+  readonly split = signal<SplitResult | null>(null);
+  readonly splitOpen = signal(false);
+  readonly confirmingUndo = signal(false);
+  readonly payTarget = signal<SplitAccount | null>(null);
+  protected readonly Number = Number;
   private paymentRequestId = newRequestId();
 
   readonly chargeForm = new FormGroup({
@@ -388,6 +552,17 @@ export class FolioPanelComponent {
   });
 
   readonly editable = computed(() => this.inHouse() && this.folio()?.status === 'open');
+  /** "Dividir": open folio, single account, nothing paid, at least two active lines. */
+  readonly canSplit = computed(() => {
+    const f = this.folio();
+    return (
+      f !== null &&
+      f.status === 'open' &&
+      this.split() === null &&
+      Number(f.paid) === 0 &&
+      f.lines.filter((l) => !l.cancelled_at).length >= 2
+    );
+  });
   readonly statusLabel = computed(() => {
     const status = this.folio()?.status;
     return status ? FOLIO_STATUS_LABELS[status] : '';
@@ -425,6 +600,93 @@ export class FolioPanelComponent {
           this.loading.set(false);
           this.toastService.error(message);
         },
+      });
+    this.loadSplit(id);
+  }
+
+  private loadSplit(id: number): void {
+    this.reservationsService
+      .getFolioSplit(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (split) => this.split.set(split),
+        error: (message: string) => this.toastService.error(message),
+      });
+  }
+
+  paymentStateLabel(state: string): string {
+    return PAYMENT_STATE_LABELS[state] ?? state;
+  }
+
+  /** The split exists: close the modal and reload folio and accounts. */
+  onSplitCreated(): void {
+    this.splitOpen.set(false);
+    this.load();
+    this.changed.emit();
+  }
+
+  undoSplit(): void {
+    const split = this.split();
+    if (!split) return;
+    this.busy.set(true);
+    this.reservationsService
+      .cancelFolioSplit(this.reservationId(), split.source_version)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (folio) => {
+          this.split.set(null);
+          this.confirmingUndo.set(false);
+          this.applied(folio);
+          this.toastService.success('División quitada');
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
+  startSplitPay(account: SplitAccount): void {
+    this.paymentRequestId = newRequestId();
+    this.payTarget.set(account);
+    this.paymentForm.reset({ amount: Number(account.remaining_balance), method_id: null });
+    this.action.set('splitPay');
+    this.loadMethods();
+  }
+
+  saveSplitPayment(): void {
+    const account = this.payTarget();
+    if (!account) return;
+    const value = this.paymentForm.getRawValue();
+    this.busy.set(true);
+    this.reservationsService
+      .payFolioSplitAccount(this.reservationId(), account.id, {
+        amount: Number(value.amount),
+        store_payment_method_id: Number(value.method_id),
+        request_id: this.paymentRequestId,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (split) => {
+          this.split.set(split);
+          this.busy.set(false);
+          this.cancelAction();
+          this.load();
+          this.changed.emit();
+          this.toastService.success('Pago registrado');
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
+  downloadAccountInvoice(account: SplitAccount): void {
+    this.busy.set(true);
+    this.reservationsService
+      .getFolioInvoicePdf(this.reservationId(), account.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (url) => {
+          this.busy.set(false);
+          globalThis.open?.(url, '_blank', 'noopener');
+        },
+        error: (message: string) => this.failed(message),
       });
   }
 
@@ -547,6 +809,10 @@ export class FolioPanelComponent {
     this.paymentRequestId = newRequestId();
     this.paymentForm.reset({ amount: null, method_id: null });
     this.action.set('payment');
+    this.loadMethods();
+  }
+
+  private loadMethods(): void {
     if (this.methodOptions().length > 0) return;
     this.paymentMethods
       .getEnabledMethods()
@@ -604,6 +870,7 @@ export class FolioPanelComponent {
   cancelAction(): void {
     this.action.set(null);
     this.voidTarget.set(null);
+    this.payTarget.set(null);
   }
 
   private applied(folio: FolioDetail): void {

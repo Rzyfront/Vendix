@@ -36,6 +36,8 @@ import { InvoicingModule } from '../../invoicing/invoicing.module';
 import { AccountsReceivableModule } from '../../accounts-receivable/accounts-receivable.module';
 import { LodgingCheckOutController } from './check-out/check-out.controller';
 import { LodgingCheckOutService } from './check-out/check-out.service';
+import { LodgingFolioSplitController } from './folio-split/folio-split.controller';
+import { LodgingFolioSplitService } from './folio-split/folio-split.service';
 
 @Module({
   imports: [
@@ -53,7 +55,8 @@ import { LodgingCheckOutService } from './check-out/check-out.service';
     WalletModule,
     PaymentLinksModule,
     // H3.6 — a room charge commits stock like a paid POS sale and closes the
-    // table session it came from.
+    // table session it came from. H3.8 — the split folio reuses the tables'
+    // financial split and per-account payment.
     OrderStockCommitModule,
     InventoryModule,
     TablesModule,
@@ -72,6 +75,7 @@ import { LodgingCheckOutService } from './check-out/check-out.service';
     LodgingDepositsController,
     LodgingRoomChargesController,
     LodgingCheckOutController,
+    LodgingFolioSplitController,
   ],
   providers: [
     LodgingReservationsService,
@@ -88,6 +92,7 @@ import { LodgingCheckOutService } from './check-out/check-out.service';
     LodgingDepositsService,
     LodgingRoomChargesService,
     LodgingCheckOutService,
+    LodgingFolioSplitService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })
