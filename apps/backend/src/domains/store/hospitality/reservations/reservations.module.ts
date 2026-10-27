@@ -53,6 +53,8 @@ import { LodgingPerformanceController } from './reports/performance.controller';
 import { LodgingPerformanceService } from './reports/performance.service';
 import { LodgingPickupController } from './reports/pickup.controller';
 import { LodgingPickupService } from './reports/pickup.service';
+import { LodgingCancellationsController } from './reports/cancellations.controller';
+import { LodgingCancellationsService } from './reports/cancellations.service';
 
 @Module({
   imports: [
@@ -99,6 +101,7 @@ import { LodgingPickupService } from './reports/pickup.service';
     LodgingNightAuditController,
     LodgingPerformanceController,
     LodgingPickupController,
+    LodgingCancellationsController,
   ],
   providers: [
     LodgingReservationsService,
@@ -123,6 +126,7 @@ import { LodgingPickupService } from './reports/pickup.service';
     LodgingNightAuditService,
     LodgingPerformanceService,
     LodgingPickupService,
+    LodgingCancellationsService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
 })

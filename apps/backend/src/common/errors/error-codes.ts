@@ -6010,6 +6010,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
   },
+  // H7.4 — no-shows and cancellations report.
+  LODGING_LOSSES_RANGE_001: {
+    code: 'LODGING_LOSSES_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
+  },
   // H7.3 — pickup and forecast report.
   LODGING_PICKUP_RANGE_001: {
     code: 'LODGING_PICKUP_RANGE_001',

@@ -626,6 +626,13 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_reservations',
         },
         {
+          // H7.4 — no-shows and cancellations: same panel_ui key.
+          label: 'No-shows y cancelaciones',
+          icon: 'calendar-x',
+          route: '/admin/hospitality/cancellations',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
           label: 'Servicios exentos',
           icon: 'file-check',

@@ -1075,6 +1075,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityPickupPageComponent),
           },
           {
+            // H7.4 — "No-shows y cancelaciones"; same panel_ui key as Reservas.
+            path: 'cancellations',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/cancellations-page/cancellations-page.component'
+              ).then((c) => c.HospitalityCancellationsPageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

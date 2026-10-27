@@ -42,6 +42,7 @@ import {
 import { NightAuditView } from '../interfaces/night-audit.interface';
 import { LodgingPerformanceReport } from '../interfaces/performance.interface';
 import { LodgingPickupReport } from '../interfaces/pickup.interface';
+import { LodgingLossesQuery, LodgingLossesReport } from '../interfaces/cancellations.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -318,6 +319,26 @@ export class LodgingReservationsService {
         { params },
       )
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.4 — no-shows and cancellations by channel with their penalties. */
+  cancellations(query: LodgingLossesQuery): Observable<LodgingLossesReport> {
+    return this.http
+      .get<ApiResponse<LodgingLossesReport>>(
+        `${environment.apiUrl}/store/hospitality/reports/cancellations`,
+        { params: toParams(query) },
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.4 — the same report as XLSX (built by the backend). */
+  exportCancellations(query: LodgingLossesQuery): Observable<Blob> {
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/cancellations/export`, {
+        params: toParams(query),
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
   }
 
   /** H7.1 — "Cerrar día": summary of a business day (default: the current one). */

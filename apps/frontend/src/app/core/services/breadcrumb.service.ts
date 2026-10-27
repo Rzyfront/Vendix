@@ -880,6 +880,12 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'calendar-clock',
     },
+    {
+      path: '/admin/hospitality/cancellations',
+      title: 'No-shows y cancelaciones',
+      parent: 'Hotelería',
+      icon: 'calendar-x',
+    },
 
     // Customers
     {
