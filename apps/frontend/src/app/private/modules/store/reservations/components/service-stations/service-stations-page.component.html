@@ -693,8 +693,40 @@
           (selectedChange)="onCheckinCustomerChange($event)"
           [createInitialValues]="checkinCustomerInitialValues()"
         />
-        <!-- Si la plantilla trae "Datos del cliente", esos campos reemplazan a estos -->
-        @if (!templateHandlesCustomer()) {
+        <!-- La plantilla define los campos de cliente: se muestran aquí mismo, una sola vez -->
+        @if (checkinCustomerIntakeItems().length) {
+          @if (!templateHandlesCustomer()) {
+            <app-input
+              label="Nombre Completo del Cliente"
+              [ngModel]="checkinCustomerName()"
+              (ngModelChange)="checkinCustomerName.set($event)"
+              placeholder="Ej. Juan Pérez o Mariana Vega"
+              [required]="true"
+            />
+          }
+          <div class="flex flex-wrap gap-3">
+            @for (item of checkinCustomerIntakeItems(); track item.id) {
+              <div [class]="getItemWidthClass(item.width)">
+                @if (item.metadata_field.field_type === 'file') {
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
+                  </p>
+                } @else {
+                  <app-dynamic-field
+                    [field]="item.metadata_field"
+                    [value]="intakeValue(item.metadata_field.id)"
+                    [required]="isIntakeItemRequired(item)"
+                    [placeholder]="item.placeholder || ''"
+                    [helpText]="item.help_text || ''"
+                    [icon]="item.icon || ''"
+                    (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
+                  />
+                }
+              </div>
+            }
+          </div>
+          <p class="text-[11px] text-[var(--color-text-secondary)]">Estos campos se guardan en el perfil del cliente.</p>
+        } @else {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <app-input
             label="Nombre Completo del Cliente"
@@ -726,8 +758,6 @@
             placeholder="cliente@ejemplo.com"
           />
         </div>
-        } @else {
-          <p class="text-xs text-[var(--color-text-secondary)]">Los datos del cliente se piden en la sección "Datos del cliente" de la plantilla de esta estación.</p>
         }
       </div>
 
@@ -832,7 +862,7 @@
           <app-spinner size="sm" /> Cargando formulario de recepción...
         </div>
       } @else if (checkinIntakeTemplate(); as intakeTemplate) {
-        @if (checkinIntakeSections().length) {
+        @if (checkinNonCustomerIntakeSections().length) {
           <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-4">
             <div>
               <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5">
@@ -840,12 +870,12 @@
                 {{ intakeTemplate.name || 'Formulario de recepción' }}
               </h4>
               <p class="text-xs text-[var(--color-text-secondary)]">
-                Se guarda con esta atención. Los campos de tipo Cliente actualizan el perfil del cliente.
+                Se guarda con esta atención.
               </p>
             </div>
-            @for (section of checkinIntakeSections(); track section.key) {
+            @for (section of checkinNonCustomerIntakeSections(); track section.key) {
               <div class="space-y-2">
-                @if (checkinIntakeSections().length > 1 || section.description) {
+                @if (checkinNonCustomerIntakeSections().length > 1 || section.description) {
                   <div>
                     <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{{ section.title }}</p>
                     @if (section.description) {

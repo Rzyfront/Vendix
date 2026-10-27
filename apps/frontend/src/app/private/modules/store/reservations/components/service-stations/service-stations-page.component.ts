@@ -547,6 +547,24 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return items;
   });
 
+  /** Campos de cliente (entity_type customer) de la plantilla, en orden y sin repetir. */
+  readonly checkinCustomerIntakeItems = computed<IntakeTemplateItem[]>(() =>
+    this.checkinIntakeItems().filter((item) => item.metadata_field.entity_type === 'customer'),
+  );
+
+  /** La plantilla trae campos de cliente: van en "Datos del Cliente", una sola vez. */
+  readonly templateHasCustomerFields = computed(() => this.checkinCustomerIntakeItems().length > 0);
+
+  /** Secciones del formulario sin los campos de cliente (ya van en "Datos del Cliente"). */
+  readonly checkinNonCustomerIntakeSections = computed<CheckinIntakeSection[]>(() =>
+    this.checkinIntakeSections()
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => item.metadata_field.entity_type !== 'customer'),
+      }))
+      .filter((section) => section.items.length > 0),
+  );
+
   readonly getItemWidthClass = getItemWidthClass;
 
   readonly checkinInitialLineTotal = computed(() => {
@@ -1715,7 +1733,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   /** Lleva lo escrito en "Datos del cliente" de la plantilla a los datos de contacto de la atención. */
   private syncCustomerFromTemplate(): void {
-    if (!this.templateHandlesCustomer()) return;
+    if (!this.templateHasCustomerFields()) return;
     const ids = this.templateCustomerFieldIds();
     const values = this.checkinIntakeValues();
     const read = (key: string) => String(values[ids[key]] ?? '').trim();

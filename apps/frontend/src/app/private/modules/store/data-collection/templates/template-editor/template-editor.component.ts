@@ -152,7 +152,38 @@ interface Selection {
                     </h2>
                   </div>
                 }
-                @for (section of step.sections; track section.title) {
+                @for (section of step.sections; track section.title; let i = $index) {
+                  @if (showCustomerFinderBefore(step, i)) {
+                    <div
+                      class="mb-4 rounded-xl p-4"
+                      style="background: var(--color-surface); border: 1px dashed var(--color-primary)"
+                    >
+                      <span
+                        class="block text-xs font-semibold mb-2"
+                        style="color: var(--color-text)"
+                        >Cliente registrado (opcional)</span
+                      >
+                      <div
+                        class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm"
+                        style="border: 1px solid var(--color-border); background: var(--color-surface-secondary); color: var(--color-text-muted)"
+                      >
+                        <app-icon name="search" [size]="14"></app-icon>
+                        <span>Buscar cliente (opcional)...</span>
+                      </div>
+                      <p
+                        class="text-xs mt-2"
+                        style="color: var(--color-text-muted)"
+                      >
+                        Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente.
+                      </p>
+                      <p
+                        class="text-[11px] mt-1"
+                        style="color: var(--color-primary)"
+                      >
+                        Vista previa: en Asignar estación este buscador aparece una sola vez, arriba de los campos de cliente.
+                      </p>
+                    </div>
+                  }
                   <div
                     class="mb-6 rounded-xl p-4"
                     style="background: var(--color-surface); border: 1px solid var(--color-border)"
@@ -1248,6 +1279,29 @@ export class TemplateEditorComponent implements OnInit {
 
   resolveField(fieldId: number): MetadataField | null {
     return this.availableFields().find((f) => f.id === fieldId) || null;
+  }
+
+  /** ¿Esta sección (o sus hijas) trae campos que se guardan en el perfil del cliente? */
+  private sectionHasCustomerField(section: SectionForm): boolean {
+    for (const item of section.items ?? []) {
+      if (this.resolveField(item.metadata_field_id)?.entity_type === 'customer') return true;
+    }
+    for (const child of section.child_sections ?? []) {
+      if (this.sectionHasCustomerField(child)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * En plantillas de estación, la recepción (Asignar) muestra el buscador de
+   * cliente registrado una sola vez, arriba de los campos de cliente. La vista
+   * previa lo refleja para que diseñar sea WYSIWYG.
+   */
+  showCustomerFinderBefore(step: { sections: SectionForm[] }, index: number): boolean {
+    if (this.formData().entity_type !== 'service_session') return false;
+    const sections = step.sections ?? [];
+    if (!sections[index] || !this.sectionHasCustomerField(sections[index])) return false;
+    return !sections.slice(0, index).some((s) => this.sectionHasCustomerField(s));
   }
 
   // --- Form Data Updates ---
