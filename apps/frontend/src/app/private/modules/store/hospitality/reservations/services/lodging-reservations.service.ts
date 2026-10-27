@@ -13,6 +13,8 @@ import {
   ReservationQuote,
   ReservationQuoteRequest,
   ReservationStats,
+  RoomChangeQuote,
+  RoomChangeRequest,
 } from '../interfaces/reservation.interface';
 
 interface ApiResponse<T> {
@@ -76,6 +78,28 @@ export class LodgingReservationsService {
     return this.http
       .post<ApiResponse<LodgingReservation>>(this.baseUrl, request)
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Validates and prices a room change without applying it (H1.4). */
+  changeQuote(roomId: number, change: RoomChangeRequest): Observable<RoomChangeQuote> {
+    return this.http
+      .get<ApiResponse<RoomChangeQuote>>(`${this.baseUrl}/rooms/${roomId}/change-quote`, {
+        params: toParams(change),
+      })
+      .pipe(
+        map((r) => r.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** Assigns, moves or resizes a reservation room (H1.4). */
+  changeRoom(roomId: number, change: RoomChangeRequest): Observable<LodgingReservation> {
+    return this.http
+      .patch<ApiResponse<LodgingReservation>>(`${this.baseUrl}/rooms/${roomId}`, change)
+      .pipe(
+        map((r) => r.data),
+        catchError(this.handleError),
+      );
   }
 
   /** Occupancy rack of the nights `[from, to)` (H1.3). */

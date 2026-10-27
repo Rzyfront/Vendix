@@ -42,7 +42,10 @@ const RESERVATION_INCLUDE = {
     select: { id: true, first_name: true, last_name: true, email: true, phone: true },
   },
   rooms: {
-    include: { unit_type: { select: { id: true, name: true } } },
+    include: {
+      unit_type: { select: { id: true, name: true } },
+      unit: { select: { id: true, code: true } },
+    },
     orderBy: { id: 'asc' },
   },
 } satisfies Prisma.lodging_reservationsInclude;

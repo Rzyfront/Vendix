@@ -29,6 +29,10 @@ import {
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import {
+  RoomChangeModalComponent,
+  RoomChangeTarget,
+} from '../room-change-modal/room-change-modal.component';
 
 type PendingAction = 'cancel' | 'no_show' | null;
 
@@ -42,7 +46,8 @@ function todayLocal(): string {
 /**
  * Hospitality Suite (H1.2) — reservation detail: stay, guests, total and
  * status history, with "Cancelar" (reason required) and "Marcar no-show".
- * Both free the nights for sale.
+ * Both free the nights for sale. "Mover" (H1.4) changes the room or the
+ * dates without dragging (the mobile path of the rack).
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -56,6 +61,7 @@ function todayLocal(): string {
     IconComponent,
     SpinnerComponent,
     TextareaComponent,
+    RoomChangeModalComponent,
   ],
   template: `
     <app-modal
@@ -83,6 +89,8 @@ function todayLocal(): string {
             </dd>
             <dt class="text-text-secondary">Tipo</dt>
             <dd>{{ roomTypes() }}</dd>
+            <dt class="text-text-secondary">Habitación</dt>
+            <dd data-testid="reservation-unit">{{ roomUnits() }}</dd>
             <dt class="text-text-secondary">Llegada → Salida</dt>
             <dd>{{ arrival() }} → {{ departure() }}</dd>
             <dt class="text-text-secondary">Noches</dt>
@@ -102,13 +110,17 @@ function todayLocal(): string {
             <ol class="space-y-2 border-l border-border pl-3" data-testid="reservation-history">
               @for (e of r.events ?? []; track e.id) {
                 <li>
-                  <p class="font-medium">{{ labelOf(e.to_status) }}</p>
+                  <p class="font-medium">
+                    {{ e.from_status === e.to_status ? 'Cambio' : labelOf(e.to_status) }}
+                  </p>
                   <p class="text-xs text-text-secondary">
                     {{ e.created_at | date: 'dd/MM/yyyy HH:mm' }} ·
                     {{ e.user ? e.user.first_name + ' ' + (e.user.last_name ?? '') : 'Automático' }}
                   </p>
                   @if (e.reason) {
-                    <p class="text-xs text-text-secondary">Motivo: {{ e.reason }}</p>
+                    <p class="text-xs text-text-secondary">
+                      {{ e.from_status === e.to_status ? e.reason : 'Motivo: ' + e.reason }}
+                    </p>
                   }
                 </li>
               } @empty {
@@ -143,6 +155,12 @@ function todayLocal(): string {
             {{ pending() === 'cancel' ? 'Confirmar cancelación' : 'Confirmar no-show' }}
           </app-button>
         } @else {
+          @if (canMove()) {
+            <app-button variant="outline" (clicked)="startMove()">
+              <app-icon slot="icon" name="arrow-right-left" [size]="16" />
+              Mover
+            </app-button>
+          }
           @if (canNoShow()) {
             <app-button variant="outline" (clicked)="startAction('no_show')">
               <app-icon slot="icon" name="user-x" [size]="16" />
@@ -159,6 +177,12 @@ function todayLocal(): string {
         }
       </div>
     </app-modal>
+
+    <app-room-change-modal
+      [target]="moveTarget()"
+      (closed)="moveTarget.set(null)"
+      (changed)="onRoomChanged($event)"
+    />
   `,
 })
 export class ReservationDetailModalComponent {
@@ -177,6 +201,7 @@ export class ReservationDetailModalComponent {
   readonly loading = signal(false);
   readonly saving = signal(false);
   readonly pending = signal<PendingAction>(null);
+  readonly moveTarget = signal<RoomChangeTarget | null>(null);
   readonly reasonControl = new FormControl('', {
     nonNullable: true,
     validators: [Validators.maxLength(500)],
@@ -187,6 +212,17 @@ export class ReservationDetailModalComponent {
   readonly nights = computed(() => countNights(this.arrival(), this.departure()));
   readonly roomTypes = computed(
     () => this.reservation()?.rooms.map((room) => room.unit_type.name).join(', ') ?? '',
+  );
+  readonly roomUnits = computed(
+    () =>
+      this.reservation()
+        ?.rooms.map((room) => room.unit?.code ?? 'Sin asignar')
+        .join(', ') ?? '',
+  );
+  readonly canMove = computed(
+    () =>
+      ['tentative', 'confirmed', 'checked_in'].includes(this.reservation()?.status ?? '') &&
+      (this.reservation()?.rooms.length ?? 0) > 0,
   );
   readonly guests = computed(() => {
     const rooms = this.reservation()?.rooms ?? [];
@@ -239,6 +275,26 @@ export class ReservationDetailModalComponent {
           );
         },
       });
+  }
+
+  startMove(): void {
+    const r = this.reservation();
+    const room = r?.rooms[0];
+    if (!r || !room) return;
+    this.moveTarget.set({
+      reservation_room_id: room.id,
+      reservation_number: r.reservation_number,
+      guest: `${r.customer.first_name} ${r.customer.last_name ?? ''}`.trim(),
+      unit_id: room.unit?.id ?? room.unit_id,
+      arrival_date: toDateOnly(room.arrival_date ?? r.arrival_date),
+      departure_date: toDateOnly(room.departure_date ?? r.departure_date),
+    });
+  }
+
+  onRoomChanged(updated: LodgingReservation): void {
+    this.moveTarget.set(null);
+    this.load(updated.id);
+    this.changed.emit();
   }
 
   startAction(action: Exclude<PendingAction, null>): void {

@@ -20,10 +20,14 @@ export interface LodgingReservationRoom {
   id: number;
   unit_type_id: number;
   unit_id: number | null;
+  arrival_date?: string;
+  departure_date?: string;
   adults: number;
   children: number;
   total_amount: string;
   unit_type: { id: number; name: string };
+  /** Physical room once assigned (H1.4). */
+  unit?: { id: number; code: string } | null;
 }
 
 /** Reservation as returned by the store API (dates are date-only ISO). */
@@ -160,4 +164,31 @@ export interface Rack {
   to: string;
   nights: string[];
   types: RackType[];
+}
+
+/** Change of a reservation room (H1.4): room and/or stay dates. */
+export interface RoomChangeRequest {
+  unit_id?: number;
+  arrival_date?: string;
+  departure_date?: string;
+}
+
+/** One side of a room change quote. */
+export interface RoomChangeSide {
+  unit: { id: number; code: string } | null;
+  unit_type: { id: number; name: string };
+  arrival_date: string;
+  departure_date: string;
+  nights: number;
+  total_amount: string;
+}
+
+/** Validated change with its price difference, before confirming. */
+export interface RoomChangeQuote {
+  reservation_room_id: number;
+  reservation_id: number;
+  current: RoomChangeSide;
+  proposed: RoomChangeSide;
+  /** proposed − current total (negative = cheaper). */
+  difference: string;
 }

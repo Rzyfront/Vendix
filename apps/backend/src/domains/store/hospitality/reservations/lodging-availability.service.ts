@@ -14,6 +14,8 @@ export type LodgingInventoryClient = Pick<
  * Rooms of a type left for a stay = active rooms - the most active nights
  * already sold on any night of the stay. Pass the transaction client when the
  * count guards a sale, so it runs under the same lock as the insert.
+ * `exclude_reservation_room_id` leaves out the nights of a room being changed
+ * (H1.4), so it does not compete with itself.
  */
 @Injectable()
 export class LodgingAvailabilityService {
@@ -24,6 +26,7 @@ export class LodgingAvailabilityService {
     arrival_date: string,
     departure_date: string,
     client: LodgingInventoryClient = this.prisma,
+    exclude_reservation_room_id?: number,
   ): Promise<number> {
     const [units, booked] = await Promise.all([
       client.lodging_units.count({ where: { unit_type_id, is_active: true } }),
@@ -32,6 +35,9 @@ export class LodgingAvailabilityService {
         where: {
           unit_type_id,
           is_active: true,
+          ...(exclude_reservation_room_id
+            ? { reservation_room_id: { not: exclude_reservation_room_id } }
+            : {}),
           night_date: {
             gte: dateOnlyToDb(arrival_date),
             lt: dateOnlyToDb(departure_date),

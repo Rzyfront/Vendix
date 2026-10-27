@@ -5681,6 +5681,37 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Solo se puede marcar no-show desde el día de llegada',
   },
+  // Hospitality Suite (H1.4) — assign, move and resize a reservation room
+  LODGING_RESERVATION_ROOM_FIND_001: {
+    code: 'LODGING_RESERVATION_ROOM_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Habitación de la reserva no encontrada',
+  },
+  LODGING_RESERVATION_ROOM_STATUS_001: {
+    code: 'LODGING_RESERVATION_ROOM_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Solo se pueden modificar reservas activas',
+  },
+  LODGING_RESERVATION_ROOM_ARRIVAL_001: {
+    code: 'LODGING_RESERVATION_ROOM_ARRIVAL_001',
+    httpStatus: 400,
+    devMessage: 'La llegada de un huésped en casa no se puede cambiar',
+  },
+  LODGING_RESERVATION_ROOM_NOCHANGE_001: {
+    code: 'LODGING_RESERVATION_ROOM_NOCHANGE_001',
+    httpStatus: 400,
+    devMessage: 'No hay cambios en la habitación ni en las fechas',
+  },
+  LODGING_RESERVATION_ROOM_UNIT_001: {
+    code: 'LODGING_RESERVATION_ROOM_UNIT_001',
+    httpStatus: 409,
+    devMessage: 'La habitación no está disponible para asignar',
+  },
+  LODGING_RESERVATION_ROOM_CONFLICT_001: {
+    code: 'LODGING_RESERVATION_ROOM_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'La habitación está ocupada en esas fechas',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

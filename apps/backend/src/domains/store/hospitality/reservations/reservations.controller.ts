@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -13,20 +14,23 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { LodgingReservationsService } from './reservations.service';
+import { LodgingRoomChangesService } from './room-changes.service';
 import {
   CancelReservationDto,
   CreateReservationDto,
   NoShowReservationDto,
   ReservationQueryDto,
   ReservationQuoteDto,
+  RoomChangeDto,
 } from './dto';
 
-/** Hospitality Suite (H1.1/H1.2) — nightly reservations of a hotel store. */
+/** Hospitality Suite (H1.1/H1.2/H1.4) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
 @UseGuards(PermissionsGuard)
 export class LodgingReservationsController {
   constructor(
     private readonly lodgingReservationsService: LodgingReservationsService,
+    private readonly lodgingRoomChangesService: LodgingRoomChangesService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -52,6 +56,23 @@ export class LodgingReservationsController {
   async quote(@Query() dto: ReservationQuoteDto) {
     const result = await this.lodgingReservationsService.quote(dto);
     return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Validar y cotizar un cambio de habitación o de fechas' })
+  @Get('rooms/:roomId/change-quote')
+  @Permissions('store:lodging:reservations:read')
+  async changeQuote(@Param('roomId', ParseIntPipe) roomId: number, @Query() dto: RoomChangeDto) {
+    const result = await this.lodgingRoomChangesService.quote(roomId, dto);
+    return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Asignar, mover o cambiar las fechas de una habitación de la reserva' })
+  @Patch('rooms/:roomId')
+  @Permissions('store:lodging:reservations:write')
+  async changeRoom(@Param('roomId', ParseIntPipe) roomId: number, @Body() dto: RoomChangeDto) {
+    const reservationId = await this.lodgingRoomChangesService.apply(roomId, dto);
+    const result = await this.lodgingReservationsService.findOne(reservationId);
+    return this.responseService.success(result, 'Reserva actualizada');
   }
 
   @ApiOperation({ summary: 'Obtener una reserva' })

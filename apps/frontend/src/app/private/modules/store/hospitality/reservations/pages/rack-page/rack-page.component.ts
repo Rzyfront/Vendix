@@ -22,10 +22,15 @@ import {
 } from '../../../../../../../shared/components/index';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import {
+  RoomChangeModalComponent,
+  RoomChangeTarget,
+} from '../../components/room-change-modal/room-change-modal.component';
+import {
   LodgingReservationStatus,
   Rack,
   RackBar,
   RESERVATION_STATUS_LABELS,
+  RoomChangeRequest,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
@@ -46,6 +51,11 @@ const BAR_CLASSES: Partial<Record<LodgingReservationStatus, string>> = {
   checked_out: 'border border-border bg-surface-secondary text-text-secondary',
 };
 
+/** Statuses whose room and dates can still change (H1.4). */
+const MOVABLE_STATUSES: LodgingReservationStatus[] = ['tentative', 'confirmed', 'checked_in'];
+
+type DragMode = 'move' | 'resize';
+
 interface RackRow {
   kind: 'type' | 'unit' | 'unassigned';
   key: string;
@@ -53,6 +63,7 @@ interface RackRow {
   /** 1-based CSS grid row (row 1 is the nights header). */
   row: number;
   typeId: number;
+  unitId?: number;
   free?: number[];
   muted?: boolean;
   hint?: string;
@@ -62,6 +73,7 @@ interface PlacedBar extends RackBar {
   row: number;
   classes: string;
   title: string;
+  movable: boolean;
 }
 
 const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
@@ -72,6 +84,12 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
  * paid or GPL timeline). Rows: the type with its free rooms per night, its
  * rooms, and a "Sin asignar" row per lane of unassigned stays. Tapping a bar
  * opens the reservation detail.
+ *
+ * H1.4: on desktop a bar is dragged onto another room (assign/move) and its
+ * right edge is dragged to lengthen or shorten the stay. Every drop is
+ * validated first: a collision shows its message and nothing moves;
+ * otherwise the change modal shows the price difference to confirm. On
+ * mobile the same change is made with "Mover" in the reservation detail.
  */
 @Component({
   selector: 'app-hospitality-rack-page',
@@ -85,6 +103,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
     SpinnerComponent,
     StickyHeaderComponent,
     ReservationDetailModalComponent,
+    RoomChangeModalComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -187,8 +206,14 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                       class="flex items-center justify-center border-b border-r border-border/50"
                       [class.bg-surface-secondary]="row.kind === 'type' || night.weekend"
                       [class.bg-surface]="row.kind !== 'type' && !night.weekend"
+                      [class.ring-2]="dropHover() === row.key + ':' + i"
+                      [class.ring-inset]="dropHover() === row.key + ':' + i"
+                      [class.ring-primary]="dropHover() === row.key + ':' + i"
                       [style.grid-row]="row.row"
                       [style.grid-column]="i + 2"
+                      (dragover)="onDragOver($event, row, i)"
+                      (dragleave)="dropHover.set(null)"
+                      (drop)="onDrop($event, row, i)"
                     >
                       @if (row.free) {
                         <span
@@ -207,20 +232,36 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                 @for (bar of bars(); track bar.reservation_room_id) {
                   <button
                     type="button"
-                    class="z-10 mx-0.5 my-1 flex min-w-0 items-center truncate px-1.5 text-left text-[11px] font-medium"
+                    class="relative z-10 mx-0.5 my-1 flex min-w-0 items-center truncate px-1.5 text-left text-[11px] font-medium"
                     [class]="bar.classes"
                     [class.rounded-l-md]="!bar.continues_before"
                     [class.rounded-r-md]="!bar.continues_after"
+                    [class.cursor-grab]="bar.movable"
+                    [class.pointer-events-none]="drag() !== null"
+                    [class.opacity-50]="drag()?.bar?.reservation_room_id === bar.reservation_room_id"
                     [style.grid-row]="bar.row"
                     [style.grid-column]="bar.start + 2 + ' / span ' + bar.span"
                     [attr.title]="bar.title"
+                    [attr.draggable]="bar.movable"
                     [attr.data-testid]="'rack-bar-' + bar.reservation_number"
                     (click)="detailId.set(bar.reservation_id)"
+                    (dragstart)="onDragStart($event, bar, 'move')"
+                    (dragend)="onDragEnd()"
                   >
                     @if (bar.continues_before) {
                       <span aria-hidden="true">‹&nbsp;</span>
                     }
                     <span class="truncate">{{ bar.guest || bar.reservation_number }}</span>
+                    @if (bar.movable && !bar.continues_after) {
+                      <span
+                        class="absolute inset-y-0 right-0 hidden w-2 cursor-ew-resize rounded-r-md bg-current opacity-20 hover:opacity-50 md:block"
+                        draggable="true"
+                        title="Arrastra para alargar o acortar la estadía"
+                        [attr.data-testid]="'rack-resize-' + bar.reservation_number"
+                        (click)="$event.stopPropagation()"
+                        (dragstart)="onDragStart($event, bar, 'resize')"
+                      ></span>
+                    }
                   </button>
                 }
               </div>
@@ -232,6 +273,12 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
       <app-reservation-detail-modal
         [reservationId]="detailId()"
         (closed)="detailId.set(null)"
+        (changed)="load()"
+      />
+
+      <app-room-change-modal
+        [target]="changeTarget()"
+        (closed)="changeTarget.set(null)"
         (changed)="load()"
       />
     </div>
@@ -249,6 +296,11 @@ export class HospitalityRackPageComponent implements OnInit {
   readonly rack = signal<Rack | null>(null);
   readonly loading = signal(false);
   readonly detailId = signal<number | null>(null);
+  /** Bar being dragged and whether it moves or resizes. */
+  readonly drag = signal<{ bar: PlacedBar; mode: DragMode } | null>(null);
+  /** `rowKey:night` of the cell under the dragged bar. */
+  readonly dropHover = signal<string | null>(null);
+  readonly changeTarget = signal<RoomChangeTarget | null>(null);
 
   readonly gridColumns = computed(
     () => `minmax(6.5rem, 9rem) repeat(${this.days()}, minmax(2.5rem, 1fr))`,
@@ -296,6 +348,7 @@ export class HospitalityRackPageComponent implements OnInit {
           key: `u${unit.id}`,
           label: unit.floor ? `${unit.code} · ${unit.floor}` : unit.code,
           typeId: type.id,
+          unitId: unit.id,
           muted: !unit.is_active || outOfOrder,
           hint: !unit.is_active ? 'Inactiva' : outOfOrder ? 'Fuera de servicio' : undefined,
         });
@@ -329,6 +382,7 @@ export class HospitalityRackPageComponent implements OnInit {
             row,
             classes: BAR_CLASSES[bar.status] ?? BAR_CLASSES.confirmed!,
             title: `${bar.reservation_number} · ${bar.guest} · ${RESERVATION_STATUS_LABELS[bar.status]} · ${bar.arrival_date} → ${bar.departure_date}`,
+            movable: MOVABLE_STATUSES.includes(bar.status),
           },
         ];
       }),
@@ -356,6 +410,72 @@ export class HospitalityRackPageComponent implements OnInit {
           this.toast.error(message);
         },
       });
+  }
+
+  onDragStart(event: DragEvent, bar: PlacedBar, mode: DragMode): void {
+    event.stopPropagation();
+    if (!bar.movable) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer?.setData('text/plain', String(bar.reservation_room_id));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    // Next tick: hiding bars from the pointer inside dragstart cancels the drag.
+    setTimeout(() => this.drag.set({ bar, mode }));
+  }
+
+  onDragEnd(): void {
+    this.drag.set(null);
+    this.dropHover.set(null);
+  }
+
+  onDragOver(event: DragEvent, row: RackRow, night: number): void {
+    if (this.proposalFor(row, night) === null) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    this.dropHover.set(`${row.key}:${night}`);
+  }
+
+  /** Validates the drop; a collision shows its message and nothing moves. */
+  onDrop(event: DragEvent, row: RackRow, night: number): void {
+    event.preventDefault();
+    const bar = this.drag()?.bar;
+    const proposal = this.proposalFor(row, night);
+    this.onDragEnd();
+    if (!bar || !proposal) return;
+    this.reservationsService
+      .changeQuote(bar.reservation_room_id, proposal)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (quote) =>
+          this.changeTarget.set({
+            reservation_room_id: bar.reservation_room_id,
+            reservation_number: bar.reservation_number,
+            guest: bar.guest,
+            unit_id: bar.unit_id,
+            arrival_date: bar.arrival_date,
+            departure_date: bar.departure_date,
+            proposal,
+            quote,
+          }),
+        error: (message: string) => this.toast.error(message),
+      });
+  }
+
+  /** Change a drop on `row`/`night` asks for, or null when it is not a target. */
+  private proposalFor(row: RackRow, night: number): RoomChangeRequest | null {
+    const drag = this.drag();
+    if (!drag) return null;
+    const { bar, mode } = drag;
+    if (mode === 'move') {
+      if (row.kind !== 'unit' || row.muted || row.unitId === undefined) return null;
+      return row.unitId === bar.unit_id ? null : { unit_id: row.unitId };
+    }
+    // Resize: along the bar's own row; the hovered night becomes the last one.
+    if (row.row !== bar.row) return null;
+    const departure = toDateString(addDays(parseISO(this.from()), night + 1));
+    if (departure <= bar.arrival_date || departure === bar.departure_date) return null;
+    return { departure_date: departure };
   }
 
   move(direction: 1 | -1): void {
