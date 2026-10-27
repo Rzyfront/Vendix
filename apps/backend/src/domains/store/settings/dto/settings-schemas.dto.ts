@@ -1279,6 +1279,19 @@ export class HospitalitySettingsDto {
   @IsOptional()
   @IsBoolean()
   folio_invoice_verification?: boolean;
+
+  @ApiProperty({
+    example: 15,
+    required: false,
+    description:
+      'H6.6 — minutes a web booking holds its rooms waiting for the online payment (5-120).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(120)
+  booking_hold_minutes?: number;
 }
 
 export class RestaurantSettingsDto {

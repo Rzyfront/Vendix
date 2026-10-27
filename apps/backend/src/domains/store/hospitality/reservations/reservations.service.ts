@@ -105,7 +105,19 @@ const RESERVATION_DETAIL_INCLUDE = {
       order: { select: { id: true, order_number: true, grand_total: true } },
     },
   },
+  // H6.6 — direct payments made online with the booking engine.
+  online_payments: {
+    select: { id: true, amount: true, applied_amount: true, status: true, paid_at: true },
+    orderBy: { id: 'asc' },
+  },
 } satisfies Prisma.lodging_reservationsInclude;
+
+/** H6.6 — a web booking: held as tentative until paid or expired. */
+export interface ReservationHold {
+  expires_at: Date;
+  /** History line of the creation ("Reserva web pendiente de pago"). */
+  reason: string;
+}
 
 /** Reason stored when the no-show job moves an overdue arrival. */
 export const AUTO_NO_SHOW_REASON = 'Llegada vencida';
@@ -305,6 +317,22 @@ export class LodgingReservationsService {
     return moved;
   }
 
+  /**
+   * H6.6 — the online payment of a web hold arrived: tentative → confirmed.
+   * False when the hold is no longer tentative (expired or cancelled).
+   */
+  async confirmHold(id: number, reason: string): Promise<boolean> {
+    return this.applyTransition(id, 'confirmed', reason, null, { from: ['tentative'] });
+  }
+
+  /**
+   * H6.6 — releases an unpaid web hold (expired, or replaced by a new one of
+   * the same guest): tentative → cancelled, nights freed, no penalty.
+   */
+  async releaseHold(id: number, reason: string): Promise<boolean> {
+    return this.applyTransition(id, 'cancelled', reason, null, { from: ['tentative'], penalty: false });
+  }
+
   /** Validated status change with history; throws on an invalid one. */
   private async transition(id: number, to: ReservationStatus, reason: string | null) {
     const user_id = RequestContextService.getContext()?.user_id ?? null;
@@ -338,10 +366,12 @@ export class LodgingReservationsService {
     to: ReservationStatus,
     reason: string | null,
     user_id: number | null,
+    options: { from?: ReservationStatus[]; penalty?: boolean } = {},
   ): Promise<boolean> {
-    const from = statusesThatCanReach(to);
+    const from = options.from ?? statusesThatCanReach(to);
     const now = new Date();
-    const event = PENALTY_EVENTS[to];
+    // H6.6 — an unpaid web hold that expires owes no penalty.
+    const event = options.penalty === false ? undefined : PENALTY_EVENTS[to];
     const timing = event ? await this.loadPenaltyTiming(this.requireStoreId()) : null;
     let retained: DepositRetainedEvent | null = null;
     const changed = await this.prisma.$transaction(async (tx) => {
@@ -352,7 +382,8 @@ export class LodgingReservationsService {
       if (!current) return false;
       const updated = await tx.lodging_reservations.updateMany({
         where: { id, status: current.status },
-        data: { status: to, updated_at: now },
+        // H6.6 — leaving `tentative` ends the web hold.
+        data: { status: to, updated_at: now, hold_expires_at: null },
       });
       if (updated.count !== 1) return false;
       if (event && timing) {
@@ -521,7 +552,7 @@ export class LodgingReservationsService {
    * Sells every room of the reservation in one transaction (H1.5): if one
    * type lacks rooms nothing is created and the error names that type.
    */
-  async create(dto: CreateReservationDto) {
+  async create(dto: CreateReservationDto, hold?: ReservationHold) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -585,13 +616,16 @@ export class LodgingReservationsService {
         data: {
           store_id,
           reservation_number: nextReservationNumber(last?.reservation_number),
-          status: 'confirmed',
+          // H6.6 — a web booking holds its nights as tentative until paid.
+          status: hold ? 'tentative' : 'confirmed',
+          hold_expires_at: hold?.expires_at ?? null,
           arrival_date: arrival,
           departure_date: departure,
           customer_id: dto.customer_id,
           total_amount: total,
           notes: dto.notes || null,
-          created_by_user_id: context?.user_id ?? null,
+          // The web guest is the customer, not a staff user.
+          created_by_user_id: hold ? null : (context?.user_id ?? null),
           updated_at: now,
         },
       });
@@ -631,9 +665,9 @@ export class LodgingReservationsService {
           store_id,
           reservation_id: reservation.id,
           from_status: null,
-          to_status: 'confirmed',
-          ...(overrideReason ? { reason: overrideReason } : {}),
-          user_id: context?.user_id ?? null,
+          to_status: hold ? 'tentative' : 'confirmed',
+          ...(overrideReason || hold ? { reason: hold?.reason ?? overrideReason } : {}),
+          user_id: hold ? null : (context?.user_id ?? null),
         },
       });
       return reservation.id;

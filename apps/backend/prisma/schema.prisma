@@ -1084,6 +1084,7 @@ model stores {
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
   lodging_ical_imports           lodging_ical_imports[]
+  lodging_reservation_payments   lodging_reservation_payments[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2525,6 +2526,9 @@ model lodging_reservations {
   // H2.4 — penalty computed when cancelled or no-show (charged in H3.5).
   cancellation_penalty_amount Decimal?               @db.Decimal(14, 2)
   cancellation_penalty_detail String?                @db.VarChar(200)
+  // H6.6 — web booking: a tentative reservation is held until it is paid or
+  // this moment passes (then the hold job cancels it). Null = not a web hold.
+  hold_expires_at    DateTime?                       @db.Timestamp(6)
   created_by_user_id Int?
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
@@ -2537,8 +2541,10 @@ model lodging_reservations {
   guests     lodging_guests[]
   folio      lodging_folios?
   deposits   lodging_deposits[]
+  online_payments lodging_reservation_payments[]
 
   @@unique([store_id, reservation_number])
+  @@index([status, hold_expires_at])
   @@index([store_id, arrival_date])
   @@index([customer_id])
 }
@@ -2684,6 +2690,38 @@ model lodging_deposits {
   payment            payments?            @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([store_id, request_id])
+  @@index([reservation_id])
+}
+
+enum lodging_reservation_payment_status_enum {
+  pending
+  completed
+  cancelled
+}
+
+// Hospitality Suite (H6.6) — direct payment of a reservation made online
+// (booking engine, Wompi payment link). Owner decision D3: a reservation
+// PAYMENT is not a deposit, so it never touches the wallet nor
+// `lodging_deposits`. Booked DR bank / CR 2805 when Wompi confirms it, and
+// applied to the folio at check-out as a folio payment (`applied_amount`).
+model lodging_reservation_payments {
+  id              Int                                     @id @default(autoincrement())
+  store_id        Int
+  reservation_id  Int
+  status          lodging_reservation_payment_status_enum @default(pending)
+  amount          Decimal                                 @db.Decimal(14, 2)
+  applied_amount  Decimal                                 @default(0) @db.Decimal(14, 2)
+  method          String                                  @db.VarChar(30)
+  payment_link_id Int?                                    @unique
+  transaction_id  String?                                 @db.VarChar(255)
+  paid_at         DateTime?                               @db.Timestamp(6)
+  created_at      DateTime?                               @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?                               @default(now()) @db.Timestamp(6)
+
+  store        stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation  lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_link payment_links?       @relation(fields: [payment_link_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   @@index([reservation_id])
 }
 
@@ -10890,6 +10928,8 @@ model payment_links {
   orders orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
   // Hospitality Suite (H3.5) — the reservation deposit this link collects.
   lodging_deposit  lodging_deposits?
+  // Hospitality Suite (H6.6) — the online reservation payment this link collects.
+  lodging_reservation_payment lodging_reservation_payments?
 
   @@index([store_id, status])
   @@index([store_id, created_at])

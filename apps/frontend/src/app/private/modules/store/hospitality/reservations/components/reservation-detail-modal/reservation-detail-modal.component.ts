@@ -149,6 +149,21 @@ function todayLocal(): string {
             </p>
           }
 
+          @for (payment of r.online_payments ?? []; track payment.id) {
+            @if (payment.status === 'completed') {
+              <p class="font-medium text-text-primary" data-testid="reservation-online-payment">
+                Pago en línea {{ money(payment.amount) }}
+                @if (Number(payment.applied_amount) > 0) {
+                  <span class="font-normal text-text-secondary"> · aplicado {{ money(payment.applied_amount) }}</span>
+                }
+              </p>
+            } @else if (payment.status === 'pending') {
+              <p class="text-warning" data-testid="reservation-online-payment-pending">
+                Pago en línea pendiente {{ money(payment.amount) }}
+              </p>
+            }
+          }
+
           <app-deposit-panel
             [reservationId]="r.id"
             [refreshKey]="depositVersion()"
@@ -483,6 +498,8 @@ export class ReservationDetailModalComponent {
       if (id !== null) untracked(() => this.load(id));
     });
   }
+
+  protected readonly Number = Number;
 
   money(amount: string): string {
     return this.currency.format(Number(amount), 0);

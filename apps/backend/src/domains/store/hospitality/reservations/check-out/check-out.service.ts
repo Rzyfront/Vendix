@@ -144,8 +144,12 @@ export class LodgingCheckOutService {
     // 2. D11 review at this total (before any money moves).
     await this.assertVerified(reservation_id, folio, dto, user);
 
-    // 3. Deposit still held → "Anticipo aplicado".
+    // 3. H6.6 — the online reservation payment, then the deposit still
+    // held ("Anticipo aplicado").
     let current = await this.folios.getFolio(reservation_id);
+    if (!split && current.online_payment_available > 0 && current.balance > 0) {
+      current = await this.folios.applyOnlinePayments(reservation_id);
+    }
     if (!split && current.deposit_available > 0 && current.balance > 0) {
       current = await this.folios.applyDeposit(reservation_id);
     }

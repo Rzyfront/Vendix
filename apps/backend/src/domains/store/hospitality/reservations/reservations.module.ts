@@ -41,6 +41,10 @@ import { LodgingFolioSplitService } from './folio-split/folio-split.service';
 import { LodgingInventoryBlocksController } from './blocks/inventory-blocks.controller';
 import { LodgingInventoryBlocksService } from './blocks/inventory-blocks.service';
 
+import { LodgingBookingEngineService } from './booking-engine/booking-engine.service';
+import { BookingHoldExpiryJob } from './booking-engine/booking-hold-expiry.job';
+import { EmailModule } from '../../../../email/email.module';
+import { S3Module } from '@common/services/s3.module';
 import { LodgingVatExemptServicesController } from './reports/vat-exempt-services.controller';
 import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
 
@@ -69,6 +73,9 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     // credit to receivables.
     InvoicingModule,
     AccountsReceivableModule,
+    // H6.6 — the booking engine signs room photos and emails the guest.
+    S3Module,
+    EmailModule,
   ],
   controllers: [
     LodgingReservationsController,
@@ -102,7 +109,9 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     LodgingFolioSplitService,
     LodgingVatExemptServicesService,
     LodgingInventoryBlocksService,
+    LodgingBookingEngineService,
+    BookingHoldExpiryJob,
   ],
-  exports: [LodgingReservationsService, LodgingAvailabilityService],
+  exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
 })
 export class LodgingReservationsModule {}

@@ -402,6 +402,8 @@ export interface HospitalitySettings {
   rnt_number: string;
   /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
   default_overbooking_allowance?: number;
+  /** H6.6 — minutes a web booking holds the room while the guest pays (5-120, default 15). */
+  booking_hold_minutes?: number;
   /** H3.6 — folio origin of a POS/table room charge. Default "Restaurante". */
   room_charge_origin?: string;
   /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */

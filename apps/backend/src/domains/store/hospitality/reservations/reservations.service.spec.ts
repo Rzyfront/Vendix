@@ -221,7 +221,7 @@ function createFakeStore(
       updateMany: jest.fn(async ({ where, data }: any) => {
         await yieldTurn();
         const hit = reservations.filter((r) => r.id === where.id && r.status === where.status);
-        hit.forEach((r) => (r.status = data.status));
+        hit.forEach((r) => Object.assign(r, data));
         return { count: hit.length };
       }),
       create: jest.fn(async ({ data }: any) => {
@@ -1170,5 +1170,62 @@ describe('LodgingReservationsService', () => {
     expect(nextReservationNumber('H-0009')).toBe('H-0010');
     expect(nextReservationNumber('H-9999')).toBe('H-10000');
     expect(formatShortDate('2026-11-10')).toBe('10-nov');
+  });
+
+  describe('reserva web (H6.6)', () => {
+    const expires_at = new Date('2026-11-01T15:15:00.000Z');
+    const hold = { expires_at, reason: 'Reserva web: pendiente de pago en línea' };
+    const activeNights = (nights: NightRow[]) => nights.filter((n) => n.is_active).length;
+
+    it('el hold crea la reserva tentativa con sus noches, el vencimiento y sin usuario del staff', async () => {
+      const { service, reservations, nights, events } = build(1);
+      await service.create(sale(stay), hold);
+      expect(reservations[0]).toMatchObject({
+        status: 'tentative',
+        hold_expires_at: expires_at,
+        created_by_user_id: null,
+      });
+      expect(activeNights(nights)).toBe(3);
+      expect(events).toEqual([
+        {
+          store_id: 5,
+          reservation_id: 1,
+          from_status: null,
+          to_status: 'tentative',
+          reason: 'Reserva web: pendiente de pago en línea',
+          user_id: null,
+        },
+      ]);
+      // The held room is not for sale while the hold lives.
+      await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_AVAILABILITY_001');
+    });
+
+    it('liberar el hold vencido lo cancela, libera las noches y no calcula penalidad', async () => {
+      const { service, reservations, nights, deposits, events } = build(1);
+      await service.create(sale(stay), hold);
+      expect(await service.releaseHold(1, 'Reserva web vencida sin pago')).toBe(true);
+      expect(reservations[0]).toMatchObject({ status: 'cancelled', hold_expires_at: null });
+      expect(activeNights(nights)).toBe(0);
+      expect(deposits.retainInTx).not.toHaveBeenCalled();
+      expect(events[1]).toMatchObject({
+        from_status: 'tentative',
+        to_status: 'cancelled',
+        reason: 'Reserva web vencida sin pago',
+        user_id: null,
+      });
+      // The room is for sale again.
+      await service.create(sale(stay));
+    });
+
+    it('el pago confirma el hold una sola vez y una reserva confirmada no se libera como hold', async () => {
+      const { service, reservations, nights } = build(1);
+      await service.create(sale(stay), hold);
+      expect(await service.confirmHold(1, 'Pago en línea recibido $225.000 (Wompi)')).toBe(true);
+      expect(reservations[0]).toMatchObject({ status: 'confirmed', hold_expires_at: null });
+      expect(await service.confirmHold(1, 'otra vez')).toBe(false);
+      expect(await service.releaseHold(1, 'Reserva web vencida sin pago')).toBe(false);
+      expect(reservations[0].status).toBe('confirmed');
+      expect(activeNights(nights)).toBe(3);
+    });
   });
 });

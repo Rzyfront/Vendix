@@ -6330,6 +6330,53 @@ export class AutoEntryService {
   }
 
   /**
+   * lodging.reservation_payment (H6.6): DR Banco → CR Anticipos de Clientes
+   * (2805). The online payment of a reservation (booking engine, Wompi) is a
+   * DIRECT payment of the stay (owner decision D3), booked like a folio
+   * payment with the same mapping keys: it is applied to the folio at
+   * check-out and the folio invoice crosses it (`lodging.folio_settlement`).
+   * `source_id` = `lodging_reservation_payments.id`.
+   */
+  async onLodgingReservationPayment(data: {
+    reservation_payment_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.bank',
+        `Pago en línea reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.customer_advance',
+        `Anticipo reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.reservation_payment',
+      source_id: data.reservation_payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Pago en línea de la reserva ${data.reservation_number}`,
+      lines,
+    });
+  }
+
+  /**
    * lodging.deposit: DR Caja/Banco → CR Anticipos de Clientes (2805).
    * A reservation deposit (owner decision D3) is a customer advance held in
    * the holder's wallet, never revenue: it is applied to the folio (still

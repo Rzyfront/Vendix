@@ -43,6 +43,8 @@ function build(
     paid?: number;
     allowOverride?: boolean;
     deposit?: number;
+    /** H6.6 — completed online reservation payment. */
+    online?: number;
     holder?: ReturnType<typeof touristHolder> | null;
     rnt?: string;
   } = {},
@@ -86,8 +88,20 @@ function build(
       return n.night_date < date.lt;
     });
 
+  const online = options.online
+    ? [{ id: 3, amount: options.online, applied_amount: 0, method: 'wompi_link', status: 'completed' }]
+    : [];
+  const onlinePayments = {
+    findMany: jest.fn(async () => online.map((row) => ({ ...row }))),
+    update: jest.fn(async ({ where, data }: any) => {
+      const row = online.find((r) => r.id === where.id)!;
+      row.applied_amount += Number(data.applied_amount.increment);
+      return row;
+    }),
+  };
   const tx = {
     $queryRaw: jest.fn(async () => [{ id: 500 }]),
+    lodging_reservation_payments: onlinePayments,
     lodging_deposits: {
       findMany: jest.fn(async () => deposits.map((d) => ({ ...d }))),
       create: jest.fn(async ({ data }: any) => {
@@ -210,6 +224,7 @@ function build(
     },
   };
   const prisma = {
+    lodging_reservation_payments: onlinePayments,
     lodging_guests: { findFirst: jest.fn(async () => (holder ? { ...holder } : null)) },
     orders: { findUnique: jest.fn(async () => order) },
     order_items: {
@@ -298,6 +313,7 @@ function build(
   // The folio view is a plain read; these specs assert the writes.
   jest.spyOn(service, 'getFolio').mockResolvedValue({} as any);
   return {
+    online,
     service,
     prisma,
     tx,
@@ -637,6 +653,47 @@ describe('LodgingFolioService (H3.4)', () => {
       expect(payments).toHaveLength(0);
     });
   });
+  describe('applying the online reservation payment (H6.6)', () => {
+    it('the web payment pays the folio as a direct payment: no wallet, no new entry', async () => {
+      const { service, payments, order, online, walletBalance, eventEmitter, cashMovements } = build({
+        online: 225000,
+      });
+      await service.postNights(1); // $250.000 + IVA = $297.500
+
+      await service.applyOnlinePayments(1);
+
+      expect(payments).toHaveLength(1);
+      expect(payments[0]).toMatchObject({
+        order_id: 500,
+        customer_id: 9,
+        amount: 225000,
+        state: 'succeeded',
+        transaction_id: 'FOLIO-70-ONLINE-3-0',
+        gateway_response: {
+          lodging_folio: expect.objectContaining({ source: 'online_reservation_payment', reservation_payment_id: 3 }),
+        },
+      });
+      expect(order.total_paid).toBe(225000);
+      expect(online[0].applied_amount).toBe(225000);
+      // Never the wallet (D3); Wompi's confirmation already booked DR bank / CR 2805.
+      expect(walletBalance.debitInTransaction).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(cashMovements.recordSaleMovement).not.toHaveBeenCalled();
+    });
+
+    it('applies only the folio balance and nothing twice', async () => {
+      const { service, payments, online } = build({ online: 400000 });
+      await service.postNights(1); // $297.500
+
+      await service.applyOnlinePayments(1);
+      await service.applyOnlinePayments(1);
+
+      expect(payments).toHaveLength(1);
+      expect(payments[0].amount).toBe(297500);
+      expect(online[0].applied_amount).toBe(297500);
+    });
+  });
+
   describe('VAT exemption of a non-resident holder (H3.9)', () => {
     const EXEMPT = 'Exento – art. 481 lit. d ET';
 

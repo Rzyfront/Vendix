@@ -496,6 +496,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       // H3.7 / D11 - the folio invoice waits for a review by a user holding
       // store:lodging:folio:verify. Off: the desk invoices without it.
       folio_invoice_verification: true,
+      // H6.6 - minutes a web booking holds its rooms waiting for the payment.
+      booking_hold_minutes: 15,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

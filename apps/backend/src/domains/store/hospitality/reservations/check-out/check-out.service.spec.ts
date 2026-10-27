@@ -18,12 +18,14 @@ function build(
     invoice?: { invoice_id: number | null; state: string };
     closeCount?: number;
     split?: boolean;
+    online?: number;
   } = {},
 ) {
   const total = options.total ?? 595000;
   const state = {
     paid: options.paid ?? 0,
     deposit: options.deposit ?? 0,
+    online: options.online ?? 0,
     verified: options.verified ?? true,
     reservation: options.status ?? 'checked_in',
   };
@@ -34,6 +36,7 @@ function build(
     paid: state.paid,
     balance: Math.max(0, total - state.paid),
     deposit_available: state.deposit,
+    online_payment_available: state.online,
     verified_at: state.verified ? new Date() : null,
     verified_current: state.verified,
   });
@@ -43,6 +46,11 @@ function build(
     getFolio: jest.fn(async () => folioView()),
     postNightsThrough: jest.fn(async () => 0),
     assertVatExemptionHolds: jest.fn(async () => undefined),
+    applyOnlinePayments: jest.fn(async () => {
+      state.paid += state.online;
+      state.online = 0;
+      return folioView();
+    }),
     applyDeposit: jest.fn(async () => {
       state.paid += state.deposit;
       state.deposit = 0;
@@ -228,6 +236,18 @@ describe('LodgingCheckOutService (H3.7)', () => {
 
     expect(folios.applyDeposit).toHaveBeenCalledWith(7);
     expect(folios.registerPayment).toHaveBeenCalledWith(7, expect.objectContaining({ amount: 395000 }));
+  });
+
+  it('H6.6 — aplica el pago en línea de la reserva, luego el anticipo, y cobra solo el resto', async () => {
+    const { service, folios } = build({ online: 150000, deposit: 100000 });
+
+    await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+    expect(folios.applyOnlinePayments).toHaveBeenCalledWith(7);
+    expect(folios.applyOnlinePayments.mock.invocationCallOrder[0]).toBeLessThan(
+      folios.applyDeposit.mock.invocationCallOrder[0],
+    );
+    expect(folios.registerPayment).toHaveBeenCalledWith(7, expect.objectContaining({ amount: 345000 }));
   });
 
   it('"Cargar a crédito de la empresa": factura a la empresa, forma 2 y CxC por el saldo', async () => {

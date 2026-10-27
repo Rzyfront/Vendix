@@ -102,6 +102,16 @@ export interface LodgingReservation {
   events?: LodgingReservationEvent[];
   /** H3.2 — guest folio opened at check-in (detail only). */
   folio?: LodgingFolio | null;
+  /** H6.6 — web (Wompi) payments of the booking engine (detail only). */
+  online_payments?: LodgingOnlinePayment[];
+}
+
+export interface LodgingOnlinePayment {
+  id: number;
+  amount: string;
+  status: 'pending' | 'completed' | 'cancelled';
+  paid_at: string | null;
+  applied_amount: string;
 }
 
 /** H3.2 — running account of a stay: its charges live in a draft order. */

@@ -5700,6 +5700,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Calendario importado no encontrado',
   },
+  LODGING_BOOKING_001: {
+    code: 'LODGING_BOOKING_001',
+    httpStatus: 400,
+    devMessage: 'No se pudo crear la reserva web',
+  },
+  LODGING_BOOKING_FIND_001: {
+    code: 'LODGING_BOOKING_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Reserva no encontrada',
+  },
   LODGING_ICAL_IMPORT_URL_001: {
     code: 'LODGING_ICAL_IMPORT_URL_001',
     httpStatus: 400,

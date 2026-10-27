@@ -1276,6 +1276,39 @@ export class AccountingEventsListener {
     }
   }
 
+  // H6.6 — reservation paid online with the booking engine (direct payment, D3).
+  @OnEvent('lodging.reservation_payment.received')
+  async handleLodgingReservationPayment(event: {
+    store_id: number;
+    organization_id?: number;
+    reservation_payment_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingReservationPayment({
+        reservation_payment_id: event.reservation_payment_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+      });
+      this.logger.log(
+        `Auto-entry created for lodging.reservation_payment - payment ${event.reservation_payment_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.reservation_payment - payment ${event.reservation_payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // H3.5 — reservation deposit received (customer advance, D3).
   @OnEvent('lodging.deposit.received')
   async handleLodgingDeposit(event: {

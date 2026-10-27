@@ -145,6 +145,7 @@ export class LodgingFolioService {
               },
             },
             lodging_deposit: { select: { id: true } },
+            transaction_id: true,
           },
           orderBy: { id: 'asc' },
         },
@@ -217,7 +218,9 @@ export class LodgingFolioService {
         amount: Number(p.amount),
         method: p.lodging_deposit
           ? 'Anticipo aplicado'
-          : p.store_payment_method?.display_name ||
+          : isOnlinePaymentTransaction(folio.id, p.transaction_id)
+            ? 'Pago en línea de la reserva'
+            : p.store_payment_method?.display_name ||
             p.store_payment_method?.system_payment_method?.display_name ||
             'Pago',
         paid_at: p.paid_at ?? p.created_at,
@@ -229,6 +232,8 @@ export class LodgingFolioService {
       balance: Math.max(0, Math.round((total - paid) * 100) / 100),
       pending_nights,
       deposit_available: Number(deposit.balance.toFixed(2)),
+      // H6.6 — online reservation payment not applied to the folio yet.
+      online_payment_available: await this.onlinePaymentAvailable(reservation_id),
       // H3.7 / D11 — reviewed at this total; a later change asks again.
       verified_at: folio.verified_at ?? null,
       verified_current:
@@ -945,6 +950,96 @@ export class LodgingFolioService {
     return this.getFolio(reservation_id);
   }
 
+  // ---------------------------------------------------------- online payment
+
+  /** H6.6 — what the online reservation payments still have to apply. */
+  private async onlinePaymentAvailable(reservation_id: number): Promise<number> {
+    const rows = await this.prisma.lodging_reservation_payments.findMany({
+      where: { reservation_id, status: 'completed' },
+      select: { amount: true, applied_amount: true },
+    });
+    const cents = rows.reduce((sum, row) => sum + toCents(row.amount) - toCents(row.applied_amount), 0);
+    return Math.max(0, cents) / 100;
+  }
+
+  /**
+   * H6.6 — the reservation paid online (booking engine) pays the folio up to
+   * its balance, as a folio payment "Pago en línea de la reserva". It is a
+   * direct payment, never a deposit (D3): no wallet. No accounting entry
+   * either: Wompi's confirmation already booked it DR bank / CR 2805, as any
+   * folio payment, and the folio invoice crosses it. The check-out (H3.7)
+   * calls it before the deposit.
+   */
+  async applyOnlinePayments(reservation_id: number) {
+    const folio = await this.findFolio(reservation_id);
+    this.assertOpen(folio);
+    const store_id = this.requireStoreId();
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        const order = await this.lockFolioOrder(tx, folio, store_id);
+        const rows = await tx.lodging_reservation_payments.findMany({
+          where: { store_id, reservation_id, status: 'completed' },
+          select: { id: true, amount: true, applied_amount: true, method: true },
+          orderBy: { id: 'asc' },
+        });
+        let balanceCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
+        let appliedCents = 0;
+        const now = new Date();
+        for (const row of rows) {
+          const amountCents = Math.min(toCents(row.amount) - toCents(row.applied_amount), balanceCents);
+          if (amountCents <= 0) continue;
+          const amount = amountCents / 100;
+          const payment = await tx.payments.create({
+            data: {
+              order_id: order.id,
+              customer_id: order.customer_id,
+              amount,
+              currency: order.currency,
+              state: 'succeeded',
+              paid_at: now,
+              transaction_id: `${onlinePaymentPrefix(folio.id)}${row.id}-${toCents(row.applied_amount)}`,
+              gateway_response: {
+                lodging_folio: {
+                  folio_id: folio.id,
+                  created_by_user_id: user_id,
+                  accounting: 'customer_advance',
+                  source: 'online_reservation_payment',
+                  reservation_payment_id: row.id,
+                  method: row.method,
+                },
+              },
+              updated_at: now,
+            },
+          });
+          await tx.lodging_reservation_payments.update({
+            where: { id: row.id },
+            data: { applied_amount: { increment: amount }, updated_at: now },
+          });
+          await this.orderHistory.record(tx, {
+            orderId: order.id,
+            storeId: store_id,
+            type: 'payment_registered',
+            paymentId: payment.id,
+            amount,
+          });
+          balanceCents -= amountCents;
+          appliedCents += amountCents;
+        }
+        if (appliedCents > 0) {
+          await tx.orders.update({
+            where: { id: order.id },
+            data: { total_paid: { increment: appliedCents / 100 }, updated_at: now },
+          });
+          await this.recalcTotals(tx, order.id);
+        }
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
+    return this.getFolio(reservation_id);
+  }
+
   // --------------------------------------------------------------- helpers
 
   private requireStoreId(): number {
@@ -1088,4 +1183,13 @@ export class LodgingFolioService {
     if (!session) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
     await this.cashMovements.recordSaleMovement(session.id, args, tx);
   }
+}
+
+/** H6.6 — transaction id prefix of a folio payment from an online reservation payment. */
+function onlinePaymentPrefix(folio_id: number): string {
+  return `FOLIO-${folio_id}-ONLINE-`;
+}
+
+function isOnlinePaymentTransaction(folio_id: number, transaction_id: string | null): boolean {
+  return !!transaction_id?.startsWith(onlinePaymentPrefix(folio_id));
 }

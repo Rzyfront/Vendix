@@ -1172,6 +1172,8 @@ export interface HospitalitySettings {
   room_charge_origin?: string;
   /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */
   folio_invoice_verification?: boolean;
+  /** H6.6 — minutes a web booking holds its rooms waiting for the payment. Default 15. */
+  booking_hold_minutes?: number;
 }
 
 // ============================================================================
