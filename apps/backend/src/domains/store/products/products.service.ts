@@ -3351,9 +3351,20 @@ export class ProductsService {
                 buffer_minutes: variant.buffer_minutes,
                 preparation_time_minutes: variant.preparation_time_minutes,
                 attributes: this.parseVariantAttributes(variant.attributes),
+                image_url: variant.product_images?.image_url ?? null,
               };
             }) || []
           : undefined;
+
+        if (mapped_variants) {
+          for (const variant of mapped_variants) {
+            if (variant.image_url) {
+              variant.image_url = await this.s3Service.signUrl(
+                variant.image_url,
+              );
+            }
+          }
+        }
 
         const activePromotion =
           activePromotionsByProductId.get(product.id) ?? null;

@@ -62,6 +62,8 @@ export interface OrderItemDraftLine {
   product_name: string;
   variant_sku: string | null;
   variant_label: string;
+  /** Miniatura: imagen de la variante o, si no tiene, la del producto. */
+  image_url: string | null;
   /** Precio unitario mostrado (existente: final con impuesto; nueva: base sin impuesto). */
   display_price: number;
   /** Precio base de una línea nueva. */
@@ -439,6 +441,7 @@ export class OrderItemsEditModalComponent {
       product_name: item.product_name,
       variant_sku: item.variant_sku ?? null,
       variant_label: variantLabelOf(item.variant_attributes),
+      image_url: item.variant_image_url || item.products?.image_url || null,
       display_price: Number(item.final_unit_price ?? item.unit_price) || 0,
       base_price: Number(item.unit_price) || 0,
       quantity,
@@ -601,6 +604,7 @@ export class OrderItemsEditModalComponent {
       product_name: product.name,
       variant_sku: variant?.sku ?? null,
       variant_label: variant ? this.variantName(variant) : '',
+      image_url: variant?.image_url || product.image_url || null,
       display_price: this.finalUnitPrice(product, variant, price),
       base_price: price,
       quantity: 1,

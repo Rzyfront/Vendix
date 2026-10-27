@@ -35,14 +35,21 @@
         >
           <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
             <div
-              class="hidden sm:flex shrink-0 w-10 h-10 rounded-lg items-center justify-center"
-              [class.bg-primary/10]="!line.removed"
+              class="flex shrink-0 w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden border items-center justify-center"
+              [class.border-border]="!line.removed"
+              [class.bg-primary/10]="!line.removed && !line.image_url"
               [class.text-primary]="!line.removed"
-              [class.bg-red-100]="line.removed"
+              [class.border-red-200]="line.removed"
+              [class.bg-red-100]="line.removed && !line.image_url"
               [class.text-red-600]="line.removed"
+              [class.opacity-60]="line.removed"
               aria-hidden="true"
             >
-              <app-icon [name]="line.existing ? 'package' : 'package-plus'" [size]="18" />
+              @if (line.image_url) {
+                <img [src]="line.image_url" alt="" class="w-full h-full object-cover" loading="lazy" />
+              } @else {
+                <app-icon [name]="line.existing ? 'package' : 'package-plus'" [size]="18" />
+              }
             </div>
 
             <div class="flex-1 min-w-0" [class.opacity-60]="line.removed">
@@ -344,9 +351,9 @@
                         (click)="addProduct(product, variant)"
                       >
                         <span class="shrink-0 w-8 h-8 rounded-md overflow-hidden border border-border bg-muted flex items-center justify-center">
-                          @if (variant.image?.image_url || product.image_url) {
+                          @if (variant.image_url || variant.image?.image_url || product.image_url) {
                             <img
-                              [src]="variant.image?.image_url || product.image_url"
+                              [src]="variant.image_url || variant.image?.image_url || product.image_url"
                               [alt]="variantName(variant)"
                               class="w-full h-full object-cover"
                               loading="lazy"
