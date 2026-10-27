@@ -1337,6 +1337,17 @@ export class OrdersService {
               },
             },
           },
+          // Columna Estación en el listado (espejo de Mesa): sesión y nombre
+          // de la estación en el mismo round-trip, sin N+1. Órdenes sin
+          // atención traen service_session=null y pintan '—'.
+          service_session: {
+            select: {
+              id: true,
+              station: {
+                select: { id: true, name: true },
+              },
+            },
+          },
         },
       }),
       this.prisma.orders.count({ where }),

@@ -34,6 +34,7 @@ import { StoreOrdersService } from '../../services/store-orders.service';
 // GET /store/tables via TablesService. Si la tienda no tiene mesas,
 // el filtro no se pinta (mayoria de tiendas de Vendix no son restaurante).
 import { TablesService } from '../../../restaurant-ops/tables/services/tables.service';
+import { ServiceStationsService } from '../../../reservations/components/service-stations/service-stations.service';
 import { Table } from '../../../restaurant-ops/tables/interfaces/table.interface';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
@@ -114,6 +115,7 @@ export class OrdersListComponent {
   private ordersService = inject(StoreOrdersService);
   private http = inject(HttpClient);
   private tablesService = inject(TablesService);
+  private stationsService = inject(ServiceStationsService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
@@ -137,6 +139,8 @@ export class OrdersListComponent {
   private authFacade = inject(AuthFacade);
   /** T10 B3 — gate de industria reusado por `columns` y `cardConfig`. */
   readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
+  /** Gate de industria para la columna Estación (espejo de Mesa). */
+  readonly isServiceIndustry = computed<boolean>(() => this.authFacade.isServiceIndustry());
 
   /** Timestamp (epoch ms) del momento en que se cargó la lista actual. */
   private loadedAt = 0;
@@ -168,6 +172,9 @@ export class OrdersListComponent {
   readonly selectedTable = signal('');
   /** Mesas de la tienda; se cargan al init y solo si hay >=1 pintamos el filtro. */
   readonly tables = signal<Table[]>([]);
+  /** La tienda tiene ≥1 estación (gate de datos de la columna Estación). */
+  readonly hasStations = signal(false);
+  private stationsGateLoaded = false;
 
   // Outputs
   readonly create = output<void>();
@@ -535,6 +542,7 @@ export class OrdersListComponent {
   // o tables() cambia.
   readonly columns = computed<TableColumn[]>(() => {
     const hasTables = this.isRestaurant() && this.tables().length > 0;
+    const hasStations = this.isServiceIndustry() && this.hasStations();
     const base: TableColumn[] = [
       { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
       {
@@ -619,6 +627,17 @@ export class OrdersListComponent {
         defaultValue: '—',
       });
     }
+    if (hasStations) {
+      // Estación: espejo de Mesa. Solo en tiendas service con estaciones;
+      // lee el campo plano `estacion` (nombre o null → '—').
+      base.push({
+        key: 'estacion',
+        label: 'Estación',
+        sortable: false,
+        priority: 2,
+        defaultValue: '—',
+      });
+    }
     return base;
   });
 
@@ -670,6 +689,7 @@ export class OrdersListComponent {
   // la tienda no tiene. ZONELESS: el template debe invocar cardConfig().
   readonly cardConfig = computed<ItemListCardConfig>(() => {
     const hasTables = this.isRestaurant() && this.tables().length > 0;
+    const hasStations = this.isServiceIndustry() && this.hasStations();
     const detailKeys: ItemListCardConfig['detailKeys'] = [
       {
         key: 'channel',
@@ -689,6 +709,18 @@ export class OrdersListComponent {
           value == null || value === '' ? '—' : (value as string),
         infoIconTransform: (value: unknown) =>
           value == null || value === '' ? undefined : 'utensils',
+        infoIconVariant: 'warning',
+      });
+    }
+    if (hasStations) {
+      // Estación: espejo de Mesa para tiendas service.
+      detailKeys.push({
+        key: 'estacion',
+        label: 'Estación',
+        transform: (value: unknown) =>
+          value == null || value === '' ? '—' : (value as string),
+        infoIconTransform: (value: unknown) =>
+          value == null || value === '' ? undefined : 'warehouse',
         infoIconVariant: 'warning',
       });
     }
@@ -982,6 +1014,20 @@ export class OrdersListComponent {
         next: (tables: Table[]) => this.tables.set(tables ?? []),
         error: () => this.tables.set([]),
       });
+    // Columna Estación (espejo de Mesa): el endpoint de estaciones exige
+    // industria service (403 si no), así que solo se consulta cuando el
+    // gate de industria ya resolvió true. Basta con total>0, una sola vez.
+    effect(() => {
+      if (!this.isServiceIndustry() || this.stationsGateLoaded) return;
+      this.stationsGateLoaded = true;
+      this.stationsService
+        .list(1, 1)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => this.hasStations.set((response?.meta?.total ?? 0) > 0),
+          error: () => this.hasStations.set(false),
+        });
+    });
   }
 
   private loadSeen(): void {
@@ -1451,9 +1497,13 @@ export class OrdersListComponent {
                 ? `${ts.table.name} (${ts.table.zone})`
                 : ts.table.name
               : null;
+            // Columna Estación (espejo de Mesa): nombre plano de la estación
+            // de la atención, o null → '—' (mismo criterio que mesa).
+            const estacion = order?.service_session?.station?.name ?? null;
             return {
               ...order,
               mesa,
+              estacion,
               customer_id:
               typeof order.customer_id === 'string'
                 ? parseInt(order.customer_id)
@@ -1717,11 +1767,13 @@ export class OrdersListComponent {
         ? `${ts.table.name} (${ts.table.zone})`
         : ts.table.name
       : null;
+    const estacion = order?.service_session?.station?.name ?? null;
     const toNum = (v: unknown): number =>
       typeof v === 'string' ? parseFloat(v) : (v as number);
     const row: any = {
       ...order,
       mesa,
+      estacion,
       customer_id:
         typeof order.customer_id === 'string'
           ? parseInt(order.customer_id)

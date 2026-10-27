@@ -198,6 +198,13 @@ export interface Order {
   active_sales_invoice?: { id: number; status: string } | null;
   /** Table session if order was placed at a restaurant table */
   table_sessions?: OrderTableSession[];
+  /** Atención de estación (listado la trae con id de sesión + nombre de estación) */
+  service_session?: {
+    id: number;
+    station?: { id: number; name: string } | null;
+  } | null;
+  /** Nombre plano de la estación, precomputado en el listado (espejo de mesa) */
+  estacion?: string | null;
 }
 
 /**
