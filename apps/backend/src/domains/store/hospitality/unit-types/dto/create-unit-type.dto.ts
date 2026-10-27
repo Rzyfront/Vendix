@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -17,6 +18,9 @@ import {
   LODGING_AMENITY_CODES,
   MAX_UNIT_TYPE_IMAGES,
 } from '../lodging-media';
+
+/** H1.6 — upper bound of a type's overbooking allowance. */
+export const MAX_OVERBOOKING_ALLOWANCE = 99;
 
 export const MAX_CAPACITY_MESSAGE =
   'La capacidad máxima debe ser mayor que cero';
@@ -114,11 +118,16 @@ export class CreateUnitTypeDto {
   @IsIn(LODGING_AMENITY_CODES, { each: true })
   amenities?: string[];
 
-  @ApiProperty({ required: false })
+  @ApiProperty({
+    required: false,
+    description:
+      'Reservas que se pueden vender por encima de las habitaciones activas del tipo (sobreventa). Cambiarla requiere store:lodging:rates:write; por defecto toma hospitality.default_overbooking_allowance.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_OVERBOOKING_ALLOWANCE)
   overbooking_allowance?: number;
 
   @ApiProperty({ required: false })

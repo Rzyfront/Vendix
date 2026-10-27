@@ -1158,6 +1158,11 @@ export interface HospitalitySettings {
   no_show_time?: string;
   /** Registro Nacional de Turismo number. Empty until the owner sets it. */
   rnt_number?: string;
+  /**
+   * Overbooking allowance a new room type starts with: reservations it may
+   * sell above its active rooms (H1.6). Default `0`.
+   */
+  default_overbooking_allowance?: number;
 }
 
 // ============================================================================

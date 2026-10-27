@@ -189,6 +189,14 @@ export function formatShortDate(date: string): string {
               <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-red-600'">
                 {{ quoteMessage() }}
               </span>
+              @if (canBook() && overbookingAlert()) {
+                <p
+                  class="mt-1 text-xs font-semibold text-primary"
+                  data-testid="reservation-overbooking"
+                >
+                  {{ overbookingAlert() }}
+                </p>
+              }
             }
             @default {
               <span class="text-text-secondary">
@@ -281,6 +289,23 @@ export class ReservationFormModalComponent {
   readonly canBook = computed(
     () => this.quoteState().kind === 'ready' && this.shortage() === null,
   );
+
+  /**
+   * H1.6 — the sale fits only thanks to the type's overbooking allowance:
+   * "Sobreventa: 3/2 Doble estándar" (rooms sold after it / active rooms).
+   */
+  readonly overbookingAlert = computed(() => {
+    const state = this.quoteState();
+    if (state.kind !== 'ready') return '';
+    return [...state.requested]
+      .sort((a, b) => a[0] - b[0])
+      .flatMap(([typeId, requested]) => {
+        const quote = state.quotes.find((q) => q.unit_type.id === typeId);
+        if (!quote || quote.sold + requested <= quote.units) return [];
+        return [`Sobreventa: ${quote.sold + requested}/${quote.units} ${quote.unit_type.name}`];
+      })
+      .join(' · ');
+  });
 
   readonly quoteMessage = computed(() => {
     const state = this.quoteState();

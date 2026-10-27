@@ -22,6 +22,7 @@ describe('UnitTypesService', () => {
     update: jest.fn(),
     remove: jest.fn(),
   };
+  const storeSettings = { findFirst: jest.fn() };
   const s3Service = {
     signUrl: jest.fn(async (key: string) => `https://signed/${key}`),
   };
@@ -48,7 +49,7 @@ describe('UnitTypesService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     service = new UnitTypesService(
-      { lodging_unit_types: unitTypes } as any,
+      { lodging_unit_types: unitTypes, store_settings: storeSettings } as any,
       productsService as any,
       s3Service as any,
     );
@@ -201,6 +202,89 @@ describe('UnitTypesService', () => {
   });
 
   // H0.4 — photos (S3 keys, signed on read) and amenities.
+  describe('sobreventa (H1.6)', () => {
+    const asUser = (permissions: string[]) =>
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 5, user_id: 9, permissions } as any);
+    const currentType = {
+      id: 11,
+      name: dto.name,
+      product_id: 40,
+      base_occupancy: 2,
+      max_adults: 3,
+      max_children: 1,
+      max_occupancy: 4,
+      images: [],
+      overbooking_allowance: 0,
+    };
+
+    it('un tipo nuevo toma la sobreventa por defecto de los ajustes de Hotelería', async () => {
+      storeSettings.findFirst.mockResolvedValue({
+        settings: { hospitality: { default_overbooking_allowance: 2 } },
+      });
+      unitTypes.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(currentType);
+      productsService.create.mockResolvedValue({ id: 40 });
+      unitTypes.create.mockResolvedValue({ id: 11 });
+
+      await service.create(dto);
+
+      expect(storeSettings.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: 5 } }),
+      );
+      expect(unitTypes.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ overbooking_allowance: 2 }),
+      });
+    });
+
+    it('sin rates:write no se puede cambiar la sobreventa (403) y no se toca nada', async () => {
+      asUser(['store:lodging:inventory:write']);
+      unitTypes.findFirst.mockResolvedValue(currentType);
+
+      await expectCode(
+        service.update(11, { overbooking_allowance: 1 }),
+        'LODGING_UNIT_TYPE_OVERBOOKING_001',
+      );
+      await expectCode(
+        service.create({ ...dto, overbooking_allowance: 1 }),
+        'LODGING_UNIT_TYPE_OVERBOOKING_001',
+      );
+      expect(unitTypes.update).not.toHaveBeenCalled();
+      expect(productsService.create).not.toHaveBeenCalled();
+      expect(productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('sin rates:write se puede editar el tipo si la sobreventa no cambia', async () => {
+      asUser(['store:lodging:inventory:write']);
+      unitTypes.findFirst.mockResolvedValue(currentType);
+
+      await service.update(11, { overbooking_allowance: 0, bed_config: '2 sencillas' });
+
+      expect(unitTypes.update).toHaveBeenCalled();
+    });
+
+    it('con rates:write "Sobreventa permitida: 1" se guarda', async () => {
+      asUser(['store:lodging:inventory:write', 'store:lodging:rates:write']);
+      unitTypes.findFirst.mockResolvedValue(currentType);
+
+      await service.update(11, { overbooking_allowance: 1 });
+
+      expect(unitTypes.update).toHaveBeenCalledWith({
+        where: { id: 11 },
+        data: expect.objectContaining({ overbooking_allowance: 1 }),
+      });
+    });
+
+    it('el DTO rechaza sobreventa negativa o mayor que 99', async () => {
+      for (const overbooking_allowance of [-1, 100]) {
+        const errors = await validate(
+          plainToInstance(CreateUnitTypeDto, { ...dto, overbooking_allowance }),
+        );
+        expect(errors.map((e) => e.property)).toEqual(['overbooking_allowance']);
+      }
+    });
+  });
+
   describe('fotos y amenidades', () => {
     const storeKey = (name: string) =>
       `organizations/roku-3/stores/roku-5/lodging/${name}`;

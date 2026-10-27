@@ -398,6 +398,8 @@ export interface HospitalitySettings {
   /** Day after arrival, `HH:mm`: unarrived confirmed reservations become no-show. */
   no_show_time: string;
   rnt_number: string;
+  /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
+  default_overbooking_allowance?: number;
 }
 
 export interface RestaurantSettings {

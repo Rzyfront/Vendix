@@ -1236,6 +1236,19 @@ export class HospitalitySettingsDto {
   @IsString()
   @MaxLength(20)
   rnt_number?: string;
+
+  @ApiProperty({
+    example: 0,
+    required: false,
+    description:
+      'Overbooking allowance new room types start with (reservations above active rooms).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  default_overbooking_allowance?: number;
 }
 
 export class RestaurantSettingsDto {

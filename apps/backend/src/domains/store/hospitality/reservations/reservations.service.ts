@@ -278,19 +278,25 @@ export class LodgingReservationsService {
     return store_id;
   }
 
-  /** "2 disponibles · 3 noches · $750.000" before confirming. */
+  /**
+   * "2 disponibles · 3 noches · $750.000" before confirming. `units` and
+   * `sold` let the form warn when the sale goes into overbooking (H1.6).
+   */
   async quote(dto: ReservationQuoteDto) {
     const nights = stayNights(dto.arrival_date, dto.departure_date);
     const unitType = await this.loadSellableType(dto.unit_type_id);
     assertCapacity(unitType, dto.adults, dto.children ?? 0);
-    const available = await this.availability.countAvailable(
+    const inventory = await this.availability.getInventory(
       unitType.id,
       dto.arrival_date,
       dto.departure_date,
     );
     return {
       unit_type: { id: unitType.id, name: unitType.name },
-      available,
+      available: inventory.available,
+      units: inventory.units,
+      sold: inventory.sold,
+      overbooking_allowance: inventory.overbooking_allowance,
       nights: nights.length,
       nightly_rate: unitType.nightly_rate.toFixed(2),
       total_amount: unitType.nightly_rate.mul(nights.length).toFixed(2),

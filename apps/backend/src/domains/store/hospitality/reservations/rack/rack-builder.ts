@@ -24,6 +24,8 @@ export interface RackUnitInput {
 export interface RackTypeInput {
   id: number;
   name: string;
+  /** H1.6 — rooms the type may sell above its active rooms. */
+  overbooking_allowance: number;
 }
 
 export interface RackRoomInput {
@@ -71,7 +73,12 @@ export interface RackType {
   id: number;
   name: string;
   units: Omit<RackUnitInput, 'unit_type_id'>[];
-  /** Rooms of the type still for sale on each night of the window. */
+  /** Active rooms of the type. */
+  capacity: number;
+  overbooking_allowance: number;
+  /** Rooms of the type sold on each night; above `capacity` = overbooked. */
+  sold: number[];
+  /** Rooms of the type still for sale on each night (overbooking included). */
   free: number[];
   /** Rows the unassigned bars need (0 = no "Sin asignar" row). */
   unassigned_lanes: number;
@@ -115,14 +122,14 @@ export function buildRack(input: {
 
   const types = input.types.map<RackType>((type) => {
     const units = input.units.filter((u) => u.unit_type_id === type.id);
-    const activeUnits = units.filter((u) => u.is_active).length;
-    const free = nights.map(() => activeUnits);
-    for (const sold of input.sold) {
-      const i = nightIndex.get(toDateOnly(sold.night_date));
-      if (sold.unit_type_id === type.id && i !== undefined) {
-        free[i] = Math.max(0, free[i] - sold.count);
-      }
+    const capacity = units.filter((u) => u.is_active).length;
+    const allowance = Math.max(0, type.overbooking_allowance);
+    const sold = nights.map(() => 0);
+    for (const night of input.sold) {
+      const i = nightIndex.get(toDateOnly(night.night_date));
+      if (night.unit_type_id === type.id && i !== undefined) sold[i] += night.count;
     }
+    const free = sold.map((count) => Math.max(0, capacity + allowance - count));
     const bars = input.rooms
       .filter((room) => room.unit_type_id === type.id)
       .map((room) => toBar(room, input.from, nights.length))
@@ -132,6 +139,9 @@ export function buildRack(input: {
       id: type.id,
       name: type.name,
       units: units.map(({ unit_type_id: _type, ...unit }) => unit),
+      capacity,
+      overbooking_allowance: allowance,
+      sold,
       free,
       unassigned_lanes: packUnassigned(bars),
       bars,

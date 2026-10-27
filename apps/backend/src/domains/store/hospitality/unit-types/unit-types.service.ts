@@ -41,6 +41,25 @@ export function resolveCapacity(input: Partial<Capacity>): Capacity {
   return { base_occupancy, max_adults, max_children, max_occupancy };
 }
 
+/** H1.6 — permission that governs how far a type may be overbooked. */
+export const OVERBOOKING_PERMISSION = 'store:lodging:rates:write';
+
+/**
+ * Overbooking is a revenue decision: only owners, super admins or users with
+ * `rates:write` change it (the endpoint itself needs `inventory:write`).
+ */
+export function assertCanChangeOverbooking(): void {
+  const context = RequestContextService.getContext();
+  if (
+    context?.is_super_admin ||
+    context?.is_owner ||
+    context?.permissions?.includes(OVERBOOKING_PERMISSION)
+  ) {
+    return;
+  }
+  throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_OVERBOOKING_001);
+}
+
 const UNIT_TYPE_INCLUDE = {
   product: {
     select: {
@@ -101,6 +120,10 @@ export class UnitTypesService {
     const name = dto.name.trim();
     const capacity = resolveCapacity(dto);
     const images = this.normalizeImages(dto.images);
+    // H1.6 — the store default applies; another value needs `rates:write`.
+    const defaultAllowance = await this.defaultOverbookingAllowance(store_id);
+    const overbooking_allowance = dto.overbooking_allowance ?? defaultAllowance;
+    if (overbooking_allowance !== defaultAllowance) assertCanChangeOverbooking();
     await this.assertNameAvailable(name);
 
     const product = await this.productsService.create({
@@ -124,7 +147,7 @@ export class UnitTypesService {
           bed_config: dto.bed_config ?? null,
           images: images ?? [],
           amenities: dto.amenities ?? [],
-          overbooking_allowance: dto.overbooking_allowance ?? 0,
+          overbooking_allowance,
           sort_order: dto.sort_order ?? 0,
           is_active: dto.is_active ?? true,
           updated_at: new Date(),
@@ -153,6 +176,12 @@ export class UnitTypesService {
           : current.max_occupancy),
     });
     const images = this.normalizeImages(dto.images);
+    if (
+      dto.overbooking_allowance !== undefined &&
+      dto.overbooking_allowance !== current.overbooking_allowance
+    ) {
+      assertCanChangeOverbooking();
+    }
     if (name !== current.name) {
       await this.assertNameAvailable(name, id);
     }
@@ -221,6 +250,19 @@ export class UnitTypesService {
       organization_id: context.organization_id,
       store_id: context.store_id,
     });
+  }
+
+  /** `hospitality.default_overbooking_allowance` of the store (0 when unset). */
+  private async defaultOverbookingAllowance(store_id: number): Promise<number> {
+    const row = await this.prisma.store_settings.findFirst({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const settings = row?.settings as {
+      hospitality?: { default_overbooking_allowance?: number };
+    } | null;
+    const value = settings?.hospitality?.default_overbooking_allowance;
+    return Number.isInteger(value) && value! > 0 ? value! : 0;
   }
 
   private async assertNameAvailable(name: string, excludeId?: number) {

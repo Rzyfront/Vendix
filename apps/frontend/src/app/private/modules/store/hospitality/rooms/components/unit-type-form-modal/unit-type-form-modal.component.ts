@@ -39,6 +39,10 @@ import {
   UnitTypePayload,
 } from '../../interfaces/unit-type.interface';
 import { UnitTypesService } from '../../services/unit-types.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+
+/** H1.6 — only this permission (or the owner) changes the overbooking. */
+const OVERBOOKING_PERMISSION = 'store:lodging:rates:write';
 
 export const MAX_CAPACITY_MESSAGE =
   'La capacidad máxima debe ser mayor que cero';
@@ -64,6 +68,7 @@ interface UnitTypeForm {
   bed_config: FormControl<string>;
   base_price: FormControl<number | null>;
   tax_category_id: FormControl<number>;
+  overbooking_allowance: FormControl<number | null>;
 }
 
 /**
@@ -164,6 +169,16 @@ interface UnitTypeForm {
             label="Impuesto"
             [options]="taxOptions()"
           />
+          <app-input
+            formControlName="overbooking_allowance"
+            label="Sobreventa permitida"
+            type="number"
+            [min]="0"
+            [max]="99"
+            [placeholder]="isEditMode() ? '0' : 'Valor de Ajustes → Hotelería'"
+            [helperText]="overbookingHelp()"
+            customWrapperClass="mt-0"
+          />
         </div>
       </form>
 
@@ -256,6 +271,7 @@ export class UnitTypeFormModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly imageUploadService = inject(ImageUploadService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input(false);
   readonly unitType = input<UnitType | null>(null);
@@ -284,6 +300,16 @@ export class UnitTypeFormModalComponent {
     { initialValue: [] as LodgingAmenity[] },
   );
   readonly isEditMode = computed(() => this.unitType() != null);
+  readonly canEditOverbooking = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.userPermissions().includes(OVERBOOKING_PERMISSION),
+  );
+  readonly overbookingHelp = computed(() =>
+    this.canEditOverbooking()
+      ? 'Reservas que se pueden vender por encima de las habitaciones de este tipo.'
+      : 'Solo un usuario con permiso de tarifas puede cambiarla.',
+  );
   readonly title = computed(() =>
     this.isEditMode()
       ? `Editar tipo: ${this.unitType()?.name ?? ''}`
@@ -321,6 +347,9 @@ export class UnitTypeFormModalComponent {
       validators: [Validators.required, Validators.min(0)],
     }),
     tax_category_id: this.fb.nonNullable.control<number>(NO_TAX),
+    overbooking_allowance: this.fb.control<number | null>(null, {
+      validators: [Validators.min(0), Validators.max(99)],
+    }),
   });
 
   // Form status is not a signal: bridge it so the error recomputes (zoneless).
@@ -344,6 +373,11 @@ export class UnitTypeFormModalComponent {
       this.unitType();
       this.syncFromUnitType();
     });
+    effect(() => {
+      const control = this.form.controls.overbooking_allowance;
+      if (this.canEditOverbooking()) control.enable({ emitEvent: false });
+      else control.disable({ emitEvent: false });
+    });
   }
 
   syncFromUnitType(): void {
@@ -363,6 +397,7 @@ export class UnitTypeFormModalComponent {
       base_price: u ? Number(u.product.base_price) : null,
       tax_category_id:
         u?.product.product_tax_assignments[0]?.tax_categories.id ?? NO_TAX,
+      overbooking_allowance: u ? u.overbooking_allowance : null,
     });
   }
 
@@ -439,6 +474,11 @@ export class UnitTypeFormModalComponent {
       tax_category_ids: raw.tax_category_id ? [raw.tax_category_id] : [],
       images: this.photos().map((p) => p.key),
       amenities: this.amenities(),
+      // Empty on a new type = the store default; never sent without permission.
+      ...(this.canEditOverbooking() &&
+        String(raw.overbooking_allowance ?? '').trim() !== '' && {
+          overbooking_allowance: Number(raw.overbooking_allowance),
+        }),
     };
     const current = this.unitType();
     const request$ = current

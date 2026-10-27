@@ -43,6 +43,8 @@ export interface UnitTypePayload {
   tax_category_ids: number[];
   images?: string[];
   amenities?: string[];
+  /** H1.6 — sent only by users who may change it (`rates:write`). */
+  overbooking_allowance?: number;
   is_active?: boolean;
 }
 

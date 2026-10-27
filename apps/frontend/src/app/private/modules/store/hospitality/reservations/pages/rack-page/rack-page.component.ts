@@ -65,6 +65,9 @@ interface RackRow {
   typeId: number;
   unitId?: number;
   free?: number[];
+  /** H1.6 — nights sold above the type's rooms, and the "Sobreventa: 3/2" alert. */
+  overbooked?: boolean[];
+  overbooking?: string;
   muted?: boolean;
   hint?: string;
 }
@@ -199,7 +202,14 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     [style.grid-row]="row.row"
                     [style.grid-column]="1"
                   >
-                    {{ row.label }}
+                    <span class="truncate">{{ row.label }}</span>
+                    @if (row.overbooking) {
+                      <span
+                        class="ml-1 shrink-0 rounded bg-primary/10 px-1 text-[10px] font-bold text-primary"
+                        title="Noches vendidas por encima de las habitaciones del tipo"
+                        >{{ row.overbooking }}</span
+                      >
+                    }
                   </div>
                   @for (night of nightHeaders(); track night.date; let i = $index) {
                     <div
@@ -220,8 +230,13 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                           class="text-[10px]"
                           [class.text-text-secondary]="row.free[i] > 0"
                           [class.text-primary]="row.free[i] === 0"
-                          [class.font-bold]="row.free[i] === 0"
-                          [attr.title]="row.free[i] + ' libres'"
+                          [class.font-bold]="row.free[i] === 0 || row.overbooked?.[i]"
+                          [class.underline]="row.overbooked?.[i]"
+                          [attr.title]="
+                            row.overbooked?.[i]
+                              ? 'Sobreventa: ' + row.free[i] + ' libres'
+                              : row.free[i] + ' libres'
+                          "
                           >{{ row.free[i] }}</span
                         >
                       }
@@ -338,7 +353,17 @@ export class HospitalityRackPageComponent implements OnInit {
       return rows.length + 1;
     };
     for (const type of this.rack()?.types ?? []) {
-      push({ kind: 'type', key: `t${type.id}`, label: type.name, typeId: type.id, free: type.free });
+      const overbooked = type.sold.map((sold) => sold > type.capacity);
+      const peak = Math.max(0, ...type.sold);
+      push({
+        kind: 'type',
+        key: `t${type.id}`,
+        label: type.name,
+        typeId: type.id,
+        free: type.free,
+        overbooked,
+        overbooking: peak > type.capacity ? `Sobreventa: ${peak}/${type.capacity}` : undefined,
+      });
       for (const unit of type.units) {
         const outOfOrder =
           unit.housekeeping_status === 'out_of_order' ||

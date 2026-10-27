@@ -486,6 +486,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       check_out_time: '12:00',
       no_show_time: '06:00',
       rnt_number: '',
+      // H1.6 - overbooking a new room type starts with (0 = never oversell).
+      default_overbooking_allowance: 0,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

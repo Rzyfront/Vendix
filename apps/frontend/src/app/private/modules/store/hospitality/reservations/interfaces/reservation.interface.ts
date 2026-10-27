@@ -102,6 +102,10 @@ export interface ReservationQuoteRequest {
 export interface ReservationQuote {
   unit_type: { id: number; name: string };
   available: number;
+  /** H1.6 — active rooms, most rooms sold on a night and overbooking allowance. */
+  units: number;
+  sold: number;
+  overbooking_allowance: number;
   nights: number;
   nightly_rate: string;
   total_amount: string;
@@ -165,7 +169,13 @@ export interface RackType {
   id: number;
   name: string;
   units: RackUnit[];
-  /** Rooms still for sale per night of the window. */
+  /** Active rooms of the type. */
+  capacity: number;
+  /** H1.6 — rooms the type may sell above `capacity`. */
+  overbooking_allowance: number;
+  /** Rooms sold per night; above `capacity` the night is overbooked. */
+  sold: number[];
+  /** Rooms still for sale per night of the window (overbooking included). */
   free: number[];
   unassigned_lanes: number;
   bars: RackBar[];

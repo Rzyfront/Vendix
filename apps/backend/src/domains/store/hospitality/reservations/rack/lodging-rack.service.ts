@@ -49,7 +49,7 @@ export class LodgingRackService {
     const [types, units] = await Promise.all([
       this.prisma.lodging_unit_types.findMany({
         where: { OR: [{ is_active: true }, { id: { in: typeIds } }] },
-        select: { id: true, name: true },
+        select: { id: true, name: true, overbooking_allowance: true },
         orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
       }),
       this.prisma.lodging_units.findMany({

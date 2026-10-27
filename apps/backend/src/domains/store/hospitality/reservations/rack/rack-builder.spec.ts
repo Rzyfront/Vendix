@@ -4,8 +4,8 @@ import { buildRack, rackNights, RackRoomInput, RackUnitInput } from './rack-buil
 const d = (date: string) => new Date(`${date}T00:00:00.000Z`);
 
 const TYPES = [
-  { id: 1, name: 'Doble estándar' },
-  { id: 2, name: 'Suite' },
+  { id: 1, name: 'Doble estándar', overbooking_allowance: 0 },
+  { id: 2, name: 'Suite', overbooking_allowance: 0 },
 ];
 
 const unit = (id: number, unit_type_id: number, code: string, is_active = true): RackUnitInput => ({
@@ -139,6 +139,25 @@ describe('rack builder (H1.3)', () => {
     expect(r.types[0].free.slice(0, 3)).toEqual([1, 0, 2]);
     expect(r.types[0].free[13]).toBe(2);
     expect(r.types[1].free[13]).toBe(0);
+  });
+
+  it('H1.6 overbooking: 3 sold of 2 rooms with allowance 1 shows sold above capacity and 0 free', () => {
+    const r = buildRack({
+      from: '2026-11-10',
+      to: '2026-11-13',
+      types: [{ id: 1, name: 'Doble estándar', overbooking_allowance: 1 }],
+      units: UNITS,
+      rooms: [],
+      sold: [
+        { unit_type_id: 1, night_date: d('2026-11-10'), count: 3 },
+        { unit_type_id: 1, night_date: d('2026-11-11'), count: 2 },
+      ],
+    });
+    const type = r.types[0];
+    expect(type.capacity).toBe(2);
+    expect(type.overbooking_allowance).toBe(1);
+    expect(type.sold).toEqual([3, 2, 0]);
+    expect(type.free).toEqual([0, 1, 3]);
   });
 
   it('inactive rooms are listed but do not count as free', () => {

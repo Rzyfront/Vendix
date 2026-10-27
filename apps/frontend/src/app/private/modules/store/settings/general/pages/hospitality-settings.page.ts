@@ -55,7 +55,8 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
               check_in_time: '15:00',
               check_out_time: '12:00',
               no_show_time: '06:00',
-              rnt_number: ''
+              rnt_number: '',
+              default_overbooking_allowance: 0
             }
           "
           (settingsChange)="store.onSectionChange('hospitality', $event)" />

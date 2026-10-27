@@ -52,7 +52,7 @@ const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
  * `pg_advisory_xact_lock`. Reads and writes yield, so without the lock two
  * parallel sales would both see the last room free.
  */
-function createFakeStore(units: number | Record<number, number>) {
+function createFakeStore(units: number | Record<number, number>, overbooking_allowance = 0) {
   const nights: NightRow[] = [];
   const reservations: {
     id: number;
@@ -75,6 +75,11 @@ function createFakeStore(units: number | Record<number, number>) {
   let lock: Promise<void> = Promise.resolve();
 
   const tables = {
+    lodging_unit_types: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        TYPES[where.id] ? { ...TYPES[where.id], overbooking_allowance } : null,
+      ),
+    },
     lodging_units: {
       count: jest.fn(async ({ where }: any) =>
         typeof units === 'number' ? units : (units[where.unit_type_id] ?? 0),
@@ -190,9 +195,6 @@ function createFakeStore(units: number | Record<number, number>) {
 
   const prisma = {
     ...tables,
-    lodging_unit_types: {
-      findFirst: jest.fn(async ({ where }: any) => TYPES[where.id] ?? null),
-    },
     users: { findFirst: jest.fn(async () => ({ id: 77 })) },
     store_settings: {
       findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })),
@@ -246,8 +248,8 @@ describe('LodgingReservationsService', () => {
     return body;
   };
 
-  const build = (units: number | Record<number, number>) => {
-    const fake = createFakeStore(units);
+  const build = (units: number | Record<number, number>, overbooking_allowance = 0) => {
+    const fake = createFakeStore(units, overbooking_allowance);
     const service = new LodgingReservationsService(
       fake.prisma as any,
       new LodgingAvailabilityService(fake.prisma as any),
@@ -307,6 +309,9 @@ describe('LodgingReservationsService', () => {
       await expect(service.quote(stay)).resolves.toEqual({
         unit_type: { id: 11, name: 'Doble estándar' },
         available: 2,
+        units: 2,
+        sold: 0,
+        overbooking_allowance: 0,
         nights: 3,
         nightly_rate: '250000.00',
         total_amount: '750000.00',
@@ -403,7 +408,7 @@ describe('LodgingReservationsService', () => {
 
     it('un tipo inactivo no se vende', async () => {
       const { service, prisma } = build(2);
-      prisma.lodging_unit_types.findFirst.mockResolvedValueOnce({ ...DOUBLE, is_active: false });
+      prisma.lodging_unit_types.findFirst.mockResolvedValueOnce({ ...DOUBLE, is_active: false, overbooking_allowance: 0 });
 
       await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_TYPE_001');
     });
@@ -413,6 +418,37 @@ describe('LodgingReservationsService', () => {
    * H1.2 — cancel and no-show free the nights (is_active=false, never
    * deleted) and leave a history line; invalid changes are rejected.
    */
+  describe('sobreventa controlada (H1.6)', () => {
+    it('con 2 habitaciones y sobreventa 1 la tercera se crea y la cuarta se rechaza', async () => {
+      const { service, reservations } = build(2, 1);
+      await service.create(sale(stay));
+      await service.create(sale(stay));
+
+      await expect(service.quote(stay)).resolves.toMatchObject({
+        available: 1,
+        units: 2,
+        sold: 2,
+        overbooking_allowance: 1,
+      });
+      await service.create(sale(stay));
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 0, sold: 3 });
+
+      const body = await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_AVAILABILITY_001');
+      expect(body.message).toBe('Sin disponibilidad de Doble estándar para el 10-nov al 13-nov');
+      expect(reservations.map((r) => r.reservation_number)).toEqual(['H-0001', 'H-0002', 'H-0003']);
+    });
+
+    it('dos ventas en paralelo por el último cupo de sobreventa: una se crea y la otra falla', async () => {
+      const { service, reservations } = build(1, 1);
+      await service.create(sale(stay));
+
+      const results = await Promise.allSettled([service.create(sale(stay)), service.create(sale(stay))]);
+
+      expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      expect(reservations).toHaveLength(2);
+    });
+  });
+
   describe('cancelación y no-show', () => {
     const activeNightsOf = (nights: NightRow[], roomId: number) =>
       nights.filter((n) => n.reservation_room_id === roomId && n.is_active).length;

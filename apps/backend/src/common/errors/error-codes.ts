@@ -5607,6 +5607,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'La ocupación base no puede superar la ocupación máxima',
   },
+  // Hospitality Suite (H1.6) — controlled overbooking
+  LODGING_UNIT_TYPE_OVERBOOKING_001: {
+    code: 'LODGING_UNIT_TYPE_OVERBOOKING_001',
+    httpStatus: 403,
+    devMessage: 'Solo un usuario con permiso de tarifas puede cambiar la sobreventa',
+  },
   // Hospitality Suite (H0.4) — room type photos
   LODGING_UNIT_TYPE_IMAGE_001: {
     code: 'LODGING_UNIT_TYPE_IMAGE_001',

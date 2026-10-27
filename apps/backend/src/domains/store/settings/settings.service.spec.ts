@@ -546,12 +546,13 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       );
     });
 
-    it('una tienda sin la sección lee check-in 15:00, check-out 12:00, no-show 06:00 y RNT vacío', () => {
+    it('una tienda sin la sección lee check-in 15:00, check-out 12:00, no-show 06:00, RNT vacío y sobreventa 0', () => {
       expect(mergeStoreSettingsWithDefaults({}).hospitality).toEqual({
         check_in_time: '15:00',
         check_out_time: '12:00',
         no_show_time: '06:00',
         rnt_number: '',
+        default_overbooking_allowance: 0,
       });
     });
 
@@ -581,11 +582,13 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
         check_in_time: '3pm',
         check_out_time: '24:00',
         no_show_time: '6',
+        default_overbooking_allowance: -1,
       });
       const errors = await validate(bad);
       expect(errors.map((e) => e.property).sort()).toEqual([
         'check_in_time',
         'check_out_time',
+        'default_overbooking_allowance',
         'no_show_time',
       ]);
     });
