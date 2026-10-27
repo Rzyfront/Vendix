@@ -820,6 +820,24 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'bed-double',
     },
+    {
+      path: '/admin/hospitality/reservations',
+      title: 'Reservas',
+      parent: 'Hotelería',
+      icon: 'calendar-check',
+    },
+    {
+      path: '/admin/hospitality/rack',
+      title: 'Rack',
+      parent: 'Hotelería',
+      icon: 'layout-grid',
+    },
+    {
+      path: '/admin/hospitality/rates',
+      title: 'Tarifas',
+      parent: 'Hotelería',
+      icon: 'tag',
+    },
 
     // Customers
     {

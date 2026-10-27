@@ -8,16 +8,22 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
 import { addDays, format, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   ButtonComponent,
   CardComponent,
+  DropdownAction,
+  EmptyStateComponent,
+  FilterConfig,
+  FilterValues,
   IconComponent,
-  SelectorComponent,
+  InputsearchComponent,
+  OptionsDropdownComponent,
   SelectorOption,
   SpinnerComponent,
-  StickyHeaderComponent,
+  StatsComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
@@ -35,6 +41,7 @@ import {
   Rack,
   RackBar,
   RackBlock,
+  RackType,
   RESERVATION_STATUS_LABELS,
   RoomChangeRequest,
 } from '../../interfaces/reservation.interface';
@@ -51,9 +58,28 @@ const STEP_DAYS = 14;
 
 /** Window sizes the desk can pick. */
 const WINDOW_OPTIONS: SelectorOption[] = [
-  { value: 14, label: '14 días' },
-  { value: 30, label: '30 días' },
+  { value: '', label: '14 días' },
+  { value: '30', label: '30 días' },
 ];
+
+const DEFAULT_DAYS = 14;
+
+/** Case- and accent-insensitive "contains". */
+function matches(term: string, ...values: (string | null | undefined)[]): boolean {
+  const normalize = (v: string) =>
+    v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const needle = normalize(term.trim());
+  return !needle || values.some((v) => !!v && normalize(v).includes(needle));
+}
+
+/** A type stays on the rack when its name, a room or a stay matches. */
+function typeMatches(type: RackType, term: string): boolean {
+  return (
+    matches(term, type.name) ||
+    type.units.some((u) => matches(term, u.code, u.floor)) ||
+    type.bars.some((b) => matches(term, b.guest, b.reservation_number))
+  );
+}
 
 /** One status, one shade of the theme's single accent. */
 const BAR_CLASSES: Partial<Record<LodgingReservationStatus, string>> = {
@@ -118,86 +144,156 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
  *
  * H5.3: "Bloquear" takes a room out of sale for maintenance or owner use;
  * the block shows on its room row and tapping it releases it.
+ *
+ * Standard admin module around the grid: four stats of the window, one card
+ * with the sticky search (type, room, guest or reservation), the options
+ * dropdown ("Bloquear habitación" + type and window filters) and the date
+ * navigation. Search and type filter hide whole types client-side.
  */
 @Component({
   selector: 'app-hospitality-rack-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    FormsModule,
     ButtonComponent,
     CardComponent,
+    EmptyStateComponent,
     IconComponent,
-    SelectorComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
     SpinnerComponent,
-    StickyHeaderComponent,
+    StatsComponent,
     ReservationDetailModalComponent,
     RoomChangeModalComponent,
     RoomBlockModalComponent,
   ],
   template: `
-    <div class="w-full overflow-x-hidden">
-      <app-sticky-header
-        title="Rack"
-        subtitle="Ocupación de habitaciones por noches"
-        icon="layout-grid"
-        variant="glass"
-      />
+    <div class="w-full md:space-y-4">
+      <!-- Stats: sticky on mobile, static on desktop -->
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
+        <app-stats
+          title="Habitaciones"
+          [value]="stats().rooms"
+          [smallText]="'activas en ' + stats().types + ' tipos'"
+          iconName="door-open"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="loading() && !rack()"
+        />
+        <app-stats
+          title="Ocupación"
+          [value]="stats().occupancy + '%'"
+          [smallText]="stats().soldNights + ' de ' + stats().roomNights + ' noches'"
+          iconName="gauge"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="loading() && !rack()"
+        />
+        <app-stats
+          title="Estadías"
+          [value]="stats().stays"
+          [smallText]="stats().unassigned + ' sin habitación asignada'"
+          iconName="calendar-check"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="loading() && !rack()"
+        />
+        <app-stats
+          title="Bloqueos"
+          [value]="stats().blocks"
+          smallText="mantenimiento, propietario o canal"
+          iconName="lock"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+          [loading]="loading() && !rack()"
+        />
+      </div>
 
-      <div class="p-2 md:p-4">
-        <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <!-- Sticky search header -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
           <div
-            class="flex flex-wrap items-center justify-between gap-2 px-2 py-2 md:px-6 md:py-4 md:border-b md:border-border"
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <div class="flex items-center gap-1">
-              <app-button
-                variant="outline"
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+            >
+              Rack de ocupación
+              <span class="text-text-secondary font-normal">({{ visibleTypes().length }} tipos)</span>
+            </h2>
+
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 size="sm"
-                ariaLabel="14 días antes"
-                (clicked)="move(-1)"
-              >
-                <app-icon slot="icon" name="chevron-left" [size]="16" />
-              </app-button>
-              <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
-              <app-button
-                variant="outline"
-                size="sm"
-                ariaLabel="14 días después"
-                (clicked)="move(1)"
-              >
-                <app-icon slot="icon" name="chevron-right" [size]="16" />
-              </app-button>
-              <span class="ml-2 text-sm font-medium text-text-primary" data-testid="rack-range">
-                {{ rangeLabel() }}
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <app-button
-                variant="outline"
-                size="sm"
-                data-testid="rack-block-room"
-                (clicked)="blockTarget.set({ mode: 'create', from_date: from() })"
-              >
-                <app-icon slot="icon" name="lock" [size]="16" />
-                Bloquear
-              </app-button>
-              <app-selector
-                class="w-32"
-                size="sm"
-                [options]="windowOptions"
-                [value]="days()"
-                (valueChange)="setDays($event)"
+                placeholder="Buscar en el rack..."
+                [debounceTime]="300"
+                [ngModel]="searchTerm()"
+                (ngModelChange)="searchTerm.set($event ?? '')"
+              />
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="onFilterChange({})"
+                (actionClick)="onActionClick($event)"
               />
             </div>
           </div>
+        </div>
 
+        <!-- Date navigation of the window -->
+        <div class="flex items-center gap-1 px-2 pt-3 md:px-6">
+          <app-button variant="outline" size="sm" ariaLabel="14 días antes" (clicked)="move(-1)">
+            <app-icon slot="icon" name="chevron-left" [size]="16" />
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
+          <app-button variant="outline" size="sm" ariaLabel="14 días después" (clicked)="move(1)">
+            <app-icon slot="icon" name="chevron-right" [size]="16" />
+          </app-button>
+          <span class="ml-2 text-sm font-medium text-text-primary" data-testid="rack-range">
+            {{ rangeLabel() }}
+          </span>
+          @if (loading() && rack()) {
+            <app-spinner size="sm" class="ml-2" />
+          }
+        </div>
+
+        <div class="px-2 pb-2 pt-3 md:p-4">
           @if (loading() && !rack()) {
-            <div class="flex justify-center py-10"><app-spinner size="md" /></div>
+            <div class="p-4 md:p-6 text-center">
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+              <p class="mt-2 text-text-secondary">Cargando rack...</p>
+            </div>
+          } @else if ((rack()?.types ?? []).length === 0) {
+            <app-empty-state
+              icon="bed-double"
+              title="Aún no hay tipos de habitación activos"
+              description="Créalos en Hotelería → Habitaciones para ver su ocupación por noches."
+            />
           } @else if (rows().length === 0) {
-            <p class="px-4 py-10 text-center text-sm text-text-secondary">
-              Aún no hay tipos de habitación activos. Créalos en Hotelería → Habitaciones.
-            </p>
+            <app-empty-state
+              icon="search"
+              title="Sin resultados"
+              description="Ningún tipo, habitación o huésped coincide con la búsqueda o los filtros."
+              actionButtonText="Limpiar filtros"
+              [showActionButton]="true"
+              (actionClick)="clearFilters()"
+            />
           } @else {
-            <div class="overflow-x-auto" data-testid="rack-scroll">
+            <div class="overflow-x-auto rounded-md border border-border" data-testid="rack-scroll">
               <div
                 class="grid w-max min-w-full text-xs"
                 [style.grid-template-columns]="gridColumns()"
@@ -347,8 +443,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
               </div>
             </div>
           }
-        </app-card>
-      </div>
+        </div>
+      </app-card>
 
       <app-reservation-detail-modal
         [reservationId]="detailId()"
@@ -377,13 +473,68 @@ export class HospitalityRackPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
-  readonly windowOptions = WINDOW_OPTIONS;
+  readonly searchTerm = signal('');
+  /** `days` empty = default 14-night window (not counted as an active filter). */
+  readonly filterValues = signal<FilterValues>({});
+
+  readonly dropdownActions: DropdownAction[] = [
+    { label: 'Bloquear habitación', icon: 'lock', action: 'block', variant: 'primary' },
+  ];
+
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'unit_type_id',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los tipos' },
+        ...(this.rack()?.types ?? []).map((t) => ({ value: String(t.id), label: t.name })),
+      ],
+    },
+    {
+      key: 'days',
+      label: 'Ventana',
+      type: 'select',
+      options: WINDOW_OPTIONS,
+    },
+  ]);
+
+  /** Types shown after the search and the type filter. */
+  readonly visibleTypes = computed<RackType[]>(() => {
+    const term = this.searchTerm();
+    const typeId = this.filterValues()['unit_type_id'];
+    return (this.rack()?.types ?? []).filter(
+      (t) => (!typeId || String(t.id) === typeId) && typeMatches(t, term),
+    );
+  });
+
+  /** Window numbers of the visible types. */
+  readonly stats = computed(() => {
+    const types = this.visibleTypes();
+    const rooms = types.reduce((sum, t) => sum + t.capacity, 0);
+    const soldNights = types.reduce(
+      (sum, t) => sum + t.sold.reduce((a, b) => a + b, 0),
+      0,
+    );
+    const roomNights = rooms * this.days();
+    const bars = types.flatMap((t) => t.bars);
+    return {
+      types: types.length,
+      rooms,
+      soldNights,
+      roomNights,
+      occupancy: roomNights ? Math.round((soldNights / roomNights) * 100) : 0,
+      stays: new Set(bars.map((b) => b.reservation_id)).size,
+      unassigned: bars.filter((b) => b.unit_id === null).length,
+      blocks: types.reduce((sum, t) => sum + t.blocks.length, 0),
+    };
+  });
 
   /** The store's civil date, not the browser's (the desk may be elsewhere). */
   private readonly today = () => storeToday(this.settingsFacade.timezone());
 
   readonly from = signal(this.today());
-  readonly days = signal(14);
+  readonly days = signal(DEFAULT_DAYS);
   readonly rack = signal<Rack | null>(null);
   readonly loading = signal(false);
   readonly detailId = signal<number | null>(null);
@@ -430,7 +581,7 @@ export class HospitalityRackPageComponent implements OnInit {
       rows.push({ ...row, row: rows.length + 2 });
       return rows.length + 1;
     };
-    for (const type of this.rack()?.types ?? []) {
+    for (const type of this.visibleTypes()) {
       const overbooked = type.sold.map((sold) => sold > type.capacity);
       const peak = Math.max(0, ...type.sold);
       push({
@@ -481,7 +632,7 @@ export class HospitalityRackPageComponent implements OnInit {
 
   readonly bars = computed<PlacedBar[]>(() => {
     const { unitRow, laneRow } = this.layout();
-    return (this.rack()?.types ?? []).flatMap((type) =>
+    return this.visibleTypes().flatMap((type) =>
       type.bars.flatMap((bar) => {
         const row =
           bar.unit_id !== null ? unitRow.get(bar.unit_id) : laneRow.get(`${type.id}-${bar.lane}`);
@@ -502,7 +653,7 @@ export class HospitalityRackPageComponent implements OnInit {
   /** H5.3 — blocks placed on their room rows. */
   readonly blockBars = computed<PlacedBlock[]>(() => {
     const { unitRow } = this.layout();
-    return (this.rack()?.types ?? []).flatMap((type) =>
+    return this.visibleTypes().flatMap((type) =>
       type.blocks.flatMap((block) => {
         const row = unitRow.get(block.unit_id);
         if (row === undefined) return [];
@@ -636,10 +787,21 @@ export class HospitalityRackPageComponent implements OnInit {
     this.load();
   }
 
-  setDays(value: string | number | null): void {
-    const days = Number(value);
-    if (days !== 14 && days !== 30) return;
-    this.days.set(days);
-    this.load();
+  onFilterChange(values: FilterValues): void {
+    const days = Number(values['days']) === 30 ? 30 : DEFAULT_DAYS;
+    this.filterValues.set({ ...values, days: days === 30 ? '30' : '' });
+    if (days !== this.days()) {
+      this.days.set(days);
+      this.load();
+    }
+  }
+
+  clearFilters(): void {
+    this.searchTerm.set('');
+    this.onFilterChange({});
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'block') this.blockTarget.set({ mode: 'create', from_date: this.from() });
   }
 }
