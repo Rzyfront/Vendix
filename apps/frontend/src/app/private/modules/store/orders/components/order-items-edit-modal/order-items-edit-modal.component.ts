@@ -16,7 +16,6 @@ import { Subject, merge, of } from 'rxjs';
 import {
   catchError,
   debounceTime,
-  distinctUntilChanged,
   map,
   switchMap,
   tap,
@@ -116,6 +115,8 @@ export const RELOAD_FAILED_MESSAGE =
   'No pudimos recargar la orden. Cierra esta ventana y vuelve a abrir el detalle antes de reintentar.';
 
 const MAX_RESULTS = 20;
+/** Productos precargados en el buscador al abrir el modal, sin término. */
+const SUGGESTED_RESULTS = 5;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const round2 = (value: number): number => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -357,25 +358,25 @@ export class OrderItemsEditModalComponent {
       }
     });
 
+    // Mismo motor y filtros que el POS (`buildProductFilters`): con término
+    // manda el rank de la búsqueda inteligente; sin término se precargan los
+    // primeros SUGGESTED_RESULTS en el orden de la grilla del POS
+    // (destacados → más vendidos). Solo vendibles: nunca insumos puros.
     this.search$
       .pipe(
         debounceTime(SEARCH_DEBOUNCE_MS),
-        distinctUntilChanged(),
-        tap((term) => {
-          if (!term) this.searchResults.set([]);
-          this.searching.set(!!term);
-        }),
+        tap(() => this.searching.set(true)),
         switchMap((term) =>
-          term
-            ? this.productsService
-                .getProducts({
-                  search: term,
-                  limit: MAX_RESULTS,
-                  state: ProductState.ACTIVE,
-                  include_variants: true,
-                })
-                .pipe(catchError(() => of(null)))
-            : of(null),
+          this.productsService
+            .getProducts({
+              state: ProductState.ACTIVE,
+              include_variants: true,
+              is_sellable: true,
+              ...(term
+                ? { search: term, limit: MAX_RESULTS }
+                : { limit: SUGGESTED_RESULTS, featured_first: true, best_selling_first: true }),
+            })
+            .pipe(catchError(() => of(null))),
         ),
         takeUntilDestroyed(),
       )
@@ -424,6 +425,7 @@ export class OrderItemsEditModalComponent {
     this.searchResults.set([]);
     this.expandedProductId.set(null);
     this.saving.set(false);
+    this.search$.next('');
   }
 
   private fromExisting(item: OrderItem): OrderItemDraftLine {

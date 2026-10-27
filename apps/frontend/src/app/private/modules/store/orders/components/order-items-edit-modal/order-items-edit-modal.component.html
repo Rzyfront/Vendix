@@ -3,10 +3,12 @@
   (isOpenChange)="onOpenChange($event)"
   title="Modificar productos"
   [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
-  size="lg"
+  size="xl-mid"
   [canClose]="canCloseModal"
 >
-  <div class="space-y-5">
+  <!-- PC: orden a la izquierda, buscador a la derecha. Móvil: una columna (orden → buscador → resto). -->
+  <div class="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+  <div class="space-y-5 min-w-0 lg:col-start-1 lg:row-start-1">
     <!-- Líneas del borrador -->
     <section class="space-y-2.5" aria-labelledby="order-items-edit-lines-title">
       <div class="flex items-center justify-between gap-2">
@@ -267,9 +269,10 @@
         La orden debe tener al menos un producto; para anularla usa Cancelar orden
       </p>
     }
+  </div>
 
     <!-- Agregar producto -->
-    <section class="flex flex-col gap-3 p-3 sm:p-4 rounded-xl border border-border bg-surface">
+    <section class="flex flex-col gap-3 p-3 sm:p-4 rounded-xl border border-border bg-surface min-w-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-0">
       <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">
         <app-icon name="plus-circle" [size]="16" class="text-primary" />
         Agregar producto
@@ -289,9 +292,21 @@
         </p>
       }
 
+      @if (!searching() && searchResults().length > 0 && !searchTerm().trim()) {
+        <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          <app-icon name="star" [size]="12" class="text-primary" />
+          Destacados y más vendidos
+        </p>
+      }
+      @if (!searching() && searchResults().length === 0 && searchTerm().trim()) {
+        <p class="text-sm text-text-secondary text-center py-4">
+          Sin resultados para "{{ searchTerm().trim() }}"
+        </p>
+      }
+
       @if (searchResults().length > 0) {
         <ul
-          class="max-h-64 overflow-y-auto rounded-lg border border-border bg-surface shadow-sm divide-y divide-border"
+          class="max-h-64 lg:max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-surface shadow-sm divide-y divide-border"
         >
           @for (product of searchResults(); track product.id) {
             <li>
@@ -384,6 +399,7 @@
       }
     </section>
 
+  <div class="space-y-5 min-w-0 lg:col-start-1 lg:row-start-2">
     <!-- Motivo -->
     @if (hasRemovals()) {
       <div class="space-y-1.5">
@@ -472,6 +488,7 @@
         }
       </section>
     }
+  </div>
   </div>
 
   <div slot="footer" class="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
