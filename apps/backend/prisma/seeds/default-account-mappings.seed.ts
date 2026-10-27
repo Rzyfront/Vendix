@@ -154,6 +154,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Varios), sin IVA, no es ingreso. Dual-source con DEFAULT_ACCOUNT_MAPPINGS.
   'payment.received.tip_payable': '238005',
   // Layaway (Plan Separé)
+  'lodging.folio_payment.cash': '1105',
+  'lodging.folio_payment.bank': '1110',
+  'lodging.folio_payment.customer_advance': '2805',
   'layaway.payment.cash': '1105',
   'layaway.payment.bank': '1110',
   'layaway.payment.customer_advance': '2805',

@@ -142,6 +142,12 @@ const GROUP_DEFINITIONS: Array<{
     ],
   },
   {
+    key: 'lodging',
+    label: 'Hotelería',
+    icon: 'bed-double',
+    prefixes: ['lodging.folio_payment.'],
+  },
+  {
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',

@@ -1204,6 +1204,42 @@ export class AccountingEventsListener {
     }
   }
 
+  // ===== HOTELERÍA (H3.4) =====
+
+  @OnEvent('lodging.folio_payment.received')
+  async handleLodgingFolioPayment(event: {
+    store_id: number;
+    organization_id?: number;
+    payment_id: number;
+    order_number: string;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingFolioPayment({
+        payment_id: event.payment_id,
+        order_number: event.order_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for lodging.folio_payment - payment ${event.payment_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_payment - payment ${event.payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== LAYAWAY (PLAN SEPARÉ) =====
 
   @OnEvent('layaway.payment_received')

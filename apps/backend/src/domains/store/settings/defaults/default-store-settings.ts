@@ -485,6 +485,9 @@ export function getDefaultStoreSettings(): StoreSettings {
       check_in_time: '15:00',
       check_out_time: '12:00',
       no_show_time: '06:00',
+      // H3.4 - night audit: from this time the nights that already passed
+      // (the business day before) are charged to each in-house folio.
+      night_audit_time: '02:00',
       rnt_number: '',
       // H1.6 - overbooking a new room type starts with (0 = never oversell).
       default_overbooking_allowance: 0,

@@ -5845,6 +5845,31 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La habitación está sucia: confirma el check-in',
   },
+  LODGING_FOLIO_FIND_001: {
+    code: 'LODGING_FOLIO_FIND_001',
+    httpStatus: 404,
+    devMessage: 'La reserva no tiene folio: haz el check-in primero',
+  },
+  LODGING_FOLIO_CLOSED_001: {
+    code: 'LODGING_FOLIO_CLOSED_001',
+    httpStatus: 409,
+    devMessage: 'El folio está cerrado',
+  },
+  LODGING_FOLIO_CHARGE_001: {
+    code: 'LODGING_FOLIO_CHARGE_001',
+    httpStatus: 400,
+    devMessage: 'El cargo no es válido para el folio',
+  },
+  LODGING_FOLIO_VOID_001: {
+    code: 'LODGING_FOLIO_VOID_001',
+    httpStatus: 409,
+    devMessage: 'No se puede anular este cargo del folio',
+  },
+  LODGING_FOLIO_PAYMENT_001: {
+    code: 'LODGING_FOLIO_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'El pago no es válido para el folio',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

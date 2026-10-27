@@ -1254,6 +1254,7 @@ export class AutoEntryService {
       installment_payment: 'auto_installment_payment',
       'layaway.payment': 'auto_payment',
       'layaway.completed': 'auto_payment',
+      'lodging.folio_payment': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
@@ -6190,6 +6191,62 @@ export class AutoEntryService {
       source_id: data.payment_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== HOTELERÍA (H3.4) =====
+
+  /**
+   * lodging.folio_payment: DR Caja/Banco → CR Anticipos de Clientes (2805).
+   * A payment of an open guest folio arrives before its invoice and the folio
+   * keeps growing, so it is an advance, not revenue: the folio invoice
+   * (H3.7) recognizes the whole sale and crosses this advance.
+   * `source_id` = the `payments.id` (one entry per payment).
+   */
+  async onLodgingFolioPayment(data: {
+    payment_id: number;
+    order_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash'
+        ? 'lodging.folio_payment.cash'
+        : 'lodging.folio_payment.bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Pago folio ${data.order_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.customer_advance',
+        `Anticipo folio ${data.order_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.folio_payment',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Pago de folio hotelero ${data.order_number}`,
       lines,
       user_id: data.user_id,
     });

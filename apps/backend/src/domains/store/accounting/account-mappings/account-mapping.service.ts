@@ -450,6 +450,21 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '4175',
     description: 'Descuentos en Ventas (Crédito)',
   },
+  // Hotelería (H3.4) — payment of an open guest folio before its invoice:
+  // received as a customer advance, never as revenue (the folio invoice
+  // recognizes the sale and crosses the advance).
+  'lodging.folio_payment.cash': {
+    code: '1105',
+    description: 'Caja (pago de folio hotelero)',
+  },
+  'lodging.folio_payment.bank': {
+    code: '1110',
+    description: 'Banco (pago de folio hotelero)',
+  },
+  'lodging.folio_payment.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (folio hotelero)',
+  },
   // Layaway (Plan Separé)
   'layaway.payment.cash': {
     code: '1105',
@@ -1107,6 +1122,7 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'layaway.cancelled': 'Plan separe cancelado',
   'layaway.completed': 'Plan separe completado',
   'layaway.payment': 'Pago plan separe',
+  'lodging.folio_payment': 'Pago de folio hotelero',
   'order.completed': 'Orden completada',
   'order_item.prepared_waste': 'Merma de plato preparado',
   'order_item.prepared_reuse': 'Reuso de insumos de plato preparado',

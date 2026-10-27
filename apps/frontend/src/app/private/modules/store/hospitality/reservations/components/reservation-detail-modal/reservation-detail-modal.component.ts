@@ -29,7 +29,6 @@ import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
 import { LodgingUnitsService } from '../../../rooms/services/units.service';
 import {
   countNights,
-  FOLIO_STATUS_LABELS,
   LodgingReservation,
   LodgingReservationRoom,
   RESERVATION_STATUS_LABELS,
@@ -43,6 +42,7 @@ import {
   RoomChangeTarget,
 } from '../room-change-modal/room-change-modal.component';
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
+import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
@@ -74,6 +74,7 @@ function todayLocal(): string {
  * H3.1: guest register (holder and companions by room).
  * H3.2: "Check-in" picks the room of each unassigned room, asks to confirm a
  * dirty one and opens the folio ("Folio · Abierto · $0").
+ * H3.4: the folio panel shows nights, charges, voids, payments and balance.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -90,6 +91,7 @@ function todayLocal(): string {
     SelectorComponent,
     RoomChangeModalComponent,
     GuestRegisterComponent,
+    FolioPanelComponent,
   ],
   template: `
     <app-modal
@@ -148,14 +150,8 @@ function todayLocal(): string {
             </p>
           }
 
-          @if (r.folio; as folio) {
-            <p
-              class="flex items-center gap-2 rounded-lg border border-border px-3 py-2 font-medium text-text-primary"
-              data-testid="reservation-folio"
-            >
-              <app-icon name="receipt" [size]="16" />
-              Folio · {{ folioStatus(folio.status) }} · {{ money(folio.order.grand_total) }}
-            </p>
+          @if (r.folio) {
+            <app-folio-panel [reservationId]="r.id" [inHouse]="r.status === 'checked_in'" />
           }
 
           <div>
@@ -465,10 +461,6 @@ export class ReservationDetailModalComponent {
     const adults = `${room.adults} ${room.adults === 1 ? 'adulto' : 'adultos'}`;
     if (room.children < 1) return adults;
     return `${adults} · ${room.children} ${room.children === 1 ? 'niño' : 'niños'}`;
-  }
-
-  folioStatus(status: keyof typeof FOLIO_STATUS_LABELS): string {
-    return FOLIO_STATUS_LABELS[status] ?? status;
   }
 
   /** Active rooms of the same type; a dirty one says so before picking it. */

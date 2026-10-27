@@ -1430,6 +1430,8 @@ model order_item_taxes {
 
 model order_items {
   financial_lines order_financial_lines[]
+  // H3.4 — hotel night this line charges (folio).
+  lodging_room_night lodging_room_nights?
   id                               Int                      @id @default(autoincrement())
   order_id                         Int
   product_id                       Int?
@@ -2709,13 +2711,16 @@ model lodging_room_nights {
   night_date          DateTime  @db.Date
   rate_amount         Decimal   @db.Decimal(14, 2)
   is_active           Boolean   @default(true)
+  // H3.4 — folio line that charged this night; null = not posted yet.
+  posted_order_item_id Int?     @unique
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
-  store            stores                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  reservation_room lodging_reservation_rooms @relation(fields: [reservation_room_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  unit_type        lodging_unit_types        @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  unit             lodging_units?            @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  store             stores                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room  lodging_reservation_rooms @relation(fields: [reservation_room_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type         lodging_unit_types        @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit              lodging_units?            @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  posted_order_item order_items?              @relation(fields: [posted_order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([unit_type_id, night_date, is_active])
   @@index([reservation_room_id])

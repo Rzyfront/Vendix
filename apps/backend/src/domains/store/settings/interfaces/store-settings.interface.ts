@@ -1156,6 +1156,11 @@ export interface HospitalitySettings {
    * reservation whose guest never arrived becomes no-show. Default `06:00`.
    */
   no_show_time?: string;
+  /**
+   * H3.4 — `HH:mm` (store time): from this time the night audit charges the
+   * nights before the current business day to each in-house folio.
+   */
+  night_audit_time?: string;
   /** Registro Nacional de Turismo number. Empty until the owner sets it. */
   rnt_number?: string;
   /**

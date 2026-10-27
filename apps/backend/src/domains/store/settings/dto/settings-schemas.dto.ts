@@ -1228,6 +1228,16 @@ export class HospitalitySettingsDto {
   no_show_time?: string;
 
   @ApiProperty({
+    example: '02:00',
+    required: false,
+    description:
+      'Night audit time (HH:mm, store time zone): from then the nights before the current business day are charged to the in-house folios.',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'night_audit_time debe tener formato HH:mm' })
+  night_audit_time?: string;
+
+  @ApiProperty({
     example: '12345',
     required: false,
     description: 'Registro Nacional de Turismo (RNT) number of the hotel.',

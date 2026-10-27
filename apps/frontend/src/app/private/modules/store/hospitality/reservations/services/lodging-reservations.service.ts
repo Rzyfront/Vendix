@@ -20,6 +20,11 @@ import {
 } from '../interfaces/reservation.interface';
 import { SellableRatePlan } from '../../rates/interfaces/rate-plan.interface';
 import { LodgingGuest, LodgingGuestRequest } from '../interfaces/guest.interface';
+import {
+  FolioChargeRequest,
+  FolioDetail,
+  FolioPaymentRequest,
+} from '../interfaces/folio.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -186,6 +191,44 @@ export class LodgingReservationsService {
   removeGuest(reservationId: number, guestId: number): Observable<{ id: number }> {
     return this.http
       .delete<ApiResponse<{ id: number }>>(`${this.baseUrl}/${reservationId}/guests/${guestId}`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.4 — guest folio of a checked-in reservation. */
+  getFolio(reservationId: number): Observable<FolioDetail> {
+    return this.http
+      .get<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** "Cargar noche": charges the nights due up to today. */
+  postFolioNights(reservationId: number): Observable<{ folio: FolioDetail; message: string }> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/nights`, {})
+      .pipe(
+        map((res) => ({ folio: res.data, message: res.message ?? 'Noches cargadas' })),
+        catchError(this.handleError),
+      );
+  }
+
+  addFolioCharge(reservationId: number, body: FolioChargeRequest): Observable<FolioDetail> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/charges`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  voidFolioCharge(reservationId: number, lineId: number, reason: string): Observable<FolioDetail> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(
+        `${this.baseUrl}/${reservationId}/folio/charges/${lineId}/void`,
+        { reason },
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  registerFolioPayment(reservationId: number, body: FolioPaymentRequest): Observable<FolioDetail> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/payments`, body)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
