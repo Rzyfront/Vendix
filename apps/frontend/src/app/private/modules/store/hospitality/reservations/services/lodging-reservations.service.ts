@@ -7,6 +7,7 @@ import { parseApiError, ParsedApiError } from '../../../../../../core/utils/pars
 import {
   CheckInRequest,
   CreateReservationRequest,
+  FrontDeskBoard,
   LodgingReservation,
   Rack,
   ReservationListQuery,
@@ -50,6 +51,13 @@ export class LodgingReservationsService {
   stats(): Observable<ReservationStats> {
     return this.http
       .get<ApiResponse<ReservationStats>>(`${this.baseUrl}/stats`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.3 — front desk board of the store business day. */
+  frontDesk(): Observable<FrontDeskBoard> {
+    return this.http
+      .get<ApiResponse<FrontDeskBoard>>(`${environment.apiUrl}/store/hospitality/front-desk`)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

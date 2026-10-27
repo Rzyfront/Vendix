@@ -575,6 +575,13 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/rooms',
         },
         {
+          // H3.3 — front desk board of the day: same panel_ui key as Reservas.
+          label: 'Recepción',
+          icon: 'concierge-bell',
+          route: '/admin/hospitality/front-desk',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // "Reservas" already maps to the appointments module
           // (`orders_reservations`), so the key is explicit.
           label: 'Reservas',

@@ -1026,6 +1026,14 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/hospitality/reservations/pages/rack-page/rack-page.component'
               ).then((c) => c.HospitalityRackPageComponent),
           },
+          {
+            // H3.3 — front desk board; same panel_ui key as Reservas.
+            path: 'front-desk',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/front-desk-page/front-desk-page.component'
+              ).then((c) => c.HospitalityFrontDeskPageComponent),
+          },
         ],
       },
       // Subscription Routes

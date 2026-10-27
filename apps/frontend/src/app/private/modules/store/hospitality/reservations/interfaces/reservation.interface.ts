@@ -160,6 +160,31 @@ export interface ReservationStats {
   occupancy_percent: number;
 }
 
+/** H3.3 — one reservation of the front desk board. Dates are `YYYY-MM-DD`. */
+export interface FrontDeskRow {
+  id: number;
+  reservation_number: string;
+  status: LodgingReservationStatus;
+  arrival_date: string;
+  departure_date: string;
+  guest_name: string;
+  /** "101 · Doble, Sin asignar · Suite". */
+  rooms: string;
+  adults: number;
+  children: number;
+  folio_id: number | null;
+  /** Folio balance (charges − payments) as a decimal string; null without a folio. */
+  balance: string | null;
+}
+
+/** H3.3 — today's arrivals, departures and guests in house (store business day). */
+export interface FrontDeskBoard {
+  business_date: string;
+  arrivals: FrontDeskRow[];
+  departures: FrontDeskRow[];
+  in_house: FrontDeskRow[];
+}
+
 /** Stay to price: dates are `YYYY-MM-DD`, departure exclusive. */
 export interface ReservationQuoteRequest {
   unit_type_id: number;

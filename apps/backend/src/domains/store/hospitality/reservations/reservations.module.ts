@@ -14,6 +14,8 @@ import { LodgingAllotmentsService } from './allotments/allotments.service';
 import { LodgingGuestsController } from './guests/guests.controller';
 import { LodgingGuestsService } from './guests/guests.service';
 import { LodgingCheckInService } from './check-in/check-in.service';
+import { LodgingFrontDeskController } from './front-desk/front-desk.controller';
+import { LodgingFrontDeskService } from './front-desk/lodging-front-desk.service';
 
 @Module({
   imports: [ResponseModule, PrismaModule, LodgingRatesModule],
@@ -22,6 +24,7 @@ import { LodgingCheckInService } from './check-in/check-in.service';
     LodgingRackController,
     LodgingAllotmentsController,
     LodgingGuestsController,
+    LodgingFrontDeskController,
   ],
   providers: [
     LodgingReservationsService,
@@ -32,6 +35,7 @@ import { LodgingCheckInService } from './check-in/check-in.service';
     LodgingAllotmentsService,
     LodgingGuestsService,
     LodgingCheckInService,
+    LodgingFrontDeskService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })
