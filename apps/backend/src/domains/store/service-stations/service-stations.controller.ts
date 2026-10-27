@@ -150,7 +150,11 @@ export class ServiceStationsController {
 
   @Delete(':id')
   @Permissions('store:reservations:update')
-  async deactivate(@Param('id', ParseIntPipe) id: number) {
+  async remove(@Param('id', ParseIntPipe) id: number, @Query('hard') hard?: string) {
+    if (hard === 'true') {
+      await this.service.destroy(id);
+      return this.response.deleted('Estación eliminada');
+    }
     return this.response.updated(await this.service.deactivate(id), 'Estación desactivada');
   }
 }

@@ -1410,9 +1410,20 @@
             </div>
 
             <div class="flex items-center justify-between pt-2">
-              <app-button variant="secondary" (clicked)="toggleStationStatus()" [disabled]="saving()">
-                {{ station.status === 'active' ? 'Desactivar Estación' : 'Activar Estación' }}
-              </app-button>
+              <div class="flex items-center gap-2">
+                <app-button
+                  [variant]="station.status === 'active' ? 'outline-danger' : 'secondary'"
+                  (clicked)="toggleStationStatus()"
+                  [disabled]="saving()"
+                >
+                  <app-icon name="power" [size]="14" slot="icon" />
+                  {{ station.status === 'active' ? 'Desactivar Estación' : 'Activar Estación' }}
+                </app-button>
+                <app-button variant="outline-danger" (clicked)="askDeleteStation()" [disabled]="saving()">
+                  <app-icon name="trash" [size]="14" slot="icon" />
+                  Eliminar Estación
+                </app-button>
+              </div>
               <app-button variant="primary" (clicked)="saveStationDetails()" [loading]="saving()">
                 Guardar Datos
               </app-button>
@@ -1477,6 +1488,32 @@
         }
       </div>
     </app-modal>
+  }
+
+  @if (showDeactivateConfirm()) {
+    <app-confirmation-modal
+      [isOpen]="true"
+      title="Desactivar estación"
+      [message]="'¿Desactivar ' + (selectedStation()?.name || 'la estación') + '? No aceptará nuevos ingresos, pero se conserva su historial.'"
+      confirmText="Desactivar"
+      cancelText="Cancelar"
+      confirmVariant="danger"
+      (confirm)="confirmDeactivateStation()"
+      (cancel)="showDeactivateConfirm.set(false)"
+    />
+  }
+
+  @if (showDeleteConfirm()) {
+    <app-confirmation-modal
+      [isOpen]="true"
+      title="Eliminar estación"
+      [message]="'¿Eliminar ' + (selectedStation()?.name || 'la estación') + ' definitivamente? Solo es posible si no tiene atenciones registradas.'"
+      confirmText="Eliminar"
+      cancelText="Cancelar"
+      confirmVariant="danger"
+      (confirm)="confirmDeleteStation()"
+      (cancel)="showDeleteConfirm.set(false)"
+    />
   }
 
   <!-- Modal 5: Visualización, Descarga e Impresión de Código QR -->

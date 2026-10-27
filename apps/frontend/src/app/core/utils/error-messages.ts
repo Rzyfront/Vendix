@@ -529,6 +529,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
   STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
+  STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',

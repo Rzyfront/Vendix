@@ -107,15 +107,27 @@ export class ServiceStationsService {
   }
 
   async getPublicUrl(id: number): Promise<string> {
-    await this.findOne(id);
+    const station = await this.findOne(id);
+    // app_type is the source of truth for app selection (domain_type is
+    // legacy). Same fallback as the session access URL: any active ecommerce
+    // domain first (primary preferred), then any primary active domain — the
+    // /estacion page also ships in the landing app, so either host works.
     const domain = await this.prisma.domain_settings.findFirst({
-      where: { store_id: this.storeId, domain_type: 'ecommerce', status: 'active', is_primary: true },
+      where: { store_id: this.storeId, app_type: 'STORE_ECOMMERCE', status: 'active' },
+      orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
+      select: { hostname: true },
+    }) ?? await this.prisma.domain_settings.findFirst({
+      where: { store_id: this.storeId, is_primary: true, status: 'active' },
       orderBy: { updated_at: 'desc' },
       select: { hostname: true },
     });
-    if (!domain?.hostname) throw new BadRequestException('Configura un dominio ecommerce principal para usar el QR público.');
+    if (!domain?.hostname) {
+      throw new VendixHttpException(
+        ErrorCodes.STATION_014,
+        'Configura y activa un dominio para tu tienda (Configuración > Dominios) para usar el QR público.',
+      );
+    }
     const base = /^https?:\/\//i.test(domain.hostname) ? domain.hostname : `https://${domain.hostname}`;
-    const station = await this.prisma.service_stations.findFirst({ where: { id, store_id: this.storeId }, select: { public_id: true } });
     if (!station?.public_id) throw new NotFoundException('Estación no encontrada');
     return `${base}/estacion/${station.public_id}`;
   }
@@ -296,6 +308,49 @@ export class ServiceStationsService {
       data: { status: 'inactive', updated_at: new Date() },
     });
     return this.findOne(id);
+  }
+
+  /**
+   * Hard delete. Only stations without operational history can be removed:
+   * any recorded session blocks it (billing history must be preserved), as do
+   * active holds and pending reschedule requests. Pure config children
+   * (schedules, exceptions, assignments) and terminal holds are cleaned up.
+   */
+  async destroy(id: number) {
+    const station = await this.findOne(id);
+    const [sessions, activeHolds, pendingReschedules] = await Promise.all([
+      this.prisma.service_sessions.count({ where: { store_id: this.storeId, station_id: id } }),
+      this.prisma.service_allocations.count({
+        where: { store_id: this.storeId, station_id: id, state: { in: ['held', 'confirmed', 'in_service'] } },
+      }),
+      this.prisma.booking_reschedule_requests.count({
+        where: { store_id: this.storeId, requested_station_id: id, status: 'pending' },
+      }),
+    ]);
+    if (sessions > 0) {
+      throw new ConflictException(
+        `No se puede eliminar: la estación tiene ${sessions} atención(es) registrada(s). Desactívala si ya no la usas.`,
+      );
+    }
+    if (activeHolds > 0) {
+      throw new ConflictException('No se puede eliminar: la estación tiene reservas o turnos activos.');
+    }
+    if (pendingReschedules > 0) {
+      throw new ConflictException('No se puede eliminar: la estación tiene solicitudes de reprogramación pendientes.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.service_allocations.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.booking_reschedule_requests.updateMany({
+        where: { store_id: this.storeId, requested_station_id: id },
+        data: { requested_station_id: null },
+      });
+      await tx.service_station_exceptions.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.service_station_schedules.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.service_station_services.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.service_station_providers.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.service_stations.delete({ where: { store_id_id: { store_id: this.storeId, id } } });
+    });
+    return station;
   }
 
   async getSchedules(id: number) {

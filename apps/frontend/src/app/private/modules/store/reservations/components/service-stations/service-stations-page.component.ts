@@ -10,6 +10,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
+  ConfirmationModalComponent,
   CustomerSelectComponent,
   CustomerSelectOption,
   IconComponent,
@@ -231,6 +232,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     CardComponent,
     SpinnerComponent,
     ButtonComponent,
+    ConfirmationModalComponent,
     IconComponent,
     BadgeComponent,
     ModalComponent,
@@ -345,6 +347,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly showCheckinModal = signal(false);
   readonly showSessionModal = signal(false);
   readonly showConfigModal = signal(false);
+  readonly showDeactivateConfirm = signal(false);
+  readonly showDeleteConfirm = signal(false);
   readonly showQrModal = signal(false);
 
   // QR Modal State
@@ -1184,8 +1188,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         },
       });
       this.qrDataUrl.set(dataUrl);
-    } catch {
-      this.toastService.error('Error al generar el código QR de la estación.');
+    } catch (error) {
+      this.toastService.error(extractApiErrorMessage(error) || 'Error al generar el código QR de la estación.');
     } finally {
       this.qrLoading.set(false);
     }
@@ -1197,7 +1201,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     let url = this.qrPublicUrl();
     if (!url) {
       try { url = await firstValueFrom(this.stationsApi.getPublicUrl(st.id)); this.qrPublicUrl.set(url); }
-      catch { this.toastService.error('No se pudo resolver el dominio público de la tienda.'); return; }
+      catch (error) { this.toastService.error(extractApiErrorMessage(error) || 'No se pudo resolver el dominio público de la tienda.'); return; }
     }
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(() => {
@@ -2358,11 +2362,58 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   toggleStationStatus(): void {
     const station = this.selectedStation();
     if (!station) return;
-    if (station.status === 'active') {
-      this.runSave(this.stationsApi.deactivate(station.id), 'Estación desactivada.', station.id);
-    } else {
+    if (station.status !== 'active') {
       this.runSave(this.stationsApi.update(station.id, { status: 'active' }), 'Estación activada.', station.id);
+      return;
     }
+    const hasOpen = this.activeSessions().some(
+      (s) => s.station_id === station.id && (s.status === 'open' || s.status === 'in_progress' || s.status === 'paused'),
+    );
+    if (hasOpen) {
+      this.toastService.warning('Esta estación tiene una atención abierta. Ciérrala antes de desactivar.');
+      return;
+    }
+    this.showDeactivateConfirm.set(true);
+  }
+
+  confirmDeactivateStation(): void {
+    const station = this.selectedStation();
+    this.showDeactivateConfirm.set(false);
+    if (!station) return;
+    this.runSave(this.stationsApi.deactivate(station.id), 'Estación desactivada.', station.id);
+  }
+
+  askDeleteStation(): void {
+    const station = this.selectedStation();
+    if (!station) return;
+    const hasOpen = this.activeSessions().some(
+      (s) => s.station_id === station.id && (s.status === 'open' || s.status === 'in_progress' || s.status === 'paused'),
+    );
+    if (hasOpen) {
+      this.toastService.warning('Esta estación tiene una atención abierta. Ciérrala antes de eliminar.');
+      return;
+    }
+    this.showDeleteConfirm.set(true);
+  }
+
+  confirmDeleteStation(): void {
+    const station = this.selectedStation();
+    this.showDeleteConfirm.set(false);
+    if (!station) return;
+    this.saving.set(true);
+    this.stationsApi.deleteStation(station.id).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.showConfigModal.set(false);
+        this.selectedStation.set(null);
+        this.toastService.success('Estación eliminada.');
+        this.loadStations();
+      },
+      error: (error: unknown) => {
+        this.saving.set(false);
+        this.toastService.error(this.errorText(error, 'No fue posible eliminar la estación.'));
+      },
+    });
   }
 
   toggleService(id: number): void {

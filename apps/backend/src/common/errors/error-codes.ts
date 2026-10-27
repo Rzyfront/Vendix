@@ -5287,6 +5287,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Service session intake values include fields outside the linked data collection template',
   },
+  STATION_014: {
+    code: 'STATION_014',
+    httpStatus: 404,
+    devMessage: 'No active store domain to build the station public URL',
+  },
   SERVICE_BOOKING_001: {
     code: 'SERVICE_BOOKING_001',
     httpStatus: 409,

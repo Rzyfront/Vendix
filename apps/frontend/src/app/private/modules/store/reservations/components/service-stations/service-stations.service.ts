@@ -179,6 +179,10 @@ export class ServiceStationsService {
     return this.http.delete<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`).pipe(map((r) => this.unwrap(r)));
   }
 
+  deleteStation(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.base}/${id}?hard=true`);
+  }
+
   setServices(id: number, product_ids: number[]): Observable<ServiceStation> {
     return this.http.put<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}/services`, { product_ids }).pipe(map((r) => this.unwrap(r)));
   }
