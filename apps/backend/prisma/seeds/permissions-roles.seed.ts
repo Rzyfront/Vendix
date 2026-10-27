@@ -5362,6 +5362,16 @@ export async function seedPermissionsAndRoles(
       p.name === 'store:carrier:close' ||
       p.name === 'store:carrier:stop:read' ||
       p.name === 'store:carrier:stop:update_address' ||
+      // Planillas (admin view the carrier panel already shows): open the route,
+      // its journey and live tracking (positions/sync require read:one), and
+      // run it end to end. No create/update/delete/void of routes.
+      p.name === 'store:dispatch_routes:read' ||
+      p.name === 'store:dispatch_routes:read:one' ||
+      p.name === 'store:dispatch_routes:dispatch' ||
+      p.name === 'store:dispatch_routes:settle' ||
+      p.name === 'store:dispatch_routes:release_stop' ||
+      p.name === 'store:dispatch_routes:close' ||
+      p.name === 'store:dispatch_routes:print' ||
       // Remisiones - lectura y captura en ruta (no update / delete / void / invoice)
       p.name === 'store:dispatch_notes:create' ||
       p.name === 'store:dispatch_notes:read' ||
