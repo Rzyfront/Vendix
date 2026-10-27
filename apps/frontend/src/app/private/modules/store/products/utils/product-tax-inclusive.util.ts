@@ -206,8 +206,12 @@ export type BulkTaxActionMode = 'add' | 'remove' | 'replace';
 export interface CoercedBulkTaxAction {
   mode: BulkTaxActionMode;
   ids: number[];
-  /** Solo presente cuando hay al menos una entrada filtrada a `ids`. */
-  inclusive?: TaxInclusivePayloadMap;
+  /**
+   * Nombre del DTO backend (`BulkRelationalTaxActionDto.tax_inclusive_map`).
+   * Solo presente cuando hay al menos una entrada filtrada a `ids` y el modo
+   * no es `remove` (el backend rechaza cualquier mapa en REMOVE).
+   */
+  tax_inclusive_map?: TaxInclusivePayloadMap;
 }
 
 function isBulkTaxActionMode(raw: unknown): raw is BulkTaxActionMode {
@@ -217,13 +221,11 @@ function isBulkTaxActionMode(raw: unknown): raw is BulkTaxActionMode {
 /**
  * Coerción de la acción masiva de impuestos, INCLUSIVE preservado (F-028).
  *
- * La página (`products-bulk-edit-page.component.ts`, fuera del alcance de este
- * cambio) debe delegar su rama `'tax-action'` de `coerceBulkEditValue` a esta
- * función —ver parche exacto en el mensaje del commit—. Hasta entonces, el
- * hijo ya escribe `inclusive` en el FormGroup y esta función es su espejo.
+ * La usa la rama `'tax-action'` de `coerceBulkEditValue`: lee el control
+ * `inclusive` del FormGroup y lo emite como `tax_inclusive_map`.
  *
  * Devuelve `undefined` cuando no hay nada que mandar (modo inválido).
- * `inclusive` se filtra a `ids`: quitar un impuesto de la selección lo saca
+ * El mapa se filtra a `ids`: quitar un impuesto de la selección lo saca
  * también del mapa (F-032).
  */
 export function coerceBulkTaxAction(raw: unknown): CoercedBulkTaxAction | undefined {
@@ -244,6 +246,8 @@ export function coerceBulkTaxAction(raw: unknown): CoercedBulkTaxAction | undefi
     normalizeTaxInclusiveMap(action[BULK_TAX_INCLUSIVE_CONTROL]),
   );
   const out: CoercedBulkTaxAction = { mode: modeRaw, ids };
-  if (Object.keys(inclusive).length > 0) out.inclusive = inclusive;
+  if (modeRaw !== 'remove' && Object.keys(inclusive).length > 0) {
+    out.tax_inclusive_map = inclusive;
+  }
   return out;
 }

@@ -1713,20 +1713,6 @@ export class ProductsBulkEditService {
       action.ids,
     );
 
-    if (
-      action.mode === RelationalActionMode.REPLACE &&
-      normalizedMap !== undefined
-    ) {
-      const missing = action.ids.filter((cid) => !normalizedMap.has(cid));
-      if (missing.length > 0) {
-        throw new VendixHttpException(
-          PROD_TAXMAP_001,
-          'tax_category_action REPLACE exige el mapa completo: cada categoría de ids debe traer su flag.',
-          { missing_ids: missing },
-        );
-      }
-    }
-
     // F-009 — el bulk NO filtraba por scope: ids de otra tienda entraban al
     // preview. Mismo predicado que el create unitario (tienda o globales).
     const context = RequestContextService.getContext();
@@ -1786,10 +1772,10 @@ export class ProductsBulkEditService {
    * Estado fiscal SIGUIENTE de un producto del lote. Puro: sin base, misma
    * función para preview (diff) y apply (payload de `update()`).
    *
-   * - ADD: las ya asignadas CONSERVAN su flag (el mapa no las toca); las
-   *   nuevas resuelven mapa ?? catálogo (F-009: sin reversión silenciosa).
-   * - REPLACE: el conjunto es `ids`; cada flag es mapa ?? catálogo (con mapa
-   *   presente la cobertura total ya se exigió en el contexto).
+   * - ADD: las ya asignadas conservan su flag salvo entrada explícita en el
+   *   mapa; las nuevas resuelven mapa ?? catálogo (F-009: sin reversión
+   *   silenciosa).
+   * - REPLACE: el conjunto es `ids`; cada flag es mapa ?? catálogo.
    * - REMOVE: el conjunto excluye `ids`; los que quedan conservan su flag.
    */
   private resolveBulkTaxTarget(
@@ -1823,7 +1809,8 @@ export class ProductsBulkEditService {
     const nextFlags = new Map<number, boolean>();
     for (const cid of targetIds) {
       if (current.has(cid)) {
-        nextFlags.set(cid, current.get(cid)!);
+        // Una entrada explícita del mapa es decisión del usuario, no reversión.
+        nextFlags.set(cid, normalizedMap?.get(cid) ?? current.get(cid)!);
       } else {
         nextFlags.set(
           cid,
