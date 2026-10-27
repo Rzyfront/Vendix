@@ -51,6 +51,8 @@ import { LodgingNightAuditController } from './night-audit/night-audit.controlle
 import { LodgingNightAuditService } from './night-audit/night-audit.service';
 import { LodgingPerformanceController } from './reports/performance.controller';
 import { LodgingPerformanceService } from './reports/performance.service';
+import { LodgingPickupController } from './reports/pickup.controller';
+import { LodgingPickupService } from './reports/pickup.service';
 
 @Module({
   imports: [
@@ -96,6 +98,7 @@ import { LodgingPerformanceService } from './reports/performance.service';
     LodgingInventoryBlocksController,
     LodgingNightAuditController,
     LodgingPerformanceController,
+    LodgingPickupController,
   ],
   providers: [
     LodgingReservationsService,
@@ -119,6 +122,7 @@ import { LodgingPerformanceService } from './reports/performance.service';
     BookingHoldExpiryJob,
     LodgingNightAuditService,
     LodgingPerformanceService,
+    LodgingPickupService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
 })

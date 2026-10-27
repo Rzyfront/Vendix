@@ -41,6 +41,7 @@ import {
 } from '../interfaces/folio.interface';
 import { NightAuditView } from '../interfaces/night-audit.interface';
 import { LodgingPerformanceReport } from '../interfaces/performance.interface';
+import { LodgingPickupReport } from '../interfaces/pickup.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -303,6 +304,17 @@ export class LodgingReservationsService {
     return this.http
       .get<ApiResponse<LodgingPerformanceReport>>(
         `${environment.apiUrl}/store/hospitality/reports/performance`,
+        { params },
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.3 — pickup (last 7 and 30 days) and projected occupancy of the next `days` stay dates. */
+  pickup(days: number): Observable<LodgingPickupReport> {
+    const params = new HttpParams().set('days', String(days));
+    return this.http
+      .get<ApiResponse<LodgingPickupReport>>(
+        `${environment.apiUrl}/store/hospitality/reports/pickup`,
         { params },
       )
       .pipe(map((res) => res.data), catchError(this.handleError));

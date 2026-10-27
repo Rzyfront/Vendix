@@ -874,6 +874,12 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'chart-line',
     },
+    {
+      path: '/admin/hospitality/pickup',
+      title: 'Pickup y pronóstico',
+      parent: 'Hotelería',
+      icon: 'calendar-clock',
+    },
 
     // Customers
     {

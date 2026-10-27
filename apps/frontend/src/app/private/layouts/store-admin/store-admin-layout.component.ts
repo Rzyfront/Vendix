@@ -619,6 +619,13 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_reservations',
         },
         {
+          // H7.3 — pickup and forecast: same panel_ui key.
+          label: 'Pickup y pronóstico',
+          icon: 'calendar-clock',
+          route: '/admin/hospitality/pickup',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
           label: 'Servicios exentos',
           icon: 'file-check',

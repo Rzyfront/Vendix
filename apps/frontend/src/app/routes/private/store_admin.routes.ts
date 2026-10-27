@@ -1067,6 +1067,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityPerformancePageComponent),
           },
           {
+            // H7.3 — "Pickup y pronóstico"; same panel_ui key as Reservas.
+            path: 'pickup',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/pickup-page/pickup-page.component'
+              ).then((c) => c.HospitalityPickupPageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

@@ -6010,6 +6010,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
   },
+  // H7.3 — pickup and forecast report.
+  LODGING_PICKUP_RANGE_001: {
+    code: 'LODGING_PICKUP_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El horizonte del pronóstico debe ir de 1 a 365 días',
+  },
   // H3.7 — check-out with payment and electronic invoice.
   LODGING_CHECKOUT_001: {
     code: 'LODGING_CHECKOUT_001',
