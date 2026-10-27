@@ -553,14 +553,24 @@
   <!-- Modal 2: Nuevo Ingreso Operativo (Apertura de Cuenta) -->
   <app-modal [(isOpen)]="showCheckinModal" title="Nuevo Ingreso de Estación" subtitle="Datos de la estación, cliente y apertura de cuenta" size="lg">
     <div class="space-y-4">
-      <!-- Selección de Estación Asignada -->
-      <app-selector
-        label="Estación / Bahía a Ocupar"
-        [options]="stationSelectorOptions()"
-        [ngModel]="checkinStationId()"
-        (ngModelChange)="onCheckinStationChange($event)"
-        [required]="true"
-      />
+      <!-- Estación: nombre fijo si se abrió desde "Asignar"; select solo en ingreso general -->
+      @if (checkinStationLocked() && selectedCheckinStation(); as st) {
+        <div>
+          <span class="block font-medium mb-2 text-[11px] uppercase tracking-[0.05em] text-[var(--color-text-muted)]">Estación / Bahía a Ocupar</span>
+          <div class="flex items-center gap-2 h-10 sm:h-11 px-3 sm:px-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-background,#f9fafb)] text-sm sm:text-base font-semibold text-[var(--color-text-primary)]">
+            <app-icon name="warehouse" [size]="16" class="text-[var(--color-primary)]" />
+            {{ st.name }}
+          </div>
+        </div>
+      } @else {
+        <app-selector
+          label="Estación / Bahía a Ocupar"
+          [options]="stationSelectorOptions()"
+          [ngModel]="checkinStationId()"
+          (ngModelChange)="onCheckinStationChange($event)"
+          [required]="true"
+        />
+      }
 
       <!-- Campos fijos por tipo: solo cuando la estación/servicio no tiene formulario de recepción -->
       @if (!checkinIntakeTemplate() && !checkinIntakeLoading() && !selectedCheckinStation()?.intake_template_id) {

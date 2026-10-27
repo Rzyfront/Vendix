@@ -361,6 +361,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Check-in form
   readonly checkinStationId = signal<number | null>(null);
+  /** True si el modal se abrió desde "Asignar" de una tarjeta: muestra el nombre fijo. */
+  readonly checkinStationLocked = signal(false);
   readonly checkinVehicleName = signal('');
   readonly checkinPlate = signal('');
   readonly checkinMileage = signal('');
@@ -1413,6 +1415,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Modal 2: Check-in / Nuevo Ingreso
   openCheckinModal(station?: ServiceStation): void {
+    this.checkinStationLocked.set(!!station);
     let target: ServiceStation | null = station ?? null;
     if (!target) {
       const freeStation = this.stations().find((s) => s.status === 'active' && !this.stationSession(s.id));
