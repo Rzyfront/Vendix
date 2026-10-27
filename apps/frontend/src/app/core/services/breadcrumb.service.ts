@@ -850,6 +850,30 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'file-check',
     },
+    {
+      path: '/admin/hospitality/housekeeping',
+      title: 'Housekeeping',
+      parent: 'Hotelería',
+      icon: 'sparkles',
+    },
+    {
+      path: '/admin/hospitality/channels',
+      title: 'Canales · iCal',
+      parent: 'Hotelería',
+      icon: 'share-2',
+    },
+    {
+      path: '/admin/hospitality/night-audit',
+      title: 'Cierre del día',
+      parent: 'Hotelería',
+      icon: 'moon',
+    },
+    {
+      path: '/admin/hospitality/performance',
+      title: 'Indicadores',
+      parent: 'Hotelería',
+      icon: 'chart-line',
+    },
 
     // Customers
     {

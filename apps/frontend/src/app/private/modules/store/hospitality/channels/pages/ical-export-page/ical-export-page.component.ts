@@ -7,21 +7,31 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import {
-  BadgeComponent,
-  BadgeVariant,
+  AlertBannerComponent,
   ButtonComponent,
   CardComponent,
   DialogService,
+  DropdownAction,
   EmptyStateComponent,
+  FilterConfig,
+  FilterValues,
   InputComponent,
+  InputsearchComponent,
+  ItemListCardConfig,
+  ModalComponent,
+  OptionsDropdownComponent,
+  ResponsiveDataViewComponent,
+  ScrollableTab,
+  ScrollableTabsComponent,
   SelectorComponent,
   SelectorOption,
-  SpinnerComponent,
-  StickyHeaderComponent,
+  StatsComponent,
+  TableAction,
+  TableColumn,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import {
@@ -30,6 +40,67 @@ import {
   IcalImportStatus,
 } from '../../interfaces/ical-export.interface';
 import { LodgingIcalExportService } from '../../services/ical-export.service';
+
+type ChannelTab = 'export' | 'import';
+
+interface ExportRow extends IcalExportUnit {
+  room: string;
+  link_state: 'published' | 'none' | 'inactive';
+  url_label: string;
+}
+
+interface ImportRow extends IcalImport {
+  room: string;
+  host_label: string;
+  sync_state: IcalImportStatus | 'never';
+  synced_label: string;
+  message_label: string;
+}
+
+const LINK_BADGE = {
+  type: 'custom' as const,
+  size: 'sm' as const,
+  colorMap: { published: '#10b981', none: '#9ca3af', inactive: '#6b7280' },
+};
+
+const LINK_LABELS: Record<ExportRow['link_state'], string> = {
+  published: 'Publicado',
+  none: 'Sin enlace',
+  inactive: 'Inactiva',
+};
+
+const SYNC_BADGE = {
+  type: 'custom' as const,
+  size: 'sm' as const,
+  colorMap: { ok: '#10b981', warning: '#f59e0b', error: '#ef4444', never: '#9ca3af' },
+};
+
+const SYNC_LABELS: Record<ImportRow['sync_state'], string> = {
+  ok: 'Sincronizado',
+  warning: 'Posible doble venta',
+  error: 'Error',
+  never: 'Sin sincronizar',
+};
+
+const linkLabel = (value: ExportRow['link_state']): string => LINK_LABELS[value] ?? value;
+const syncLabel = (value: ImportRow['sync_state']): string => SYNC_LABELS[value] ?? value;
+
+/** Case- and accent-insensitive "contains". */
+function matches(term: string, ...values: (string | null | undefined)[]): boolean {
+  const normalize = (v: string) =>
+    v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const needle = normalize(term.trim());
+  return !needle || values.some((v) => !!v && normalize(v).includes(needle));
+}
+
+/** Only the host: the rest of the URL is the channel's secret. */
+function host(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Hospitality Suite — Canales → iCal (H6.1). One export link per room: the
@@ -40,231 +111,262 @@ import { LodgingIcalExportService } from '../../services/ical-export.service';
  * H6.2 — "Importar": the manager pastes the iCal URL of an Airbnb/Booking
  * listing into a room; its reservations block the room in Vendix (rack),
  * synced every 15 minutes and with "Sincronizar ahora".
+ *
+ * Standard admin list module: four stats, the export/import tabs, one card
+ * with the sticky search and the options dropdown (state filter, "Importar
+ * calendario" and refresh) and the responsive data view. The import form
+ * opens in a modal.
  */
 @Component({
   selector: 'app-hospitality-ical-export-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    StickyHeaderComponent,
-    CardComponent,
-    BadgeComponent,
-    ButtonComponent,
-    EmptyStateComponent,
-    SpinnerComponent,
-    InputComponent,
-    SelectorComponent,
+    FormsModule,
     ReactiveFormsModule,
-    DatePipe,
+    NgTemplateOutlet,
+    AlertBannerComponent,
+    ButtonComponent,
+    CardComponent,
+    EmptyStateComponent,
+    InputComponent,
+    InputsearchComponent,
+    ModalComponent,
+    OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    ScrollableTabsComponent,
+    SelectorComponent,
+    StatsComponent,
   ],
+  providers: [DatePipe],
   template: `
-    <div class="w-full overflow-x-hidden">
-      <app-sticky-header
-        title="Canales · iCal"
-        subtitle="Calendarios de Airbnb y Booking: exportar e importar"
-        icon="share-2"
-        variant="glass"
+    <div class="w-full md:space-y-4">
+      <!-- Stats: sticky on mobile, static on desktop -->
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
+        <app-stats
+          title="Habitaciones"
+          [value]="activeUnits()"
+          smallText="activas para publicar"
+          iconName="bed-double"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="units() === null"
+        />
+        <app-stats
+          title="Enlaces publicados"
+          [value]="publishedCount()"
+          smallText="calendarios que exporta Vendix"
+          iconName="share-2"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="units() === null"
+        />
+        <app-stats
+          title="Calendarios importados"
+          [value]="imports()?.length ?? 0"
+          smallText="de Airbnb, Booking u otros"
+          iconName="calendar-check"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="imports() === null"
+        />
+        <app-stats
+          title="Con alerta"
+          [value]="alertCount()"
+          smallText="error o posible doble venta"
+          iconName="alert-triangle"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+          [loading]="imports() === null"
+        />
+      </div>
+
+      <app-scrollable-tabs
+        ariaLabel="Canales iCal"
+        [tabs]="tabs()"
+        [activeTab]="tab()"
+        (tabChange)="onTab($event)"
       />
 
-      <div class="flex flex-col gap-3 p-2 md:p-4">
-        <app-card [responsive]="true">
-          <h2 class="mb-1 font-semibold">Exportar</h2>
-          <p class="mb-3 text-sm text-text-secondary">
-            Copia el enlace de cada habitación y pégalo en Airbnb o Booking (importar
-            calendario). Allá se bloquearán las noches vendidas o bloqueadas en Vendix. El
-            calendario solo lleva fechas: sin precios ni datos del huésped, y el canal lo
-            actualiza cada pocas horas.
-          </p>
-
-          @if (units() === null) {
-            <div class="flex flex-col items-center gap-2 py-8">
-              <app-spinner size="md" />
-              <p class="text-sm text-text-secondary">Cargando habitaciones…</p>
-            </div>
-          } @else if (units()!.length === 0) {
-            <app-empty-state
-              icon="bed-double"
-              title="Sin habitaciones"
-              description="Crea las habitaciones en Hotelería → Habitaciones para publicar su calendario."
-              [showActionButton]="false"
-            />
-          } @else {
-            <div class="flex flex-col divide-y divide-border">
-              @for (unit of units(); track unit.id) {
-                <div
-                  class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
-                  [attr.data-testid]="'ical-unit-' + unit.code"
-                >
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <div class="flex items-center gap-2">
-                      <span class="font-semibold">Habitación {{ unit.code }}</span>
-                      <span class="text-sm text-text-secondary">{{ unit.unit_type.name }}</span>
-                      @if (!unit.is_active) {
-                        <app-badge variant="neutral" size="sm">Inactiva</app-badge>
-                      }
-                    </div>
-                    @if (unit.ical_export_token; as token) {
-                      <code class="block truncate rounded bg-muted px-2 py-1 text-xs" [title]="url(token)">
-                        {{ url(token) }}
-                      </code>
-                    } @else {
-                      <span class="text-xs text-text-secondary">Sin enlace publicado</span>
-                    }
-                  </div>
-
-                  <div class="flex shrink-0 flex-wrap gap-2">
-                    @if (unit.ical_export_token; as token) {
-                      <app-button variant="primary" size="sm" (clicked)="copy(token)">
-                        Copiar URL
-                      </app-button>
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        [loading]="saving() === unit.id"
-                        [disabled]="saving() !== null"
-                        (clicked)="regenerate(unit)"
-                      >
-                        Regenerar
-                      </app-button>
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        [disabled]="saving() !== null"
-                        (clicked)="revoke(unit)"
-                      >
-                        Revocar
-                      </app-button>
-                    } @else {
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        [loading]="saving() === unit.id"
-                        [disabled]="saving() !== null"
-                        (clicked)="generate(unit)"
-                      >
-                        Generar enlace
-                      </app-button>
-                    }
-                  </div>
-                </div>
-              }
-            </div>
-          }
-        </app-card>
-
-        <!-- H6.2 — calendars imported from the channels -->
-        <app-card [responsive]="true">
-          <h2 class="mb-1 font-semibold">Importar</h2>
-          <p class="mb-2 text-sm text-text-secondary">
-            Pega el enlace iCal que Airbnb o Booking dan para el anuncio (exportar calendario).
-            Sus reservas bloquean la habitación en Vendix y se ven en el rack con el nombre del
-            canal. Se sincroniza cada 15 minutos y con «Sincronizar ahora».
-          </p>
-          <p
-            class="mb-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
-            data-testid="ical-import-warning"
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <!-- Sticky search header -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            iCal no trae el precio ni los datos del huésped: solo bloquea las fechas. Además, el
-            canal publica su calendario con horas de retraso, así que una misma noche puede
-            venderse en los dos lados antes de sincronizar (riesgo de doble venta). Si ves el
-            aviso de doble venta, mueve la reserva de Vendix a otra habitación.
-          </p>
-
-          <form
-            [formGroup]="importForm"
-            class="grid grid-cols-1 gap-3 text-sm md:grid-cols-[1fr_1fr_2fr_auto] md:items-end"
-            data-testid="ical-import-form"
-            (ngSubmit)="addImport()"
-          >
-            <app-selector
-              formControlName="unit_id"
-              label="Habitación"
-              placeholder="Selecciona"
-              [options]="unitOptions()"
-            />
-            <app-input formControlName="name" label="Canal" placeholder="Airbnb" customWrapperClass="mt-0" />
-            <app-input
-              formControlName="url"
-              label="URL iCal del canal"
-              placeholder="https://www.airbnb.com/calendar/ical/….ics"
-              customWrapperClass="mt-0"
-            />
-            <app-button
-              variant="primary"
-              size="sm"
-              type="submit"
-              [loading]="adding()"
-              [disabled]="!canAdd() || adding()"
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
             >
-              Importar
-            </app-button>
-          </form>
+              {{ tab() === 'export' ? 'Exportar calendario' : 'Calendarios importados' }}
+              <span class="text-text-secondary font-normal">
+                ({{ tab() === 'export' ? exportRows().length : importRows().length }})
+              </span>
+            </h2>
 
-          @if (imports() === null) {
-            <div class="flex justify-center py-6"><app-spinner size="sm" /></div>
-          } @else if (imports()!.length === 0) {
-            <p class="py-4 text-sm text-text-secondary">Aún no importas calendarios.</p>
-          } @else {
-            <div class="mt-3 flex flex-col divide-y divide-border">
-              @for (item of imports(); track item.id) {
-                <div
-                  class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
-                  [attr.data-testid]="'ical-import-' + item.id"
-                >
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-semibold">Habitación {{ item.unit.code }}</span>
-                      <span class="text-sm text-text-secondary">· {{ item.name }}</span>
-                      @if (item.last_sync_status; as status) {
-                        <app-badge [variant]="statusVariant(status)" size="sm">
-                          {{ statusLabel(status) }}
-                        </app-badge>
-                      }
-                    </div>
-                    <span class="truncate text-xs text-text-secondary" [title]="item.url">{{ host(item.url) }}</span>
-                    @if (item.last_sync_message) {
-                      <span
-                        class="text-xs"
-                        [class.text-error]="item.last_sync_status === 'error'"
-                        [class.text-warning]="item.last_sync_status === 'warning'"
-                        [attr.data-testid]="'ical-import-message-' + item.id"
-                      >
-                        {{ item.last_sync_message }}
-                      </span>
-                    }
-                    <span class="text-xs text-text-secondary">
-                      @if (item.last_synced_at) {
-                        Última sincronización: {{ item.last_synced_at | date: 'dd/MM/yyyy HH:mm' }}
-                      } @else {
-                        Sin sincronizar
-                      }
-                    </span>
-                  </div>
-                  <div class="flex shrink-0 flex-wrap gap-2">
-                    <app-button
-                      variant="outline"
-                      size="sm"
-                      [loading]="syncing() === item.id"
-                      [disabled]="syncing() !== null"
-                      (clicked)="syncNow(item)"
-                    >
-                      Sincronizar ahora
-                    </app-button>
-                    <app-button
-                      variant="outline"
-                      size="sm"
-                      [disabled]="syncing() !== null"
-                      (clicked)="removeImport(item)"
-                    >
-                      Quitar
-                    </app-button>
-                  </div>
-                </div>
-              }
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                [placeholder]="tab() === 'export' ? 'Buscar habitación...' : 'Buscar canal...'"
+                [debounceTime]="300"
+                [ngModel]="search()"
+                (ngModelChange)="onSearch($event)"
+              />
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions()"
+                [isLoading]="units() === null || imports() === null"
+                (filterChange)="filterValues.set($event)"
+                (clearAllFilters)="filterValues.set({})"
+                (actionClick)="onActionClick($event)"
+              />
             </div>
+          </div>
+        </div>
+
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <p class="mb-3 text-xs text-text-secondary md:text-sm">
+            @if (tab() === 'export') {
+              Copia el enlace de cada habitación y pégalo en Airbnb o Booking (importar
+              calendario). Allá se bloquean las noches vendidas o bloqueadas en Vendix; el
+              calendario solo lleva fechas, sin precios ni datos del huésped.
+            } @else {
+              Las reservas de cada canal bloquean la habitación en Vendix y se ven en el rack.
+              Se sincroniza cada 15 minutos y con «Sincronizar ahora».
+            }
+          </p>
+
+          @if (tab() === 'export') {
+            @if (units() === null) {
+              <div class="p-4 md:p-6 text-center">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+              </div>
+            } @else if (units()!.length === 0) {
+              <app-empty-state
+                icon="bed-double"
+                title="Sin habitaciones"
+                description="Crea las habitaciones en Hotelería → Habitaciones para publicar su calendario."
+                [showActionButton]="false"
+              />
+            } @else if (exportRows().length === 0) {
+              <ng-container [ngTemplateOutlet]="noResults" />
+            } @else {
+              <app-responsive-data-view
+                [data]="exportRows()"
+                [columns]="exportColumns"
+                [cardConfig]="exportCardConfig"
+                [actions]="exportActions"
+                [mobileActions]="exportActions"
+                [striped]="true"
+                [hoverable]="true"
+                emptyMessage="No hay habitaciones con ese criterio"
+                emptyIcon="search"
+                data-testid="ical-units"
+              />
+            }
+          } @else {
+            @if (imports() === null) {
+              <div class="p-4 md:p-6 text-center">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p class="mt-2 text-text-secondary">Cargando calendarios...</p>
+              </div>
+            } @else if (imports()!.length === 0) {
+              <app-empty-state
+                icon="calendar-plus"
+                title="Aún no importas calendarios"
+                description="Pega el enlace iCal de un anuncio de Airbnb o Booking para bloquear sus fechas en Vendix."
+                actionButtonText="Importar calendario"
+                actionButtonIcon="plus"
+                [showActionButton]="unitOptions().length > 0"
+                (actionClick)="openImport()"
+              />
+            } @else if (importRows().length === 0) {
+              <ng-container [ngTemplateOutlet]="noResults" />
+            } @else {
+              <app-responsive-data-view
+                [data]="importRows()"
+                [columns]="importColumns"
+                [cardConfig]="importCardConfig"
+                [actions]="importActions"
+                [mobileActions]="importActions"
+                [striped]="true"
+                [hoverable]="true"
+                emptyMessage="No hay calendarios con ese criterio"
+                emptyIcon="search"
+                data-testid="ical-imports"
+              />
+            }
           }
-        </app-card>
-      </div>
+
+          <ng-template #noResults>
+            <app-empty-state
+              icon="search"
+              title="Sin resultados"
+              description="Nada coincide con la búsqueda o los filtros."
+              actionButtonText="Limpiar filtros"
+              [showActionButton]="true"
+              (actionClick)="clearFilters()"
+            />
+          </ng-template>
+        </div>
+      </app-card>
+
+      <!-- H6.2 — import a channel calendar -->
+      <app-modal
+        [isOpen]="importOpen()"
+        (isOpenChange)="!$event && importOpen.set(false)"
+        (cancel)="importOpen.set(false)"
+        size="md"
+        title="Importar calendario"
+        subtitle="Enlace iCal de Airbnb, Booking u otro canal"
+      >
+        <form
+          [formGroup]="importForm"
+          class="flex flex-col gap-3"
+          data-testid="ical-import-form"
+          (ngSubmit)="addImport()"
+        >
+          <app-selector
+            formControlName="unit_id"
+            label="Habitación"
+            placeholder="Selecciona"
+            [options]="unitOptions()"
+          />
+          <app-input formControlName="name" label="Canal" placeholder="Airbnb" customWrapperClass="mt-0" />
+          <app-input
+            formControlName="url"
+            label="URL iCal del canal"
+            placeholder="https://www.airbnb.com/calendar/ical/….ics"
+            customWrapperClass="mt-0"
+          />
+          <app-alert-banner variant="warning" icon="alert-triangle" data-testid="ical-import-warning">
+            iCal no trae el precio ni los datos del huésped: solo bloquea las fechas. El canal
+            publica su calendario con horas de retraso, así que una misma noche puede venderse en
+            los dos lados antes de sincronizar. Si ves el aviso de doble venta, mueve la reserva de
+            Vendix a otra habitación.
+          </app-alert-banner>
+        </form>
+        <div slot="footer" class="flex justify-end gap-2">
+          <app-button variant="ghost" (clicked)="importOpen.set(false)">Cancelar</app-button>
+          <app-button
+            variant="primary"
+            [loading]="adding()"
+            [disabled]="!canAdd() || adding()"
+            (clicked)="addImport()"
+          >
+            Importar
+          </app-button>
+        </div>
+      </app-modal>
     </div>
   `,
 })
@@ -274,6 +376,7 @@ export class HospitalityIcalExportPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
+  private readonly datePipe = inject(DatePipe);
 
   readonly units = signal<IcalExportUnit[] | null>(null);
   /** Room whose link change is in flight (blocks a double click). */
@@ -302,6 +405,249 @@ export class HospitalityIcalExportPageComponent implements OnInit {
       .filter((u) => u.is_active)
       .map((u) => ({ value: u.id, label: `${u.code} · ${u.unit_type.name}` })),
   );
+
+  readonly tab = signal<ChannelTab>('export');
+  readonly search = signal('');
+  readonly filterValues = signal<FilterValues>({});
+  readonly importOpen = signal(false);
+
+  readonly activeUnits = computed(() => (this.units() ?? []).filter((u) => u.is_active).length);
+  readonly publishedCount = computed(
+    () => (this.units() ?? []).filter((u) => u.ical_export_token).length,
+  );
+  readonly alertCount = computed(
+    () =>
+      (this.imports() ?? []).filter(
+        (i) => i.last_sync_status === 'error' || i.last_sync_status === 'warning',
+      ).length,
+  );
+
+  readonly tabs = computed<ScrollableTab[]>(() => [
+    { id: 'export', label: `Exportar (${this.units()?.length ?? 0})`, icon: 'upload' },
+    { id: 'import', label: `Importar (${this.imports()?.length ?? 0})`, icon: 'download' },
+  ]);
+
+  readonly filterConfigs = computed<FilterConfig[]>(() =>
+    this.tab() === 'export'
+      ? [
+          {
+            key: 'link_state',
+            label: 'Enlace',
+            type: 'select',
+            options: [
+              { value: '', label: 'Todos' },
+              { value: 'published', label: 'Publicado' },
+              { value: 'none', label: 'Sin enlace' },
+              { value: 'inactive', label: 'Habitación inactiva' },
+            ],
+          },
+        ]
+      : [
+          {
+            key: 'sync_state',
+            label: 'Sincronización',
+            type: 'select',
+            options: [
+              { value: '', label: 'Todas' },
+              ...(Object.keys(SYNC_LABELS) as ImportRow['sync_state'][]).map((value) => ({
+                value,
+                label: SYNC_LABELS[value],
+              })),
+            ],
+          },
+        ],
+  );
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    ...(this.tab() === 'import'
+      ? [
+          {
+            label: 'Importar calendario',
+            icon: 'plus',
+            action: 'import',
+            variant: 'primary' as const,
+            disabled: this.unitOptions().length === 0,
+          },
+        ]
+      : []),
+    { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
+  ]);
+
+  private readonly stateFilter = computed(() => {
+    const value = this.filterValues()[this.tab() === 'export' ? 'link_state' : 'sync_state'];
+    return typeof value === 'string' ? value : '';
+  });
+
+  readonly exportRows = computed<ExportRow[]>(() =>
+    (this.units() ?? [])
+      .map((unit) => ({
+        ...unit,
+        room: `Habitación ${unit.code}`,
+        link_state: !unit.is_active
+          ? ('inactive' as const)
+          : unit.ical_export_token
+            ? ('published' as const)
+            : ('none' as const),
+        url_label: unit.ical_export_token ? this.url(unit.ical_export_token) : '—',
+      }))
+      .filter(
+        (row) =>
+          matches(this.search(), row.code, row.unit_type.name, row.floor) &&
+          (!this.stateFilter() || row.link_state === this.stateFilter()),
+      ),
+  );
+
+  readonly importRows = computed<ImportRow[]>(() =>
+    (this.imports() ?? [])
+      .map((item) => ({
+        ...item,
+        room: `Habitación ${item.unit.code}`,
+        host_label: host(item.url),
+        sync_state: item.last_sync_status ?? ('never' as const),
+        synced_label: item.last_synced_at
+          ? (this.datePipe.transform(item.last_synced_at, 'dd/MM/yyyy HH:mm') ?? '')
+          : 'Sin sincronizar',
+        message_label: item.last_sync_message ?? '',
+      }))
+      .filter(
+        (row) =>
+          matches(this.search(), row.unit.code, row.name, row.host_label) &&
+          (!this.stateFilter() || row.sync_state === this.stateFilter()),
+      ),
+  );
+
+  readonly exportColumns: TableColumn[] = [
+    { key: 'room', label: 'Habitación' },
+    { key: 'unit_type.name', label: 'Tipo' },
+    { key: 'url_label', label: 'Enlace iCal', cellClass: () => 'max-w-xs truncate font-mono text-xs' },
+    {
+      key: 'link_state',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: LINK_BADGE,
+      transform: linkLabel,
+    },
+  ];
+
+  readonly exportCardConfig: ItemListCardConfig = {
+    titleKey: 'room',
+    subtitleKey: 'unit_type.name',
+    badgeKey: 'link_state',
+    badgeConfig: LINK_BADGE,
+    badgeTransform: linkLabel,
+  };
+
+  readonly exportActions: TableAction[] = [
+    {
+      label: 'Copiar URL',
+      icon: 'copy',
+      variant: 'primary',
+      show: (row: ExportRow) => !!row.ical_export_token,
+      action: (row: ExportRow) => this.copy(row.ical_export_token!),
+    },
+    {
+      label: 'Generar enlace',
+      icon: 'link',
+      variant: 'primary',
+      show: (row: ExportRow) => !row.ical_export_token,
+      disabled: () => this.saving() !== null,
+      action: (row: ExportRow) => this.generate(row),
+    },
+    {
+      label: 'Regenerar',
+      icon: 'refresh-cw',
+      variant: 'secondary',
+      show: (row: ExportRow) => !!row.ical_export_token,
+      disabled: () => this.saving() !== null,
+      action: (row: ExportRow) => this.regenerate(row),
+    },
+    {
+      label: 'Revocar',
+      icon: 'x-circle',
+      variant: 'danger',
+      show: (row: ExportRow) => !!row.ical_export_token,
+      disabled: () => this.saving() !== null,
+      action: (row: ExportRow) => this.revoke(row),
+    },
+  ];
+
+  readonly importColumns: TableColumn[] = [
+    { key: 'room', label: 'Habitación' },
+    { key: 'name', label: 'Canal' },
+    { key: 'host_label', label: 'Origen' },
+    { key: 'synced_label', label: 'Última sincronización' },
+    {
+      key: 'message_label',
+      label: 'Mensaje',
+      cellClass: (_value: string, row?: ImportRow) =>
+        row?.sync_state === 'error' ? 'text-error' : row?.sync_state === 'warning' ? 'text-warning' : '',
+    },
+    {
+      key: 'sync_state',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: SYNC_BADGE,
+      transform: syncLabel,
+    },
+  ];
+
+  readonly importCardConfig: ItemListCardConfig = {
+    titleKey: 'room',
+    subtitleKey: 'name',
+    badgeKey: 'sync_state',
+    badgeConfig: SYNC_BADGE,
+    badgeTransform: syncLabel,
+    detailKeys: [
+      { key: 'host_label', label: 'Origen' },
+      { key: 'synced_label', label: 'Sincronizado' },
+    ],
+    noteTransform: (row: ImportRow) => row.message_label || null,
+  };
+
+  readonly importActions: TableAction[] = [
+    {
+      label: 'Sincronizar ahora',
+      icon: 'refresh-cw',
+      variant: 'primary',
+      disabled: () => this.syncing() !== null,
+      action: (row: ImportRow) => this.syncNow(row),
+    },
+    {
+      label: 'Quitar',
+      icon: 'trash-2',
+      variant: 'danger',
+      disabled: () => this.syncing() !== null,
+      action: (row: ImportRow) => this.removeImport(row),
+    },
+  ];
+
+  onTab(id: string): void {
+    this.tab.set(id as ChannelTab);
+    this.clearFilters();
+  }
+
+  onSearch(term: string | null): void {
+    this.search.set((term ?? '').trim());
+  }
+
+  clearFilters(): void {
+    this.search.set('');
+    this.filterValues.set({});
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'import') {
+      this.openImport();
+    } else if (action === 'refresh') {
+      this.load();
+      this.loadImports();
+    }
+  }
+
+  openImport(): void {
+    this.importForm.reset({ unit_id: null, name: 'Airbnb', url: '' });
+    this.importOpen.set(true);
+  }
 
   ngOnInit(): void {
     this.load();
@@ -334,6 +680,7 @@ export class HospitalityIcalExportPageComponent implements OnInit {
         next: (item) => {
           this.adding.set(false);
           this.imports.update((list) => [...(list ?? []), item]);
+          this.importOpen.set(false);
           this.importForm.reset({ unit_id: null, name: 'Airbnb', url: '' });
           this.toastSync(item, 'Calendario importado');
         },
@@ -387,23 +734,6 @@ export class HospitalityIcalExportPageComponent implements OnInit {
           this.toastService.error(typeof message === 'string' ? message : 'No se pudo quitar');
         },
       });
-  }
-
-  statusVariant(status: IcalImportStatus): BadgeVariant {
-    return status === 'ok' ? 'success' : status === 'warning' ? 'warning' : 'error';
-  }
-
-  statusLabel(status: IcalImportStatus): string {
-    return status === 'ok' ? 'Sincronizado' : status === 'warning' ? 'Posible doble venta' : 'Error';
-  }
-
-  /** Only the host: the rest of the URL is the channel's secret. */
-  host(url: string): string {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
   }
 
   private replaceImport(updated: IcalImport): void {
