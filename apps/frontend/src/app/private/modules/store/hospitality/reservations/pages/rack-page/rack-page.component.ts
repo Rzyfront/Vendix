@@ -288,7 +288,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                   }
                 }
 
-                <!-- H5.3 — maintenance / owner use blocks on their room row -->
+                <!-- H5.3 — maintenance / owner use (and H6.2 iCal) blocks on their room row -->
                 @for (block of blockBars(); track block.id) {
                   <button
                     type="button"
@@ -500,13 +500,17 @@ export class HospitalityRackPageComponent implements OnInit {
       type.blocks.flatMap((block) => {
         const row = unitRow.get(block.unit_id);
         if (row === undefined) return [];
-        const label = INVENTORY_BLOCK_REASON_LABELS[block.reason];
+        // H6.2 — an imported block is labelled with its channel ("Airbnb").
+        const label =
+          block.reason === 'ical' && block.notes
+            ? block.notes
+            : INVENTORY_BLOCK_REASON_LABELS[block.reason];
         return [
           {
             ...block,
             row,
             label,
-            title: `${label} · ${block.from_date} → ${block.to_date}${block.notes ? ' · ' + block.notes : ''}`,
+            title: `${label} · ${block.from_date} → ${block.to_date}${block.notes && block.notes !== label ? ' · ' + block.notes : ''}`,
           },
         ];
       }),

@@ -1083,6 +1083,7 @@ model stores {
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
+  lodging_ical_imports           lodging_ical_imports[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2390,6 +2391,7 @@ model lodging_units {
   room_nights       lodging_room_nights[]
   housekeeping_tasks lodging_housekeeping_tasks[]
   inventory_blocks   lodging_inventory_blocks[]
+  ical_imports       lodging_ical_imports[]
 
   @@unique([store_id, code])
   @@index([unit_type_id, is_active])
@@ -2455,13 +2457,46 @@ model lodging_inventory_blocks {
   created_by_user_id  Int?
   released_at         DateTime?                           @db.Timestamp(6)
   released_by_user_id Int?
+  // H6.2 — set on blocks created by an iCal import: the source and the event
+  // UID of the channel (the sync diff key).
+  ical_import_id      Int?
+  external_uid        String?                             @db.VarChar(255)
   created_at          DateTime?                           @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                           @default(now()) @db.Timestamp(6)
 
-  store stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  unit  lodging_units @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit        lodging_units         @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ical_import lodging_ical_imports? @relation(fields: [ical_import_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id, unit_id, from_date, to_date])
+  @@index([ical_import_id, external_uid])
+}
+
+/// Hospitality Suite (H6.2) — an external calendar (Airbnb, Booking...) whose
+/// events block one room in Vendix. Synced every few minutes and on demand.
+model lodging_ical_imports {
+  id                 Int       @id @default(autoincrement())
+  store_id           Int
+  unit_id            Int
+  /// Channel label shown on the rack blocks ("Airbnb").
+  name               String    @db.VarChar(60)
+  url                String    @db.VarChar(2000)
+  is_active          Boolean   @default(true)
+  last_synced_at     DateTime? @db.Timestamp(6)
+  /// ok | warning (synced, possible double sale) | error (feed not read).
+  last_sync_status   String?   @db.VarChar(10)
+  last_sync_message  String?   @db.VarChar(500)
+  last_sync_events   Int?
+  created_by_user_id Int?
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  store  stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit   lodging_units              @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  blocks lodging_inventory_blocks[]
+
+  @@index([store_id, is_active])
+  @@index([unit_id])
 }
 
 // Hospitality Suite (H1.1) — lifecycle of a lodging reservation.

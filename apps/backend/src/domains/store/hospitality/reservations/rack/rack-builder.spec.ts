@@ -240,4 +240,25 @@ describe('rack builder (H1.3)', () => {
     expect(r.types[0].free).toEqual([1]);
     expect(r.types[0].blocks).toHaveLength(1);
   });
+
+  it('H6.2 — an Airbnb block over a maintenance block of the same room counts once', () => {
+    const r = buildRack({
+      from: '2026-11-10',
+      to: '2026-11-13',
+      types: TYPES,
+      units: UNITS,
+      rooms: [],
+      sold: [],
+      blocks: [
+        { id: 9, unit_id: 101, from_date: d('2026-11-10'), to_date: d('2026-11-12'), reason: 'maintenance', notes: null },
+        { id: 10, unit_id: 101, from_date: d('2026-11-11'), to_date: d('2026-11-13'), reason: 'ical', notes: 'Airbnb' },
+      ],
+    });
+    expect(r.types[0].blocked).toEqual([1, 1, 1]);
+    expect(r.types[0].free).toEqual([1, 1, 1]);
+    expect(r.types[0].blocks.map((b) => [b.id, b.reason, b.notes])).toEqual([
+      [9, 'maintenance', null],
+      [10, 'ical', 'Airbnb'],
+    ]);
+  });
 });

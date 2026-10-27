@@ -171,11 +171,18 @@ export function buildRack(input: {
       .filter((block) => unitIds.has(block.unit_id))
       .map((block) => toBlockBar(block, input.from, nights.length))
       .filter((bar): bar is RackBlockBar => bar !== null);
-    // A block of a room already out of service does not count twice.
+    // A block of a room already out of service does not count twice, nor a
+    // room blocked twice on a night (maintenance + iCal, H6.2).
     const blocked = nights.map(() => 0);
+    const counted = new Set<string>();
     for (const block of blocks) {
       if (!sellable.has(block.unit_id)) continue;
-      for (let i = block.start; i < block.start + block.span; i++) blocked[i] += 1;
+      for (let i = block.start; i < block.start + block.span; i++) {
+        const key = `${block.unit_id}:${i}`;
+        if (counted.has(key)) continue;
+        counted.add(key);
+        blocked[i] += 1;
+      }
     }
     const allowance = Math.max(0, type.overbooking_allowance);
     const sold = nights.map(() => 0);

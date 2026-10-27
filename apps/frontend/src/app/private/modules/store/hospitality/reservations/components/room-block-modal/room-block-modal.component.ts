@@ -84,6 +84,12 @@ const longDate = (date: string) => format(parseISO(date), "d 'de' MMM yyyy", { l
             <dd class="whitespace-pre-line">{{ view.block.notes }}</dd>
           }
         </dl>
+        @if (view.block.reason === 'ical') {
+          <p class="mt-3 text-xs text-text-secondary" data-testid="room-block-ical-hint">
+            Viene del calendario importado de {{ view.block.notes || 'un canal' }}: se libera solo
+            cuando la reserva se cancela allá (Canales → iCal).
+          </p>
+        }
       } @else {
         <form [formGroup]="form" class="grid grid-cols-2 gap-3 text-sm" data-testid="room-block-form">
           <app-selector

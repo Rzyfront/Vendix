@@ -5694,6 +5694,17 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Calendario no encontrado o revocado',
   },
+  // Hospitality Suite (H6.2) — iCal import
+  LODGING_ICAL_IMPORT_FIND_001: {
+    code: 'LODGING_ICAL_IMPORT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Calendario importado no encontrado',
+  },
+  LODGING_ICAL_IMPORT_URL_001: {
+    code: 'LODGING_ICAL_IMPORT_URL_001',
+    httpStatus: 400,
+    devMessage: 'La URL del calendario no es válida',
+  },
   // Hospitality Suite (H1.3) — occupancy rack
   LODGING_RACK_RANGE_001: {
     code: 'LODGING_RACK_RANGE_001',

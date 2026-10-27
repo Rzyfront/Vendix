@@ -235,18 +235,25 @@ export class LodgingAvailabilityService {
         },
       },
       select: {
+        unit_id: true,
         from_date: true,
         to_date: true,
         unit: { select: { unit_type_id: true } },
       },
     });
+    // A room blocked twice on a night (maintenance + iCal, H6.2) counts once.
+    const counted = new Set<string>();
     for (const block of blocks) {
       const typeId = block.unit.unit_type_id;
       const perNight = result.get(typeId) ?? nights.map(() => 0);
       const from = toDateOnly(block.from_date);
       const to = toDateOnly(block.to_date);
       nights.forEach((night, i) => {
-        if (night >= from && night < to) perNight[i] += 1;
+        const key = `${block.unit_id}:${night}`;
+        if (night >= from && night < to && !counted.has(key)) {
+          counted.add(key);
+          perNight[i] += 1;
+        }
       });
       result.set(typeId, perNight);
     }
