@@ -1221,6 +1221,13 @@ export class OrderDetailsPageComponent {
       code: cu.coupon?.code ?? `CUP-${cu.coupon_id}`,
       name: cu.coupon?.name ?? null,
       discount_applied: Number(cu.discount_applied || 0),
+      // QUI-650 — el porcentual se informa como tal ("Cupón 10 %"), no como
+      // un monto fijo en pesos.
+      percent:
+        cu.coupon?.discount_type === 'PERCENTAGE' &&
+        cu.coupon?.discount_value != null
+          ? Number(cu.coupon.discount_value).toLocaleString('es-CO')
+          : null,
     })),
   );
 

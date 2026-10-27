@@ -163,6 +163,10 @@ describe('PaymentsService', () => {
       coupons: {
         findFirst: jest.fn(),
       },
+      // QUI-650 — el cobro de una orden existente lee su `coupon_id`.
+      orders: {
+        findFirst: jest.fn(),
+      },
       // `processPosPayment` corre todo el cobro dentro de una transacción; el
       // mock ejecuta el callback en línea para poder observar lo que ocurre
       // adentro sin una base de datos.
@@ -1082,6 +1086,71 @@ describe('PaymentsService', () => {
       });
       expect(couponsService.validate).not.toHaveBeenCalled();
     });
+
+    it('QUI-650 regla 1: cobrar una orden existente cuyo cupón se desactivó no bloquea y conserva el descuento', async () => {
+      (prisma.orders.findFirst as jest.Mock).mockResolvedValue({ coupon_id: 42 });
+      (couponsService.validate as jest.Mock).mockImplementation(
+        async (_dto: any, opts?: any) => {
+          if (!opts?.keepInactiveUsedByOrder) {
+            throw new VendixHttpException(ErrorCodes.CPN_FIND_001);
+          }
+          return {
+            valid: true, coupon_id: 42, code: 'OFF10',
+            discount_type: 'PERCENTAGE', discount_value: 10,
+            discount_amount: 10, kept_inactive: true,
+          };
+        },
+      );
+
+      const res = await (service as any).calculatePosCouponDiscount(
+        { ...baseDto, coupon_code: 'OFF10' },
+        100,
+        0,
+        77,
+      );
+
+      expect(couponsService.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'OFF10' }),
+        { excludeOrderId: 77, orderCouponId: 42, keepInactiveUsedByOrder: true },
+      );
+      expect(res).toEqual({
+        coupon_id: 42, coupon_code: 'OFF10', discount_amount: 10, kept_inactive: true,
+      });
+    });
+
+    it('QUI-650 regla 1: con solo coupon_id, el cupón desactivado de la orden se resuelve por su id', async () => {
+      (prisma.orders.findFirst as jest.Mock).mockResolvedValue({ coupon_id: 42 });
+      (prisma.coupons.findFirst as jest.Mock).mockImplementation(
+        async ({ where }: any) => (where.is_active ? null : { code: 'OFF10' }),
+      );
+      (couponsService.validate as jest.Mock).mockResolvedValue({
+        valid: true, coupon_id: 42, code: 'OFF10', discount_amount: 10, kept_inactive: true,
+      });
+
+      const res = await (service as any).calculatePosCouponDiscount(
+        { ...baseDto, coupon_id: 42 },
+        100,
+        0,
+        77,
+      );
+
+      expect(res.discount_amount).toBe(10);
+      expect(res.kept_inactive).toBe(true);
+    });
+
+    it('QUI-650 regla 4: venta nueva (sin orden existente) con cupón desactivado sigue bloqueando', async () => {
+      (couponsService.validate as jest.Mock).mockRejectedValue(
+        new VendixHttpException(ErrorCodes.CPN_FIND_001),
+      );
+      await expect(
+        (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'OFF10' },
+          100,
+          0,
+        ),
+      ).rejects.toMatchObject({ errorCode: 'CPN_FIND_001' });
+      expect(prisma.orders.findFirst).not.toHaveBeenCalled();
+    });
   });
 
   // ------------------------------------------------------------------
@@ -1580,6 +1649,28 @@ describe('PaymentsService', () => {
         }),
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+
+    it('QUI-650 regla 1: el cobro de la orden POS adoptada cotiza el cupón como cupón YA aplicado a esa orden', async () => {
+      const client = tx();
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      const coupon = jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: 42, coupon_code: 'OFF10', discount_amount: 100, kept_inactive: true,
+      });
+
+      await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ coupon_code: 'OFF10' }), user,
+      );
+
+      // 4.º argumento = id de la orden existente: habilita conservar su cupón
+      // aunque se haya desactivado después de aplicarse.
+      expect(coupon).toHaveBeenCalledWith(expect.anything(), 1000, 0, 41);
     });
 
     it('assigns a fresh POS order to the locked active session of its cashier', async () => {

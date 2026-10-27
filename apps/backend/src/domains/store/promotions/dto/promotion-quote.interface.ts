@@ -77,8 +77,10 @@ export interface PromotionQuoteInput {
    * los candidatos a estos ids (no entra ninguna promoción nueva, automática
    * o no) e ignora el filtro de `state` para ellos. La ventana de fechas
    * sigue vigente (`as_of`). Sin la opción, comportamiento idéntico.
+   * Con `include_auto_apply`, además de esos ids entran las automáticas
+   * activas (paridad con el POS al editar productos de la orden).
    */
-  order_scope?: { promotion_ids: number[] } | null;
+  order_scope?: { promotion_ids: number[]; include_auto_apply?: boolean } | null;
   /**
    * Reference date used for date-range eligibility. Defaults to `new Date()`.
    * Useful for deterministic tests and replays.

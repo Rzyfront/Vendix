@@ -1185,7 +1185,12 @@ export class PaymentsService {
           orderCreation.promotionsSnapshot ?? [];
         const appliedPromotionDetails =
           orderCreation.appliedPromotions ?? [];
-        const couponInfo = orderCreation.couponInfo ?? {
+        const couponInfo: {
+          coupon_id: number | null;
+          coupon_code: string | null;
+          discount_amount: number;
+          kept_inactive?: true;
+        } = orderCreation.couponInfo ?? {
           coupon_id: null as number | null,
           coupon_code: null as string | null,
           discount_amount: 0,
@@ -2222,7 +2227,9 @@ export class PaymentsService {
             where: {
               id: couponInfo.coupon_id,
               store_id: createPosPaymentDto.store_id,
-              is_active: true,
+              // QUI-650 — el cupón desactivado que la orden ya tenía aplicado
+              // se consume igual: nunca bloquea el cobro.
+              ...(couponInfo.kept_inactive ? {} : { is_active: true }),
             },
             data: { current_uses: { increment: 1 } },
           });
@@ -3121,12 +3128,27 @@ export class PaymentsService {
      */
     productsSubtotalGross: number,
     promotionsDiscount: number,
+    /**
+     * QUI-650 — orden YA existente que se cobra (POS adoptado, cierre de
+     * mesa). Su cupón, aunque luego se haya desactivado o eliminado, ya está
+     * aplicado: se cotiza igual y nunca bloquea el cobro.
+     */
+    existingOrderId: number | null = null,
   ): Promise<{
     coupon_id: number | null;
     coupon_code: string | null;
     discount_amount: number;
+    kept_inactive?: true;
   }> {
     let code = (dto.coupon_code || '').trim();
+    let orderCouponId: number | null = null;
+    if (existingOrderId != null && (code || dto.coupon_id != null)) {
+      const existing = await this.prisma.orders.findFirst({
+        where: { id: existingOrderId },
+        select: { coupon_id: true },
+      });
+      orderCouponId = existing?.coupon_id ?? null;
+    }
 
     // QUI-783 round 2 — fallback: si el frontend manda `coupon_id` pero no
     // `coupon_code`, resolver el código desde la DB. No cambiamos el contrato
@@ -3142,6 +3164,16 @@ export class PaymentsService {
         });
         if (found?.code) {
           code = found.code;
+        } else if (
+          orderCouponId != null &&
+          orderCouponId === Number(dto.coupon_id)
+        ) {
+          // QUI-650 — el cupón de la orden se desactivó después de aplicarse.
+          const own = await this.prisma.coupons.findFirst({
+            where: { id: orderCouponId },
+            select: { code: true },
+          });
+          code = own?.code ?? '';
         }
       } catch {
         // Lookup failure is non-fatal — fall through to the no-coupon path.
@@ -3186,7 +3218,17 @@ export class PaymentsService {
           };
         });
 
-      const validation = await this.couponsService.validate({
+      // Solo el cobro de una orden existente pasa opciones: la venta nueva
+      // valida igual que siempre.
+      const keepOpts =
+        existingOrderId != null
+          ? {
+              excludeOrderId: existingOrderId,
+              orderCouponId,
+              keepInactiveUsedByOrder: true,
+            }
+          : null;
+      const validateDto = {
         code,
         cart_subtotal: remainingSubtotal,
         customer_id: dto.customer_id,
@@ -3199,7 +3241,10 @@ export class PaymentsService {
         // object directly and ignores unknown keys via `forbidNonWhitelisted`
         // being off in the inner ValidationPipe-less call path.
         store_id: dto.store_id,
-      } as any);
+      } as any;
+      const validation = keepOpts
+        ? await this.couponsService.validate(validateDto, keepOpts)
+        : await this.couponsService.validate(validateDto);
 
       const discount = this.roundMoney(
         Math.min(validation.discount_amount || 0, remainingSubtotal),
@@ -3209,6 +3254,7 @@ export class PaymentsService {
         coupon_id: validation.coupon_id,
         coupon_code: validation.code,
         discount_amount: discount,
+        ...(validation.kept_inactive ? { kept_inactive: true as const } : {}),
       };
     } catch (error) {
       // QUI-783 — surface the coupon rejection to the cashier instead of
@@ -4658,7 +4704,7 @@ export class PaymentsService {
     hasSerialized: boolean;
     promotionsSnapshot: any[];
     appliedPromotions: any[];
-    couponInfo: { coupon_id: number | null; coupon_code: string | null; discount_amount: number };
+    couponInfo: { coupon_id: number | null; coupon_code: string | null; discount_amount: number; kept_inactive?: true };
     // Plan KDS fire-flows (B6): the auto-fire result captured inside the
     // table close-out, so the caller (`processPosPayment`) can surface it
     // in the response (`kitchen_fire`), flip `hasKitchenItems`, and emit
@@ -4864,6 +4910,7 @@ export class PaymentsService {
       dto,
       newSubtotalGross,
       promotionQuote.total_discount,
+      session.order_id ?? null,
     );
     const totalGrossDiscount = this.roundMoney(
       promotionQuote.total_discount + couponInfo.discount_amount,
@@ -5971,6 +6018,7 @@ export class PaymentsService {
           dto,
           calculatedSubtotalGross,
           promotionQuote.total_discount,
+          existingOrder?.id ?? null,
         );
 
         const totalGrossDiscount = this.roundMoney(

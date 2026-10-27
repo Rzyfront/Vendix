@@ -1384,8 +1384,13 @@ export class OrderItemChangesService {
     // header-only (ecommerce/WhatsApp): líneas sin descuento, descuento solo
     // en la cabecera y el impuesto ya calculado ANTES del descuento: nunca se
     // redistribuye en líneas ni se tocan sus impuestos.
+    // Una orden POS sin descuento también es line-driven: si con el cambio
+    // entra una promoción (p. ej. escala por volumen), se reparte por línea y
+    // el impuesto va sobre la base descontada, como al cobrar en el POS.
     const lineDriven =
-      headerDiscount > 0 && Math.abs(currentLineDiscounts - headerDiscount) <= 0.01;
+      headerDiscount > 0
+        ? Math.abs(currentLineDiscounts - headerDiscount) <= 0.01
+        : order.channel === 'pos';
     // mixed: descuentos de línea + un descuento manual de cabecera encima.
     const mixed =
       headerDiscount > 0 &&
@@ -1414,7 +1419,10 @@ export class OrderItemChangesService {
       .filter((id: unknown): id is number => typeof id === 'number');
     const hasPromoOrCoupon =
       couponCode.length > 0 || order.coupon_id != null || promoIds.length > 0;
-    if (hasPromoOrCoupon) {
+    // Se cotiza SIEMPRE, aunque la orden no tenga promoción ni cupón: como en
+    // el POS, una promoción automática (escala por volumen) puede empezar a
+    // aplicar al cambiar las cantidades.
+    {
       const plannedLines: PlannedOrderLine[] = [
         ...resulting.map((r) => this.plannedLineOfRow(r.line, r.base)),
         ...adds.map((a) => a.planned),
@@ -1465,11 +1473,11 @@ export class OrderItemChangesService {
           customer_id: order.customer_id ?? undefined,
           manual_promotion_ids: promoIds,
           exclude_order_id: orderId,
-          // Solo las promociones que la orden ya tiene (pausadas incluidas); no
-          // entra ninguna nueva.
-          order_scope: { promotion_ids: promoIds },
+          // Las de la orden (pausadas incluidas) más las automáticas activas,
+          // como el POS: una escala por volumen entra al subir la cantidad.
+          order_scope: { promotion_ids: promoIds, include_auto_apply: true },
           // Re-cotiza A LA FECHA DE LA ORDEN: lo que aplicaba al crearla no se
-          // cae por vencer después ni entran promociones automáticas nuevas.
+          // cae por vencer después ni entran automáticas creadas después.
           as_of: order.created_at ? new Date(order.created_at) : undefined,
           items: quoteItems.map((it, index) => ({
             line_id: index,
@@ -1501,31 +1509,50 @@ export class OrderItemChangesService {
         );
       }
 
+      // Orden sin promoción ni cupón: solo cuenta si entra una automática.
+      // Sin ella, la orden queda exactamente como estaba (sus descuentos
+      // manuales incluidos).
+      if (quoted && !hasPromoOrCoupon) {
+        if (promotionDiscount <= 0) {
+          quoted = false;
+        } else if (headerDiscount > 0.01) {
+          quoted = false;
+          const msg = `Con este cambio entra una promoción automática, pero la orden ya tiene un descuento manual de ${money(headerDiscount)} y no se pueden combinar al editar. Ajusta las cantidades o crea la orden de nuevo en el POS.`;
+          warnings.push(msg);
+          planBlock = new VendixHttpException(
+            ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+            msg,
+          );
+        }
+      }
+
       let couponDiscount = 0;
       if (quoted && couponCode) {
+        const remaining = Math.max(
+          0,
+          this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
+        );
+        const couponDto = {
+          code: couponCode,
+          cart_subtotal: remaining,
+          customer_id: order.customer_id ?? undefined,
+          items: quoteItems.map((it) => ({
+            product_id: it.product_id as number,
+            category_id: null,
+            category_ids: categoriesOf(it.product_id),
+            line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
+          })),
+          store_id: storeId,
+        } as any;
+        const couponOpts = {
+          excludeOrderId: orderId,
+          asOf: order.created_at ? new Date(order.created_at) : undefined,
+          // `current_uses` que el editor subió SIN fila coupon_uses.
+          orderCouponId: order.coupon_id ?? null,
+          orderState: order.state,
+        };
         try {
-          const remaining = Math.max(
-            0,
-            this.ordersService.grossOfPlannedLines(plannedLines) - promotionDiscount,
-          );
-          const validation = await this.couponsService.validate({
-            code: couponCode,
-            cart_subtotal: remaining,
-            customer_id: order.customer_id ?? undefined,
-            items: quoteItems.map((it) => ({
-              product_id: it.product_id as number,
-              category_id: null,
-              category_ids: categoriesOf(it.product_id),
-              line_total: roundMoney2(it.unit_price * Number(it.quantity || 0)),
-            })),
-            store_id: storeId,
-          } as any, {
-            excludeOrderId: orderId,
-            asOf: order.created_at ? new Date(order.created_at) : undefined,
-            // `current_uses` que el editor subió SIN fila coupon_uses.
-            orderCouponId: order.coupon_id ?? null,
-            orderState: order.state,
-          });
+          const validation = await this.couponsService.validate(couponDto, couponOpts);
           couponUseRow = await db.coupon_uses.findFirst({
             where: { order_id: orderId, coupon_id: validation?.coupon_id ?? order.coupon_id },
             select: { id: true, discount_applied: true },
@@ -1535,7 +1562,69 @@ export class OrderItemChangesService {
           );
           requotedCouponDiscount = couponDiscount;
         } catch (err) {
-          if (err instanceof VendixHttpException) {
+          // `validate` solo encuentra cupones activos (eliminar = desactivar).
+          // Si ESTA orden ya tiene el cupón (`orders.coupon_id`, p. ej. la
+          // orden POS sin cobrar, o su fila `coupon_uses`) y el comercio lo
+          // desactivó después, se respeta: `keepInactiveUsedByOrder` lo cotiza.
+          const keptCoupon =
+            err instanceof VendixHttpException &&
+            err.errorCode === ErrorCodes.CPN_FIND_001.code
+              ? await this.couponsService
+                  .validate(couponDto, { ...couponOpts, keepInactiveUsedByOrder: true })
+                  .catch(() => null)
+              : null;
+          if (keptCoupon?.kept_inactive && keptCoupon.discount_type === 'PERCENTAGE') {
+            // Porcentual: el porcentaje es la fuente de verdad y el monto se
+            // recalcula sobre el nuevo subtotal; nunca se congela en pesos.
+            couponUseRow = await db.coupon_uses.findFirst({
+              where: { order_id: orderId, coupon_id: keptCoupon.coupon_id },
+              select: { id: true, discount_applied: true },
+            });
+            couponDiscount = roundMoney2(
+              Math.min(keptCoupon.discount_amount || 0, remaining),
+            );
+            requotedCouponDiscount = couponDiscount;
+            const pct = `${String(keptCoupon.discount_value).replace('.', ',')} %`;
+            warnings.push(
+              `El cupón ${couponCode} (${pct}) está desactivado: su descuento se recalcula al ${pct} del nuevo subtotal: ${money(couponDiscount)}`,
+            );
+          } else if (keptCoupon?.kept_inactive) {
+            // Monto fijo: se conserva el monto que la orden ya tenía. El
+            // checkout (orden sin `coupon_id`) guarda en `discount_applied`
+            // solo el cupón: ese monto se conserva tal cual. El cobro POS
+            // (`commitCouponUseForOrder`, orden con `coupon_id`) guarda TODO el
+            // descuento de la orden: ahí el cupón nunca supera lo que ocupaba
+            // en la cabecera (sin promociones ni descuento manual). La orden
+            // POS sin cobrar aún no tiene fila: vale el monto del cupón.
+            const usedInactive = await db.coupon_uses.findFirst({
+              where: { order_id: orderId, coupon: { code: couponCode, is_active: false } },
+              select: { id: true, discount_applied: true },
+              orderBy: { id: 'desc' },
+            });
+            const applied = usedInactive
+              ? Number(usedInactive.discount_applied ?? 0)
+              : Number(keptCoupon.discount_amount ?? 0);
+            const priorPromotions = (order.order_promotions ?? []).reduce(
+              (sum: number, p: any) => sum + Number(p.discount_amount ?? 0),
+              0,
+            );
+            const kept = roundMoney2(
+              Math.max(
+                0,
+                order.coupon_id == null || !usedInactive
+                  ? applied
+                  : Math.min(applied, headerDiscount - priorPromotions - manualPart),
+              ),
+            );
+            couponDiscount = roundMoney2(Math.min(kept, remaining));
+            // `requotedCouponDiscount` queda null: la fila `coupon_uses` del
+            // cupón inactivo de monto fijo no se reescribe.
+            warnings.push(
+              couponDiscount < kept
+                ? `El cupón ${couponCode} está desactivado: su descuento se reduce de ${money(kept)} a ${money(couponDiscount)} porque supera el nuevo total`
+                : `El cupón ${couponCode} está desactivado: se conserva su descuento de ${money(couponDiscount)}`,
+            );
+          } else if (err instanceof VendixHttpException) {
             // Nunca se descarta un cupón solo: si deja de aplicar, el cambio
             // se bloquea y el usuario ajusta los productos (igual que el editor).
             quoted = false;
@@ -1562,17 +1651,22 @@ export class OrderItemChangesService {
 
       if (quoted) {
         quotedSnapshot = promoSnapshot;
-        if (promoIds.length > 0) {
+        const next = new Map(promoSnapshot.map((p) => [p.promotion_id, p.discount_amount]));
+        // Automáticas que la orden no tenía y que entran con este cambio.
+        const newIds = promoSnapshot
+          .filter((p) => p.discount_amount > 0 && !promoIds.includes(p.promotion_id))
+          .map((p) => p.promotion_id);
+        const watchedIds = [...promoIds, ...newIds];
+        if (watchedIds.length > 0) {
           const prior = new Map<number, number>(
             (order.order_promotions ?? []).map((p: any) => [
               p.promotion_id,
               Number(p.discount_amount ?? 0),
             ]),
           );
-          const next = new Map(promoSnapshot.map((p) => [p.promotion_id, p.discount_amount]));
           const named: Array<{ id: number; name: string }> =
             (await db.promotions.findMany({
-              where: { id: { in: promoIds } },
+              where: { id: { in: watchedIds } },
               select: { id: true, name: true },
             })) ?? [];
           const nameOf = new Map(named.map((p) => [p.id, p.name]));
@@ -1587,6 +1681,11 @@ export class OrderItemChangesService {
             } else if (a <= 0 && b > 0) {
               warnings.push(`La promoción «${name}» vuelve a aplicar`);
             }
+          }
+          for (const id of newIds) {
+            warnings.push(
+              `La promoción «${nameOf.get(id) ?? `#${id}`}» aplica con este cambio (${money(next.get(id) ?? 0)})`,
+            );
           }
         }
       }

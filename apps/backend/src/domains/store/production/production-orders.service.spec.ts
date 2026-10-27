@@ -609,4 +609,114 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     });
   });
+  describe('yield scaling of ingredient consumption (QUI-965)', () => {
+    const run = async (opts: {
+      yieldQty: number | null;
+      produced: number;
+      lineQty: number;
+      linePct?: number;
+      recipePct?: number;
+      mode?: 'percent' | 'absolute';
+      wasteAbs?: number;
+    }) => {
+      prismaMock.production_orders.findFirst.mockResolvedValue({
+        id: 900,
+        store_id: 1,
+        product_id: 50,
+        recipe_id: 7,
+        planned_qty: new Prisma.Decimal(opts.produced),
+        produced_qty: null,
+        status: 'draft',
+        produced_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        product: { id: 50, name: 'Salsa', sku: 'S', stock_unit: 'g', is_batch_produced: true },
+        recipe: {
+          id: 7,
+          yield_quantity:
+            opts.yieldQty === null ? null : new Prisma.Decimal(opts.yieldQty),
+          yield_unit: 'g',
+          waste_percent: new Prisma.Decimal(opts.recipePct ?? 0),
+          items: [
+            {
+              id: 1,
+              recipe_id: 7,
+              component_product_id: 99,
+              quantity: new Prisma.Decimal(opts.lineQty),
+              waste_percent: new Prisma.Decimal(opts.linePct ?? 0),
+              waste_mode: opts.mode ?? 'percent',
+              waste_absolute: new Prisma.Decimal(opts.wasteAbs ?? 0),
+              is_optional: false,
+              component_product: { id: 99, name: 'H', sku: 'H', stock_unit: 'g' },
+            },
+          ],
+        },
+      } as any);
+      stockLevelManager.updateStock.mockImplementation(async () => ({
+        stock_level: { id: 1 } as any,
+        transaction: { id: 1 } as any,
+        previous_quantity: 0,
+        cost_snapshot: { unit_cost: 0, total_cost: 0, stock_value: 0 },
+      }));
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+      const updated = {
+        id: 900,
+        status: 'completed',
+        produced_qty: new Prisma.Decimal(opts.produced),
+        product: { id: 50, name: 'Salsa', sku: 'S', stock_unit: 'g' },
+        recipe: { id: 7, yield_quantity: new Prisma.Decimal(1), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
+      };
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated) } }),
+      );
+      prismaMock.production_orders.update.mockResolvedValue(updated as any);
+      await service.complete(900, { produced_qty: opts.produced });
+      return stockLevelManager.updateStock.mock.calls[0][0].quantity_change;
+    };
+
+    it('yield 1, produce 10, line 100 -> consumes 1000', async () => {
+      expect(await run({ yieldQty: 1, produced: 10, lineQty: 100 })).toBe(-1000);
+    });
+
+    it('yield 10, produce 10, line 100 -> consumes 100', async () => {
+      expect(await run({ yieldQty: 10, produced: 10, lineQty: 100 })).toBe(-100);
+    });
+
+    it('yield 10, produce 25, line 100 -> consumes 250', async () => {
+      expect(await run({ yieldQty: 10, produced: 25, lineQty: 100 })).toBe(-250);
+    });
+
+    it('percent waste applies on top of the scaled quantity (line% x recipe%)', async () => {
+      // 100 * 2 * 1.10 * 1.05 = 231
+      expect(
+        await run({ yieldQty: 5, produced: 10, lineQty: 100, linePct: 10, recipePct: 5 }),
+      ).toBe(-231);
+    });
+
+    it('absolute waste is per batch, so it scales with the factor', async () => {
+      // (100 + 10) * 2 * 1.05 = 231
+      expect(
+        await run({
+          yieldQty: 5,
+          produced: 10,
+          lineQty: 100,
+          mode: 'absolute',
+          wasteAbs: 10,
+          recipePct: 5,
+        }),
+      ).toBe(-231);
+    });
+
+    it('degenerate yield (null) is treated as 1 and does not throw', async () => {
+      expect(await run({ yieldQty: null, produced: 10, lineQty: 100 })).toBe(-1000);
+    });
+
+    it('the stock pre-check receives the same scaled quantity', async () => {
+      await run({ yieldQty: 1, produced: 10, lineQty: 100 });
+      expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 99, quantity: 1000 })],
+        expect.anything(),
+      );
+    });
+  });
 });

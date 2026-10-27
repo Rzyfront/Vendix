@@ -304,9 +304,16 @@ export class CouponsService {
       /** Cupón y estado de la orden: el editor sube `current_uses` SIN crear fila `coupon_uses`. */
       orderCouponId?: number | null;
       orderState?: string;
+      /**
+       * QUI-650 — con `excludeOrderId`: un cupón desactivado (eliminar =
+       * desactivar) que ESA orden ya tiene aplicado (`orders.coupon_id` o
+       * fila `coupon_uses`) se cotiza igual y nunca bloquea: el descuento ya
+       * quedó aplicado. Un porcentual se recalcula sobre el subtotal recibido.
+       */
+      keepInactiveUsedByOrder?: boolean;
     } = {},
   ) {
-    const coupon = await this.prisma.coupons.findFirst({
+    let coupon = await this.prisma.coupons.findFirst({
       where: { code: dto.code, is_active: true },
       include: {
         coupon_products: true,
@@ -314,10 +321,89 @@ export class CouponsService {
       },
     });
 
+    let keptInactive = false;
+    if (!coupon && opts.keepInactiveUsedByOrder && opts.excludeOrderId != null) {
+      const inactive = await this.prisma.coupons.findFirst({
+        where: { code: dto.code, is_active: false },
+        include: {
+          coupon_products: true,
+          coupon_categories: true,
+        },
+      });
+      const usedByOrder =
+        !!inactive &&
+        (opts.orderCouponId === inactive.id ||
+          (await this.prisma.coupon_uses.count({
+            where: { coupon_id: inactive.id, order_id: opts.excludeOrderId },
+          })) > 0);
+      if (usedByOrder) {
+        coupon = inactive;
+        keptInactive = true;
+      }
+    }
+
     if (!coupon) {
       throw new VendixHttpException(ErrorCodes.CPN_FIND_001);
     }
 
+    // El cupón que la orden ya usó fue aceptado al aplicarse: vigencia, cupos
+    // y compra mínima no se vuelven a exigir; solo se recalcula el monto.
+    if (!keptInactive) {
+      await this.assertCouponUsable(coupon, dto, opts);
+    }
+
+    const applicableSubtotal = this.getApplicableSubtotal(coupon, dto);
+    if (applicableSubtotal <= 0 && !keptInactive) {
+      throw new VendixHttpException(ErrorCodes.CPN_APPLY_001);
+    }
+
+    // Calculate discount
+    let discount_amount = 0;
+    if (coupon.discount_type === 'PERCENTAGE') {
+      discount_amount =
+        (applicableSubtotal * Number(coupon.discount_value)) / 100;
+      // Apply cap
+      const maxDiscountAmount = Number(coupon.max_discount_amount);
+      if (Number.isFinite(maxDiscountAmount) && maxDiscountAmount > 0) {
+        discount_amount = Math.min(discount_amount, maxDiscountAmount);
+      }
+    } else {
+      discount_amount = Number(coupon.discount_value);
+    }
+
+    // Discount cannot exceed subtotal
+    discount_amount = Math.max(0, Math.min(discount_amount, applicableSubtotal));
+    discount_amount = Math.round(discount_amount * 100) / 100;
+
+    return {
+      valid: true,
+      coupon_id: coupon.id,
+      code: coupon.code,
+      name: coupon.name,
+      discount_type: coupon.discount_type,
+      discount_value: Number(coupon.discount_value),
+      discount_amount,
+      min_purchase_amount: coupon.min_purchase_amount
+        ? Number(coupon.min_purchase_amount)
+        : null,
+      max_discount_amount: coupon.max_discount_amount
+        ? Number(coupon.max_discount_amount)
+        : null,
+      ...(keptInactive ? { kept_inactive: true as const } : {}),
+    };
+  }
+
+  /** Vigencia, cupos global/por cliente y compra mínima de un cupón activo. */
+  private async assertCouponUsable(
+    coupon: any,
+    dto: ValidateCouponDto,
+    opts: {
+      excludeOrderId?: number;
+      asOf?: Date;
+      orderCouponId?: number | null;
+      orderState?: string;
+    },
+  ): Promise<void> {
     const now = opts.asOf ?? new Date();
 
     // Check dates
@@ -383,45 +469,6 @@ export class CouponsService {
     ) {
       throw new VendixHttpException(ErrorCodes.CPN_MIN_001);
     }
-
-    const applicableSubtotal = this.getApplicableSubtotal(coupon, dto);
-    if (applicableSubtotal <= 0) {
-      throw new VendixHttpException(ErrorCodes.CPN_APPLY_001);
-    }
-
-    // Calculate discount
-    let discount_amount = 0;
-    if (coupon.discount_type === 'PERCENTAGE') {
-      discount_amount =
-        (applicableSubtotal * Number(coupon.discount_value)) / 100;
-      // Apply cap
-      const maxDiscountAmount = Number(coupon.max_discount_amount);
-      if (Number.isFinite(maxDiscountAmount) && maxDiscountAmount > 0) {
-        discount_amount = Math.min(discount_amount, maxDiscountAmount);
-      }
-    } else {
-      discount_amount = Number(coupon.discount_value);
-    }
-
-    // Discount cannot exceed subtotal
-    discount_amount = Math.min(discount_amount, applicableSubtotal);
-    discount_amount = Math.round(discount_amount * 100) / 100;
-
-    return {
-      valid: true,
-      coupon_id: coupon.id,
-      code: coupon.code,
-      name: coupon.name,
-      discount_type: coupon.discount_type,
-      discount_value: Number(coupon.discount_value),
-      discount_amount,
-      min_purchase_amount: coupon.min_purchase_amount
-        ? Number(coupon.min_purchase_amount)
-        : null,
-      max_discount_amount: coupon.max_discount_amount
-        ? Number(coupon.max_discount_amount)
-        : null,
-    };
   }
 
   private validateTargetSelection(

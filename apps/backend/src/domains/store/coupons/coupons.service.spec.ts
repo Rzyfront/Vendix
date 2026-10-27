@@ -57,3 +57,57 @@ describe('CouponsService.validate — excludeOrderId (QUI-650)', () => {
     await expect(svc.validate(dto, { excludeOrderId: 55, orderCouponId: 1, orderState: 'draft' })).rejects.toMatchObject({ errorCode: 'CPN_LIMIT_001' });
   });
 });
+
+describe('CouponsService.validate — cupón desactivado que la orden ya usa (QUI-650)', () => {
+  const inactive = {
+    id: 9, code: 'DIEZ', name: 'Diez', is_active: false, valid_from: past, valid_until: past,
+    discount_type: 'PERCENTAGE', discount_value: 10, applies_to: 'ALL_PRODUCTS',
+    min_purchase_amount: 1_000_000, max_discount_amount: null, max_uses: 1,
+    max_uses_per_customer: 1, current_uses: 5, coupon_products: [], coupon_categories: [],
+  };
+  const buildInactive = (ownRows: number) => {
+    const prisma: any = {
+      coupons: {
+        findFirst: jest.fn().mockImplementation(async ({ where }: any) =>
+          where.is_active === false && where.code === inactive.code ? inactive : null,
+        ),
+      },
+      coupon_uses: { count: jest.fn().mockResolvedValue(ownRows) },
+    };
+    return new CouponsService(prisma);
+  };
+  const keep = { excludeOrderId: 55, keepInactiveUsedByOrder: true };
+  const d: any = { code: 'DIEZ', cart_subtotal: 300, customer_id: 7, items: [] };
+
+  it('regla 1: la orden POS sin cobrar (solo orders.coupon_id, sin fila coupon_uses) lo conserva aunque esté desactivado', async () => {
+    const svc = buildInactive(0);
+    await expect(svc.validate(d)).rejects.toMatchObject({ errorCode: 'CPN_FIND_001' });
+    await expect(svc.validate(d, { ...keep, orderCouponId: 9 })).resolves.toMatchObject({
+      coupon_id: 9, kept_inactive: true, discount_amount: 30,
+    });
+  });
+
+  it('regla 1: la orden con fila coupon_uses (ya cobrada) también lo conserva', async () => {
+    await expect(buildInactive(1).validate(d, { ...keep, orderCouponId: null })).resolves.toMatchObject({
+      coupon_id: 9, kept_inactive: true,
+    });
+  });
+
+  it('regla 2: un porcentual desactivado se recalcula sobre el nuevo subtotal, no se congela en pesos', async () => {
+    const svc = buildInactive(0);
+    await expect(svc.validate({ ...d, cart_subtotal: 500 }, { ...keep, orderCouponId: 9 })).resolves.toMatchObject({
+      discount_type: 'PERCENTAGE', discount_value: 10, discount_amount: 50,
+    });
+  });
+
+  it('regla 4: un cupón desactivado que la orden NO usó sigue bloqueando', async () => {
+    const svc = buildInactive(0);
+    await expect(svc.validate(d, { ...keep, orderCouponId: 3 })).rejects.toMatchObject({ errorCode: 'CPN_FIND_001' });
+    await expect(svc.validate(d, { keepInactiveUsedByOrder: true, orderCouponId: 9 })).rejects.toMatchObject({ errorCode: 'CPN_FIND_001' });
+  });
+
+  it('un cupón activo no expone kept_inactive (respuesta intacta)', async () => {
+    const res = await build({}, { total: 0, own: 0 }).validate(dto, keep);
+    expect(res).not.toHaveProperty('kept_inactive');
+  });
+});

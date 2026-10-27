@@ -9,7 +9,7 @@
     "// ----- BUILD & START -----": "",
     "build": "nest build",
     "start": "nest start",
-    "start:dev": "nest start --watch --builder swc",
+    "start:dev": "nest start --watch --config nest-cli.dev.json",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main",
     "// ----- TYPE CHECK (specs included, scripts/ excluded) -----": "",

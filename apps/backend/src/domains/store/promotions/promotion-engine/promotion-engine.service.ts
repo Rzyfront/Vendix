@@ -549,6 +549,7 @@ export class PromotionEngineService {
     const customerId = input.customer_id ?? null;
     const excludeOrderId = input.exclude_order_id ?? null;
     const orderScopeIds = input.order_scope?.promotion_ids ?? null;
+    const orderScopeWithAuto = input.order_scope?.include_auto_apply === true;
     const manualIds = Array.from(new Set(input.manual_promotion_ids ?? []));
 
     const subtotal = this.roundMoney(
@@ -612,7 +613,24 @@ export class PromotionEngineService {
 
     // Fetch candidate promotions: auto-apply OR explicitly requested.
     const candidates = (await this.prisma.promotions.findMany({
-      where: orderScopeIds
+      where: orderScopeIds && orderScopeWithAuto
+        ? {
+            // Re-cotización al editar productos de la orden: sus promociones
+            // (cualquier `state`) MÁS las automáticas activas, como el POS. Una
+            // escala por volumen que no aplicaba con 5 unidades sí aplica al
+            // subir a 50. La ventana de fechas sigue con `as_of`.
+            start_date: { lte: now },
+            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            AND: [
+              {
+                OR: [
+                  { id: { in: orderScopeIds } },
+                  { is_auto_apply: true, state: { in: ['active', 'scheduled'] } },
+                ],
+              },
+            ],
+          }
+        : orderScopeIds
         ? {
             // Re-cotización de una orden ya persistida: SOLO sus promociones
             // (no entra ninguna nueva) y se ignora el `state` (pausada,
