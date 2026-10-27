@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsPositive, IsString, Matches } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsPositive, IsString, Matches } from 'class-validator';
 
 /** H3.5 — deposit taken at the desk (cash, card or transfer). */
 export class CollectDepositDto {
@@ -25,4 +25,10 @@ export class DepositLinkDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   amount!: number;
+
+  /** Client key of this attempt: a double click creates one link. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9-]{8,64}$/)
+  request_id?: string;
 }

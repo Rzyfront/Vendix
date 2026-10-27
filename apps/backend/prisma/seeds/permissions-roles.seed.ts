@@ -5319,6 +5319,8 @@ export async function seedPermissionsAndRoles(
       // Reservas - check-in y submissions
       p.name.includes('store:reservations:write') ||
       p.name.includes('store:data_collection:submissions:read') ||
+      // Hotelería (H3.6, D10) — "Cargo a habitación" desde el POS.
+      p.name === 'store:lodging:folio:charge' ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||
@@ -5470,6 +5472,8 @@ export async function seedPermissionsAndRoles(
     'store:products:read:slug',
     // Lectura de clientes (mismo subset read que cashier)
     'store:customers:read',
+    // Hotelería (H3.6, D10) — "Cargo a habitación" al cerrar la mesa.
+    'store:lodging:folio:charge',
   ];
 
   const waiterPermissions = allPermissions.filter((p) =>

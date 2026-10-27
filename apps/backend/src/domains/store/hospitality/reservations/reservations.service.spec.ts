@@ -368,6 +368,8 @@ describe('LodgingReservationsService', () => {
       retainInTx: jest.fn(async (): Promise<unknown> => null),
       announceRetained: jest.fn(),
       quoteSettlement: jest.fn(async () => ({})),
+      cancelPendingLinksInTx: jest.fn(async (): Promise<number[]> => []),
+      deactivateLinks: jest.fn(async () => undefined),
     };
     const service = new LodgingReservationsService(
       fake.prisma as any,
@@ -1139,6 +1141,21 @@ describe('LodgingReservationsService', () => {
       );
       expect(deposits.announceRetained).toHaveBeenCalledWith(retained);
       expect(deposits.announceRetained.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.$transaction.mock.invocationCallOrder.at(-1)!,
+      );
+    });
+
+    it('H3.5 — cancelar anula los links Wompi pendientes y los desactiva tras el commit', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, deposits, prisma } = build(2);
+      await service.create(flexible);
+      deposits.cancelPendingLinksInTx.mockResolvedValueOnce([77]);
+
+      await service.cancel(1, 'Cambio de planes');
+
+      expect(deposits.cancelPendingLinksInTx).toHaveBeenCalledWith(expect.anything(), 1);
+      expect(deposits.deactivateLinks).toHaveBeenCalledWith([77]);
+      expect(deposits.deactivateLinks.mock.invocationCallOrder[0]).toBeGreaterThan(
         prisma.$transaction.mock.invocationCallOrder.at(-1)!,
       );
     });

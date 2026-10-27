@@ -1,3 +1,4 @@
+import { OrderHistoryService } from '../../../orders/order-history/order-history.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -69,6 +70,7 @@ export class LodgingRoomChargesService {
     private readonly stockValidator: StockValidatorService,
     private readonly tableSessions: TableSessionsService,
     private readonly settings: SettingsService,
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   /** Rooms with a guest in house and an open folio (the room picker). */
@@ -149,6 +151,21 @@ export class LodgingRoomChargesService {
         const folioOrder = await this.lockOrder(tx, room.folio.order_id, store_id);
         if (folioOrder.state !== 'draft') throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_CLOSED_001);
         assertNoActiveFinancialSplit(folioOrder);
+        // Read again under the lock: the folio may have closed or blocked
+        // charges after the room was resolved.
+        const fresh = await tx.lodging_folios.findUnique({
+          where: { id: room.folio.id },
+          select: { status: true, charges_blocked: true, reservation: { select: { status: true } } },
+        });
+        if (!fresh || fresh.status !== 'open' || fresh.reservation.status !== 'checked_in') {
+          throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_CLOSED_001);
+        }
+        if (fresh.charges_blocked) {
+          throw new VendixHttpException(
+            ErrorCodes.LODGING_ROOM_CHARGE_BLOCKED_001,
+            `La habitación ${room.room_code} tiene los cargos bloqueados`,
+          );
+        }
 
         const again = await tx.lodging_room_charges.findUnique({ where: { source_order_id: order.id } });
         if (again) return again;
@@ -197,6 +214,14 @@ export class LodgingRoomChargesService {
             internal_notes: `Cargado a habitación ${room.room_code} · folio ${room.folio.id}`,
             updated_at: new Date(),
           },
+        });
+        await this.orderHistory.record(tx, {
+          orderId: order.id,
+          storeId: store_id,
+          type: 'state_changed',
+          fromState: order.state,
+          toState: 'cancelled',
+          payload: { reason: 'room_charge', room_code: room.room_code, folio_id: room.folio.id },
         });
         if (source.table_session_id) {
           await tx.table_sessions.update({

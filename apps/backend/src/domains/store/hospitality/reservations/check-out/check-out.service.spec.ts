@@ -19,6 +19,9 @@ function build(
     closeCount?: number;
     split?: boolean;
     online?: number;
+    eInvoicing?: boolean;
+    verifiedTotal?: number;
+    repeatOrder?: { payment_form: string; remaining_balance: number };
   } = {},
 ) {
   const total = options.total ?? 595000;
@@ -74,7 +77,11 @@ function build(
       })),
       update: jest.fn(async () => ({})),
     },
-    lodging_folios: { updateMany: jest.fn(async () => ({ count: options.closeCount ?? 1 })) },
+    lodging_folios: {
+      updateMany: jest.fn(async () => ({ count: options.closeCount ?? 1 })),
+      findUnique: jest.fn(async () => ({ verified_total: options.verifiedTotal ?? total })),
+    },
+    lodging_room_nights: { updateMany: jest.fn(async () => ({ count: 2 })) },
     lodging_reservations: {
       updateMany: jest.fn(async () => {
         state.reservation = 'checked_out';
@@ -94,9 +101,30 @@ function build(
     users: { findFirst: jest.fn(async ({ where }: any) => (where.id === 77 ? { id: 77 } : null)) },
     orders: {
       findFirst: jest.fn(async () => ({
+        id: 500,
+        order_number: 'F-H-0001',
+        customer_id: 9,
         grand_total: total,
+        subtotal_amount: 500000,
+        tax_amount: 95000,
+        tip_amount: 0,
         active_financial_split_id: options.split ? 90 : null,
+        payment_form: options.repeatOrder?.payment_form ?? '1',
+        remaining_balance: options.repeatOrder?.remaining_balance ?? 0,
       })),
+    },
+    order_items: {
+      findMany: jest.fn(async () => [
+        {
+          total_price: 500000,
+          quantity: 1,
+          tax_amount_item: 95000,
+          weight: null,
+          price_unit_quantity: null,
+          item_type: 'service',
+          order_item_taxes: [{ tax_type: 'IVA', tax_amount: 95000, tax_rate: 0.19 }],
+        },
+      ]),
     },
     // H3.8 — split folio: lodging to the company, consumptions to the guest.
     order_financial_accounts: {
@@ -108,7 +136,8 @@ function build(
     lodging_folios: { updateMany: jest.fn(async () => ({ count: 1 })) },
     stores: { findFirst: jest.fn(async () => ({ timezone: 'America/Bogota' })) },
     store_settings: { findFirst: jest.fn(async () => null) },
-    invoices: { findFirst: jest.fn(async () => ({ id: 120 })) },
+    // Without e-invoicing no document is ever created for the order.
+    invoices: { findFirst: jest.fn(async () => (options.eInvoicing === false ? null : { id: 120 })) },
     $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
 
@@ -136,6 +165,13 @@ function build(
   const reservations = { findOne: jest.fn(async () => ({ id: 7, status: state.reservation })) };
   const history = { record: jest.fn(async () => ({ id: 1 })) };
   const pdf = { getPdf: jest.fn(async () => 'https://signed/fe-120.pdf') };
+  const invoicing = {
+    getElectronicEmissionEligibility: jest.fn(async () => ({
+      eligible: options.eInvoicing ?? true,
+      reason: options.eInvoicing === false ? 'sin habilitación' : null,
+    })),
+  };
+  const cashSessions = { assertSessionForSales: jest.fn(async () => undefined) };
 
   const service = new LodgingCheckOutService(
     prisma as any,
@@ -147,8 +183,10 @@ function build(
     fiscal as any,
     pdf as any,
     events as any,
+    invoicing as any,
+    cashSessions as any,
   );
-  return { service, prisma, tx, folios, fiscal, receivables, events, state, pdf };
+  return { service, prisma, tx, folios, fiscal, receivables, events, state, pdf, cashSessions };
 }
 
 const VERIFIER = { permissions: [{ name: 'store:lodging:folio:verify', status: 'active' }] };
@@ -444,6 +482,120 @@ describe('LodgingCheckOutService (H3.7)', () => {
       expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ order_id: 500, financial_account_id: 302 }) }),
       );
+    });
+  });
+
+  describe('decisión 3 — reconocimiento del ingreso según la facturación de la tienda', () => {
+    it('sin facturación electrónica: el check-out reconoce la venta (ingreso + impuestos y cruce 2805) sin bloquear', async () => {
+      const { service, events } = build({ eInvoicing: false });
+
+      const result = await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+      expect(events.emit).toHaveBeenCalledWith(
+        'lodging.folio.sale_recognized',
+        expect.objectContaining({
+          order_id: 500,
+          store_id: 3,
+          order_number: 'F-H-0001',
+          total_amount: 595000,
+          tax_amount: 95000,
+          customer: expect.objectContaining({ id: 9 }),
+        }),
+      );
+      expect(result.reservation).toMatchObject({ status: 'checked_out' });
+    });
+
+    it('con facturación electrónica: no reconoce en el check-out; lo hace la factura aceptada', async () => {
+      const { service, events, fiscal } = build({ eInvoicing: true });
+
+      await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+      expect(fiscal.emitForOrder).toHaveBeenCalledTimes(1);
+      expect(events.emit).not.toHaveBeenCalledWith('lodging.folio.sale_recognized', expect.anything());
+    });
+
+    it('sin FE pero con un documento ya iniciado para la orden: no reconoce dos veces', async () => {
+      const { service, events, prisma } = build({ eInvoicing: false });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 120 });
+
+      await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+      expect(events.emit).not.toHaveBeenCalledWith('lodging.folio.sale_recognized', expect.anything());
+    });
+
+    it('si el reconocimiento falla, el check-out igual termina', async () => {
+      const { service, prisma } = build({ eInvoicing: false });
+      prisma.order_items.findMany.mockRejectedValueOnce(new Error('db down'));
+
+      const result = await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+      expect(result.reservation).toMatchObject({ status: 'checked_out' });
+    });
+
+    it('un check-out repetido sin FE reintenta el reconocimiento (idempotente por orden)', async () => {
+      const { service, events } = build({ eInvoicing: false, status: 'checked_out', folioStatus: 'closed' });
+
+      await service.checkOut(7, { request_id: REQUEST }, DESK);
+
+      expect(events.emit).toHaveBeenCalledWith('lodging.folio.sale_recognized', expect.objectContaining({ order_id: 500 }));
+    });
+  });
+
+  it('salida anticipada: desactiva las noches no posteadas desde hoy', async () => {
+    const { service, tx } = build();
+
+    await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+    expect(tx.lodging_room_nights.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          reservation_room: { reservation_id: 7 },
+          posted_order_item_id: null,
+          is_active: true,
+          night_date: { gte: expect.any(Date) },
+        }),
+        data: expect.objectContaining({ is_active: false }),
+      }),
+    );
+  });
+
+  it('D11 bajo el lock: un cargo que entró después de verificar bloquea el cierre', async () => {
+    const { service, tx, fiscal } = build({ verifiedTotal: 500000 });
+
+    await expect(
+      service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.LODGING_CHECKOUT_VERIFY_001.code });
+    expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+    expect(fiscal.emitForOrder).not.toHaveBeenCalled();
+  });
+
+  it('el check-out a crédito exige caja abierta como toda venta POS', async () => {
+    const { service, cashSessions, tx } = build({ paid: 100000 });
+    cashSessions.assertSessionForSales.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.LODGING_CHECKOUT_001, 'Abre la caja'),
+    );
+
+    await expect(
+      service.checkOut(7, { charge_to_credit: true, bill_to_customer_id: 77, request_id: REQUEST }, DESK),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+    expect(cashSessions.assertSessionForSales).toHaveBeenCalledWith(5);
+    expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('un check-out repetido a crédito reintenta la cuenta por cobrar', async () => {
+    const { service, receivables } = build({
+      status: 'checked_out',
+      folioStatus: 'closed',
+      invoice: { invoice_id: 120, state: 'issued' },
+      repeatOrder: { payment_form: '2', remaining_balance: 495000 },
+    });
+
+    await service.checkOut(7, { request_id: REQUEST }, DESK);
+
+    expect(receivables.createCreditSaleFromEvent).toHaveBeenCalledWith({
+      order_id: 500,
+      total_amount: 495000,
+      store_id: 3,
     });
   });
 });

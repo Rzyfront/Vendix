@@ -6,6 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { assertNotLodgingFolioOrder } from '../orders/shared/lodging-folio-policy';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
@@ -219,6 +220,16 @@ export class PaymentsService {
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
       await this.validateUserAccess(user, createPaymentDto.storeId);
+
+      // A hotel folio is paid only from Hotelería (its payments credit 2805).
+      if (createPaymentDto.orderId) {
+        assertNotLodgingFolioOrder({
+          lodging_folio: await this.prisma.lodging_folios.findFirst({
+            where: { order_id: createPaymentDto.orderId },
+            select: { id: true },
+          }),
+        });
+      }
 
       // Gate único de caja: ningún pago con el switch activo nace sin caja
       // de quien cobra. Antes del gateway para no crear pago ni movimientos.

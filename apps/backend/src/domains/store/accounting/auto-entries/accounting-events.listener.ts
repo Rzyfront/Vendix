@@ -1245,6 +1245,55 @@ export class AccountingEventsListener {
     }
   }
 
+  /**
+   * Check-out of a folio in a store WITHOUT electronic invoicing: the sale is
+   * recognized at check-out (owner decision 2026-10-27). Same `payments` flow
+   * as the folio payments that created the 2805 advance.
+   */
+  @OnEvent('lodging.folio.sale_recognized')
+  async handleLodgingFolioSaleRecognized(event: {
+    order_id: number;
+    organization_id?: number;
+    store_id: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    shipping_amount?: number;
+    discount_amount?: number;
+    total_amount: number;
+    tip_amount?: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id = event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingFolioSale({
+        order_id: event.order_id,
+        organization_id,
+        store_id: event.store_id,
+        order_number: event.order_number,
+        subtotal_amount: Number(event.subtotal_amount),
+        tax_amount: Number(event.tax_amount),
+        tax_breakdown: event.tax_breakdown,
+        shipping_amount: Number(event.shipping_amount ?? 0),
+        discount_amount:
+          event.discount_amount != null ? Number(event.discount_amount) : undefined,
+        total_amount: Number(event.total_amount),
+        tip_amount: Number(event.tip_amount ?? 0),
+        user_id: event.user_id,
+        customer: event.customer,
+      });
+      this.logger.log(`Auto-entry created for lodging.folio_sale - order ${event.order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_sale - order ${event.order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   /** H3.7 — no-op unless the invoice belongs to a guest folio order. */
   private async handleLodgingFolioInvoiced(event: {
     invoice_id: number;
@@ -1256,6 +1305,8 @@ export class AccountingEventsListener {
     customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
+      // The advance came from the `payments` flow: cross it only if it was booked.
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
       const entry = await this.auto_entry_service.onLodgingFolioInvoiced({
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,

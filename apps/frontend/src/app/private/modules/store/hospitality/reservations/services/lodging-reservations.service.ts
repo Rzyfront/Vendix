@@ -372,10 +372,12 @@ export class LodgingReservationsService {
   createDepositLink(
     reservationId: number,
     amount: number,
+    requestId: string,
   ): Observable<{ summary: LodgingDepositSummary; message: string }> {
     return this.http
       .post<ApiResponse<LodgingDepositSummary>>(`${this.baseUrl}/${reservationId}/deposits/link`, {
         amount,
+        request_id: requestId,
       })
       .pipe(
         map((res) => ({ summary: res.data, message: res.message ?? 'Link de pago creado' })),

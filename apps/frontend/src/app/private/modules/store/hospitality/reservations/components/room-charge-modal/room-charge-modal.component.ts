@@ -23,6 +23,8 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { InHouseRoom } from '../../interfaces/folio.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
 /**
  * Hospitality Suite (H3.6) — "Cargo a habitación" picker shared by the POS
  * checkout and the table bill. Lists only rooms with a guest in house; a room
@@ -74,7 +76,7 @@ import { LodgingReservationsService } from '../../services/lodging-reservations.
                     <span class="font-semibold">{{ room.room_code }}</span>
                     · {{ room.guest_name }}
                     <span class="block text-xs text-text-secondary">
-                      {{ room.unit_type_name }} · {{ room.reservation_number }} · sale {{ room.departure_date }}
+                      {{ room.unit_type_name }} · {{ room.reservation_number }} · sale {{ departureLabel(room.departure_date) }}
                     </span>
                   </span>
                   @if (room.charges_blocked) {
@@ -171,5 +173,11 @@ export class RoomChargeModalComponent {
 
   money(value: number): string {
     return this.currency.format(value, 0);
+  }
+
+  /** Civil date `2026-10-28` → `28-oct`, same label as the front desk. */
+  departureLabel(date: string): string {
+    const [, month, day] = date.slice(0, 10).split('-').map(Number);
+    return `${day}-${MONTHS[month - 1]}`;
   }
 }

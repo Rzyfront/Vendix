@@ -12,6 +12,9 @@ import { AccountsReceivableService } from '../../../accounts-receivable/accounts
 import { PosFiscalEmissionService } from '../../../invoicing/pos/pos-fiscal-emission.service';
 import { PosFiscalStatus } from '../../../invoicing/pos/pos-fiscal-status.interface';
 import { InvoicePdfService } from '../../../invoicing/services/invoice-pdf.service';
+import { InvoicingService } from '../../../invoicing/invoicing.service';
+import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
+import { buildOrderSaleTaxPayload } from '../../../payments/utils/order-sale-tax-payload.util';
 import { LodgingReservationsService } from '../reservations.service';
 import { FolioUser, FolioRow, hasActivePermission, LodgingFolioService } from '../folio/folio.service';
 import { CheckOutDto } from './check-out.dto';
@@ -58,6 +61,10 @@ const toCents = (value: Prisma.Decimal | number | string | null | undefined) =>
  * order and never takes a second number). Its acceptance books revenue + VAT
  * against 1305, and `lodging.folio_settlement` crosses the 2805 advance.
  *
+ * Without electronic invoicing in the store (owner decision 2026-10-27) the
+ * check-out recognizes the sale itself (`lodging.folio.sale_recognized`:
+ * DR 1305 / CR revenue + taxes, then the 2805 cross); never blocking.
+ *
  * Closing is a conditional update (open → closed): a double click closes
  * once, and only the request that closed emits; a repeated check-out only
  * retries a failed emission of the same document.
@@ -76,6 +83,8 @@ export class LodgingCheckOutService {
     private readonly fiscalEmission: PosFiscalEmissionService,
     private readonly pdfService: InvoicePdfService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly invoicing: InvoicingService,
+    private readonly cashSessions: SessionsService,
   ) {}
 
   /**
@@ -104,6 +113,7 @@ export class LodgingCheckOutService {
 
     // Repeated check-out: never a second invoice, only a retry of the same one.
     if (reservation.status === 'checked_out' && folio.status === 'closed') {
+      await this.retryAfterClose(folio.order_id, store_id, context?.organization_id, user_id);
       return this.result(reservation_id, folio.order_id, true);
     }
     if (reservation.status !== 'checked_in' || folio.status !== 'open') {
@@ -144,6 +154,12 @@ export class LodgingCheckOutService {
     // 2. D11 review at this total (before any money moves).
     await this.assertVerified(reservation_id, folio, dto, user);
 
+    // The credit route sells without cash: the POS cash-session rule still
+    // applies, checked before any money moves.
+    if (dto.charge_to_credit) {
+      await this.cashSessions.assertSessionForSales(user_id ?? undefined);
+    }
+
     // 3. H6.6 — the online reservation payment, then the deposit still
     // held ("Anticipo aplicado").
     let current = await this.folios.getFolio(reservation_id);
@@ -176,6 +192,8 @@ export class LodgingCheckOutService {
     }
 
     // 5. Close: folio, order, reservation and rooms, all or nothing.
+    const verifyTotal = await this.verificationRequired();
+    const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
     const closed = await this.prisma.$transaction(
       async (tx) => {
         const locked: Array<{ id: number }> = await tx.$queryRaw`
@@ -187,6 +205,19 @@ export class LodgingCheckOutService {
           include: { payments: { select: { amount: true, state: true } } },
         });
         if (!order) throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_FIND_001);
+        // D11 again under the lock: a charge may have entered after the review.
+        if (verifyTotal) {
+          const stored = await tx.lodging_folios.findUnique({
+            where: { id: folio.id },
+            select: { verified_total: true },
+          });
+          if (toCents(stored?.verified_total) !== toCents(order.grand_total)) {
+            throw new VendixHttpException(
+              ErrorCodes.LODGING_CHECKOUT_VERIFY_001,
+              'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo',
+            );
+          }
+        }
         const now = new Date();
         // Only one request moves the folio from open: the double click gets 0.
         const updated = await tx.lodging_folios.updateMany({
@@ -245,6 +276,16 @@ export class LodgingCheckOutService {
           where: { reservation_id, cancelled_at: null, unit_id: { not: null } },
           select: { unit_id: true },
         });
+        // Early departure: the nights not slept stop blocking the rooms.
+        await tx.lodging_room_nights.updateMany({
+          where: {
+            reservation_room: { reservation_id },
+            posted_order_item_id: null,
+            is_active: true,
+            night_date: { gte: new Date(`${today}T00:00:00.000Z`) },
+          },
+          data: { is_active: false, updated_at: now },
+        });
         const unitIds = rooms.map((r) => r.unit_id as number);
         if (unitIds.length > 0) {
           await tx.lodging_units.updateMany({
@@ -289,6 +330,7 @@ export class LodgingCheckOutService {
         user_id: user_id ?? undefined,
       });
     }
+    if (!split) await this.recognizeSale(folio.order_id, store_id, context?.organization_id, user_id);
     return this.result(reservation_id, folio.order_id, true);
   }
 
@@ -402,6 +444,108 @@ export class LodgingCheckOutService {
     });
   }
 
+  /**
+   * Store without electronic invoicing: the check-out closes the folio as a
+   * normal POS sale and recognizes the revenue now (the listener books
+   * DR 1305 / CR revenue + taxes and crosses the 2805 advance; both entries
+   * are idempotent per order). With electronic invoicing the invoice
+   * acceptance does it. Never blocks the check-out.
+   */
+  private async recognizeSale(
+    order_id: number,
+    store_id: number,
+    organization_id: number | undefined,
+    user_id: number | null,
+  ): Promise<void> {
+    try {
+      const { eligible } = await this.invoicing.getElectronicEmissionEligibility();
+      if (eligible) return;
+      // A document already started for the order (FE enabled at the time)
+      // books the sale on acceptance: never recognize it twice.
+      const invoice = await this.prisma.invoices.findFirst({ where: { order_id }, select: { id: true } });
+      if (invoice) return;
+      const order = await this.prisma.orders.findFirst({ where: { id: order_id } });
+      if (!order) return;
+      const items = await this.prisma.order_items.findMany({
+        where: { order_id, cancelled_at: null },
+        select: {
+          total_price: true,
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
+          item_type: true,
+          order_item_taxes: { select: { tax_type: true, tax_amount: true, tax_rate: true } },
+        },
+      });
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: items.flatMap((item) =>
+          (item.order_item_taxes || []).map((tax) => ({
+            ...tax,
+            taxable_amount: Number(item.total_price || 0),
+          })),
+        ),
+        order,
+        order_items: items,
+      });
+      let customer: { id: number; name?: string; tax_id?: string } | undefined;
+      if (order.customer_id) {
+        const user = await this.prisma.users.findFirst({
+          where: { id: order.customer_id },
+          select: { first_name: true, last_name: true, document_number: true },
+        });
+        customer = {
+          id: order.customer_id,
+          name: user ? `${user.first_name} ${user.last_name}`.trim() : undefined,
+          tax_id: user?.document_number ?? undefined,
+        };
+      }
+      this.eventEmitter.emit('lodging.folio.sale_recognized', {
+        order_id,
+        organization_id,
+        store_id,
+        order_number: order.order_number,
+        subtotal_amount: Number(order.subtotal_amount || 0),
+        tax_amount: sale_tax.tax_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
+        shipping_amount: sale_tax.shipping_amount,
+        discount_amount: sale_tax.discount_amount,
+        total_amount: Number(order.grand_total || 0),
+        tip_amount: Number(order.tip_amount || 0),
+        user_id: user_id ?? undefined,
+        customer,
+      });
+    } catch (error) {
+      this.logger.error(`Folio order ${order_id}: sale recognition failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Repeated check-out: retries what runs after the close and may have failed. */
+  private async retryAfterClose(
+    order_id: number,
+    store_id: number,
+    organization_id: number | undefined,
+    user_id: number | null,
+  ): Promise<void> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: { payment_form: true, remaining_balance: true, active_financial_split_id: true },
+    });
+    if (!order || order.active_financial_split_id) return;
+    if (order.payment_form === '2' && Number(order.remaining_balance ?? 0) > 0) {
+      try {
+        await this.receivables.createCreditSaleFromEvent({
+          order_id,
+          total_amount: Number(order.remaining_balance),
+          store_id,
+        });
+      } catch (error) {
+        this.logger.error(`Folio order ${order_id}: receivable retry failed: ${(error as Error).message}`);
+      }
+    }
+    await this.recognizeSale(order_id, store_id, organization_id, user_id);
+  }
+
   /** Emits only when there is no document yet or the last attempt failed. */
   private async emitOnce(order_id: number): Promise<PosFiscalStatus> {
     const status = await this.fiscalEmission.getStatusForOrder(order_id);
@@ -434,10 +578,7 @@ export class LodgingCheckOutService {
     dto: CheckOutDto,
     user?: FolioUser,
   ): Promise<void> {
-    const settings = (await this.settings.getSettings()) as {
-      hospitality?: { folio_invoice_verification?: boolean };
-    };
-    if (settings?.hospitality?.folio_invoice_verification === false) return;
+    if (!(await this.verificationRequired())) return;
 
     const current = await this.folios.getFolio(reservation_id);
     if (current.verified_current) return;
@@ -451,6 +592,13 @@ export class LodgingCheckOutService {
         ? 'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo'
         : 'Un usuario con permiso «Verificar el folio» debe revisarlo antes de facturar',
     );
+  }
+
+  private async verificationRequired(): Promise<boolean> {
+    const settings = (await this.settings.getSettings()) as {
+      hospitality?: { folio_invoice_verification?: boolean };
+    };
+    return settings?.hospitality?.folio_invoice_verification !== false;
   }
 
   private async markVerified(folio_id: number, order_id: number): Promise<void> {

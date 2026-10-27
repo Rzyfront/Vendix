@@ -1784,6 +1784,14 @@ export class PosCheckoutShellComponent {
   @HostListener('keydown', ['$event'])
   onShellKeydown(event: KeyboardEvent): void {
     if (!this.isOpen() || event.defaultPrevented) return;
+    // El selector de habitación vive dentro del checkout: sus teclas (Enter en
+    // la búsqueda) no deben disparar el cobro de la venta por detrás.
+    if (
+      this.roomChargeOpen() ||
+      (event.target as HTMLElement | null)?.closest?.('app-room-charge-modal')
+    ) {
+      return;
+    }
     // Stitch 11b (5): corrección de la trampa de Tab ANTES del guard de
     // procesamiento — el foco debe envolverse aunque el footer esté
     // deshabilitado. Corre en el host (burbuja) antes del listener de
@@ -2517,6 +2525,7 @@ export class PosCheckoutShellComponent {
   readonly roomChargeBusy = signal(false);
   /** Draft already saved by a failed attempt: a retry charges the same sale. */
   private roomChargeOrderId: number | null = null;
+  private roomChargeOrder: any = null;
 
   /**
    * Hotel stores (Hotelería) with `store:lodging:folio:charge` can charge a
@@ -2542,7 +2551,12 @@ export class PosCheckoutShellComponent {
     this.roomChargeOpen.set(false);
     if (this.roomChargeOrderId != null) {
       this.toastService.warning('La venta quedó guardada como borrador; puedes cobrarla desde Borradores.');
+      const order = this.roomChargeOrder;
       this.roomChargeOrderId = null;
+      this.roomChargeOrder = null;
+      // Mismo camino que el borrador normal: emite draftSaved, limpia el
+      // carrito y cierra, para no cobrar dos veces ni repetir comandas.
+      this.finishDraft(order, [], true);
     }
   }
 
@@ -2562,6 +2576,7 @@ export class PosCheckoutShellComponent {
         : this.integration.createCounterDraftOrder(draftState, this.customerAliasForPayload()).pipe(
             switchMap((order) => {
               this.roomChargeOrderId = order.id;
+              this.roomChargeOrder = order;
               return this.integration
                 .maybeFireKitchen(order.id, this.preparedItemIdsFromOrder(order))
                 .pipe(
@@ -2584,6 +2599,7 @@ export class PosCheckoutShellComponent {
         next: (result) => {
           this.roomChargeBusy.set(false);
           this.roomChargeOrderId = null;
+          this.roomChargeOrder = null;
           this.roomChargeOpen.set(false);
           this.toastService.success(result.message);
           this.cartService

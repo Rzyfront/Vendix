@@ -38,6 +38,8 @@ function build(
     discount?: number;
     existing?: { folio_id: number };
     sessionPaid?: boolean;
+    /** Charges blocked after the room was resolved (read again under the lock). */
+    blockedUnderLock?: boolean;
   } = {},
 ) {
   const orders = new Map<number, Order>();
@@ -114,6 +116,13 @@ function build(
     },
     table_sessions: { update: jest.fn(async ({ where, data }: any) => Object.assign(sessions.find((s) => s.id === where.id)!, data)) },
     lodging_room_charges: chargesTable,
+    lodging_folios: {
+      findUnique: jest.fn(async () => ({
+        status: 'open',
+        charges_blocked: options.blockedUnderLock ?? false,
+        reservation: { status: 'checked_in' },
+      })),
+    },
   };
   const prisma = {
     lodging_reservation_rooms: {
@@ -150,6 +159,7 @@ function build(
   const stockValidator = { resolveInventoryPolicy: jest.fn(async () => ({ allowOversell: false })) };
   const tableSessions = { closeSession: jest.fn(async () => ({})) };
   const settings = { getSettings: jest.fn(async () => ({ hospitality: {} })) };
+  const orderHistory = { record: jest.fn(async () => ({ id: 1 })) };
 
   const service = new LodgingRoomChargesService(
     prisma as any,
@@ -158,8 +168,21 @@ function build(
     stockValidator as any,
     tableSessions as any,
     settings as any,
+    orderHistory as any,
   );
-  return { service, prisma, tx, orders, items, charges, sessions, orderStockCommit, tableSessions, settings };
+  return {
+    service,
+    prisma,
+    tx,
+    orders,
+    items,
+    charges,
+    sessions,
+    orderStockCommit,
+    tableSessions,
+    settings,
+    orderHistory,
+  };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<VendixHttpException> {
@@ -210,6 +233,33 @@ describe('LodgingRoomChargesService (H3.6)', () => {
       });
       expect(Number(ctx.charges[0].cost_amount)).toBe(12000);
       expect(ctx.tableSessions.closeSession).not.toHaveBeenCalled();
+    });
+
+    it('records draft → cancelled in the history of the source sale', async () => {
+      const ctx = build();
+
+      await ctx.service.chargeToRoom({ reservation_room_id: 8, order_id: 900 });
+
+      expect(ctx.orderHistory.record).toHaveBeenCalledWith(
+        ctx.tx,
+        expect.objectContaining({
+          orderId: 900,
+          type: 'state_changed',
+          fromState: 'draft',
+          toState: 'cancelled',
+          payload: expect.objectContaining({ room_code: '101', folio_id: 70 }),
+        }),
+      );
+    });
+
+    it('rejects when the charges were blocked after the room was picked (read under the lock)', async () => {
+      const ctx = build({ blockedUnderLock: true });
+
+      const error = await errorOf(ctx.service.chargeToRoom({ reservation_room_id: 8, order_id: 900 }));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_ROOM_CHARGE_BLOCKED_001.code);
+      expect(ctx.orders.get(900)!.state).toBe('draft');
+      expect(ctx.charges).toHaveLength(0);
     });
 
     it('uses the store origin label when it is set', async () => {

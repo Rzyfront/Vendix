@@ -384,6 +384,7 @@ function newRequestId(): string {
             <app-input
               [formControl]="paymentForm.controls.amount"
               type="number"
+              [currency]="true"
               [min]="1"
               label="Monto"
               size="sm"
@@ -433,6 +434,7 @@ function newRequestId(): string {
             <app-input
               [formControl]="chargeForm.controls.unit_price"
               type="number"
+              [currency]="true"
               [min]="0"
               label="Precio unitario"
               size="sm"
@@ -460,6 +462,7 @@ function newRequestId(): string {
             <app-input
               [formControl]="paymentForm.controls.amount"
               type="number"
+              [currency]="true"
               [min]="1"
               label="Monto"
               size="sm"

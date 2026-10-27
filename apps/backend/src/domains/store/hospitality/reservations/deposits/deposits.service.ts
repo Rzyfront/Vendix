@@ -178,7 +178,21 @@ export class LodgingDepositsService {
       select: { kind: true, status: true, amount: true },
     });
     const { balance } = depositTotals(rows);
-    const settlement = settleDeposit(penalty, balance);
+    // Same cap as `retainInTx`: only what the wallet still has free is kept.
+    const reservation = await this.prisma.lodging_reservations.findFirst({
+      where: { id: reservation_id },
+      select: { customer_id: true },
+    });
+    const wallet = reservation
+      ? await this.prisma.wallets.findFirst({
+          where: { customer_id: reservation.customer_id },
+          select: { balance: true, held_balance: true },
+        })
+      : null;
+    const available = wallet
+      ? new Prisma.Decimal(wallet.balance).sub(new Prisma.Decimal(wallet.held_balance))
+      : new Prisma.Decimal(0);
+    const settlement = settleDeposit(penalty, balance, available);
     return {
       deposit_balance: balance.toFixed(2),
       deposit_retained: settlement.retained.toFixed(2),
@@ -284,43 +298,105 @@ export class LodgingDepositsService {
     const store_id = this.requireStoreId();
     const user_id = RequestContextService.getContext()?.user_id ?? null;
     const reservation = await this.loadCollectable(reservation_id);
-    const amount = await this.assertAmount(this.prisma, reservation_id, reservation.total_amount, dto.amount);
+
+    // The pending row is created first, under the reservation lock, so it
+    // counts against the cap: two clicks or two desks cannot both pass it.
+    const pending = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockReservation(tx, reservation_id, store_id);
+        if (dto.request_id) {
+          const duplicate = await tx.lodging_deposits.findFirst({
+            where: { store_id, request_id: dto.request_id },
+            select: { id: true },
+          });
+          if (duplicate) return null;
+        }
+        const amount = await this.assertAmount(tx, reservation_id, reservation.total_amount, dto.amount);
+        return tx.lodging_deposits.create({
+          data: {
+            store_id,
+            reservation_id,
+            kind: 'received',
+            status: 'pending',
+            amount,
+            method: 'wompi_link',
+            request_id: dto.request_id ?? null,
+            created_by_user_id: user_id,
+          },
+          select: { id: true, amount: true },
+        });
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
+    if (!pending) return this.summary(reservation_id);
 
     let link: { id: number } | undefined;
+    let failure: string | null = null;
     try {
       const created = await this.paymentLinks.create({
         name: `Depósito reserva ${reservation.reservation_number}`,
         description: `Depósito de la reserva ${reservation.reservation_number}`,
         single_use: true,
         collect_shipping: false,
-        amount_in_cents: Math.round(Number(amount) * 100),
+        amount_in_cents: Math.round(Number(pending.amount) * 100),
         currency: 'COP',
       });
       link = created.data;
+      if (!link?.id) failure = 'No se pudo crear el link de pago';
     } catch (err: unknown) {
-      if (err instanceof HttpException) throw err;
+      if (err instanceof HttpException) {
+        await this.cancelPendingRow(pending.id);
+        throw err;
+      }
       // Gateway errors (bad keys, Wompi down) reach the desk as a message, not a 500.
-      throw new VendixHttpException(
-        ErrorCodes.LODGING_DEPOSIT_001,
-        `Wompi no creó el link: ${err instanceof Error ? err.message : 'error desconocido'}`,
-      );
+      failure = `Wompi no creó el link: ${err instanceof Error ? err.message : 'error desconocido'}`;
     }
-    if (!link?.id) {
-      throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'No se pudo crear el link de pago');
+    if (failure || !link?.id) {
+      await this.cancelPendingRow(pending.id);
+      throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, failure ?? 'No se pudo crear el link de pago');
     }
-    await this.prisma.lodging_deposits.create({
-      data: {
-        store_id,
-        reservation_id,
-        kind: 'received',
-        status: 'pending',
-        amount,
-        method: 'wompi_link',
-        payment_link_id: link.id,
-        created_by_user_id: user_id,
-      },
+    await this.prisma.lodging_deposits.update({
+      where: { id: pending.id },
+      data: { payment_link_id: link.id, updated_at: new Date() },
     });
     return this.summary(reservation_id);
+  }
+
+  /** A link that was never created frees its share of the cap. */
+  private async cancelPendingRow(id: number): Promise<void> {
+    await this.prisma.lodging_deposits.updateMany({
+      where: { id, status: 'pending' },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+  }
+
+  /**
+   * Cancellation or no-show: the pending Wompi links of the reservation stop
+   * counting and cannot be credited anymore. Returns their link ids so the
+   * caller deactivates them after commit (`deactivateLinks`).
+   */
+  async cancelPendingLinksInTx(tx: Tx, reservation_id: number): Promise<number[]> {
+    const rows = await tx.lodging_deposits.findMany({
+      where: { reservation_id, kind: 'received', status: 'pending' },
+      select: { id: true, payment_link_id: true },
+    });
+    if (rows.length === 0) return [];
+    await tx.lodging_deposits.updateMany({
+      where: { id: { in: rows.map((row) => row.id) }, status: 'pending' },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    return rows.map((row) => row.payment_link_id).filter((id): id is number => id != null);
+  }
+
+  /** Best effort: a link that cannot be deactivated is only logged. */
+  async deactivateLinks(link_ids: readonly number[]): Promise<void> {
+    for (const id of link_ids) {
+      try {
+        await this.paymentLinks.deactivate(id);
+      } catch (err: unknown) {
+        this.logger.warn(`Payment link ${id} not deactivated: ${err instanceof Error ? err.message : err}`);
+      }
+    }
   }
 
   /** Wompi confirmed a payment link: credit the pending deposit it collects. */
@@ -348,7 +424,19 @@ export class LodgingDepositsService {
         reservation: { select: { id: true, reservation_number: true, customer_id: true } },
       },
     });
-    if (!pending) return false;
+    if (!pending) {
+      const cancelled = await this.prisma.lodging_deposits.findFirst({
+        where: { payment_link_id, kind: 'received', status: 'cancelled' },
+        select: { id: true, reservation_id: true },
+      });
+      if (cancelled) {
+        // Paid after the reservation was cancelled: not credited, refund by hand.
+        this.logger.error(
+          `Payment link ${payment_link_id} paid after deposit ${cancelled.id} was cancelled (reservation ${cancelled.reservation_id}): refund it manually`,
+        );
+      }
+      return false;
+    }
     const wallet = await this.wallets.getOrCreateWallet(pending.reservation.customer_id);
 
     const emitted = await this.prisma.$transaction(
@@ -533,7 +621,11 @@ export class LodgingDepositsService {
       where: { reservation_id },
       select: { kind: true, status: true, amount: true },
     });
-    const room = new Prisma.Decimal(total_amount).sub(depositTotals(rows).received);
+    // A pending Wompi link is not money yet, but it reserves its share of the cap.
+    const pendingLinks = rows
+      .filter((row) => row.kind === 'received' && row.status === 'pending')
+      .reduce((sum, row) => sum.add(new Prisma.Decimal(row.amount)), new Prisma.Decimal(0));
+    const room = new Prisma.Decimal(total_amount).sub(depositTotals(rows).received).sub(pendingLinks);
     if (amount.gt(room)) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_DEPOSIT_001,

@@ -49,14 +49,14 @@ function build(options: { status?: string; walletBalance?: number } = {}) {
     create: jest.fn(async ({ data }: any) => {
       const row = { id: 40 + rows.length, ...data, amount: Number(data.amount) } as Row;
       rows.push(row);
-      return { id: row.id };
+      return { id: row.id, amount: row.amount };
     }),
     update: jest.fn(async ({ where, data }: any) => Object.assign(rows.find((r) => r.id === where.id)!, data)),
     updateMany: jest.fn(async ({ where, data }: any) => {
-      const row = rows.find((r) => r.id === where.id && r.status === where.status);
-      if (!row) return { count: 0 };
-      Object.assign(row, data);
-      return { count: 1 };
+      const ids: number[] = where.id?.in ?? [where.id];
+      const hit = rows.filter((r) => ids.includes(r.id) && r.status === where.status);
+      hit.forEach((row) => Object.assign(row, data));
+      return { count: hit.length };
     }),
   };
   const tx = {
@@ -68,6 +68,7 @@ function build(options: { status?: string; walletBalance?: number } = {}) {
   const prisma = {
     lodging_deposits,
     lodging_reservations: { findFirst: jest.fn(async () => reservation) },
+    wallets: { findFirst: jest.fn(async () => ({ ...wallet })) },
     store_payment_methods: {
       findFirst: jest.fn(async () => ({ id: 4, system_payment_method: { type: 'cash' } })),
     },
@@ -92,6 +93,7 @@ function build(options: { status?: string; walletBalance?: number } = {}) {
   const settings = { getSettings: jest.fn(async () => ({ pos: { cash_register: { enabled: true } } })) };
   const paymentLinks = {
     create: jest.fn(async () => ({ success: true, data: { id: 77, checkout_url: 'https://checkout.wompi.co/l/abc' } })),
+    deactivate: jest.fn(async () => ({})),
   };
   const eventEmitter = { emit: jest.fn() };
   const storeContextRunner = { runInStoreContext: jest.fn(async (_store: number, fn: () => unknown) => fn()) };
@@ -208,6 +210,56 @@ describe('LodgingDepositsService (H3.5)', () => {
     });
   });
 
+  describe('Wompi payment link — cap and lifecycle', () => {
+    it('a pending link reserves its share: a second link for the full total is rejected', async () => {
+      const { service, rows, paymentLinks } = build();
+      await service.createLink(1, { amount: 750000, request_id: 'link-0001-abcd' });
+
+      const error = await errorOf(service.createLink(1, { amount: 750000, request_id: 'link-0002-abcd' }));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_DEPOSIT_001.code);
+      expect(paymentLinks.create).toHaveBeenCalledTimes(1);
+      expect(rows.filter((r) => r.status === 'pending')).toHaveLength(1);
+    });
+
+    it('a double click with the same request_id creates one link', async () => {
+      const { service, rows, paymentLinks } = build();
+      await service.createLink(1, { amount: 225000, request_id: 'link-0001-abcd' });
+      await service.createLink(1, { amount: 225000, request_id: 'link-0001-abcd' });
+
+      expect(paymentLinks.create).toHaveBeenCalledTimes(1);
+      expect(rows).toHaveLength(1);
+    });
+
+    it('a link Wompi did not create frees the cap', async () => {
+      const { service, rows, paymentLinks } = build();
+      paymentLinks.create.mockRejectedValueOnce(new Error('Wompi down'));
+
+      const error = await errorOf(service.createLink(1, { amount: 750000 }));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_DEPOSIT_001.code);
+      expect(rows[0].status).toBe('cancelled');
+      await service.createLink(1, { amount: 750000 });
+      expect(rows[1]).toMatchObject({ status: 'pending', payment_link_id: 77 });
+    });
+
+    it('cancelling the reservation cancels its pending links; a late payment is not credited', async () => {
+      const { service, rows, tx, paymentLinks, wallet, eventEmitter } = build();
+      await service.createLink(1, { amount: 225000 });
+
+      const links = await service.cancelPendingLinksInTx(tx as any, 1);
+      await service.deactivateLinks(links);
+      const credited = await service.completeLinkDeposit(77);
+
+      expect(links).toEqual([77]);
+      expect(paymentLinks.deactivate).toHaveBeenCalledWith(77);
+      expect(rows[0].status).toBe('cancelled');
+      expect(credited).toBe(false);
+      expect(wallet.balance).toBe(0);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cancellation penalty', () => {
     it('retains the deposit up to the penalty: "retenido $225.000 · por cobrar $25.000"', async () => {
       const { service, rows, wallet, tx, reservation } = build();
@@ -269,6 +321,16 @@ describe('LodgingDepositsService (H3.5)', () => {
         to_refund: '0.00',
       });
       expect(rows).toHaveLength(1); // a quote writes nothing
+    });
+
+    it('the quote is capped by what the wallet still has free (same as the retention)', async () => {
+      const { service, wallet } = build();
+      await service.collect(1, { amount: 225000, store_payment_method_id: 4, request_id });
+      wallet.balance = 100000; // the holder spent part of it in the POS
+
+      const quote = await service.quoteSettlement(1, new Prisma.Decimal(250000));
+
+      expect(quote).toMatchObject({ deposit_retained: '100000.00', to_collect: '150000.00' });
     });
 
     it('a free cancellation retains nothing', async () => {

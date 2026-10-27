@@ -63,9 +63,6 @@ const RESERVATION_INCLUDE = {
       last_name: true,
       email: true,
       phone: true,
-      // H3.1 — prefills the holder in the guest register.
-      document_type: true,
-      document_number: true,
     },
   },
   rooms: {
@@ -80,6 +77,15 @@ const RESERVATION_INCLUDE = {
 
 const RESERVATION_DETAIL_INCLUDE = {
   ...RESERVATION_INCLUDE,
+  // H3.1 — prefills the holder in the guest register. Identity documents
+  // only in the detail, never in the list (Ley 1581).
+  customer: {
+    select: {
+      ...RESERVATION_INCLUDE.customer.select,
+      document_type: true,
+      document_number: true,
+    },
+  },
   // H2.1 — sold nights with their price snapshot, for the per-night breakdown.
   rooms: {
     include: {
@@ -380,6 +386,7 @@ export class LodgingReservationsService {
     const event = options.penalty === false ? undefined : PENALTY_EVENTS[to];
     const timing = event ? await this.loadPenaltyTiming(this.requireStoreId()) : null;
     let retained: DepositRetainedEvent | null = null;
+    let cancelledLinks: number[] = [];
     const changed = await this.prisma.$transaction(async (tx) => {
       const current = await tx.lodging_reservations.findFirst({
         where: { id, status: { in: from } },
@@ -414,6 +421,10 @@ export class LodgingReservationsService {
           });
         }
       }
+      // H3.5 — a Wompi link still pending is not collected after the stay ends.
+      if (to === 'cancelled' || to === 'no_show') {
+        cancelledLinks = await this.deposits.cancelPendingLinksInTx(tx, id);
+      }
       if (
         NIGHT_HOLDING_STATUSES.includes(current.status) &&
         !NIGHT_HOLDING_STATUSES.includes(to)
@@ -435,7 +446,10 @@ export class LodgingReservationsService {
       });
       return true;
     });
-    if (changed) this.deposits.announceRetained(retained);
+    if (changed) {
+      this.deposits.announceRetained(retained);
+      await this.deposits.deactivateLinks(cancelledLinks);
+    }
     return changed;
   }
 

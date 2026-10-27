@@ -24,6 +24,8 @@ import {
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { formatStoreDate } from '../../../../../../../shared/utils/date.util';
 import { VatExemptServiceRow } from '../../interfaces/folio.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
@@ -125,13 +127,15 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   });
   readonly to = new FormControl(civilDate(new Date()), { nonNullable: true });
 
+  private readonly storeSettings = inject(StoreSettingsFacade);
+
   readonly loading = signal(true);
   private readonly report = signal<VatExemptServiceRow[]>([]);
 
   readonly rows = computed<ReportRow[]>(() =>
     this.report().map((row) => ({
       ...row,
-      date_label: row.issue_date.slice(0, 10),
+      date_label: formatStoreDate(row.issue_date, this.storeSettings.timezone()),
       document_label: [row.document_type, row.document_number].filter(Boolean).join(' '),
       base_label: this.currency.format(row.exempt_base, 0),
       total_label: this.currency.format(row.invoice_total, 0),

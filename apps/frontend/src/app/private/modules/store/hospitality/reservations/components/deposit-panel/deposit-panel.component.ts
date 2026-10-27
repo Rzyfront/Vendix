@@ -293,7 +293,7 @@ export class DepositPanelComponent {
     const amount = Number(value.amount);
     this.busy.set(true);
     const request$ = this.isLink()
-      ? this.reservationsService.createDepositLink(this.reservationId(), amount)
+      ? this.reservationsService.createDepositLink(this.reservationId(), amount, this.requestId)
       : this.reservationsService.registerDeposit(this.reservationId(), {
           amount,
           store_payment_method_id: Number(value.method),

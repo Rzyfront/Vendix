@@ -1,3 +1,4 @@
+import { assertNotLodgingFolioOrder } from '../shared/lodging-folio-policy';
 import {
   assertNoActiveFinancialSplit,
   isFinancialSplitSettled,
@@ -710,6 +711,8 @@ export class OrderFlowService {
           } },
         },
         order_items: { include: { products: true, product_variants: true } },
+        // Hotel folio draft: owned by Hotelería (`assertNotLodgingFolioOrder`).
+        lodging_folio: { select: { id: true } },
       },
     });
 
@@ -758,10 +761,16 @@ export class OrderFlowService {
   }
 
   private async assertNoOpenTableForDraft(
-    order: { id: number; store_id: number; state: order_state_enum },
+    order: {
+      id: number;
+      store_id: number;
+      state: order_state_enum;
+      lodging_folio?: { id: number } | null;
+    },
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<void> {
     if (order.state !== 'draft') return;
+    assertNotLodgingFolioOrder(order);
     const session = await client.table_sessions.findFirst({
       where: { order_id: order.id, store_id: order.store_id, closed_at: null },
       select: { id: true },
@@ -1858,6 +1867,7 @@ export class OrderFlowService {
           active_financial_split_id: true,
           delivery_type: true,
           shipping_method_id: true,
+          lodging_folio: { select: { id: true } },
           order_items: {
             select: {
               products: { select: { product_type: true } },
@@ -1865,7 +1875,10 @@ export class OrderFlowService {
           },
         },
       });
-      if (probe) assertNoActiveFinancialSplit(probe);
+      if (probe) {
+        assertNoActiveFinancialSplit(probe);
+        assertNotLodgingFolioOrder(probe);
+      }
       const needsDispatch =
         (!probe?.delivery_type ||
           !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(probe.delivery_type)) &&
@@ -5456,6 +5469,7 @@ export class OrderFlowService {
     //    si no la encuentra o no pertenece al scope.
     const order = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(order);
+    assertNotLodgingFolioOrder(order);
 
     // No `payment_status` column exists on orders. Settlement is evidenced by
     // the payment rows, just as in cancelDeliveredOrderItem (ADR-02).
@@ -8692,6 +8706,7 @@ export class OrderFlowService {
     const splitSettled = isFinancialSplitSettled(order);
     if (order.active_financial_split_id && !splitSettled) {
       assertNoActiveFinancialSplit(order);
+      assertNotLodgingFolioOrder(order);
     }
 
     // 1) Pay (only if not already paid)

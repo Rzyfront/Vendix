@@ -1256,6 +1256,10 @@ export class AutoEntryService {
       'layaway.completed': 'auto_payment',
       'lodging.folio_payment': 'auto_payment',
       'lodging.folio_settlement': 'auto_invoice',
+      'lodging.folio_sale': 'auto_invoice',
+      'lodging.folio_sale_settlement': 'auto_invoice',
+      'lodging.deposit': 'auto_payment',
+      'lodging.deposit_retained': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
@@ -2340,6 +2344,8 @@ export class AutoEntryService {
         status: 'posted',
         OR: [
           { source_type: 'credit_sale.created', source_id: order_id },
+          // Folio closed without e-invoicing: the check-out already sold it.
+          { source_type: 'lodging.folio_sale', source_id: order_id },
           ...(payment_ids.length
             ? [
                 {
@@ -2368,6 +2374,7 @@ export class AutoEntryService {
 
     const recognizesRevenue = (entry: any) =>
       entry.source_type === 'credit_sale.created' ||
+      entry.source_type === 'lodging.folio_sale' ||
       (entry.accounting_entry_lines ?? []).some(
         (line: any) =>
           getCents(line.credit_amount ?? 0) > 0n &&
@@ -3644,7 +3651,12 @@ export class AutoEntryService {
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
     customer?: { id: number; name?: string; tax_id?: string };
+    /** Override opcional (venta de folio hotelero): por defecto `credit_sale.created`. */
+    source_type?: string;
+    /** Override opcional de la descripción del asiento. */
+    description?: string;
   }) {
+    const sale_source_type = data.source_type ?? 'credit_sale.created';
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
           id: data.customer.id,
@@ -3733,7 +3745,7 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'credit_sale.created.vat_payable',
         label: `IVA venta a crédito${order_ref}`,
-        source_type: 'credit_sale.created',
+        source_type: sale_source_type,
         source_id: data.order_id,
       })),
     );
@@ -3765,10 +3777,11 @@ export class AutoEntryService {
     }
 
     return this.createAutoEntry({
-      source_type: 'credit_sale.created',
+      source_type: sale_source_type,
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Venta a crédito #${data.order_id}${order_ref}`,
+      store_id: data.store_id,
+      description: data.description ?? `Venta a crédito #${data.order_id}${order_ref}`,
       lines,
       user_id: data.user_id,
     });
@@ -6289,41 +6302,140 @@ export class AutoEntryService {
       select: { id: true },
     });
     if (!folio) return null;
-    const paid = await db.payments.aggregate({
-      where: { order_id: invoice.order_id, state: { in: ['succeeded', 'captured'] } },
+    // The check-out without e-invoicing already crossed this folio's advance.
+    const crossed = await db.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'lodging.folio_sale_settlement',
+        source_id: invoice.order_id,
+      },
+      select: { id: true },
+    });
+    if (crossed) return null;
+    return this.crossLodgingAdvance({
+      order_id: invoice.order_id,
+      organization_id: data.organization_id,
+      store_id: invoice.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      total: Number(data.total),
+      customer: data.customer,
+      source_type: 'lodging.folio_settlement',
+      source_id: data.invoice_id,
+      reference: `factura ${invoice.invoice_number}`,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.folio_sale: a guest folio closed WITHOUT electronic invoicing
+   * (owner decision 2026-10-27). The checkout books the sale like the POS
+   * credit sale (DR 1305 / CR revenue + typed taxes, reusing
+   * `onCreditSaleCreated` under its own source_type) and then crosses the
+   * 2805 advance (`lodging.folio_sale_settlement`). Both entries are keyed
+   * by `order_id`, so a retried checkout never duplicates them.
+   */
+  async onLodgingFolioSale(data: {
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    shipping_amount?: number;
+    discount_amount?: number;
+    total_amount: number;
+    tip_amount?: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const order_ref = data.order_number ?? `#${data.order_id}`;
+    const sale = await this.onCreditSaleCreated({
+      ...data,
+      source_type: 'lodging.folio_sale',
+      description: `Venta de folio hotelero ${order_ref}`,
+    });
+    const cross = await this.crossLodgingAdvance({
+      order_id: data.order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      total: Number(data.total_amount),
+      customer: data.customer ? { ...data.customer, type: 'customer' } : undefined,
+      source_type: 'lodging.folio_sale_settlement',
+      source_id: data.order_id,
+      reference: `folio ${order_ref}`,
+      user_id: data.user_id,
+    });
+    return { sale, cross };
+  }
+
+  /**
+   * Crosses the 2805 advance of a folio order against the receivable the
+   * sale booked: one DR 2805 line PER PAYER (the guest may have paid while
+   * the folio is billed to a company) and one CR 1305 to the billed customer.
+   * Amount = settled payments of the order, capped at `total`.
+   */
+  private async crossLodgingAdvance(data: {
+    order_id: number;
+    organization_id: number;
+    store_id: number | undefined;
+    accounting_entity_id?: number;
+    total: number;
+    customer?: AutoEntryThirdParty;
+    source_type: string;
+    source_id: number;
+    reference: string;
+    user_id?: number;
+  }) {
+    const db = this.prisma.withoutScope();
+    const paid = await db.payments.groupBy({
+      by: ['customer_id'],
+      where: { order_id: data.order_id, state: { in: ['succeeded', 'captured'] } },
       _sum: { amount: true },
     });
-    const amount = Math.min(Number(paid._sum.amount ?? 0), Number(data.total));
+    let remaining = Number(data.total);
+    const payers: Array<{ customer_id: number | null; amount: number }> = [];
+    for (const row of paid) {
+      const amount = Math.min(Number(row._sum.amount ?? 0), remaining);
+      if (!(amount > 0)) continue;
+      payers.push({ customer_id: row.customer_id, amount });
+      remaining -= amount;
+    }
+    const amount = payers.reduce((sum, p) => sum + p.amount, 0);
     if (!(amount > 0)) return null;
 
     const lines = await Promise.all([
-      this.resolveAccountLine(
-        data.organization_id,
-        'lodging.folio_settlement.customer_advance',
-        `Anticipo cruzado factura ${invoice.invoice_number}`,
-        amount,
-        0,
-        invoice.store_id,
-        data.customer,
+      ...payers.map((payer) =>
+        this.resolveAccountLine(
+          data.organization_id,
+          'lodging.folio_settlement.customer_advance',
+          `Anticipo cruzado ${data.reference}`,
+          payer.amount,
+          0,
+          data.store_id,
+          payer.customer_id
+            ? { id: Number(payer.customer_id), type: 'customer' as const }
+            : undefined,
+        ),
       ),
       this.resolveAccountLine(
         data.organization_id,
         'lodging.folio_settlement.receivable',
-        `Cobro folio factura ${invoice.invoice_number}`,
+        `Cobro folio ${data.reference}`,
         0,
         amount,
-        invoice.store_id,
+        data.store_id,
         data.customer,
       ),
     ]);
 
     return this.createAutoEntry({
-      source_type: 'lodging.folio_settlement',
-      source_id: data.invoice_id,
+      source_type: data.source_type,
+      source_id: data.source_id,
       organization_id: data.organization_id,
-      store_id: invoice.store_id,
+      store_id: data.store_id,
       accounting_entity_id: data.accounting_entity_id,
-      description: `Cruce de anticipos del folio hotelero - factura ${invoice.invoice_number}`,
+      description: `Cruce de anticipos del folio hotelero - ${data.reference}`,
       lines,
       user_id: data.user_id,
     });
