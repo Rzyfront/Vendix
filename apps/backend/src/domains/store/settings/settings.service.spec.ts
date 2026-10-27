@@ -331,6 +331,35 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     });
   });
 
+  describe('updateSettings — sobreventa por defecto (H1.6)', () => {
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+    });
+
+    it('sin rates:write no se puede cambiar la sobreventa por defecto', async () => {
+      const error = await service
+        .updateSettings({ hospitality: { default_overbooking_allowance: 5 } } as any)
+        .catch((e) => e);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse()).toMatchObject({ error_code: 'LODGING_UNIT_TYPE_OVERBOOKING_001' });
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('con rates:write se cambia, y reenviar el mismo valor no lo exige', async () => {
+      await service.updateSettings({ hospitality: { default_overbooking_allowance: 0 } } as any);
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE_ID,
+        user_id: USER_ID,
+        permissions: ['store:lodging:rates:write'],
+      } as any);
+      await service.updateSettings({ hospitality: { default_overbooking_allowance: 5 } } as any);
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(2);
+    });
+  });
+
   // ------------------------------------------- merge por clave de la sección vexi
 
   /**
@@ -547,7 +576,7 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     });
 
     it('una tienda sin la sección lee check-in 15:00, check-out 12:00, no-show 06:00, RNT vacío y sobreventa 0', () => {
-      expect(mergeStoreSettingsWithDefaults({}).hospitality).toEqual({
+      expect(mergeStoreSettingsWithDefaults({}).hospitality).toMatchObject({
         check_in_time: '15:00',
         check_out_time: '12:00',
         no_show_time: '06:00',

@@ -18,6 +18,8 @@ describe('UnitsService', () => {
     update: jest.fn(),
   };
   const unitTypes = { findFirst: jest.fn() };
+  const roomNights = { findFirst: jest.fn() };
+  const storeSettings = { findFirst: jest.fn() };
   let service: UnitsService;
 
   const expectCode = async (promise: Promise<unknown>, code: string) => {
@@ -33,14 +35,21 @@ describe('UnitsService', () => {
     service = new UnitsService({
       lodging_units: units,
       lodging_unit_types: unitTypes,
+      lodging_room_nights: roomNights,
+      store_settings: storeSettings,
     } as any);
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 5, user_id: 9 } as any);
     unitTypes.findFirst.mockResolvedValue({ id: 11 });
+    roomNights.findFirst.mockResolvedValue(null);
+    storeSettings.findFirst.mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } });
   });
 
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
 
   it('H6.1: el listado y el detalle no exponen el secreto del iCal', async () => {
     units.findMany.mockResolvedValue([]);
@@ -154,7 +163,7 @@ describe('UnitsService', () => {
 
   it('desactivar una habitación la deja inactiva (sale del conteo)', async () => {
     units.findFirst
-      .mockResolvedValueOnce({ id: 1, code: '101', unit_type_id: 11 })
+      .mockResolvedValueOnce({ id: 1, code: '101', unit_type_id: 11, is_active: true })
       .mockResolvedValueOnce({ id: 1, code: '101', unit_type_id: 11, is_active: false });
     units.update.mockResolvedValue({});
 
@@ -177,5 +186,38 @@ describe('UnitsService', () => {
       }),
     );
     expect(units.update).not.toHaveBeenCalled();
+  });
+
+  describe('con noches asignadas (H1.4)', () => {
+    beforeEach(() => {
+      // 10-nov 15:00 Bogotá: business day 10-nov.
+      jest.useFakeTimers({ now: new Date('2026-11-10T20:00:00Z'), doNotFake: ['setImmediate', 'nextTick'] });
+      units.findFirst.mockResolvedValueOnce({ id: 1, code: '101', unit_type_id: 11, is_active: true });
+      roomNights.findFirst.mockResolvedValue({ night_date: new Date('2026-11-10T00:00:00.000Z') });
+    });
+
+    it('cambiar el tipo se rechaza nombrando la primera noche', async () => {
+      const body = await expectCode(service.update(1, { unit_type_id: 12 }), 'LODGING_UNIT_IN_USE_001');
+      expect(body.message).toBe('La 101 tiene reservas asignadas desde el 10-nov; muévelas antes');
+      expect(roomNights.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { unit_id: 1, is_active: true, night_date: { gte: new Date('2026-11-10T00:00:00.000Z') } },
+        }),
+      );
+      expect(units.update).not.toHaveBeenCalled();
+    });
+
+    it('desactivarla se rechaza', async () => {
+      await expectCode(service.update(1, { is_active: false }), 'LODGING_UNIT_IN_USE_001');
+      expect(units.update).not.toHaveBeenCalled();
+    });
+
+    it('renombrarla o cambiar el piso no mira las noches', async () => {
+      units.findFirst.mockResolvedValueOnce({ id: 1, code: '101', unit_type_id: 11, floor: '2' });
+      units.update.mockResolvedValue({});
+      await service.update(1, { floor: '2', unit_type_id: 11 });
+      expect(roomNights.findFirst).not.toHaveBeenCalled();
+      expect(units.update).toHaveBeenCalled();
+    });
   });
 });

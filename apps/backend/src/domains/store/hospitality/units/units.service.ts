@@ -4,6 +4,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateUnitDto, CreateUnitsBulkDto, UpdateUnitDto } from './dto';
+import { lodgingBusinessDate } from '../reservations/folio/folio-nights';
+import { dateOnlyToDb, formatShortDate } from '../reservations/stay-dates';
 
 const UNIT_INCLUDE = {
   unit_type: { select: { id: true, name: true } },
@@ -58,6 +60,10 @@ export class UnitsService {
     }
     if (dto.code !== undefined && dto.code !== current.code) {
       await this.assertCodesAvailable([dto.code], id);
+    }
+    const typeChanged = dto.unit_type_id !== undefined && dto.unit_type_id !== current.unit_type_id;
+    if (typeChanged || (dto.is_active === false && current.is_active)) {
+      await this.assertNoAssignedNights(id, current.code);
     }
     try {
       await this.prisma.lodging_units.update({
@@ -123,6 +129,30 @@ export class UnitsService {
     });
     if (!unitType) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_FIND_001);
+    }
+  }
+
+  /**
+   * H1.4 — a room's nights count on the type stored in each night: moving the
+   * room to another type or deactivating it while it holds current or future
+   * nights would sell rooms that do not exist. The desk moves them first.
+   */
+  private async assertNoAssignedNights(unit_id: number, code: string) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const { business_date } = await lodgingBusinessDate(this.prisma, store_id);
+    const night = await this.prisma.lodging_room_nights.findFirst({
+      where: { unit_id, is_active: true, night_date: { gte: dateOnlyToDb(business_date) } },
+      select: { night_date: true },
+      orderBy: { night_date: 'asc' },
+    });
+    if (night) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_UNIT_IN_USE_001,
+        `La ${code} tiene reservas asignadas desde el ${formatShortDate(night.night_date.toISOString().slice(0, 10))}; muévelas antes`,
+      );
     }
   }
 

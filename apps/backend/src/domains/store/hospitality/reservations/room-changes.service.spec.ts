@@ -154,6 +154,9 @@ function createFake(options: Options = {}) {
     },
     lodging_reservations: { update: jest.fn(async () => ({})) },
     lodging_reservation_events: { create: jest.fn(async () => ({})) },
+    store_settings: {
+      findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })),
+    },
   };
   client.$transaction = jest.fn(async (cb: (tx: any) => unknown) => cb(client));
   const service = new LodgingRoomChangesService(
@@ -187,7 +190,7 @@ describe('diffStayNights', () => {
       sold,
       ['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'],
       () => dec(300000),
-      false,
+      null,
     );
     expect(diff.added).toEqual(['2026-11-13']);
     expect(diff.removed).toEqual([]);
@@ -195,14 +198,25 @@ describe('diffStayNights', () => {
   });
 
   it('shortening drops the last night from the total', () => {
-    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11'], () => dec(250000), false);
+    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11'], () => dec(250000), null);
     expect(diff.removed).toEqual(['2026-11-12']);
     expect(diff.total.toFixed(2)).toBe('500000.00');
   });
 
   it('a type change reprices every night', () => {
-    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11', '2026-11-12'], () => dec(400000), true);
+    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11', '2026-11-12'], () => dec(400000), '');
     expect(diff.total.toFixed(2)).toBe('1200000.00');
+  });
+
+  it('an in-house type change reprices only the nights from the business day on', () => {
+    const diff = diffStayNights(
+      sold,
+      ['2026-11-10', '2026-11-11', '2026-11-12'],
+      () => dec(400000),
+      '2026-11-11',
+    );
+    expect(diff.repriced).toEqual(['2026-11-11', '2026-11-12']);
+    expect(diff.total.toFixed(2)).toBe('1050000.00');
   });
 });
 
@@ -309,6 +323,36 @@ describe('LodgingRoomChangesService', () => {
       const error = await rejection(service.apply(5, { unit_id: 1 }));
       expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_FIND_001');
       expect(client.lodging_room_nights.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('business day (H1.4)', () => {
+    afterEach(() => jest.useRealTimers());
+    const at = (iso: string) =>
+      jest.useFakeTimers({ now: new Date(iso), doNotFake: ['setImmediate', 'nextTick'] });
+
+    it('rejects moving the arrival before the business day', async () => {
+      at('2026-11-10T20:00:00Z'); // 10-nov 15:00 Bogotá
+      const { service, client } = createFake();
+      const error = await rejection(service.apply(5, { arrival_date: '2026-11-09' }));
+      expect(codeOf(error)).toBe('LODGING_RESERVATION_DATES_003');
+      expect(messageOf(error)).toBe('La llegada no puede ser anterior a hoy');
+      expect(client.lodging_room_nights.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('an in-house move to another type keeps the price of the nights already slept', async () => {
+      at('2026-11-11T20:00:00Z'); // business day 11-nov: the 10-nov night was slept
+      const { service, client } = createFake({ status: 'checked_in', unit: { id: 1, code: '101' } });
+      const quote = await service.quote(5, { unit_id: 3 });
+      expect(quote.proposed.total_amount).toBe('1050000.00');
+      expect(quote.difference).toBe('300000.00');
+      await service.apply(5, { unit_id: 3 });
+      expect(client.lodging_room_nights.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ night_date: { in: [D('2026-11-11'), D('2026-11-12')] } }),
+          data: expect.objectContaining({ rate_amount: dec(400000) }),
+        }),
+      );
     });
   });
 

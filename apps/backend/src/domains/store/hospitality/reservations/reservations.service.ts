@@ -15,6 +15,7 @@ import {
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { DepositRetainedEvent, LodgingDepositsService } from './deposits/deposits.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
+import { lodgingBusinessDate } from './folio/folio-nights';
 import { loadPlanPricing, PlanTerms } from '../rates/rate-plans.service';
 import {
   asPolicySnapshot,
@@ -438,6 +439,14 @@ export class LodgingReservationsService {
     return changed;
   }
 
+  /** A stay cannot start before the store's business day (it would no-show at once). */
+  private async assertArrivalNotPast(store_id: number, arrival_date: string) {
+    const { business_date } = await lodgingBusinessDate(this.prisma, store_id);
+    if (arrival_date < business_date) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_DATES_003);
+    }
+  }
+
   /** Store time zone and check-in time: the penalty windows count to it. */
   private async loadPenaltyTiming(store_id: number): Promise<PenaltyTiming> {
     const timezone = await resolveStoreTimezone(this.prisma, store_id);
@@ -515,6 +524,7 @@ export class LodgingReservationsService {
   async quote(dto: ReservationQuoteDto) {
     const store_id = this.requireStoreId();
     const nights = stayNights(dto.arrival_date, dto.departure_date);
+    await this.assertArrivalNotPast(store_id, dto.arrival_date);
     const unitType = await this.loadSellableType(dto.unit_type_id);
     assertCapacity(unitType, dto.adults, dto.children ?? 0);
     const priced = await this.priceStay(store_id, unitType, dto.rate_plan_id, nights);
@@ -564,6 +574,7 @@ export class LodgingReservationsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const nights = stayNights(dto.arrival_date, dto.departure_date);
+    await this.assertArrivalNotPast(store_id, dto.arrival_date);
     // Types in id order, so checks (and the type a shortage names) are stable.
     const typeIds = [...new Set(dto.rooms.map((r) => r.unit_type_id))].sort((a, b) => a - b);
     const types = new Map<number, SellableType>();

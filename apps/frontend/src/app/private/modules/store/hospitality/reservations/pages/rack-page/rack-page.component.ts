@@ -39,6 +39,8 @@ import {
   RoomChangeRequest,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { storeToday } from '../../../../../../../shared/utils/date.util';
 import {
   HOUSEKEEPING_STATUS_LABELS,
   HousekeepingStatus,
@@ -373,10 +375,14 @@ export class HospitalityRackPageComponent implements OnInit {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   readonly windowOptions = WINDOW_OPTIONS;
 
-  readonly from = signal(toDateString(new Date()));
+  /** The store's civil date, not the browser's (the desk may be elsewhere). */
+  private readonly today = () => storeToday(this.settingsFacade.timezone());
+
+  readonly from = signal(this.today());
   readonly days = signal(14);
   readonly rack = signal<Rack | null>(null);
   readonly loading = signal(false);
@@ -400,7 +406,7 @@ export class HospitalityRackPageComponent implements OnInit {
   });
 
   readonly nightHeaders = computed(() => {
-    const today = toDateString(new Date());
+    const today = this.today();
     const start = parseISO(this.from());
     return Array.from({ length: this.days() }, (_, i) => {
       const date = addDays(start, i);
@@ -626,7 +632,7 @@ export class HospitalityRackPageComponent implements OnInit {
   }
 
   goToday(): void {
-    this.from.set(toDateString(new Date()));
+    this.from.set(this.today());
     this.load();
   }
 

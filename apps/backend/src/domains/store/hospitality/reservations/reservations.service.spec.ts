@@ -10,7 +10,7 @@ import {
 } from './reservations.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { formatShortDate, stayNights } from './stay-dates';
-import { CancelReservationDto, CreateReservationDto } from './dto';
+import { CancelReservationDto, CreateReservationDto, ReservationQueryDto } from './dto';
 import { canTransition, noShowArrivalCutoff } from './reservation-status';
 
 interface NightRow {
@@ -379,12 +379,26 @@ describe('LodgingReservationsService', () => {
   };
 
   beforeEach(() => {
+    // Stays in the specs start on 10-nov or later: today is 1-nov (Bogotá).
+    jest.useFakeTimers({ now: new Date('2026-11-01T17:00:00Z'), doNotFake: ['setImmediate', 'nextTick'] });
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 5, user_id: 9 } as any);
   });
 
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  describe('filtros de la lista', () => {
+    it('una fecha imposible en el filtro se rechaza en el DTO (no llega a Prisma)', async () => {
+      const bad = await validate(plainToInstance(ReservationQueryDto, { date_from: '2026-13-45', date_to: '2026-02-30' }));
+      expect(bad.map((e) => e.property).sort()).toEqual(['date_from', 'date_to']);
+      const ok = await validate(plainToInstance(ReservationQueryDto, { date_from: '2026-11-10', date_to: '2026-11-13' }));
+      expect(ok).toEqual([]);
+    });
+  });
 
   describe('noches de la estadía', () => {
     it('del 10 al 13 son 3 noches: la noche de salida no cuenta', () => {
@@ -459,6 +473,21 @@ describe('LodgingReservationsService', () => {
   });
 
   describe('crear', () => {
+    it('rechaza una llegada anterior al día hotelero sin crear nada', async () => {
+      jest.setSystemTime(new Date('2026-11-11T17:00:00Z')); // 11-nov 12:00 Bogotá
+      const { service, prisma } = build(2);
+      const body = await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_DATES_003');
+      expect(body.message).toBe('La llegada no puede ser anterior a hoy');
+      expect(prisma.lodging_reservations.create).not.toHaveBeenCalled();
+    });
+
+    it('antes del cierre del día (01:00) la llegada de ayer aún se acepta', async () => {
+      jest.setSystemTime(new Date('2026-11-11T06:00:00Z')); // 11-nov 01:00 Bogotá
+      const { service, prisma } = build(2);
+      await service.create(sale(stay));
+      expect(prisma.lodging_reservations.create).toHaveBeenCalled();
+    });
+
     it('crea H-0001 confirmada con 3 noches a $250.000 y total $750.000', async () => {
       const { service, prisma, nights } = build(2);
 

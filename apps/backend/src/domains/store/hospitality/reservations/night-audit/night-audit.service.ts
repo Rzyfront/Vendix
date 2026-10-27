@@ -1,16 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
-import { localCivil, resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { LodgingFolioService } from '../folio/folio.service';
-import { DEFAULT_NIGHT_AUDIT_TIME, nightAuditCutoff } from '../folio/folio-nights';
+import { lodgingBusinessDate } from '../folio/folio-nights';
 import { LodgingReservationsService } from '../reservations.service';
 import { addDays } from '../reservation-status';
 import { dateOnlyToDb } from '../stay-dates';
-
-const pad2 = (n: number) => String(n).padStart(2, '0');
 
 export interface NightAuditReservationRow {
   id: number;
@@ -249,18 +246,8 @@ export class LodgingNightAuditService {
   }
 
   /** Store date and current business day (before `night_audit_time` it is yesterday). */
-  private async clock(): Promise<{ today: string; business_date: string }> {
-    const store_id = this.requireStoreId();
-    const local = localCivil(new Date(), await resolveStoreTimezone(this.prisma, store_id));
-    const today = `${local.year}-${pad2(local.month)}-${pad2(local.day)}`;
-    const row = await this.prisma.store_settings.findFirst({
-      where: { store_id },
-      select: { settings: true },
-    });
-    const settings = row?.settings as { hospitality?: { night_audit_time?: string } } | null;
-    const auditTime = settings?.hospitality?.night_audit_time || DEFAULT_NIGHT_AUDIT_TIME;
-    const business_date = nightAuditCutoff(today, `${pad2(local.hour)}:${pad2(local.minute)}`, auditTime);
-    return { today, business_date };
+  private clock(): Promise<{ today: string; business_date: string }> {
+    return lodgingBusinessDate(this.prisma, this.requireStoreId());
   }
 
   private findAudit(business_date: string) {

@@ -36,6 +36,8 @@ import {
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { storeToday } from '../../../../../../../shared/utils/date.util';
 import { describePolicy } from '../../../rates/interfaces/rate-plan.interface';
 import {
   RoomChangeModalComponent,
@@ -57,13 +59,6 @@ const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null | 'check_in'>, string
 
 /** H3.2 — a guest never enters a room in these states. */
 const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
-
-/** Local civil date `YYYY-MM-DD` of the browser (the desk's day). */
-function todayLocal(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 /**
  * Hospitality Suite (H1.2) — reservation detail: stay, guests, total and
@@ -368,6 +363,7 @@ export class ReservationDetailModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly unitsService = inject(LodgingUnitsService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   /** Reservation to show; `null` keeps the modal closed. */
   readonly reservationId = input<number | null>(null);
@@ -488,7 +484,7 @@ export class ReservationDetailModalComponent {
     return this.unassignedRooms().every((room) => controls.get(room.id)?.value != null);
   });
   readonly canNoShow = computed(
-    () => this.reservation()?.status === 'confirmed' && this.arrival() <= todayLocal(),
+    () => this.reservation()?.status === 'confirmed' && this.arrival() <= storeToday(this.settingsFacade.timezone()),
   );
 
   constructor() {

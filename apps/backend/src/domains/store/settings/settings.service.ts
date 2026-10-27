@@ -38,6 +38,7 @@ import {
 } from '@common/helpers/organization-fiscal-columns.helper';
 import { tryResolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { assertCanChangeOverbooking } from '../hospitality/unit-types/overbooking-permission';
 import {
   SETTINGS_TRANSITION_GUARDS,
   readSettingsPath,
@@ -540,6 +541,17 @@ export class SettingsService {
     let currentSettings = mergeStoreSettingsWithDefaults(
       storeSettings?.settings,
     );
+
+    // H1.6 — the default overbooking of new room types is the same revenue
+    // decision as a type's own allowance: `store:settings:update` alone is not
+    // enough to raise it.
+    const nextOverbooking = dto.hospitality?.default_overbooking_allowance;
+    if (
+      nextOverbooking !== undefined &&
+      nextOverbooking !== (currentSettings.hospitality?.default_overbooking_allowance ?? 0)
+    ) {
+      assertCanChangeOverbooking();
+    }
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };

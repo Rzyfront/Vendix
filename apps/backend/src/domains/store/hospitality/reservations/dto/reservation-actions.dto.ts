@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  IsDateString,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -43,11 +44,13 @@ export class ReservationQueryDto {
   @ApiProperty({ required: false, description: 'Estadías que ocupan alguna noche desde esta fecha (YYYY-MM-DD).' })
   @IsOptional()
   @Matches(DATE_ONLY)
+  @IsDateString({ strict: true })
   date_from?: string;
 
   @ApiProperty({ required: false, description: 'Estadías que ocupan alguna noche hasta esta fecha (YYYY-MM-DD).' })
   @IsOptional()
   @Matches(DATE_ONLY)
+  @IsDateString({ strict: true })
   date_to?: string;
 
   @ApiProperty({ required: false, default: 1 })

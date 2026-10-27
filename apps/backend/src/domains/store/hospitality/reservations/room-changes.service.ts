@@ -7,6 +7,7 @@ import { RoomChangeDto } from './dto';
 import { LodgingAvailabilityService, LodgingInventoryClient } from './lodging-availability.service';
 import { assertCapacity } from './reservations.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
+import { lodgingBusinessDate } from './folio/folio-nights';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
 import { loadPlanPricing } from '../rates/rate-plans.service';
 import { resolveNightRate } from '../rates/lodging-rate-resolver';
@@ -40,18 +41,21 @@ export function diffStayNights(
   current: NightRate[],
   nights: string[],
   rateFor: NightRateFn,
-  repriceAll: boolean,
+  /** Sold nights on or after this date take the new rate (type change); `null` keeps them. */
+  repriceFrom: string | null,
 ) {
   const sold = new Map(current.map((n) => [n.night_date, n.rate_amount]));
+  const reprice = (n: string) => repriceFrom !== null && n >= repriceFrom;
   const wanted = new Set(nights);
   const kept = nights.filter((n) => sold.has(n));
   const added = nights.filter((n) => !sold.has(n));
   const removed = current.map((n) => n.night_date).filter((n) => !wanted.has(n));
   const total = nights.reduce(
-    (sum, n) => sum.add(repriceAll || !sold.has(n) ? rateFor(n) : sold.get(n)!),
+    (sum, n) => sum.add(reprice(n) || !sold.has(n) ? rateFor(n) : sold.get(n)!),
     new Prisma.Decimal(0),
   );
-  return { kept, added, removed, total };
+  const repriced = kept.filter(reprice);
+  return { kept, added, removed, repriced, total };
 }
 
 interface StaySide {
@@ -199,6 +203,13 @@ export class LodgingRoomChangesService {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_ARRIVAL_001);
     }
     const nights = stayNights(arrival, departure);
+    // An in-house guest's past nights were slept: only nights from the
+    // business day on are repriced. A stay cannot be moved to start before it.
+    const needsToday = status === 'checked_in' || arrival !== currentArrival;
+    const business_date = needsToday ? (await lodgingBusinessDate(this.prisma, store_id)).business_date : '';
+    if (arrival !== currentArrival && arrival < business_date) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_DATES_003);
+    }
     const soldNights = new Set(room.nights.map((n) => toDateOnly(n.night_date)));
 
     let unit = room.unit;
@@ -255,7 +266,7 @@ export class LodgingRoomChangesService {
       room.nights.map((n) => ({ night_date: toDateOnly(n.night_date), rate_amount: n.rate_amount })),
       nights,
       rateFor,
-      type_changed,
+      type_changed ? (status === 'checked_in' ? business_date : '') : null,
     );
 
     // Selling the type again (new type or extra nights) needs a free room of it.
@@ -377,9 +388,9 @@ export class LodgingRoomChangesService {
       });
     }
     if (plan.type_changed) {
-      // Kept nights take the new type's price, grouped by amount.
+      // Repriced kept nights take the new type's price, grouped by amount.
       const byRate = new Map<string, string[]>();
-      for (const night of nights.kept) {
+      for (const night of nights.repriced) {
         const key = plan.rateFor(night).toFixed(2);
         byRate.set(key, [...(byRate.get(key) ?? []), night]);
       }

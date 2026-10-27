@@ -9,6 +9,7 @@ import { ProductsService } from '../../products/products.service';
 import { ProductType } from '../../products/dto';
 import { CreateUnitTypeDto, UpdateUnitTypeDto } from './dto';
 import { normalizeLodgingImageKeys } from './lodging-media';
+import { assertCanChangeOverbooking } from './overbooking-permission';
 
 /** Name of the service product that sells one night of a room type. */
 export function nightProductName(unitTypeName: string): string {
@@ -39,25 +40,6 @@ export function resolveCapacity(input: Partial<Capacity>): Capacity {
     throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_CAPACITY_002);
   }
   return { base_occupancy, max_adults, max_children, max_occupancy };
-}
-
-/** H1.6 — permission that governs how far a type may be overbooked. */
-export const OVERBOOKING_PERMISSION = 'store:lodging:rates:write';
-
-/**
- * Overbooking is a revenue decision: only owners, super admins or users with
- * `rates:write` change it (the endpoint itself needs `inventory:write`).
- */
-export function assertCanChangeOverbooking(): void {
-  const context = RequestContextService.getContext();
-  if (
-    context?.is_super_admin ||
-    context?.is_owner ||
-    context?.permissions?.includes(OVERBOOKING_PERMISSION)
-  ) {
-    return;
-  }
-  throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_OVERBOOKING_001);
 }
 
 /**

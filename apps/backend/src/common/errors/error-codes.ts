@@ -5648,6 +5648,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango de habitaciones no es válido (máximo 100)',
   },
+  LODGING_UNIT_IN_USE_001: {
+    code: 'LODGING_UNIT_IN_USE_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene reservas asignadas; muévelas antes',
+  },
   // Hospitality Suite (H5.1) — housekeeping status
   LODGING_HOUSEKEEPING_TRANSITION_001: {
     code: 'LODGING_HOUSEKEEPING_TRANSITION_001',
@@ -5749,6 +5754,11 @@ export const ErrorCodes = {
     code: 'LODGING_RESERVATION_DATES_002',
     httpStatus: 400,
     devMessage: 'La estadía no puede superar las 365 noches',
+  },
+  LODGING_RESERVATION_DATES_003: {
+    code: 'LODGING_RESERVATION_DATES_003',
+    httpStatus: 400,
+    devMessage: 'La llegada no puede ser anterior a hoy',
   },
   LODGING_RESERVATION_CAPACITY_001: {
     code: 'LODGING_RESERVATION_CAPACITY_001',
