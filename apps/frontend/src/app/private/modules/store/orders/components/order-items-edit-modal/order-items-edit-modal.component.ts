@@ -16,7 +16,6 @@ import { Subject, merge, of } from 'rxjs';
 import {
   catchError,
   debounceTime,
-  distinctUntilChanged,
   map,
   switchMap,
   tap,
@@ -25,6 +24,7 @@ import {
 import {
   ButtonComponent,
   IconComponent,
+  InputsearchComponent,
   ModalComponent,
   ToastService,
 } from '../../../../../../shared/components';
@@ -61,6 +61,8 @@ export interface OrderItemDraftLine {
   product_name: string;
   variant_sku: string | null;
   variant_label: string;
+  /** Miniatura: imagen de la variante o, si no tiene, la del producto. */
+  image_url: string | null;
   /** Precio unitario mostrado (existente: final con impuesto; nueva: base sin impuesto). */
   display_price: number;
   /** Precio base de una línea nueva. */
@@ -113,6 +115,8 @@ export const RELOAD_FAILED_MESSAGE =
   'No pudimos recargar la orden. Cierra esta ventana y vuelve a abrir el detalle antes de reintentar.';
 
 const MAX_RESULTS = 20;
+/** Productos precargados en el buscador al abrir el modal, sin término. */
+const SUGGESTED_RESULTS = 5;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const round2 = (value: number): number => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -154,7 +158,14 @@ function variantLabelOf(raw: unknown): string {
 @Component({
   selector: 'app-order-items-edit-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [
+    FormsModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    InputsearchComponent,
+    CurrencyPipe,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './order-items-edit-modal.component.html',
 })
@@ -347,25 +358,25 @@ export class OrderItemsEditModalComponent {
       }
     });
 
+    // Mismo motor y filtros que el POS (`buildProductFilters`): con término
+    // manda el rank de la búsqueda inteligente; sin término se precargan los
+    // primeros SUGGESTED_RESULTS en el orden de la grilla del POS
+    // (destacados → más vendidos). Solo vendibles: nunca insumos puros.
     this.search$
       .pipe(
         debounceTime(SEARCH_DEBOUNCE_MS),
-        distinctUntilChanged(),
-        tap((term) => {
-          if (!term) this.searchResults.set([]);
-          this.searching.set(!!term);
-        }),
+        tap(() => this.searching.set(true)),
         switchMap((term) =>
-          term
-            ? this.productsService
-                .getProducts({
-                  search: term,
-                  limit: MAX_RESULTS,
-                  state: ProductState.ACTIVE,
-                  include_variants: true,
-                })
-                .pipe(catchError(() => of(null)))
-            : of(null),
+          this.productsService
+            .getProducts({
+              state: ProductState.ACTIVE,
+              include_variants: true,
+              is_sellable: true,
+              ...(term
+                ? { search: term, limit: MAX_RESULTS }
+                : { limit: SUGGESTED_RESULTS, featured_first: true, best_selling_first: true }),
+            })
+            .pipe(catchError(() => of(null))),
         ),
         takeUntilDestroyed(),
       )
@@ -414,6 +425,7 @@ export class OrderItemsEditModalComponent {
     this.searchResults.set([]);
     this.expandedProductId.set(null);
     this.saving.set(false);
+    this.search$.next('');
   }
 
   private fromExisting(item: OrderItem): OrderItemDraftLine {
@@ -431,6 +443,7 @@ export class OrderItemsEditModalComponent {
       product_name: item.product_name,
       variant_sku: item.variant_sku ?? null,
       variant_label: variantLabelOf(item.variant_attributes),
+      image_url: item.variant_image_url || item.products?.image_url || null,
       display_price: Number(item.final_unit_price ?? item.unit_price) || 0,
       base_price: Number(item.unit_price) || 0,
       quantity,
@@ -593,6 +606,7 @@ export class OrderItemsEditModalComponent {
       product_name: product.name,
       variant_sku: variant?.sku ?? null,
       variant_label: variant ? this.variantName(variant) : '',
+      image_url: variant?.image_url || product.image_url || null,
       display_price: this.finalUnitPrice(product, variant, price),
       base_price: price,
       quantity: 1,

@@ -682,8 +682,8 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       expect(await run({ yieldQty: 10, produced: 10, lineQty: 100 })).toBe(-100);
     });
 
-    it('yield 10, produce 25, line 100 -> consumes 250', async () => {
-      expect(await run({ yieldQty: 10, produced: 25, lineQty: 100 })).toBe(-250);
+    it('yield 10, produce 30 (3 batches), line 100 -> consumes 300', async () => {
+      expect(await run({ yieldQty: 10, produced: 30, lineQty: 100 })).toBe(-300);
     });
 
     it('percent waste applies on top of the scaled quantity (line% x recipe%)', async () => {
@@ -711,12 +711,70 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       expect(await run({ yieldQty: null, produced: 10, lineQty: 100 })).toBe(-1000);
     });
 
+    it('rejects a produced quantity that is not a multiple of the recipe yield (yield 10, produce 25)', async () => {
+      await expect(run({ yieldQty: 10, produced: 25, lineQty: 100 })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+      });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(stockValidatorService.assertIngredientsAvailable).not.toHaveBeenCalled();
+    });
+
+    it('rejects producing less than one batch (yield 10, produce 3)', async () => {
+      await expect(run({ yieldQty: 10, produced: 3, lineQty: 1 })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+      });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
     it('the stock pre-check receives the same scaled quantity', async () => {
       await run({ yieldQty: 1, produced: 10, lineQty: 100 });
       expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 99, quantity: 1000 })],
         expect.anything(),
       );
+    });
+  });
+  describe('create() — planned quantity must be whole recipe batches (QUI-965)', () => {
+    const arrange = (yieldQty: number) => {
+      (prismaMock as any).products = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 50,
+          name: 'Salsa',
+          product_type: 'physical',
+          is_batch_produced: true,
+          store_id: 1,
+        }),
+      };
+      (prismaMock as any).recipes = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          product_id: 50,
+          is_active: true,
+          yield_quantity: new Prisma.Decimal(yieldQty),
+          yield_unit: 'und',
+        }),
+      };
+      (prismaMock.production_orders as any).create = jest
+        .fn()
+        .mockResolvedValue({ id: 1, status: 'draft' });
+    };
+
+    it('accepts 3 batches of a recipe that yields 10 (planned 30)', async () => {
+      arrange(10);
+      await service.create({ product_id: 50, recipe_id: 7, planned_qty: 30 } as any);
+      expect((prismaMock.production_orders as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ planned_qty: new Prisma.Decimal(30) }),
+        }),
+      );
+    });
+
+    it('rejects a planned quantity that is not a multiple of the recipe yield', async () => {
+      arrange(10);
+      await expect(
+        service.create({ product_id: 50, recipe_id: 7, planned_qty: 25 } as any),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE' });
+      expect((prismaMock.production_orders as any).create).not.toHaveBeenCalled();
     });
   });
 });

@@ -6006,6 +6006,12 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'La cantidad producida debe ser mayor a 0',
   },
+  PRODUCTION_QTY_NOT_YIELD_MULTIPLE: {
+    code: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+    httpStatus: 422,
+    devMessage:
+      'La cantidad debe ser un múltiplo exacto de lo que rinde la receta (tandas completas)',
+  },
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
   KITCHEN_FIRE_ORDER_NOT_FOUND: {
     code: 'KITCHEN_FIRE_ORDER_NOT_FOUND',
