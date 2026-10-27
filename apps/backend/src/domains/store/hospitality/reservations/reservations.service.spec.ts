@@ -92,6 +92,7 @@ function createFakeStore(
   units: number | Record<number, number>,
   overbooking_allowance = 0,
   restrictions: Record<string, unknown>[] = [],
+  allotments: Record<string, any>[] = [],
 ) {
   const nights: NightRow[] = [];
   const reservations: {
@@ -100,6 +101,7 @@ function createFakeStore(
     status: string;
     store_id: number;
     arrival_date: Date;
+    customer_id?: number;
     total_amount?: Prisma.Decimal;
   }[] = [];
   const rooms: {
@@ -140,8 +142,36 @@ function createFakeStore(
             counts.set(key, (counts.get(key) ?? 0) + 1);
           }
         }
-        return [...counts.values()].map((c) => ({ _count: { _all: c } }));
+        return [...counts.entries()].map(([key, c]) => ({
+          night_date: new Date(key),
+          _count: { _all: c },
+        }));
       }),
+      // H2.5 — nights an allotment customer already booked.
+      findMany: jest.fn(async ({ where }: any) =>
+        nights
+          .filter(
+            (n) =>
+              where.unit_type_id.in.includes(n.unit_type_id) &&
+              n.is_active &&
+              n.night_date >= where.night_date.gte &&
+              n.night_date <= where.night_date.lte,
+          )
+          .map((n) => {
+            const room = rooms.find((r) => r.id === n.reservation_room_id)!;
+            const reservation = reservations.find((r) => r.id === room.reservation_id)!;
+            return {
+              unit_type_id: n.unit_type_id,
+              night_date: n.night_date,
+              reservation_room: { reservation: { customer_id: reservation.customer_id } },
+            };
+          })
+          .filter((n) =>
+            where.reservation_room.reservation.customer_id.in.includes(
+              n.reservation_room.reservation.customer_id,
+            ),
+          ),
+      ),
       createMany: jest.fn(async ({ data }: any) => {
         await yieldTurn();
         nights.push(...data.map((d: any) => ({ ...d, is_active: true })));
@@ -238,6 +268,17 @@ function createFakeStore(
         return data;
       }),
     },
+    lodging_allotments: {
+      findMany: jest.fn(async ({ where }: any) =>
+        allotments.filter(
+          (a) =>
+            where.unit_type_id.in.includes(a.unit_type_id) &&
+            a.from_date <= where.from_date.lte &&
+            a.to_date >= where.to_date.gte &&
+            a.customer_id !== where.customer_id?.not,
+        ),
+      ),
+    },
     lodging_rate_plans: {
       findFirst: jest.fn(
         async ({ where }: any) =>
@@ -319,8 +360,9 @@ describe('LodgingReservationsService', () => {
     units: number | Record<number, number>,
     overbooking_allowance = 0,
     restrictions: Record<string, unknown>[] = [],
+    allotments: Record<string, any>[] = [],
   ) => {
-    const fake = createFakeStore(units, overbooking_allowance, restrictions);
+    const fake = createFakeStore(units, overbooking_allowance, restrictions, allotments);
     const service = new LodgingReservationsService(
       fake.prisma as any,
       new LodgingAvailabilityService(fake.prisma as any),
@@ -382,6 +424,7 @@ describe('LodgingReservationsService', () => {
         available: 2,
         units: 2,
         sold: 0,
+        held: 0,
         overbooking_allowance: 0,
         nights: 3,
         rate_plan: null,
@@ -601,6 +644,69 @@ describe('LodgingReservationsService', () => {
 
       expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
       expect(reservations).toHaveLength(2);
+    });
+  });
+
+  describe('cupos para agencias y empresas (H2.5)', () => {
+    // "Viajes X" (customer 90) holds 3 Dobles in November, released 7 days
+    // before each night. The stay 10-13 nov is released from 3, 4 and 5 nov.
+    const VIAJES_X = {
+      store_id: 5,
+      customer_id: 90,
+      unit_type_id: 11,
+      from_date: new Date('2026-11-01T00:00:00.000Z'),
+      to_date: new Date('2026-11-30T00:00:00.000Z'),
+      rooms: 3,
+      release_days: 7,
+    };
+    const agency = { ...stay, customer_id: 90 };
+    const at = (iso: string) =>
+      jest.useFakeTimers({ now: new Date(iso), doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
+
+    afterEach(() => jest.useRealTimers());
+
+    it('el público ve 3 Dobles menos y no puede vender el cupo', async () => {
+      at('2026-11-01T15:00:00.000Z');
+      const { service } = build(5, 0, [], [VIAJES_X]);
+
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 2, held: 3, units: 5 });
+      await service.create(sale(stay));
+      await service.create(sale(stay));
+      await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_AVAILABILITY_001');
+    });
+
+    it('al reservar para Viajes X se consume el cupo, no la disponibilidad pública', async () => {
+      at('2026-11-01T15:00:00.000Z');
+      const { service } = build(5, 0, [], [VIAJES_X]);
+
+      await expect(service.quote({ ...stay, customer_id: 90 })).resolves.toMatchObject({
+        available: 5,
+        held: 0,
+      });
+      await service.create(sale(agency));
+      // 5 rooms - 1 sold to Viajes X - 2 still held for it.
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 2, held: 2, sold: 1 });
+      await service.create(sale(stay));
+      await service.create(sale(stay));
+      await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_AVAILABILITY_001');
+      // The agency still has its 2 held rooms.
+      await service.create(sale(agency));
+      await service.create(sale(agency));
+      await expectCode(service.create(sale(agency)), 'LODGING_RESERVATION_AVAILABILITY_001');
+    });
+
+    it('7 días antes de cada noche el cupo no usado vuelve al público', async () => {
+      // 4-nov: nights 10 and 11 are released, the 12th is still held.
+      at('2026-11-04T15:00:00.000Z');
+      const { service } = build(5, 0, [], [VIAJES_X]);
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 2, held: 3 });
+
+      // 5-nov (store time zone): the last night is released too.
+      at('2026-11-05T15:00:00.000Z');
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 5, held: 0 });
+      // 4-nov 23:30 in Bogotá is already 5-nov in UTC: still held.
+      at('2026-11-05T04:30:00.000Z');
+      await expect(service.quote(stay)).resolves.toMatchObject({ available: 2, held: 3 });
     });
   });
 

@@ -21,12 +21,17 @@ import {
 } from '../../../../../../../shared/components/index';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
+import {
+  AllotmentFormModalComponent,
+  customerName,
+} from '../../components/allotment-form-modal/allotment-form-modal.component';
 import { CancellationPolicyFormModalComponent } from '../../components/cancellation-policy-form-modal/cancellation-policy-form-modal.component';
 import { RatePlanFormModalComponent } from '../../components/rate-plan-form-modal/rate-plan-form-modal.component';
 import { RatesCalendarComponent } from '../../components/rates-calendar/rates-calendar.component';
 import { RestrictionFormModalComponent } from '../../components/restriction-form-modal/restriction-form-modal.component';
 import { SeasonFormModalComponent } from '../../components/season-form-modal/season-form-modal.component';
 import {
+  Allotment,
   CancellationPolicy,
   describePolicy,
   LodgingRestriction,
@@ -35,6 +40,7 @@ import {
   Season,
   seasonRange,
 } from '../../interfaces/rate-plan.interface';
+import { AllotmentsService } from '../../services/allotments.service';
 import { CancellationPoliciesService } from '../../services/cancellation-policies.service';
 import { RatePlansService } from '../../services/rate-plans.service';
 import { RestrictionsService } from '../../services/restrictions.service';
@@ -54,6 +60,15 @@ interface PolicyRow extends CancellationPolicy {
   status: 'active' | 'inactive';
 }
 
+interface AllotmentRow extends Allotment {
+  agency: string;
+  type_name: string;
+  range: string;
+  rooms_label: string;
+  release_label: string;
+  status: 'active' | 'inactive';
+}
+
 interface SeasonRow extends Season {
   range: string;
   status: 'active' | 'inactive';
@@ -66,6 +81,7 @@ interface SeasonRow extends Season {
  * season. The default plan is preselected when booking. H2.3: clicking a
  * night of the calendar sets its stay restrictions (min stay, CTA/CTD, stop-sell).
  * H2.4: cancellation policies, assigned to each plan with its deposit percent.
+ * H2.5: allotments (cupos) that hold rooms for an agency until their release.
  */
 @Component({
   selector: 'app-hospitality-rates-page',
@@ -80,6 +96,7 @@ interface SeasonRow extends Season {
     ResponsiveDataViewComponent,
     RatePlanFormModalComponent,
     SeasonFormModalComponent,
+    AllotmentFormModalComponent,
     RatesCalendarComponent,
     RestrictionFormModalComponent,
     CancellationPolicyFormModalComponent,
@@ -222,6 +239,48 @@ interface SeasonRow extends Season {
       <div class="p-2 md:p-4">
         <app-card [responsive]="true" [padding]="false" overflow="visible">
           <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
+            <div class="flex items-center justify-between gap-2">
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+              >
+                Cupos ({{ allotments().length }})
+              </h2>
+              <app-button variant="outline" size="md" (clicked)="openAllotmentForm(null)">
+                <app-icon slot="icon" name="plus" [size]="16" />
+                Nuevo cupo
+              </app-button>
+            </div>
+          </div>
+
+          <div class="px-2 pb-2 pt-3 md:px-6 md:pb-6">
+            @if (!allotmentsLoading() && allotments().length === 0) {
+              <app-empty-state
+                icon="building-2"
+                title="Aún no tienes cupos"
+                description="Reserva habitaciones para una agencia o empresa (ej. Viajes X: 3 Dobles en diciembre) con fecha de liberación, para garantizarle disponibilidad sin bloquear el inventario."
+                actionButtonText="Nuevo cupo"
+                actionButtonIcon="plus"
+                [showActionButton]="true"
+                (actionClick)="openAllotmentForm(null)"
+              />
+            } @else {
+              <app-responsive-data-view
+                [data]="allotmentRows()"
+                [columns]="allotmentColumns"
+                [cardConfig]="allotmentCardConfig"
+                [loading]="allotmentsLoading()"
+                [striped]="true"
+                [hoverable]="true"
+                (rowClick)="openAllotmentForm($event)"
+              />
+            }
+          </div>
+        </app-card>
+      </div>
+
+      <div class="p-2 md:p-4">
+        <app-card [responsive]="true" [padding]="false" overflow="visible">
+          <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
             <h2
               class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
@@ -273,6 +332,14 @@ interface SeasonRow extends Season {
         (isOpenChange)="isSeasonFormOpen.set($event)"
         (saved)="refreshSeasons()"
       />
+
+      <app-allotment-form-modal
+        [isOpen]="isAllotmentFormOpen()"
+        [allotment]="editingAllotment()"
+        [unitTypes]="unitTypes()"
+        (isOpenChange)="isAllotmentFormOpen.set($event)"
+        (saved)="refreshAllotments()"
+      />
     </div>
   `,
 })
@@ -282,6 +349,7 @@ export class HospitalityRatesPageComponent implements OnInit {
   private readonly seasonsService = inject(SeasonsService);
   private readonly restrictionsService = inject(RestrictionsService);
   private readonly policiesService = inject(CancellationPoliciesService);
+  private readonly allotmentsService = inject(AllotmentsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -290,6 +358,10 @@ export class HospitalityRatesPageComponent implements OnInit {
   readonly isLoading = signal(true);
   readonly isFormOpen = signal(false);
   readonly editing = signal<RatePlan | null>(null);
+  readonly allotments = signal<Allotment[]>([]);
+  readonly allotmentsLoading = signal(true);
+  readonly isAllotmentFormOpen = signal(false);
+  readonly editingAllotment = signal<Allotment | null>(null);
   readonly seasons = signal<Season[]>([]);
   readonly seasonsLoading = signal(true);
   readonly isSeasonFormOpen = signal(false);
@@ -394,6 +466,47 @@ export class HospitalityRatesPageComponent implements OnInit {
     detailKeys: [{ key: 'plans_label', label: 'Planes' }],
   };
 
+  /** H2.5 — "Viajes X · Doble · 1-dic → 31-dic · 3 hab. · libera 7 días antes". */
+  readonly allotmentRows = computed<AllotmentRow[]>(() =>
+    this.allotments().map((a) => ({
+      ...a,
+      agency: customerName(a.customer),
+      type_name: a.unit_type.name,
+      range: seasonRange(a),
+      rooms_label: `${a.rooms} hab.`,
+      release_label: a.release_days === 1 ? '1 día antes' : `${a.release_days} días antes`,
+      status: a.is_active ? 'active' : 'inactive',
+    })),
+  );
+
+  readonly allotmentColumns: TableColumn[] = [
+    { key: 'agency', label: 'Agencia o empresa', sortable: true },
+    { key: 'type_name', label: 'Tipo' },
+    { key: 'range', label: 'Noches' },
+    { key: 'rooms_label', label: 'Habitaciones', align: 'center' },
+    { key: 'release_label', label: 'Liberación' },
+    {
+      key: 'status',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: { type: 'status' },
+      transform: (value: string) => (value === 'active' ? 'Activo' : 'Inactivo'),
+    },
+  ];
+
+  readonly allotmentCardConfig: ItemListCardConfig = {
+    titleKey: 'agency',
+    subtitleKey: 'range',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' },
+    badgeTransform: (value: string) => (value === 'active' ? 'Activo' : 'Inactivo'),
+    detailKeys: [
+      { key: 'type_name', label: 'Tipo' },
+      { key: 'rooms_label', label: 'Habitaciones' },
+      { key: 'release_label', label: 'Liberación' },
+    ],
+  };
+
   readonly seasonRows = computed<SeasonRow[]>(() =>
     this.seasons().map((season) => ({
       ...season,
@@ -428,6 +541,7 @@ export class HospitalityRatesPageComponent implements OnInit {
     this.refresh();
     this.refreshSeasons();
     this.refreshPolicies();
+    this.refreshAllotments();
     this.unitTypesService
       .list()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -495,6 +609,32 @@ export class HospitalityRatesPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  refreshAllotments(): void {
+    this.allotmentsLoading.set(true);
+    this.allotmentsService
+      .list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (allotments) => {
+          this.allotments.set(allotments);
+          this.allotmentsLoading.set(false);
+        },
+        error: (message: unknown) => {
+          this.allotmentsLoading.set(false);
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudieron cargar los cupos',
+          );
+        },
+      });
+  }
+
+  openAllotmentForm(allotment: Allotment | null): void {
+    this.editingAllotment.set(
+      allotment ? (this.allotments().find((a) => a.id === allotment.id) ?? null) : null,
+    );
+    this.isAllotmentFormOpen.set(true);
   }
 
   openPolicyForm(policy: CancellationPolicy | null): void {

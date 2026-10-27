@@ -160,6 +160,20 @@ describe('rack builder (H1.3)', () => {
     expect(type.free).toEqual([0, 1, 3]);
   });
 
+  it('H2.5 allotment: rooms held for an agency are not free for the public', () => {
+    const r = buildRack({
+      from: '2026-11-10',
+      to: '2026-11-13',
+      types: [{ id: 1, name: 'Doble estándar', overbooking_allowance: 0 }],
+      units: UNITS,
+      rooms: [],
+      sold: [{ unit_type_id: 1, night_date: d('2026-11-10'), count: 1 }],
+      held: new Map([[1, [1, 2, 0]]]),
+    });
+    expect(r.types[0].held).toEqual([1, 2, 0]);
+    expect(r.types[0].free).toEqual([0, 0, 2]);
+  });
+
   it('inactive rooms are listed but do not count as free', () => {
     const r = buildRack({
       from: '2026-11-10',

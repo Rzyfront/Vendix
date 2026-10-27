@@ -54,6 +54,15 @@ export class ReservationQuoteDto {
   @Type(() => Number)
   @IsInt()
   rate_plan_id?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Titular (H2.5): una agencia o empresa ve también las habitaciones de su cupo.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  customer_id?: number;
 }
 
 /** Most rooms one reservation can hold (a group bigger than this is split). */

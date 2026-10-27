@@ -116,6 +116,9 @@ const REQUIRED_COLUMNS = [
   'lodging_rate_plans.cancellation_policy_id',
   'lodging_reservation_rooms.cancellation_policy_snapshot',
   'lodging_reservations.cancellation_penalty_amount',
+
+  // --- Hotelería H2.5 · cupos para agencias y empresas
+  'lodging_allotments.release_days',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

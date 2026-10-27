@@ -226,3 +226,38 @@ export function describePolicy(
   const noShow = policy.no_show_penalty ? penaltyLabel(policy.no_show_penalty) : 'sin penalidad';
   return `${parts.join('; ')} · No-show: ${noShow}`;
 }
+
+/**
+ * H2.5 — rooms of a type held for an agency or company. Dates are
+ * `YYYY-MM-DD`, `to_date` is the last night held. What the customer has not
+ * booked returns to public sale `release_days` before each night.
+ */
+export interface Allotment {
+  id: number;
+  customer_id: number;
+  unit_type_id: number;
+  from_date: string;
+  to_date: string;
+  rooms: number;
+  release_days: number;
+  notes: string | null;
+  is_active: boolean;
+  customer: { id: number; first_name: string | null; last_name: string | null; email: string };
+  unit_type: { id: number; name: string };
+  /** Next day a held night returns to the public (null = nothing left to release). */
+  next_release_date: string | null;
+}
+
+export interface AllotmentPayload {
+  customer_id: number;
+  unit_type_id: number;
+  from_date: string;
+  to_date: string;
+  rooms: number;
+  release_days: number;
+  notes?: string;
+}
+
+export type AllotmentUpdatePayload = Partial<
+  Omit<AllotmentPayload, 'customer_id' | 'unit_type_id'>
+> & { is_active?: boolean };

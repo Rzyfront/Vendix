@@ -144,6 +144,8 @@ export interface ReservationQuoteRequest {
   children?: number;
   /** H2.1 — rate plan; omitted = room type base price. */
   rate_plan_id?: number;
+  /** H2.5 — holder: an agency or company also sees its allotment rooms. */
+  customer_id?: number;
 }
 
 export interface ReservationQuote {
@@ -152,6 +154,8 @@ export interface ReservationQuote {
   /** H1.6 — active rooms, most rooms sold on a night and overbooking allowance. */
   units: number;
   sold: number;
+  /** H2.5 — rooms held for other customers' allotments (not for sale). */
+  held: number;
   overbooking_allowance: number;
   nights: number;
   /** H2.1 — plan applied (null = base price) and the price of each night. */
@@ -232,6 +236,8 @@ export interface RackType {
   overbooking_allowance: number;
   /** Rooms sold per night; above `capacity` the night is overbooked. */
   sold: number[];
+  /** H2.5 — rooms held for allotments per night (not for public sale). */
+  held: number[];
   /** Rooms still for sale per night of the window (overbooking included). */
   free: number[];
   unassigned_lanes: number;

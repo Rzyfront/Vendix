@@ -174,7 +174,7 @@ export class LodgingRoomChangesService {
         unit: { select: { id: true, code: true } },
         unit_type: { select: { id: true, name: true } },
         cancelled_at: true,
-        reservation: { select: { status: true } },
+        reservation: { select: { status: true, customer_id: true } },
         nights: {
           where: { is_active: true },
           select: { night_date: true, rate_amount: true },
@@ -272,6 +272,8 @@ export class LodgingRoomChangesService {
         departure,
         client,
         room.id,
+        // H2.5 — an agency's room may use its own allotment.
+        room.reservation.customer_id,
       );
       if (available < 1) {
         throw new VendixHttpException(

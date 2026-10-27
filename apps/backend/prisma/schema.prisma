@@ -206,6 +206,7 @@ model users {
   lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
+  lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
@@ -1074,6 +1075,7 @@ model stores {
   lodging_seasons                lodging_seasons[]
   lodging_restrictions           lodging_restrictions[]
   lodging_cancellation_policies  lodging_cancellation_policies[]
+  lodging_allotments             lodging_allotments[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2335,6 +2337,7 @@ model lodging_unit_types {
   room_nights       lodging_room_nights[]
   rate_prices       lodging_rate_prices[]
   restrictions      lodging_restrictions[]
+  allotments        lodging_allotments[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -2516,6 +2519,34 @@ model lodging_cancellation_policies {
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
+}
+
+// Hospitality Suite (H2.5) — rooms of a type held for an agency or company
+// (`customer_id`) on the nights from_date..to_date (to_date included). Rooms
+// the customer has not booked stay out of public sale until `release_days`
+// before each night, then return to the public (computed in the store's time
+// zone, see lodging-allotment-holds).
+model lodging_allotments {
+  id           Int       @id @default(autoincrement())
+  store_id     Int
+  customer_id  Int
+  unit_type_id Int
+  from_date    DateTime  @db.Date
+  to_date      DateTime  @db.Date
+  rooms        Int
+  release_days Int       @default(7)
+  notes        String?   @db.VarChar(500)
+  is_active    Boolean   @default(true)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer  users              @relation("lodging_allotments_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, is_active, from_date, to_date])
+  @@index([unit_type_id, is_active])
+  @@index([customer_id])
 }
 
 // Hospitality Suite (H2.1) — nightly price of a room type in a plan.

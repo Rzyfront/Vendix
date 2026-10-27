@@ -107,7 +107,7 @@ function createFake(options: Options = {}) {
     lodging_room_nights: {
       groupBy: jest.fn(async ({ where }: any) => {
         const sold = options.soldOfType?.[where.unit_type_id] ?? 0;
-        return sold ? [{ _count: { _all: sold } }] : [];
+        return sold ? [{ night_date: where.night_date.gte, _count: { _all: sold } }] : [];
       }),
       findFirst: jest.fn(async ({ where }: any) => {
         const taken = options.taken;
@@ -137,6 +137,7 @@ function createFake(options: Options = {}) {
         ),
       ),
     },
+    lodging_allotments: { findMany: jest.fn(async () => []) },
     lodging_reservations: { update: jest.fn(async () => ({})) },
     lodging_reservation_events: { create: jest.fn(async () => ({})) },
   };

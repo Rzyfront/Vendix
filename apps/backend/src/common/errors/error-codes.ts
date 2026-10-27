@@ -5773,6 +5773,26 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La temporada se solapa con otra de la misma prioridad',
   },
+  LODGING_ALLOTMENT_FIND_001: {
+    code: 'LODGING_ALLOTMENT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Cupo no encontrado',
+  },
+  LODGING_ALLOTMENT_DATES_001: {
+    code: 'LODGING_ALLOTMENT_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última noche del cupo no puede ser anterior a la primera',
+  },
+  LODGING_ALLOTMENT_OVERLAP_001: {
+    code: 'LODGING_ALLOTMENT_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'El cliente ya tiene un cupo activo de ese tipo de habitación en esas fechas',
+  },
+  LODGING_ALLOTMENT_AVAILABILITY_001: {
+    code: 'LODGING_ALLOTMENT_AVAILABILITY_001',
+    httpStatus: 409,
+    devMessage: 'No hay habitaciones libres suficientes para reservar ese cupo',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

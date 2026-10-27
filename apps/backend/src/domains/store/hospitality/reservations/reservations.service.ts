@@ -456,12 +456,17 @@ export class LodgingReservationsService {
       unitType.id,
       dto.arrival_date,
       dto.departure_date,
+      undefined,
+      undefined,
+      dto.customer_id,
     );
     return {
       unit_type: { id: unitType.id, name: unitType.name },
       available: inventory.available,
       units: inventory.units,
       sold: inventory.sold,
+      // H2.5 — rooms held for other customers' allotments (not for sale).
+      held: inventory.held,
       overbooking_allowance: inventory.overbooking_allowance,
       nights: nights.length,
       rate_plan: priced.rate_plan,
@@ -523,6 +528,9 @@ export class LodgingReservationsService {
           dto.arrival_date,
           dto.departure_date,
           tx,
+          undefined,
+          // H2.5 — an agency or company sells from its own allotment.
+          dto.customer_id,
         );
         if (available < requested) {
           const left = available > 0 ? ` (quedan ${available})` : '';

@@ -1,15 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { dateOnlyToDb } from '../stay-dates';
+import { LodgingAvailabilityService } from '../lodging-availability.service';
 import { buildRack, Rack, RACK_STATUSES, rackNights } from './rack-builder';
 
 /** Hospitality Suite (H1.3) — read model of the occupancy rack. */
 @Injectable()
 export class LodgingRackService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly availability: LodgingAvailabilityService,
+  ) {}
 
   async getRack(from: string, to: string): Promise<Rack> {
-    rackNights(from, to);
+    const nights = rackNights(from, to);
     const range = { gte: dateOnlyToDb(from), lt: dateOnlyToDb(to) };
 
     const [rooms, sold] = await Promise.all([
@@ -65,6 +69,11 @@ export class LodgingRackService {
         orderBy: [{ code: 'asc' }],
       }),
     ]);
+    // H2.5 — unbooked allotment rooms are not free for the public.
+    const held = await this.availability.holdsByType(
+      types.map((t) => t.id),
+      nights,
+    );
 
     return buildRack({
       from,
@@ -77,6 +86,7 @@ export class LodgingRackService {
         night_date: s.night_date,
         count: s._count._all,
       })),
+      held,
     });
   }
 }

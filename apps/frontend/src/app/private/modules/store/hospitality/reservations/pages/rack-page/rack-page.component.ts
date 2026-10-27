@@ -65,6 +65,8 @@ interface RackRow {
   typeId: number;
   unitId?: number;
   free?: number[];
+  /** H2.5 — allotment rooms held per night. */
+  held?: number[];
   /** H1.6 — nights sold above the type's rooms, and the "Sobreventa: 3/2" alert. */
   overbooked?: boolean[];
   overbooking?: string;
@@ -233,12 +235,20 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                           [class.font-bold]="row.free[i] === 0 || row.overbooked?.[i]"
                           [class.underline]="row.overbooked?.[i]"
                           [attr.title]="
-                            row.overbooked?.[i]
-                              ? 'Sobreventa: ' + row.free[i] + ' libres'
-                              : row.free[i] + ' libres'
+                            (row.overbooked?.[i] ? 'Sobreventa: ' : '') +
+                            row.free[i] +
+                            ' libres' +
+                            (row.held?.[i] ? ' · ' + row.held?.[i] + ' en cupo' : '')
                           "
                           >{{ row.free[i] }}</span
                         >
+                        @if (row.held?.[i]) {
+                          <span
+                            class="ml-0.5 rounded bg-amber-100 px-0.5 text-[9px] leading-tight text-amber-800"
+                            data-testid="rack-held"
+                            >{{ row.held?.[i] }}c</span
+                          >
+                        }
                       }
                     </div>
                   }
@@ -361,6 +371,7 @@ export class HospitalityRackPageComponent implements OnInit {
         label: type.name,
         typeId: type.id,
         free: type.free,
+        held: type.held,
         overbooked,
         overbooking: peak > type.capacity ? `Sobreventa: ${peak}/${type.capacity}` : undefined,
       });

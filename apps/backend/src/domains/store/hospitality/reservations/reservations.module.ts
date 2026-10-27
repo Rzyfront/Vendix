@@ -9,16 +9,19 @@ import { LodgingNoShowJob } from './jobs/lodging-no-show.job';
 import { LodgingRackController } from './rack/rack.controller';
 import { LodgingRackService } from './rack/lodging-rack.service';
 import { LodgingRatesModule } from '../rates/rates.module';
+import { LodgingAllotmentsController } from './allotments/allotments.controller';
+import { LodgingAllotmentsService } from './allotments/allotments.service';
 
 @Module({
   imports: [ResponseModule, PrismaModule, LodgingRatesModule],
-  controllers: [LodgingReservationsController, LodgingRackController],
+  controllers: [LodgingReservationsController, LodgingRackController, LodgingAllotmentsController],
   providers: [
     LodgingReservationsService,
     LodgingAvailabilityService,
     LodgingRoomChangesService,
     LodgingNoShowJob,
     LodgingRackService,
+    LodgingAllotmentsService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

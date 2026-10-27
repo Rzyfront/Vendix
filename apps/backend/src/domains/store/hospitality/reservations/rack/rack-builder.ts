@@ -78,6 +78,8 @@ export interface RackType {
   overbooking_allowance: number;
   /** Rooms of the type sold on each night; above `capacity` = overbooked. */
   sold: number[];
+  /** H2.5 — rooms held for allotments on each night (not for public sale). */
+  held: number[];
   /** Rooms of the type still for sale on each night (overbooking included). */
   free: number[];
   /** Rows the unassigned bars need (0 = no "Sin asignar" row). */
@@ -116,6 +118,8 @@ export function buildRack(input: {
   units: RackUnitInput[];
   rooms: RackRoomInput[];
   sold: RackSoldNightInput[];
+  /** H2.5 — allotment rooms held per night `[from, to)`, by type id. */
+  held?: Map<number, number[]>;
 }): Rack {
   const nights = rackNights(input.from, input.to);
   const nightIndex = new Map(nights.map((night, i) => [night, i]));
@@ -129,7 +133,8 @@ export function buildRack(input: {
       const i = nightIndex.get(toDateOnly(night.night_date));
       if (night.unit_type_id === type.id && i !== undefined) sold[i] += night.count;
     }
-    const free = sold.map((count) => Math.max(0, capacity + allowance - count));
+    const held = input.held?.get(type.id) ?? nights.map(() => 0);
+    const free = sold.map((count, i) => Math.max(0, capacity + allowance - count - held[i]));
     const bars = input.rooms
       .filter((room) => room.unit_type_id === type.id)
       .map((room) => toBar(room, input.from, nights.length))
@@ -142,6 +147,7 @@ export function buildRack(input: {
       capacity,
       overbooking_allowance: allowance,
       sold,
+      held,
       free,
       unassigned_lanes: packUnassigned(bars),
       bars,

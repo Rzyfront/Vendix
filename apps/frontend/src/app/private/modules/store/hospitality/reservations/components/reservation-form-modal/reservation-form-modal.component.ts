@@ -16,8 +16,8 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { forkJoin, of } from 'rxjs';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
+import { forkJoin, merge, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap, tap } from 'rxjs/operators';
 import {
   ButtonComponent,
@@ -218,6 +218,11 @@ export function formatShortDate(date: string): string {
               <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-red-600'">
                 {{ quoteMessage() }}
               </span>
+              @if (allotmentHint()) {
+                <p class="mt-1 text-xs text-text-secondary" data-testid="reservation-allotment">
+                  En cupo de agencias o empresas: {{ allotmentHint() }}
+                </p>
+              }
               @if (restrictionMessages().length) {
                 <ul class="mt-1 space-y-0.5 text-xs font-semibold text-red-600" data-testid="reservation-restrictions">
                   @for (message of restrictionMessages(); track message) {
@@ -388,6 +393,16 @@ export class ReservationFormModalComponent {
       .join(' · ');
   });
 
+  /** H2.5 — "3 Doble estándar en cupo de agencias" (not for this holder). */
+  readonly allotmentHint = computed(() => {
+    const state = this.quoteState();
+    if (state.kind !== 'ready') return '';
+    return state.quotes
+      .filter((q, i, all) => q.held > 0 && all.findIndex((x) => x.unit_type.id === q.unit_type.id) === i)
+      .map((q) => `${q.held} ${q.unit_type.name}`)
+      .join(', ');
+  });
+
   readonly quoteMessage = computed(() => {
     const state = this.quoteState();
     if (state.kind === 'error') return state.message;
@@ -427,7 +442,8 @@ export class ReservationFormModalComponent {
   readonly overrideReason = toSignal(this.overrideControl.valueChanges, { initialValue: '' });
 
   constructor() {
-    this.form.valueChanges
+    // H2.5 — the holder matters too: an agency also sees its allotment rooms.
+    merge(this.form.valueChanges, toObservable(this.customer))
       .pipe(
         map(() => this.quoteRequest()),
         tap((request) =>
@@ -620,6 +636,7 @@ export class ReservationFormModalComponent {
       adults: Number(room.adults) || 0,
       children: Number(room.children) || 0,
       rate_plan_id: this.planIdFor(room.unit_type_id, room.rate_plan_id),
+      customer_id: this.customer()?.id,
     }));
   }
 

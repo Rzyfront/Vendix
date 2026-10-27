@@ -1,12 +1,28 @@
 import { Injectable } from '@nestjs/common';
+import {
+  localDateString,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { dateOnlyToDb } from './stay-dates';
+import { dateOnlyToDb, stayNights } from './stay-dates';
+import { allotmentHolds, consumedKey } from './lodging-allotment-holds';
 
 /** Prisma client or interactive transaction exposing the lodging models. */
 export type LodgingInventoryClient = Pick<
   StorePrismaService,
-  'lodging_unit_types' | 'lodging_units' | 'lodging_room_nights'
+  | 'lodging_unit_types'
+  | 'lodging_units'
+  | 'lodging_room_nights'
+  | 'lodging_allotments'
 >;
+
+const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
+/** `groupBy(['night_date'])` counts → rooms per `YYYY-MM-DD`. */
+const countByNight = (rows: { night_date: Date; _count: { _all: number } }[]) =>
+  new Map<string, number>(
+    rows.map((r) => [toDateOnly(r.night_date), r._count._all]),
+  );
 
 /** Inventory of a room type over a stay. */
 export interface LodgingTypeInventory {
@@ -16,7 +32,12 @@ export interface LodgingTypeInventory {
   overbooking_allowance: number;
   /** Most rooms already sold on any night of the stay. */
   sold: number;
-  /** Rooms still for sale: `units + overbooking_allowance - sold`, never below 0. */
+  /** Most rooms held for other customers' allotments on a night (H2.5). */
+  held: number;
+  /**
+   * Rooms still for sale: `units + overbooking_allowance` minus the busiest
+   * night's sold + held rooms, never below 0.
+   */
   available: number;
 }
 
@@ -30,6 +51,8 @@ export interface LodgingTypeInventory {
  * sale, so it runs under the same lock as the insert.
  * `exclude_reservation_room_id` leaves out the nights of a room being changed
  * (H1.4), so it does not compete with itself.
+ * H2.5 — unbooked allotment rooms of other customers are not for sale until
+ * released; `buyer_customer_id` sells from its own allotment.
  */
 @Injectable()
 export class LodgingAvailabilityService {
@@ -41,6 +64,7 @@ export class LodgingAvailabilityService {
     departure_date: string,
     client: LodgingInventoryClient = this.prisma,
     exclude_reservation_room_id?: number,
+    buyer_customer_id?: number,
   ): Promise<number> {
     const inventory = await this.getInventory(
       unit_type_id,
@@ -48,6 +72,7 @@ export class LodgingAvailabilityService {
       departure_date,
       client,
       exclude_reservation_room_id,
+      buyer_customer_id,
     );
     return inventory.available;
   }
@@ -58,8 +83,10 @@ export class LodgingAvailabilityService {
     departure_date: string,
     client: LodgingInventoryClient = this.prisma,
     exclude_reservation_room_id?: number,
+    buyer_customer_id?: number,
   ): Promise<LodgingTypeInventory> {
-    const [type, units, booked] = await Promise.all([
+    const nights = stayNights(arrival_date, departure_date);
+    const [type, units, booked, holds] = await Promise.all([
       client.lodging_unit_types.findFirst({
         where: { id: unit_type_id },
         select: { overbooking_allowance: true },
@@ -80,14 +107,178 @@ export class LodgingAvailabilityService {
         },
         _count: { _all: true },
       }),
+      this.holdsByType(
+        [unit_type_id],
+        nights,
+        client,
+        buyer_customer_id,
+        exclude_reservation_room_id,
+      ),
     ]);
     const overbooking_allowance = Math.max(0, type?.overbooking_allowance ?? 0);
-    const sold = booked.reduce((max, n) => Math.max(max, n._count._all), 0);
+    const soldOn = countByNight(booked);
+    const held = holds.get(unit_type_id) ?? nights.map(() => 0);
+    const taken = nights.map((night, i) => (soldOn.get(night) ?? 0) + held[i]);
     return {
       units,
       overbooking_allowance,
-      sold,
-      available: Math.max(0, units + overbooking_allowance - sold),
+      sold: Math.max(0, ...soldOn.values()),
+      held: Math.max(0, ...held),
+      available: Math.max(
+        0,
+        units + overbooking_allowance - Math.max(0, ...taken),
+      ),
     };
+  }
+
+  /**
+   * H2.5 — rooms an allotment of `customer_id` can hold on each night: the
+   * sellable rooms minus nights sold and other customers' holds, plus the
+   * nights this customer already booked (they count inside its allotment).
+   * Returns the tightest night, so the form can say "quedan 2 el 20-dic".
+   */
+  async allotmentCapacity(
+    unit_type_id: number,
+    nights: string[],
+    customer_id: number,
+    client: LodgingInventoryClient = this.prisma,
+  ): Promise<{ night: string; free: number }> {
+    const range = {
+      gte: dateOnlyToDb(nights[0]),
+      lte: dateOnlyToDb(nights[nights.length - 1]),
+    };
+    const [type, units, booked, own, holds] = await Promise.all([
+      client.lodging_unit_types.findFirst({
+        where: { id: unit_type_id },
+        select: { overbooking_allowance: true },
+      }),
+      client.lodging_units.count({ where: { unit_type_id, is_active: true } }),
+      client.lodging_room_nights.groupBy({
+        by: ['night_date'],
+        where: { unit_type_id, is_active: true, night_date: range },
+        _count: { _all: true },
+      }),
+      client.lodging_room_nights.groupBy({
+        by: ['night_date'],
+        where: {
+          unit_type_id,
+          is_active: true,
+          night_date: range,
+          reservation_room: { reservation: { customer_id } },
+        },
+        _count: { _all: true },
+      }),
+      this.holdsByType([unit_type_id], nights, client, customer_id),
+    ]);
+    const sellable = units + Math.max(0, type?.overbooking_allowance ?? 0);
+    const soldOn = countByNight(booked);
+    const ownOn = countByNight(own);
+    const held = holds.get(unit_type_id) ?? nights.map(() => 0);
+    return nights
+      .map((night, i) => ({
+        night,
+        free:
+          sellable -
+          (soldOn.get(night) ?? 0) -
+          held[i] +
+          (ownOn.get(night) ?? 0),
+      }))
+      .reduce((tightest, n) => (n.free < tightest.free ? n : tightest));
+  }
+
+  /**
+   * H2.5 — rooms held per night for allotments, by room type (types without
+   * an allotment in range are absent). `nights` are consecutive `YYYY-MM-DD`.
+   * Room types are store-owned ids, so the filters stay inside the store even
+   * with an unscoped transaction client.
+   */
+  async holdsByType(
+    unit_type_ids: number[],
+    nights: string[],
+    client: LodgingInventoryClient = this.prisma,
+    buyer_customer_id?: number,
+    exclude_reservation_room_id?: number,
+  ): Promise<Map<number, number[]>> {
+    const result = new Map<number, number[]>();
+    if (unit_type_ids.length === 0 || nights.length === 0) return result;
+    const first = dateOnlyToDb(nights[0]);
+    const last = dateOnlyToDb(nights[nights.length - 1]);
+    const allotments = await client.lodging_allotments.findMany({
+      where: {
+        unit_type_id: { in: unit_type_ids },
+        is_active: true,
+        from_date: { lte: last },
+        to_date: { gte: first },
+        ...(buyer_customer_id
+          ? { customer_id: { not: buyer_customer_id } }
+          : {}),
+      },
+      select: {
+        store_id: true,
+        customer_id: true,
+        unit_type_id: true,
+        from_date: true,
+        to_date: true,
+        rooms: true,
+        release_days: true,
+      },
+    });
+    if (allotments.length === 0) return result;
+
+    const customers = [...new Set(allotments.map((a) => a.customer_id))];
+    const [timezone, booked] = await Promise.all([
+      resolveStoreTimezone(this.prisma, allotments[0].store_id),
+      client.lodging_room_nights.findMany({
+        where: {
+          unit_type_id: { in: unit_type_ids },
+          is_active: true,
+          night_date: { gte: first, lte: last },
+          ...(exclude_reservation_room_id
+            ? { reservation_room_id: { not: exclude_reservation_room_id } }
+            : {}),
+          reservation_room: { reservation: { customer_id: { in: customers } } },
+        },
+        select: {
+          unit_type_id: true,
+          night_date: true,
+          reservation_room: {
+            select: { reservation: { select: { customer_id: true } } },
+          },
+        },
+      }),
+    ]);
+    const today = localDateString(new Date(), timezone);
+
+    for (const unit_type_id of new Set<number>(
+      allotments.map((a) => a.unit_type_id),
+    )) {
+      const consumed = new Map<string, number>();
+      for (const n of booked) {
+        if (n.unit_type_id !== unit_type_id) continue;
+        const key = consumedKey(
+          n.reservation_room.reservation.customer_id,
+          toDateOnly(n.night_date),
+        );
+        consumed.set(key, (consumed.get(key) ?? 0) + 1);
+      }
+      result.set(
+        unit_type_id,
+        allotmentHolds({
+          nights,
+          allotments: allotments
+            .filter((a) => a.unit_type_id === unit_type_id)
+            .map((a) => ({
+              customer_id: a.customer_id,
+              from_date: toDateOnly(a.from_date),
+              to_date: toDateOnly(a.to_date),
+              rooms: a.rooms,
+              release_days: a.release_days,
+            })),
+          consumed,
+          today,
+        }),
+      );
+    }
+    return result;
   }
 }
