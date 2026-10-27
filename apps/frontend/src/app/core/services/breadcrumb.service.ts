@@ -858,7 +858,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/hospitality/channels',
-      title: 'Canales · iCal',
+      title: 'Canales',
       parent: 'Hotelería',
       icon: 'share-2',
     },

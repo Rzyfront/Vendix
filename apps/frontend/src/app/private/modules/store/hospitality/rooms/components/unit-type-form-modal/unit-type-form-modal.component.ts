@@ -29,6 +29,7 @@ import {
   SelectorComponent,
   SelectorOption,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import { ImageUploadService } from '../../../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../../../shared/utils/data-url.util';
@@ -87,6 +88,7 @@ interface UnitTypeForm {
     IconComponent,
     ScrollableTabsComponent,
     ImageSourceModalComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -233,15 +235,13 @@ interface UnitTypeForm {
       @if (activeTab() === 'amenities') {
         <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
           @for (amenity of amenityCatalog(); track amenity.code) {
-            <label class="flex items-center gap-2 p-2 rounded-lg border border-border cursor-pointer hover:bg-surface">
-              <input
-                type="checkbox"
-                class="h-4 w-4"
+            <div class="p-2 rounded-lg border border-border">
+              <app-toggle
                 [checked]="amenities().includes(amenity.code)"
-                (change)="toggleAmenity(amenity.code)"
+                [label]="amenity.label"
+                (changed)="toggleAmenity(amenity.code)"
               />
-              <span class="text-sm">{{ amenity.label }}</span>
-            </label>
+            </div>
           }
         </div>
       }
