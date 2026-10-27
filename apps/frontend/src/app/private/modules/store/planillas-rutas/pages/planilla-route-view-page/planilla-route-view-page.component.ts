@@ -23,6 +23,11 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import {
+  StickyHeaderActionButton,
+  StickyHeaderBadgeColor,
+  StickyHeaderComponent,
+} from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import {
   MapViewComponent,
   MapMarker,
   LatLng,
@@ -81,6 +86,7 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
     NgTemplateOutlet,
     IconComponent,
     ButtonComponent,
+    StickyHeaderComponent,
     MapViewComponent,
     CurrencyPipe,
     StopSettleModalComponent,
@@ -92,38 +98,40 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
     '(document:keydown.escape)': 'onEscape()',
   },
   template: `
-    <!-- Reusable stop list (desktop column and fullscreen floating panel) -->
+    <!-- Reusable stop list (side panel and fullscreen floating panel) -->
     <ng-template #stopsList>
       <div class="flex min-h-0 flex-1 flex-col gap-3">
-        <div class="grid shrink-0 grid-cols-3 gap-2 text-center">
-          <div class="rounded-lg border border-border bg-surface px-2 py-1.5">
-            <p class="text-[10px] uppercase tracking-wide text-text-secondary">Entregadas</p>
-            <p class="text-sm font-semibold text-text-primary">{{ deliveredCount() }}/{{ rows().length }}</p>
+        <div class="grid shrink-0 grid-cols-3 gap-2">
+          <div class="rounded-lg border border-border bg-bg px-2 py-2 text-center">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">Entregadas</p>
+            <p class="mt-0.5 text-sm font-bold tabular-nums text-text-primary">{{ deliveredCount() }}/{{ rows().length }}</p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-2 py-1.5">
-            <p class="text-[10px] uppercase tracking-wide text-text-secondary">Por cobrar</p>
-            <p class="truncate text-sm font-semibold text-text-primary">{{ toCollectTotal() | currency }}</p>
+          <div class="rounded-lg border border-border bg-bg px-2 py-2 text-center">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">Por cobrar</p>
+            <p class="mt-0.5 truncate text-sm font-bold tabular-nums text-amber-700">{{ toCollectTotal() | currency }}</p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-2 py-1.5">
-            <p class="text-[10px] uppercase tracking-wide text-text-secondary">Recaudado</p>
-            <p class="truncate text-sm font-semibold text-text-primary">{{ collectedTotal() | currency }}</p>
+          <div class="rounded-lg border border-border bg-bg px-2 py-2 text-center">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">Recaudado</p>
+            <p class="mt-0.5 truncate text-sm font-bold tabular-nums text-green-700">{{ collectedTotal() | currency }}</p>
           </div>
         </div>
 
         @if (canReorder()) {
           <div class="shrink-0">
             @if (confirmingOptimal()) {
-              <div class="space-y-2 rounded-lg border border-border bg-surface p-2 text-xs text-text-secondary">
+              <div class="space-y-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-text-primary">
                 <p>¿Aplicar el orden óptimo a {{ optimizedPending().length }} paradas pendientes? Esto reordenará las paradas.</p>
-                <div class="flex justify-end gap-2">
-                  <app-button variant="outline" size="sm" [disabled]="reordering()" (clicked)="confirmingOptimal.set(false)">Cancelar</app-button>
-                  <app-button variant="primary" size="sm" [loading]="reordering()" (clicked)="applyOptimalOrder()">Confirmar orden</app-button>
+                <div class="grid grid-cols-2 gap-2">
+                  <app-button variant="outline" size="sm" [fullWidth]="true" customClasses="!h-11 sm:!h-9" [disabled]="reordering()" (clicked)="confirmingOptimal.set(false)">Cancelar</app-button>
+                  <app-button variant="primary" size="sm" [fullWidth]="true" customClasses="!h-11 sm:!h-9" [loading]="reordering()" (clicked)="applyOptimalOrder()">Confirmar orden</app-button>
                 </div>
               </div>
             } @else {
               <app-button
                 variant="outline"
                 size="sm"
+                [fullWidth]="true"
+                customClasses="!h-11 sm:!h-9"
                 [disabled]="optimizedPending().length < 2 || reordering()"
                 (clicked)="confirmingOptimal.set(true)"
               >
@@ -134,206 +142,270 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
           </div>
         }
 
-        <ul class="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <ul class="-mx-1 min-h-0 flex-1 space-y-2 overflow-y-auto px-1 pb-1">
           @for (row of rows(); track row.stop.id; let i = $index; let first = $first; let last = $last) {
+            @let selected = selectedStopId() === row.stop.id;
+            @let terminal = row.stop.status === 'delivered' || row.stop.status === 'partial' || row.stop.status === 'released' || row.stop.status === 'rejected';
             <li
-              class="cursor-pointer rounded-xl border bg-surface p-3 transition-colors"
-              [class.border-primary-500]="selectedStopId() === row.stop.id"
-              [class.ring-1]="selectedStopId() === row.stop.id"
-              [class.ring-primary-500]="selectedStopId() === row.stop.id"
-              [class.border-border]="selectedStopId() !== row.stop.id"
+              class="cursor-pointer rounded-xl border bg-surface p-3 transition-shadow hover:shadow-md"
+              [class.border-primary-500]="selected"
+              [class.ring-2]="selected"
+              [class.ring-primary-500]="selected"
+              [class.shadow-sm]="row.isNext && !selected"
+              [class.border-border]="!selected && !row.isNext"
+              [style.border-color]="row.isNext && !selected ? nextColor : null"
               (click)="selectStop(row.stop.id)"
             >
               <div class="flex items-start gap-3">
                 <span
-                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white"
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums"
+                  [class.bg-primary-600]="!row.isNext && !terminal"
+                  [class.text-white]="!terminal"
+                  [class.bg-gray-100]="terminal"
+                  [class.text-gray-500]="terminal"
+                  [style.background]="row.isNext ? nextColor : null"
                 >{{ row.stop.stop_sequence }}</span>
+
                 <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <span class="truncate text-sm font-semibold text-text-primary">{{ row.customer }}</span>
-                    <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" [class]="row.badge.cls">{{ row.badge.label }}</span>
-                    @if (row.isNext) {
-                      <span class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase text-white" [style.background]="nextColor">Próxima</span>
-                    }
-                  </div>
-                  <p class="mt-0.5 truncate text-xs text-text-secondary">{{ row.address }}</p>
-                  @if (row.toCollect > 0) {
-                    <p class="mt-0.5 text-xs font-medium text-text-primary">Por cobrar: {{ row.toCollect | currency }}</p>
-                  } @else if (row.total > 0) {
-                    <p class="mt-0.5 text-xs text-text-secondary">Total: {{ row.total | currency }}</p>
+                  <p class="truncate text-sm font-semibold text-text-primary">{{ row.customer }}</p>
+                  <p class="mt-0.5 flex items-start gap-1 text-xs text-text-secondary">
+                    <app-icon name="map-pin" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                    <span class="line-clamp-2">{{ row.address }}</span>
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  class="-mr-1 -mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-gray-100 hover:text-text-primary sm:h-9 sm:w-9"
+                  aria-label="Ver detalle"
+                  title="Ver detalle"
+                  (click)="$event.stopPropagation(); openDetail(row.stop)"
+                >
+                  <app-icon name="eye" [size]="16"></app-icon>
+                </button>
+              </div>
+
+              <div class="mt-2 flex items-center justify-between gap-2 pl-11">
+                <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide" [class]="row.badge.cls">{{ row.badge.label }}</span>
+                  @if (row.isNext) {
+                    <span class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white" [style.background]="nextColor">Próxima</span>
                   }
                 </div>
-                @if (canReorder()) {
-                  <div class="flex shrink-0 flex-col">
-                    <button type="button" class="rounded p-0.5 text-text-secondary hover:bg-gray-100 disabled:opacity-30" [disabled]="first || reordering()" (click)="$event.stopPropagation(); move(i, -1)" aria-label="Subir parada">
-                      <app-icon name="arrow-up" [size]="14"></app-icon>
-                    </button>
-                    <button type="button" class="rounded p-0.5 text-text-secondary hover:bg-gray-100 disabled:opacity-30" [disabled]="last || reordering()" (click)="$event.stopPropagation(); move(i, 1)" aria-label="Bajar parada">
-                      <app-icon name="arrow-down" [size]="14"></app-icon>
-                    </button>
-                  </div>
+                @if (row.toCollect > 0) {
+                  <p class="shrink-0 text-right text-xs text-text-secondary">
+                    Por cobrar <span class="block text-sm font-bold tabular-nums text-text-primary">{{ row.toCollect | currency }}</span>
+                  </p>
+                } @else if (row.total > 0) {
+                  <p class="shrink-0 text-right text-xs text-text-secondary">
+                    Total <span class="block text-sm font-semibold tabular-nums text-text-primary">{{ row.total | currency }}</span>
+                  </p>
                 }
               </div>
-              <div class="mt-2 flex flex-wrap justify-end gap-1.5">
-                <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-gray-50" (click)="$event.stopPropagation(); openDetail(row.stop)">
-                  <app-icon name="eye" [size]="12"></app-icon> Ver detalle
-                </button>
-                @if (row.canAct) {
-                  @if (row.stop.status === 'pending') {
-                    <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-gray-50 disabled:opacity-50" [disabled]="actionLoading()" (click)="$event.stopPropagation(); startStop(row.stop)">
-                      <app-icon name="play" [size]="12"></app-icon> Iniciar
-                    </button>
+
+              @if (canReorder() || row.canAct) {
+                <div class="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                  @if (canReorder()) {
+                    <div class="flex shrink-0 gap-1">
+                      <button type="button" class="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-text-secondary hover:bg-gray-50 disabled:opacity-30 sm:h-9 sm:w-9" [disabled]="first || reordering()" (click)="$event.stopPropagation(); move(i, -1)" aria-label="Subir parada" title="Subir parada">
+                        <app-icon name="arrow-up" [size]="16"></app-icon>
+                      </button>
+                      <button type="button" class="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-text-secondary hover:bg-gray-50 disabled:opacity-30 sm:h-9 sm:w-9" [disabled]="last || reordering()" (click)="$event.stopPropagation(); move(i, 1)" aria-label="Bajar parada" title="Bajar parada">
+                        <app-icon name="arrow-down" [size]="16"></app-icon>
+                      </button>
+                    </div>
                   }
-                  <button type="button" class="inline-flex items-center gap-1 rounded-md bg-primary-600 px-2 py-1 text-xs font-medium text-white hover:bg-primary-700" (click)="$event.stopPropagation(); settleStop.set(row.stop)">
-                    <app-icon name="wallet" [size]="12"></app-icon> Liquidar
-                  </button>
-                  <button type="button" class="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50" (click)="$event.stopPropagation(); releaseStop.set(row.stop)">
-                    <app-icon name="x-circle" [size]="12"></app-icon> Liberar
-                  </button>
-                }
-              </div>
+                  @if (row.canAct) {
+                    <div class="grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-2">
+                      @if (row.stop.status === 'pending') {
+                        <button type="button" class="inline-flex h-11 min-w-0 items-center justify-center gap-1 rounded-lg border border-border px-2 text-xs font-medium text-text-primary hover:bg-gray-50 disabled:opacity-50 sm:h-9" [disabled]="actionLoading()" (click)="$event.stopPropagation(); startStop(row.stop)">
+                          <app-icon name="play" [size]="14" class="shrink-0"></app-icon><span class="truncate">Iniciar</span>
+                        </button>
+                      }
+                      <button type="button" class="inline-flex h-11 min-w-0 items-center justify-center gap-1 rounded-lg bg-primary-600 px-2 text-xs font-semibold text-white hover:bg-primary-700 sm:h-9" (click)="$event.stopPropagation(); settleStop.set(row.stop)">
+                        <app-icon name="wallet" [size]="14" class="shrink-0"></app-icon><span class="truncate">Liquidar</span>
+                      </button>
+                      <button type="button" class="inline-flex h-11 min-w-0 items-center justify-center gap-1 rounded-lg border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50 sm:h-9" (click)="$event.stopPropagation(); releaseStop.set(row.stop)">
+                        <app-icon name="x-circle" [size]="14" class="shrink-0"></app-icon><span class="truncate">Liberar</span>
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
             </li>
           } @empty {
-            <li class="py-6 text-center text-sm text-text-secondary">Esta ruta no tiene paradas.</li>
+            <li class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-4 py-10 text-center">
+              <span class="flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-text-secondary">
+                <app-icon name="map-pin" [size]="20"></app-icon>
+              </span>
+              <p class="text-sm font-medium text-text-primary">Esta ruta no tiene paradas.</p>
+            </li>
           }
         </ul>
       </div>
     </ng-template>
 
-    @if (loading()) {
-      <div class="flex items-center justify-center gap-2 py-12 text-text-secondary">
-        <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
-        <span class="text-sm">Cargando recorrido…</span>
-      </div>
-    } @else if (error()) {
-      <div class="m-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-        <app-icon name="alert-triangle" [size]="18" class="mt-0.5 shrink-0 text-red-600"></app-icon>
-        <div>
-          <p class="font-semibold">No se pudo cargar la ruta</p>
-          <p class="mt-0.5">{{ error() }}</p>
-          <button type="button" class="mt-2 text-xs font-semibold underline" (click)="backToDetail()">Volver al detalle</button>
-        </div>
-      </div>
-    } @else if (route(); as r) {
-      <div class="flex flex-col gap-3 p-3 md:p-4 lg:h-[calc(100dvh-6rem)]">
-        <!-- Header -->
-        <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
-          <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-text-primary hover:bg-gray-50" (click)="backToDetail()">
-            <app-icon name="arrow-left" [size]="16"></app-icon>
-            <span>Detalle</span>
-          </button>
-          <h1 class="text-base font-bold text-text-primary">Ruta {{ r.route_number }}</h1>
-          <span class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-semibold text-primary-700">{{ routeStatusLabel() }}</span>
-          <span class="text-sm text-text-secondary">Encargado: <span class="font-medium text-text-primary">{{ responsibleLabel() }}</span></span>
+    <div class="flex flex-col lg:h-[calc(100dvh-6rem)]">
+      <app-sticky-header
+        [title]="headerTitle()"
+        subtitle="Recorrido de la ruta"
+        icon="navigation"
+        [showBackButton]="true"
+        [backRoute]="backRoute()"
+        [badgeText]="routeStatusLabel()"
+        [badgeColor]="headerBadgeColor()"
+        [actions]="headerActions()"
+        (actionClicked)="onHeaderAction($event)"
+      ></app-sticky-header>
 
-          <span
-            class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
-            [class]="chip().cls"
-          >
-            <app-icon [name]="chip().icon" [size]="12"></app-icon>
-            {{ chip().text }}
-          </span>
-
-          <div class="ml-auto flex flex-wrap items-center gap-2">
-            @if (r.status === 'draft') {
-              <div class="flex flex-col items-end">
-                <app-button variant="primary" size="sm" [loading]="actionLoading()" (clicked)="dispatch()">
-                  <app-icon slot="icon" name="send" [size]="16"></app-icon>
-                  Despachar
-                </app-button>
-                @if (dispatchByOtherText(); as txt) {
-                  <span class="mt-1 text-xs text-text-secondary">{{ txt }}</span>
-                }
-              </div>
+      @if (loading()) {
+        <div class="grid min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-4 lg:grid-cols-12" aria-busy="true">
+          <div class="flex h-[42vh] min-h-[260px] animate-pulse items-center justify-center gap-2 rounded-xl border border-border bg-gray-100 text-text-secondary lg:col-span-7 lg:h-auto xl:col-span-8">
+            <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+            <span class="text-sm">Cargando recorrido…</span>
+          </div>
+          <div class="space-y-2 rounded-xl border border-border bg-surface p-3 lg:col-span-5 xl:col-span-4">
+            @for (s of [1, 2, 3]; track s) {
+              <div class="h-24 animate-pulse rounded-xl bg-gray-100"></div>
             }
-            <app-button variant="outline" size="sm" (clicked)="enterFullscreen()">
-              <app-icon slot="icon" name="maximize" [size]="16"></app-icon>
-              Pantalla completa
-            </app-button>
           </div>
         </div>
-
-        @if (needsLocationSync()) {
-          <div class="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-            <app-icon name="map-pin" [size]="18" class="shrink-0 text-amber-600"></app-icon>
-            <p class="min-w-0 flex-1">
-              Esta ruta fue despachada por otro usuario y aún no rastrea tu recorrido.
-              Sincroniza tu ubicación para ver la ruta respecto a ti y que tu equipo pueda seguirte.
-            </p>
-            <app-button variant="primary" size="sm" (clicked)="syncLocation()">
-              <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
-              Sincronizar mi ubicación
-            </app-button>
-          </div>
-        }
-
-        @if (isResponsible() && inProgress() && (publisher.state() === 'denied' || publisher.state() === 'unavailable')) {
-          <div class="flex shrink-0 items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-            <app-icon name="alert-triangle" [size]="18" class="mt-0.5 shrink-0 text-amber-600"></app-icon>
-            <p>
-              @if (publisher.state() === 'denied') {
-                Activa el permiso de ubicación del navegador para que tu equipo vea tu recorrido.
-              } @else {
-                Este dispositivo o navegador no permite obtener tu ubicación (requiere HTTPS y GPS). Tu equipo no verá tu recorrido.
-              }
-            </p>
-          </div>
-        }
-
-        <!-- Map + stops -->
-        <div class="grid min-h-0 gap-4 lg:flex-1 lg:grid-cols-12">
-          <div
-            [class]="fullscreen() ? 'fixed inset-0 z-[60] bg-surface' : 'relative h-[45vh] min-h-0 overflow-hidden rounded-xl border border-border lg:col-span-8 lg:h-full'"
-          >
-            <div class="h-full min-h-0">
-              <app-map-view
-                class="block h-full"
-                [markers]="markers()"
-                [route]="routeLine()"
-                [completedRoute]="completedLine()"
-                [origin]="origin()"
-                [userLocation]="userLocation()"
-                [fill]="true"
-                [readonly]="true"
-                (markerClick)="onMarkerClick($event)"
-              ></app-map-view>
+      } @else if (error()) {
+        <div class="p-3 md:p-4">
+          <div class="mx-auto flex max-w-lg flex-col items-center gap-3 rounded-xl border border-red-200 bg-surface px-6 py-10 text-center shadow-sm">
+            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+              <app-icon name="alert-triangle" [size]="22"></app-icon>
+            </span>
+            <div>
+              <p class="text-base font-semibold text-text-primary">No se pudo cargar la ruta</p>
+              <p class="mt-1 text-sm text-text-secondary">{{ error() }}</p>
             </div>
-
-            @if (fullscreen()) {
-              <button type="button" class="absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-2 text-sm font-medium text-text-primary shadow-lg" (click)="exitFullscreen()" aria-label="Salir de pantalla completa">
-                <app-icon name="minimize" [size]="16"></app-icon> Salir
-              </button>
-
-              @if (panelCollapsed()) {
-                <button type="button" class="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-2 rounded-2xl bg-surface px-4 py-3 text-left shadow-xl lg:inset-x-auto lg:bottom-auto lg:right-4 lg:top-4 lg:w-[360px]" (click)="panelCollapsed.set(false)">
-                  <span class="min-w-0 truncate text-sm font-semibold text-text-primary">
-                    {{ rows().length }} paradas
-                    @if (nextRow(); as n) {
-                      <span class="font-normal text-text-secondary"> · próxima: {{ n.customer }}</span>
-                    }
-                  </span>
-                  <app-icon name="chevron-up" [size]="18"></app-icon>
-                </button>
-              } @else {
-                <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[55vh] flex-col gap-2 rounded-t-2xl bg-surface p-3 shadow-2xl lg:inset-x-auto lg:bottom-4 lg:right-16 lg:top-4 lg:max-h-none lg:w-[360px] lg:rounded-2xl">
-                  <button type="button" class="flex shrink-0 items-center justify-between text-sm font-semibold text-text-primary" (click)="panelCollapsed.set(true)" aria-label="Colapsar paradas">
-                    <span>Paradas ({{ rows().length }})</span>
-                    <app-icon name="chevron-down" [size]="18"></app-icon>
-                  </button>
-                  <ng-container [ngTemplateOutlet]="stopsList"></ng-container>
-                </div>
-              }
-            }
+            <app-button variant="outline" size="sm" customClasses="!h-11 sm:!h-9" (clicked)="backToDetail()">
+              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+              Volver al detalle
+            </app-button>
           </div>
+        </div>
+      } @else if (route(); as r) {
+        <div class="flex min-h-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:p-4">
+          <!-- Route summary -->
+          <section class="grid shrink-0 grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-surface p-3 shadow-sm md:grid-cols-4 md:p-4">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Estado</span>
+              <span class="w-fit rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-semibold text-primary-700">{{ routeStatusLabel() }}</span>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Vehículo</span>
+              <span class="truncate text-sm font-semibold text-text-primary">{{ r.vehicle?.plate || '—' }}</span>
+            </div>
+            <div class="col-span-2 flex min-w-0 flex-col gap-1 md:col-span-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Encargado</span>
+              <span class="truncate text-sm font-semibold text-text-primary">{{ responsibleLabel() }}</span>
+            </div>
+            <div class="col-span-2 flex min-w-0 flex-col gap-1 md:col-span-1">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Rastreo</span>
+              <span class="inline-flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium" [class]="chip().cls">
+                <app-icon [name]="chip().icon" [size]="12" class="shrink-0" [spin]="chip().icon === 'loader-2'"></app-icon>
+                <span class="min-w-0">{{ chip().text }}</span>
+              </span>
+            </div>
+          </section>
 
-          @if (!fullscreen()) {
-            <div class="flex min-h-0 flex-col lg:col-span-4 lg:overflow-hidden">
-              <ng-container [ngTemplateOutlet]="stopsList"></ng-container>
+          @if (r.status === 'draft' && dispatchByOtherText(); as txt) {
+            <div class="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">
+              <app-icon name="info" [size]="18" class="shrink-0 text-primary-600"></app-icon>
+              <p class="min-w-0 flex-1">{{ txt }}</p>
             </div>
           }
+
+          @if (needsLocationSync()) {
+            <div class="flex shrink-0 flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-center">
+              <div class="flex min-w-0 flex-1 items-start gap-3">
+                <app-icon name="map-pin" [size]="18" class="mt-0.5 shrink-0 text-amber-600"></app-icon>
+                <p class="min-w-0">
+                  Esta ruta fue despachada por otro usuario y aún no rastrea tu recorrido.
+                  Sincroniza tu ubicación para ver la ruta respecto a ti y que tu equipo pueda seguirte.
+                </p>
+              </div>
+              <app-button variant="primary" size="sm" customClasses="!h-11 w-full sm:!h-9 sm:w-auto shrink-0" (clicked)="syncLocation()">
+                <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+                Sincronizar mi ubicación
+              </app-button>
+            </div>
+          }
+
+          @if (isResponsible() && inProgress() && (publisher.state() === 'denied' || publisher.state() === 'unavailable')) {
+            <div class="flex shrink-0 items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <app-icon name="alert-triangle" [size]="18" class="mt-0.5 shrink-0 text-amber-600"></app-icon>
+              <p class="min-w-0">
+                @if (publisher.state() === 'denied') {
+                  Activa el permiso de ubicación del navegador para que tu equipo vea tu recorrido.
+                } @else {
+                  Este dispositivo o navegador no permite obtener tu ubicación (requiere HTTPS y GPS). Tu equipo no verá tu recorrido.
+                }
+              </p>
+            </div>
+          }
+
+          <!-- Map + stops -->
+          <div class="grid min-h-0 gap-3 md:gap-4 lg:flex-1 lg:grid-cols-12 lg:grid-rows-[minmax(0,1fr)]">
+            <div
+              [class]="fullscreen() ? 'fixed inset-0 z-[60] bg-surface' : 'relative h-[42vh] min-h-[260px] overflow-hidden rounded-xl border border-border bg-surface shadow-sm lg:col-span-7 lg:h-full xl:col-span-8'"
+            >
+              <div class="h-full min-h-0">
+                <app-map-view
+                  class="block h-full"
+                  [markers]="markers()"
+                  [route]="routeLine()"
+                  [completedRoute]="completedLine()"
+                  [origin]="origin()"
+                  [userLocation]="userLocation()"
+                  [fill]="true"
+                  [readonly]="true"
+                  (markerClick)="onMarkerClick($event)"
+                ></app-map-view>
+              </div>
+
+              @if (fullscreen()) {
+                <button type="button" class="absolute left-3 top-3 z-10 inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-surface px-4 text-sm font-semibold text-text-primary shadow-lg hover:bg-gray-50" (click)="exitFullscreen()" aria-label="Salir de pantalla completa">
+                  <app-icon name="minimize" [size]="16"></app-icon> Salir
+                </button>
+
+                @if (panelCollapsed()) {
+                  <button type="button" class="absolute inset-x-3 bottom-3 z-10 flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-left shadow-xl lg:inset-x-auto lg:bottom-auto lg:right-4 lg:top-4 lg:w-[380px]" (click)="panelCollapsed.set(false)">
+                    <span class="min-w-0 truncate text-sm font-semibold text-text-primary">
+                      {{ rows().length }} paradas
+                      @if (nextRow(); as n) {
+                        <span class="font-normal text-text-secondary"> · próxima: {{ n.customer }}</span>
+                      }
+                    </span>
+                    <app-icon name="chevron-up" [size]="18" class="shrink-0"></app-icon>
+                  </button>
+                } @else {
+                  <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[60vh] flex-col gap-3 rounded-t-2xl border-t border-border bg-surface p-3 shadow-2xl lg:inset-x-auto lg:bottom-4 lg:right-16 lg:top-4 lg:max-h-none lg:w-[380px] lg:rounded-2xl lg:border">
+                    <button type="button" class="flex h-11 shrink-0 items-center justify-between text-sm font-semibold text-text-primary" (click)="panelCollapsed.set(true)" aria-label="Colapsar paradas">
+                      <span>Paradas ({{ rows().length }})</span>
+                      <app-icon name="chevron-down" [size]="18"></app-icon>
+                    </button>
+                    <ng-container [ngTemplateOutlet]="stopsList"></ng-container>
+                  </div>
+                }
+              }
+            </div>
+
+            @if (!fullscreen()) {
+              <section class="flex min-h-0 flex-col gap-3 rounded-xl border border-border bg-surface p-3 shadow-sm lg:col-span-5 lg:overflow-hidden xl:col-span-4">
+                <div class="flex shrink-0 items-center justify-between gap-2">
+                  <h2 class="text-sm font-bold uppercase tracking-wider text-text-primary">Paradas</h2>
+                  <span class="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-text-secondary">{{ rows().length }}</span>
+                </div>
+                <ng-container [ngTemplateOutlet]="stopsList"></ng-container>
+              </section>
+            }
+          </div>
         </div>
-      </div>
-    }
+      }
+    </div>
 
     @if (settleStop(); as s) {
       <app-stop-settle-modal
@@ -416,6 +488,49 @@ export class PlanillaRouteViewPageComponent {
   readonly routeStatusLabel = computed(
     () => ROUTE_STATUS_LABEL[this.route()?.status ?? ''] ?? '',
   );
+
+  readonly backRoute = computed(() => ['/admin/orders/planillas', String(this.routeId())]);
+
+  readonly headerTitle = computed(() => {
+    const n = this.route()?.route_number;
+    return n ? `Ruta ${n}` : 'Recorrido';
+  });
+
+  readonly headerBadgeColor = computed<StickyHeaderBadgeColor>(() => {
+    switch (this.route()?.status) {
+      case 'dispatched':
+      case 'in_transit':
+        return 'blue';
+      case 'closed':
+        return 'green';
+      case 'voided':
+        return 'red';
+      default:
+        return 'gray';
+    }
+  });
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const r = this.route();
+    if (!r) return [];
+    const actions: StickyHeaderActionButton[] = [];
+    if (r.status === 'draft') {
+      actions.push({
+        id: 'dispatch',
+        label: 'Despachar',
+        variant: 'primary',
+        icon: 'send',
+        loading: this.actionLoading(),
+      });
+    }
+    actions.push({
+      id: 'fullscreen',
+      label: 'Pantalla completa',
+      variant: 'outline',
+      icon: 'maximize',
+    });
+    return actions;
+  });
 
   readonly inProgress = computed(() => {
     const s = this.route()?.status;
@@ -749,6 +864,11 @@ export class PlanillaRouteViewPageComponent {
   }
 
   // ---------------------------------------------------------------- actions
+
+  onHeaderAction(id: string): void {
+    if (id === 'dispatch') this.dispatch();
+    else if (id === 'fullscreen') this.enterFullscreen();
+  }
 
   backToDetail(): void {
     this.router.navigate(['/admin/orders/planillas', this.routeId()]);
