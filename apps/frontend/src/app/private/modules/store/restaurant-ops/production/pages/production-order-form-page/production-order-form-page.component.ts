@@ -93,11 +93,15 @@ export class ProductionOrderFormPageComponent implements OnInit {
    * Units that will be produced: batches × recipe yield. Production always
    * runs whole batches (QUI-965) — a recipe that yields 10 run 3 times gives 30.
    */
+  /** Recipe yield per batch; invalid or <= 0 falls back to 1, as the backend does. */
+  private readonly recipeYield = computed<number>(() => {
+    const value = Number(this.selectedRecipe()?.yield_quantity);
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  });
   readonly plannedUnits = computed<number | null>(() => {
     const batches = this.batches();
-    const recipe = this.selectedRecipe();
-    if (batches == null || !recipe) return null;
-    return batches * Number(recipe.yield_quantity);
+    if (batches == null || !this.selectedRecipe()) return null;
+    return batches * this.recipeYield();
   });
   readonly batchesHelperText = computed(() => {
     const recipe = this.selectedRecipe();
@@ -105,10 +109,11 @@ export class ProductionOrderFormPageComponent implements OnInit {
       return 'Cuántas veces vas a preparar la receta. Elige una receta para ver cuánto produce.';
     }
     const units = this.plannedUnits();
-    const perBatch = `La receta rinde ${Number(recipe.yield_quantity)} ${recipe.yield_unit} por tanda`;
+    const unit = recipe.yield_unit || 'unidades';
+    const perBatch = `La receta rinde ${this.recipeYield()} ${unit} por tanda`;
     return units == null
       ? `${perBatch}.`
-      : `${perBatch} · se producirán ${units} ${recipe.yield_unit}.`;
+      : `${perBatch} · se producirán ${units} ${unit}.`;
   });
 
   readonly form: FormGroup<ProductionFormControls> = this.fb.group<ProductionFormControls>({
