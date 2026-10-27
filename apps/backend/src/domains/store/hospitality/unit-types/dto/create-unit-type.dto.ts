@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -11,6 +12,11 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsSafeS3Key } from '@common/decorators/is-safe-s3-key.decorator';
+import {
+  LODGING_AMENITY_CODES,
+  MAX_UNIT_TYPE_IMAGES,
+} from '../lodging-media';
 
 export const MAX_CAPACITY_MESSAGE =
   'La capacidad máxima debe ser mayor que cero';
@@ -86,6 +92,27 @@ export class CreateUnitTypeDto {
   @Type(() => Number)
   @IsInt({ each: true })
   tax_category_ids?: number[];
+
+  @ApiProperty({
+    required: false,
+    description: 'Claves S3 de las fotos, en el orden en que se muestran.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_UNIT_TYPE_IMAGES)
+  @IsString({ each: true })
+  @IsSafeS3Key({ each: true })
+  images?: string[];
+
+  @ApiProperty({
+    required: false,
+    description: 'Códigos de amenidades del catálogo (wifi, air_conditioning...).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(LODGING_AMENITY_CODES.length)
+  @IsIn(LODGING_AMENITY_CODES, { each: true })
+  amenities?: string[];
 
   @ApiProperty({ required: false })
   @IsOptional()

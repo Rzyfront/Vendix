@@ -5607,6 +5607,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'La ocupación base no puede superar la ocupación máxima',
   },
+  // Hospitality Suite (H0.4) — room type photos
+  LODGING_UNIT_TYPE_IMAGE_001: {
+    code: 'LODGING_UNIT_TYPE_IMAGE_001',
+    httpStatus: 400,
+    devMessage: 'Una de las fotos no es válida para esta tienda',
+  },
   // Hospitality Suite (H0.3) — rooms
   LODGING_UNIT_FIND_001: {
     code: 'LODGING_UNIT_FIND_001',

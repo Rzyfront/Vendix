@@ -4,7 +4,11 @@ import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
-import { UnitType, UnitTypePayload } from '../interfaces/unit-type.interface';
+import {
+  LodgingAmenity,
+  UnitType,
+  UnitTypePayload,
+} from '../interfaces/unit-type.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -21,6 +25,13 @@ export class UnitTypesService {
   list(): Observable<UnitType[]> {
     return this.http
       .get<ApiResponse<UnitType[]>>(this.baseUrl)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H0.4 — amenities a room type can offer. */
+  amenities(): Observable<LodgingAmenity[]> {
+    return this.http
+      .get<ApiResponse<LodgingAmenity[]>>(`${this.baseUrl}/amenities`)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

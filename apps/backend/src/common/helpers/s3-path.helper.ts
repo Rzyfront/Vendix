@@ -81,6 +81,14 @@ export class S3PathHelper {
   }
 
   /**
+   * Builds the path for hospitality assets (room type photos)
+   * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/lodging
+   */
+  buildLodgingPath(org: S3OrgContext, store: S3StoreContext): string {
+    return `${this.buildStorePath(org, store)}/lodging`;
+  }
+
+  /**
    * Builds the path for brand assets
    * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/brands
    */

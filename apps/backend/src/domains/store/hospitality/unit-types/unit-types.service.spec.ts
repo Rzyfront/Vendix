@@ -4,6 +4,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { UnitTypesService } from './unit-types.service';
 import { CreateUnitTypeDto, MAX_CAPACITY_MESSAGE } from './dto';
+import { normalizeLodgingImageKeys } from './lodging-media';
 
 /**
  * H0.2 — room types. Each type creates its "Noche – {name}" service product
@@ -20,6 +21,9 @@ describe('UnitTypesService', () => {
     create: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
+  };
+  const s3Service = {
+    signUrl: jest.fn(async (key: string) => `https://signed/${key}`),
   };
   let service: UnitTypesService;
 
@@ -46,10 +50,12 @@ describe('UnitTypesService', () => {
     service = new UnitTypesService(
       { lodging_unit_types: unitTypes } as any,
       productsService as any,
+      s3Service as any,
     );
+    s3Service.signUrl.mockImplementation(async (key) => `https://signed/${key}`);
     jest
       .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ store_id: 5, user_id: 9 } as any);
+      .mockReturnValue({ store_id: 5, organization_id: 3, user_id: 9 } as any);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -57,7 +63,7 @@ describe('UnitTypesService', () => {
   it('crea el tipo y su servicio "Noche – {tipo}" no inventariable', async () => {
     unitTypes.findFirst
       .mockResolvedValueOnce(null) // nombre libre
-      .mockResolvedValueOnce({ id: 11, name: dto.name }); // lectura final
+      .mockResolvedValueOnce({ id: 11, name: dto.name, images: [] }); // lectura final
     productsService.create.mockResolvedValue({ id: 40 });
     unitTypes.create.mockResolvedValue({ id: 11 });
 
@@ -83,7 +89,7 @@ describe('UnitTypesService', () => {
         bed_config: '1 doble + 1 sencilla',
       }),
     });
-    expect(result).toEqual({ id: 11, name: dto.name });
+    expect(result).toMatchObject({ id: 11, name: dto.name, image_urls: [] });
   });
 
   it('rechaza máximo de adultos 0 sin crear producto', async () => {
@@ -123,7 +129,9 @@ describe('UnitTypesService', () => {
   });
 
   it('lista los tipos con el conteo de habitaciones activas', async () => {
-    unitTypes.findMany.mockResolvedValue([{ id: 11, _count: { units: 2 } }]);
+    unitTypes.findMany.mockResolvedValue([
+      { id: 11, images: [], _count: { units: 2 } },
+    ]);
     const result = await service.findAll();
     expect(unitTypes.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,6 +160,7 @@ describe('UnitTypesService', () => {
       max_adults: 3,
       max_children: 1,
       max_occupancy: 4,
+      images: [],
     };
     unitTypes.findFirst
       .mockResolvedValueOnce(current) // findOne inicial
@@ -181,12 +190,116 @@ describe('UnitTypesService', () => {
       max_adults: 3,
       max_children: 1,
       max_occupancy: 4,
+      images: [],
     });
     await service.update(11, { max_adults: 2 });
     expect(productsService.update).not.toHaveBeenCalled();
     expect(unitTypes.update).toHaveBeenCalledWith({
       where: { id: 11 },
       data: expect.objectContaining({ max_adults: 2, max_occupancy: 3 }),
+    });
+  });
+
+  // H0.4 — photos (S3 keys, signed on read) and amenities.
+  describe('fotos y amenidades', () => {
+    const storeKey = (name: string) =>
+      `organizations/roku-3/stores/roku-5/lodging/${name}`;
+
+    it('acepta claves de la carpeta lodging de la tienda y normaliza URLs firmadas a clave', () => {
+      const signed = `https://bucket.s3.us-east-1.amazonaws.com/${storeKey('b.jpg')}?X-Amz-Signature=abc&X-Amz-Expires=3600`;
+      expect(
+        normalizeLodgingImageKeys([storeKey('a.jpg'), signed], {
+          organization_id: 3,
+          store_id: 5,
+        }),
+      ).toEqual([storeKey('a.jpg'), storeKey('b.jpg')]);
+    });
+
+    it.each([
+      ['otra tienda', 'organizations/roku-3/stores/otra-6/lodging/a.jpg'],
+      ['otra organización', 'organizations/x-4/stores/roku-5/lodging/a.jpg'],
+      ['otra carpeta', 'organizations/roku-3/stores/roku-5/products/a.jpg'],
+      ['path traversal', 'organizations/roku-3/stores/roku-5/lodging/../../x.jpg'],
+      ['id que solo termina igual', 'organizations/roku-13/stores/roku-15/lodging/a.jpg'],
+      ['vacía', ''],
+    ])('rechaza una clave de %s', (_case, key) => {
+      expect(() =>
+        normalizeLodgingImageKeys([key], { organization_id: 3, store_id: 5 }),
+      ).toThrow(VendixHttpException);
+    });
+
+    it('el DTO rechaza claves inseguras y amenidades fuera del catálogo', async () => {
+      const errors = await validate(
+        plainToInstance(CreateUnitTypeDto, {
+          ...dto,
+          images: ['organizations/a-1/../secret.jpg'],
+          amenities: ['wifi', 'jacuzzi_dorado'],
+        }),
+      );
+      const fields = errors.map((e) => e.property);
+      expect(fields).toEqual(expect.arrayContaining(['images', 'amenities']));
+    });
+
+    it('guarda las fotos en el orden elegido y las amenidades marcadas', async () => {
+      unitTypes.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 11,
+          images: [storeKey('2.jpg'), storeKey('1.jpg')],
+          amenities: ['wifi', 'air_conditioning'],
+        });
+      productsService.create.mockResolvedValue({ id: 40 });
+      unitTypes.create.mockResolvedValue({ id: 11 });
+
+      const result = await service.create({
+        ...dto,
+        images: [storeKey('2.jpg'), storeKey('1.jpg')],
+        amenities: ['wifi', 'air_conditioning'],
+      });
+
+      expect(unitTypes.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          images: [storeKey('2.jpg'), storeKey('1.jpg')],
+          amenities: ['wifi', 'air_conditioning'],
+        }),
+      });
+      expect(result.image_urls).toEqual([
+        `https://signed/${storeKey('2.jpg')}`,
+        `https://signed/${storeKey('1.jpg')}`,
+      ]);
+    });
+
+    it('rechaza una foto de otra tienda sin crear el producto noche', async () => {
+      await expectCode(
+        service.create({
+          ...dto,
+          images: ['organizations/x-4/stores/otra-6/lodging/a.jpg'],
+        }),
+        'LODGING_UNIT_TYPE_IMAGE_001',
+      );
+      expect(productsService.create).not.toHaveBeenCalled();
+    });
+
+    it('editar solo amenidades no toca las fotos ni el producto', async () => {
+      unitTypes.findFirst.mockResolvedValue({
+        id: 11,
+        name: dto.name,
+        product_id: 40,
+        base_occupancy: 2,
+        max_adults: 3,
+        max_children: 1,
+        max_occupancy: 4,
+        images: [storeKey('1.jpg')],
+        amenities: [],
+      });
+      unitTypes.update.mockResolvedValue({ id: 11 });
+
+      await service.update(11, { amenities: ['wifi'] });
+
+      const data = unitTypes.update.mock.calls[0][0].data;
+      expect(data.amenities).toEqual(['wifi']);
+      expect(data).not.toHaveProperty('images');
+      expect(productsService.update).not.toHaveBeenCalled();
     });
   });
 });

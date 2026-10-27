@@ -2306,6 +2306,10 @@ model lodging_unit_types {
   max_occupancy         Int
   // Free-text bed layout shown to staff and guests ("1 doble + 1 sencilla").
   bed_config            String?   @db.VarChar(255)
+  // H0.4 — ordered S3 keys of the photos (signed on read) and amenity codes
+  // from the lodging amenities catalog.
+  images                String[]  @default([])
+  amenities             String[]  @default([])
   overbooking_allowance Int       @default(0)
   sort_order            Int       @default(0)
   is_active             Boolean   @default(true)

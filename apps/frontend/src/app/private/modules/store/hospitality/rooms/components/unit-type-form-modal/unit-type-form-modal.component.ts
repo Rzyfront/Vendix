@@ -17,24 +17,44 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, startWith } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import {
   ButtonComponent,
   IconComponent,
+  ImageSourceModalComponent,
   InputComponent,
   ModalComponent,
+  ScrollableTab,
+  ScrollableTabsComponent,
   SelectorComponent,
   SelectorOption,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { ImageUploadService } from '../../../../../../../shared/services/image-upload.service';
+import { dataUrlToFile } from '../../../../../../../shared/utils/data-url.util';
 import { TaxesService } from '../../../../products/services/taxes.service';
-import { UnitType, UnitTypePayload } from '../../interfaces/unit-type.interface';
+import {
+  LodgingAmenity,
+  UnitType,
+  UnitTypePayload,
+} from '../../interfaces/unit-type.interface';
 import { UnitTypesService } from '../../services/unit-types.service';
 
 export const MAX_CAPACITY_MESSAGE =
   'La capacidad máxima debe ser mayor que cero';
 
 const NO_TAX = 0;
+
+/** Same cap as the backend DTO (`MAX_UNIT_TYPE_IMAGES`). */
+const MAX_PHOTOS = 20;
+
+type FormTab = 'data' | 'photos' | 'amenities';
+
+/** A photo: the S3 key is saved, the signed URL is only for preview. */
+interface Photo {
+  key: string;
+  url: string;
+}
 
 interface UnitTypeForm {
   name: FormControl<string>;
@@ -60,6 +80,8 @@ interface UnitTypeForm {
     InputComponent,
     SelectorComponent,
     IconComponent,
+    ScrollableTabsComponent,
+    ImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -70,9 +92,21 @@ interface UnitTypeForm {
       [size]="'md'"
       [dialog]="true"
       [title]="title()"
-      subtitle="Capacidad, camas y precio base por noche"
+      subtitle="Capacidad, camas, precio, fotos y amenidades"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <app-scrollable-tabs
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        (tabChange)="activeTab.set($any($event))"
+        size="sm"
+        ariaLabel="Secciones del tipo de habitación"
+      />
+
+      <form
+        [formGroup]="form"
+        class="space-y-4 mt-4"
+        [class.hidden]="activeTab() !== 'data'"
+      >
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
             class="md:col-span-2"
@@ -133,6 +167,78 @@ interface UnitTypeForm {
         </div>
       </form>
 
+      @if (activeTab() === 'photos') {
+        <div class="mt-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-sm text-text-secondary">
+              {{ photos().length }} de {{ maxPhotos }} fotos. La primera es la portada.
+            </p>
+            <app-button
+              variant="outline"
+              size="sm"
+              [loading]="uploading()"
+              [disabled]="photos().length >= maxPhotos"
+              (clicked)="photoPickerOpen.set(true)"
+            >
+              <app-icon slot="icon" name="upload-cloud" [size]="16" />
+              Subir fotos
+            </app-button>
+          </div>
+
+          @if (photos().length === 0) {
+            <p class="text-sm text-text-secondary py-6 text-center border border-dashed border-border rounded-lg">
+              Aún no hay fotos de este tipo de habitación.
+            </p>
+          } @else {
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              @for (photo of photos(); track photo.key; let i = $index; let last = $last) {
+                <div class="relative rounded-lg overflow-hidden border border-border bg-surface">
+                  <img [src]="photo.url" [alt]="'Foto ' + (i + 1)" class="w-full aspect-[4/3] object-cover" />
+                  <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1.5">{{ i + 1 }}</span>
+                  <div class="flex justify-between p-1">
+                    <div class="flex gap-1">
+                      <app-button variant="ghost" size="xsm" [disabled]="i === 0" (clicked)="movePhoto(i, -1)" ariaLabel="Mover antes">
+                        <app-icon slot="icon" name="arrow-left" [size]="14" />
+                      </app-button>
+                      <app-button variant="ghost" size="xsm" [disabled]="last" (clicked)="movePhoto(i, 1)" ariaLabel="Mover después">
+                        <app-icon slot="icon" name="arrow-right" [size]="14" />
+                      </app-button>
+                    </div>
+                    <app-button variant="ghost" size="xsm" (clicked)="removePhoto(i)" ariaLabel="Quitar foto">
+                      <app-icon slot="icon" name="trash-2" [size]="14" />
+                    </app-button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      @if (activeTab() === 'amenities') {
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          @for (amenity of amenityCatalog(); track amenity.code) {
+            <label class="flex items-center gap-2 p-2 rounded-lg border border-border cursor-pointer hover:bg-surface">
+              <input
+                type="checkbox"
+                class="h-4 w-4"
+                [checked]="amenities().includes(amenity.code)"
+                (change)="toggleAmenity(amenity.code)"
+              />
+              <span class="text-sm">{{ amenity.label }}</span>
+            </label>
+          }
+        </div>
+      }
+
+      <app-image-source-modal
+        [(isOpen)]="photoPickerOpen"
+        [remainingSlots]="maxPhotos - photos().length"
+        defaultAspect="4:3"
+        headerTitle="Fotos de la habitación"
+        (imagesAdded)="onPhotosAdded($event)"
+      />
+
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
@@ -148,6 +254,7 @@ export class UnitTypeFormModalComponent {
   private readonly unitTypesService = inject(UnitTypesService);
   private readonly taxesService = inject(TaxesService);
   private readonly toastService = inject(ToastService);
+  private readonly imageUploadService = inject(ImageUploadService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
@@ -157,6 +264,25 @@ export class UnitTypeFormModalComponent {
   readonly saved = output<UnitType>();
 
   readonly saving = signal(false);
+
+  readonly tabs: ScrollableTab[] = [
+    { id: 'data', label: 'Datos', icon: 'bed-double' },
+    { id: 'photos', label: 'Fotos', icon: 'image-plus' },
+    { id: 'amenities', label: 'Amenidades', icon: 'wifi' },
+  ];
+  readonly activeTab = signal<FormTab>('data');
+  readonly maxPhotos = MAX_PHOTOS;
+  readonly photos = signal<Photo[]>([]);
+  readonly uploading = signal(false);
+  readonly photoPickerOpen = signal(false);
+  readonly amenities = signal<string[]>([]);
+
+  readonly amenityCatalog = toSignal(
+    this.unitTypesService
+      .amenities()
+      .pipe(catchError(() => of<LodgingAmenity[]>([]))),
+    { initialValue: [] as LodgingAmenity[] },
+  );
   readonly isEditMode = computed(() => this.unitType() != null);
   readonly title = computed(() =>
     this.isEditMode()
@@ -223,6 +349,11 @@ export class UnitTypeFormModalComponent {
   syncFromUnitType(): void {
     const u = this.unitType();
     this.touched.set(false);
+    this.activeTab.set('data');
+    this.photos.set(
+      (u?.images ?? []).map((key, i) => ({ key, url: u?.image_urls[i] ?? '' })),
+    );
+    this.amenities.set([...(u?.amenities ?? [])]);
     this.form.reset({
       name: u?.name ?? '',
       base_occupancy: u?.base_occupancy ?? 2,
@@ -235,12 +366,64 @@ export class UnitTypeFormModalComponent {
     });
   }
 
+  onPhotosAdded(dataUrls: string[]): void {
+    if (dataUrls.length === 0) return;
+    this.uploading.set(true);
+    forkJoin(
+      dataUrls.map((dataUrl, i) =>
+        this.imageUploadService.uploadFile(
+          dataUrlToFile(dataUrl, `habitacion-${Date.now()}-${i}.jpg`),
+          'lodging',
+        ),
+      ),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (results) => {
+          this.uploading.set(false);
+          this.photos.update((current) =>
+            [...current, ...results.map((r) => ({ key: r.key, url: r.url }))].slice(
+              0,
+              MAX_PHOTOS,
+            ),
+          );
+        },
+        error: () => {
+          this.uploading.set(false);
+          this.toastService.error('No se pudieron subir las fotos');
+        },
+      });
+  }
+
+  movePhoto(index: number, delta: -1 | 1): void {
+    this.photos.update((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  removePhoto(index: number): void {
+    this.photos.update((current) => current.filter((_, i) => i !== index));
+  }
+
+  toggleAmenity(code: string): void {
+    this.amenities.update((current) =>
+      current.includes(code)
+        ? current.filter((c) => c !== code)
+        : [...current, code],
+    );
+  }
+
   onCancel(): void {
     this.isOpenChange.emit(false);
   }
 
   onSubmit(): void {
     if (this.form.invalid) {
+      this.activeTab.set('data');
       this.touched.set(true);
       this.form.markAllAsTouched();
       return;
@@ -254,6 +437,8 @@ export class UnitTypeFormModalComponent {
       bed_config: raw.bed_config.trim() || undefined,
       base_price: raw.base_price ?? 0,
       tax_category_ids: raw.tax_category_id ? [raw.tax_category_id] : [],
+      images: this.photos().map((p) => p.key),
+      amenities: this.amenities(),
     };
     const current = this.unitType();
     const request$ = current

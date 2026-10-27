@@ -4,9 +4,11 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { generateSlug } from '@common/utils/slug.util';
+import { S3Service } from '@common/services/s3.service';
 import { ProductsService } from '../../products/products.service';
 import { ProductType } from '../../products/dto';
 import { CreateUnitTypeDto, UpdateUnitTypeDto } from './dto';
+import { normalizeLodgingImageKeys } from './lodging-media';
 
 /** Name of the service product that sells one night of a room type. */
 export function nightProductName(unitTypeName: string): string {
@@ -68,13 +70,15 @@ export class UnitTypesService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async findAll() {
-    return this.prisma.lodging_unit_types.findMany({
+    const unitTypes = await this.prisma.lodging_unit_types.findMany({
       include: UNIT_TYPE_INCLUDE,
       orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
     });
+    return Promise.all(unitTypes.map((u) => this.withImageUrls(u)));
   }
 
   async findOne(id: number) {
@@ -85,7 +89,7 @@ export class UnitTypesService {
     if (!unitType) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_FIND_001);
     }
-    return unitType;
+    return this.withImageUrls(unitType);
   }
 
   async create(dto: CreateUnitTypeDto) {
@@ -96,6 +100,7 @@ export class UnitTypesService {
 
     const name = dto.name.trim();
     const capacity = resolveCapacity(dto);
+    const images = this.normalizeImages(dto.images);
     await this.assertNameAvailable(name);
 
     const product = await this.productsService.create({
@@ -117,6 +122,8 @@ export class UnitTypesService {
           description: dto.description ?? null,
           ...capacity,
           bed_config: dto.bed_config ?? null,
+          images: images ?? [],
+          amenities: dto.amenities ?? [],
           overbooking_allowance: dto.overbooking_allowance ?? 0,
           sort_order: dto.sort_order ?? 0,
           is_active: dto.is_active ?? true,
@@ -145,6 +152,7 @@ export class UnitTypesService {
           ? undefined
           : current.max_occupancy),
     });
+    const images = this.normalizeImages(dto.images);
     if (name !== current.name) {
       await this.assertNameAvailable(name, id);
     }
@@ -177,6 +185,8 @@ export class UnitTypesService {
           ...(dto.bed_config !== undefined && {
             bed_config: dto.bed_config || null,
           }),
+          ...(images !== undefined && { images }),
+          ...(dto.amenities !== undefined && { amenities: dto.amenities }),
           ...(dto.overbooking_allowance !== undefined && {
             overbooking_allowance: dto.overbooking_allowance,
           }),
@@ -189,6 +199,28 @@ export class UnitTypesService {
       throw this.mapUniqueViolation(error);
     }
     return this.findOne(id);
+  }
+
+  /** Photos are stored as S3 keys and signed on every read. */
+  private async withImageUrls<T extends { images: string[] }>(unitType: T) {
+    const image_urls = await Promise.all(
+      unitType.images.map(
+        async (key) => (await this.s3Service.signUrl(key)) ?? '',
+      ),
+    );
+    return { ...unitType, image_urls };
+  }
+
+  private normalizeImages(images: string[] | undefined): string[] | undefined {
+    if (images === undefined) return undefined;
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id || !context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return normalizeLodgingImageKeys(images, {
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+    });
   }
 
   private async assertNameAvailable(name: string, excludeId?: number) {

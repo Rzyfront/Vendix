@@ -10,6 +10,12 @@ export interface UnitType {
   max_children: number;
   max_occupancy: number;
   bed_config: string | null;
+  /** H0.4 — S3 keys of the photos in display order. */
+  images: string[];
+  /** H0.4 — signed URLs of `images`, same order. */
+  image_urls: string[];
+  /** H0.4 — codes from the amenities catalog. */
+  amenities: string[];
   overbooking_allowance: number;
   sort_order: number;
   is_active: boolean;
@@ -35,5 +41,13 @@ export interface UnitTypePayload {
   bed_config?: string;
   base_price: number;
   tax_category_ids: number[];
+  images?: string[];
+  amenities?: string[];
   is_active?: boolean;
+}
+
+/** H0.4 — entry of `GET /store/hospitality/unit-types/amenities`. */
+export interface LodgingAmenity {
+  code: string;
+  label: string;
 }

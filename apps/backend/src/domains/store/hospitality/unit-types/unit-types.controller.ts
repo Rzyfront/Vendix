@@ -14,6 +14,7 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { UnitTypesService } from './unit-types.service';
 import { CreateUnitTypeDto, UpdateUnitTypeDto } from './dto';
+import { LODGING_AMENITIES } from './lodging-media';
 
 /**
  * Hospitality Suite (H0.2) — room types of a hotel store. Handlers do not
@@ -33,6 +34,13 @@ export class UnitTypesController {
   async findAll() {
     const result = await this.unitTypesService.findAll();
     return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Catálogo de amenidades de habitación' })
+  @Get('amenities')
+  @Permissions('store:lodging:inventory:read')
+  findAmenities() {
+    return this.responseService.success(LODGING_AMENITIES);
   }
 
   @ApiOperation({ summary: 'Obtener un tipo de habitación' })
