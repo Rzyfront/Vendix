@@ -640,8 +640,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     });
   });
 
-  // ── D2: despacho solo por el encargado ────────────────────────────────
-  describe('dispatch() — solo el encargado (D2)', () => {
+  // ── D2: any user with the permission may dispatch ─────────────────────
+  describe('dispatch() — encargado u otro usuario con permiso (D2)', () => {
     const dispatchableStop = () =>
       buildStop({
         dispatch_note: {
@@ -659,14 +659,24 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         ...overrides,
       });
 
-    it('no encargado: 403 DISPATCH_ROUTE_NOT_RESPONSIBLE con el nombre del encargado', async () => {
-      prismaMock.dispatch_routes.findFirst.mockResolvedValue(draftRoute());
-      const err: any = await service.dispatch(ROUTE_ID).catch((e) => e);
-      expect(err).toBeInstanceOf(VendixHttpException);
-      expect(err.errorCode).toBe('DISPATCH_ROUTE_NOT_RESPONSIBLE');
-      expect(err.getStatus()).toBe(403);
-      expect(err.message).toContain('Ana Ruiz');
-      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    it('another permitted user (not the responsible) can dispatch', async () => {
+      context.user_id = 42;
+      const route = draftRoute();
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.update.mockResolvedValue({
+        ...route,
+        status: 'dispatched',
+      });
+      const res = await service.dispatch(ROUTE_ID);
+      expect(res.status).toBe('dispatched');
+      expect(prismaMock.dispatch_routes.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'dispatched',
+            dispatched_by_user_id: 42,
+          }),
+        }),
+      );
     });
 
     it('encargado: despacha OK', async () => {

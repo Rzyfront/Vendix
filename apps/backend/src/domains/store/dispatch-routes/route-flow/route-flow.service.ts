@@ -460,24 +460,10 @@ export class RouteFlowService {
       );
     }
 
-    // D2: solo el encargado (conductor interno) puede despachar. Con conductor
-    // primario externo cualquiera con el permiso despacha. Sin user_id de
-    // request (caller de sistema) no se aplica el guard.
-    if (
-      user_id &&
-      !route.is_primary_driver_external &&
-      route.driver_user_id &&
-      route.driver_user_id !== user_id
-    ) {
-      const du = route.driver_user;
-      const driver_name = du
-        ? `${du.first_name ?? ''} ${du.last_name ?? ''}`.trim()
-        : '';
-      throw new VendixHttpException(
-        ErrorCodes.DISPATCH_ROUTE_NOT_RESPONSIBLE,
-        `Solo el encargado de la ruta${driver_name ? ` (${driver_name})` : ''} puede despacharla`,
-      );
-    }
+    // D2: any user with the dispatch permission (controller guard) may
+    // dispatch, not only the responsible. When someone else dispatches, the
+    // responsible's journey is tracked only after they sync their location
+    // (see RouteTrackingService.getTracking `is_responsible_linked`).
 
     // Per-stop delivery-address gate (defense in depth): sub-task 2 already
     // blocks createFromOrder/createFromSalesOrder when the order has no address,
