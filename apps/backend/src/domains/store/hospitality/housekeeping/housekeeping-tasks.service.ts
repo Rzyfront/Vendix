@@ -115,7 +115,7 @@ export class HousekeepingTasksService {
     tasks: HousekeepingTaskView[];
     staff: HousekeepingStaffMember[];
   }> {
-    const { store_id, today } = await this.ensureToday();
+    const { store_id, today, current } = await this.ensureToday();
     const [tasks, staff] = await Promise.all([
       this.prisma.lodging_housekeeping_tasks.findMany({
         where: { task_date: dateOnlyToDb(today) },
@@ -124,19 +124,19 @@ export class HousekeepingTasksService {
       }),
       this.staff(store_id),
     ]);
-    return { business_date: today, tasks: tasks.map(toView), staff };
+    return { business_date: today, tasks: stillDue(tasks, current).map(toView), staff };
   }
 
   /** Housekeeper: only the tasks of today assigned to the current user. */
   async mine(): Promise<{ business_date: string; tasks: HousekeepingTaskView[] }> {
     const user_id = this.requireUserId();
-    const { today } = await this.ensureToday();
+    const { today, current } = await this.ensureToday();
     const tasks = await this.prisma.lodging_housekeeping_tasks.findMany({
       where: { task_date: dateOnlyToDb(today), assigned_user_id: user_id },
       select: TASK_SELECT,
       orderBy: [{ status: 'asc' }, { unit: { floor: 'asc' } }, { unit: { code: 'asc' } }],
     });
-    return { business_date: today, tasks: tasks.map(toView) };
+    return { business_date: today, tasks: stillDue(tasks, current).map(toView) };
   }
 
   /** `assigned_user_id: null` takes the task back to the unassigned pool. */
@@ -213,8 +213,11 @@ export class HousekeepingTasksService {
     return this.findView(id);
   }
 
-  /** Creates today's missing tasks; existing ones (and their assignee) stay. */
-  private async ensureToday(): Promise<{ store_id: number; today: string }> {
+  /**
+   * Creates today's missing tasks; existing ones (and their assignee) stay.
+   * `current` holds the `unit_id:type` keys today's stays still call for.
+   */
+  private async ensureToday(): Promise<{ store_id: number; today: string; current: Set<string> }> {
     const store_id = this.requireStoreId();
     const timezone = await resolveStoreTimezone(this.prisma, store_id);
     const today = localDateString(new Date(), timezone);
@@ -242,7 +245,7 @@ export class HousekeepingTasksService {
         skipDuplicates: true,
       });
     }
-    return { store_id, today };
+    return { store_id, today, current: new Set(tasks.map(taskKey)) };
   }
 
   /** Active users of this store holding a housekeeper role (here or org-wide). */
@@ -291,6 +294,22 @@ export class HousekeepingTasksService {
     }
     return user_id;
   }
+}
+
+const taskKey = (task: { unit_id: number; type: HousekeepingTaskType }) =>
+  `${task.unit_id}:${task.type}`;
+
+/**
+ * A pending task whose stay no longer calls for it (cancelled, or moved to
+ * another room today) is not shown; finished tasks always stay.
+ */
+function stillDue<T extends { status: HousekeepingTaskStatus; type: HousekeepingTaskType; unit: { id: number } }>(
+  tasks: T[],
+  current: Set<string>,
+): T[] {
+  return tasks.filter(
+    (task) => task.status !== 'pending' || current.has(taskKey({ unit_id: task.unit.id, type: task.type })),
+  );
 }
 
 function toView(

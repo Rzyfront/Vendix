@@ -5706,6 +5706,21 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El bloqueo ya fue liberado',
   },
+  LODGING_BLOCK_ICAL_001: {
+    code: 'LODGING_BLOCK_ICAL_001',
+    httpStatus: 409,
+    devMessage: 'Los bloqueos del calendario externo se liberan desde su canal',
+  },
+  LODGING_BLOCK_DATES_001: {
+    code: 'LODGING_BLOCK_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de regreso a la venta debe ser posterior al inicio',
+  },
+  LODGING_BLOCK_DATES_002: {
+    code: 'LODGING_BLOCK_DATES_002',
+    httpStatus: 400,
+    devMessage: 'El bloqueo no puede empezar antes de hoy',
+  },
   // Hospitality Suite (H6.1) — iCal export
   LODGING_ICAL_FEED_001: {
     code: 'LODGING_ICAL_FEED_001',

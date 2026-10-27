@@ -27,6 +27,16 @@ export const HOUSEKEEPING_TRANSITIONS: Record<HousekeepingStatus, HousekeepingSt
   out_of_service: ['dirty', 'clean', 'out_of_order'],
 };
 
+/**
+ * Mirrors the API `HOUSEKEEPING_STATUS_PERMISSIONS`: inspecting and taking a
+ * room out of the sale need any one of these; other moves only `operate`.
+ */
+export const HOUSEKEEPING_STATUS_PERMISSIONS: Partial<Record<HousekeepingStatus, string[]>> = {
+  inspected: ['store:lodging:housekeeping:assign'],
+  out_of_order: ['store:lodging:housekeeping:assign', 'store:lodging:inventory:write'],
+  out_of_service: ['store:lodging:housekeeping:assign', 'store:lodging:inventory:write'],
+};
+
 /** Next step of the cleaning cycle, offered as the room's quick action. */
 export const HOUSEKEEPING_QUICK_ACTION: Partial<
   Record<HousekeepingStatus, { to: HousekeepingStatus; label: string }>

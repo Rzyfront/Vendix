@@ -6,6 +6,11 @@ import { LodgingAvailabilityService } from '../lodging-availability.service';
 import { LodgingInventoryBlocksService } from './inventory-blocks.service';
 import { CreateInventoryBlockDto } from './inventory-block.dto';
 
+jest.mock('@common/utils/store-timezone.util', () => ({
+  ...jest.requireActual('@common/utils/store-timezone.util'),
+  resolveStoreTimezone: jest.fn().mockResolvedValue('America/Bogota'),
+}));
+
 const D = (date: string) => new Date(`${date}T00:00:00.000Z`);
 
 /** Doble estándar (type 11): rooms 101 and 102, no overbooking. */
@@ -27,6 +32,7 @@ interface Block {
   from_date: Date;
   to_date: Date;
   released_at: Date | null;
+  reason?: string;
 }
 
 const inRange = (date: Date, range: { gte?: Date; lt?: Date; lte?: Date }) =>
@@ -99,7 +105,15 @@ function createFake(nights: Night[] = [], blocks: Block[] = []) {
         );
       }),
       findMany: jest.fn(async ({ where }: any) =>
-        blocks
+        where.unit_id !== undefined
+          ? blocks.filter(
+              (b) =>
+                b.unit_id === where.unit_id &&
+                b.released_at === null &&
+                b.to_date > where.to_date.gt &&
+                (!where.from_date || b.from_date < where.from_date.lt),
+            )
+          : blocks
           .filter(
             (b) =>
               b.released_at === null &&
@@ -111,7 +125,12 @@ function createFake(nights: Night[] = [], blocks: Block[] = []) {
       ),
       create: jest.fn(async ({ data }: any) => ({ id: 99, ...data })),
       updateMany: jest.fn(async ({ where }: any) => {
-        const block = blocks.find((b) => b.id === where.id && b.released_at === null);
+        const block = blocks.find(
+          (b) =>
+            b.id === where.id &&
+            b.released_at === null &&
+            (!where.reason || b.reason !== where.reason.not),
+        );
         if (!block) return { count: 0 };
         block.released_at = new Date();
         return { count: 1 };
@@ -137,11 +156,39 @@ const MAINTENANCE = { unit_id: 2, from_date: '2026-11-10', to_date: '2026-11-13'
 
 describe('LodgingInventoryBlocksService (H5.3)', () => {
   beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(new Date('2026-11-01T15:00:00Z')); // 1-nov in Bogotá
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 1, user_id: 7 } as any);
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  describe('dates', () => {
+    it('refuses a return day not after the start, with a block message', async () => {
+      const { service, client } = createFake();
+      const error = await rejection(
+        service.create({ ...MAINTENANCE, from_date: '2026-11-13', to_date: '2026-11-10' }),
+      );
+      expect(error.error_code).toBe('LODGING_BLOCK_DATES_001');
+      expect(client.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses a block starting before the store business day', async () => {
+      const { service, client } = createFake();
+      const error = await rejection(
+        service.create({ ...MAINTENANCE, from_date: '2026-10-31', to_date: '2026-11-02' }),
+      );
+      expect(error.error_code).toBe('LODGING_BLOCK_DATES_002');
+      expect(client.$transaction).not.toHaveBeenCalled();
+      await expect(
+        service.create({ ...MAINTENANCE, from_date: '2026-11-01', to_date: '2026-11-02' }),
+      ).resolves.toMatchObject({ id: 99 });
+    });
+  });
 
   describe('collision with reservations', () => {
     it('refuses a room with a reservation assigned on those nights, naming it and the night', async () => {
@@ -224,7 +271,7 @@ describe('LodgingInventoryBlocksService (H5.3)', () => {
     const { service, availability, client } = createFake([], blocks);
     await service.release(5);
     expect(client.lodging_inventory_blocks.updateMany).toHaveBeenCalledWith({
-      where: { id: 5, released_at: null },
+      where: { id: 5, released_at: null, reason: { not: 'ical' } },
       data: expect.objectContaining({ released_by_user_id: 7 }),
     });
     await expect(availability.countAvailable(11, '2026-11-11', '2026-11-12')).resolves.toBe(2);
@@ -233,6 +280,19 @@ describe('LodgingInventoryBlocksService (H5.3)', () => {
     expect(again.error_code).toBe('LODGING_BLOCK_RELEASED_001');
     const missing = await rejection(service.release(404));
     expect(missing.error_code).toBe('LODGING_BLOCK_FIND_001');
+  });
+
+  it('an iCal block is not released by hand (its channel releases it)', async () => {
+    const blocks: Block[] = [
+      { id: 6, unit_id: 2, from_date: D('2026-11-10'), to_date: D('2026-11-13'), released_at: null, reason: 'ical' },
+    ];
+    const { service, client } = createFake([], blocks);
+    const error = await rejection(service.release(6));
+    expect(error.error_code).toBe('LODGING_BLOCK_ICAL_001');
+    expect(client.lodging_inventory_blocks.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 6, released_at: null, reason: { not: 'ical' } } }),
+    );
+    expect(blocks[0].released_at).toBeNull();
   });
 
   it('the DTO accepts only manual reasons (iCal blocks come from the import)', async () => {

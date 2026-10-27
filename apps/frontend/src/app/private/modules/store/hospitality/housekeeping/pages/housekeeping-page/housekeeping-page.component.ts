@@ -34,6 +34,7 @@ import {
 } from '../../../rooms/interfaces/unit.interface';
 import {
   HOUSEKEEPING_QUICK_ACTION,
+  HOUSEKEEPING_STATUS_PERMISSIONS,
   HOUSEKEEPING_TRANSITIONS,
   HousekeepingBoard,
   HousekeepingBoardUnit,
@@ -145,7 +146,7 @@ const stringFilter = (values: FilterValues, key: string): string => {
         <app-stats
           title="Fuera de venta"
           [value]="count('out_of_order') + count('out_of_service')"
-          smallText="bloqueadas o fuera de servicio"
+          smallText="fuera de servicio o no disponibles"
           iconName="ban"
           iconBgColor="bg-red-100"
           iconColor="text-red-500"
@@ -316,7 +317,8 @@ const stringFilter = (values: FilterValues, key: string): string => {
             </app-button>
           }
           <p class="text-xs text-text-secondary">
-            Fuera de servicio y Bloqueada sacan la habitación de la venta y del check-in.
+            Fuera de servicio y No disponible sacan la habitación de la venta y del check-in.
+            Para cerrarla por fechas usa «Bloquear habitación» en el rack.
           </p>
         </div>
       </app-modal>
@@ -464,7 +466,9 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
 
   readonly targets = computed<HousekeepingStatus[]>(() => {
     const unit = this.selected();
-    return unit ? HOUSEKEEPING_TRANSITIONS[unit.housekeeping_status] : [];
+    return unit
+      ? HOUSEKEEPING_TRANSITIONS[unit.housekeeping_status].filter((to) => this.mayChangeTo(to))
+      : [];
   });
 
   ngOnInit(): void {
@@ -526,8 +530,15 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     return unit.occupancy ? OCCUPANCY_LABELS[unit.occupancy] : '';
   }
 
+  /** The housekeeper cleans; inspecting or leaving the sale needs more (API rule). */
+  mayChangeTo(to: HousekeepingStatus): boolean {
+    const required = HOUSEKEEPING_STATUS_PERMISSIONS[to];
+    return !required || this.authFacade.hasAnyPermission(required);
+  }
+
   quickAction(unit: HousekeepingBoardUnit) {
-    return HOUSEKEEPING_QUICK_ACTION[unit.housekeeping_status] ?? null;
+    const action = HOUSEKEEPING_QUICK_ACTION[unit.housekeeping_status];
+    return action && this.mayChangeTo(action.to) ? action : null;
   }
 
   openChange(unit: HousekeepingBoardUnit): void {

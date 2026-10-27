@@ -30,6 +30,7 @@ import {
   RackBlock,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 /** What the modal opens on: a new block (optionally on a room) or an existing one. */
 export type RoomBlockTarget =
@@ -133,15 +134,17 @@ const longDate = (date: string) => format(parseISO(date), "d 'de' MMM yyyy", { l
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="close()">Cancelar</app-button>
         @if (viewed(); as view) {
-          <app-button
-            variant="primary"
-            [loading]="saving()"
-            [disabled]="view.block.reason === 'ical'"
-            (clicked)="release(view.block.id)"
-          >
-            <app-icon slot="icon" name="unlock" [size]="16" />
-            Liberar habitación
-          </app-button>
+          @if (canRelease) {
+            <app-button
+              variant="primary"
+              [loading]="saving()"
+              [disabled]="view.block.reason === 'ical'"
+              (clicked)="release(view.block.id)"
+            >
+              <app-icon slot="icon" name="unlock" [size]="16" />
+              Liberar habitación
+            </app-button>
+          }
         } @else {
           <app-button
             variant="primary"
@@ -162,6 +165,8 @@ export class RoomBlockModalComponent {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  /** Without the inventory write permission the block is read-only. */
+  readonly canRelease = inject(AuthFacade).hasPermission('store:lodging:inventory:write');
 
   /** Block to view or create; `null` keeps the modal closed. */
   readonly target = input<RoomBlockTarget | null>(null);

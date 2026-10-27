@@ -43,5 +43,20 @@ export const HOUSEKEEPING_STATUS_LABELS: Readonly<Record<HousekeepingStatus, str
   dirty: 'Sucia',
   inspected: 'Inspeccionada',
   out_of_order: 'Fuera de servicio',
-  out_of_service: 'Bloqueada',
+  // Not "Bloqueada": a dated block (H5.3) is a different thing, seen on the rack.
+  out_of_service: 'No disponible',
+};
+
+/**
+ * Separation of duties: the housekeeper cleans, the head housekeeper
+ * inspects (H5.2), and taking a room out of the sale is for whoever manages
+ * the housekeeping or the room inventory (H5.3). Any one listed permission
+ * allows the move; statuses without an entry only need `housekeeping:operate`.
+ */
+export const HOUSEKEEPING_STATUS_PERMISSIONS: Readonly<
+  Partial<Record<HousekeepingStatus, readonly string[]>>
+> = {
+  inspected: ['store:lodging:housekeeping:assign'],
+  out_of_order: ['store:lodging:housekeeping:assign', 'store:lodging:inventory:write'],
+  out_of_service: ['store:lodging:housekeeping:assign', 'store:lodging:inventory:write'],
 };

@@ -4,11 +4,18 @@ import { localDateString, resolveStoreTimezone } from '@common/utils/store-timez
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { dateOnlyToDb } from '../reservations/stay-dates';
+import { LodgingAvailabilityService } from '../reservations/lodging-availability.service';
+import { assertUnitCanLeaveSale } from '../reservations/blocks/leave-sale.guard';
 import {
   canChangeHousekeeping,
   HOUSEKEEPING_STATUS_LABELS,
+  HOUSEKEEPING_STATUS_PERMISSIONS,
   HousekeepingStatus,
+  isSellableHousekeeping,
 } from './housekeeping-status';
+
+/** Same queue and limits as a sale: leaving the sale waits on its lock. */
+const LEAVE_SALE_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
 /** Guest situation of a room today, for the housekeeper's priorities. */
 export type HousekeepingOccupancy = 'in_house' | 'departs_today' | null;
@@ -29,10 +36,15 @@ export interface HousekeepingBoardUnit {
  * the screen groups them by floor. Status changes follow
  * `HOUSEKEEPING_TRANSITIONS` and are conditional on the status the user saw,
  * so two people changing the same room never overwrite each other silently.
+ * Inspecting and taking a room out of the sale need more than the
+ * housekeeper's permission (`HOUSEKEEPING_STATUS_PERMISSIONS`).
  */
 @Injectable()
 export class HousekeepingService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly availability: LodgingAvailabilityService,
+  ) {}
 
   async board(): Promise<{ business_date: string; units: HousekeepingBoardUnit[] }> {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -82,6 +94,11 @@ export class HousekeepingService {
   }
 
   async changeStatus(id: number, from: HousekeepingStatus, to: HousekeepingStatus) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    this.assertMayChangeTo(to);
     const unit = await this.prisma.lodging_units.findFirst({
       where: { id },
       select: { id: true, code: true, housekeeping_status: true },
@@ -102,10 +119,13 @@ export class HousekeepingService {
       );
     }
 
-    const { count } = await this.prisma.lodging_units.updateMany({
-      where: { id, housekeeping_status: from },
-      data: { housekeeping_status: to, updated_at: new Date() },
-    });
+    const leavesSale = isSellableHousekeeping(from) && !isSellableHousekeeping(to);
+    const { count } = leavesSale
+      ? await this.takeOutOfSale(store_id, id, from, to)
+      : await this.prisma.lodging_units.updateMany({
+          where: { id, housekeeping_status: from },
+          data: { housekeeping_status: to, updated_at: new Date() },
+        });
     if (count === 0) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_HOUSEKEEPING_STALE_001,
@@ -113,5 +133,61 @@ export class HousekeepingService {
       );
     }
     return { id: unit.id, code: unit.code, housekeeping_status: to };
+  }
+
+  /**
+   * H5.1/H5.3 — a room leaving the sale from the board follows the same
+   * rules as a dated block, under the store's sale lock: no reservation
+   * assigned from today on, and the type's sold nights must still fit.
+   */
+  private async takeOutOfSale(
+    store_id: number,
+    id: number,
+    from: HousekeepingStatus,
+    to: HousekeepingStatus,
+  ): Promise<{ count: number }> {
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = localDateString(new Date(), timezone);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`lodging_reservations:${store_id}`}))`;
+      // Inside `$transaction` the client is not store-scoped: name the store.
+      const unit = await tx.lodging_units.findFirst({
+        where: { id, store_id },
+        select: {
+          id: true,
+          code: true,
+          unit_type_id: true,
+          is_active: true,
+          housekeeping_status: true,
+          unit_type: { select: { name: true, overbooking_allowance: true } },
+        },
+      });
+      if (!unit || unit.housekeeping_status !== from) return { count: 0 };
+      await assertUnitCanLeaveSale(
+        tx,
+        this.availability,
+        store_id,
+        unit,
+        { from: today },
+        { verb: 'sacarla de la venta', noun: 'Sacar de la venta' },
+      );
+      return tx.lodging_units.updateMany({
+        where: { id, store_id, housekeeping_status: from },
+        data: { housekeeping_status: to, updated_at: new Date() },
+      });
+    }, LEAVE_SALE_TX_OPTIONS);
+  }
+
+  private assertMayChangeTo(to: HousekeepingStatus): void {
+    const required = HOUSEKEEPING_STATUS_PERMISSIONS[to];
+    const context = RequestContextService.getContext();
+    if (!required || context?.is_owner || context?.is_super_admin) return;
+    const granted = context?.permissions ?? [];
+    if (!required.some((permission) => granted.includes(permission))) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        `No tienes permiso para dejar una habitación ${HOUSEKEEPING_STATUS_LABELS[to].toLowerCase()}`,
+      );
+    }
   }
 }

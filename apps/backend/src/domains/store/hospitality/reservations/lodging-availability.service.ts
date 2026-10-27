@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   localDateString,
   resolveStoreTimezone,
@@ -29,6 +30,18 @@ const sellableUnitsWhere = (unit_type_id: number) => ({
   is_active: true,
   housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] },
 });
+
+/**
+ * H5.1 — sold nights that need a sellable room. A night assigned to a room
+ * out of order/service already left the sale with that room, so it is not
+ * subtracted a second time from the sellable rooms.
+ */
+export const NIGHTS_ON_SELLABLE_ROOMS: Prisma.lodging_room_nightsWhereInput = {
+  OR: [
+    { unit_id: null },
+    { unit: { housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] } } },
+  ],
+};
 
 /** `groupBy(['night_date'])` counts → rooms per `YYYY-MM-DD`. */
 const countByNight = (rows: { night_date: Date; _count: { _all: number } }[]) =>
@@ -111,6 +124,7 @@ export class LodgingAvailabilityService {
         where: {
           unit_type_id,
           is_active: true,
+          ...NIGHTS_ON_SELLABLE_ROOMS,
           ...(exclude_reservation_room_id
             ? { reservation_room_id: { not: exclude_reservation_room_id } }
             : {}),
@@ -174,7 +188,7 @@ export class LodgingAvailabilityService {
       client.lodging_units.count({ where: sellableUnitsWhere(unit_type_id) }),
       client.lodging_room_nights.groupBy({
         by: ['night_date'],
-        where: { unit_type_id, is_active: true, night_date: range },
+        where: { unit_type_id, is_active: true, night_date: range, ...NIGHTS_ON_SELLABLE_ROOMS },
         _count: { _all: true },
       }),
       client.lodging_room_nights.groupBy({
@@ -183,6 +197,7 @@ export class LodgingAvailabilityService {
           unit_type_id,
           is_active: true,
           night_date: range,
+          ...NIGHTS_ON_SELLABLE_ROOMS,
           reservation_room: { reservation: { customer_id } },
         },
         _count: { _all: true },

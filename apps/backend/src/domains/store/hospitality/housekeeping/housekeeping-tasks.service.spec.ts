@@ -129,6 +129,7 @@ describe('HousekeepingTasksService', () => {
 
   describe('my tasks', () => {
     it('the housekeeper only reads the tasks assigned to her', async () => {
+      rooms.findMany.mockResolvedValue([stay(7, '2026-11-08', '2026-11-10', 'checked_in')]);
       tasks.findMany.mockResolvedValue([view]);
 
       const result = await service.mine();
@@ -139,6 +140,25 @@ describe('HousekeepingTasksService', () => {
         }),
       );
       expect(result.tasks).toEqual([{ ...view, task_date: '2026-11-10' }]);
+    });
+  });
+
+  describe('stays that changed today', () => {
+    it('hides a pending task whose stay moved to another room, keeps finished ones', async () => {
+      // The guest of 101 (unit 7) moved to 103 (unit 9) at noon.
+      rooms.findMany.mockResolvedValue([stay(9, '2026-11-08', '2026-11-12', 'checked_in')]);
+      const moved = { ...view, type: 'stayover' };
+      const done = { ...view, id: 2, unit: { ...view.unit, id: 8, code: '102' }, status: 'done' };
+      const current = { ...view, id: 3, type: 'stayover', unit: { ...view.unit, id: 9, code: '103' } };
+      tasks.findMany.mockResolvedValue([moved, done, current]);
+
+      const result = await service.today();
+
+      expect(tasks.createMany).toHaveBeenCalledWith({
+        data: [{ unit_id: 9, type: 'stayover', store_id: 5, task_date: d('2026-11-10') }],
+        skipDuplicates: true,
+      });
+      expect(result.tasks.map((t) => t.unit.code)).toEqual(['102', '103']);
     });
   });
 

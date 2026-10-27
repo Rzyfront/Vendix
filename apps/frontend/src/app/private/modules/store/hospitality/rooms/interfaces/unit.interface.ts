@@ -11,7 +11,7 @@ export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
   dirty: 'Sucia',
   inspected: 'Inspeccionada',
   out_of_order: 'Fuera de servicio',
-  out_of_service: 'Bloqueada',
+  out_of_service: 'No disponible',
 };
 
 /** Physical room as returned by the store API. */

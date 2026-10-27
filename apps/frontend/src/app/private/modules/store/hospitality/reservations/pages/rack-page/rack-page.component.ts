@@ -47,6 +47,7 @@ import {
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { storeToday } from '../../../../../../../shared/utils/date.util';
 import {
   HOUSEKEEPING_STATUS_LABELS,
@@ -472,14 +473,18 @@ export class HospitalityRackPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly searchTerm = signal('');
   /** `days` empty = default 14-night window (not counted as an active filter). */
   readonly filterValues = signal<FilterValues>({});
 
-  readonly dropdownActions: DropdownAction[] = [
-    { label: 'Bloquear habitación', icon: 'lock', action: 'block', variant: 'primary' },
-  ];
+  /** H5.3: blocking and releasing need the inventory write permission. */
+  readonly canBlock = this.authFacade.hasPermission('store:lodging:inventory:write');
+
+  readonly dropdownActions: DropdownAction[] = this.canBlock
+    ? [{ label: 'Bloquear habitación', icon: 'lock', action: 'block', variant: 'primary' }]
+    : [];
 
   readonly filterConfigs = computed<FilterConfig[]>(() => [
     {
@@ -802,6 +807,6 @@ export class HospitalityRackPageComponent implements OnInit {
   }
 
   onActionClick(action: string): void {
-    if (action === 'block') this.blockTarget.set({ mode: 'create', from_date: this.from() });
+    if (action === 'block' && this.canBlock) this.blockTarget.set({ mode: 'create', from_date: this.from() });
   }
 }

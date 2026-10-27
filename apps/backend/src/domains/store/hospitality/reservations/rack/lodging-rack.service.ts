@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { dateOnlyToDb } from '../stay-dates';
-import { LodgingAvailabilityService } from '../lodging-availability.service';
+import {
+  LodgingAvailabilityService,
+  NIGHTS_ON_SELLABLE_ROOMS,
+} from '../lodging-availability.service';
 import { buildRack, Rack, RACK_STATUSES, rackNights } from './rack-builder';
 
 /** Hospitality Suite (H1.3) — read model of the occupancy rack. */
@@ -42,7 +45,8 @@ export class LodgingRackService {
       }),
       this.prisma.lodging_room_nights.groupBy({
         by: ['unit_type_id', 'night_date'],
-        where: { is_active: true, night_date: range },
+        // H5.1 — a night on a room out of service left the sale with the room.
+        where: { is_active: true, night_date: range, ...NIGHTS_ON_SELLABLE_ROOMS },
         _count: { _all: true },
       }),
       // H5.3 — active blocks overlapping the window.

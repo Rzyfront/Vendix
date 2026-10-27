@@ -23,7 +23,20 @@ jest.mock('@common/utils/store-timezone.util', () => ({
 describe('HousekeepingService', () => {
   const units = { findFirst: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() };
   const rooms = { findMany: jest.fn() };
+  /** Sale-lock transaction: Doble (type 11) has 101 (unit 1) and 102. */
+  const tx = {
+    $executeRaw: jest.fn(),
+    lodging_units: { findFirst: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
+    lodging_room_nights: { findFirst: jest.fn(), groupBy: jest.fn() },
+    lodging_inventory_blocks: { findMany: jest.fn() },
+  };
+  const $transaction = jest.fn((fn: (client: typeof tx) => unknown) => fn(tx));
   let service: HousekeepingService;
+  const MANAGER = ['store:lodging:housekeeping:operate', 'store:lodging:housekeeping:assign'];
+  const asUser = (permissions: string[]) =>
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 5, user_id: 9, permissions } as any);
 
   const expectCode = async (promise: Promise<unknown>, code: string) => {
     const error = await promise.catch((e) => e);
@@ -35,13 +48,24 @@ describe('HousekeepingService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new HousekeepingService({
-      lodging_units: units,
-      lodging_reservation_rooms: rooms,
-    } as any);
-    jest
-      .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue({ store_id: 5, user_id: 9 } as any);
+    service = new HousekeepingService(
+      { lodging_units: units, lodging_reservation_rooms: rooms, $transaction } as any,
+      new LodgingAvailabilityService({} as any),
+    );
+    asUser(MANAGER);
+    tx.lodging_units.findFirst.mockResolvedValue({
+      id: 1,
+      code: '101',
+      unit_type_id: 11,
+      is_active: true,
+      housekeeping_status: 'clean',
+      unit_type: { name: 'Doble', overbooking_allowance: 0 },
+    });
+    tx.lodging_units.updateMany.mockResolvedValue({ count: 1 });
+    tx.lodging_units.count.mockResolvedValue(2);
+    tx.lodging_room_nights.findFirst.mockResolvedValue(null);
+    tx.lodging_room_nights.groupBy.mockResolvedValue([]);
+    tx.lodging_inventory_blocks.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -125,6 +149,114 @@ describe('HousekeepingService', () => {
     });
   });
 
+  describe('separation of duties', () => {
+    it.each([
+      ['clean', 'inspected'],
+      ['clean', 'out_of_order'],
+      ['dirty', 'out_of_service'],
+    ] as const)('the housekeeper cannot change %s → %s', async (from, to) => {
+      asUser(['store:lodging:housekeeping:operate']);
+      units.findFirst.mockResolvedValue({ id: 1, code: '101', housekeeping_status: from });
+
+      await expectCode(service.changeStatus(1, from, to), 'AUTH_PERM_001');
+      expect(units.updateMany).not.toHaveBeenCalled();
+      expect($transaction).not.toHaveBeenCalled();
+    });
+
+    it('the housekeeper still cleans; inventory managers take rooms out of sale', async () => {
+      asUser(['store:lodging:housekeeping:operate']);
+      units.findFirst.mockResolvedValue({ id: 1, code: '101', housekeeping_status: 'dirty' });
+      units.updateMany.mockResolvedValue({ count: 1 });
+      await expect(service.changeStatus(1, 'dirty', 'clean')).resolves.toMatchObject({
+        housekeeping_status: 'clean',
+      });
+
+      asUser(['store:lodging:inventory:write']);
+      units.findFirst.mockResolvedValue({ id: 1, code: '101', housekeeping_status: 'clean' });
+      await expect(service.changeStatus(1, 'clean', 'out_of_order')).resolves.toMatchObject({
+        housekeeping_status: 'out_of_order',
+      });
+    });
+  });
+
+  describe('taking a room out of the sale (same rules as a block)', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date('2026-11-09T15:00:00Z')); // 9-nov in Bogotá
+      units.findFirst.mockResolvedValue({ id: 1, code: '101', housekeeping_status: 'clean' });
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('refuses a room with a reservation assigned from today on, naming it', async () => {
+      tx.lodging_room_nights.findFirst.mockResolvedValue({
+        night_date: new Date('2026-11-10T00:00:00Z'),
+        reservation_room: { reservation: { reservation_number: 'H-0007' } },
+      });
+
+      const body = await expectCode(
+        service.changeStatus(1, 'clean', 'out_of_order'),
+        'LODGING_BLOCK_RESERVED_001',
+      );
+      expect(body.message).toBe(
+        'La 101 tiene la reserva H-0007 el 10-nov. Muévela antes de sacarla de la venta.',
+      );
+      expect(tx.lodging_room_nights.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: 5,
+            unit_id: 1,
+            is_active: true,
+            night_date: { gte: new Date('2026-11-09T00:00:00Z') },
+          }),
+        }),
+      );
+      expect(tx.$executeRaw.mock.calls[0][1]).toBe('lodging_reservations:5');
+      expect(tx.lodging_units.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the unassigned reservations of the type would be left without a room', async () => {
+      // 102 is sold and another Doble is unassigned on 12-nov: both rooms are needed.
+      tx.lodging_room_nights.groupBy.mockResolvedValue([
+        { night_date: new Date('2026-11-12T00:00:00Z'), _count: { _all: 2 } },
+      ]);
+
+      const body = await expectCode(
+        service.changeStatus(1, 'clean', 'out_of_order'),
+        'LODGING_BLOCK_OVERSOLD_001',
+      );
+      expect(body.message).toBe(
+        'Sacar de la venta la 101 deja sin habitación a reservas de Doble el 12-nov. Asígnalas o muévelas antes.',
+      );
+      expect(tx.lodging_units.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('takes a free room out of the sale under the lock', async () => {
+      tx.lodging_room_nights.groupBy.mockResolvedValue([
+        { night_date: new Date('2026-11-12T00:00:00Z'), _count: { _all: 1 } },
+      ]);
+
+      await expect(service.changeStatus(1, 'clean', 'out_of_order')).resolves.toEqual({
+        id: 1,
+        code: '101',
+        housekeeping_status: 'out_of_order',
+      });
+      expect(tx.lodging_units.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, store_id: 5, housekeeping_status: 'clean' },
+        data: expect.objectContaining({ housekeeping_status: 'out_of_order' }),
+      });
+      expect(units.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('moving between out-of-sale statuses needs no guard', async () => {
+      units.findFirst.mockResolvedValue({ id: 1, code: '101', housekeeping_status: 'out_of_order' });
+      units.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.changeStatus(1, 'out_of_order', 'out_of_service');
+
+      expect($transaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('board', () => {
     it('flags rooms in house and leaving today, in the store business day', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-11-11T03:00:00Z')); // 10-nov 22:00 Bogotá
@@ -188,6 +320,31 @@ describe('HousekeepingService', () => {
         housekeeping_status: { notIn: ['out_of_order', 'out_of_service'] },
       },
     });
+  });
+
+  it('nights on a room out of service are not subtracted twice from its type', async () => {
+    // Doble: 101 out of order still holds H-0007 on 10-nov; 102 is free.
+    const nights = [{ unit_id: 1, unit_status: 'out_of_order', night_date: '2026-11-10' }];
+    const client = {
+      lodging_unit_types: { findFirst: jest.fn().mockResolvedValue({ overbooking_allowance: 0 }) },
+      lodging_units: { count: jest.fn().mockResolvedValue(1) },
+      lodging_room_nights: {
+        groupBy: jest.fn(async ({ where }: any) => {
+          const sellableOnly = where.OR?.[1]?.unit?.housekeeping_status?.notIn ?? [];
+          const counted = nights.filter((n) => !sellableOnly.includes(n.unit_status));
+          return counted.length
+            ? [{ night_date: new Date(`${counted[0].night_date}T00:00:00Z`), _count: { _all: counted.length } }]
+            : [];
+        }),
+      },
+      lodging_allotments: { findMany: jest.fn().mockResolvedValue([]) },
+      lodging_inventory_blocks: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const availability = new LodgingAvailabilityService(client as any);
+
+    await expect(
+      availability.countAvailable(11, '2026-11-10', '2026-11-11', client as any),
+    ).resolves.toBe(1);
   });
 
   it('the status DTO only accepts known statuses', async () => {
