@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FormBuilder } from '@angular/forms';
 import { provideHttpClient } from '@angular/common/http';
@@ -13,6 +14,7 @@ import { Observable, Subject } from 'rxjs';
 import { StoreUserCreateModalComponent } from './store-user-create-modal.component';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import { initialStoreUsersState } from '../state/store-users.state';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * QUI-554 — Regresión de la causa raíz.
@@ -48,6 +50,7 @@ describe('StoreUserCreateModalComponent (QUI-554)', () => {
           initialState: { storeUsers: initialStoreUsersState },
         }),
         provideMockActions(() => actions$ as Observable<Action>),
+        { provide: AuthFacade, useValue: { isHospitality: signal(false) } },
       ],
     });
 

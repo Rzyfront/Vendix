@@ -243,6 +243,20 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        path: 'hotel',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-search.component').then(
+            (c) => c.HotelSearchComponent,
+          ),
+      },
+      {
+        path: 'hotel/reserva/:id',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-reservation-status.component').then(
+            (c) => c.HotelReservationStatusComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

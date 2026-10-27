@@ -120,3 +120,33 @@ export function storeSupportsServiceStations(
     (INDUSTRIES_SUPPORTING_SERVICE_STATIONS as readonly string[]).includes(industry as string),
   );
 }
+
+/**
+ * List of `industry_enum` values that support the lodging flow (rooms,
+ * reservations, front desk, folio). Mirrors the frontend
+ * `INDUSTRY_HIDDEN_MODULES` rule for the `hospitality` module keys in
+ * `apps/frontend/src/app/shared/constants/industry-modules.constant.ts`:
+ * every industry EXCEPT `hospitality` hides them.
+ */
+export const INDUSTRIES_SUPPORTING_LODGING: industry_enum[] = ['hospitality'];
+
+/**
+ * Backend capability resolver: returns true when at least one of the given
+ * store industries supports the lodging flow (today only `hospitality`).
+ *
+ * OR semantics: a hotel with a restaurant (`hospitality` + `restaurant`)
+ * keeps the flow. Safe to call with `null`/`undefined`/empty arrays;
+ * returns `false` then.
+ */
+export function storeSupportsLodging(
+  industries: industry_enum[] | string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) =>
+    (INDUSTRIES_SUPPORTING_LODGING as readonly string[]).includes(
+      industry as string,
+    ),
+  );
+}

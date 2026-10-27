@@ -1254,6 +1254,13 @@ export class AutoEntryService {
       installment_payment: 'auto_installment_payment',
       'layaway.payment': 'auto_payment',
       'layaway.completed': 'auto_payment',
+      'lodging.folio_payment': 'auto_payment',
+      'lodging.folio_settlement': 'auto_invoice',
+      'lodging.folio_sale': 'auto_invoice',
+      'lodging.folio_sale_settlement': 'auto_invoice',
+      'lodging.deposit': 'auto_payment',
+      'lodging.deposit_retained': 'auto_payment',
+      'lodging.reservation_payment_retained': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
@@ -2338,6 +2345,8 @@ export class AutoEntryService {
         status: 'posted',
         OR: [
           { source_type: 'credit_sale.created', source_id: order_id },
+          // Folio closed without e-invoicing: the check-out already sold it.
+          { source_type: 'lodging.folio_sale', source_id: order_id },
           ...(payment_ids.length
             ? [
                 {
@@ -2366,6 +2375,7 @@ export class AutoEntryService {
 
     const recognizesRevenue = (entry: any) =>
       entry.source_type === 'credit_sale.created' ||
+      entry.source_type === 'lodging.folio_sale' ||
       (entry.accounting_entry_lines ?? []).some(
         (line: any) =>
           getCents(line.credit_amount ?? 0) > 0n &&
@@ -3642,7 +3652,12 @@ export class AutoEntryService {
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
     customer?: { id: number; name?: string; tax_id?: string };
+    /** Override opcional (venta de folio hotelero): por defecto `credit_sale.created`. */
+    source_type?: string;
+    /** Override opcional de la descripción del asiento. */
+    description?: string;
   }) {
+    const sale_source_type = data.source_type ?? 'credit_sale.created';
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
           id: data.customer.id,
@@ -3731,7 +3746,7 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'credit_sale.created.vat_payable',
         label: `IVA venta a crédito${order_ref}`,
-        source_type: 'credit_sale.created',
+        source_type: sale_source_type,
         source_id: data.order_id,
       })),
     );
@@ -3763,10 +3778,11 @@ export class AutoEntryService {
     }
 
     return this.createAutoEntry({
-      source_type: 'credit_sale.created',
+      source_type: sale_source_type,
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Venta a crédito #${data.order_id}${order_ref}`,
+      store_id: data.store_id,
+      description: data.description ?? `Venta a crédito #${data.order_id}${order_ref}`,
       lines,
       user_id: data.user_id,
     });
@@ -6190,6 +6206,433 @@ export class AutoEntryService {
       source_id: data.payment_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== HOTELERÍA (H3.4) =====
+
+  /**
+   * lodging.folio_payment: DR Caja/Banco → CR Anticipos de Clientes (2805).
+   * A payment of an open guest folio arrives before its invoice and the folio
+   * keeps growing, so it is an advance, not revenue: the folio invoice
+   * (H3.7) recognizes the whole sale and crosses this advance.
+   * `source_id` = the `payments.id` (one entry per payment).
+   */
+  async onLodgingFolioPayment(data: {
+    payment_id: number;
+    order_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash'
+        ? 'lodging.folio_payment.cash'
+        : 'lodging.folio_payment.bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Pago folio ${data.order_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.customer_advance',
+        `Anticipo folio ${data.order_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.folio_payment',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Pago de folio hotelero ${data.order_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.folio_settlement (H3.7): DR Anticipos de Clientes (2805) → CR
+   * Clientes (1305). The folio invoice books the whole stay as DR 1305 / CR
+   * revenue + VAT (`onInvoiceValidated`); the payments and the applied
+   * deposit of the folio already sit in 2805, so this entry crosses them and
+   * 1305 keeps only what the guest or the company still owes (the credit
+   * check-out). Amount = settled payments of the folio order, capped at the
+   * invoice total. Returns null when the invoice is not a folio's or nothing
+   * was paid. `source_id` = the `invoices.id` (one cross per invoice).
+   */
+  async onLodgingFolioInvoiced(data: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    total: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    // Runs from `invoice.accepted`, which also fires from jobs (DIAN polling,
+    // retries) without a store request context: explicit store filters.
+    const db = this.prisma.withoutScope();
+    const invoice = await db.invoices.findFirst({
+      where: {
+        id: data.invoice_id,
+        ...(data.store_id ? { store_id: data.store_id } : {}),
+        invoice_type: 'sales_invoice',
+      },
+      select: { order_id: true, store_id: true, invoice_number: true },
+    });
+    if (!invoice?.order_id) return null;
+    const folio = await db.lodging_folios.findFirst({
+      where: { order_id: invoice.order_id, store_id: invoice.store_id },
+      select: { id: true },
+    });
+    if (!folio) return null;
+    // The check-out without e-invoicing already crossed this folio's advance.
+    const crossed = await db.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'lodging.folio_sale_settlement',
+        source_id: invoice.order_id,
+      },
+      select: { id: true },
+    });
+    if (crossed) return null;
+    return this.crossLodgingAdvance({
+      order_id: invoice.order_id,
+      organization_id: data.organization_id,
+      store_id: invoice.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      total: Number(data.total),
+      customer: data.customer,
+      source_type: 'lodging.folio_settlement',
+      source_id: data.invoice_id,
+      reference: `factura ${invoice.invoice_number}`,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.folio_sale: a guest folio closed WITHOUT electronic invoicing
+   * (owner decision 2026-10-27). The checkout books the sale like the POS
+   * credit sale (DR 1305 / CR revenue + typed taxes, reusing
+   * `onCreditSaleCreated` under its own source_type) and then crosses the
+   * 2805 advance (`lodging.folio_sale_settlement`). Both entries are keyed
+   * by `order_id`, so a retried checkout never duplicates them.
+   */
+  async onLodgingFolioSale(data: {
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    shipping_amount?: number;
+    discount_amount?: number;
+    total_amount: number;
+    tip_amount?: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const order_ref = data.order_number ?? `#${data.order_id}`;
+    const sale = await this.onCreditSaleCreated({
+      ...data,
+      source_type: 'lodging.folio_sale',
+      description: `Venta de folio hotelero ${order_ref}`,
+    });
+    const cross = await this.crossLodgingAdvance({
+      order_id: data.order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      total: Number(data.total_amount),
+      customer: data.customer ? { ...data.customer, type: 'customer' } : undefined,
+      source_type: 'lodging.folio_sale_settlement',
+      source_id: data.order_id,
+      reference: `folio ${order_ref}`,
+      user_id: data.user_id,
+    });
+    return { sale, cross };
+  }
+
+  /**
+   * Crosses the 2805 advance of a folio order against the receivable the
+   * sale booked: one DR 2805 line PER PAYER (the guest may have paid while
+   * the folio is billed to a company) and one CR 1305 to the billed customer.
+   * Amount = settled payments of the order, capped at `total`.
+   */
+  private async crossLodgingAdvance(data: {
+    order_id: number;
+    organization_id: number;
+    store_id: number | undefined;
+    accounting_entity_id?: number;
+    total: number;
+    customer?: AutoEntryThirdParty;
+    source_type: string;
+    source_id: number;
+    reference: string;
+    user_id?: number;
+  }) {
+    const db = this.prisma.withoutScope();
+    const paid = await db.payments.groupBy({
+      by: ['customer_id'],
+      where: { order_id: data.order_id, state: { in: ['succeeded', 'captured'] } },
+      _sum: { amount: true },
+    });
+    let remaining = Number(data.total);
+    const payers: Array<{ customer_id: number | null; amount: number }> = [];
+    for (const row of paid) {
+      const amount = Math.min(Number(row._sum.amount ?? 0), remaining);
+      if (!(amount > 0)) continue;
+      payers.push({ customer_id: row.customer_id, amount });
+      remaining -= amount;
+    }
+    const amount = payers.reduce((sum, p) => sum + p.amount, 0);
+    if (!(amount > 0)) return null;
+
+    const lines = await Promise.all([
+      ...payers.map((payer) =>
+        this.resolveAccountLine(
+          data.organization_id,
+          'lodging.folio_settlement.customer_advance',
+          `Anticipo cruzado ${data.reference}`,
+          payer.amount,
+          0,
+          data.store_id,
+          payer.customer_id
+            ? { id: Number(payer.customer_id), type: 'customer' as const }
+            : undefined,
+        ),
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_settlement.receivable',
+        `Cobro folio ${data.reference}`,
+        0,
+        amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: data.source_type,
+      source_id: data.source_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Cruce de anticipos del folio hotelero - ${data.reference}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.reservation_payment (H6.6): DR Banco → CR Anticipos de Clientes
+   * (2805). The online payment of a reservation (booking engine, Wompi) is a
+   * DIRECT payment of the stay (owner decision D3), booked like a folio
+   * payment with the same mapping keys: it is applied to the folio at
+   * check-out and the folio invoice crosses it (`lodging.folio_settlement`).
+   * `source_id` = `lodging_reservation_payments.id`.
+   */
+  async onLodgingReservationPayment(data: {
+    reservation_payment_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.bank',
+        `Pago en línea reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_payment.customer_advance',
+        `Anticipo reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.reservation_payment',
+      source_id: data.reservation_payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Pago en línea de la reserva ${data.reservation_number}`,
+      lines,
+    });
+  }
+
+  /**
+   * lodging.deposit: DR Caja/Banco → CR Anticipos de Clientes (2805).
+   * A reservation deposit (owner decision D3) is a customer advance held in
+   * the holder's wallet, never revenue: it is applied to the folio (still
+   * 2805, crossed by the folio invoice in H3.7) or retained as a penalty
+   * (`lodging.deposit_retained`). VAT on the advance is pending the
+   * accountant's review (plan risk R5). `source_id` = `lodging_deposits.id`.
+   */
+  async onLodgingDeposit(data: {
+    deposit_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash' ? 'lodging.deposit.cash' : 'lodging.deposit.bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Depósito reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit.customer_advance',
+        `Anticipo reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.deposit',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Depósito de reserva hotelera ${data.reservation_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.deposit_retained: DR Anticipos de Clientes (2805) → CR Ingreso
+   * por penalidad. A cancellation or no-show keeps the deposit up to the
+   * penalty; what is left stays in 2805, owed back to the guest.
+   * `source_id` = the `retained` `lodging_deposits.id`.
+   */
+  async onLodgingDepositRetained(data: {
+    deposit_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.customer_advance',
+        `Anticipo retenido reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.penalty_income',
+        `Penalidad reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.deposit_retained',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Penalidad retenida del depósito ${data.reservation_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.reservation_payment_retained (H6.6): DR Anticipos de Clientes
+   * (2805) → CR Ingreso por penalidad. A reservation paid online is cancelled
+   * or no-show: its web payment (a direct payment, not a deposit, D3) keeps
+   * what the deposit did not cover of the penalty; the rest stays in 2805,
+   * owed back to the guest. Same accounts as the deposit retention.
+   * `source_id` = `lodging_reservation_payments.id`.
+   */
+  async onLodgingReservationPaymentRetained(data: {
+    reservation_payment_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.customer_advance',
+        `Pago en línea retenido reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.penalty_income',
+        `Penalidad reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.reservation_payment_retained',
+      source_id: data.reservation_payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Penalidad retenida del pago en línea ${data.reservation_number}`,
       lines,
       user_id: data.user_id,
     });

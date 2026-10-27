@@ -17,6 +17,7 @@ import { CurrencyPipe } from '../../../../../../app/shared/pipes/currency';
 import { translateCustomerError } from '../utils/customer-error.translator';
 import { getDocumentTypeLabel } from '../../../../../shared/constants/document-types';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   CardComponent,
   ButtonComponent,
@@ -290,8 +291,21 @@ import {
           </div>
         }
     
-        <!-- Consultation History -->
-        @if (bookingHistory().length > 0) {
+        <!-- Hospitality (Hotelería) — placeholder until stays land -->
+        @if (customer() && !loadingCustomer() && showHospitalitySection()) {
+          <app-card>
+            <h3 class="font-bold text-base flex items-center gap-2 mb-2" style="color: var(--color-text)">
+              <app-icon name="bed-double" [size]="18"></app-icon>
+              Hotelería
+            </h3>
+            <p class="text-sm" style="color: var(--color-text-secondary)">
+              Aquí verás las estadías de este huésped.
+            </p>
+          </app-card>
+        }
+
+        <!-- Consultation History (service industry) -->
+        @if (showConsultationHistory() && bookingHistory().length > 0) {
           <div class="card p-4" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.75rem">
             <div class="flex items-center justify-between mb-4">
               <h3 class="font-bold text-base flex items-center gap-2" style="color: var(--color-text)">
@@ -773,6 +787,14 @@ export class CustomerDetailsComponent {
   private http = inject(HttpClient);
   private fb = inject(FormBuilder);
   private customersService = inject(CustomersService);
+  private authFacade = inject(AuthFacade);
+
+  // Industry sections: the profile only shows sections of the store's active
+  // industries (settings → login → [] cascade in AuthFacade).
+  showHospitalitySection = this.authFacade.isHospitality;
+  showConsultationHistory = computed(() =>
+    this.authFacade.storeIndustries().includes('service'),
+  );
 
   // Metadata & History signals
   customerMetadata = signal<any[]>([]);
@@ -797,12 +819,12 @@ export class CustomerDetailsComponent {
   walletError = signal<string | null>(null);
   topUpError = signal<string | null>(null);
 
-  // Deep-link to the member profile (Membership Suite). Only meaningful for
-  // `gym`/`service`-industry stores; the destination page is gated by the
+  // Deep-link to the member profile (Membership Suite). Only shown for
+  // `gym`-industry stores; the destination page is also gated by the
   // store:memberships:read permission and the memberships panel_ui
   // visibility.
   gymProfileActions = computed<StickyHeaderActionButton[]>(() =>
-    this.customerId() != null
+    this.customerId() != null && this.authFacade.isGym()
       ? [
           {
             id: 'gym-profile',

@@ -190,7 +190,7 @@ interface AvailableNote {
                         </p>
                       }
                       <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                        Si el encargado es usuario del sistema, solo él podrá despachar la ruta y se compartirá su ubicación en tiempo real mientras esté en curso. Si es externo, cualquiera con permiso puede despachar y no hay rastreo.
+                        Cualquier usuario con permiso puede despachar la ruta. Si el encargado es usuario del sistema y la despacha él mismo, se compartirá su ubicación en tiempo real mientras esté en curso; si la despacha otra persona, el rastreo inicia cuando el encargado sincronice su ubicación desde la ruta. Si es externo, no hay rastreo.
                       </p>
                     </div>
                     <div>

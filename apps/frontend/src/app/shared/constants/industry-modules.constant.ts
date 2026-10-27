@@ -5,6 +5,7 @@ export const STORE_INDUSTRIES = [
   'service',
   'gym',
   'construction',
+  'hospitality',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -65,6 +66,12 @@ export const INDUSTRY_METADATA: Record<StoreIndustry, IndustryMeta> = {
     description: 'Obras, contratos y AIU',
     icon: 'building-2',
   },
+  hospitality: {
+    value: 'hospitality',
+    label: 'Hotelería',
+    description: 'Habitaciones, reservas y recepción',
+    icon: 'hotel',
+  },
 };
 
 /**
@@ -120,9 +127,20 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * `ConstructionIndustryGuard` (403 CONTRACT_INDUSTRY_001) — this map is UX
  * only. The sidebar entry and page land with C.2; the key is registered here
  * first so the rule exists before the first contracts endpoint does.
+ *
+ * Hospitality Suite (H0.1): the `hospitality` parent and its submodules
+ * (`hospitality_rooms`, `hospitality_reservations`, `hospitality_rates`) are visible ⟺ the store's industry includes
+ * `hospitality`. Every other industry lists them as hidden. A hotel with a
+ * restaurant (`['hospitality','restaurant']`) sees both "Hotelería" and the
+ * restaurant suite ("Mesas") because each half of the intersection keeps
+ * its own suite visible.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   retail: [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
     'restaurant_ops',
     'memberships',
     'orders_reservations',
@@ -130,6 +148,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_contracts',
   ],
   restaurant: [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
     'memberships',
     'orders_reservations',
     'orders_service_stations',
@@ -143,6 +165,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
   ],
   manufacturing: [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
     'restaurant_ops',
     'memberships',
     'orders_reservations',
@@ -157,6 +183,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
   ],
   service: [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
     'restaurant_ops',
     'memberships',
     'orders_contracts',
@@ -169,6 +199,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
   ],
   gym: [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
     'restaurant_ops',
     'orders_reservations',
     'orders_service_stations',
@@ -200,6 +234,31 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'memberships',
     'orders_reservations',
     'orders_service_stations',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
+  ],
+  // Hotelería (H0.1): un hotel opera habitaciones, reservas de estadía,
+  // recepción y folio — no la agenda de citas (`orders_reservations`), ni
+  // contratos de obra, ni membresías, ni flota de reparto. Restaurante y citas
+  // se destapan sumando `restaurant` o `service` a las industrias de la tienda.
+  hospitality: [
+    // `hospitality` / `hospitality_rooms` are INTENTIONALLY absent here: the
+    // lodging suite is visible ⟺ the store includes `hospitality`. Every
+    // other industry lists them, so the OR-semantics intersection keeps them
+    // visible exactly for hospitality (solo o multi-industria).
+    'restaurant_ops',
+    'memberships',
+    'orders_reservations',
+    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',

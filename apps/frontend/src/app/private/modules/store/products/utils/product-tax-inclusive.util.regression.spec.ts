@@ -182,13 +182,23 @@ describe('product-tax-inclusive.util — hidratación y precedencia (A.5)', () =
           ids: [19],
           [BULK_TAX_INCLUSIVE_CONTROL]: { '19': true, '8': true },
         }),
-      ).toEqual({ mode: 'add', ids: [19], inclusive: { '19': true } });
+      ).toEqual({ mode: 'add', ids: [19], tax_inclusive_map: { '19': true } });
     });
 
-    it('sin entradas efectivas no emite la clave inclusive', () => {
+    it('sin entradas efectivas no emite tax_inclusive_map', () => {
       expect(
         coerceBulkTaxAction({ mode: 'add', ids: [19], inclusive: {} }),
       ).toEqual({ mode: 'add', ids: [19] });
+    });
+
+    it('REMOVE nunca emite tax_inclusive_map (el backend lo rechaza)', () => {
+      expect(
+        coerceBulkTaxAction({
+          mode: 'remove',
+          ids: [19],
+          [BULK_TAX_INCLUSIVE_CONTROL]: { '19': true },
+        }),
+      ).toEqual({ mode: 'remove', ids: [19] });
     });
 
     it('modo inválido ⇒ undefined (nada que mandar)', () => {

@@ -204,6 +204,11 @@ model users {
   // Bookings
   bookings_as_customer            bookings[]                    @relation("bookings_customer")
   bookings_created                bookings[]                    @relation("bookings_created_by")
+  lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
+  lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
+  lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
+  lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
+  lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
@@ -1065,6 +1070,27 @@ model stores {
 
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers                    price_tiers[]
+  lodging_unit_types             lodging_unit_types[]
+  lodging_units                  lodging_units[]
+  lodging_reservations           lodging_reservations[]
+  lodging_reservation_rooms      lodging_reservation_rooms[]
+  lodging_reservation_events     lodging_reservation_events[]
+  lodging_room_nights            lodging_room_nights[]
+  lodging_rate_plans             lodging_rate_plans[]
+  lodging_rate_prices            lodging_rate_prices[]
+  lodging_seasons                lodging_seasons[]
+  lodging_restrictions           lodging_restrictions[]
+  lodging_cancellation_policies  lodging_cancellation_policies[]
+  lodging_allotments             lodging_allotments[]
+  lodging_guests                 lodging_guests[]
+  lodging_folios                 lodging_folios[]
+  lodging_deposits               lodging_deposits[]
+  lodging_room_charges           lodging_room_charges[]
+  lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
+  lodging_inventory_blocks       lodging_inventory_blocks[]
+  lodging_ical_imports           lodging_ical_imports[]
+  lodging_reservation_payments   lodging_reservation_payments[]
+  lodging_night_audits           lodging_night_audits[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -1419,6 +1445,8 @@ model order_item_taxes {
 
 model order_items {
   financial_lines order_financial_lines[]
+  // H3.4 — hotel night this line charges (folio).
+  lodging_room_night lodging_room_nights?
   id                               Int                      @id @default(autoincrement())
   service_session_id               Int?
   order_id                         Int
@@ -1762,6 +1790,10 @@ model orders {
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions  table_sessions[]
+  // Hospitality Suite (H3.2) — the draft order of a guest folio.
+  lodging_folio   lodging_folios?
+  // Hospitality Suite (H3.6) — POS sale or table bill charged to a room.
+  lodging_room_charge lodging_room_charges?
   kitchen_tickets kitchen_tickets[]
 
   // Dispatch (remisión) back-relation
@@ -1892,6 +1924,8 @@ model payments {
   bank_account            bank_accounts?            @relation(fields: [bank_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
+  // Hospitality Suite (H3.5) — the deposit applied to a folio with this payment.
+  lodging_deposit         lodging_deposits?
 
   @@index([gateway_reference])
   @@index([order_id])
@@ -2211,6 +2245,7 @@ model products {
   /// COMPONENTE excluido de la receta de otro plato.
   excluded_in_order_items   order_item_exclusions[]          @relation("order_item_exclusion_component")
   excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
+  lodging_unit_type         lodging_unit_types?
 
   /// Unicidad de slug, sku y barcode POR TIENDA y SOLO entre productos no
   /// archivados (borrar = archivar; el archivado libera sus identificadores).
@@ -2315,6 +2350,677 @@ model price_tiers {
   @@unique([store_id, name])
   @@index([store_id, is_active])
   @@index([store_id, kind, is_active])
+}
+
+// Hospitality Suite (H0.2) — room type of a hotel store. Each type owns a
+// service product ("Noche – {name}") that carries its base price and tax, so
+// nights are sold and invoiced through the existing product/order engine.
+model lodging_unit_types {
+  id                    Int       @id @default(autoincrement())
+  store_id              Int
+  product_id            Int       @unique
+  /// Also unique per store case-insensitive via
+  /// `lodging_unit_types_store_id_lower_name_key` ON (store_id, lower(name)).
+  name                  String    @db.VarChar(120)
+  code                  String?   @db.VarChar(30)
+  description           String?   @db.Text
+  base_occupancy        Int       @default(1)
+  max_adults            Int
+  max_children          Int       @default(0)
+  max_occupancy         Int
+  // Free-text bed layout shown to staff and guests ("1 doble + 1 sencilla").
+  bed_config            String?   @db.VarChar(255)
+  // H0.4 — ordered S3 keys of the photos (signed on read) and amenity codes
+  // from the lodging amenities catalog.
+  images                String[]  @default([])
+  amenities             String[]  @default([])
+  overbooking_allowance Int       @default(0)
+  sort_order            Int       @default(0)
+  is_active             Boolean   @default(true)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product products @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  units   lodging_units[]
+  reservation_rooms lodging_reservation_rooms[]
+  room_nights       lodging_room_nights[]
+  rate_prices       lodging_rate_prices[]
+  restrictions      lodging_restrictions[]
+  allotments        lodging_allotments[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+}
+
+// Hospitality Suite (H0.3) — housekeeping state of a physical room.
+enum lodging_housekeeping_status_enum {
+  clean
+  dirty
+  inspected
+  out_of_order
+  out_of_service
+}
+
+// Hospitality Suite (H0.3) — physical room (101, Cabaña 1) of a room type.
+// Active units are the sellable inventory of their type.
+model lodging_units {
+  id                  Int                              @id @default(autoincrement())
+  store_id            Int
+  unit_type_id        Int
+  /// Also unique per store case-insensitive via
+  /// `lodging_units_store_id_lower_code_key` ON (store_id, lower(code)).
+  code                String                           @db.VarChar(30)
+  floor               String?                          @db.VarChar(30)
+  zone                String?                          @db.VarChar(60)
+  housekeeping_status lodging_housekeeping_status_enum @default(clean)
+  is_active           Boolean                          @default(true)
+  // H6.1 — secret of the public iCal export URL; null = no feed. Rotating it
+  // revokes the URL already pasted on Airbnb/Booking.
+  ical_export_token   String?                          @unique @db.VarChar(64)
+  created_at          DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_rooms lodging_reservation_rooms[]
+  room_nights       lodging_room_nights[]
+  housekeeping_tasks lodging_housekeeping_tasks[]
+  inventory_blocks   lodging_inventory_blocks[]
+  ical_imports       lodging_ical_imports[]
+
+  @@unique([store_id, code])
+  @@index([unit_type_id, is_active])
+}
+
+// Hospitality Suite (H5.2) — kind of housekeeping task of a room for a day.
+enum lodging_housekeeping_task_type_enum {
+  checkout_clean
+  stayover
+  inspection
+  maintenance
+}
+
+enum lodging_housekeeping_task_status_enum {
+  pending
+  done
+}
+
+// Hospitality Suite (H5.2) — room task of the day, generated from the stays
+// (departures → checkout_clean, in house → stayover) and assigned by the
+// head housekeeper to a housekeeper, who marks it done from her phone.
+model lodging_housekeeping_tasks {
+  id                   Int                                   @id @default(autoincrement())
+  store_id             Int
+  unit_id              Int
+  task_date            DateTime                              @db.Date
+  type                 lodging_housekeeping_task_type_enum
+  status               lodging_housekeeping_task_status_enum @default(pending)
+  assigned_user_id     Int?
+  notes                String?                               @db.VarChar(500)
+  completed_at         DateTime?                             @db.Timestamp(6)
+  completed_by_user_id Int?
+  created_at           DateTime?                             @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                             @default(now()) @db.Timestamp(6)
+
+  store stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit  lodging_units @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, unit_id, task_date, type])
+  @@index([store_id, task_date, assigned_user_id])
+}
+
+// Hospitality Suite (H5.3) — why a room is blocked without a reservation.
+// `ical` is reserved for the iCal import (H6.2).
+enum lodging_inventory_block_reason_enum {
+  maintenance
+  owner_use
+  ical
+}
+
+// Hospitality Suite (H5.3) — room taken out of sale for the nights
+// [from_date, to_date) without a reservation (maintenance, owner use). It
+// lowers the type availability while active; releasing it (released_at)
+// returns the room to sale.
+// Hospitality Suite (H7.1) — night audit: one row per closed business day.
+// `status` closed freezes the day (no night of that date is posted or voided);
+// reopened (with permission and a reason) unfreezes it until it closes again.
+// `summary` is the snapshot shown by "Cerrar día" at closing time.
+model lodging_night_audits {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  business_date       DateTime  @db.Date
+  status              String    @default("closed") @db.VarChar(20)
+  summary             Json
+  closed_by_user_id   Int?
+  closed_at           DateTime  @db.Timestamp(6)
+  reopened_by_user_id Int?
+  reopened_at         DateTime? @db.Timestamp(6)
+  reopen_reason       String?   @db.VarChar(500)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, business_date])
+}
+
+model lodging_inventory_blocks {
+  id                  Int                                 @id @default(autoincrement())
+  store_id            Int
+  unit_id             Int
+  from_date           DateTime                            @db.Date
+  to_date             DateTime                            @db.Date
+  reason              lodging_inventory_block_reason_enum @default(maintenance)
+  notes               String?                             @db.VarChar(500)
+  created_by_user_id  Int?
+  released_at         DateTime?                           @db.Timestamp(6)
+  released_by_user_id Int?
+  // H6.2 — set on blocks created by an iCal import: the source and the event
+  // UID of the channel (the sync diff key).
+  ical_import_id      Int?
+  external_uid        String?                             @db.VarChar(255)
+  created_at          DateTime?                           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                           @default(now()) @db.Timestamp(6)
+
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit        lodging_units         @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ical_import lodging_ical_imports? @relation(fields: [ical_import_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, unit_id, from_date, to_date])
+  @@index([ical_import_id, external_uid])
+}
+
+/// Hospitality Suite (H6.2) — an external calendar (Airbnb, Booking...) whose
+/// events block one room in Vendix. Synced every few minutes and on demand.
+model lodging_ical_imports {
+  id                 Int       @id @default(autoincrement())
+  store_id           Int
+  unit_id            Int
+  /// Channel label shown on the rack blocks ("Airbnb").
+  name               String    @db.VarChar(60)
+  url                String    @db.VarChar(2000)
+  is_active          Boolean   @default(true)
+  last_synced_at     DateTime? @db.Timestamp(6)
+  /// ok | warning (synced, possible double sale) | error (feed not read).
+  last_sync_status   String?   @db.VarChar(10)
+  last_sync_message  String?   @db.VarChar(500)
+  last_sync_events   Int?
+  created_by_user_id Int?
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  store  stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit   lodging_units              @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  blocks lodging_inventory_blocks[]
+
+  @@index([store_id, is_active])
+  @@index([unit_id])
+}
+
+// Hospitality Suite (H1.1) — lifecycle of a lodging reservation.
+enum lodging_reservation_status_enum {
+  tentative
+  confirmed
+  checked_in
+  checked_out
+  cancelled
+  no_show
+}
+
+// Hospitality Suite (H1.1) — stay reservation of a hotel store: header with
+// the holder (customer) and the stay dates. Departure is exclusive: a stay
+// from the 10th to the 13th occupies the nights of the 10th, 11th and 12th.
+model lodging_reservations {
+  id                 Int                             @id @default(autoincrement())
+  store_id           Int
+  reservation_number String                          @db.VarChar(20)
+  status             lodging_reservation_status_enum @default(confirmed)
+  arrival_date       DateTime                        @db.Date
+  departure_date     DateTime                        @db.Date
+  customer_id        Int
+  total_amount       Decimal                         @default(0) @db.Decimal(14, 2)
+  notes              String?                         @db.Text
+  // H2.4 — penalty computed when cancelled or no-show (charged in H3.5).
+  cancellation_penalty_amount Decimal?               @db.Decimal(14, 2)
+  cancellation_penalty_detail String?                @db.VarChar(200)
+  // H6.6 — web booking: a tentative reservation is held until it is paid or
+  // this moment passes (then the hold job cancels it). Null = not a web hold.
+  hold_expires_at    DateTime?                       @db.Timestamp(6)
+  created_by_user_id Int?
+  created_at         DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer   users                       @relation("lodging_reservations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by users?                      @relation("lodging_reservations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rooms      lodging_reservation_rooms[]
+  events     lodging_reservation_events[]
+  guests     lodging_guests[]
+  folio      lodging_folios?
+  deposits   lodging_deposits[]
+  online_payments lodging_reservation_payments[]
+
+  @@unique([store_id, reservation_number])
+  @@index([status, hold_expires_at])
+  @@index([store_id, arrival_date])
+  @@index([customer_id])
+}
+
+// Hospitality Suite (H1.2) — status history of a reservation: one row per
+// change (creation included), with the reason and who made it. `user_id` is
+// null for automatic changes (no-show job).
+model lodging_reservation_events {
+  id             Int                              @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  from_status    lodging_reservation_status_enum?
+  to_status      lodging_reservation_status_enum
+  reason         String?                          @db.VarChar(500)
+  user_id        Int?
+  created_at     DateTime?                        @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user        users?               @relation("lodging_reservation_events_user", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([reservation_id])
+}
+
+// Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
+// the physical room once assigned, and the occupancy. A reservation holds one
+// or more rooms (H1.5, groups and families under one holder).
+model lodging_reservation_rooms {
+  id             Int       @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  unit_type_id   Int
+  unit_id        Int?
+  arrival_date   DateTime  @db.Date
+  departure_date DateTime  @db.Date
+  adults         Int       @default(1)
+  children       Int       @default(0)
+  total_amount   Decimal   @default(0) @db.Decimal(14, 2)
+  // H1.5 — one room of a multi-room reservation cancelled alone; null = active.
+  cancelled_at   DateTime? @db.Timestamp(6)
+  // H2.1 — plan the room was sold with; null = room type base price.
+  rate_plan_id   Int?
+  // H2.4 — plan cancellation policy and deposit when sold; later edits never change them.
+  cancellation_policy_snapshot Json?
+  deposit_percent              Decimal   @default(0) @db.Decimal(5, 2)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations  @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type   lodging_unit_types    @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit        lodging_units?        @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  nights      lodging_room_nights[]
+  guests      lodging_guests[]
+
+  @@index([reservation_id])
+  @@index([unit_type_id])
+  @@index([rate_plan_id])
+}
+
+// Hospitality Suite (H3.1) — guest register: the holder and each companion
+// of a reservation, by room, with the fields the TRA (Res. 409/2022 art. 7)
+// and, for foreigners, the SIRE ask. Personal data (Ley 1581): no document
+// photo; `data_consent_at` records that the data notice was shown and
+// accepted. `customer_id` links the guest to an existing customer profile.
+model lodging_guests {
+  id                       Int                      @id @default(autoincrement())
+  store_id                 Int
+  reservation_id           Int
+  reservation_room_id      Int?
+  customer_id              Int?
+  is_primary               Boolean                  @default(false)
+  document_type            identification_type_enum
+  document_number          String                   @db.VarChar(50)
+  first_name               String                   @db.VarChar(100)
+  last_name                String                   @db.VarChar(100)
+  nationality_country_code String                   @db.Char(2)
+  birth_date               DateTime?                @db.Date
+  residence_city           String                   @db.VarChar(120)
+  origin_city              String                   @db.VarChar(120)
+  travel_purpose           String                   @db.VarChar(40)
+  // PIP/TP/PT stamp of a foreign visitor (IVA exemption support, H3.9).
+  entry_permit_type        String?                  @db.VarChar(20)
+  is_non_resident          Boolean                  @default(false)
+  // H3.9 — "No residente – exento de IVA" applied to the folio nights.
+  vat_exempt_at            DateTime?                @db.Timestamp(6)
+  vat_exempt_by_user_id    Int?
+  data_consent_at          DateTime                 @db.Timestamp(6)
+  created_at               DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                @default(now()) @db.Timestamp(6)
+
+  store       stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  room        lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  customer    users?                     @relation("lodging_guests_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([reservation_id, document_type, document_number])
+  @@index([store_id])
+  @@index([reservation_room_id])
+  @@index([customer_id])
+}
+
+enum lodging_deposit_kind_enum {
+  received
+  applied
+  retained
+}
+
+enum lodging_deposit_status_enum {
+  pending
+  completed
+  cancelled
+}
+
+// Hospitality Suite (H3.5) — deposit ledger of a reservation (owner decision
+// D3: a deposit is a customer advance kept in the holder's wallet, never a
+// folio payment). `received` credits the wallet (cash/card/transfer at the
+// desk, or a Wompi link that stays `pending` until paid); `applied` debits it
+// into a folio payment ("Anticipo aplicado"); `retained` debits it as the
+// cancellation/no-show penalty. Balance = received - applied - retained.
+model lodging_deposits {
+  id                      Int                         @id @default(autoincrement())
+  store_id                Int
+  reservation_id          Int
+  kind                    lodging_deposit_kind_enum
+  status                  lodging_deposit_status_enum @default(completed)
+  amount                  Decimal                     @db.Decimal(14, 2)
+  method                  String?                     @db.VarChar(30)
+  store_payment_method_id Int?
+  payment_link_id         Int?                        @unique
+  wallet_transaction_id   Int?                        @unique
+  payment_id              Int?                        @unique
+  request_id              String?                     @db.VarChar(64)
+  created_by_user_id      Int?
+  created_at              DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                   @default(now()) @db.Timestamp(6)
+
+  store              stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation        lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_link       payment_links?       @relation(fields: [payment_link_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  wallet_transaction wallet_transactions? @relation(fields: [wallet_transaction_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment            payments?            @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, request_id])
+  @@index([reservation_id])
+}
+
+enum lodging_reservation_payment_status_enum {
+  pending
+  completed
+  cancelled
+}
+
+// Hospitality Suite (H6.6) — direct payment of a reservation made online
+// (booking engine, Wompi payment link). Owner decision D3: a reservation
+// PAYMENT is not a deposit, so it never touches the wallet nor
+// `lodging_deposits`. Booked DR bank / CR 2805 when Wompi confirms it, and
+// applied to the folio at check-out as a folio payment (`applied_amount`).
+model lodging_reservation_payments {
+  id              Int                                     @id @default(autoincrement())
+  store_id        Int
+  reservation_id  Int
+  status          lodging_reservation_payment_status_enum @default(pending)
+  amount          Decimal                                 @db.Decimal(14, 2)
+  applied_amount  Decimal                                 @default(0) @db.Decimal(14, 2)
+  // Kept as a cancellation / no-show penalty; amount - applied - retained is owed back.
+  retained_amount Decimal                                 @default(0) @db.Decimal(14, 2)
+  method          String                                  @db.VarChar(30)
+  payment_link_id Int?                                    @unique
+  transaction_id  String?                                 @db.VarChar(255)
+  paid_at         DateTime?                               @db.Timestamp(6)
+  created_at      DateTime?                               @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?                               @default(now()) @db.Timestamp(6)
+
+  store        stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation  lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_link payment_links?       @relation(fields: [payment_link_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([reservation_id])
+}
+
+enum lodging_folio_status_enum {
+  open
+  closed
+}
+
+// Hospitality Suite (H3.2) — guest folio opened at check-in: the running
+// account of a stay. Same pattern as `table_sessions`: the charges live in a
+// `draft` POS order (1:1) of the reservation holder.
+model lodging_folios {
+  id             Int                       @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int                       @unique
+  order_id       Int                       @unique
+  status         lodging_folio_status_enum @default(open)
+  opened_at      DateTime                  @default(now()) @db.Timestamp(6)
+  closed_at      DateTime?                 @db.Timestamp(6)
+  // H3.6 — "Cargos bloqueados": POS and tables cannot charge this room.
+  charges_blocked Boolean                  @default(false)
+  // H3.7 / D11 — review of the folio before its invoice, at `verified_total`.
+  verified_at         DateTime?            @db.Timestamp(6)
+  verified_by_user_id Int?
+  verified_total      Decimal?             @db.Decimal(14, 2)
+  closed_by_user_id   Int?
+  created_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
+
+  store        stores                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation  lodging_reservations   @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order        orders                 @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  room_charges lodging_room_charges[]
+
+  @@index([store_id, status])
+}
+
+// Hospitality Suite (H3.6) — a POS sale or table bill charged to an in-house
+// room. Its lines moved to the folio order (`item_ids`) and the source order
+// was cancelled without payment; the folio invoice (H3.7) bills them once.
+// `cost_amount` is the stock cost the transfer committed (COGS for H3.7).
+model lodging_room_charges {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  folio_id            Int
+  reservation_room_id Int
+  source_order_id     Int       @unique
+  table_session_id    Int?
+  origin              String    @db.VarChar(80)
+  item_ids            Int[]
+  amount              Decimal   @db.Decimal(14, 2)
+  cost_amount         Decimal   @default(0) @db.Decimal(14, 2)
+  created_by_user_id  Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  folio        lodging_folios @relation(fields: [folio_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  source_order orders         @relation(fields: [source_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([folio_id])
+}
+
+// Hospitality Suite (H2.1) — rate plan of a hotel store ("Solo alojamiento",
+// "Con desayuno"). A partial unique index (migration only) keeps one default
+// plan per store; the default is preselected when booking.
+model lodging_rate_plans {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  name       String    @db.VarChar(120)
+  code       String?   @db.VarChar(30)
+  // room_only | breakfast | half_board | full_board | all_inclusive
+  meal_plan  String    @default("room_only") @db.VarChar(30)
+  is_default Boolean   @default(false)
+  is_active  Boolean   @default(true)
+  sort_order Int       @default(0)
+  // H2.4 — cancellation policy and deposit (% of the stay) asked when booking.
+  cancellation_policy_id Int?
+  deposit_percent        Decimal   @default(0) @db.Decimal(5, 2)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cancellation_policy lodging_cancellation_policies? @relation(fields: [cancellation_policy_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  prices            lodging_rate_prices[]
+  reservation_rooms lodging_reservation_rooms[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+  @@index([cancellation_policy_id])
+}
+
+/// Hospitality Suite (H2.4) — cancellation policy of a rate plan.
+/// `rules`: [{ hours_before, penalty_type: nights|percent, penalty_value }];
+/// `no_show_penalty`: { penalty_type, penalty_value } or null (free).
+model lodging_cancellation_policies {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  name            String    @db.VarChar(120)
+  rules           Json      @default("[]")
+  no_show_penalty Json?
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  store      stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_plans lodging_rate_plans[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+}
+
+// Hospitality Suite (H2.5) — rooms of a type held for an agency or company
+// (`customer_id`) on the nights from_date..to_date (to_date included). Rooms
+// the customer has not booked stay out of public sale until `release_days`
+// before each night, then return to the public (computed in the store's time
+// zone, see lodging-allotment-holds).
+model lodging_allotments {
+  id           Int       @id @default(autoincrement())
+  store_id     Int
+  customer_id  Int
+  unit_type_id Int
+  from_date    DateTime  @db.Date
+  to_date      DateTime  @db.Date
+  rooms        Int
+  release_days Int       @default(7)
+  notes        String?   @db.VarChar(500)
+  is_active    Boolean   @default(true)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer  users              @relation("lodging_allotments_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, is_active, from_date, to_date])
+  @@index([unit_type_id, is_active])
+  @@index([customer_id])
+}
+
+// Hospitality Suite (H2.1) — nightly price of a room type in a plan.
+// `day_of_week` null = base price of every night; 0 (Sunday) .. 6 (Saturday)
+// overrides that weekday. Partial unique indexes (migration only) allow one
+// base row and one row per weekday for each plan × type.
+model lodging_rate_prices {
+  id           Int       @id @default(autoincrement())
+  store_id     Int
+  rate_plan_id Int
+  unit_type_id Int
+  day_of_week  Int?      @db.SmallInt
+  // H2.2: null = regular price; set = price inside that season.
+  season_id    Int?
+  price        Decimal   @db.Decimal(14, 2)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_plan lodging_rate_plans @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  season    lodging_seasons?   @relation(fields: [season_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([rate_plan_id, unit_type_id])
+  @@index([unit_type_id])
+  @@index([season_id])
+}
+
+// Hospitality Suite (H2.2) — demand seasons ("Alta: 15-dic al 15-ene").
+// `to_date` is the last night inside the season. Plans price a season per
+// room type; when two active seasons overlap, the higher `priority` wins.
+model lodging_seasons {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  name       String    @db.VarChar(80)
+  from_date  DateTime  @db.Date
+  to_date    DateTime  @db.Date
+  priority   Int       @default(0)
+  // Calendar color, #RRGGBB.
+  color      String    @default("#F59E0B") @db.VarChar(7)
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_prices lodging_rate_prices[]
+
+  @@unique([store_id, name])
+  @@index([store_id, from_date, to_date])
+}
+
+// Hospitality Suite (H2.3) — stay restrictions of one night (`date`): minimum
+// and maximum stay for arrivals that night, closed to arrival or departure,
+// and stop-sell. `unit_type_id` null = every room type. One row per store,
+// date and scope (partial unique indexes in the migration).
+model lodging_restrictions {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  unit_type_id        Int?
+  date                DateTime  @db.Date
+  min_stay            Int?
+  max_stay            Int?
+  closed_to_arrival   Boolean   @default(false)
+  closed_to_departure Boolean   @default(false)
+  stop_sell           Boolean   @default(false)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types? @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, date])
+  @@index([unit_type_id])
+}
+
+// Hospitality Suite (H1.1) — sellable inventory per night. Availability of a
+// room type on a night = its active rooms - its active nights. A partial
+// unique index (migration only, Prisma cannot express it) on
+// (unit_id, night_date) WHERE unit_id IS NOT NULL AND is_active keeps a
+// physical room from being assigned twice the same night.
+model lodging_room_nights {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  reservation_room_id Int
+  unit_type_id        Int
+  unit_id             Int?
+  night_date          DateTime  @db.Date
+  rate_amount         Decimal   @db.Decimal(14, 2)
+  is_active           Boolean   @default(true)
+  // H3.4 — folio line that charged this night; null = not posted yet.
+  posted_order_item_id Int?     @unique
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room  lodging_reservation_rooms @relation(fields: [reservation_room_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type         lodging_unit_types        @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit              lodging_units?            @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  posted_order_item order_items?              @relation(fields: [posted_order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([unit_type_id, night_date, is_active])
+  @@index([reservation_room_id])
 }
 
 model product_price_tier_overrides {
@@ -4555,6 +5261,7 @@ enum industry_enum {
   service
   gym
   construction
+  hospitality
 }
 
 enum crm_generation_status_enum {
@@ -10136,6 +10843,8 @@ model wallet_transactions {
   created_at     DateTime                      @default(now()) @db.Timestamp(6)
 
   wallet wallets @relation(fields: [wallet_id], references: [id])
+  // Hospitality Suite (H3.5) — the deposit movement behind this wallet row.
+  lodging_deposit lodging_deposits?
 
   @@index([wallet_id, created_at])
   @@index([reference_type, reference_id])
@@ -10293,6 +11002,10 @@ model payment_links {
 
   stores stores  @relation(fields: [store_id], references: [id], onDelete: Cascade)
   orders orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  // Hospitality Suite (H3.5) — the reservation deposit this link collects.
+  lodging_deposit  lodging_deposits?
+  // Hospitality Suite (H6.6) — the online reservation payment this link collects.
+  lodging_reservation_payment lodging_reservation_payments?
 
   @@index([store_id, status])
   @@index([store_id, created_at])

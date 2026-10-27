@@ -353,6 +353,8 @@ import {
   Mic,
   Video,
   Clapperboard,
+  Hotel,
+  BedDouble,
 } from 'lucide-angular';
 
 /**
@@ -363,6 +365,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   dumbbell: Dumbbell,
   'door-open': DoorOpen,
   'key-round': KeyRound,
+  // Hospitality Suite (H0.1) icons
+  hotel: Hotel,
+  'bed-double': BedDouble,
   // Video library icons
   video: Video,
   clapperboard: Clapperboard,

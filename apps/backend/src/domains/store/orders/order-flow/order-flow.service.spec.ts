@@ -3970,6 +3970,18 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
   });
 
+  it('rechaza cancelar el draft de un folio hotelero abierto, sin escribir', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      ...cancelableOrder([]), state: 'draft', order_items: [], lodging_folio: { id: 40 },
+    });
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_STATUS_001',
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
+  });
+
   it('pago succeeded en efectivo: registra el egreso por el monto exacto', async () => {
     jest
       .spyOn(service as any, 'getOrder')

@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
 import { WompiClientFactory } from '../payments/processors/wompi/wompi.factory';
@@ -16,6 +17,7 @@ export class PaymentLinksService {
     private readonly response: ResponseService,
     private readonly wompiClientFactory: WompiClientFactory,
     private readonly paymentEncryption: PaymentEncryptionService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private async getWompiConfig(): Promise<Record<string, any>> {
@@ -201,6 +203,15 @@ export class PaymentLinksService {
     });
 
     this.logger.log(`Payment link ${wompiLinkId} marked as paid`);
+
+    // Consumers settle what the link collects (e.g. a hotel deposit, H3.5).
+    // Emitted on every confirmation: listeners are idempotent, so a repeated
+    // webhook heals a consumer that failed the first time.
+    this.eventEmitter.emit('payment_link.paid', {
+      payment_link_id: link.id,
+      store_id: link.store_id,
+      transaction_id: transactionData?.id ?? null,
+    });
   }
 
   private async checkExpiredLinks(): Promise<void> {

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { DefaultPanelUIService } from './default-panel-ui.service';
 import { UserRoleAssignmentService } from './user-role-assignment.service';
+import { applyRolePanelPreset } from '../constants/lodging-roles.constant';
 import { VendixHttpException, ErrorCodes } from '../errors';
 import { emailEquals } from '../utils/email.util';
 
@@ -292,8 +293,11 @@ export class StaffProvisioningService {
         });
       }
     } else {
-      const defaultConfig =
-        await this.defaultPanelUIService.generatePanelUI(appType);
+      // Hotel roles (H0.5) start with only their workflow modules visible.
+      const defaultConfig = applyRolePanelPreset(
+        await this.defaultPanelUIService.generatePanelUI(appType),
+        roleName,
+      );
       await db.user_settings.create({
         data: {
           user_id: userId,

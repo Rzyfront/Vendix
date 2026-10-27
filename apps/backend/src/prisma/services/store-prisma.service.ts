@@ -149,6 +149,44 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_payments',
     'subscription_events',
     'price_tiers',
+    // Hospitality Suite (H0.2)
+    'lodging_unit_types',
+    'lodging_units',
+    // Hospitality Suite (H1.1)
+    'lodging_reservations',
+    'lodging_reservation_rooms',
+    'lodging_room_nights',
+    // Hospitality Suite (H1.2)
+    'lodging_reservation_events',
+    // Hospitality Suite (H2.1)
+    'lodging_rate_plans',
+    'lodging_rate_prices',
+    // Hospitality Suite (H2.2)
+    'lodging_seasons',
+    // Hospitality Suite (H2.3)
+    'lodging_restrictions',
+    // Hospitality Suite (H2.4)
+    'lodging_cancellation_policies',
+    // Hospitality Suite (H2.5)
+    'lodging_allotments',
+    // Hospitality Suite (H3.1)
+    'lodging_guests',
+    // Hospitality Suite (H3.2)
+    'lodging_folios',
+    // Hospitality Suite (H3.5)
+    'lodging_deposits',
+    // Hospitality Suite (H3.6)
+    'lodging_room_charges',
+    // Hospitality Suite (H5.2)
+    'lodging_housekeeping_tasks',
+    // Hospitality Suite (H5.3)
+    'lodging_inventory_blocks',
+    // Hospitality Suite (H6.2)
+    'lodging_ical_imports',
+    // H6.6 — online payments of web bookings.
+    'lodging_reservation_payments',
+    // Hospitality Suite (H7.1)
+    'lodging_night_audits',
     // ===== Restaurant Suite Foundation (Fase A) =====
     // Only the 8 models that carry a direct store_id column use direct-store
     // scoping. The 3 child tables (recipe_items, kitchen_ticket_items,
@@ -1832,6 +1870,103 @@ export class StorePrismaService extends BasePrismaService {
   // Price Tiers (multi-tarifa)
   get price_tiers() {
     return this.scoped_client.price_tiers;
+  }
+
+  // Hospitality Suite (H0.2)
+  get lodging_unit_types() {
+    return this.scoped_client.lodging_unit_types;
+  }
+
+  get lodging_units() {
+    return this.scoped_client.lodging_units;
+  }
+
+  // Hospitality Suite (H1.1)
+  get lodging_reservations() {
+    return this.scoped_client.lodging_reservations;
+  }
+
+  get lodging_reservation_rooms() {
+    return this.scoped_client.lodging_reservation_rooms;
+  }
+
+  get lodging_room_nights() {
+    return this.scoped_client.lodging_room_nights;
+  }
+
+  get lodging_reservation_events() {
+    return this.scoped_client.lodging_reservation_events;
+  }
+
+  // Hospitality Suite (H2.1)
+  get lodging_rate_plans() {
+    return this.scoped_client.lodging_rate_plans;
+  }
+
+  get lodging_rate_prices() {
+    return this.scoped_client.lodging_rate_prices;
+  }
+
+  get lodging_seasons() {
+    return this.scoped_client.lodging_seasons;
+  }
+
+  get lodging_restrictions() {
+    return this.scoped_client.lodging_restrictions;
+  }
+
+  // Hospitality Suite (H2.4)
+  get lodging_cancellation_policies() {
+    return this.scoped_client.lodging_cancellation_policies;
+  }
+
+  // Hospitality Suite (H2.5)
+  get lodging_allotments() {
+    return this.scoped_client.lodging_allotments;
+  }
+
+  // Hospitality Suite (H3.1)
+  get lodging_guests() {
+    return this.scoped_client.lodging_guests;
+  }
+
+  // Hospitality Suite (H3.2)
+  get lodging_folios() {
+    return this.scoped_client.lodging_folios;
+  }
+
+  // Hospitality Suite (H3.5)
+  get lodging_deposits() {
+    return this.scoped_client.lodging_deposits;
+  }
+
+  // Hospitality Suite (H3.6)
+  get lodging_room_charges() {
+    return this.scoped_client.lodging_room_charges;
+  }
+
+  // Hospitality Suite (H5.2)
+  get lodging_housekeeping_tasks() {
+    return this.scoped_client.lodging_housekeeping_tasks;
+  }
+
+  // Hospitality Suite (H5.3)
+  get lodging_inventory_blocks() {
+    return this.scoped_client.lodging_inventory_blocks;
+  }
+
+  // Hospitality Suite (H6.2)
+  get lodging_ical_imports() {
+    return this.scoped_client.lodging_ical_imports;
+  }
+
+  get lodging_reservation_payments() {
+    return this.scoped_client.lodging_reservation_payments;
+  }
+
+  // Hospitality Suite (H7.1)
+  get lodging_night_audits() {
+    return this.scoped_client.lodging_night_audits;
   }
 
   get product_price_tier_overrides() {

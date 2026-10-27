@@ -120,6 +120,7 @@ import {
   ProductsBulkEditService,
   type BulkEditProductQuery,
 } from './products-bulk-edit.service';
+import { coerceBulkTaxAction } from '../utils/product-tax-inclusive.util';
 
 /** Tope del endpoint de ids (`MAX_PRODUCT_IDS` en el backend). */
 const MAX_FILTER_IDS = 1000;
@@ -900,21 +901,8 @@ export function coerceBulkEditValue(
     case 'toggle':
       return Boolean(raw);
 
-    case 'tax-action': {
-      if (!raw || typeof raw !== 'object') {
-        return undefined;
-      }
-      const action = raw as { mode?: unknown; ids?: unknown };
-      const mode = String(action.mode || 'add');
-      if (!['add', 'remove', 'replace'].includes(mode)) {
-        return undefined;
-      }
-      const rawIds = Array.isArray(action.ids) ? action.ids : [];
-      const ids = rawIds
-        .map((id) => Number(id))
-        .filter((n) => Number.isFinite(n) && n > 0);
-      return { mode, ids };
-    }
+    case 'tax-action':
+      return coerceBulkTaxAction(raw);
 
     case 'number':
     case 'currency': {

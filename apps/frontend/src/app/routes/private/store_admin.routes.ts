@@ -374,6 +374,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'dispatch-notes/bulk',
+            loadComponent: () =>
+              import('../../private/modules/store/dispatch-notes/bulk/dispatch-notes-bulk-page.component').then(
+                (c) => c.DispatchNotesBulkPageComponent,
+              ),
+          },
+          {
             path: 'dispatch-notes/:id',
             loadComponent: () =>
               import('../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component').then(
@@ -1003,6 +1010,111 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/memberships/access/routes/membership-access.routes'
               ).then((m) => m.membershipAccessRoutes),
+          },
+        ],
+      },
+      // Hospitality Suite (H0.1). Industry gating is UX (panelUiGuard +
+      // INDUSTRY_HIDDEN_MODULES); lodging APIs land with H0.2+.
+      {
+        path: 'hospitality',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'rooms',
+          },
+          {
+            path: 'rooms',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/rooms/routes/rooms.routes'
+              ).then((m) => m.hospitalityRoomsRoutes),
+          },
+          {
+            path: 'reservations',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/routes/reservations.routes'
+              ).then((m) => m.hospitalityReservationsRoutes),
+          },
+          {
+            path: 'rates',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/rates/routes/rates.routes'
+              ).then((m) => m.hospitalityRatesRoutes),
+          },
+          {
+            // H1.3 — occupancy rack; same panel_ui key as Reservas.
+            path: 'rack',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/rack-page/rack-page.component'
+              ).then((c) => c.HospitalityRackPageComponent),
+          },
+          {
+            // H3.3 — front desk board; same panel_ui key as Reservas.
+            path: 'front-desk',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/front-desk-page/front-desk-page.component'
+              ).then((c) => c.HospitalityFrontDeskPageComponent),
+          },
+          {
+            // H5.1 — housekeeping board; same panel_ui key as Habitaciones.
+            path: 'housekeeping',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/housekeeping/pages/housekeeping-page/housekeeping-page.component'
+              ).then((c) => c.HospitalityHousekeepingPageComponent),
+          },
+          {
+            // H6.1 — Canales → iCal export; same panel_ui key as Tarifas.
+            path: 'channels',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/channels/pages/ical-export-page/ical-export-page.component'
+              ).then((c) => c.HospitalityIcalExportPageComponent),
+          },
+          {
+            // H7.1 — "Cierre del día" (night audit); same panel_ui key as Reservas.
+            path: 'night-audit',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/night-audit-page/night-audit-page.component'
+              ).then((c) => c.HospitalityNightAuditPageComponent),
+          },
+          {
+            // H7.2 — "Indicadores" (occupancy, ADR, RevPAR); same panel_ui key as Reservas.
+            path: 'performance',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/performance-page/performance-page.component'
+              ).then((c) => c.HospitalityPerformancePageComponent),
+          },
+          {
+            // H7.3 — "Pickup y pronóstico"; same panel_ui key as Reservas.
+            path: 'pickup',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/pickup-page/pickup-page.component'
+              ).then((c) => c.HospitalityPickupPageComponent),
+          },
+          {
+            // H7.4 — "No-shows y cancelaciones"; same panel_ui key as Reservas.
+            path: 'cancellations',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/cancellations-page/cancellations-page.component'
+              ).then((c) => c.HospitalityCancellationsPageComponent),
+          },
+          {
+            // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
+            path: 'exempt-services',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/vat-exempt-services-page/vat-exempt-services-page.component'
+              ).then((c) => c.HospitalityVatExemptServicesPageComponent),
           },
         ],
       },

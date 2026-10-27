@@ -149,6 +149,12 @@ export class RouteTrackingService {
         }
       : null;
 
+    // Linked = the responsible's device shares its position with the route:
+    // they dispatched it themselves (tracking starts automatically) or they
+    // already reported positions after syncing. Derived, not persisted.
+    const dispatched_by_responsible =
+      has_driver && route.dispatched_by_user_id === route.driver_user_id;
+
     const base = {
       tracking_enabled,
       responsible,
@@ -158,7 +164,12 @@ export class RouteTrackingService {
     };
 
     if (!tracking_enabled) {
-      return { ...base, last_position: null, trail: [] as TrackingPosition[] };
+      return {
+        ...base,
+        is_responsible_linked: false,
+        last_position: null,
+        trail: [] as TrackingPosition[],
+      };
     }
 
     const rows: any[] = await this.positions.findMany({
@@ -178,6 +189,12 @@ export class RouteTrackingService {
       }
     }
 
-    return { ...base, last_position, trail };
+    return {
+      ...base,
+      // Only the responsible can report positions, so any row means synced.
+      is_responsible_linked: dispatched_by_responsible || rows.length > 0,
+      last_position,
+      trail,
+    };
   }
 }

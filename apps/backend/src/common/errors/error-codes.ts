@@ -5713,6 +5713,525 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Tarifa de precios no encontrada',
   },
+  // Hospitality Suite (H0.2) — room types
+  LODGING_UNIT_TYPE_FIND_001: {
+    code: 'LODGING_UNIT_TYPE_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Tipo de habitación no encontrado',
+  },
+  LODGING_UNIT_TYPE_DUP_001: {
+    code: 'LODGING_UNIT_TYPE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe un tipo de habitación con ese nombre',
+  },
+  LODGING_UNIT_TYPE_PRODUCT_001: {
+    code: 'LODGING_UNIT_TYPE_PRODUCT_001',
+    httpStatus: 409,
+    devMessage:
+      'Este servicio pertenece a un tipo de habitación; edítalo desde Hotelería',
+  },
+  // A store without the `hospitality` industry gets 403 even through curl:
+  // the menu is UX only, LodgingIndustryGuard is the real boundary.
+  LODGING_INDUSTRY_001: {
+    code: 'LODGING_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'La industria de la tienda no incluye Hotelería',
+  },
+  LODGING_UNIT_TYPE_CAPACITY_001: {
+    code: 'LODGING_UNIT_TYPE_CAPACITY_001',
+    httpStatus: 400,
+    devMessage: 'La capacidad máxima debe ser mayor que cero',
+  },
+  LODGING_UNIT_TYPE_CAPACITY_002: {
+    code: 'LODGING_UNIT_TYPE_CAPACITY_002',
+    httpStatus: 400,
+    devMessage: 'La ocupación base no puede superar la ocupación máxima',
+  },
+  // Hospitality Suite (H1.6) — controlled overbooking
+  LODGING_UNIT_TYPE_OVERBOOKING_001: {
+    code: 'LODGING_UNIT_TYPE_OVERBOOKING_001',
+    httpStatus: 403,
+    devMessage: 'Solo un usuario con permiso de tarifas puede cambiar la sobreventa',
+  },
+  // Hospitality Suite (H0.4) — room type photos
+  LODGING_UNIT_TYPE_IMAGE_001: {
+    code: 'LODGING_UNIT_TYPE_IMAGE_001',
+    httpStatus: 400,
+    devMessage: 'Una de las fotos no es válida para esta tienda',
+  },
+  // Hospitality Suite (H0.3) — rooms
+  LODGING_UNIT_FIND_001: {
+    code: 'LODGING_UNIT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Habitación no encontrada',
+  },
+  LODGING_UNIT_DUP_001: {
+    code: 'LODGING_UNIT_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una habitación con ese número',
+  },
+  LODGING_UNIT_RANGE_001: {
+    code: 'LODGING_UNIT_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango de habitaciones no es válido (máximo 100)',
+  },
+  LODGING_UNIT_IN_USE_001: {
+    code: 'LODGING_UNIT_IN_USE_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene reservas asignadas; muévelas antes',
+  },
+  // Hospitality Suite (H5.1) — housekeeping status
+  LODGING_HOUSEKEEPING_TRANSITION_001: {
+    code: 'LODGING_HOUSEKEEPING_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'La habitación no puede pasar a ese estado de limpieza',
+  },
+  LODGING_HOUSEKEEPING_STALE_001: {
+    code: 'LODGING_HOUSEKEEPING_STALE_001',
+    httpStatus: 409,
+    devMessage: 'El estado de la habitación cambió. Actualiza el tablero.',
+  },
+  // Hospitality Suite (H5.2) — housekeeping tasks
+  LODGING_HOUSEKEEPING_TASK_FIND_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Tarea de limpieza no encontrada',
+  },
+  LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001',
+    httpStatus: 400,
+    devMessage: 'La persona no es camarera de esta tienda',
+  },
+  LODGING_HOUSEKEEPING_TASK_STATE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_STATE_001',
+    httpStatus: 409,
+    devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
+  },
+  // Hospitality Suite (H5.3) — inventory blocks (maintenance, owner use)
+  LODGING_BLOCK_FIND_001: {
+    code: 'LODGING_BLOCK_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Bloqueo no encontrado',
+  },
+  LODGING_BLOCK_RESERVED_001: {
+    code: 'LODGING_BLOCK_RESERVED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene una reserva asignada en esas fechas. Muévela antes de bloquearla.',
+  },
+  LODGING_BLOCK_OVERLAP_001: {
+    code: 'LODGING_BLOCK_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'La habitación ya está bloqueada en esas fechas',
+  },
+  LODGING_BLOCK_OVERSOLD_001: {
+    code: 'LODGING_BLOCK_OVERSOLD_001',
+    httpStatus: 409,
+    devMessage: 'Bloquearla deja sin habitación a reservas sin asignar de ese tipo',
+  },
+  LODGING_BLOCK_RELEASED_001: {
+    code: 'LODGING_BLOCK_RELEASED_001',
+    httpStatus: 409,
+    devMessage: 'El bloqueo ya fue liberado',
+  },
+  LODGING_BLOCK_ICAL_001: {
+    code: 'LODGING_BLOCK_ICAL_001',
+    httpStatus: 409,
+    devMessage: 'Los bloqueos del calendario externo se liberan desde su canal',
+  },
+  LODGING_BLOCK_DATES_001: {
+    code: 'LODGING_BLOCK_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de regreso a la venta debe ser posterior al inicio',
+  },
+  LODGING_BLOCK_DATES_002: {
+    code: 'LODGING_BLOCK_DATES_002',
+    httpStatus: 400,
+    devMessage: 'El bloqueo no puede empezar antes de hoy',
+  },
+  // Hospitality Suite (H6.1) — iCal export
+  LODGING_ICAL_FEED_001: {
+    code: 'LODGING_ICAL_FEED_001',
+    httpStatus: 404,
+    devMessage: 'Calendario no encontrado o revocado',
+  },
+  // Hospitality Suite (H6.2) — iCal import
+  LODGING_ICAL_IMPORT_FIND_001: {
+    code: 'LODGING_ICAL_IMPORT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Calendario importado no encontrado',
+  },
+  LODGING_BOOKING_001: {
+    code: 'LODGING_BOOKING_001',
+    httpStatus: 400,
+    devMessage: 'No se pudo crear la reserva web',
+  },
+  LODGING_BOOKING_FIND_001: {
+    code: 'LODGING_BOOKING_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Reserva no encontrada',
+  },
+  LODGING_ICAL_IMPORT_URL_001: {
+    code: 'LODGING_ICAL_IMPORT_URL_001',
+    httpStatus: 400,
+    devMessage: 'La URL del calendario no es válida',
+  },
+  // Hospitality Suite (H1.3) — occupancy rack
+  LODGING_RACK_RANGE_001: {
+    code: 'LODGING_RACK_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango del rack debe ser de 1 a 62 noches',
+  },
+  // Hospitality Suite (H1.1) — reservations
+  LODGING_RESERVATION_FIND_001: {
+    code: 'LODGING_RESERVATION_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Reserva no encontrada',
+  },
+  LODGING_RESERVATION_DATES_001: {
+    code: 'LODGING_RESERVATION_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La salida debe ser posterior a la llegada',
+  },
+  LODGING_RESERVATION_DATES_002: {
+    code: 'LODGING_RESERVATION_DATES_002',
+    httpStatus: 400,
+    devMessage: 'La estadía no puede superar las 365 noches',
+  },
+  LODGING_RESERVATION_DATES_003: {
+    code: 'LODGING_RESERVATION_DATES_003',
+    httpStatus: 400,
+    devMessage: 'La llegada no puede ser anterior a hoy',
+  },
+  LODGING_RESERVATION_CAPACITY_001: {
+    code: 'LODGING_RESERVATION_CAPACITY_001',
+    httpStatus: 400,
+    devMessage: 'Excede la capacidad del tipo',
+  },
+  LODGING_RESERVATION_AVAILABILITY_001: {
+    code: 'LODGING_RESERVATION_AVAILABILITY_001',
+    httpStatus: 409,
+    devMessage: 'Sin disponibilidad para esas fechas',
+  },
+  LODGING_RESERVATION_TYPE_001: {
+    code: 'LODGING_RESERVATION_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'El tipo de habitación no está activo',
+  },
+  LODGING_RESERVATION_CUSTOMER_001: {
+    code: 'LODGING_RESERVATION_CUSTOMER_001',
+    httpStatus: 404,
+    devMessage: 'Cliente no encontrado en esta tienda',
+  },
+  LODGING_RESERVATION_TRANSITION_001: {
+    code: 'LODGING_RESERVATION_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'Cambio de estado de reserva no permitido',
+  },
+  LODGING_RESERVATION_NO_SHOW_001: {
+    code: 'LODGING_RESERVATION_NO_SHOW_001',
+    httpStatus: 400,
+    devMessage: 'Solo se puede marcar no-show desde el día de llegada',
+  },
+  // Hospitality Suite (H1.4) — assign, move and resize a reservation room
+  LODGING_RESERVATION_ROOM_FIND_001: {
+    code: 'LODGING_RESERVATION_ROOM_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Habitación de la reserva no encontrada',
+  },
+  LODGING_RESERVATION_ROOM_STATUS_001: {
+    code: 'LODGING_RESERVATION_ROOM_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Solo se pueden modificar reservas activas',
+  },
+  LODGING_RESERVATION_ROOM_ARRIVAL_001: {
+    code: 'LODGING_RESERVATION_ROOM_ARRIVAL_001',
+    httpStatus: 400,
+    devMessage: 'La llegada de un huésped en casa no se puede cambiar',
+  },
+  LODGING_RESERVATION_ROOM_NOCHANGE_001: {
+    code: 'LODGING_RESERVATION_ROOM_NOCHANGE_001',
+    httpStatus: 400,
+    devMessage: 'No hay cambios en la habitación ni en las fechas',
+  },
+  LODGING_RESERVATION_ROOM_UNIT_001: {
+    code: 'LODGING_RESERVATION_ROOM_UNIT_001',
+    httpStatus: 409,
+    devMessage: 'La habitación no está disponible para asignar',
+  },
+  LODGING_RESERVATION_ROOM_CONFLICT_001: {
+    code: 'LODGING_RESERVATION_ROOM_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'La habitación está ocupada en esas fechas',
+  },
+  LODGING_RESERVATION_ROOM_CANCELLED_001: {
+    code: 'LODGING_RESERVATION_ROOM_CANCELLED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación de la reserva ya está cancelada',
+  },
+  LODGING_RESERVATION_ROOM_LAST_001: {
+    code: 'LODGING_RESERVATION_ROOM_LAST_001',
+    httpStatus: 409,
+    devMessage: 'Es la única habitación activa de la reserva: cancela la reserva completa',
+  },
+  LODGING_RATE_PLAN_FIND_001: {
+    code: 'LODGING_RATE_PLAN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Plan tarifario no encontrado',
+  },
+  LODGING_RATE_PLAN_DUP_001: {
+    code: 'LODGING_RATE_PLAN_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe un plan tarifario con ese nombre',
+  },
+  LODGING_RATE_PLAN_PRICES_001: {
+    code: 'LODGING_RATE_PLAN_PRICES_001',
+    httpStatus: 400,
+    devMessage: 'Cada tipo de habitación del plan necesita un precio base y un solo precio por día',
+  },
+  LODGING_RATE_PLAN_INACTIVE_001: {
+    code: 'LODGING_RATE_PLAN_INACTIVE_001',
+    httpStatus: 409,
+    devMessage: 'El plan tarifario está inactivo',
+  },
+  LODGING_RATE_PLAN_UNPRICED_001: {
+    code: 'LODGING_RATE_PLAN_UNPRICED_001',
+    httpStatus: 409,
+    devMessage: 'El plan tarifario no tiene precio para ese tipo de habitación',
+  },
+  LODGING_SEASON_FIND_001: {
+    code: 'LODGING_SEASON_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Temporada no encontrada',
+  },
+  LODGING_SEASON_DUP_001: {
+    code: 'LODGING_SEASON_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una temporada con ese nombre',
+  },
+  LODGING_SEASON_DATES_001: {
+    code: 'LODGING_SEASON_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última noche de la temporada no puede ser anterior a la primera',
+  },
+  LODGING_SEASON_OVERLAP_001: {
+    code: 'LODGING_SEASON_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'La temporada se solapa con otra de la misma prioridad',
+  },
+  LODGING_ALLOTMENT_FIND_001: {
+    code: 'LODGING_ALLOTMENT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Cupo no encontrado',
+  },
+  LODGING_ALLOTMENT_DATES_001: {
+    code: 'LODGING_ALLOTMENT_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última noche del cupo no puede ser anterior a la primera',
+  },
+  LODGING_ALLOTMENT_OVERLAP_001: {
+    code: 'LODGING_ALLOTMENT_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'El cliente ya tiene un cupo activo de ese tipo de habitación en esas fechas',
+  },
+  LODGING_ALLOTMENT_AVAILABILITY_001: {
+    code: 'LODGING_ALLOTMENT_AVAILABILITY_001',
+    httpStatus: 409,
+    devMessage: 'No hay habitaciones libres suficientes para reservar ese cupo',
+  },
+  // Hospitality Suite (H3.1) — guest register
+  LODGING_GUEST_FIND_001: {
+    code: 'LODGING_GUEST_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Huésped no encontrado',
+  },
+  LODGING_GUEST_FIELDS_001: {
+    code: 'LODGING_GUEST_FIELDS_001',
+    httpStatus: 400,
+    devMessage: 'Faltan datos obligatorios del huésped',
+  },
+  LODGING_GUEST_ROOM_001: {
+    code: 'LODGING_GUEST_ROOM_001',
+    httpStatus: 400,
+    devMessage: 'Elige una habitación activa de la reserva',
+  },
+  LODGING_GUEST_STATUS_001: {
+    code: 'LODGING_GUEST_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Los huéspedes solo se registran en reservas activas o en casa',
+  },
+  LODGING_GUEST_DUP_001: {
+    code: 'LODGING_GUEST_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ese documento ya está registrado en la reserva',
+  },
+  LODGING_GUEST_CUSTOMER_001: {
+    code: 'LODGING_GUEST_CUSTOMER_001',
+    httpStatus: 404,
+    devMessage: 'Cliente no encontrado en la tienda',
+  },
+  // Hospitality Suite (H3.2) — check-in that opens the folio.
+  LODGING_CHECKIN_EARLY_001: {
+    code: 'LODGING_CHECKIN_EARLY_001',
+    httpStatus: 409,
+    devMessage: 'No se puede hacer check-in antes de la fecha de llegada',
+  },
+  LODGING_CHECKIN_GUESTS_001: {
+    code: 'LODGING_CHECKIN_GUESTS_001',
+    httpStatus: 409,
+    devMessage: 'Registra al menos al titular',
+  },
+  LODGING_CHECKIN_UNIT_001: {
+    code: 'LODGING_CHECKIN_UNIT_001',
+    httpStatus: 409,
+    devMessage: 'Asigna una habitación antes del check-in',
+  },
+  LODGING_CHECKIN_DIRTY_001: {
+    code: 'LODGING_CHECKIN_DIRTY_001',
+    httpStatus: 409,
+    devMessage: 'La habitación está sucia: confirma el check-in',
+  },
+  LODGING_FOLIO_FIND_001: {
+    code: 'LODGING_FOLIO_FIND_001',
+    httpStatus: 404,
+    devMessage: 'La reserva no tiene folio: haz el check-in primero',
+  },
+  LODGING_FOLIO_CLOSED_001: {
+    code: 'LODGING_FOLIO_CLOSED_001',
+    httpStatus: 409,
+    devMessage: 'El folio está cerrado',
+  },
+  LODGING_FOLIO_CHARGE_001: {
+    code: 'LODGING_FOLIO_CHARGE_001',
+    httpStatus: 400,
+    devMessage: 'El cargo no es válido para el folio',
+  },
+  LODGING_FOLIO_VOID_001: {
+    code: 'LODGING_FOLIO_VOID_001',
+    httpStatus: 409,
+    devMessage: 'No se puede anular este cargo del folio',
+  },
+  LODGING_FOLIO_PAYMENT_001: {
+    code: 'LODGING_FOLIO_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'El pago no es válido para el folio',
+  },
+  // H7.1 — night audit (business day close and reopen).
+  LODGING_NIGHT_AUDIT_CLOSED_001: {
+    code: 'LODGING_NIGHT_AUDIT_CLOSED_001',
+    httpStatus: 409,
+    devMessage: 'El día de negocio está cerrado',
+  },
+  LODGING_NIGHT_AUDIT_DATE_001: {
+    code: 'LODGING_NIGHT_AUDIT_DATE_001',
+    httpStatus: 400,
+    devMessage: 'No se puede cerrar un día que aún no llega',
+  },
+  LODGING_NIGHT_AUDIT_REOPEN_001: {
+    code: 'LODGING_NIGHT_AUDIT_REOPEN_001',
+    httpStatus: 409,
+    devMessage: 'Solo se reabre un día cerrado',
+  },
+  // H7.2 — occupancy, ADR and RevPAR report.
+  LODGING_PERFORMANCE_RANGE_001: {
+    code: 'LODGING_PERFORMANCE_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
+  },
+  // H7.4 — no-shows and cancellations report.
+  LODGING_LOSSES_RANGE_001: {
+    code: 'LODGING_LOSSES_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
+  },
+  // H7.3 — pickup and forecast report.
+  LODGING_PICKUP_RANGE_001: {
+    code: 'LODGING_PICKUP_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El horizonte del pronóstico debe ir de 1 a 365 días',
+  },
+  // H3.7 — check-out with payment and electronic invoice.
+  LODGING_CHECKOUT_001: {
+    code: 'LODGING_CHECKOUT_001',
+    httpStatus: 409,
+    devMessage: 'Solo se hace check-out de una reserva en casa',
+  },
+  LODGING_CHECKOUT_BALANCE_001: {
+    code: 'LODGING_CHECKOUT_BALANCE_001',
+    httpStatus: 400,
+    devMessage: 'El folio tiene saldo pendiente',
+  },
+  LODGING_CHECKOUT_VERIFY_001: {
+    code: 'LODGING_CHECKOUT_VERIFY_001',
+    httpStatus: 403,
+    devMessage: 'El folio debe verificarse antes de facturar',
+  },
+  LODGING_CHECKOUT_BILL_TO_001: {
+    code: 'LODGING_CHECKOUT_BILL_TO_001',
+    httpStatus: 400,
+    devMessage: 'El cliente a facturar no es válido',
+  },
+  // H3.8 — split folio.
+  LODGING_FOLIO_SPLIT_001: {
+    code: 'LODGING_FOLIO_SPLIT_001',
+    httpStatus: 409,
+    devMessage: 'No se puede dividir el folio',
+  },
+  LODGING_VAT_EXEMPT_001: {
+    code: 'LODGING_VAT_EXEMPT_001',
+    httpStatus: 409,
+    devMessage: 'No se puede aplicar la exención de IVA al titular',
+  },
+  LODGING_ROOM_CHARGE_001: {
+    code: 'LODGING_ROOM_CHARGE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cargar esta cuenta a la habitación',
+  },
+  LODGING_ROOM_CHARGE_BLOCKED_001: {
+    code: 'LODGING_ROOM_CHARGE_BLOCKED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene los cargos bloqueados',
+  },
+  LODGING_DEPOSIT_001: {
+    code: 'LODGING_DEPOSIT_001',
+    httpStatus: 400,
+    devMessage: 'El depósito no es válido para la reserva',
+  },
+  LODGING_RESTRICTION_STAY_001: {
+    code: 'LODGING_RESTRICTION_STAY_001',
+    httpStatus: 409,
+    devMessage: 'La estadía no cumple las restricciones de venta de esas fechas',
+  },
+  LODGING_RESTRICTION_OVERRIDE_001: {
+    code: 'LODGING_RESTRICTION_OVERRIDE_001',
+    httpStatus: 403,
+    devMessage: 'Solo un usuario con permiso para editar tarifas puede forzar las restricciones',
+  },
+  LODGING_RESTRICTION_RANGE_001: {
+    code: 'LODGING_RESTRICTION_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'La estancia máxima no puede ser menor que la mínima',
+  },
+  LODGING_RESTRICTION_DATES_001: {
+    code: 'LODGING_RESTRICTION_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última fecha debe ser igual o posterior a la primera, en un rango de hasta 366 días',
+  },
+  LODGING_CANCEL_POLICY_FIND_001: {
+    code: 'LODGING_CANCEL_POLICY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Política de cancelación no encontrada',
+  },
+  LODGING_CANCEL_POLICY_DUP_001: {
+    code: 'LODGING_CANCEL_POLICY_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una política de cancelación con ese nombre',
+  },
+  LODGING_CANCEL_POLICY_RULES_001: {
+    code: 'LODGING_CANCEL_POLICY_RULES_001',
+    httpStatus: 400,
+    devMessage:
+      'Revisa las penalidades: una por ventana de horas, hasta 30 noches o hasta 100 %',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

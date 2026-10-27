@@ -562,6 +562,101 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
+      // Hotelería (Hospitality Suite, H0.1). Hidden by INDUSTRY_HIDDEN_MODULES
+      // for every industry except `hospitality`. Labels map to panel_ui keys
+      // via MenuFilterService ('Hotelería' → hospitality, Habitaciones →
+      // hospitality_rooms).
+      label: 'Hotelería',
+      icon: 'hotel',
+      children: [
+        {
+          label: 'Habitaciones',
+          icon: 'bed-double',
+          route: '/admin/hospitality/rooms',
+        },
+        {
+          // H5.1 — room status board: same panel_ui key as Habitaciones, so
+          // the Camarera preset (hospitality_rooms) already shows it.
+          label: 'Housekeeping',
+          icon: 'sparkles',
+          route: '/admin/hospitality/housekeeping',
+          panelUiKey: 'hospitality_rooms',
+        },
+        {
+          // H3.3 — front desk board of the day: same panel_ui key as Reservas.
+          label: 'Recepción',
+          icon: 'concierge-bell',
+          route: '/admin/hospitality/front-desk',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // "Reservas" already maps to the appointments module
+          // (`orders_reservations`), so the key is explicit.
+          label: 'Reservas',
+          icon: 'calendar-check',
+          route: '/admin/hospitality/reservations',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H1.3 — read view of the reservations: same panel_ui key.
+          label: 'Rack',
+          icon: 'layout-grid',
+          route: '/admin/hospitality/rack',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H7.1 — night audit (close the business day): same panel_ui key.
+          label: 'Cierre del día',
+          icon: 'moon',
+          route: '/admin/hospitality/night-audit',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H7.2 — occupancy, ADR and RevPAR: same panel_ui key.
+          label: 'Indicadores',
+          icon: 'chart-line',
+          route: '/admin/hospitality/performance',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H7.3 — pickup and forecast: same panel_ui key.
+          label: 'Pickup y pronóstico',
+          icon: 'calendar-clock',
+          route: '/admin/hospitality/pickup',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H7.4 — no-shows and cancellations: same panel_ui key.
+          label: 'No-shows y cancelaciones',
+          icon: 'calendar-x',
+          route: '/admin/hospitality/cancellations',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
+          label: 'Servicios exentos',
+          icon: 'file-check',
+          route: '/admin/hospitality/exempt-services',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
+          // H2.1 — rate plans and nightly prices.
+          label: 'Tarifas',
+          icon: 'tag',
+          route: '/admin/hospitality/rates',
+          panelUiKey: 'hospitality_rates',
+        },
+        {
+          // H6.1 — iCal export per room: same panel_ui key as Tarifas
+          // (manager area; receptionist and housekeeper presets lack it).
+          label: 'Canales',
+          icon: 'share-2',
+          route: '/admin/hospitality/channels',
+          panelUiKey: 'hospitality_rates',
+        },
+      ],
+    },
+    {
       label: 'Órdenes',
       icon: 'cart',
       children: [

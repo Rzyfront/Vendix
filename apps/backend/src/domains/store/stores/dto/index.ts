@@ -135,6 +135,7 @@ export const StoreIndustry = {
   SERVICE: 'service',
   GYM: 'gym',
   CONSTRUCTION: 'construction',
+  HOSPITALITY: 'hospitality',
 } as const satisfies Record<
   Uppercase<$Enums.industry_enum>,
   $Enums.industry_enum

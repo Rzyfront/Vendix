@@ -8,6 +8,7 @@ import {
   effect,
   computed,
 } from '@angular/core';
+import { CatalogService } from '../../modules/ecommerce/services/catalog.service';
 import { StoreSeoService } from '../../modules/ecommerce/services/store-seo';
 import { isPlatformBrowser, ViewportScroller } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
@@ -135,6 +136,9 @@ export class StoreEcommerceLayoutComponent {
   readonly is_auth_modal_open = signal(false);
   readonly auth_modal_mode = signal<'login' | 'register' | 'forgot'>('login');
 
+  /** H6.6 — hotel stores show the "Reservar habitación" entry. */
+  readonly is_hotel = signal(false);
+
   // Footer settings
   readonly footer_settings = signal<FooterSettings | null>(null);
   readonly show_about_modal = signal(false);
@@ -158,6 +162,7 @@ export class StoreEcommerceLayoutComponent {
   private cart_service = inject(CartService);
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
+  private catalog_service = inject(CatalogService);
   private table_context_service = inject(TableContextService);
   private table_sse_service = inject(TableSessionSseService);
   private toast_service = inject(ToastService);
@@ -322,6 +327,15 @@ export class StoreEcommerceLayoutComponent {
   private join_toast_last_event_id = '';
 
   constructor() {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response) =>
+          this.is_hotel.set((response.data?.industries ?? []).includes('hospitality')),
+        error: () => this.is_hotel.set(false),
+      });
+
     // Restore body scroll if the actions sheet is torn down mid-open.
     this.destroy_ref.onDestroy(() => this.setBodyScrollLock(false));
 

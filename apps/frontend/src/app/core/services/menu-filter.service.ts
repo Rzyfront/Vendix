@@ -242,6 +242,12 @@ export class MenuFilterService {
     Miembros: 'memberships_members',
     Accesos: 'memberships_access',
 
+    // Hotelería (Hospitality Suite, H0.1) — padre + submódulos. El padre
+    // mapea al key padre para que el sidebar renderice el grupo cuando la
+    // industria `hospitality` lo permita.
+    Hotelería: 'hospitality',
+    Habitaciones: 'hospitality_rooms',
+
     // ERP Modules
     Facturación: 'invoicing',
     Facturas: 'invoicing_invoices',
@@ -681,6 +687,11 @@ export class MenuFilterService {
             fallbackModuleKeys,
             userPermissions,
           );
+          // A group with every child hidden is an empty header (e.g.
+          // "Configuración" for a receptionist, H0.5): drop it.
+          if (alwaysVisibleItem.children.length === 0) {
+            return filtered;
+          }
         }
 
         filtered.push(alwaysVisibleItem);

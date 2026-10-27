@@ -558,3 +558,92 @@ describe('AccountingEventsListener payment.voided', () => {
     error.mockRestore();
   });
 });
+
+/**
+ * Review ola 3 — hotel folio: the 2805 advance is booked by the `payments`
+ * flow, so both its cross on invoice acceptance and the sale recognized at a
+ * check-out without e-invoicing depend on that same flow (findings 1 and 15).
+ */
+describe('AccountingEventsListener — hotel folio (lodging)', () => {
+  const createListener = (flows: Record<string, boolean>) => {
+    const auto_entry_service = {
+      onInvoiceValidated: jest.fn().mockResolvedValue({ id: 1 }),
+      onLodgingFolioInvoiced: jest.fn().mockResolvedValue({ id: 3 }),
+      onLodgingFolioSale: jest.fn().mockResolvedValue({ sale: { id: 4 }, cross: null }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const fiscal_gate = {
+      isSubflowEnabled: jest.fn(async (_org: number, _store: number, flow: string) => flows[flow] ?? true),
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      { getPlatformContext: jest.fn() } as any,
+      { recordSkip: jest.fn(), recordFailure: jest.fn() } as any,
+    );
+    return { listener, auto_entry_service };
+  };
+
+  const invoiceEvent = {
+    invoice_id: 55,
+    invoice_number: 'FE100',
+    invoice_type: 'sales_invoice',
+    organization_id: 1,
+    store_id: 2,
+    subtotal_amount: 500000,
+    tax_amount: 95000,
+    tax_breakdown: [],
+    withholding_breakdown: [],
+    total_amount: 595000,
+  };
+  const saleEvent = {
+    order_id: 500,
+    organization_id: 1,
+    store_id: 2,
+    order_number: 'F-H-0001',
+    subtotal_amount: 500000,
+    tax_amount: 95000,
+    total_amount: 595000,
+    customer: { id: 9 },
+  };
+
+  it('with `payments` off it does not cross 2805 on the invoice (the advance was never booked)', async () => {
+    const { listener, auto_entry_service } = createListener({ payments: false });
+
+    await listener.handleInvoiceAccepted(invoiceEvent as any);
+
+    expect(auto_entry_service.onInvoiceValidated).toHaveBeenCalled();
+    expect(auto_entry_service.onLodgingFolioInvoiced).not.toHaveBeenCalled();
+  });
+
+  it('with `payments` on the invoice crosses the folio advance', async () => {
+    const { listener, auto_entry_service } = createListener({});
+
+    await listener.handleInvoiceAccepted(invoiceEvent as any);
+
+    expect(auto_entry_service.onLodgingFolioInvoiced).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice_id: 55, organization_id: 1 }),
+    );
+  });
+
+  it('check-out without e-invoicing books the folio sale under the `payments` flow', async () => {
+    const { listener, auto_entry_service } = createListener({});
+
+    await listener.handleLodgingFolioSaleRecognized(saleEvent);
+
+    expect(auto_entry_service.onLodgingFolioSale).toHaveBeenCalledWith(
+      expect.objectContaining({ order_id: 500, total_amount: 595000, tax_amount: 95000, customer: { id: 9 } }),
+    );
+  });
+
+  it('with `payments` off the folio sale is not booked, and a failure never throws', async () => {
+    const off = createListener({ payments: false });
+    await off.listener.handleLodgingFolioSaleRecognized(saleEvent);
+    expect(off.auto_entry_service.onLodgingFolioSale).not.toHaveBeenCalled();
+
+    const failing = createListener({});
+    failing.auto_entry_service.onLodgingFolioSale.mockRejectedValueOnce(new Error('db down'));
+    await expect(failing.listener.handleLodgingFolioSaleRecognized(saleEvent)).resolves.toBeUndefined();
+  });
+});
