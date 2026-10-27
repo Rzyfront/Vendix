@@ -122,7 +122,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   memberships_members: '/admin/memberships/members',
   memberships_access: '/admin/memberships/access',
 
-  // Hospedaje
+  // Hotelería
   hospitality: '/admin/hospitality/rooms',
   hospitality_rooms: '/admin/hospitality/rooms',
 

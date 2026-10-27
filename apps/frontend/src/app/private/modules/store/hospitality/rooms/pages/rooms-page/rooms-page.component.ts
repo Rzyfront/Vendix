@@ -7,7 +7,7 @@ import {
 /**
  * Hospitality Suite — H0.1. Rooms landing page.
  *
- * Empty shell that proves the "Hospedaje" menu and its industry gating. Room
+ * Empty shell that proves the "Hotelería" menu and its industry gating. Room
  * types and rooms (H0.2) fill this page later; until then it only renders the
  * empty state.
  */

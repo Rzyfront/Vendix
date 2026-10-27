@@ -241,10 +241,10 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
   });
 });
 
-describe('gating de hospedaje por industria (H0.1)', () => {
+describe('gating de hotelería por industria (H0.1)', () => {
   const HOSPITALITY_KEYS = ['hospitality', 'hospitality_rooms'];
 
-  it('hospitality sola ve Hospedaje y no la agenda de citas', () => {
+  it('hospitality sola ve Hotelería y no la agenda de citas', () => {
     const hidden = getModulesHiddenByIndustries(['hospitality']);
     for (const key of HOSPITALITY_KEYS) {
       expect(hidden).withContext(key).not.toContain(key);
@@ -253,14 +253,14 @@ describe('gating de hospedaje por industria (H0.1)', () => {
     expect(hidden).toContain('restaurant_ops');
   });
 
-  it('hospitality + restaurant ve Hospedaje y Mesas', () => {
+  it('hospitality + restaurant ve Hotelería y Mesas', () => {
     const hidden = getModulesHiddenByIndustries(['hospitality', 'restaurant']);
     for (const key of [...HOSPITALITY_KEYS, 'restaurant_ops', 'restaurant_ops_tables']) {
       expect(hidden).withContext(key).not.toContain(key);
     }
   });
 
-  it('toda industria sin hospitality oculta Hospedaje', () => {
+  it('toda industria sin hospitality oculta Hotelería', () => {
     for (const industries of [
       ['retail'],
       ['restaurant'],
@@ -278,7 +278,7 @@ describe('gating de hospedaje por industria (H0.1)', () => {
     }
   });
 
-  it('las keys de hospedaje existen en APP_MODULES y MODULE_ROUTES', () => {
+  it('las keys de hotelería existen en APP_MODULES y MODULE_ROUTES', () => {
     const keys = allStoreAdminKeys();
     for (const key of HOSPITALITY_KEYS) {
       expect(keys).withContext(key).toContain(key);

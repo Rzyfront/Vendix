@@ -68,7 +68,7 @@ export const INDUSTRY_METADATA: Record<StoreIndustry, IndustryMeta> = {
   },
   hospitality: {
     value: 'hospitality',
-    label: 'Hospedaje',
+    label: 'Hotelería',
     description: 'Habitaciones, reservas y recepción',
     icon: 'hotel',
   },
@@ -131,7 +131,7 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * Hospitality Suite (H0.1): the `hospitality` parent and its submodules
  * (today `hospitality_rooms`) are visible ⟺ the store's industry includes
  * `hospitality`. Every other industry lists them as hidden. A hotel with a
- * restaurant (`['hospitality','restaurant']`) sees both "Hospedaje" and the
+ * restaurant (`['hospitality','restaurant']`) sees both "Hotelería" and the
  * restaurant suite ("Mesas") because each half of the intersection keeps
  * its own suite visible.
  */
@@ -229,7 +229,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'hospitality',
     'hospitality_rooms',
   ],
-  // Hospedaje (H0.1): un hotel opera habitaciones, reservas de estadía,
+  // Hotelería (H0.1): un hotel opera habitaciones, reservas de estadía,
   // recepción y folio — no la agenda de citas (`orders_reservations`), ni
   // contratos de obra, ni membresías, ni flota de reparto. Restaurante y citas
   // se destapan sumando `restaurant` o `service` a las industrias de la tienda.

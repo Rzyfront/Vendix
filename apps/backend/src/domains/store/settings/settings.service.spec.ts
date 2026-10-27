@@ -286,7 +286,7 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
   // ------------------------------------------------- sync de industrias (H0.1)
 
   /**
-   * H0.1 (hospitality): marcar "Hospedaje" en Configuración → General debe
+   * H0.1 (hospitality): marcar "Hotelería" en Configuración → General debe
    * llegar a `stores.industries`, que es lo que lee el gating del menú. El
    * sync no filtra valores, así que el riesgo está en la validación del DTO:
    * si `hospitality` no estuviera en `StoreIndustry`, el PATCH respondería 400.

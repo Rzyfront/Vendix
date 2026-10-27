@@ -61,7 +61,7 @@ export interface IndustryFeatureItem {
  * en dos pestañas porque el discurso de un salón y el de una consultoría no se
  * parecen en nada. Es una división de marketing, no de dominio.
  *
- * `hospitality` queda fuera hasta que la suite de hospedaje sea vendible: hoy
+ * `hospitality` queda fuera hasta que la suite de hotelería sea vendible: hoy
  * (H0.1) solo existe el menú vacío, y la landing no debe ofrecerla.
  */
 export type LandingSector = Exclude<StoreIndustry, 'hospitality'> | 'beauty';
