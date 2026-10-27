@@ -1081,6 +1081,7 @@ model stores {
   lodging_folios                 lodging_folios[]
   lodging_deposits               lodging_deposits[]
   lodging_room_charges           lodging_room_charges[]
+  lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2383,9 +2384,47 @@ model lodging_units {
   unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   reservation_rooms lodging_reservation_rooms[]
   room_nights       lodging_room_nights[]
+  housekeeping_tasks lodging_housekeeping_tasks[]
 
   @@unique([store_id, code])
   @@index([unit_type_id, is_active])
+}
+
+// Hospitality Suite (H5.2) — kind of housekeeping task of a room for a day.
+enum lodging_housekeeping_task_type_enum {
+  checkout_clean
+  stayover
+  inspection
+  maintenance
+}
+
+enum lodging_housekeeping_task_status_enum {
+  pending
+  done
+}
+
+// Hospitality Suite (H5.2) — room task of the day, generated from the stays
+// (departures → checkout_clean, in house → stayover) and assigned by the
+// head housekeeper to a housekeeper, who marks it done from her phone.
+model lodging_housekeeping_tasks {
+  id                   Int                                   @id @default(autoincrement())
+  store_id             Int
+  unit_id              Int
+  task_date            DateTime                              @db.Date
+  type                 lodging_housekeeping_task_type_enum
+  status               lodging_housekeeping_task_status_enum @default(pending)
+  assigned_user_id     Int?
+  notes                String?                               @db.VarChar(500)
+  completed_at         DateTime?                             @db.Timestamp(6)
+  completed_by_user_id Int?
+  created_at           DateTime?                             @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                             @default(now()) @db.Timestamp(6)
+
+  store stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit  lodging_units @relation(fields: [unit_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, unit_id, task_date, type])
+  @@index([store_id, task_date, assigned_user_id])
 }
 
 // Hospitality Suite (H1.1) — lifecycle of a lodging reservation.

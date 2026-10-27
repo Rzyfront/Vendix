@@ -36,3 +36,43 @@ export const HOUSEKEEPING_QUICK_ACTION: Partial<
   out_of_order: { to: 'dirty', label: 'Volver a servicio' },
   out_of_service: { to: 'dirty', label: 'Volver a servicio' },
 };
+
+/** Hospitality Suite (H5.2) — tasks per housekeeper. */
+export type HousekeepingTaskType = 'checkout_clean' | 'stayover' | 'inspection' | 'maintenance';
+export type HousekeepingTaskStatus = 'pending' | 'done';
+
+export const HOUSEKEEPING_TASK_TYPE_LABELS: Record<HousekeepingTaskType, string> = {
+  checkout_clean: 'Limpieza de salida',
+  stayover: 'Repaso',
+  inspection: 'Inspección',
+  maintenance: 'Mantenimiento',
+};
+
+export interface HousekeepingTask {
+  id: number;
+  task_date: string;
+  type: HousekeepingTaskType;
+  status: HousekeepingTaskStatus;
+  assigned_user_id: number | null;
+  notes: string | null;
+  completed_at: string | null;
+  unit: {
+    id: number;
+    code: string;
+    floor: string | null;
+    housekeeping_status: HousekeepingStatus;
+    unit_type: { id: number; name: string };
+  };
+}
+
+export interface HousekeepingStaffMember {
+  id: number;
+  name: string;
+}
+
+export interface HousekeepingTasksDay {
+  business_date: string;
+  tasks: HousekeepingTask[];
+  /** Only on the head housekeeper's view. */
+  staff?: HousekeepingStaffMember[];
+}

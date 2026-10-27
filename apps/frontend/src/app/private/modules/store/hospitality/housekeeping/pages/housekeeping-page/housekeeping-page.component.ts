@@ -32,6 +32,7 @@ import {
   HousekeepingBoardUnit,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
+import { HousekeepingTasksPanelComponent } from '../../components/housekeeping-tasks-panel/housekeeping-tasks-panel.component';
 
 /** Status colors: warning asks for attention, error is out of sale. */
 const STATUS_BADGE: Record<HousekeepingStatus, BadgeVariant> = {
@@ -61,7 +62,8 @@ interface FloorGroup {
  * Hospitality Suite — Housekeeping (H5.1). Rooms grouped by floor with their
  * cleaning status; the housekeeper moves each room through the cycle
  * (sucia → limpia → inspeccionada) or takes it out of service, which removes
- * it from the sale. Check-out leaves the room "Sucia" on its own.
+ * it from the sale. Check-out leaves the room "Sucia" on its own. Above the
+ * board, the day's tasks per housekeeper (H5.2).
  */
 @Component({
   selector: 'app-hospitality-housekeeping-page',
@@ -76,6 +78,7 @@ interface FloorGroup {
     EmptyStateComponent,
     SpinnerComponent,
     ModalComponent,
+    HousekeepingTasksPanelComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -98,7 +101,11 @@ interface FloorGroup {
         />
       </div>
 
-      <div class="p-2 md:p-4">
+      <div class="flex flex-col gap-3 p-2 md:p-4">
+        @if (tasksMode(); as mode) {
+          <!-- H5.2 — head housekeeper assigns rooms; a housekeeper sees only hers. -->
+          <app-housekeeping-tasks-panel [mode]="mode" (roomChanged)="load()" />
+        }
         <app-card [responsive]="true">
           <div class="mb-3 flex items-center justify-end">
             <app-button variant="outline" size="sm" (clicked)="load()">Actualizar</app-button>
@@ -203,6 +210,13 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   readonly saving = signal<number | null>(null);
   readonly selected = signal<HousekeepingBoardUnit | null>(null);
   readonly canOperate = signal(this.authFacade.hasPermission('store:lodging:housekeeping:operate'));
+  readonly tasksMode = signal<'assign' | 'mine' | null>(
+    this.authFacade.hasPermission('store:lodging:housekeeping:assign')
+      ? 'assign'
+      : this.canOperate()
+        ? 'mine'
+        : null,
+  );
 
   readonly floors = computed<FloorGroup[]>(() => {
     const groups = new Map<string, HousekeepingBoardUnit[]>();

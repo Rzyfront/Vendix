@@ -5646,6 +5646,22 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El estado de la habitación cambió. Actualiza el tablero.',
   },
+  // Hospitality Suite (H5.2) — housekeeping tasks
+  LODGING_HOUSEKEEPING_TASK_FIND_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Tarea de limpieza no encontrada',
+  },
+  LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001',
+    httpStatus: 400,
+    devMessage: 'La persona no es camarera de esta tienda',
+  },
+  LODGING_HOUSEKEEPING_TASK_STATE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_STATE_001',
+    httpStatus: 409,
+    devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
+  },
   // Hospitality Suite (H1.3) — occupancy rack
   LODGING_RACK_RANGE_001: {
     code: 'LODGING_RACK_RANGE_001',

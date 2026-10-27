@@ -537,6 +537,14 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      // H5.2 — head housekeeper: sees every task of the day and assigns the
+      // rooms to each housekeeper (who only sees her own).
+      name: 'store:lodging:housekeeping:assign',
+      description: 'Asignar las tareas de limpieza del día a las camareras',
+      path: '/api/store/hospitality/housekeeping/tasks',
+      method: 'GET',
+    },
+    {
       name: 'store:lodging:compliance:operate',
       description: 'Registrar huéspedes ante TRA y SIRE',
       path: '/api/store/hospitality/compliance',
