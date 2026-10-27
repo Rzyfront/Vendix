@@ -5586,6 +5586,27 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Tarifa de precios no encontrada',
   },
+  // Hospitality Suite (H0.2) — room types
+  LODGING_UNIT_TYPE_FIND_001: {
+    code: 'LODGING_UNIT_TYPE_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Tipo de habitación no encontrado',
+  },
+  LODGING_UNIT_TYPE_DUP_001: {
+    code: 'LODGING_UNIT_TYPE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe un tipo de habitación con ese nombre',
+  },
+  LODGING_UNIT_TYPE_CAPACITY_001: {
+    code: 'LODGING_UNIT_TYPE_CAPACITY_001',
+    httpStatus: 400,
+    devMessage: 'La capacidad máxima debe ser mayor que cero',
+  },
+  LODGING_UNIT_TYPE_CAPACITY_002: {
+    code: 'LODGING_UNIT_TYPE_CAPACITY_002',
+    httpStatus: 400,
+    devMessage: 'La ocupación base no puede superar la ocupación máxima',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

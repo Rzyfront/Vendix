@@ -453,6 +453,19 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Hotelería (H0.2): tipos de habitación y, después, habitaciones.
+    {
+      name: 'store:lodging:inventory:read',
+      description: 'Ver tipos de habitación y habitaciones del hotel',
+      path: '/api/store/hospitality/unit-types',
+      method: 'GET',
+    },
+    {
+      name: 'store:lodging:inventory:write',
+      description: 'Crear y editar tipos de habitación y habitaciones del hotel',
+      path: '/api/store/hospitality/unit-types',
+      method: 'POST',
+    },
     // Tarifas de Precios (CRUD multi-tarifa)
     {
       name: 'store:price-tiers:read',

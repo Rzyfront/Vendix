@@ -1060,6 +1060,7 @@ model stores {
 
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers                    price_tiers[]
+  lodging_unit_types             lodging_unit_types[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2185,6 +2186,7 @@ model products {
   /// COMPONENTE excluido de la receta de otro plato.
   excluded_in_order_items   order_item_exclusions[]          @relation("order_item_exclusion_component")
   excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
+  lodging_unit_type         lodging_unit_types?
 
   /// Unicidad de slug, sku y barcode POR TIENDA y SOLO entre productos no
   /// archivados (borrar = archivar; el archivado libera sus identificadores).
@@ -2285,6 +2287,35 @@ model price_tiers {
   @@unique([store_id, name])
   @@index([store_id, is_active])
   @@index([store_id, kind, is_active])
+}
+
+// Hospitality Suite (H0.2) — room type of a hotel store. Each type owns a
+// service product ("Noche – {name}") that carries its base price and tax, so
+// nights are sold and invoiced through the existing product/order engine.
+model lodging_unit_types {
+  id                    Int       @id @default(autoincrement())
+  store_id              Int
+  product_id            Int       @unique
+  name                  String    @db.VarChar(120)
+  code                  String?   @db.VarChar(30)
+  description           String?   @db.Text
+  base_occupancy        Int       @default(1)
+  max_adults            Int
+  max_children          Int       @default(0)
+  max_occupancy         Int
+  // Free-text bed layout shown to staff and guests ("1 doble + 1 sencilla").
+  bed_config            String?   @db.VarChar(255)
+  overbooking_allowance Int       @default(0)
+  sort_order            Int       @default(0)
+  is_active             Boolean   @default(true)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product products @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
 }
 
 model product_price_tier_overrides {
