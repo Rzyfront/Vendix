@@ -62,6 +62,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       // via `groupBy`, so the spec exposes the mock surface the engine
       // actually queries against.
       groupBy: jest.Mock;
+      findMany: jest.Mock;
     };
     products: { findMany: jest.Mock };
   };
@@ -83,6 +84,7 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         // override the mock per-case with a concrete `{ promotion_id,
         // _count: { _all } }` row.
         groupBy: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       // QUI-648: el motor lee la escala de venta del producto para contar
       // presentaciones en vez de unidades mínimas. Por defecto ningún producto
@@ -403,10 +405,109 @@ describe('PromotionEngineService - quoteDiscounts', () => {
 
       expect(prisma.order_promotions.groupBy).toHaveBeenCalledWith({
         by: ['promotion_id'],
-        where: { promotion_id: { in: [63] }, customer_id: 77 },
+        // las filas en 0 (promoción que dejó de aplicar) no consumen el límite
+        where: { promotion_id: { in: [63] }, customer_id: 77, discount_amount: { gt: 0 } },
         _count: { _all: true },
       });
       expect(result.applied_promotions).toEqual([]);
+    });
+
+    it('exclude_order_id: la promoción limit 1 que la propia orden ya tiene sigue aplicando al re-cotizar', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({ id: 64, per_customer_limit: 1, usage_limit: 1, usage_count: 1 }),
+      ]);
+      // El uso existente ES de la orden 900: el conteo real lo excluye con
+      // `order_id: { not: 900 }`; sin la opción lo cuenta.
+      prisma.order_promotions.groupBy.mockImplementation(async ({ where }: any) =>
+        where.order_id ? [] : [{ promotion_id: 64, _count: { _all: 1 } }],
+      );
+      prisma.order_promotions.findMany.mockResolvedValue([{ promotion_id: 64 }]);
+      const input = {
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        customer_id: 77,
+        now: REFERENCE_NOW,
+      };
+      const without = await service.quoteDiscounts(input);
+      expect(without.applied_promotions).toEqual([]);
+      const withOpt = await service.quoteDiscounts({ ...input, exclude_order_id: 900 });
+      expect(prisma.order_promotions.groupBy).toHaveBeenLastCalledWith({
+        by: ['promotion_id'],
+        where: { promotion_id: { in: [64] }, customer_id: 77, discount_amount: { gt: 0 }, order_id: { not: 900 } },
+        _count: { _all: true },
+      });
+      expect(withOpt.applied_promotions).toHaveLength(1);
+    });
+  });
+
+  describe('order_scope', () => {
+    it('limita los candidatos a los ids de la orden e ignora el state (pausada se conserva, automática nueva no entra)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([buildPromotion({ id: 91, state: 'paused', is_auto_apply: false })]);
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        manual_promotion_ids: [91],
+        order_scope: { promotion_ids: [91] },
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.id).toEqual({ in: [91] }); // ninguna promoción nueva entra
+      expect(where).not.toHaveProperty('state'); // la pausada no se filtra
+      expect(where).not.toHaveProperty('is_auto_apply');
+      expect(result.applied_promotions).toHaveLength(1);
+    });
+
+    it('include_auto_apply: además de las de la orden entran las automáticas vigentes (escala por volumen al subir la cantidad)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 92,
+          rule_type: 'quantity_tiered',
+          scope: 'order',
+          value: 0,
+          promotion_quantity_tiers: [buildTier({ promotion_id: 92, min_quantity: 50, value: 10 })],
+        }),
+      ]);
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 50 }],
+        manual_promotion_ids: [91],
+        order_scope: { promotion_ids: [91], include_auto_apply: true },
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.AND).toEqual([
+        {
+          OR: [
+            { id: { in: [91] } },
+            { is_auto_apply: true, state: { in: ['active', 'scheduled'] } },
+          ],
+        },
+      ]);
+      expect(where).not.toHaveProperty('state');
+      expect(result.total_discount).toBe(500);
+    });
+
+    it('sin la opción el filtro por state y auto-apply queda igual', async () => {
+      prisma.promotions.findMany.mockResolvedValue([]);
+      await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.state).toEqual({ in: ['active', 'scheduled'] });
+      expect(where.is_auto_apply).toBe(true);
+    });
+  });
+
+  describe('as_of', () => {
+    it('as_of fija la ventana de vigencia (re-cotizar a la fecha de la orden)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([buildPromotion({ id: 90 })]);
+      const asOf = new Date('2026-03-01T00:00:00Z');
+      await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        as_of: asOf,
+        now: REFERENCE_NOW,
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.start_date).toEqual({ lte: asOf });
+      expect(where.OR).toEqual([{ end_date: null }, { end_date: { gte: asOf } }]);
     });
   });
 

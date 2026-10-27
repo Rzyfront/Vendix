@@ -134,6 +134,14 @@
           </div>
         }
 
+        @case ('account-code') {
+          <app-account-code-select [formControlName]="field().key" />
+          <p class="mt-1.5 text-[10px] leading-tight text-text-secondary">
+            Activado y vacío: se limpia la cuenta y el ingreso vuelve a la
+            cuenta por defecto de la organización.
+          </p>
+        }
+
         @case ('tax-action') {
           <div class="space-y-3" [formGroupName]="field().key">
             <div>

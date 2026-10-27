@@ -29,6 +29,7 @@ import {
   CancelOrderItemDto,
   TransferTableSessionDto,
   UpdateOrderItemNotesDto,
+  UpdateTableSessionInformalNotesDto,
 } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -97,6 +98,7 @@ export const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  *   POST  /api/store/table-sessions/:id/add-items         append items to the draft order
  *   DELETE /api/store/table-sessions/:id/items/:orderItemId  remove one item from the draft order
  *   PATCH /api/store/table-sessions/:id/customer          assign/detach the order customer
+ *   PATCH /api/store/table-sessions/:id/informal-notes    free-text table notes (QUI-898)
  *   POST  /api/store/table-sessions/:id/close             close the session (NOT the order)
  *   GET   /api/store/table-sessions/:id/payments/pending  list pending payments (C3)
  *   POST  /api/store/table-sessions/:id/payments/:pid/confirm  staff confirm payment (C3)
@@ -343,6 +345,23 @@ export class TableSessionsController {
       dto.notes,
     );
     return this.responseService.updated(result, 'Nota del ítem actualizada');
+  }
+
+  /**
+   * Update the informal (free-text) notes of the table session (QUI-898).
+   * PATCH /api/store/table-sessions/:id/informal-notes
+   */
+  @Patch(':id/informal-notes')
+  @Permissions('store:table_sessions:update')
+  async updateInformalNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTableSessionInformalNotesDto,
+  ) {
+    const result = await this.tableSessionsService.updateInformalNotes(
+      id,
+      dto.informal_notes,
+    );
+    return this.responseService.updated(result, 'Notas de la mesa actualizadas');
   }
 
   /**

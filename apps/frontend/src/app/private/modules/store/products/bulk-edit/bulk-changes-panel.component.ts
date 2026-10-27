@@ -141,6 +141,8 @@ export class BulkChangesPanelComponent {
   readonly typeOptions = input<readonly BulkEditFieldOption[]>([]);
   /** Catálogo de unidades de medida (`optionsRef: 'uom-*'`). */
   readonly uomOptions = input<readonly SelectorOption[]>([]);
+  /** Estaciones KDS (`optionsRef: 'kds-stations'`). */
+  readonly kdsOptions = input<readonly SelectorOption[]>([]);
   /** Catálogo de plantillas de consulta (`optionsRef: 'document-templates'`). */
   readonly templateOptions = input<readonly SelectorOption[]>([]);
   /** Catálogo de categorías de impuestos (`optionsRef: 'tax-categories'`). */
@@ -300,6 +302,8 @@ export class BulkChangesPanelComponent {
         return this.templateOptions();
       case 'tax-categories':
         return this.taxOptions();
+      case 'kds-stations':
+        return this.kdsOptions();
       default:
         return [];
     }

@@ -208,6 +208,8 @@ export interface ProductVariant {
   barcode?: string;
   name?: string;
   attributes?: Record<string, any>;
+  /** Signed variant image URL (GET /store/products with include_variants). */
+  image_url?: string | null;
   price_override?: number;
   cost_price?: number;
   profit_margin?: number;

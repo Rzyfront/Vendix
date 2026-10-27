@@ -4,7 +4,14 @@ import { ProductsBulkEditService } from './products-bulk-edit.service';
 import { ProductsService } from './products.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
-import { BulkArchiveProductsDto, BulkEditProductsDto } from './dto';
+import {
+  BulkArchiveProductsDto,
+  BulkEditProductsDto,
+  BulkEditableChangesDto,
+} from './dto';
+import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { ProductState, ProductType } from './dto/product-enums';
 import { RequestContextService } from '@common/context/request-context.service';
 
@@ -40,6 +47,11 @@ const MOCKED_MODELS = [
   // este array a propósito: así las aserciones de «el preview no escribe nada»
   // también cubren la auditoría.
   'audit_logs',
+  // QUI-752 — estaciones KDS, catálogo de UoM y movimientos de inventario
+  // (estos últimos vigilados: los umbrales de reposición NO los escriben).
+  'kds',
+  'units_of_measure',
+  'inventory_movements',
 ] as const;
 
 type MockModel = Record<string, jest.Mock>;
@@ -110,6 +122,16 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
     consultation_template_id: null,
     preconsultation_template_id: null,
     online_purchase_url: null,
+    max_stock_level: null,
+    reorder_point: null,
+    reorder_quantity: null,
+    requires_batch_tracking: false,
+    account_code: null,
+    kds_id: null,
+    buffer_minutes: 0,
+    is_eligible_for_home_service: false,
+    offer_loose_unit: true,
+    purchase_to_stock_factor: 1,
     ...overrides,
   };
 }
@@ -151,6 +173,7 @@ describe('ProductsBulkEditService', () => {
   let service: ProductsBulkEditService;
   let prisma: MockPrisma;
   let eventEmitter: { emit: jest.Mock };
+  let autoEntryService: { validateProductAccountCodes: jest.Mock };
   let productsService: {
     update: jest.Mock;
     remove: jest.Mock;
@@ -160,6 +183,9 @@ describe('ProductsBulkEditService', () => {
   beforeEach(async () => {
     prisma = buildMockPrisma();
     eventEmitter = { emit: jest.fn() };
+    autoEntryService = {
+      validateProductAccountCodes: jest.fn().mockResolvedValue(undefined),
+    };
     productsService = {
       update: jest.fn(),
       remove: jest.fn(),
@@ -175,6 +201,7 @@ describe('ProductsBulkEditService', () => {
         { provide: StorePrismaService, useValue: prisma },
         { provide: ProductsService, useValue: productsService },
         { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: AutoEntryService, useValue: autoEntryService },
       ],
     }).compile();
 
@@ -1280,6 +1307,324 @@ describe('ProductsBulkEditService', () => {
 
       expect(productsService.remove).toHaveBeenCalledTimes(1);
       expect(result.total).toBe(1);
+    });
+  });
+
+  describe('QUI-752 — campos escalares nuevos', () => {
+    const NEW_FIELDS = {
+      max_stock_level: 50,
+      reorder_point: 10,
+      reorder_quantity: 20,
+      requires_batch_tracking: true,
+      account_code: '413550',
+      buffer_minutes: 15,
+      is_eligible_for_home_service: true,
+      offer_loose_unit: false,
+      purchase_to_stock_factor: 12,
+    };
+
+    it('preview devuelve diffs reales de los campos nuevos sin error', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+      const result = await service.preview(makeDto([1], NEW_FIELDS));
+
+      expect(result.errors).toBe(0);
+      expect(result.items[0].status).toBe('ok');
+      const fields = result.items[0].changes.map((c) => c.field);
+      expect(fields).toEqual(
+        expect.arrayContaining(Object.keys(NEW_FIELDS)),
+      );
+      expect(result.items[0].changes).toEqual(
+        expect.arrayContaining([
+          { field: 'reorder_point', current: null, next: 10 },
+          { field: 'offer_loose_unit', current: true, next: false },
+        ]),
+      );
+      expect(autoEntryService.validateProductAccountCodes).toHaveBeenCalledTimes(1);
+    });
+
+    it('apply con reorder_point no escribe inventory_movements ni stock', async () => {
+      prisma.products.findMany.mockResolvedValue([{ id: 1, name: 'Uno' }]);
+      productsService.update.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      const result = await service.apply(
+        makeDto([1], { reorder_point: 5, max_stock_level: null }),
+      );
+
+      expect(result.successful).toBe(1);
+      expect(productsService.update).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ reorder_point: 5, max_stock_level: null }),
+        expect.anything(),
+      );
+      for (const write of WRITE_METHODS) {
+        expect(prisma.inventory_movements[write]).not.toHaveBeenCalled();
+      }
+    });
+
+    describe('purchase_to_stock_factor', () => {
+      it('error cuando la pareja de UoM es derivable del catálogo', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, stock_uom_id: 1, purchase_uom_id: 2 }),
+        ]);
+        prisma.units_of_measure.findMany.mockResolvedValue([
+          { id: 1, dimension: 'mass' },
+          { id: 2, dimension: 'mass' },
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], { purchase_to_stock_factor: 5 }),
+        );
+
+        expect(result.items[0].status).toBe('error');
+        expect(result.items[0].code).toBe('PROD_VALIDATE_001');
+        expect(result.items[0].message).toContain('lo calcula el catálogo');
+      });
+
+      it('usa las UoM del lote sobre las persistidas', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+        prisma.units_of_measure.findMany.mockResolvedValue([
+          { id: 1, dimension: 'volume' },
+          { id: 2, dimension: 'volume' },
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], {
+            purchase_to_stock_factor: 5,
+            stock_uom_id: 1,
+            purchase_uom_id: 2,
+          }),
+        );
+
+        expect(result.items[0].status).toBe('error');
+      });
+
+      it('ok cuando el producto no tiene UoM', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        const result = await service.preview(
+          makeDto([1], { purchase_to_stock_factor: 5 }),
+        );
+
+        expect(result.items[0].status).toBe('ok');
+        expect(prisma.units_of_measure.findMany).not.toHaveBeenCalled();
+      });
+
+      it('ok en contenido por envase (count -> mass)', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, stock_uom_id: 1, purchase_uom_id: 2 }),
+        ]);
+        prisma.units_of_measure.findMany.mockResolvedValue([
+          { id: 1, dimension: 'mass' },
+          { id: 2, dimension: 'count' },
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], { purchase_to_stock_factor: 1000 }),
+        );
+
+        expect(result.items[0].status).toBe('ok');
+      });
+
+      it('apply no llama a update() para la fila derivable', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          { id: 1, name: 'Uno', stock_uom_id: 1, purchase_uom_id: 2 },
+          { id: 2, name: 'Dos', stock_uom_id: null, purchase_uom_id: null },
+        ]);
+        prisma.units_of_measure.findMany.mockResolvedValue([
+          { id: 1, dimension: 'mass' },
+          { id: 2, dimension: 'mass' },
+        ]);
+        productsService.update.mockResolvedValue({ id: 2, name: 'Dos' });
+
+        const result = await service.apply(
+          makeDto([1, 2], { purchase_to_stock_factor: 5 }),
+        );
+
+        expect(result.results[0]).toMatchObject({
+          id: 1,
+          status: 'error',
+          code: 'PROD_VALIDATE_001',
+        });
+        expect(result.results[1].status).toBe('ok');
+        expect(productsService.update).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('kds_id', () => {
+      it('estación inexistente o de otra tienda => 400 de lote', async () => {
+        prisma.kds.findFirst.mockResolvedValue(null);
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        await expect(
+          service.preview(makeDto([1], { kds_id: 99 })),
+        ).rejects.toMatchObject({ status: 400 });
+        await expect(
+          service.apply(makeDto([1], { kds_id: 99 })),
+        ).rejects.toBeInstanceOf(VendixHttpException);
+        expect(prisma.kds.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 99,
+              store_id: 10,
+              is_active: true,
+            }),
+          }),
+        );
+        expect(productsService.update).not.toHaveBeenCalled();
+      });
+
+      it('estación inactiva (no la encuentra el filtro is_active) => 400', async () => {
+        prisma.kds.findFirst.mockResolvedValue(null);
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        await expect(
+          service.apply(makeDto([1], { kds_id: 5 })),
+        ).rejects.toMatchObject({ status: 400 });
+        expect(productsService.update).not.toHaveBeenCalled();
+      });
+
+      it('apply valida account_code una vez por lote', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+        autoEntryService.validateProductAccountCodes.mockRejectedValueOnce(
+          new VendixHttpException(ErrorCodes.PROD_VALIDATE_001, 'cuenta inválida'),
+        );
+
+        await expect(
+          service.apply(makeDto([1], { account_code: '413550' })),
+        ).rejects.toBeInstanceOf(VendixHttpException);
+        expect(autoEntryService.validateProductAccountCodes).toHaveBeenCalledTimes(1);
+        expect(productsService.update).not.toHaveBeenCalled();
+      });
+
+      it('valida UNA vez por lote y avisa en productos no preparados', async () => {
+        prisma.kds.findFirst.mockResolvedValue({ id: 7 });
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, product_type: ProductType.PHYSICAL }),
+          makeProduct({
+            id: 2,
+            sku: 'SKU-2',
+            product_type: ProductType.PREPARED,
+          }),
+        ]);
+        prisma.recipes.findMany.mockResolvedValue([{ product_id: 2 }]);
+
+        const result = await service.preview(makeDto([1, 2], { kds_id: 7 }));
+
+        expect(prisma.kds.findFirst).toHaveBeenCalledTimes(1);
+        expect(result.items[0].status).toBe('warning');
+        expect(result.items[0].message).toContain('solo aplica a platos preparados');
+        expect(result.items[1].status).toBe('ok');
+      });
+
+      it('kds_id null no consulta la base (limpiar)', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        const result = await service.preview(makeDto([1], { kds_id: null }));
+
+        expect(prisma.kds.findFirst).not.toHaveBeenCalled();
+        expect(result.items[0].status).toBe('ok');
+      });
+    });
+
+    describe('saneado de servicios', () => {
+      it('descarta max_stock_level, reorder_* igual que min_stock_level', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        const result = await service.preview(
+          makeDto([1], {
+            product_type: ProductType.SERVICE,
+            min_stock_level: 1,
+            max_stock_level: 10,
+            reorder_point: 2,
+            reorder_quantity: 3,
+          }),
+        );
+
+        const fields = result.items[0].changes.map((c) => c.field);
+        for (const f of [
+          'min_stock_level',
+          'max_stock_level',
+          'reorder_point',
+          'reorder_quantity',
+          'requires_batch_tracking',
+        ]) {
+          expect(fields).not.toContain(f);
+        }
+      });
+
+      it('requires_batch_tracking=true en un servicio => PROD_SVC_001', async () => {
+        prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+        await expect(
+          service.preview(
+            makeDto([1], {
+              product_type: ProductType.SERVICE,
+              requires_batch_tracking: true,
+            }),
+          ),
+        ).rejects.toMatchObject({ status: 400 });
+      });
+
+      it('requires_batch_tracking=false se descarta del diff en un servicio', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, requires_batch_tracking: true }),
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], {
+            product_type: ProductType.SERVICE,
+            requires_batch_tracking: false,
+          }),
+        );
+
+        expect(result.items[0].changes.map((c) => c.field)).not.toContain(
+          'requires_batch_tracking',
+        );
+      });
+    });
+  });
+
+  describe('BulkEditableChangesDto — campos QUI-752', () => {
+    const valid = {
+      max_stock_level: 100,
+      reorder_point: 10,
+      reorder_quantity: 20,
+      requires_batch_tracking: true,
+      account_code: '413550',
+      kds_id: 3,
+      buffer_minutes: 15,
+      is_eligible_for_home_service: true,
+      offer_loose_unit: false,
+      purchase_to_stock_factor: 6,
+    };
+
+    it('acepta los 10 campos válidos', async () => {
+      const dto = plainToInstance(BulkEditableChangesDto, valid);
+      expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+    });
+
+    it('acepta null para umbrales, account_code y kds_id', async () => {
+      const dto = plainToInstance(BulkEditableChangesDto, {
+        max_stock_level: null,
+        reorder_point: null,
+        reorder_quantity: null,
+        account_code: null,
+        kds_id: null,
+      });
+      expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+    });
+
+    it('rechaza account_code "4135.50"', async () => {
+      const dto = plainToInstance(BulkEditableChangesDto, { account_code: '4135.50' });
+      const errors = await validate(dto);
+      expect(errors.map((e) => e.property)).toContain('account_code');
+    });
+
+    it('rechaza purchase_to_stock_factor 0', async () => {
+      const dto = plainToInstance(BulkEditableChangesDto, { purchase_to_stock_factor: 0 });
+      const errors = await validate(dto);
+      expect(errors.map((e) => e.property)).toContain('purchase_to_stock_factor');
     });
   });
 });

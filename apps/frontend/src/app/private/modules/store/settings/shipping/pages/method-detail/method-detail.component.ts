@@ -136,7 +136,7 @@ import {
                   Despacho con flota propia
                 </h3>
                 <p class="text-xs md:text-sm text-text-secondary">
-                  Crea una planilla de ruta (DSD) para agrupar remisiones y
+                  Crea una ruta (DSD) para agrupar remisiones y
                   recaudar en ruta con este método.
                 </p>
               </div>
@@ -147,7 +147,7 @@ import {
               (clicked)="goToCreateRoute()"
             >
               <app-icon slot="icon" name="clipboard-list" [size]="16" />
-              Crear planilla de ruta
+              Crear ruta
             </app-button>
           </div>
         </div>
@@ -566,7 +566,7 @@ export class MethodDetailComponent implements OnInit {
     if (this.supports_dispatch_routes()) {
       actions.unshift({
         id: 'create_route',
-        label: 'Crear planilla de ruta',
+        label: 'Crear ruta',
         variant: 'primary' as const,
         icon: 'clipboard-list'});
     }

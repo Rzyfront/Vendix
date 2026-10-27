@@ -57,6 +57,8 @@ const DISPATCH_NOTE_PDF_INCLUDE = {
       id: true,
       order_number: true,
       shipping_address_snapshot: true,
+      shipping_tax_amount: true,
+      shipping_tax_name: true,
       addresses_orders_shipping_address_idToaddresses: true,
     },
   },
@@ -237,6 +239,9 @@ export class DispatchNotePdfService {
       discount_amount: Number(note.discount_amount) || 0,
       tax_amount: Number(note.tax_amount) || 0,
       prints_vat_breakdown,
+      shipping_cost: Number(note.shipping_cost) || 0,
+      shipping_tax_amount: Number(note.order?.shipping_tax_amount) || 0,
+      shipping_tax_name: note.order?.shipping_tax_name || undefined,
       grand_total: Number(note.grand_total) || 0,
       currency: note.currency || 'COP',
 

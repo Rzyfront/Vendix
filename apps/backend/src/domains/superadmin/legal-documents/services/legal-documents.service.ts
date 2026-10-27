@@ -130,12 +130,18 @@ export class LegalDocumentsService {
   async createSystemDocument(userId: number, dto: CreateSystemDocumentDto) {
     // Verificar si ya existe una versión con ese número
     const existing = await this.globalPrisma.legal_documents.findFirst({
-      where: { version: dto.version },
+      where: {
+        version: dto.version,
+        document_type: dto.document_type,
+        is_system: true,
+        organization_id: null,
+        store_id: null,
+      },
     });
 
     if (existing) {
       throw new BadRequestException(
-        `Document version ${dto.version} already exists`,
+        `Ya existe la versión ${dto.version} para este tipo de documento`,
       );
     }
 

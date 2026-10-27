@@ -439,21 +439,13 @@ export class OrdersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateOrderItemsDto,
   ) {
-    try {
-      const result = await this.ordersService.updateOrderItems(id, dto);
-      return this.responseService.updated(
-        result,
-        'Items de la orden actualizados exitosamente',
-      );
-    } catch (error) {
-      // IVA cycle (F4): propaga la excepción tipada del gate al filtro.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al actualizar los items de la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: el error sube al AllExceptionsFilter (status + error_code
+    // reales; nunca HTTP 200 con success:false).
+    const result = await this.ordersService.updateOrderItems(id, dto);
+    return this.responseService.updated(
+      result,
+      'Items de la orden actualizados exitosamente',
+    );
   }
 
   /**
@@ -487,23 +479,13 @@ export class OrdersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateOrderEditorDto,
   ) {
-    try {
-      const result = await this.ordersService.updateOrderFromEditor(id, dto);
-      return this.responseService.updated(
-        result,
-        'Orden actualizada exitosamente',
-      );
-    } catch (error) {
-      // Propaga las excepciones tipadas (gate de IVA, claim atómico, customer
-      // store mismatch, stock insuficiente) al AllExceptionsFilter para
-      // preservar status + error_code + details. El resto cae al legacy.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al actualizar la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: el AllExceptionsFilter preserva status + error_code +
+    // details (gate de IVA, claim atómico, stock, ORD_EDIT_LINES_LOCKED_001).
+    const result = await this.ordersService.updateOrderFromEditor(id, dto);
+    return this.responseService.updated(
+      result,
+      'Orden actualizada exitosamente',
+    );
   }
 
   @Patch(':id/shipping')

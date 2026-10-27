@@ -1,0 +1,519 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onOpenChange($event)"
+  title="Modificar productos"
+  [subtitle]="'Orden ' + (order().order_number || '#' + order().id)"
+  size="xl-mid"
+  customClasses="md:[&>div]:min-h-[min(700px,90vh)]"
+  [canClose]="canCloseModal"
+>
+  <!-- PC: orden a la izquierda, buscador a la derecha. Móvil: una columna (orden → buscador → resto). -->
+  <div class="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+  <div class="space-y-5 min-w-0 lg:col-start-1 lg:row-start-1">
+    <!-- Líneas del borrador -->
+    <section class="space-y-2.5" aria-labelledby="order-items-edit-lines-title">
+      <div class="flex items-center justify-between gap-2">
+        <h3
+          id="order-items-edit-lines-title"
+          class="flex items-center gap-2 text-sm font-semibold text-text-primary"
+        >
+          <app-icon name="shopping-bag" [size]="16" class="text-primary" />
+          Productos de la orden
+        </h3>
+        <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+          {{ draft().length }}
+        </span>
+      </div>
+
+      @for (line of draft(); track line.key) {
+        @let pl = previewFor(line);
+        <div
+          class="p-3 sm:p-4 border rounded-xl space-y-2.5 transition-colors"
+          [class.bg-surface]="!line.removed"
+          [class.border-border]="!line.removed && !(pl?.blocked)"
+          [class.hover:border-primary/40]="!line.removed && !(pl?.blocked)"
+          [class.border-red-300]="pl?.blocked"
+          [class.bg-red-50]="line.removed"
+          [class.border-red-200]="line.removed && !pl?.blocked"
+        >
+          <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+            <div
+              class="flex shrink-0 w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden border items-center justify-center"
+              [class.border-border]="!line.removed"
+              [class.bg-primary/10]="!line.removed && !line.image_url"
+              [class.text-primary]="!line.removed"
+              [class.border-red-200]="line.removed"
+              [class.bg-red-100]="line.removed && !line.image_url"
+              [class.text-red-600]="line.removed"
+              [class.opacity-60]="line.removed"
+              aria-hidden="true"
+            >
+              @if (line.image_url) {
+                <img [src]="line.image_url" alt="" class="w-full h-full object-cover" loading="lazy" />
+              } @else {
+                <app-icon [name]="line.existing ? 'package' : 'package-plus'" [size]="18" />
+              }
+            </div>
+
+            <div class="flex-1 min-w-0" [class.opacity-60]="line.removed">
+              <p
+                class="text-sm font-semibold text-text-primary truncate"
+                [class.line-through]="line.removed"
+              >
+                {{ line.product_name }}
+              </p>
+              @if (line.variant_label) {
+                <p class="text-xs text-text-secondary truncate">{{ line.variant_label }}</p>
+              }
+              <p class="text-xs text-text-secondary mt-0.5">
+                <span class="font-medium text-text-primary">{{ line.display_price | currency }}</span>
+                c/u
+              </p>
+              <div class="flex flex-wrap gap-1 mt-1.5 empty:hidden">
+                @if (line.delivered) {
+                  <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-800">
+                    <app-icon name="check" [size]="12" /> Entregado
+                  </span>
+                }
+                @if (line.in_kitchen) {
+                  <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    <app-icon name="chef-hat" [size]="12" />
+                    En cocina
+                    @if (line.kitchen_ticket_number) {
+                      · Comanda #{{ line.kitchen_ticket_number }}
+                    }
+                    · {{ line.kitchen_status_label }}
+                  </span>
+                }
+                @if (!line.existing) {
+                  <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                    @if (line.from_locked) {
+                      Nuevo · irá a cocina
+                    } @else {
+                      Nuevo
+                    }
+                  </span>
+                }
+                @if (line.removed) {
+                  <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+                    Se quitará
+                  </span>
+                }
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 ml-auto">
+              @if (line.removed) {
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-surface text-xs font-medium text-text-primary hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+                  [disabled]="busy()"
+                  (click)="restore(line)"
+                >
+                  <app-icon name="rotate-ccw" [size]="14" />
+                  Deshacer
+                </button>
+              } @else {
+                @if (line.weighted && line.existing) {
+                  <span class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-muted text-text-secondary">
+                    {{ line.quantity }} (por peso)
+                  </span>
+                } @else {
+                  <div class="inline-flex items-center h-9 rounded-lg border border-border bg-surface overflow-hidden">
+                    <button
+                      type="button"
+                      class="w-9 h-full flex items-center justify-center text-text-secondary hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+                      [disabled]="line.quantity <= 1 || isLocked(line) || busy()"
+                      aria-label="Disminuir cantidad"
+                      (click)="decrement(line)"
+                    >
+                      <app-icon name="minus" [size]="14" />
+                    </button>
+                    <span
+                      class="min-w-[2.5rem] px-1 h-full flex items-center justify-center border-x border-border text-sm font-semibold text-text-primary tabular-nums"
+                    >
+                      {{ line.quantity }}
+                    </span>
+                    <button
+                      type="button"
+                      class="w-9 h-full flex items-center justify-center text-text-secondary hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+                      [disabled]="busy()"
+                      [attr.aria-label]="isLocked(line) ? 'Agregar una unidad nueva' : 'Aumentar cantidad'"
+                      (click)="increment(line)"
+                    >
+                      <app-icon name="plus" [size]="14" />
+                    </button>
+                  </div>
+                }
+
+                <button
+                  type="button"
+                  class="w-9 h-9 rounded-lg flex items-center justify-center text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                  [disabled]="busy() || line.delivered"
+                  aria-label="Quitar producto"
+                  (click)="remove(line)"
+                >
+                  <app-icon name="trash-2" [size]="16" />
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (line.delivered) {
+            <p class="flex items-start gap-1.5 text-xs text-text-secondary">
+              <app-icon name="info" [size]="14" class="mt-px shrink-0" />
+              Ya se entregó; para devolverlo usa 'Revertir entrega' en el detalle
+            </p>
+          } @else if (line.in_kitchen && !line.removed) {
+            <p class="flex items-start gap-1.5 text-xs text-text-secondary">
+              <app-icon name="info" [size]="14" class="mt-px shrink-0" />
+              Ya está en cocina: no se puede reducir; quítalo completo y se cancelará su comanda
+            </p>
+          }
+
+          <!-- Consecuencias (preview) -->
+          @if (pl) {
+            <div class="space-y-1.5" [class.opacity-60]="previewPending()" aria-live="polite">
+              @if (pl.blocked && pl.blocked_reason) {
+                <p class="flex items-start gap-1.5 text-xs font-medium text-red-700" role="alert">
+                  <app-icon name="alert-triangle" [size]="14" class="mt-px shrink-0" />
+                  {{ pl.blocked_reason }}
+                </p>
+              }
+              @let rc = repriceChip(pl);
+              @if (rc) {
+                <div class="flex flex-wrap gap-1">
+                  <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-900 border border-sky-200">
+                    <app-icon [name]="rc.icon" [size]="12" /> {{ rc.text }}
+                  </span>
+                </div>
+              }
+              @let kc = kitchenChip(pl);
+              @let sc = stockChip(pl);
+              @if (kc || sc) {
+                <div class="flex flex-wrap gap-1">
+                  @if (kc) {
+                    <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200">
+                      <app-icon [name]="kc.icon" [size]="12" /> {{ kc.text }}
+                    </span>
+                  }
+                  @if (sc) {
+                    <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-800 border border-slate-200">
+                      <app-icon [name]="sc.icon" [size]="12" /> {{ sc.text }}
+                    </span>
+                  }
+                </div>
+              }
+              @for (msg of pl.messages; track $index) {
+                <p class="flex items-start gap-1.5 text-xs text-text-secondary">
+                  <app-icon name="info" [size]="14" class="mt-px shrink-0" />
+                  {{ msg }}
+                </p>
+              }
+              @if (line.removed && pl.requires_cancellation_type) {
+                <fieldset class="mt-1 p-2.5 rounded-lg bg-surface border border-red-200">
+                  <legend class="px-1 text-xs font-semibold text-text-primary">
+                    ¿Qué hacer con los insumos?
+                  </legend>
+                  <div class="flex gap-5">
+                    <label class="inline-flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+                      <input
+                        type="radio"
+                        class="accent-[var(--color-primary)]"
+                        [name]="'ct-' + line.key"
+                        [checked]="cancellationTypes()[line.existing!.id] === 'after_fire_reused'"
+                        (change)="setCancellationType(line, 'after_fire_reused')"
+                      />
+                      Reutilizar
+                    </label>
+                    <label class="inline-flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+                      <input
+                        type="radio"
+                        class="accent-[var(--color-primary)]"
+                        [name]="'ct-' + line.key"
+                        [checked]="cancellationTypes()[line.existing!.id] === 'after_fire_waste'"
+                        (change)="setCancellationType(line, 'after_fire_waste')"
+                      />
+                      Desechar
+                    </label>
+                  </div>
+                </fieldset>
+              }
+            </div>
+          }
+        </div>
+      }
+    </section>
+
+    @if (cancelledLines().length > 0) {
+      <section class="space-y-1.5">
+        <p class="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Productos anulados (solo lectura)
+        </p>
+        @for (item of cancelledLines(); track item.id) {
+          <div class="flex items-center justify-between gap-2 px-3 py-2 border border-dashed border-border rounded-lg bg-surface">
+            <span class="text-sm text-text-secondary truncate line-through decoration-text-secondary/60">
+              {{ item.quantity }} × {{ item.product_name }}
+            </span>
+            <span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Anulado</span>
+          </div>
+        }
+      </section>
+    }
+
+    @if (isEmpty()) {
+      <p
+        class="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3"
+        role="alert"
+      >
+        <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
+        La orden debe tener al menos un producto; para anularla usa Cancelar orden
+      </p>
+    }
+  </div>
+
+    <!-- Agregar producto -->
+    <section class="flex flex-col gap-3 p-3 sm:p-4 rounded-xl border border-border bg-surface min-w-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-0">
+      <h3 class="flex items-center gap-2 text-sm font-semibold text-text-primary">
+        <app-icon name="plus-circle" [size]="16" class="text-primary" />
+        Agregar producto
+      </h3>
+      <app-inputsearch
+        class="block"
+        placeholder="Buscar por nombre o SKU"
+        ariaLabel="Buscar producto para agregar"
+        [ngModel]="searchTerm()"
+        (ngModelChange)="onSearchInput($event)"
+        [disabled]="busy()"
+      />
+
+      @if (searching()) {
+        <p class="flex items-center gap-2 text-xs text-text-secondary" role="status">
+          <app-icon name="loader-2" [size]="14" [spin]="true" /> Buscando...
+        </p>
+      }
+
+      @if (!searching() && searchResults().length > 0 && !searchTerm().trim()) {
+        <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          <app-icon name="star" [size]="12" class="text-primary" />
+          Destacados y más vendidos
+        </p>
+      }
+      @if (!searching() && searchResults().length === 0 && searchTerm().trim()) {
+        <p class="text-sm text-text-secondary text-center py-4">
+          Sin resultados para "{{ searchTerm().trim() }}"
+        </p>
+      }
+
+      @if (searchResults().length > 0) {
+        <ul
+          class="max-h-64 lg:max-h-[60vh] overflow-y-auto rounded-lg border border-border bg-surface shadow-sm divide-y divide-border"
+        >
+          @for (product of searchResults(); track product.id) {
+            <li>
+              <button
+                type="button"
+                class="group w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-primary/5 focus-visible:bg-primary/5 focus-visible:outline-none transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                [disabled]="busy() || !isSellable(product)"
+                (click)="onProductClick(product)"
+              >
+                <span class="shrink-0 w-11 h-11 rounded-lg overflow-hidden border border-border bg-muted flex items-center justify-center">
+                  @if (product.image_url) {
+                    <img
+                      [src]="product.image_url"
+                      [alt]="product.name"
+                      class="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  } @else {
+                    <app-icon name="package" [size]="18" class="text-text-secondary" />
+                  }
+                </span>
+                <span class="flex-1 min-w-0">
+                  <span class="block text-sm font-medium text-text-primary truncate">{{ product.name }}</span>
+                  @if (!isSellable(product)) {
+                    <span class="block text-xs text-text-secondary">No vendible</span>
+                  } @else if (hasVariants(product)) {
+                    <span class="block text-xs text-text-secondary">Elige una variante</span>
+                  }
+                </span>
+                <span class="shrink-0 flex items-center gap-2">
+                  @if (!hasVariants(product)) {
+                    <span class="text-sm font-semibold text-text-primary tabular-nums">
+                      {{ priceOf(product) | currency }}
+                    </span>
+                    <app-icon
+                      name="plus"
+                      [size]="16"
+                      class="text-text-secondary group-hover:text-primary transition-colors"
+                    />
+                  } @else {
+                    <app-icon
+                      [name]="expandedProductId() === product.id ? 'chevron-down' : 'chevron-right'"
+                      [size]="16"
+                      class="text-text-secondary group-hover:text-primary transition-colors"
+                    />
+                  }
+                </span>
+              </button>
+              @if (expandedProductId() === product.id) {
+                <ul class="bg-muted/40 divide-y divide-border">
+                  @for (variant of product.product_variants; track variant.id) {
+                    <li>
+                      <button
+                        type="button"
+                        class="group w-full flex items-center justify-between gap-3 pl-7 pr-3 py-2 text-left hover:bg-primary/5 focus-visible:bg-primary/5 focus-visible:outline-none transition-colors"
+                        [disabled]="busy()"
+                        (click)="addProduct(product, variant)"
+                      >
+                        <span class="shrink-0 w-8 h-8 rounded-md overflow-hidden border border-border bg-muted flex items-center justify-center">
+                          @if (variant.image_url || variant.image?.image_url || product.image_url) {
+                            <img
+                              [src]="variant.image_url || variant.image?.image_url || product.image_url"
+                              [alt]="variantName(variant)"
+                              class="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          } @else {
+                            <app-icon name="package" [size]="14" class="text-text-secondary" />
+                          }
+                        </span>
+                        <span class="flex-1 min-w-0 text-sm text-text-primary truncate">{{ variantName(variant) }}</span>
+                        <span class="shrink-0 flex items-center gap-2">
+                          <span class="text-sm font-medium text-text-primary tabular-nums">{{
+                            priceOf(product, variant) | currency
+                          }}</span>
+                          <app-icon
+                            name="plus"
+                            [size]="16"
+                            class="text-text-secondary group-hover:text-primary transition-colors"
+                          />
+                        </span>
+                      </button>
+                    </li>
+                  }
+                </ul>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </section>
+
+  <div class="space-y-5 min-w-0 lg:col-start-1 lg:row-start-2">
+    <!-- Motivo -->
+    @if (hasRemovals()) {
+      <div class="space-y-1.5">
+        <label
+          class="flex items-center gap-2 text-sm font-semibold text-text-primary"
+          for="order-items-edit-reason"
+        >
+          <app-icon name="message-square" [size]="16" class="text-primary" />
+          Motivo de los productos quitados
+        </label>
+        <textarea
+          id="order-items-edit-reason"
+          rows="2"
+          maxlength="500"
+          class="w-full px-3 py-2 border border-border rounded-lg text-sm text-text-primary bg-surface placeholder:text-text-secondary focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors"
+          placeholder="Ej: el cliente cambió de opinión"
+          [ngModel]="reason()"
+          (ngModelChange)="reason.set($event)"
+          [disabled]="busy()"
+        ></textarea>
+        @if (!reasonValid()) {
+          <p class="text-xs text-red-600" role="alert">Escribe un motivo de al menos 3 caracteres</p>
+        }
+      </div>
+    }
+
+    <!-- Estado del preview -->
+    @if (conflictMessage()) {
+      <p class="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3" role="alert">
+        <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
+        {{ conflictMessage() }}
+      </p>
+    }
+    @if (previewPending()) {
+      <p class="flex items-center gap-2 text-xs text-text-secondary" role="status">
+        <app-icon name="loader-2" [size]="14" [spin]="true" /> Calculando consecuencias...
+      </p>
+    }
+    @if (previewError()) {
+      <p class="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3" role="alert">
+        <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
+        No se pudo calcular la vista previa: {{ previewError() }}
+      </p>
+    }
+
+    @if (preview(); as p) {
+      @if (p.warnings.length > 0) {
+        <div class="space-y-1 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          @for (w of p.warnings; track $index) {
+            <p class="flex items-start gap-1.5 text-xs text-amber-900">
+              <app-icon name="alert-triangle" [size]="14" class="mt-px shrink-0" /> {{ w }}
+            </p>
+          }
+        </div>
+      }
+
+      <!-- Totales antes → después -->
+      <section
+        class="rounded-xl border border-border bg-surface overflow-hidden"
+        [class.opacity-60]="previewPending()"
+      >
+        <div class="flex items-center gap-2 px-3 sm:px-4 py-2.5 border-b border-border">
+          <app-icon name="receipt" [size]="16" class="text-primary" />
+          <span class="text-sm font-semibold text-text-primary">Resumen de totales</span>
+        </div>
+        <div class="grid grid-cols-3 gap-2 px-3 sm:px-4 py-2 bg-muted/50 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+          <span>Concepto</span>
+          <span class="text-right">Antes</span>
+          <span class="text-right">Después</span>
+        </div>
+        @for (row of totalsRows(); track row.label) {
+          <div
+            class="grid grid-cols-3 gap-2 px-3 sm:px-4 py-2 text-sm text-text-primary border-t border-border tabular-nums"
+            [class.bg-amber-50]="row.changed && !row.strong"
+            [class.bg-primary/5]="row.strong"
+            [class.font-bold]="row.strong"
+          >
+            <span>{{ row.label }}</span>
+            <span class="text-right text-text-secondary">{{ row.before | currency }}</span>
+            <span
+              class="text-right"
+              [class.font-semibold]="row.changed"
+              [class.text-primary]="row.strong"
+            >{{ row.after | currency }}</span>
+          </div>
+        }
+      </section>
+    }
+  </div>
+  </div>
+
+  <div slot="footer" class="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+    @if (summaryParts(); as sum) {
+      <p class="text-xs text-text-secondary sm:text-left text-center">
+        @for (t of sum.texts; track $index) {
+          {{ t }} ·
+        }
+        Total {{ sum.before | currency }} →
+        <span class="font-semibold text-text-primary">{{ sum.after | currency }}</span>
+      </p>
+    } @else {
+      <span class="hidden sm:block"></span>
+    }
+    <div class="flex items-center justify-end gap-2">
+      <app-button variant="outline" [disabled]="busy()" (clicked)="close()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [disabled]="!canSave()"
+        [loading]="saving()"
+        (clicked)="save()"
+      >
+        Guardar cambios
+      </app-button>
+    </div>
+  </div>
+</app-modal>

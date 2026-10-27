@@ -154,11 +154,12 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
       </app-card>
     </div>
 
-    @defer (when isModalOpen) {
+    @defer (when isModalOpen()) {
       <app-legal-document-modal
-        [(isOpen)]="isModalOpen"
-        [document]="selectedDocument"
-        [submitting]="isModalSubmitting"
+        [isOpen]="isModalOpen()"
+        (isOpenChange)="isModalOpen.set($event)"
+        [document]="selectedDocument()"
+        [submitting]="isModalSubmitting()"
         (save)="onSaveDocument($event)"
         (cancel)="closeModal()"
       ></app-legal-document-modal>
@@ -233,9 +234,9 @@ export class LegalDocumentsComponent implements OnInit {
   });
 
   // Modal State
-  isModalOpen = false;
-  isModalSubmitting = false;
-  selectedDocument?: LegalDocument;
+  isModalOpen = signal(false);
+  isModalSubmitting = signal(false);
+  selectedDocument = signal<LegalDocument | undefined>(undefined);
 
   // Confirmation Modal State
   isConfirmOpen = false;
@@ -416,16 +417,16 @@ export class LegalDocumentsComponent implements OnInit {
   }
 
   openCreateModal() {
-    this.selectedDocument = undefined;
-    this.isModalOpen = true;
+    this.selectedDocument.set(undefined);
+    this.isModalOpen.set(true);
   }
 
   async openEditModal(doc: LegalDocument) {
     this.loading.set(true);
     try {
       const fullDoc = await firstValueFrom(this.service.getSystemDocument(doc.id));
-      this.selectedDocument = fullDoc;
-      this.isModalOpen = true;
+      this.selectedDocument.set(fullDoc);
+      this.isModalOpen.set(true);
       this.loading.set(false);
     } catch (err) {
       console.error('Error loading document details', err);
@@ -435,20 +436,21 @@ export class LegalDocumentsComponent implements OnInit {
   }
 
   closeModal() {
-    this.isModalOpen = false;
-    this.isModalSubmitting = false;
-    this.selectedDocument = undefined;
+    this.isModalOpen.set(false);
+    this.isModalSubmitting.set(false);
+    this.selectedDocument.set(undefined);
   }
 
   async onSaveDocument(dto: CreateSystemDocumentDto | UpdateSystemDocumentDto) {
-    this.isModalSubmitting = true;
+    this.isModalSubmitting.set(true);
+    const selected = this.selectedDocument();
 
-    if (this.selectedDocument) {
+    if (selected) {
       // Edit
       try {
         await firstValueFrom(
           this.service.updateSystemDocument(
-            this.selectedDocument.id,
+            selected.id,
             dto as UpdateSystemDocumentDto,
           ),
         );
@@ -457,7 +459,7 @@ export class LegalDocumentsComponent implements OnInit {
         this.loadDocuments();
       } catch (err) {
         console.error(err);
-        this.isModalSubmitting = false;
+        this.isModalSubmitting.set(false);
         this.toast.error(
           this.extractErrorMessage(err, 'Error al actualizar el documento'),
         );
@@ -473,7 +475,7 @@ export class LegalDocumentsComponent implements OnInit {
         this.loadDocuments();
       } catch (err) {
         console.error(err);
-        this.isModalSubmitting = false;
+        this.isModalSubmitting.set(false);
         this.toast.error(
           this.extractErrorMessage(err, 'Error al crear el documento'),
         );

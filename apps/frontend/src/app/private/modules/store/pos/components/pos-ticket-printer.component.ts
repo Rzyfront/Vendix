@@ -76,23 +76,6 @@ import {
             <label class="checkbox-label">
               <input
                 type="checkbox"
-                [(ngModel)]="printOptions.emailReceipt"
-                (change)="onOptionsChange()"
-                [disabled]="!hasCustomerEmail()"
-              />
-              Enviar por email
-              @if (ticketData().customer?.email) {
-                <span class="customer-info">
-                  ({{ ticketData()!.customer!.email }})
-                </span>
-              }
-            </label>
-          </div>
-
-          <div class="option-group">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
                 [(ngModel)]="printOptions.smsReceipt"
                 (change)="onOptionsChange()"
                 [disabled]="!hasCustomerPhone()"
@@ -422,7 +405,6 @@ export class PosTicketPrinterComponent {
   printOptions: PrintOptions = {
     printReceipt: true,
     openCashDrawer: true,
-    emailReceipt: false,
     smsReceipt: false,
     // Seeded from `receipts.pos_ticket_copies` instead of a hardcoded 1, so the
     // configured number of copies is what the dialog offers by default. The
@@ -441,10 +423,6 @@ export class PosTicketPrinterComponent {
   constructor() {
     this.printOptions.copies = this.ticketService.configuredCopies();
     this.loadPreview();
-  }
-
-  hasCustomerEmail(): boolean {
-    return !!this.ticketData()?.customer?.email;
   }
 
   hasCustomerPhone(): boolean {

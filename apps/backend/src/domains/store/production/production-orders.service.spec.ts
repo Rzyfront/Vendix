@@ -609,4 +609,172 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     });
   });
+  describe('yield scaling of ingredient consumption (QUI-965)', () => {
+    const run = async (opts: {
+      yieldQty: number | null;
+      produced: number;
+      lineQty: number;
+      linePct?: number;
+      recipePct?: number;
+      mode?: 'percent' | 'absolute';
+      wasteAbs?: number;
+    }) => {
+      prismaMock.production_orders.findFirst.mockResolvedValue({
+        id: 900,
+        store_id: 1,
+        product_id: 50,
+        recipe_id: 7,
+        planned_qty: new Prisma.Decimal(opts.produced),
+        produced_qty: null,
+        status: 'draft',
+        produced_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        product: { id: 50, name: 'Salsa', sku: 'S', stock_unit: 'g', is_batch_produced: true },
+        recipe: {
+          id: 7,
+          yield_quantity:
+            opts.yieldQty === null ? null : new Prisma.Decimal(opts.yieldQty),
+          yield_unit: 'g',
+          waste_percent: new Prisma.Decimal(opts.recipePct ?? 0),
+          items: [
+            {
+              id: 1,
+              recipe_id: 7,
+              component_product_id: 99,
+              quantity: new Prisma.Decimal(opts.lineQty),
+              waste_percent: new Prisma.Decimal(opts.linePct ?? 0),
+              waste_mode: opts.mode ?? 'percent',
+              waste_absolute: new Prisma.Decimal(opts.wasteAbs ?? 0),
+              is_optional: false,
+              component_product: { id: 99, name: 'H', sku: 'H', stock_unit: 'g' },
+            },
+          ],
+        },
+      } as any);
+      stockLevelManager.updateStock.mockImplementation(async () => ({
+        stock_level: { id: 1 } as any,
+        transaction: { id: 1 } as any,
+        previous_quantity: 0,
+        cost_snapshot: { unit_cost: 0, total_cost: 0, stock_value: 0 },
+      }));
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+      const updated = {
+        id: 900,
+        status: 'completed',
+        produced_qty: new Prisma.Decimal(opts.produced),
+        product: { id: 50, name: 'Salsa', sku: 'S', stock_unit: 'g' },
+        recipe: { id: 7, yield_quantity: new Prisma.Decimal(1), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
+      };
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated) } }),
+      );
+      prismaMock.production_orders.update.mockResolvedValue(updated as any);
+      await service.complete(900, { produced_qty: opts.produced });
+      return stockLevelManager.updateStock.mock.calls[0][0].quantity_change;
+    };
+
+    it('yield 1, produce 10, line 100 -> consumes 1000', async () => {
+      expect(await run({ yieldQty: 1, produced: 10, lineQty: 100 })).toBe(-1000);
+    });
+
+    it('yield 10, produce 10, line 100 -> consumes 100', async () => {
+      expect(await run({ yieldQty: 10, produced: 10, lineQty: 100 })).toBe(-100);
+    });
+
+    it('yield 10, produce 30 (3 batches), line 100 -> consumes 300', async () => {
+      expect(await run({ yieldQty: 10, produced: 30, lineQty: 100 })).toBe(-300);
+    });
+
+    it('percent waste applies on top of the scaled quantity (line% x recipe%)', async () => {
+      // 100 * 2 * 1.10 * 1.05 = 231
+      expect(
+        await run({ yieldQty: 5, produced: 10, lineQty: 100, linePct: 10, recipePct: 5 }),
+      ).toBe(-231);
+    });
+
+    it('absolute waste is per batch, so it scales with the factor', async () => {
+      // (100 + 10) * 2 * 1.05 = 231
+      expect(
+        await run({
+          yieldQty: 5,
+          produced: 10,
+          lineQty: 100,
+          mode: 'absolute',
+          wasteAbs: 10,
+          recipePct: 5,
+        }),
+      ).toBe(-231);
+    });
+
+    it('degenerate yield (null) is treated as 1 and does not throw', async () => {
+      expect(await run({ yieldQty: null, produced: 10, lineQty: 100 })).toBe(-1000);
+    });
+
+    it('rejects a produced quantity that is not a multiple of the recipe yield (yield 10, produce 25)', async () => {
+      await expect(run({ yieldQty: 10, produced: 25, lineQty: 100 })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+      });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(stockValidatorService.assertIngredientsAvailable).not.toHaveBeenCalled();
+    });
+
+    it('rejects producing less than one batch (yield 10, produce 3)', async () => {
+      await expect(run({ yieldQty: 10, produced: 3, lineQty: 1 })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+      });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('the stock pre-check receives the same scaled quantity', async () => {
+      await run({ yieldQty: 1, produced: 10, lineQty: 100 });
+      expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 99, quantity: 1000 })],
+        expect.anything(),
+      );
+    });
+  });
+  describe('create() — planned quantity must be whole recipe batches (QUI-965)', () => {
+    const arrange = (yieldQty: number) => {
+      (prismaMock as any).products = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 50,
+          name: 'Salsa',
+          product_type: 'physical',
+          is_batch_produced: true,
+          store_id: 1,
+        }),
+      };
+      (prismaMock as any).recipes = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          product_id: 50,
+          is_active: true,
+          yield_quantity: new Prisma.Decimal(yieldQty),
+          yield_unit: 'und',
+        }),
+      };
+      (prismaMock.production_orders as any).create = jest
+        .fn()
+        .mockResolvedValue({ id: 1, status: 'draft' });
+    };
+
+    it('accepts 3 batches of a recipe that yields 10 (planned 30)', async () => {
+      arrange(10);
+      await service.create({ product_id: 50, recipe_id: 7, planned_qty: 30 } as any);
+      expect((prismaMock.production_orders as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ planned_qty: new Prisma.Decimal(30) }),
+        }),
+      );
+    });
+
+    it('rejects a planned quantity that is not a multiple of the recipe yield', async () => {
+      arrange(10);
+      await expect(
+        service.create({ product_id: 50, recipe_id: 7, planned_qty: 25 } as any),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE' });
+      expect((prismaMock.production_orders as any).create).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -90,6 +90,28 @@ describe('SubscriptionStateService', () => {
     expect(result.state).toBe('pending_payment');
   });
 
+  // QUI-677 — the RNC-40 draft cleanup cron cancels abandoned drafts.
+  it('draft → cancelled is legal and persists state + event (QUI-677)', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'draft' }]);
+    prismaMock.store_subscriptions.update.mockResolvedValue({
+      id: 100,
+      state: 'cancelled',
+    });
+
+    const result = await service.transition(10, 'cancelled', {
+      reason: 'Draft abandoned',
+      triggeredByJob: 'subscription-draft-cleanup',
+    });
+
+    const updArg = prismaMock.store_subscriptions.update.mock.calls[0][0];
+    expect(updArg.data.state).toBe('cancelled');
+    const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(evtArg.data.from_state).toBe('draft');
+    expect(evtArg.data.to_state).toBe('cancelled');
+    expect(result.state).toBe('cancelled');
+    expect(service.isLegalTransition('draft', 'cancelled')).toBe(true);
+  });
+
   // QUI-676 — every state that may legally ENTER pending_payment must be able
   // to come back out of it, because the checkout paths write that origin state
   // verbatim into `pending_revert_state` and the rollback paths have nothing

@@ -1,9 +1,9 @@
 ---
 name: vendix-angular-forms
 description: >
-  Angular Reactive Forms patterns with strict typing, shared CVA components, and Zoneless-safe
-  form state. Trigger: When creating Angular forms, fixing FormControl type errors, binding
-  form controls in templates, or implementing ControlValueAccessor components.
+  Angular Reactive Forms with strict typing, shared CVA components and Zoneless-safe form state.
+  Trigger: creating Angular forms, fixing FormControl type errors, binding form controls in templates,
+  implementing ControlValueAccessor.
 license: Apache-2.0
 metadata:
   author: rzyfront

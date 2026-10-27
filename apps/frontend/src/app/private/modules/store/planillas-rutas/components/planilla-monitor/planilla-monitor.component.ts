@@ -91,7 +91,7 @@ const LIQUIDACION_COLORS: Record<string, string> = {
           <app-empty-state
             icon="truck"
             title="Sin datos de monitor"
-            description="Cuando cierres o liquides planillas verás aquí el margen de flete por ruta."
+            description="Cuando cierres o liquides rutas verás aquí el margen de flete por ruta."
             [showActionButton]="false"
           ></app-empty-state>
         }
@@ -156,7 +156,7 @@ export class PlanillaMonitorComponent implements OnInit {
   readonly tableColumns: TableColumn[] = [
     {
       key: 'route_number',
-      label: 'Planilla',
+      label: 'Ruta',
       sortable: true,
       width: '140px',
       priority: 1,

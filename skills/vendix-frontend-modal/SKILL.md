@@ -7,62 +7,29 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Creating or modifying modals in frontend"
 ---
 
 # Vendix Frontend Modal
 
-## Source of Truth
+Source: `apps/frontend/src/app/shared/components/modal/modal.component.ts` (+ `README.md`).
 
-- `apps/frontend/src/app/shared/components/modal/modal.component.ts`
-- `apps/frontend/src/app/shared/components/modal/README.md`
+## `app-modal` API
 
-## Current `app-modal` API
-
-`app-modal` is a standalone shared component using signal APIs.
-
-Inputs:
-
-- `isOpen` via `model<boolean>(false)`
-- `title`
-- `subtitle`
-- `size`: `sm | md | lg | xl-mid | xl`
-- `centered`
-- `closeOnBackdrop`
-- `closeOnEscape`
-- `showCloseButton`
-- `overlayCloseButton`
-- `customClasses`
-
-Outputs:
-
-- `opened`
-- `closed`
-- `cancel`
-
-Slots/content areas:
-
-- default body content
-- `[slot=header]`
-- `[slot=header-end]`
-- `[slot=footer]`
+- `isOpen`: `model<boolean>(false)` → use `[(isOpen)]`.
+- Inputs: `title`, `subtitle`, `size` (`sm | md | lg | xl-mid | xl | xxl | full`, default `md`), `centered` (true), `closeOnBackdrop` (**false** by default, QUI-438), `closeOnEscape` (true), `showCloseButton` (true), `overlayCloseButton`, `customClasses`, `dialog` (true: role/aria, focus trap, focus restore, Escape), `canClose: () => boolean | Promise<boolean>` (block close, e.g. dirty form), `fullScreenOnMobile` (opt-in full-screen sheet below `md:`).
+- Outputs: `opened`, `closed` (from an `effect()` on `isOpen()` transitions), `cancel` (emitted by `close()`).
+- Slots: default body, `[slot=header]`, `[slot=header-end]`, `[slot=footer]` (action buttons).
 
 ## Rules
 
-- Always follow `vendix-zoneless-signals` patterns when wrapping modals.
-- Use `[(isOpen)]` with a signal/model in the parent or wrapper component.
-- Prefer shared system components inside the modal body, but this is a preference, not a false hard rule.
-- Use the footer slot for action buttons.
-- Listen to `cancel` when the wrapper needs cleanup on close.
-
-## Behavior Notes
-
-- `opened` and `closed` are emitted from an `effect()` observing `isOpen()` transitions.
-- `close()` sets `isOpen(false)` and emits `cancel`.
-- Escape closing is wired through a browser-only keydown listener.
-- Current backdrop-close handling is attached to the wrapper `dblclick` path plus outside-container detection; document current behavior, do not assume a different click contract without checking the component.
+- Follow `vendix-zoneless-signals` in wrappers.
+- `close()` respects `canClose()` (sync or async), then sets `isOpen(false)` and emits `cancel`; listen to `cancel` for wrapper cleanup.
+- Backdrop close is a single `click` outside the container and only when `[closeOnBackdrop]="true"`. Do not opt in for forms.
+- Keep `dialog` true except purely decorative modals.
+- Prefer shared components inside the body (preference, not hard rule).
 
 ## Wrapper Pattern
 
@@ -93,12 +60,9 @@ onCancel(): void { this.isOpenChange.emit(false); }  // model stays true
 
 Same rule for the inner `app-modal`: forward its `(isOpenChange)` into the
 wrapper's own model — `(isOpenChange)="isOpen.set($event)"` — instead of adding
-a parallel output. This pattern was found in **20 of 64** wrappers during
-QUI-554; fix them opportunistically when you touch one.
+a parallel output. Fix existing offenders opportunistically when you touch one.
 
-Related trap: an `output()` that is **declared and never emitted** looks like
-the parent covers a concern it never receives. `onUserUpdated` did exactly that
-and hid QUI-554. Emit it or delete it.
+An `output()` declared but never emitted hides missing behavior: emit it or delete it.
 
 ## Mutations Inside A Modal
 
@@ -110,6 +74,6 @@ arrives. Full contract, spec + CI guard in `vendix-frontend-state`
 ## Related Skills
 
 - `vendix-zoneless-signals`
-- `vendix-frontend-component`
+- `vendix-frontend`
 - `vendix-angular-forms`
 - `vendix-frontend-state`

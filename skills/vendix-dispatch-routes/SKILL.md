@@ -1,17 +1,13 @@
 ---
 name: vendix-dispatch-routes
 description: >
-  Planillas de despacho (rutas DSD con recaudo) para distribuidoras colombianas:
-  agrupar múltiples remisiones en una ruta con vehículo/conductor/auxiliares y
-  orden de paradas, ejecutar captura progresiva desde la app móvil, y cuadrar
-  el recaudo al regreso reutilizando caja/cartera/refunds/retenciones existentes.
-  Trigger: When working with dispatch_routes, dispatch_route_stops, vehicles,
-  DSD route settlement, withholding breakdown per stop, declared_cash variance,
-  route PDF print, or any "agregador de ruta que orquesta primitivas".
+  Planillas de despacho (rutas DSD con recaudo): agrupar remisiones en ruta con vehículo/conductor y
+  paradas, captura móvil y cuadre de recaudo. Trigger: dispatch_routes, dispatch_route_stops,
+  vehicles, liquidación de ruta, declared_cash, PDF de ruta.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Editing dispatch_routes or dispatch_route_stops schema or service"
@@ -24,385 +20,48 @@ metadata:
     - "Adding new fields to dispatch_route_stop_history audit log"
 ---
 
-## When to Use
+## Alcance
 
-- Touching `dispatch_routes`, `dispatch_route_stops`, `dispatch_route_stop_history`,
-  or `vehicles` tables (any field, transition, or relation).
-- Working with the DSD route flow: armar planilla → despachar → liquidar paradas
-  en ruta → liberar paradas no entregadas → cerrar/cuadrar.
-- Computing `cash_variance = declared_cash - cash_collected_in_route`.
-- Generating or modifying the route PDF (encabezado ruta/vehículo/personal,
-  tabla de paradas, totales, bloque de firmas).
-- Working with retenciones fiscales (`withholding_breakdown`) por parada cuando
-  el cliente es agente retenedor (`customers.is_withholding_agent = true`).
-- Touching `apps/frontend/src/app/private/modules/store/planillas-rutas/`
-  (lista, detalle, wizard, modales de settle/release/close, visor PDF).
-- Modifying the `route-flow.controller.ts` endpoints
-  (`/store/dispatch-routes/:id/{dispatch,close,void,pdf}` y
-  `/store/dispatch-routes/:id/stops/:stopId/{start,settle,release}`).
+Planillas de despacho DSD con recaudo: agrupar remisiones en una ruta con vehículo/conductor/auxiliares, liquidar paradas en ruta y cuadrar el recaudo al cerrar. Código: `apps/backend/src/domains/store/dispatch-routes/` y `apps/frontend/src/app/private/modules/store/planillas-rutas/`.
 
-## Core Rule: Orquestar, no duplicar
+Detalle bajo demanda: columnas en `references/data-model.md`; endpoints, liquidación, cierre contra caja, tracking, permisos y UI en `references/flows.md`.
 
-**The dispatch route is an aggregator, NOT a parallel system.** When a stop is
-settled, the route emits domain events that existing listeners already handle:
+## Regla central: orquestar, no duplicar
 
-| Event              | Listener                                              | Effect                                    |
-|--------------------|-------------------------------------------------------|-------------------------------------------|
-| `payment.received` | `accounting-events.listener` (auto-entries)            | Creates journal entry for cash sale        |
-| `payment.received` | `ar-events.listener`                                   | Updates accounts_receivable if applicable  |
-| `payment.received` | `commissions-events.listener`                          | Calculates commission                      |
-| `payment.received` | `notifications-events.listener`                        | Pushes notification                       |
-| ~~`credit_sale.created`~~ | `ar-events.listener`, `accounting-events.listener`   | **La ruta ya NO lo emite** (sin crédito en ruta). El evento sigue vivo para otros dominios |
-| `refund.completed` | `accounting-events.listener`                           | Creates refund accounting entry            |
-| `cash_register.movement` | `accounting-events.listener`                       | Cash movement + auto-entry                |
-| `dispatch_route.closed` | (none — informational, used by listeners elsewhere) | Signals route settlement complete         |
-| `dispatch_route.voided` | (none — informational)                              | Signals route voided                      |
+La planilla es un agregador. Al liquidar emite eventos que ya manejan los listeners existentes; no crear pipelines paralelos de contabilidad, caja, cartera o notificaciones.
 
-**Do NOT** create a parallel accounting/cash/AR/notification pipeline for
-dispatch routes. The rule is: the route orchestrates, the existing primitives
-do their job.
-
-## Data Model (canonical)
-
-### `dispatch_routes` (the planilla)
-
-| Column | Type | Notes |
-|---|---|---|
-| `route_number` | `VARCHAR(50)` UNIQUE per store | Format `PLN{YYMMDD}{####}`, generated atomically |
-| `route_code` | `VARCHAR(20)` | External identifier (e.g. "RI02") |
-| `status` | enum | `draft` → `dispatched` → `in_transit` → `closed` (or `voided` at any non-terminal point). `close()` acepta `dispatched` o `in_transit`; **no existe `settling`** |
-| `vehicle_id` | FK → `vehicles` nullable | Set null on vehicle delete |
-| `driver_user_id` | FK → `users` nullable | OR `external_driver_*` (mutually exclusive or both allowed) |
-| `external_driver_name`, `external_driver_id_number` | VARCHAR nullable | External driver fallback |
-| `is_primary_driver_external` | BOOLEAN | When both `driver_user_id` and `external_driver_*` are set, flags who actually drives |
-| `assistants` | JSONB | Array of `{user_id?, external_name?, external_id_number?, role?}` |
-| `origin_location_id` | FK → `inventory_locations` nullable | Where the route physically starts |
-| `planned_date` | TIMESTAMP NOT NULL | When the route is planned to dispatch |
-| `dispatch_started_at` / `closed_at` / `voided_at` | TIMESTAMP nullable | State-change timestamps |
-| `total_to_collect`, `total_collected`, `total_prepaid`, `total_changes`, `total_withholdings`, `total_credit` | DECIMAL(14,2) | Aggregated route totals, all default 0 |
-| `declared_cash` | DECIMAL(14,2) nullable | Cash the conductor physically brings back (set at `close`) |
-| `cash_variance` | DECIMAL(14,2) nullable | `declared_cash - cash_collected` (positive = sobra, negative = falta) |
-| `currency` | VARCHAR(10) | Always 'COP' for Colombian DSD |
-
-### `dispatch_route_stops` (each remisión in the planilla)
-
-| Column | Type | Notes |
-|---|---|---|
-| `route_id` | FK → `dispatch_routes` | CASCADE on parent delete |
-| `dispatch_note_id` | FK → `dispatch_notes` UNIQUE **partial** | `UNIQUE WHERE status != 'released'` — allows reassignment after release |
-| `stop_sequence` | INT | 1..N order of stops |
-| `status` | enum | `pending` → `in_progress` → (`delivered` \| `rejected`) or `released`. El enum de Postgres aún contiene `partial` por filas históricas, pero ninguna liquidación puede producirlo |
-| `result` | enum | Final state, set when settled: `delivered`, `rejected`, `released`. `partial` es **solo lectura histórica** (ver Sin pago parcial) |
-| `is_extra_route` | BOOLEAN | Stop added outside the planned route (e.g. cliente adicional en ruta) |
-| `is_prepaid` | BOOLEAN | **Derived** from `dispatch_note.invoice.payment_date IS NOT NULL`. Excluded from `total_to_collect` and cash variance |
-| `collected_amount` | DECIMAL(14,2) | Cash collected in this stop (default 0) |
-| `anticipo_amount` | DECIMAL(14,2) | Reserved for advance payments — currently 0 (no partial payments) |
-| `change_amount` | DECIMAL(14,2) | Cash given back to customer (recorded as `refund` with `source_type='dispatch_route_change'`) |
-| `withholding_amount` | DECIMAL(14,2) | Total fiscal withholding suffered (retefuente + reteiva + reteica) |
-| `withholding_breakdown` | JSONB nullable | `{retefuente?: number, reteiva?: number, reteica?: number}` — sum must equal `withholding_amount` |
-| `credit_amount` | DECIMAL(14,2) | Columna preservada en el schema, **siempre 0**. No es input ni output del settle: la liquidación ya no la escribe y enviarla en el payload produce un 400 del `ValidationPipe` (`forbidNonWhitelisted`). Filas anteriores a la regla conservan su valor |
-| `payment_method` | VARCHAR(40) | `cash` (default), `transfer`, `card` |
-| `settled_at` / `released_at` | TIMESTAMP nullable | State-change timestamps |
-
-### `dispatch_route_stop_history` (audit log)
-
-Append-only audit of every stop transition. `action` can be:
-`start` (pending → in_progress), `settle` (any → result), `release` (any → released).
-Stores `from_status`, `to_status`, `reason` (for release), `released_by`, and a
-`metadata` JSONB with the amounts at the time of transition.
-
-### `vehicles`
-
-Store-scoped, reusable. UNIQUE `(store_id, plate)`. Cannot be hard-deleted if
-referenced by a non-voided route — must be `is_active=false` instead.
-
-## State Machine
-
-### Route state (`dispatch_routes.status`)
-
-```
-            ┌──────────┐
-            │  draft   │
-            └────┬─────┘
-       dispatch  │      void (only in draft/dispatched/in_transit)
-                 ▼
-       ┌────────────────┐              ┌─────────────┐
-       │  dispatched    │ ───────────► │ in_transit  │  (auto on first stop start)
-       └────────┬───────┘              └──────┬──────┘
-                │  close (with declared_cash) │
-                └──────────────┬──────────────┘
-                               ▼
-                        ┌──────────┐
-                        │  closed  │  (immutable, only via manual adjustment)
-                        └──────────┘
-```
-
-`dispatch_route_status_enum` = `draft | dispatched | in_transit | closed | voided`.
-**No existe un estado `settling`**: `close()` se invoca directamente desde
-`dispatched` o `in_transit` y cualquier otro estado devuelve 400.
-
-### Stop state (`dispatch_route_stops.status`)
-
-```
-pending → in_progress → delivered   (pago TOTAL, o prepaga; retención permitida)
-                       → rejected   (el cliente no recibió o no pagó completo)
-            any → released          (remisión freed for reassignment)
-```
-
-Transitions are **forward-only** except `released` which can be reached from any
-non-terminal state and is the only "release valve" to free a dispatch_note.
-
-### Sin pago parcial (regla de negocio)
-
-Distinguir los dos niveles — confundirlos es el origen de QUI-491 y QUI-493:
-
-| Nivel | Regla |
+| Evento | Efecto |
 |---|---|
-| **Parada** | Binaria. Se entrega solo con pago **total** (o prepaga). `settleStop` rechaza `result='partial'` con `DISPATCH_ROUTE_PARTIAL_DISABLED` (400) y también rechaza `delivered` cuando `collected + anticipo + withholding < grand_total`. Sin cobro completo la parada va a `rejected`. |
-| **Ruta** | Parcial permitida. Una planilla cierra con normalidad mezclando paradas `delivered`, `rejected` y `released` — **no lograr entregar todo NO es un error**. Solo bloquea el cierre una parada no terminal (`pending` / `in_progress`), con 400 "Hay N parada(s) sin liquidar". |
+| `payment.received` (`source_type='dispatch_route'`, `payment_id: null`) | Asiento (si el gate fiscal `payments` está activo), comisiones, notificaciones |
+| `refund.completed` (`source_type='dispatch_route_change'`) | Asiento de vueltas |
+| `dispatch_route.closed` | `onDispatchRouteClosed` asienta solo `cash_variance` (gate `cash_register`) |
+| `credit_sale.created` | La ruta ya NO lo emite |
 
-Consecuencias en código:
+Sin asientos con el gate fiscal inactivo es comportamiento correcto (activación fiscal opt-in), no bug.
 
-- No hay venta a crédito en ruta: la liquidación nunca crea `accounts_receivable`
-  ni emite `credit_sale.created` (`emitCreditSale` fue eliminado).
-- `credit_amount` / `total_credit` no se escriben; toda fila nueva queda en 0.
-- Los valores `partial` de los enums y las columnas **se conservan** en el schema
-  (retirarlos exigiría una migración destructiva) y solo sobreviven en los
-  caminos de **lectura** — `SETTLED_RESULTS` en `utils/route-stop-calc.ts`, los
-  badges del detalle y el conteo `per_delivery` del settlement. Quitarlos de la
-  lectura volvería no-terminales las paradas liquidadas antes de la regla y
-  `close()` rechazaría cerrar sus rutas históricas.
-- El escáner de planillas nunca deriva `partial`: si la hoja dice entregada pero
-  el cobro es menor al neto, la parada sale en `skipped[]` con
-  `reason: 'short_payment_requires_decision'` (más `collected_amount` y `net`) y
-  **no se liquida** — reversar inventario ya despachado o asumir el faltante es
-  una decisión de caja del operador, no del sistema.
+## Estados
 
-## Cash Settlement (`cash-settlement.service.ts`)
+- Ruta: `draft → dispatched → in_transit` (auto al iniciar la primera parada) `→ closed`; `voided` desde draft/dispatched/in_transit. No existe `settling`: `close()` solo desde `dispatched` o `in_transit`; `closed` es inmutable.
+- Parada: `pending → in_progress → delivered | rejected`; `released` desde cualquier no terminal (única forma de liberar la remisión). Solo hacia adelante. Cada transición se audita en `dispatch_route_stop_history`.
 
-> **Desde 2026-10-14 el recaudo en ruta NO exige caja.** `settleStop` ya no
-> escribe `cash_register_movements` (ni llama `assertSessionForSales`). Los
-> movimientos se asientan al **cerrar** la planilla contra la sesión que elige
-> el usuario — ver "Cierre contra caja" abajo. `recordCashMovement` queda
-> `@deprecated` sin callers de producción.
+## Invariantes
 
-When `settleStop` is called, it dispatches (in this exact order):
+1. **Sin pago parcial por parada.** `delivered` solo con pago total o prepagada (retención permitida); `settleStop` rechaza `result='partial'` (400 `DISPATCH_ROUTE_PARTIAL_DISABLED`) y `delivered` si `collected + anticipo + withholding < grand_total`. Sin cobro completo → `rejected`.
+2. **Ruta parcial sí.** Cerrar con mezcla de `delivered`/`rejected`/`released` es normal; solo bloquea una parada `pending`/`in_progress`.
+3. **Sin crédito en ruta:** nunca crear `accounts_receivable` ni escribir `credit_amount`/`total_credit` (siempre 0; enviarlo → 400).
+4. **`partial` se conserva en enums y en lectura** (`SETTLED_RESULTS` en `utils/route-stop-calc.ts`, badges, `per_delivery`): quitarlo exige migración destructiva y rompería el cierre de rutas históricas.
+5. **Recaudo sin caja en ruta; se asienta al cerrar** contra la sesión elegida (`recordRouteCloseMovements`, un `sale` por método). No emitir `cash_register.movement` por ese `sale`.
+6. **`cash_variance = declared_cash - cash_collected`**; prepagadas fuera de `total_to_collect` y del cuadre (`is_prepaid` derivado de `dispatch_note.invoice.payment_date`).
+7. **UNIQUE parcial** de `dispatch_note_id` (`WHERE status != 'released'`); un UNIQUE simple bloquea la reasignación.
+8. **Retenciones por parada** solo si el cliente es agente retenedor (`users.is_withholding_agent` del customer); `withholding_breakdown` debe sumar `withholding_amount`.
+9. **Encargado:** con conductor interno principal, solo él despacha y publica tracking.
+10. Vehículos referenciados por rutas no anuladas se desactivan, no se borran.
 
-1. **`emitPaymentReceived`** — only if `collected_amount + anticipo_amount > 0`
-   and not `is_prepaid`:
-   - Emits `payment.received` event with `source_type='dispatch_route'`,
-     `source_id=route_id`, `stop_id`, `order_id=sales_order_id` (may be null),
-     `withholding_breakdown` array for accounting listener.
-2. **`emitRefundCompleted`** — only if `change_amount > 0`:
-   - If `sales_order_id` exists, inserts a `refunds` row with
-     `state='completed'`, `refund_method='cash_on_route'`.
-   - Always emits `refund.completed` event with
-     `source_type='dispatch_route_change'`, `source_id=stop_id`.
+## Trampas
 
-When the route is **closed** (`:id/close`), it computes totals and updates
-`total_collected`, `total_credit` (espejo denormalizado — 0 en toda ruta nueva),
-`total_withholdings`, `cash_variance` (= `declared_cash - cash_collected`), and
-emits `dispatch_route.closed` for downstream listeners. El cierre exige que
-**todas** las paradas estén en estado terminal, pero acepta cualquier mezcla de
-`delivered` / `rejected` / `released`.
+- `cash_register_sessions` usa `opened_by`, no `user_id`.
+- `sales_orders` no tiene `payment_status`; prepago por `dispatch_notes.invoice.payment_date`.
+- `refunds` exige `order_id`: sin `sales_order_id`, solo emitir el evento.
+- Coordenadas de paradas y `unlocated[]`: `resolveStopCoordinates` (`vendix-address-geocoding`).
 
-### Cierre contra caja (recaudo de la planilla)
-
-- `GET /store/dispatch-routes/:id/close-options` (permiso `close`) →
-  `{ cash_required, sessions[] }`. `cash_required` = misma lectura que
-  `assertSessionForSales` (`pos.cash_register.enabled`).
-- `POST /:id/close` acepta `cash_register_session_id?`. Caja obligatoria sin
-  sesión → 400 `DISPATCH_ROUTE_CASH_SESSION_REQUIRED`; sesión no `open` o de otra
-  tienda → 409 `DISPATCH_ROUTE_CASH_SESSION_INVALID`; ruta ya cerrada (chequeo
-  bajo `FOR UPDATE`) → 409 `DISPATCH_ROUTE_ALREADY_CLOSED`.
-- `CashSettlementService.recordRouteCloseMovements` crea UN movimiento `sale`
-  por método de pago (`reference = dispatch_route:{id}:close:{method}`,
-  `user_id = session.opened_by` = responsable), excluyendo paradas con
-  movimiento legado `dispatch_route:{id}:stop:{stopId}`. Persiste
-  `settlement_cash_session_id`, `settlement_cash_user_id`, `cash_settled_at`.
-- **No** emite `cash_register.movement`: el listener contable solo entiende
-  `cash_in`/`cash_out` y trataría un `sale` como retiro. El asiento del recaudo
-  sale de `payment.received` (igual que POS).
-
-### Encargado y tracking en vivo
-
-- Encargado = `driver_user_id` cuando `!is_primary_driver_external`. Si existe,
-  solo él despacha (403 `DISPATCH_ROUTE_NOT_RESPONSIBLE`); externo ⇒ cualquiera
-  con `dispatch`.
-- `dispatch_route_positions` (telemetría append-only, scope manual por
-  `store_id`, sin getter scoped → `withoutScope()` + filtro explícito).
-  Publica solo el encargado interno de una ruta `dispatched|in_transit`:
-  `POST /store/dispatch-routes/:id/tracking/positions` (admin) o el espejo
-  `POST /store/carrier/route/tracking/positions` (app Repartos). Lectura:
-  `GET /:id/tracking` (snapshot, trail ≤500) y SSE `GET /:id/tracking/stream?token=`.
-- Frontend: `RoutePositionPublisherService` (solo el encargado; sobrevive al
-  cambio de página; para con 403/404/409) y `RouteTrackingService` (SSE +
-  polling 15 s). El espectador NUNCA usa geolocalización. Vista completa en
-  `/admin/orders/planillas/:id/recorrido` (mapa 8/12 izq, paradas 4/12 der,
-  pantalla completa con panel flotante / bottom-sheet).
-
-## Capture Progressive Mobile
-
-The mobile-first UI allows the conductor/admin to mark stops in real time:
-
-1. **Pre-dispatch** (`draft`): edit stops, add/remove, change driver/vehicle.
-2. **Pre-dispatch transition** (`dispatch`): locks stop list, sets
-   `dispatch_started_at` and `dispatched_by_user_id`.
-3. **In route** (`in_transit`): per stop, the conductor can:
-   - **Start** (`POST /stops/:stopId/start`): pending → in_progress.
-   - **Settle** (`POST /stops/:stopId/settle`): capture amounts + result.
-   - **Release** (`POST /stops/:stopId/release`): pending/in_progress → released
-     (with `reason`); the remisión is freed for reassignment to another route.
-4. **Close** (`POST /:id/close`): aggregate totals, set `declared_cash`,
-   compute `cash_variance`, mark `closed` (immutable).
-
-The frontend's `planilla-detail-page.component.ts` exposes per-stop cards with
-big tap targets (`Liquidar` and `Liberar` buttons), and a `PlanillaCloseModal`
-that shows live variance computation as the conductor types `declared_cash`.
-
-## Permissions
-
-The permission key is `store:dispatch_routes` with actions:
-
-| Action | Used by |
-|---|---|
-| `create` | `POST /store/dispatch-routes` |
-| `read` | `GET /store/dispatch-routes` (list + stats) |
-| `read:one` | `GET /store/dispatch-routes/:id` |
-| `update` | `PATCH /store/dispatch-routes/:id` |
-| `delete` | `DELETE /store/dispatch-routes/:id` |
-| `dispatch` | `POST /:id/dispatch` |
-| `settle` | `POST /:id/stops/:stopId/{start,settle}` |
-| `release_stop` | `POST /:id/stops/:stopId/release` |
-| `close` | `POST /:id/close` |
-| `void` | `POST /:id/void` |
-| `print` | `POST /:id/pdf` |
-
-The `admin` and `owner` roles get all `store:*` permissions via the
-permissions-roles seed filter, so no explicit assignment is required. Add
-explicit assignments only if a more restricted role (e.g. `dispatcher`) needs
-access.
-
-## Mobile-First UI
-
-`apps/frontend/src/app/private/modules/store/planillas-rutas/`:
-
-- **List view** (`planillas-list.component.ts`): cards on `<md` breakpoints,
-  table on `>=md`. Each card shows route number, status, driver, vehicle,
-  stop count, and total to collect.
-- **Detail view** (`planilla-detail-page.component.ts`): stop cards with
-  left-border color (green if delivered, red if released/rejected; `partial` se
-  sigue pintando verde solo para paradas históricas).
-  Action buttons (`Liquidar`, `Liberar`) are large tap targets.
-- **Wizard** (`planilla-wizard.component.ts`): bottom-sheet style modal on
-  mobile (`rounded-t-2xl md:rounded-2xl`), centered modal on desktop.
-- **Modals** (settle, release, close): all use the same bottom-sheet pattern
-  for mobile consistency. Close modal shows live variance calc.
-- **PDF viewer** (`planilla-pdf-viewer.component.ts`): iframe with
-  `URL.createObjectURL` from a Blob. Includes a download link.
-
-The sidebar item "Planillas de Ruta" maps to `orders_dispatch_routes` in
-`menu-filter.service.ts` so `panel_ui` can hide/show it per store.
-
-## Common Pitfalls
-
-1. **`cash_register_sessions` has `opened_by`, not `user_id`.** The field
-   that identifies the user on the open session is `opened_by`. Using
-   `user_id` in a Prisma `where` will throw `Unknown argument`.
-2. **`sales_orders` does NOT have `payment_status`.** Use the join through
-   `dispatch_notes.invoice.payment_date IS NOT NULL` to determine
-   `is_prepaid` for a stop.
-3. **`refunds` requires `order_id` NOT NULL and `state` enum value.** If
-   `sales_order_id` is null, skip the `refunds` insert and just emit the
-   `refund.completed` event. Don't crash the whole settle.
-4. **UNIQUE on `dispatch_note_id` must be PARTIAL** (`WHERE status != 'released'`)
-   to allow reassignment after `release-stop`. A plain `UNIQUE` would block
-   the entire reassignment flow.
-5. **Don't add parallel accounting logic.** Emit events; let existing
-   listeners create entries. The `payment.received` listener creates the
-   accounting_entries row (note: requires `payment_id` to be set; for
-   dispatch routes this is `null` by design — see "Known Gap" below).
-6. **Auto-entries require a real `payments` row.** The `payment.received`
-   listener in `accounting-events.listener.ts` filters by `payment_id` for
-   journal entry creation. When dispatch routes emit with `payment_id: null`,
-   the cash side creates the `cash_register_movements` row directly (good),
-   but the journal entry is skipped. If full accounting is required, insert
-   a `payments` row in `emitPaymentReceived` before emitting the event.
-
-## Why Accounting Entries Are Not Generated Automatically
-
-The `accounting-events.listener` is gated by the organization's **fiscal
-status** (subflow: `payments`, `credit_sales`). The listener calls
-`isFlowEnabled(store_id, 'payments')` which checks
-`fiscal_gate.isSubflowEnabled(org_id, store_id, 'payments')`. If the
-organization's `organization_settings.fiscal_status.accounting.state` is
-`INACTIVE` (or its subflow `payments` is disabled), the event is **silently
-dropped** — by design, for opt-in fiscal activation.
-
-This is **correct behavior**, not a bug. When the organization activates its
-fiscal status (sets `accounting.state = ACTIVE` and enables the `payments`
-subflow), the existing `payment.received` listener will pick up the events
-emitted by dispatch routes and create auto-entries.
-
-For convenience, `dispatch_routes` event payloads include enough context for
-the listener to work:
-
-- `payment_id`: `null` (use `source_id=route_id` as a back-reference)
-- `order_id`: `sales_order_id` if the dispatch_note has one, else `null`
-- `withholding_breakdown`: array of `{code, amount}` for fiscal line items
-- `amount`, `subtotal_amount`, `tax_amount`, `discount_amount`: full context
-- `source_type: 'dispatch_route'`: distinguishable from POS payments
-
-If an organization requires strict double-entry on every planilla stop and
-the fiscal flow is active, the existing auto-entry machinery handles it
-without any code change.
-
-## Verifying Changes
-
-After any schema or service edit, run:
-
-```bash
-# Backend type check
-cd apps/backend && npx tsc -p tsconfig.build.json --noEmit
-
-# Apply migration
-cd apps/backend && npx prisma db execute --file prisma/migrations/<ts>_*/migration.sql
-
-# Seed (idempotent)
-cd apps/backend && npm run db:seed
-
-# Frontend build
-cd apps/frontend && npx ng build --configuration=production
-
-# Restart backend
-docker restart vendix_backend
-
-# E2E smoke
-TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"owner@techsolutions.co","password":"1125634q","organization_slug":"tech-solutions"}' \
-  | node -e "const d=require('fs').readFileSync(0,'utf8');const j=JSON.parse(d);console.log(j.data.access_token)")
-
-# Stats
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/store/dispatch-routes/stats
-```
-
-## Related Files
-
-### Backend
-- `apps/backend/prisma/schema.prisma` — new models (vehicles, dispatch_routes,
-  dispatch_route_stops, dispatch_route_stop_history) and enums
-- `apps/backend/prisma/migrations/<ts>_dispatch_routes/migration.sql` — idempotent migration
-- `apps/backend/src/domains/store/dispatch-routes/` — module, controllers, services
-- `apps/backend/src/domains/store/dispatch-routes/route-flow/route-flow.service.ts` — state machine + close logic
-- `apps/backend/src/domains/store/dispatch-routes/route-flow/cash-settlement.service.ts` — event emission
-- `apps/backend/src/domains/store/dispatch-routes/route-flow/pdf-export.service.ts` — PDFKit builder
-- `apps/backend/src/domains/store/store.module.ts` — registers `DispatchRoutesModule`
-- `apps/backend/src/prisma/services/store-prisma.service.ts` — store-scoped getters for new models
-- `apps/backend/prisma/seeds/permissions-roles.seed.ts` — `store:dispatch_routes:*` permissions
-
-### Frontend
-- `apps/frontend/src/app/private/modules/store/planillas-rutas/` — full module
-- `apps/frontend/src/app/routes/private/store_admin.routes.ts` — `/admin/orders/planillas` routes
-- `apps/frontend/src/app/private/layouts/store-admin/store-admin-layout.component.ts` — sidebar entry
-- `apps/frontend/src/app/core/services/menu-filter.service.ts` — `moduleKeyMap` entry
+Verificación: tests del archivo tocado (p. ej. `npm run test:path -w apps/backend -- src/domains/store/dispatch-routes/route-flow/route-flow.service.spec.ts`) y `curl` con usuario seed; ver `how-to-test`.

@@ -78,7 +78,8 @@ export function buildVendixStructuredData(
         name: 'Vendix',
         legalName: VENDIX_LEGAL_NAME,
         url: `${VENDIX_ORIGIN}/`,
-        logo: `${VENDIX_ORIGIN}/vlogo.png`,
+        // 128 px (#945): cumple el mínimo de 112 px de Google sin descargar el PNG de 505 KB.
+        logo: `${VENDIX_ORIGIN}/vlogo-128.png`,
         sameAs: VENDIX_SAME_AS,
         contactPoint: [VENDIX_CONTACT_POINT],
       },

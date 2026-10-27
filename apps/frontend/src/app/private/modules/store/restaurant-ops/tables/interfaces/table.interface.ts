@@ -122,6 +122,8 @@ export interface TableSession {
    * hasta que el mesero ejecute `closeSession`.
    */
   paid_at?: string | Date | null;
+  /** QUI-898 — notas informales de la mesa (texto libre, no cobra ni va a cocina). */
+  informal_notes?: string | null;
   guest_count: number | null;
   order?: TableSessionOrder;
   table?: {

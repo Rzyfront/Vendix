@@ -99,7 +99,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         icon="coins"
         iconTone="teal"
         title="Reparto"
-        hint="Tarifa que se propone al liquidar una planilla; se puede ajustar por ruta.">
+        hint="Tarifa que se propone al liquidar una ruta; se puede ajustar en cada ruta.">
         <app-carrier-settings-form
           [settings]="
             store.settings().carrier || {

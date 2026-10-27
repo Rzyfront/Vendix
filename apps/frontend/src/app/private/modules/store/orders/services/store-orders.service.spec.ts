@@ -194,3 +194,72 @@ describe('StoreOrdersService — typed error contract', () => {
     );
   });
 });
+
+describe('StoreOrdersService — success:false nunca es éxito (QUI-650)', () => {
+  let service: StoreOrdersService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        StoreOrdersService,
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: StoreContextService, useValue: { getStoreId: () => 1, storeId: () => 1 } },
+      ],
+    });
+    service = TestBed.inject(StoreOrdersService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => httpMock.verify());
+
+  const body = {
+    success: false,
+    error_code: 'ORD_EDIT_INVALID_STATE_001',
+    message: 'No editable',
+    statusCode: 409,
+  };
+
+  it('updateOrderItems convierte 200 + success:false en error tipado', (done) => {
+    service.updateOrderItems('9', {}).subscribe({
+      next: () => fail('no debe emitir éxito'),
+      error: (err) => {
+        expect(err.errorCode).toBe('ORD_EDIT_INVALID_STATE_001');
+        expect(err.message.length).toBeGreaterThan(0);
+        done();
+      },
+    });
+    httpMock.expectOne(`${environment.apiUrl}/store/orders/9/items`).flush(body);
+  });
+
+  it('updateOrderFromEditor convierte 200 + success:false en error tipado', (done) => {
+    service.updateOrderFromEditor('9', {}).subscribe({
+      next: () => fail('no debe emitir éxito'),
+      error: (err) => {
+        expect(err.errorCode).toBe('ORD_EDIT_INVALID_STATE_001');
+        done();
+      },
+    });
+    httpMock.expectOne(`${environment.apiUrl}/store/orders/9/editor`).flush(body);
+  });
+
+  it('previewItemChanges y applyItemChanges devuelven data tipada y tratan success:false como error', (done) => {
+    service.previewItemChanges(9, { remove: [{ order_item_id: 1 }] }).subscribe((p) => {
+      expect(p.version).toBe('v1');
+      service.applyItemChanges(9, {}).subscribe({
+        next: () => fail('no debe emitir éxito'),
+        error: (err) => {
+          expect(err.errorCode).toBe('ORD_EDIT_INVALID_STATE_001');
+          done();
+        },
+      });
+      httpMock
+        .expectOne(`${environment.apiUrl}/store/orders/9/flow/items/changes`)
+        .flush(body);
+    });
+    httpMock
+      .expectOne(`${environment.apiUrl}/store/orders/9/flow/items/changes/preview`)
+      .flush({ success: true, data: { version: 'v1', lines: [] } });
+  });
+});

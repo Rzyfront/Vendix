@@ -11686,6 +11686,9 @@ model table_sessions {
   /// que el mesero la libere explícitamente (closed_at sigue independiente).
   paid_at     DateTime? @db.Timestamp(6)
   guest_count Int?
+  /// QUI-898: notas informales del mesero sobre la mesa (texto libre). No afectan
+  /// cuenta, inventario ni KDS; se conservan al cerrar la sesión (historial).
+  informal_notes String? @db.Text
   created_at  DateTime? @default(now()) @db.Timestamp(6)
   updated_at  DateTime? @default(now()) @db.Timestamp(6)
 

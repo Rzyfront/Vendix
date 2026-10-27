@@ -393,10 +393,6 @@ export class PosTicketService {
           this.openCashDrawer();
         }
 
-        if (printOptions.emailReceipt && ticketData.customer?.email) {
-          this.emailTicket(ticketData, ticketData.customer.email);
-        }
-
         if (printOptions.smsReceipt && ticketData.customer?.phone) {
           this.smsTicket(ticketData, ticketData.customer.phone);
         }
@@ -1273,8 +1269,6 @@ export class PosTicketService {
 
   private openCashDrawer(): void {}
 
-  private emailTicket(ticketData: TicketData, email: string): void {}
-
   private smsTicket(ticketData: TicketData, phone: string): void {}
 
   private getDefaultPrintOptions(): PrintOptions {
@@ -1284,7 +1278,6 @@ export class PosTicketService {
       copies: printer.copies,
       openCashDrawer: true,
       printReceipt: true,
-      emailReceipt: false,
       smsReceipt: false,
     };
   }

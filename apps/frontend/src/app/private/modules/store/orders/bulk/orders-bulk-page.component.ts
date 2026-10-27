@@ -209,15 +209,15 @@ const BULK_ACTIONS: BulkActionDef[] = [
     group: 'dispatch',
     label: 'Crear remisiones y asignar a ruta',
     description:
-      'Genera la remisión de cada orden y la agrega como parada a la planilla que elijas. Las órdenes que ya tengan remisión se omiten.',
-    cta: 'Elegir planilla',
+      'Genera la remisión de cada orden y la agrega como parada a la ruta que elijas. Las órdenes que ya tengan remisión se omiten.',
+    cta: 'Elegir ruta',
     icon: 'navigation',
     variant: 'outline',
     permission: 'store:orders:bulk_update',
     confirm: true,
     confirmTitle: 'Crear remisiones y asignar a ruta',
     confirmMessage:
-      '¿Crear remisiones para las órdenes seleccionadas y asignarlas como stops a la planilla elegida? Las órdenes que ya tengan remisión se omitirán.',
+      '¿Crear remisiones para las órdenes seleccionadas y asignarlas como stops a la ruta elegida? Las órdenes que ya tengan remisión se omitirán.',
   },
   {
     id: 'print',
@@ -251,7 +251,7 @@ const BULK_ACTIONS: BulkActionDef[] = [
 ];
 
 /** Título del modal para la asignación a ruta (no viene de un `BulkActionDef`). */
-const ASSIGN_ROUTE_TITLE = 'Crear remisiones y asignar a planilla';
+const ASSIGN_ROUTE_TITLE = 'Crear remisiones y asignar a ruta';
 
 /** Metadatos de presentación por grupo. El orden aquí es el orden en pantalla. */
 const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
@@ -865,7 +865,7 @@ export class OrdersBulkPageComponent {
     if (action.id === 'assign-route') {
       if (this.routes().length === 0) {
         this.toastService.warning(
-          'No hay planillas disponibles. Crea una planilla primero.',
+          'No hay rutas disponibles. Crea una ruta primero.',
         );
         return;
       }

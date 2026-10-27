@@ -1,14 +1,11 @@
 ---
 name: vendix-subscription-gate
 description: >
-  Feature gating by store subscription state: global store write guard, AI feature gate,
-  Redis feature resolution, quota consumption, frontend paywall interceptor, banner, and
-  subscription UI states. Trigger: When adding feature gates, paywalls, subscription-based
-  access control, protecting store write operations, AI feature gates, or rollout flags.
+  Feature gating by store subscription state: store write guard, AI feature gate, Redis feature resolution, frontend paywall and banner. Trigger: feature gates, paywalls, subscription access control, @RequireAIFeature, rollout flags.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Adding feature gates or paywalls backed by subscription state"
@@ -57,17 +54,11 @@ Use `@SkipSubscriptionGate()` for subscription management, platform webhook/paym
 
 ## Rollout Flags
 
-Primary flag:
-
-- `STORE_GATE_ENFORCE=true` enables enforcement.
-
-Deprecated alias:
-
-- `AI_GATE_ENFORCE=true` also enables enforcement and logs a deprecation warning.
+- Enforcement is the **code default**. `STORE_GATE_ENFORCE=false` (deprecated alias `AI_GATE_ENFORCE=false`, logs a warning) falls back to log-only, e.g. for an incident bypass.
 
 `SUBSCRIPTION_CRON_DRY_RUN=true` enables dry-run behavior for some subscription jobs.
 
-Known implementation caveat: `SubscriptionAccessService` has an internal private `isEnforceMode()` path that checks only `AI_GATE_ENFORCE` for internal-error fail-open/fail-closed behavior. Other guard/AI paths use `SubscriptionGateConfig.isEnforce()`.
+Known caveat: `SubscriptionAccessService` has a private `isEnforceMode()` that returns `AI_GATE_ENFORCE === 'true'` only (opt-in, opposite default) for internal-error fail-open/fail-closed. Other guard/AI paths use `SubscriptionGateConfig.isEnforce()`.
 
 ## State Mapping
 
@@ -76,6 +67,7 @@ Current backend `stateToMode()` behavior:
 | State | Mode | Reason |
 | --- | --- | --- |
 | `active`, `trial` | allow | none |
+| `pending_payment` | warn (charge in flight; `ReconcileStuckPendingJob` reverts it after 60 min) | `SUBSCRIPTION_007` |
 | `grace_soft` | warn | `SUBSCRIPTION_007` |
 | `grace_hard` | warn by default, block if feature `degradation='block'` | `SUBSCRIPTION_009` when blocked |
 | `suspended` | block | `SUBSCRIPTION_008` |
@@ -83,6 +75,8 @@ Current backend `stateToMode()` behavior:
 | `cancelled`, `expired` | block | `SUBSCRIPTION_003` |
 | `no_plan` | block | `SUBSCRIPTION_004` |
 | `draft`/default | block | `SUBSCRIPTION_002` |
+
+If the plan was retired from the catalog, `pending_payment`/grace/`suspended`/`blocked` report `SUBSCRIPTION_011` instead (recovery = pick a plan, no debt). `stateToMode()` also reads `store_subscriptions.lock_reason` to name the real cause.
 
 Important nuance: GET/HEAD/OPTIONS requests bypass `StoreOperationsGuard`, so read routes remain reachable at the guard layer. But `canUseModule()` currently maps `cancelled` to block; do not document module checks as read-allow for cancelled unless code changes.
 
@@ -127,55 +121,11 @@ Do not consume quota before provider success.
 
 ## Quota Keys
 
-`consumeAIQuota()` uses Redis with request-id dedupe.
+`consumeAIQuota()` uses Redis Lua with request-id dedupe (`ai:quota:{storeId}:{feature}:{period}`, UTC periods, TTL 48h daily / 40d monthly). The AI engine passes the request context id or a synthetic `internal-${randomUUID()}`. Rules: `vendix-redis-quota`.
 
-- Counter: `ai:quota:{storeId}:{feature}:{period}`.
-- Dedup set: `ai:quota:dedup:{storeId}:{feature}:{period}`.
-- Daily period: `YYYYMMDD`, TTL 48h.
-- Monthly period: `YYYYMM`, TTL 40d.
-- Requires non-empty request id; AI engine uses request context id or synthetic `internal-${randomUUID()}`.
+## Frontend
 
-## Frontend Source of Truth
-
-- Store: `apps/frontend/src/app/core/store/subscription/`
-- Interceptor: `apps/frontend/src/app/core/interceptors/subscription-paywall.interceptor.ts`
-- Paywall service: `apps/frontend/src/app/core/services/subscription-access.service.ts`
-- Paywall outlet/modal: `apps/frontend/src/app/shared/components/ai-paywall-modal/`
-- Banner: `apps/frontend/src/app/shared/components/subscription-banner/subscription-banner.component.ts`
-- Store subscription pages: `apps/frontend/src/app/private/modules/store/subscription/`
-
-## Frontend Paywall
-
-The HTTP interceptor opens a paywall by backend `error_code`, not strictly by HTTP status.
-
-Codes handled include `SUBSCRIPTION_002` through `SUBSCRIPTION_009`, `PLAN_001`, and `TRIAL_001`. It rethrows the original error after opening the modal.
-
-Suppression rules prevent duplicate paywalls on:
-
-- no-plan while already on `/admin/subscription/picker`.
-- suspended/blocked while already on `/admin/subscription/dunning`.
-- exact `/admin/subscription`.
-
-`SubscriptionAccessService.openPaywall(code, message?, details?)` maps backend codes and synthetic state codes to variant config. It also supports state-driven paywalls and payment-success microinteraction.
-
-`<app-paywall-outlet />` is mounted in store-admin, organization-admin, and super-admin layouts. The subscription banner is store-admin only.
-
-## Frontend Subscription State
-
-`SubscriptionFacade` exposes both observables and signals with `toSignal(..., { initialValue })`.
-
-Important facade concepts:
-
-- `subscriptionContextChanged(storeId)` resets/loads state by store context.
-- `subscriptionUiState` is the frontend cascade for grace, terminal states, no-plan, pending payment/change, expiring soon, and healthy states.
-- Effects call `/store/subscriptions/current`, `/current/access`, checkout preview/commit, invoices, dunning state, retry payment, coupon validation, and invoice sync from gateway.
-- SSE listens to `/store/notifications/stream?token=...` and reacts to `subscription.updated`.
-
-## Banner And Dunning UI
-
-`SubscriptionBannerComponent` is store-scoped and visible only for `expiring_soon`, `grace_soft`, and `grace_hard`. Terminal and pending states are handled by subscription pages/paywall variants.
-
-Store dunning page shows deadline, total due, overdue invoices, features lost/kept, retry payment, and support request CTA.
+Store `core/store/subscription/`, interceptor `core/interceptors/subscription-paywall.interceptor.ts`, `core/services/subscription-access.service.ts`, `shared/components/ai-paywall-modal/`, `shared/components/subscription-banner/`, pages `private/modules/store/subscription/`. The interceptor opens the paywall by backend `error_code` (`SUBSCRIPTION_002`–`009`, `SUBSCRIPTION_011`, `PLAN_001`, `TRIAL_001`), not by status, and rethrows. Paywall suppression, facade state cascade, SSE `subscription.updated`, banner and dunning: `references/frontend.md` (read on demand).
 
 ## Anti-Patterns
 

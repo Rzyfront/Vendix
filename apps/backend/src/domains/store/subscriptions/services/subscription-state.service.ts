@@ -70,7 +70,9 @@ interface PaymentFailedEventPayload {
  * 409 from the controller and were stuck.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
-  draft: ['pending_payment', 'trial', 'active', 'no_plan'],
+  // QUI-677: the RNC-40 cleanup cron (SubscriptionDraftCleanupJob) cancels
+  // abandoned drafts, so `draft -> cancelled` must be legal.
+  draft: ['pending_payment', 'trial', 'active', 'no_plan', 'cancelled'],
   // Recovery checkouts initiated from grace/suspended store the prior state
   // in `pending_revert_state`. cancelPendingChange uses that field to roll
   // back, so pending_payment must be able to transition back to those

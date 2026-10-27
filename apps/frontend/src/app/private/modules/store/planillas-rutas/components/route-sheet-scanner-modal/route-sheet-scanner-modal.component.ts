@@ -109,8 +109,8 @@ interface EditableStopDecision {
       (isOpenChange)="onOpenChange($event)"
       (cancel)="onCancel()"
       size="xl"
-      title="Cargar planilla escaneada"
-      subtitle="Escanea la planilla física para liquidar la ruta"
+      title="Cargar hoja de ruta escaneada"
+      subtitle="Escanea la hoja de ruta física para liquidarla"
     >
       <!-- Steps indicator -->
       <div class="mb-6">
@@ -192,7 +192,7 @@ interface EditableStopDecision {
                 <app-icon name="scan-line" [size]="32" class="text-primary-600"></app-icon>
               </div>
               <p class="text-sm font-semibold text-text-primary mb-1">
-                Arrastra tu planilla aquí
+                Arrastra tu hoja de ruta aquí
               </p>
               <p class="text-xs text-text-secondary">
                 JPG, PNG, WebP o PDF - Máx 10MB
@@ -230,7 +230,7 @@ interface EditableStopDecision {
             <div class="lg:w-1/3 flex-shrink-0">
               <img
                 [src]="filePreviewUrl()"
-                alt="Planilla"
+                alt="Hoja de ruta"
                 class="w-full max-h-64 lg:max-h-80 object-contain rounded-lg border border-border"
               />
             </div>
@@ -246,7 +246,7 @@ interface EditableStopDecision {
           }
 
           <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Analizando planilla..."></app-spinner>
+            <app-spinner size="lg" text="Analizando hoja de ruta..."></app-spinner>
             <p class="text-sm text-text-secondary text-center">
               Extrayendo recaudos y buscando coincidencias con las paradas de la ruta...
             </p>
@@ -509,7 +509,7 @@ interface EditableStopDecision {
               [disabled]="!selectedFile()"
               (clicked)="startScan()"
             >
-              Analizar Planilla
+              Analizar hoja de ruta
             </app-button>
           }
           @if (currentStep() === 3) {
@@ -819,7 +819,7 @@ export class RouteSheetScannerModalComponent {
             err instanceof HttpErrorResponse
               ? parseApiError(err).userMessage
               : (err as Error | null)?.message ||
-                'Error al procesar la planilla';
+                'Error al procesar la hoja de ruta';
           this.toast.error(msg);
           this.currentStep.set(1);
           this.isScanning.set(false);
@@ -1078,7 +1078,7 @@ export class RouteSheetScannerModalComponent {
     if (code === 'DISPATCH_ROUTE_PARTIAL_DISABLED') {
       return 'No se permiten pagos parciales en una ruta: cada parada debe cobrarse completa o quedar como rechazada/liberada.';
     }
-    return err?.message || 'Error al liquidar la planilla';
+    return err?.message || 'Error al liquidar la ruta';
   }
 
   // ============================================================

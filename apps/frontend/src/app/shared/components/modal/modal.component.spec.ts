@@ -61,3 +61,38 @@ describe('ModalComponent nested keyboard ownership', () => {
     expect(customerWrapper.contains(document.activeElement)).toBeTrue();
   });
 });
+
+@Component({
+  standalone: true,
+  imports: [ModalComponent],
+  template: `
+    <app-modal [(isOpen)]="open" title="Producto">
+      <input id="product-name" type="text" />
+    </app-modal>
+  `,
+})
+class DefaultModalHost {
+  readonly open = signal(true);
+}
+
+describe('ModalComponent default dialog (QUI-746)', () => {
+  let fixture: ComponentFixture<DefaultModalHost>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({ imports: [DefaultModalHost] }).compileComponents();
+    fixture = TestBed.createComponent(DefaultModalHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('exposes role="dialog" without opting in and focuses the container, not the first input', () => {
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement | null;
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    expect(dialog?.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(dialog);
+    expect(document.activeElement?.id).not.toBe('product-name');
+  });
+});

@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Adding backend permissions"
@@ -29,7 +29,7 @@ Real behavior:
 
 - Super admin role bypasses permission checks.
 - JWT user permissions are objects with `name`, `path`, `method`, and `status`.
-- Route/method match passes when `currentPath === permission.path` or `currentPath.startsWith(permission.path)`, method matches, and status is `active`.
+- Route/method match passes only when `permission.path === currentPath` **exactly** (the Nest route pattern, e.g. `/api/store/products/:id`), method matches or is `ALL`, and status is `active`. No prefix match; `*` wildcards in seed paths do not match by route (those rows authorize only by name). Adding wildcard support widens access and needs an explicit decision.
 - Named match passes when any required `@Permissions(...)` name exists in active user permissions.
 - The guard uses OR semantics: route/method match OR named permission match.
 
@@ -73,10 +73,10 @@ Prefer `domain:resource:action` or `domain:resource:subresource:action` for new 
 
 1. Add or update `@Permissions('permission:name')` on the protected controller/handler.
 2. Add or update the row in `apps/backend/prisma/seeds/permissions-roles.seed.ts`.
-3. Ensure `path` includes the API route shape expected by `PermissionsGuard`.
+3. Ensure `path` equals the full Nest route pattern (`/api/...` with `:params`) expected by `PermissionsGuard`.
 4. Ensure `method` matches the HTTP method or uses `ALL` only when intentional.
 5. Assign the permission to the correct role(s) in the seed.
-6. Treat seed cleanup as data-impacting: removed seed permissions may be removed/deprecated from DB by seed logic.
+6. Removing a row from the seed does not revoke it in existing DBs; revocation is a data-impacting change (see `vendix-prisma-migrations`).
 7. **Run the seed.** Editing the seed file alone does NOT grant the permission — the row only exists in code until the seed runs against the DB. After committing the seed change you MUST re-run it:
 
    ```bash
@@ -85,10 +85,10 @@ Prefer `domain:resource:action` or `domain:resource:subresource:action` for new 
      npx ts-node -e "import('./prisma/seeds/permissions-roles.seed').then(m => m.seedPermissionsAndRoles())"
 
    # Full seed (idempotent but heavier)
-   docker exec vendix_backend npm run seed
+   docker exec vendix_backend npm run db:seed
    ```
 
-   The seed is additive: it never deletes role assignments (uses `syncRolePermissions` with additive-only mode), so it is safe to re-run in dev. In production, run it via the deploy pipeline alongside the migration.
+   The seed is additive: `syncRolePermissions` never deletes role assignments, so it is safe to re-run in dev; removing a permission from a role needs an explicit approved data change. In production the deploy runs `seed-production.ts` (includes permissions/roles) after the migration.
 
 8. **No re-login required for users.** `JwtStrategy.validate()` re-reads `user.permissions` from the DB on every request — once the row exists, the next API call sees it.
 
@@ -115,5 +115,5 @@ Never rely on hidden frontend UI as a security boundary.
 
 - `vendix-backend-auth` - Global JWT auth and public routes
 - `vendix-panel-ui` - Sidebar visibility
-- `vendix-backend-api` - Controller patterns
+- `vendix-backend` - Controller patterns
 - `vendix-prisma-seed` - Seed safety patterns

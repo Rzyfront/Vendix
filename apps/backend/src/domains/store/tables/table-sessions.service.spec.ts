@@ -2684,5 +2684,50 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         service.updateItemNotes(83, 501, 'Nota'),
       ).rejects.toThrow();
     });
+
+    describe('updateInformalNotes (QUI-898)', () => {
+      it('guarda el texto recortado sin tocar order_items ni cocina', async () => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(findOneRow());
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+        (prismaMock.$transaction as jest.Mock).mockClear();
+
+        await service.updateInformalNotes(83, '  Cliente pidió un vaso extra  ');
+
+        expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+          where: { id: 83, store_id: STORE_ID },
+          data: expect.objectContaining({ informal_notes: 'Cliente pidió un vaso extra' }),
+        });
+        expect(prismaMock.$transaction).not.toHaveBeenCalled();
+        expect(
+          (service as any).kitchenFireService.emitTicketUpdatedEvent,
+        ).not.toHaveBeenCalled();
+      });
+
+      it.each(['', '   ', null, undefined])('normaliza %p a null', async (value) => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(findOneRow());
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+
+        await service.updateInformalNotes(83, value as any);
+
+        expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+          where: { id: 83, store_id: STORE_ID },
+          data: expect.objectContaining({ informal_notes: null }),
+        });
+      });
+
+      it('rechaza con TABLE_SESSION_CLOSED si la sesión está cerrada y no escribe', async () => {
+        (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue({
+          ...findOneRow(),
+          closed_at: new Date(),
+        });
+        (prismaMock.table_sessions.updateMany as jest.Mock).mockClear();
+
+        await expect(service.updateInformalNotes(83, 'x')).rejects.toMatchObject({
+          errorCode: ErrorCodes.TABLE_SESSION_CLOSED.code,
+        });
+        expect(prismaMock.table_sessions.updateMany).not.toHaveBeenCalled();
+        expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      });
+    });
   });
 });

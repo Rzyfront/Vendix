@@ -84,5 +84,4 @@ Some checks are warnings, not hard failures. Follow the script’s logic rather 
 
 - `vendix-frontend`
 - `vendix-angular-forms`
-- `vendix-frontend-component`
 - `vendix-frontend-state`

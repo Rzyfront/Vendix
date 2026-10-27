@@ -44,7 +44,7 @@ import { DispatchRoute, DispatchRouteStats } from './interfaces/planilla.interfa
       <div
         class="flex items-center gap-2 px-2 pb-2 pt-1 md:px-0 md:pt-0 md:mb-3"
         role="tablist"
-        aria-label="Vistas de planillas"
+        aria-label="Vistas de rutas"
       >
         <button
           type="button"
@@ -227,7 +227,7 @@ export class PlanillasRutasComponent {
   onCreated(route: DispatchRoute) {
     this.showWizard.set(false);
     this.clearPrefill();
-    this.toast.success(`Planilla ${route.route_number} creada`);
+    this.toast.success(`Ruta ${route.route_number} creada`);
     this.refresh();
   }
 

@@ -8,7 +8,6 @@ import {
   SimpleChanges,
   inject,
   computed,
-  signal,
 } from '@angular/core';
 
 import {
@@ -191,8 +190,8 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || isSubmitting()"
-            [loading]="isSubmitting()"
+            [disabled]="form.invalid || submitting()"
+            [loading]="submitting()"
           >
             {{ isEditMode() ? 'Guardar Cambios' : 'Publicar' }}
           </app-button>
@@ -204,6 +203,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
   readonly isOpen = model<boolean>(false);
   readonly document = input<StoreLegalDocument | undefined>(undefined);
+  readonly submitting = input(false);
   readonly isOpenChange = output<boolean>();
   readonly save = output<CreateStoreDocumentDto | UpdateStoreDocumentDto>();
   readonly cancel = output<void>();
@@ -212,7 +212,6 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   private fb = inject(FormBuilder);
   form: FormGroup;
-  readonly isSubmitting = signal(false);
 
   documentTypeOptions: SelectorOption[] = [
     { label: 'Términos de Servicio', value: 'TERMS_OF_SERVICE' },
@@ -284,7 +283,6 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   private resetForm() {
     this.form.reset();
-    this.isSubmitting.set(false);
   }
 
   patchForm(doc: StoreLegalDocument) {
@@ -305,7 +303,6 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
       return;
     }
 
-    this.isSubmitting.set(true);
     const formValue = this.form.getRawValue();
 
     let dto: CreateStoreDocumentDto | UpdateStoreDocumentDto;
@@ -338,11 +335,6 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   onClose() {
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

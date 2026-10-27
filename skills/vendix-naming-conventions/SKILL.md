@@ -51,7 +51,7 @@ Vendix Prisma schema mirrors the existing database naming style:
 - Prisma enum names commonly use `snake_case` with `_enum`, e.g. `user_state_enum`.
 - Prisma enum values follow the persisted DB values. Many are lowercase `snake_case`, while some protocol-like values are uppercase, e.g. HTTP methods.
 
-Do not rename Prisma models, columns, or enum values without loading `vendix-prisma-schema` and `vendix-prisma-migrations`.
+Do not rename Prisma models, columns, or enum values without loading `vendix-prisma` and `vendix-prisma-migrations`.
 
 ## Angular And NestJS Class Suffixes
 
@@ -80,7 +80,7 @@ Do not rename Prisma models, columns, or enum values without loading `vendix-pri
 
 ## Related Skills
 
-- `vendix-prisma-schema` - Prisma naming and schema edits
+- `vendix-prisma` - Prisma naming and schema edits
 - `vendix-prisma-migrations` - Safe database renames/migrations
-- `vendix-frontend-component` - Angular component structure
-- `vendix-backend-domain` - Backend domain structure
+- `vendix-frontend` - Angular component structure
+- `vendix-backend` - Backend domain structure

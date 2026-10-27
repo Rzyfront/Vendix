@@ -467,15 +467,15 @@
         (click)="$event.stopPropagation()"
       >
         <h3 class="text-sm font-semibold text-text-primary">
-          Asignar a planilla
+          Asignar a ruta
         </h3>
         <p class="mt-1 text-xs text-text-secondary">
-          Elige la planilla a la que se asignarán las remisiones creadas para las
+          Elige la ruta a la que se asignarán las remisiones creadas para las
           {{ selectedCount() }} órdenes seleccionadas.
         </p>
         @if (routeOptions().length === 0) {
           <p class="mt-3 text-xs text-text-secondary">
-            No hay planillas disponibles en estado borrador o despachada.
+            No hay rutas disponibles en estado borrador o despachada.
           </p>
         } @else {
           <ul class="mt-3 max-h-64 space-y-1 overflow-y-auto">

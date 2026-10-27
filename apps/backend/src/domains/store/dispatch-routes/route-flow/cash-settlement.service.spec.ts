@@ -17,7 +17,7 @@ describe('CashSettlementService.emitPaymentReceived — close-session lock', () 
         create: jest.fn().mockResolvedValue({
           id: 91,
           reference: 'dispatch_route:3:stop:5',
-          notes: 'Recaudo planilla #3 parada #5',
+          notes: 'Recaudo ruta #3 parada #5',
         }),
       },
     };
@@ -143,7 +143,7 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
         amount: 150,
         payment_method: 'cash',
         reference: 'dispatch_route:3:close:cash',
-        notes: 'Recaudo planilla PLN1 (2 paradas)',
+        notes: 'Recaudo ruta PLN1 (2 paradas)',
       }),
     });
     expect(tx.cash_register_movements.create).toHaveBeenCalledWith({

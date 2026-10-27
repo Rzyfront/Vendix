@@ -747,7 +747,7 @@ export const PRINT_DOCUMENT_LABELS: Record<PrintDocument, string> = {
   invoice: 'Factura electrónica',
   dispatch_ticket: 'Tiquete de despacho',
   dispatch_note: 'Remisión',
-  dispatch_route: 'Planilla de ruta',
+  dispatch_route: 'Ruta',
   sales_order: 'Orden de venta',
   purchase_order: 'Orden de compra',
   quotation: 'Cotización',

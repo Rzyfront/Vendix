@@ -62,10 +62,16 @@ export class ProductionOrdersService {
   ) {}
 
   /**
-   * Consumed quantity for a single `recipe_items` line, net of line + recipe
-   * waste. Extracted so the no-overselling pre-check (before the tx) and the
-   * real consumption (inside the tx) compute the EXACT same number — they
-   * can never diverge on what is about to be deducted.
+   * Consumed quantity for a single `recipe_items` line, scaled to the produced
+   * quantity and net of line + recipe waste. Extracted so the no-overselling
+   * pre-check (before the tx) and the real consumption (inside the tx) compute
+   * the EXACT same number — they can never diverge on what is about to be
+   * deducted.
+   *
+   * Recipe lines are expressed per recipe batch (`recipe.yield_quantity`), so
+   * the scale factor is `producedQty / yield_quantity`. A missing/invalid/<=0
+   * yield falls back to 1. Absolute waste is per batch and scales with the
+   * factor. Rounding happens only once, at the very end.
    */
   private computeConsumedQty(
     item: {
@@ -75,9 +81,15 @@ export class ProductionOrdersService {
       waste_absolute?: any;
     },
     recipeWastePct: number,
+    producedQty: number,
+    yieldQuantity?: any,
   ): number {
     const baseQty = Number(item.quantity);
     if (!Number.isFinite(baseQty) || baseQty <= 0) return 0;
+
+    const yieldQty = Number(yieldQuantity);
+    const safeYield = Number.isFinite(yieldQty) && yieldQty > 0 ? yieldQty : 1;
+    const factor = producedQty / safeYield;
 
     const lineWastePct = Number(item.waste_percent || 0);
     const wasteMode = (item as any).waste_mode ?? 'percent';
@@ -85,10 +97,35 @@ export class ProductionOrdersService {
       const wasteAbs = Number((item as any).waste_absolute ?? 0);
       const safeWasteAbs = Number.isFinite(wasteAbs) ? wasteAbs : 0;
       const withLine = baseQty + safeWasteAbs;
-      return Math.round(withLine * (1 + recipeWastePct / 100));
+      return Math.round(withLine * factor * (1 + recipeWastePct / 100));
     }
     const multiplier = (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
-    return Math.round(baseQty * multiplier);
+    return Math.round(baseQty * factor * multiplier);
+  }
+
+  /**
+   * Production always runs whole recipe batches: a recipe that yields 10 can
+   * produce 10, 20, 30… but never 3 or 25. This keeps the consumption factor
+   * (`qty / yield_quantity`) a positive integer, so no ingredient line can be
+   * rounded down to zero by a partial batch. A missing/invalid yield is
+   * treated as 1 (any positive integer quantity is accepted).
+   */
+  private assertWholeBatches(
+    qty: number,
+    yieldQuantity: unknown,
+    yieldUnit?: string | null,
+  ): void {
+    const yieldQty = Number(yieldQuantity);
+    if (!Number.isFinite(yieldQty) || yieldQty <= 0) return;
+    const batches = qty / yieldQty;
+    const wholeBatches = Math.round(batches);
+    if (wholeBatches >= 1 && Math.abs(batches - wholeBatches) < 1e-9) return;
+    const unit = yieldUnit ? ` ${yieldUnit}` : '';
+    throw new VendixHttpException(
+      ErrorCodes.PRODUCTION_QTY_NOT_YIELD_MULTIPLE,
+      `La receta rinde ${yieldQty}${unit} por tanda: la cantidad debe ser un múltiplo exacto (${yieldQty}, ${yieldQty * 2}, ${yieldQty * 3}…)`,
+      { quantity: qty, yield_quantity: yieldQty },
+    );
   }
 
   // ------------------------------------------------------------------ create
@@ -116,6 +153,7 @@ export class ProductionOrdersService {
           id: true,
           product_id: true,
           is_active: true,
+          yield_quantity: true,
           yield_unit: true,
         },
       }),
@@ -144,6 +182,12 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_INACTIVE,
       );
     }
+
+    this.assertWholeBatches(
+      Number(dto.planned_qty),
+      recipe.yield_quantity,
+      recipe.yield_unit,
+    );
 
     const created = await this.prisma.production_orders.create({
       data: {
@@ -328,6 +372,7 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_EMPTY,
       );
     }
+    this.assertWholeBatches(producedQty, recipe.yield_quantity, recipe.yield_unit);
 
     // Resolve the location for the produced good. Uses the same default
     // resolver as the rest of the inventory flow so we don't surprise
@@ -345,7 +390,12 @@ export class ProductionOrdersService {
     const recipeWastePctForCheck = Number(recipe.waste_percent || 0);
     const ingredientDemands: StockDemandLine[] = [];
     for (const item of recipe.items) {
-      const consumedQty = this.computeConsumedQty(item, recipeWastePctForCheck);
+      const consumedQty = this.computeConsumedQty(
+        item,
+        recipeWastePctForCheck,
+        producedQty,
+        recipe.yield_quantity,
+      );
       if (consumedQty <= 0) continue;
       ingredientDemands.push({
         product_id: item.component_product_id,
@@ -382,7 +432,12 @@ export class ProductionOrdersService {
       // they are consumed as their own batch stock via the same machinery).
       for (const item of recipe.items) {
         const recipeWastePct = Number(recipe.waste_percent || 0);
-        const consumedQty = this.computeConsumedQty(item, recipeWastePct);
+        const consumedQty = this.computeConsumedQty(
+          item,
+          recipeWastePct,
+          producedQty,
+          recipe.yield_quantity,
+        );
         if (consumedQty <= 0) continue;
 
         // El insumo se consume de SU propia bodega, no de la del producto

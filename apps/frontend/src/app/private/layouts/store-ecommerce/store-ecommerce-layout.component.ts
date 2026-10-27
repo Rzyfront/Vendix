@@ -8,7 +8,7 @@ import {
   effect,
   computed,
 } from '@angular/core';
-import { Title } from '@angular/platform-browser';
+import { StoreSeoService } from '../../modules/ecommerce/services/store-seo';
 import { isPlatformBrowser, ViewportScroller } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
@@ -164,7 +164,7 @@ export class StoreEcommerceLayoutComponent {
   private router = inject(Router);
   private viewport_scroller = inject(ViewportScroller);
   private destroy_ref = inject(DestroyRef);
-  private title_service = inject(Title); // Inject Title service
+  private store_seo = inject(StoreSeoService);
   private platform_id = inject(PLATFORM_ID);
   private wompi_checkout = inject(WompiCheckoutService); // shared widget opener
   private readonly is_browser = isPlatformBrowser(this.platform_id);
@@ -361,8 +361,12 @@ export class StoreEcommerceLayoutComponent {
           'Tienda';
         this.store_name.set(resolvedName);
 
-        if (resolvedName && resolvedName !== 'Tienda') {
-          this.title_service.setTitle(resolvedName);
+        // SEO: el nombre real de la tienda (no el slug) y su descripción reemplazan
+        // los metadatos de Vendix que trae el index.html compartido.
+        const seoName =
+          this.domain_service.getCurrentStore()?.name || resolvedName;
+        if (seoName && seoName !== 'Tienda') {
+          this.store_seo.setStore(seoName, tenantConfig?.seo?.description);
         }
 
         const storeLogo = domainConfig.store_logo_url;

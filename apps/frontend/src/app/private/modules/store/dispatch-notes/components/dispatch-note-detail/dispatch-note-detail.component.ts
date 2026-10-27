@@ -89,6 +89,11 @@ export class DispatchNoteDetailComponent {
   /** Emite cuando el editor de dirección guarda — el parent debe refrescar la nota. */
   readonly addressSaved = output<void>();
 
+  // ── Envío (QUI-718) ─────────────────────────────────
+  readonly shippingCost = computed(() => Number(this.dispatch_note().shipping_cost) || 0);
+  readonly shippingTax = computed(() => Number(this.dispatch_note().order?.shipping_tax_amount) || 0);
+  readonly shippingTaxName = computed(() => this.dispatch_note().order?.shipping_tax_name || 'impuesto');
+
   // ── StickyHeader computed ───────────────────────────
   readonly headerTitle = computed(() => `Remision ${this.dispatch_note().dispatch_number}`);
   readonly headerSubtitle = computed(

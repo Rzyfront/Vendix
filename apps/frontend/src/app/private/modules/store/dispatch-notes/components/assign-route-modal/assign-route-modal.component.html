@@ -4,7 +4,7 @@
   (cancel)="onModalCancel()"
   [dialog]="true"
   title="Asignar a ruta"
-  subtitle="Agrega esta remisión a una planilla de ruta"
+  subtitle="Agrega esta remisión a una ruta"
   size="md"
 >
   <!-- Header icon -->
@@ -79,16 +79,16 @@
     @if (mode() === 'existing') {
       <div class="space-y-1.5">
         @if (loadingRoutes()) {
-          <p class="text-xs text-[var(--color-text-secondary)] py-2 px-1">Cargando planillas...</p>
+          <p class="text-xs text-[var(--color-text-secondary)] py-2 px-1">Cargando rutas...</p>
         }
 
         @if (!loadingRoutes() && routes().length === 0) {
           <div class="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-center">
             <p class="text-xs text-[var(--color-text-muted)]">
-              No hay planillas en borrador o despachadas disponibles.
+              No hay rutas en borrador o despachadas disponibles.
             </p>
             <p class="text-[11px] text-[var(--color-text-muted)] mt-1">
-              Usa "Nueva planilla" para crear una.
+              Usa "Nueva ruta" para crear una.
             </p>
           </div>
         }
@@ -133,7 +133,7 @@
       <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 flex gap-2.5">
         <app-icon name="plus-circle" [size]="18" class="text-[var(--color-primary)] flex-shrink-0 mt-0.5"></app-icon>
         <p class="text-xs text-[var(--color-text-secondary)] leading-snug">
-          Se abrirá el asistente de planillas con esta remisión pre-seleccionada
+          Se abrirá el asistente de rutas con esta remisión pre-seleccionada
           para que definas conductor, vehículo y fecha de la nueva ruta.
         </p>
       </div>

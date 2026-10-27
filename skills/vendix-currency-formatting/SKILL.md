@@ -1,13 +1,13 @@
 ---
 name: vendix-currency-formatting
 description: >
-  Currency formatting patterns: custom Vendix CurrencyPipe, CurrencyFormatService,
-  money inputs with [currency], format_style enum, Decimal string handling, and avoiding
-  hardcoded money formatting. Trigger: When displaying or inputting money/currency values.
+  Currency formatting: Vendix CurrencyPipe, CurrencyFormatService, money inputs with [currency],
+  format_style, Decimal strings, no hardcoded money formatting. Trigger: When displaying or inputting
+  money/currency values.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Displaying or formatting money/currency values"
@@ -53,6 +53,8 @@ Useful methods:
 - `formatCompact(amount)`
 - `formatChartAxis(value)`
 
+Resolution is a 3-state signal `resolution()`: `pending` → `format()` returns `CURRENCY_PENDING_PLACEHOLDER` (`'…'`, never a provisional number; `'—'` means "no value"); `resolved` → tenant currency; `unresolved` → en-US fallback. Read `format()` inside templates (impure pipe or component helper) so the view repaints when currency resolves; do not cache formatted strings in plain fields.
+
 ## Inputs
 
 Use shared input currency mode:
@@ -66,5 +68,4 @@ Use shared input currency mode:
 ## Related Skills
 
 - `vendix-product-pricing`
-- `vendix-calculated-pricing`
 - `vendix-angular-forms`

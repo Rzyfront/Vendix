@@ -17,16 +17,32 @@ import {
 
 import { WizardStepSectionComponent } from './wizard-step-section.component';
 import { PlanillasRutasService } from '../../../planillas-rutas/services/planillas-rutas.service';
-import { DispatchRoute } from '../../../planillas-rutas/interfaces/planilla.interface';
+import { DispatchRoute, DispatchRouteStatus } from '../../../planillas-rutas/interfaces/planilla.interface';
 import { CreateDispatchFromOrderNewRouteDto } from '../../interfaces/dispatch-note.interface';
 import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispatch-note-wizard.service';
+
+/** Statuses the backend accepts when appending a remisión to an existing route. */
+export const ASSIGNABLE_ROUTE_STATUSES: ReadonlyArray<DispatchRouteStatus> = ['draft', 'dispatched'];
+
+export function isRouteAssignable(route: Pick<DispatchRoute, 'status'>): boolean {
+  return ASSIGNABLE_ROUTE_STATUSES.includes(route.status);
+}
+
+export const ROUTE_STATUS_LABELS: Record<DispatchRouteStatus, string> = {
+  draft: 'Borrador',
+  dispatched: 'Despachada',
+  in_transit: 'En ruta',
+  closed: 'Cerrada',
+  voided: 'Anulada',
+};
 
 /**
  * Route step (ref 2026-06-25).
  *
  * Optional. The operator picks one of three modes:
  *   - none     : free-standing remisión (default).
- *   - existing : append this remisión as a stop on an existing draft planilla.
+ *   - existing : append this remisión as a stop on an existing planilla. All
+ *                statuses are listed, but only draft/dispatched are selectable.
  *   - new      : create a new planilla inline. The planilla is created
  *                atomically with the remisión via
  *                `CreateFromOrderDto.route_assignment.new_route`.
@@ -51,7 +67,7 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
     <app-wizard-step-section
       icon="truck"
       title="Ruta"
-      subtitle="Asigna una planilla ahora o déjala sin ruta (se creará como borrador)"
+      subtitle="Asigna una ruta ahora o deja la remisión sin ruta (se creará como borrador)"
       [dense]="true"
     >
       <!-- Mode radio group -->
@@ -82,20 +98,20 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
       @if (wizardService.routeMode() === 'existing') {
         <div class="space-y-1.5">
           <app-inputsearch
-            placeholder="Buscar planilla por # o ruta..."
+            placeholder="Buscar ruta por # o nombre..."
             [debounceTime]="300"
             (search)="onRouteSearch($event)"
           ></app-inputsearch>
 
           @if (loadingRoutes()) {
             <p class="text-xs text-[var(--color-text-secondary)] py-1.5 px-1">
-              Buscando planillas...
+              Buscando rutas...
             </p>
           }
 
           @if (!loadingRoutes() && routes().length === 0) {
             <p class="text-xs text-[var(--color-text-muted)] py-2 px-1">
-              No hay planillas en borrador.
+              No hay rutas registradas.
             </p>
           }
 
@@ -103,17 +119,20 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
             <button
               type="button"
               class="w-full text-left p-2 border rounded-lg transition-colors"
+              [disabled]="!isAssignable(r)"
               [class]="
-                wizardService.selectedRouteId() === r.id
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
-                  : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40'
+                !isAssignable(r)
+                  ? 'border-[var(--color-border)] opacity-60 cursor-not-allowed'
+                  : wizardService.selectedRouteId() === r.id
+                    ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+                    : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40'
               "
-              (click)="onPickRoute(r.id)"
+              (click)="onPickRoute(r)"
             >
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">{{ r.route_number }}</span>
                 <span class="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
-                  {{ r.status }}
+                  {{ statusLabels[r.status] }}
                 </span>
               </div>
               <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -125,6 +144,11 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
                   · {{ r.vehicle.plate }}
                 }
               </p>
+              @if (!isAssignable(r)) {
+                <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
+                  No admite nuevas remisiones: solo se pueden asignar rutas en Borrador o Despachada.
+                </p>
+              }
             </button>
           }
         </div>
@@ -158,7 +182,7 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
 
           <app-textarea
             label="Notas (opcional)"
-            placeholder="Notas internas de la planilla..."
+            placeholder="Notas internas de la ruta..."
             [rows]="2"
             [ngModel]="notes()"
             (ngModelChange)="setNotes($event)"
@@ -180,9 +204,11 @@ export class RouteStepComponent {
     icon: string;
   }> = [
     { value: 'none', label: 'Sin ruta', description: 'Entrega directa desde la remisión.', icon: 'x' },
-    { value: 'existing', label: 'Planilla existente', description: 'Asignar a una planilla en borrador.', icon: 'truck' },
-    { value: 'new', label: 'Nueva planilla', description: 'Crear planilla y asignar la remisión.', icon: 'plus-circle' },
+    { value: 'existing', label: 'Ruta existente', description: 'Asignar a una ruta en borrador o despachada.', icon: 'truck' },
+    { value: 'new', label: 'Nueva ruta', description: 'Crear ruta y asignar la remisión.', icon: 'plus-circle' },
   ];
+
+  readonly statusLabels = ROUTE_STATUS_LABELS;
 
   readonly loadingRoutes = signal(false);
   readonly routes = signal<DispatchRoute[]>([]);
@@ -219,8 +245,13 @@ export class RouteStepComponent {
     this.fetchRoutes(query);
   }
 
-  onPickRoute(id: number): void {
-    this.wizardService.setSelectedRouteId(id);
+  isAssignable(route: Pick<DispatchRoute, 'status'>): boolean {
+    return isRouteAssignable(route);
+  }
+
+  onPickRoute(route: DispatchRoute): void {
+    if (!this.isAssignable(route)) return;
+    this.wizardService.setSelectedRouteId(route.id);
   }
 
   setDriver(id: number | null): void {
@@ -259,7 +290,7 @@ export class RouteStepComponent {
   private fetchRoutes(query: string): void {
     this.loadingRoutes.set(true);
     this.planillasService
-      .list({ status: 'draft', search: query?.trim() || undefined, limit: 20 })
+      .list({ search: query?.trim() || undefined, limit: 20 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {

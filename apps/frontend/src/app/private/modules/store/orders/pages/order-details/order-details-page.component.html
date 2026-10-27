@@ -2535,6 +2535,11 @@
                         ></app-icon>
                         <span class="text-text-secondary truncate">
                           Cupón
+                          @if (cp.percent) {
+                            <span class="font-semibold text-gray-900"
+                              >{{ cp.percent }} %</span
+                            >
+                          }
                           <span class="font-semibold text-gray-900">{{
                             cp.code
                           }}</span>
@@ -2960,6 +2965,15 @@
           (paymentSubmitted)="onPaymentSubmitted($event)"
         />
       }
+    }
+
+    @if (showItemsEditModal() && order(); as orderData) {
+      <app-order-items-edit-modal
+        [(isOpen)]="showItemsEditModal"
+        [order]="orderData"
+        (saved)="loadData()"
+        (orderReloaded)="loadData()"
+      />
     }
 
     <!-- SHIP MODAL (delivery-type aware) -->

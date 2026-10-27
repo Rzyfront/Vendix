@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Changing run_readonly_script or the sandbox RPC broker"
@@ -17,8 +17,6 @@ metadata:
 # Agent sandbox security
 
 ## Non-negotiable boundary
-
-- Autonomy capabilities are standard, without environment switches.
 
 - Availability is detected from real isolated-runtime dependencies, never a store canary allowlist.
 - NEVER run generated code in Nest, Node `vm`, local Deno, or on the dev Mac.
@@ -83,8 +81,8 @@ egress/imports/fs/env/FFI/workers, memory/CPU/stdout/PIDs, cancellation/late RPC
 Review report must match final runtime/policy/seccomp/runsc/supervisor digests.
 An env boolean or synthetic negative test is not security certification.
 
-Use the existing general Vex/Vexi control to stop operation; preserve evidence.
-canary, rounds/cost/latency benefits require authorized real measurements. No
+Rollback: stop Vex/Vexi through its general control and preserve evidence. Canary,
+rounds/cost/latency benefits require authorized real measurements. No
 infrastructure provisioning or paid service choice is implicit in this skill.
 
 ## Source of truth
@@ -95,13 +93,3 @@ infrastructure provisioning or paid service choice is implicit in this skill.
 - `docs/agentic-sandbox-E.md` — phase boundaries and verification status.
 - Related: `vendix-agent-durable-tasks`, `vendix-ai-agent-tools`,
   `vendix-multi-tenant-context`, `vendix-prisma-migrations`, `buildcheck-dev`.
-
-## Standard autonomy operation
-
-Autonomy is always active in code; stop Vex/Vexi through its existing general
-control, not environment switches. Sandbox availability requires the actual isolated
-runtime/supervisor/configuration and source encryption key. Missing dependencies
-yield an unavailable recoverable result; other tools remain usable. Recipe mining
-is active independently of the signing key; publication without
-`AI_RECIPE_REVIEW_KEY` is a safe no-op. Bootstrap automatically synchronizes
-the tool/process catalog; missing embeddings degrade to authorized lexical search.

@@ -31,6 +31,7 @@ import { PosScaleService } from '../services/pos-scale.service';
       size="sm"
       [showCloseButton]="true"
       (isOpenChange)="onModalClose()"
+      [dialog]="true"
       >
       <div class="scale-modal-body">
         <!-- Product info -->

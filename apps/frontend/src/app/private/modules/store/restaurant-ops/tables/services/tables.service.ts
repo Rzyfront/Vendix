@@ -352,6 +352,26 @@ export class TablesService {
   }
 
   /**
+   * QUI-898 — notas informales de la sesión (texto libre, sin efecto en
+   * total, inventario ni cocina). `null` o vacío las limpia.
+   * `PATCH /store/table-sessions/:id/informal-notes`
+   */
+  updateInformalNotes(
+    sessionId: number,
+    informal_notes: string | null,
+  ): Observable<TableSession> {
+    return this.http
+      .patch<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/informal-notes`,
+        { informal_notes: informal_notes ?? null },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
    * QUI-655 — receta activa de un producto, para el picker de "sin papas" al
    * tomar el pedido. Devuelve las lineas directas de la receta con su nombre.
    *

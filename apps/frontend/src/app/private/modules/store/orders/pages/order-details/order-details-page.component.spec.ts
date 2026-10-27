@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
@@ -6,7 +7,7 @@ import {
   orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
   cancelPaymentCopy,
   isCodAwaitingConfirmation, isOrderEligibleForSplitCreation,
-  isManualPaymentPending, isOrderSplitLocked,
+  isManualPaymentPending, isOrderSplitLocked, OrderDetailsPageComponent,
 } from './order-details-page.component';
 import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
@@ -537,5 +538,33 @@ describe('OrderDetailsPageComponent — cuenta dividida fija los importes', () =
     expect(isOrderSplitLocked({ active_financial_split_id: 5 })).toBeTrue();
     expect(isOrderSplitLocked({ active_financial_split_id: null })).toBeFalse();
     expect(isOrderSplitLocked(null)).toBeFalse();
+  });
+});
+
+describe('QUI-650 — Modificar Orden abre el modal de ítems', () => {
+  const build = (order: unknown) => {
+    const showItemsEditModal = signal(false);
+    const router = jasmine.createSpyObj('Router', ['navigate']);
+    const self = {
+      order: () => order,
+      showItemsEditModal,
+      router,
+      openItemsEditModal: OrderDetailsPageComponent.prototype.openItemsEditModal,
+    };
+    return { self, showItemsEditModal, router };
+  };
+
+  it("executeAction('edit-order') abre el modal y no navega al POS", () => {
+    const { self, showItemsEditModal, router } = build({ id: 5 });
+    OrderDetailsPageComponent.prototype.executeAction.call(self as any, 'edit-order');
+    expect(showItemsEditModal()).toBeTrue();
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('no hace nada si la orden tiene una cuenta dividida activa', () => {
+    const { self, showItemsEditModal, router } = build({ id: 5, active_financial_split_id: 9 });
+    OrderDetailsPageComponent.prototype.executeAction.call(self as any, 'edit-order');
+    expect(showItemsEditModal()).toBeFalse();
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

@@ -1,191 +1,75 @@
 ---
 name: parallel
 description: >
-  Governs parallel execution by multiple executive agents on the SAME current git branch and a
-  shared working tree. Defines the hard prohibitions for executive agents (no branch switching, no
-  touching out-of-scope files, no deletions, no destructive or history-rewriting git) and the
-  commit-early protection that prevents irrecoverable loss of a neighbor's unstaged work.
-  Runs on `develop` by default; another branch only when the user explicitly requires it.
-  Trigger: NOT auto-invoked. Load ONLY when the user explicitly invokes it in a plan or workflow to
-  run work in parallel on the current branch.
+  Safety contract for parallel writer agents on independent units, in one shared tree or in worktrees: scope, commit-early, no stash or destructive git.
+  Trigger: /parallel, or a plan that runs writers in parallel.
+disable-model-invocation: true
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "2.1"
   scope: [root]
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
 # Parallel
 
-## Purpose
+Boundaries for concurrent writer agents so none corrupts a sibling's work. Whether to delegate is in
+`AGENTS.md` / `how-to-plan`; general git rules in `git-workflow`. The coordinator injects these rules
+into every writer prompt with an explicit allowed-file list per writer.
 
-This skill governs **parallel execution by multiple executive agents working on the SAME current git
-branch and the SAME shared working tree**. It defines the boundaries each executive agent must
-respect so concurrent work does not corrupt, overwrite, or destroy the work of sibling agents.
+## When allowed
 
-Its objective is to provide a **fast, shared multi-agent development space**: agents move quickly
-without blocking each other, and that speed comes from small committed increments — never from
-editing on top of a sibling's uncommitted work.
+Only independent units: disjoint files and no ordering dependency (B needs A's output → sequential).
+Manual invocation only (`/parallel` or a feature doc that names it). Never "to be thorough".
 
-The run works on **`develop` by default**. It uses another branch only when the user explicitly
-requires it.
+| Mode | When | Isolation |
+| --- | --- | --- |
+| **Worktrees** (default) | Unless Rafael says no | One worktree + branch per writer from the anchor (`git worktree add -b <branch> ../<dir> <sha>`). Integrate via commits/PR, never by copying files between trees. |
+| **Shared tree** | Rafael asks, or worktrees impossible | Same branch and tree; scope discipline and early commits are the only protection. |
 
-It governs the **safety contract** of shared-tree parallel work. It does NOT govern how to split a
-task or orchestrate agents (see `agent-teams`) nor general git rules (see `git-workflow`).
+## Coordinator checkpoint (before fan-out)
 
-## Activation
+1. Confirm the run branch (from `origin/develop` unless Rafael named another); `git status`; commit
+   its own pending changes. Never fan out on the wrong branch or on unstaged work.
+2. Record the anchor: `git rev-parse HEAD` (optionally `git tag checkpoint/parallel-<run-id>`).
+3. Then spawn writers.
+4. Recovery to the anchor (`git reset --hard <sha>` / `git revert`) is a deliberate coordinator or
+   human decision, never a writer's; cherry-pick committed work from the reflog first.
 
-- **NOT auto-invoked.** This skill is never loaded automatically by action triggers.
-- Load it **only** when the user explicitly references it inside a plan or workflow — e.g. "run this
-  in parallel using the `parallel` skill" or a plan step that names it.
-- When active, its rules apply to **every executive agent** spawned for that parallel run, and the
-  orchestrator must inject them into each subordinate agent's prompt.
+## Writers: hard prohibitions
 
-## Execution Model
+1. No branch changes: no `checkout`, `switch`, `checkout -b`, `branch -m`, detached HEAD.
+2. No out-of-scope edits: no reformatting, cleanup or refactor of neighbor files.
+3. No deletions outside the assigned scope; never delete, discard or revert another agent's files,
+   changes or commits. No `rm`/`git rm` to "tidy".
+4. No destructive or history-rewriting git: `reset` (any mode dropping changes), `checkout -- <path>`,
+   `restore`, `clean -f*`, `rebase`, `merge`, `pull`, `push --force*`, `commit --amend` on shared
+   commits, `stash` in any form, `reflog expire`, `gc --prune`, `branch -D`, `tag -d`.
 
-- All executive agents operate on the **run branch** — **`develop` by default**, or the branch
-  the user explicitly required. The orchestrator checks out that branch before the run starts;
-  executive agents never switch branches (see Hard Prohibitions). There is no per-agent branch
-  and no worktree isolation unless the user explicitly asks.
-- The working tree is **shared**: a file written by one agent is immediately visible to all others,
-  and a destructive command by one agent affects every other agent's in-progress work.
-- Because there is no isolation, the only real protection against loss is **scope discipline plus
-  committing early** (see Commit Protection).
+A neighbor's `reset --hard` / `restore` / `clean` annihilates every unstaged change in a shared tree,
+irrecoverably. It already cost a fully verified refactor at Vendix.
 
-## Orchestrator Checkpoint (Pre-Fan-Out)
+Allowed: read anything; edit/create inside scope; `git add <own files>` + `git commit`; read-only git;
+scoped tests and log checks (`buildcheck-dev`).
 
-Before launching any executive agent, the **orchestrator** (never an executive agent) establishes a
-recovery anchor so the whole run has a guaranteed point of return:
+## File scope and shared files
 
-1. **Anchor branch + clean baseline.** Check out the run branch (`develop` by default, or the
-   branch the user explicitly required), then run `git status`; if the tree has uncommitted
-   changes the orchestrator owns, commit them first. Never fan out on the wrong branch or on top
-   of unstaged work.
-2. **Capture the checkpoint.** Record the current HEAD as the recovery anchor:
-   ```bash
-   git rev-parse HEAD                          # note this SHA — the recovery point
-   git tag checkpoint/parallel-<run-id>        # optional, human-readable anchor on the same branch
-   ```
-   A lightweight tag does not move HEAD and does not switch branches, so it respects the model.
-3. **Then fan out.** Spawn the executive agents only after the checkpoint exists.
-4. **Recovery is deliberate and orchestrator/human-only.** If the run is corrupted, returning to the
-   checkpoint (`git reset --hard <sha>` or `git revert`) is a conscious, coordinated decision made by
-   the orchestrator or a human — it is NEVER an action an executive agent may take (see Hard
-   Prohibitions). Any committed agent work between the checkpoint and the failure is preserved in the
-   reflog/object store and can be cherry-picked before resetting.
+- Confirm each file is part of your assignment; never edit a file holding a sibling's uncommitted
+  diff — wait for their commit and re-read fresh.
+- Need a file outside scope → report a blocker, do not edit.
+- Shared-file protocol (only way to mix changes in one file): both commit first → coordinator assigns
+  non-overlapping regions → re-read fresh, edit only your region → `git diff` proves sibling lines
+  intact → commit immediately. Overlap or doubt → stop and report.
 
-The checkpoint complements — does not replace — the per-agent commit-early rule: the checkpoint
-bounds the blast radius of the whole run; early commits protect each agent's individual work.
+## Commit protection
 
-## Hard Prohibitions (Executive Agents)
+As soon as your scoped work passes its scoped check, `git add <your files>` and commit (WIP is fine)
+before returning. Unstaged work dies with a sibling's reset; committed work survives. If the
+coordinator forbade commits, leave files unstaged and list them exactly in the report.
 
-Executive agents are **completely forbidden** from the following. These are not guidelines; a single
-violation can destroy sibling work irrecoverably.
+## Blockers: report and wait
 
-1. **No branch changes.** Do NOT run `git checkout <branch>`, `git switch`, `git checkout -b`,
-   `git branch -m`, or anything that moves HEAD off the current branch or detaches it. Stay on the
-   branch you started on.
-2. **No touching out-of-scope files.** Edit ONLY files that are directly part of your assigned
-   change. Never edit, reformat, "clean up", normalize, or refactor a neighbor file in passing — it
-   may be mid-edit by another agent.
-3. **No deletions — especially another agent's work.** Do NOT delete repository files — not
-   your own out of convenience, and absolutely never anything created or changed by another agent:
-   no deleting their files, no discarding their uncommitted changes, no reverting their commits
-   without orchestrator approval. No `rm`, no `git rm`, no deleting to "tidy the tree".
-4. **No destructive or history-rewriting git.** Do NOT run any command that discards working-tree
-   changes, resets state, or rewrites history. This explicitly includes:
-   - `git reset --hard`, `git reset` (any mode that drops changes)
-   - `git checkout -- <path>`, `git restore <path>`, `git restore .`
-   - `git clean -f` / `-fd` / `-fdx`
-   - `git rebase` (any form), `git merge`, `git pull`
-   - `git push --force` / `--force-with-lease`
-   - `git commit --amend` on already-shared commits
-   - `git reflog expire`, `git gc --prune`, `git stash drop`/`clear`
-   - branch or tag deletion (`git branch -D`, `git tag -d`)
-
-> A neighbor's `git reset --hard`, `git restore`, or `git clean` does NOT touch committed objects but
-> **annihilates every unstaged change in the shared tree, irrecoverably** — not via stash, dangling
-> objects, reflog, or editor history. This has already cost a fully verified refactor at Vendix.
-
-## Allowed Operations
-
-- Read any file (read-only inspection is always safe).
-- Create and edit files **inside your assigned scope**.
-- `git add <your-scope-files>` and `git commit` of your own scoped changes.
-- `git status`, `git diff`, `git log` and other read-only git inspection.
-- Build / test / verification commands that do not mutate the tree destructively.
-
-## File Scope Rules
-
-- Before touching a file, confirm it is **directly part of your assigned feature/scope**.
-- Do not assume an unrelated file is canonical — it may be mid-edit by a sibling agent.
-- Never edit a file holding a sibling agent's **uncommitted diff** — wait until they commit it,
-  then re-read the file fresh before touching it. The only way to mix changes in one file is the
-  Shared-File Protocol below.
-- If your change genuinely requires modifying a file outside your scope, **STOP and report it as a
-  blocker** to the orchestrator; do not act on it yourself.
-- When the orchestrator delegates, it must hand each agent an explicit allowed-file list and forbid
-  edits outside it.
-
-## Shared-File Protocol (controlled exception)
-
-Two agents MAY mix changes in the same file, but ONLY through this protocol — never by editing on
-top of a sibling's uncommitted diff:
-
-1. **Both commit first.** Each agent commits its own scoped work (see Commit Protection) so nothing
-   about to be mixed is uncommitted.
-2. **Orchestrator grants access.** The orchestrator assigns non-overlapping regions (or serializes
-   the edits) and names the exact file + allowed region per agent.
-3. **Re-read fresh, then edit your region only.** Read the file after the sibling's commit; touch
-   only your assigned region.
-4. **Prove no loss.** After editing, run `git diff` and confirm every sibling line is still intact
-   before committing.
-5. **Commit immediately** once your edit passes the build — do not hold a shared file dirty.
-6. **Overlap or doubt → STOP.** If both agents need the same lines, or the diff shows anything
-   unexpected, report to the orchestrator; never resolve it by deleting or overwriting a sibling's
-   lines.
-
-## Commit Protection
-
-The commit is the **only durable shield** in a shared tree.
-
-- As soon as your scoped work **passes the build**, `git add` your files and `git commit`
-  immediately — even as WIP — before returning control.
-- Do not leave verified work unstaged waiting for approval: a sibling's `reset --hard` / `restore` /
-  `clean` will erase it permanently. Committed work survives those commands; unstaged work does not.
-- Commit only your scoped files; never `git add -A` / `git add .` in a shared tree, which would
-  stage another agent's in-progress changes.
-
-## Blocker Protocol
-
-When an executive agent hits any of these, it **reports and waits** instead of acting:
-
-| Situation | Action |
-| --- | --- |
-| Change needs a file outside your scope | Report as blocker; do not edit it. |
-| A required file appears broken/mid-edit by another agent | Report; do not "fix" or revert it. |
-| You believe a branch switch / reset / pull is needed | Report; never run it yourself. |
-| Merge/state conflict in the shared tree | Report to orchestrator for human-coordinated resolution. |
-| You need a file with a sibling's uncommitted diff | Wait for their commit and re-read; urgent cases go through the Shared-File Protocol via the orchestrator. |
-
-## Decision Rules
-
-| Situation | Use |
-| --- | --- |
-| User invokes parallel work on the current branch in a plan/workflow | Load this skill and apply to all executive agents. |
-| About to launch a parallel run | Orchestrator creates a checkpoint anchor first (see Orchestrator Checkpoint). |
-| Run got corrupted and you need to roll back | Orchestrator/human-only recovery to the checkpoint; never an executive agent. |
-| Deciding how to split/orchestrate the parallel agents | `agent-teams` |
-| Normal commit / branch / PR rules | `git-workflow` |
-| Verifying a build before the protective commit | `buildcheck-dev` |
-| Agent needs an isolated branch/worktree | Out of scope — requires explicit user request, not this skill. |
-| Which branch a parallel run uses | `develop` by default; another branch only on explicit user request. |
-
-## Related Skills
-
-- `agent-teams` - How to orchestrate and delegate to subordinate agents (this skill adds the
-  shared-tree safety contract on top).
-- `git-workflow` - Canonical commit/branch/PR/conflict rules.
-- `buildcheck-dev` - Build verification to run before the protective commit.
-- `how-to-plan` - Where a parallel run is declared as a plan step.
+Out-of-scope file needed · a required file looks broken or mid-edit · you think a branch switch,
+reset or pull is needed · conflict in the shared tree · you need a file with a sibling's uncommitted
+diff. Never "fix" these yourself.

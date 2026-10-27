@@ -22,6 +22,7 @@ import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service'
 import { AuditResource } from '../../../common/audit/audit.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { resolveKitchenMode } from './kitchen-mode.util';
+import { closeSupersededKitchenRows } from './kitchen-superseded-rows.util';
 
 /**
  * Puerto mínimo de OrderFlowService que necesita cocina para mantener
@@ -2089,6 +2090,99 @@ export class KitchenFireService {
     };
   }
 
+  /**
+   * QUI-650 (L5) — vista previa de insumos SIN escribir y sin órdenes
+   * persistidas: para platos que aún no existen como `order_items` (líneas
+   * "agregar" del editor por diferencias). Resuelve receta activa por
+   * (producto, variante), explota el BOM y valida los insumos rastreados con
+   * la misma agregación del fire (`buildIngredientDemandLines` +
+   * `findInsufficientLines kind:'ingredient'`). Devuelve la política vigente
+   * (`allowIngredientOveruse`) para que el llamador decida bloquear o avisar.
+   */
+  async previewIngredientShortfall(
+    dishes: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      product_name: string;
+    }>,
+    opts: { tx?: Prisma.TransactionClient } = {},
+  ): Promise<{
+    allowIngredientOveruse: boolean;
+    shortages: InsufficientStockItem[];
+  }> {
+    const storeId = RequestContextService.getContext()?.store_id;
+    const policy = await this.stockValidatorService.resolveInventoryPolicy(
+      storeId as number,
+      opts.tx,
+    );
+    if (dishes.length === 0) {
+      return {
+        allowIngredientOveruse: policy.allowIngredientOveruse,
+        shortages: [],
+      };
+    }
+    const db: any = opts.tx ?? this.prisma;
+    const recipes: Array<{
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+    }> = await db.recipes.findMany({
+      where: {
+        product_id: { in: [...new Set(dishes.map((d) => d.product_id))] },
+        is_active: true,
+      },
+      select: { id: true, product_id: true, product_variant_id: true },
+    });
+    const exactByPair = new Map<string, (typeof recipes)[number]>();
+    const baseByProduct = new Map<number, (typeof recipes)[number]>();
+    for (const r of recipes) {
+      if (r.product_variant_id != null) {
+        exactByPair.set(this.recipeKey(r.product_id, r.product_variant_id), r);
+      } else {
+        baseByProduct.set(r.product_id, r);
+      }
+    }
+    const bomCache = new Map<number, BomExplosionLine[]>();
+    const items: Array<{
+      orderItem: { id: number; quantity: number; product_name: string };
+      bomLines: BomExplosionLine[];
+    }> = [];
+    for (const [index, d] of dishes.entries()) {
+      const recipe = this.resolveRecipeForVariant(
+        exactByPair,
+        baseByProduct,
+        d.product_id,
+        d.product_variant_id ?? null,
+      );
+      if (!recipe) continue; // sin receta activa: no consume insumos al disparar
+      let bom = bomCache.get(recipe.id);
+      if (!bom) {
+        bom = await this.recipesService.explodeBom(recipe.id, {
+          [recipe.id]: 1,
+        });
+        bomCache.set(recipe.id, bom);
+      }
+      items.push({
+        orderItem: {
+          id: index,
+          quantity: d.quantity,
+          product_name: d.product_name,
+        },
+        bomLines: bom,
+      });
+    }
+    const demands = this.buildIngredientDemandLines(items, new Map());
+    const shortages = await this.stockValidatorService.findInsufficientLines(
+      demands,
+      { tx: opts.tx, kind: 'ingredient' },
+    );
+    return {
+      allowIngredientOveruse: policy.allowIngredientOveruse,
+      shortages,
+    };
+  }
+
   async previewFire(
     orderId: number,
     candidateOrderItemIds: number[],
@@ -3237,6 +3331,24 @@ export class KitchenFireService {
           updated_at: new Date(),
         },
       });
+    }
+
+    // QUI-892: cerrar (solo estado) las filas viejas de reenvíos previos de
+    // las líneas entregadas, para que sus tickets no bloqueen la orden.
+    try {
+      const closedTickets = await closeSupersededKitchenRows(
+        this.prisma,
+        Array.from(
+          new Set<number>(deliveredItems.map((it: any) => it.order_item_id)),
+        ),
+      );
+      for (const closedId of closedTickets) {
+        if (closedId !== ticketId) await this.emitTicketUpdatedEvent(closedId);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `QUI-892: no se pudieron cerrar filas superadas del ticket ${ticketId}: ${(err as Error).message}`,
+      );
     }
 
     const full = await this.getTicketForStore(ticketId);

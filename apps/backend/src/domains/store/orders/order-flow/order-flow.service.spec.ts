@@ -845,15 +845,15 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
 });
 
 describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
-  const pendingItems = [
-    { order_item_id: 11, status: 'ready', quantity: 2, variant_label: 'Grande', order_item: { product_name: 'Hamburguesa' } },
-    { order_item_id: 12, status: 'in_preparation', quantity: 1, variant_label: null, order_item: { product_name: 'Papas' } },
+  // QUI-892: el bloqueo se calcula sobre la ÚLTIMA fila de cada línea no cancelada.
+  const pendingLines = [
+    { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'ready', quantity: 2, variant_label: 'Grande' }] },
+    { id: 12, product_name: 'Papas', kitchen_ticket_items: [{ status: 'in_preparation', quantity: 1, variant_label: null }] },
   ];
 
-  const harness = (state: string, items: typeof pendingItems) => {
+  const harness = (state: string, lines: any[]) => {
     const prisma: any = {
-      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
-      order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: { findMany: jest.fn().mockResolvedValue(lines) },
     };
     const service = new OrderFlowService(
       prisma, {} as any, {} as any, {} as any, {} as any,
@@ -868,7 +868,7 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
   it.each(['processing', 'delivered'])(
     'rechaza finalizar desde %s con lista de platos accionable',
     async (state) => {
-      const { service, prisma, updateState } = harness(state, pendingItems);
+      const { service, prisma, updateState } = harness(state, pendingLines);
       await expect(service.confirmDelivery(1)).rejects.toMatchObject({
         errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
         response: expect.objectContaining({
@@ -880,8 +880,8 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
           },
         }),
       });
-      expect(prisma.kitchen_ticket_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { kitchen_ticket: { order_id: 1 }, status: { notIn: ['delivered', 'cancelled'] } },
+      expect(prisma.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ order_id: 1, cancelled_at: null }),
       }));
       expect(updateState).not.toHaveBeenCalled();
     },
@@ -896,10 +896,28 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
     },
   );
 
+  it('QUI-892: línea con fila vieja pendiente y última delivered NO bloquea', async () => {
+    // La query ya trae solo la última fila (orderBy id desc, take 1): la vieja no llega.
+    const { service, updateState } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'delivered', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).resolves.toMatchObject({ state: 'finished' });
+    expect(updateState).toHaveBeenCalled();
+  });
+
+  it('QUI-892: línea reenviada con última fila pending sí bloquea', async () => {
+    const { service } = harness('processing', [
+      { id: 11, product_name: 'Hamburguesa', kitchen_ticket_items: [{ status: 'pending', quantity: 1, variant_label: null }] },
+    ]);
+    await expect(service.confirmDelivery(1)).rejects.toMatchObject({
+      errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+  });
+
   it('no consulta cocina ni muta un estado no finalizable', async () => {
-    const { service, prisma, updateState } = harness('refunded', pendingItems);
+    const { service, prisma, updateState } = harness('refunded', pendingLines);
     await expect(service.confirmDelivery(1)).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(prisma.order_items.findMany).not.toHaveBeenCalled();
     expect(updateState).not.toHaveBeenCalled();
   });
 });
@@ -8271,5 +8289,49 @@ describe('OrderFlowService.updateItemNotes — nota por ítem en cualquier orden
     expect(err.errorCode).toBe('ORD_ITEM_NOTES_CANCELLED_001');
     expect(err.getStatus()).toBe(409);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.commitCouponUseForOrder — cupón desactivado (QUI-650)', () => {
+  const buildCommit = (coupon: Record<string, unknown>) => {
+    const tx: any = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 70, coupon_id: 9, coupon_code: 'DIEZ', discount_amount: 25, store_id: 4,
+        }),
+      },
+      coupon_uses: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 1 }),
+      },
+      coupons: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 9, is_active: true, current_uses: 0, max_uses: null, ...coupon,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new OrderFlowService(
+      tx, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, { logCustom: jest.fn() } as any,
+    );
+    return { tx, service };
+  };
+
+  it('regla 1: la orden POS sin cobrar con cupón desactivado después se cobra y registra el uso', async () => {
+    const { tx, service } = buildCommit({ is_active: false });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).resolves.toBeUndefined();
+    expect(tx.coupon_uses.create).toHaveBeenCalledWith({
+      data: { coupon_id: 9, order_id: 70, customer_id: null, discount_applied: 25 },
+    });
+    expect(tx.coupons.updateMany.mock.calls[0][0].where).not.toHaveProperty('is_active');
+  });
+
+  it('un cupón agotado sigue bloqueando el cobro (sin cambios)', async () => {
+    const { tx, service } = buildCommit({ max_uses: 1, current_uses: 1 });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).rejects.toMatchObject({
+      errorCode: 'ORD_EDIT_COUPON_COMMIT_001',
+    });
+    expect(tx.coupon_uses.create).not.toHaveBeenCalled();
   });
 });

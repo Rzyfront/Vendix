@@ -117,6 +117,16 @@ export class KdsStationsService {
   /** ¿Se puede gestionar un ticket? Solo con turno abierto en esta estación. */
   readonly canManageTickets = computed(() => this.openSession() != null);
 
+  /**
+   * GET puro de estaciones: no toca señales ni autoselecciona estación.
+   * Para consumidores ajenos al módulo KDS (p. ej. edición masiva).
+   */
+  listStations(): Observable<KdsStation[]> {
+    return this.http
+      .get<ApiResponse<KdsStation[]>>(`${this.apiUrl}/store/kds`)
+      .pipe(map((res) => res.data ?? []));
+  }
+
   loadStations(): Observable<KdsStation[]> {
     this.isLoading.set(true);
     return this.http

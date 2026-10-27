@@ -48,7 +48,7 @@ import { portadorTipoLabel } from '../dispatch-carrier-type.util';
 
 const ROUTE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'Todas' },
-  { value: 'dsd', label: 'Planillas DSD' },
+  { value: 'dsd', label: 'Rutas DSD' },
   { value: 'carrier', label: 'Repartidor' },
 ];
 

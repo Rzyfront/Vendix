@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke: "Configuring middleware"
 ---
@@ -27,7 +27,7 @@ metadata:
 
 It resolves store context in this order:
 
-1. `x-store-id` header or `store_id` query param.
+1. `x-store-id` header or `store_id` query param (must be a single positive integer; arrays/objects → 400).
 2. Hostname resolution via `PublicDomainsService.resolveDomain(hostname)`.
 3. Cached hostname lookup through Nest `cache-manager`.
 
@@ -48,6 +48,10 @@ It does not write `req.store_id` / `req.organization_id` / `req.domain_type` dir
 - It calls `RequestContextService.asyncLocalStorage.run(contextObj, ...)`.
 - Consumers read static helpers like `getStoreId()`, `getUserId()`, `getRequestId()`, `isSuperAdmin()`.
 
+## Other Middleware
+
+`AuthModule` applies `SessionValidationMiddleware`, `LoginRateLimitMiddleware`, `RefreshRateLimitMiddleware` and `RateLimitMiddleware` (`common/middleware/`) to auth routes. Outside a request (jobs, superadmin consoles) use `StoreContextRunner` / `TenantContextRunner` (`common/context/`) to set the ALS context.
+
 ## Rules
 
 - Do not document or implement new middleware assuming route-param tenancy.
@@ -59,4 +63,4 @@ It does not write `req.store_id` / `req.organization_id` / `req.domain_type` dir
 
 - `vendix-multi-tenant-context`
 - `vendix-prisma-scopes`
-- `vendix-backend-domain`
+- `vendix-backend`

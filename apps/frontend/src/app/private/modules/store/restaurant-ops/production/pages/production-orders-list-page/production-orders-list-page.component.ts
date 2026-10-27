@@ -378,26 +378,36 @@ export class ProductionOrdersListPageComponent implements OnInit {
   }
 
   private completeOrder(order: ProductionOrder): void {
-    // Prompt for the real produced_qty (post-merma). The user may also
-    // override the global waste percentage if the actual waste was
-    // significantly different than the recipe's planned value.
+    // Production always runs whole recipe batches (QUI-965): the user types
+    // how many times the recipe was made and the produced units are
+    // batches × yield (a recipe that yields 10 run 3 times gives 30).
+    const rawYield = Number(order.recipe?.yield_quantity);
+    const yieldQty = Number.isFinite(rawYield) && rawYield > 0 ? rawYield : 1;
+    const unit = order.recipe?.yield_unit ?? 'unidades';
+    const plannedBatches = Math.max(
+      1,
+      Math.round(Number(order.planned_qty) / yieldQty),
+    );
     this.dialogService
       .prompt({
         title: `Completar producción de ${order.product?.name ?? `#${order.id}`}`,
-        message: `Indica cuántas ${order.recipe?.yield_unit ?? 'unidades'} se produjeron realmente (planeado: ${this.formatNumber(order.planned_qty)}). Al confirmar, se descuentan los insumos de la receta del inventario y se suma el stock del producto terminado.`,
-        placeholder: `Cantidad en ${order.recipe?.yield_unit ?? 'unidades'}`,
-        defaultValue: String(order.planned_qty),
+        message: `Indica cuántas tandas de la receta se hicieron (cada tanda rinde ${this.formatNumber(yieldQty)} ${unit}; planeado: ${this.formatNumber(order.planned_qty)} ${unit}). Al confirmar, se descuentan los insumos de la receta multiplicados por las tandas y se suma el stock del producto terminado.`,
+        placeholder: 'Número de tandas',
+        defaultValue: String(plannedBatches),
         confirmText: 'Completar y registrar stock',
         cancelText: 'Cancelar',
         inputType: 'number',
       })
       .then((value) => {
         if (value == null) return;
-        const produced = Number(value);
-        if (!Number.isFinite(produced) || produced <= 0) {
-          this.toastService.error('La cantidad producida debe ser mayor a 0');
+        const batches = Number(value);
+        if (!Number.isInteger(batches) || batches < 1) {
+          this.toastService.error(
+            'Las tandas deben ser un número entero mayor o igual a 1',
+          );
           return;
         }
+        const produced = batches * yieldQty;
         this.processingId.set(order.id);
         this.productionService
           .complete(order.id, { produced_qty: produced })

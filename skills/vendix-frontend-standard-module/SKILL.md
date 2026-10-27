@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke: "Creating or refactoring standard admin modules (stats + table)"
 ---
@@ -74,7 +74,7 @@ The parent page owns stats and module-level state. The child list component owns
   >
     <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
       <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-        Products ({{ items().length }})
+        Products ({{ totalItems() }})
       </h2>
 
       <div class="flex items-center gap-2 w-full md:w-auto">
@@ -89,12 +89,17 @@ The parent page owns stats and module-level state. The child list component owns
 
   <div class="px-2 pb-2 pt-3 md:p-4">
     <app-responsive-data-view
-      [data]="filteredItems()"
+      [data]="items()"
       [columns]="columns"
       [actions]="actions"
       [cardConfig]="cardConfig"
       [loading]="loading()"
       [sortable]="true"
+    />
+    <app-pagination
+      [currentPage]="filters().page" [totalPages]="totalPages()"
+      [total]="totalItems()" [limit]="filters().limit"
+      (pageChange)="onPageChange($event)"
     />
   </div>
 </app-card>
@@ -110,25 +115,9 @@ The parent page owns stats and module-level state. The child list component owns
 - Use `smallText` on stats where meaningful; it is recommended and common, but `StatsComponent` does not require it in code.
 - Do not copy old super-admin roles as the standard pattern; it is a legacy/non-standard layout.
 
-## ⚠️ Mandatory: server-side pagination on every list
+## Mandatory: server-side pagination
 
-Every list page MUST use the `price-tiers` pagination pattern. Reference:
-`apps/frontend/src/app/private/modules/store/price-tiers/pages/price-tiers-list-page/price-tiers-list-page.component.ts`.
-
-Required:
-
-1. Backend `GET` returns the `ResponseService.paginated()` envelope with `meta.total`.
-2. Frontend service types it as `PaginatedApiResponse<T>` and exposes `data` and `meta`.
-3. Parent component owns the `filters = signal({ page, limit })`, `totalItems` and
-   `totalPages` signals, resets `page` to 1 on every search/filter change, and
-   provides `onPageChange()`.
-4. Template renders `<app-pagination>` immediately after the data view, with
-   the same `currentPage / totalPages / total / limit` inputs.
-
-The `PaginationComponent` self-hides when `totalPages <= 1`. No conditional
-wrapper needed. Full rule and exceptions are documented in
-`vendix-frontend-data-display` (see "Mandatory Rule — Pagination on Every
-List").
+Every list page uses the server-side pagination pattern (`ResponseService.paginated()` + `PaginatedApiResponse<T>` + `filters` signal + `<app-pagination>` right after the data view). Rule, steps and exceptions: `vendix-frontend-data-display`. Reference: `apps/frontend/src/app/private/modules/store/price-tiers/pages/price-tiers-list-page/price-tiers-list-page.component.ts`.
 
 ## When to Use `app-sticky-header` Instead
 

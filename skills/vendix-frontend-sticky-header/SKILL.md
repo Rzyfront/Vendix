@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke: "Implementing sticky headers or refactoring module headers"
 ---
@@ -56,7 +56,7 @@ Inputs:
 - `icon: string = 'box'`.
 - `variant: 'default' | 'glass' = 'glass'`.
 - `showBackButton: boolean = false`.
-- `backRoute: string | string[] = '/'`.
+- `backRoute: string | string[] = '/'`, `backQueryParams?: Params`.
 - `metadataContent: string = ''`.
 - `badgePulse: boolean = false`.
 - `badgeText: string = ''`.
@@ -71,7 +71,7 @@ Outputs:
 - `actionClicked: output<string>()`, emitting the action `id`.
 - `tabChanged: output<string>()`, emitting the tab `id`.
 
-`metadataContent` is rendered as plain interpolated text in the current template, not `[innerHTML]`. The current template does not expose an `ng-content` slot.
+`metadataContent` is rendered as plain interpolated text, not `[innerHTML]`. The only content slot is `[actions-extra]`, projected next to the action buttons (e.g. an `app-dropdown` overflow menu).
 
 ## Action Buttons
 
@@ -94,7 +94,7 @@ onHeaderAction(actionId: string): void {
 }
 ```
 
-`StickyHeaderActionButton` supports `id`, `label`, `variant`, `icon`, `loading`, `disabled`, and `visible`.
+`StickyHeaderActionButton` supports `id`, `label`, `variant` (`primary | secondary | outline | outline-danger | ghost | danger`), `icon`, `loading`, `disabled`, `visible`, and `title` (native tooltip, e.g. why it is disabled).
 
 ## Tabs
 
@@ -130,7 +130,7 @@ readonly tabs: StickyHeaderTab[] = [
 ];
 ```
 
-`StickyHeaderTab` supports `id`, `label`, `shortLabel`, `icon`, `route`, `exact`, `disabled`, and `visible`.
+`StickyHeaderTab` supports `id`, `label`, `shortLabel`, `description` (one-line purpose, shown by `ModuleTabsShellComponent`), `icon`, `route`, `exact`, `disabled`, and `visible`.
 
 ## Form Scope
 

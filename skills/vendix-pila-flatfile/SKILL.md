@@ -1,16 +1,11 @@
 ---
 name: vendix-pila-flatfile
 description: >
-  Generation of the Colombian PILA flat file (Planilla Integrada de
-  Liquidación de Aportes, Resolución 2388/2016) in Vendix: fixed-width type-1
-  header and type-2 contributor records, IBC caps, novelty mapping
-  (ING/RET/VSP/LMA/IGE/VAC/IRL), the positional layout serializer, and the
-  export endpoint. Trigger: generating or editing the PILA flat file, its
-  record layout, novelty flags, or IBC caps.
+  Colombian PILA flat file (Res. 2388/2016): fixed-width type-1/type-2 records, IBC caps, novelties (ING/RET/VSP/LMA/IGE/VAC/IRL), export endpoint. Trigger: generating or editing the PILA file or domains/store/payroll/pila.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Generating or editing the PILA flat file (Resolución 2388/2016)"
@@ -36,7 +31,7 @@ Dir: `apps/backend/src/domains/store/payroll/pila/`
 
 ## Generation Flow
 
-`generateFlatFile(year, month, store_id)` (`pila-report.service.ts:890`):
+`generateFlatFile(year, month, store_id)` (`pila-report.service.ts`):
 
 1. `getContributionsForPeriod()` — aggregates non-draft/cancelled `payroll_items` per employee, applies IBC caps, marks exoneration, derives novelties.
 2. `resolveAportanteIdentity()` — employer razón social + NIT via `FiscalScopeService`.
@@ -57,13 +52,13 @@ Per-contributor values: `ibc = round(emp.ibc)`, `days = clamp(worked_days,0,30)`
 
 ## IBC Caps
 
-`clampIbc(raw_ibc, worked_days, minimum_wage)` (`pila-report.service.ts:714`):
+`clampIbc(raw_ibc, worked_days, minimum_wage)` (`pila-report.service.ts`):
 
 - floor (prorated) = `round(minimum_wage * days/30)`, `days = clamp(worked_days,0,30)`
 - ceiling = `minimum_wage * 25`
 - result = `round(min(max(raw_ibc, floor), ceiling))`
 
-`calculateIbc()` (:567) = base_salary + overtime + commissions + taxable bonuses (transport subsidy excluded). SMMLV via `resolveMinimumWage()` → `PayrollRulesService.getRulesForYear`. Exoneration flag: `SMMLV>0 && ibc < 10*SMMLV && sena===0 && icbf===0`.
+`calculateIbc()` = base_salary + overtime + commissions + taxable bonuses (transport subsidy excluded). SMMLV via `resolveMinimumWage()` → `PayrollRulesService.getRulesForYear`. Exoneration flag: `SMMLV>0 && ibc < 10*SMMLV && sena===0 && icbf===0`.
 
 ## Novelty Mapping
 
@@ -102,7 +97,6 @@ Novelty dates go to fields 80–94.
 - **Administradora codes (AFP/EPS/CCF/ARL) are emitted blank** — a real submission likely needs them filled.
 - **Many header fields are hardcoded** (modalidad, radicación, fecha de pago, código operador) for the operator to reassign.
 - **VST always blank** (no data source).
-- The class docstring at `pila-report.service.ts` still says flat-file generation is "out of scope" — that is **stale**; `generateFlatFile` does produce it. Fix the docstring if you touch that block.
 
 ## Related Skills
 

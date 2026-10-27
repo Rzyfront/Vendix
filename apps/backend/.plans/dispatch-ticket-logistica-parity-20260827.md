@@ -58,7 +58,7 @@ El Hub enriquecido (plan original `CP-PRINT-FORMATS-ENRIQUECIDO-PROFESIONAL`) cu
 ## Criticality Justification
 
 > Invocación explícita del owner (verbatim):
-> *"TENGO ESTE MODULO https://vendix.com/admin/settings/print-formats ... LA IDEA ES QUE ESTE MODULO SEA UN ENTORNO ENRRIQUECIDO, PROFESIONAL Y FIEL ... USA UN @skills/how-to-critical-plan/ ... ADEMAS DEBE QUEDAR ENLAZADO Y FUNCIONA EN TODOS LOS SITIOS DONDE DEBE FUNCIONAR."*
+> *"TENGO ESTE MODULO https://vendix.com/admin/settings/print-formats ... LA IDEA ES QUE ESTE MODULO SEA UN ENTORNO ENRRIQUECIDO, PROFESIONAL Y FIEL ... USA UN plan crítico [skill retirado] ... ADEMAS DEBE QUEDAR ENLAZADO Y FUNCIONA EN TODOS LOS SITIOS DONDE DEBE FUNCIONAR."*
 > *"Hay que ajustarlo y agregarle este detalle super importante ... Integrar el Ticket de Despacho (dispatch_ticket) en el nuevo Hub de Formatos de Impresión y Print Gateway de Vendix ... ese ticker de despacho podre configurar que se imprima 1 Junto con ticket POS o factura de venta en POS o 2 Desde el detalle de la orden en la seccion de envio."*
 
 **Por qué crítico:**
@@ -1111,7 +1111,7 @@ Coordinación con 3 agentes paralelos activos:
    **Status:** pending
 
 #### F.4 Convergence Loop 13 perspectivas ×2 rondas limpias
-   **Skills:** agent-teams, how-to-critical-plan
+   **Skills:** agent-teams [retirado], plan crítico [retirado]
    **Resources:** 13 perspective agents + Convergence Loop Log
    **Business decision:** Round 1 + Round 2 con entry points variados. 2 rondas consecutivas clean (B=0, M=0).
    **Why:** Self-verification.

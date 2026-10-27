@@ -61,6 +61,27 @@ export interface PromotionQuoteInput {
    */
   manual_promotion_ids?: number[];
   /**
+   * Aditivo. Al RE-cotizar una orden ya persistida, los usos que esa misma
+   * orden registró (`order_promotions` y su parte de `usage_count`) no cuentan
+   * contra `per_customer_limit` ni `usage_limit`. Sin la opción, el
+   * comportamiento es el de siempre.
+   */
+  exclude_order_id?: number | null;
+  /**
+   * Aditivo. Fecha de referencia SOLO para la ventana de vigencia (re-cotizar
+   * "a la fecha de la orden"). Tiene precedencia sobre `now`.
+   */
+  as_of?: Date | null;
+  /**
+   * Aditivo. Re-cotizar una orden ya persistida con SUS promociones: limita
+   * los candidatos a estos ids (no entra ninguna promoción nueva, automática
+   * o no) e ignora el filtro de `state` para ellos. La ventana de fechas
+   * sigue vigente (`as_of`). Sin la opción, comportamiento idéntico.
+   * Con `include_auto_apply`, además de esos ids entran las automáticas
+   * activas (paridad con el POS al editar productos de la orden).
+   */
+  order_scope?: { promotion_ids: number[]; include_auto_apply?: boolean } | null;
+  /**
    * Reference date used for date-range eligibility. Defaults to `new Date()`.
    * Useful for deterministic tests and replays.
    */

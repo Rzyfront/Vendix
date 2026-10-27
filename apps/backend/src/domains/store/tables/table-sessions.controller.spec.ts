@@ -3,6 +3,7 @@ import { RequestMethod } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { PERMISSIONS_KEY } from '../../auth/decorators/permissions.decorator';
+import { UpdateTableSessionInformalNotesDto } from './dto/table-session.dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { STAFF_EVENT_WHITELIST, TableSessionsController } from './table-sessions.controller';
 
@@ -42,5 +43,32 @@ describe('POST /store/table-sessions/reassign', () => {
     });
     const errors = validateSync(invalid, { whitelist: true, forbidNonWhitelisted: true });
     expect(errors.map((error) => error.property).sort()).toEqual(['order_id', 'target_table_id', 'unexpected']);
+  });
+});
+
+describe('PATCH /store/table-sessions/:id/informal-notes (QUI-898)', () => {
+  it('delegates to the service with id and dto.informal_notes', async () => {
+    const session = { id: 83, informal_notes: 'vaso extra' };
+    const service = { updateInformalNotes: jest.fn().mockResolvedValue(session) };
+    const response = { updated: jest.fn().mockReturnValue({ data: session }) };
+    const controller = new TableSessionsController(
+      service as any, response as any, {} as any, {} as any,
+    );
+    const handler = (controller as any).updateInformalNotes;
+
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/informal-notes');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.PATCH);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual(['store:table_sessions:update']);
+    await expect(
+      handler.call(controller, 83, { informal_notes: 'vaso extra' }),
+    ).resolves.toEqual({ data: session });
+    expect(service.updateInformalNotes).toHaveBeenCalledWith(83, 'vaso extra');
+    expect(response.updated).toHaveBeenCalledWith(session, 'Notas de la mesa actualizadas');
+  });
+
+  it('validates the DTO (max 2000, null allowed)', () => {
+    const opts = { whitelist: true, forbidNonWhitelisted: true };
+    expect(validateSync(plainToInstance(UpdateTableSessionInformalNotesDto, { informal_notes: null }), opts)).toHaveLength(0);
+    expect(validateSync(plainToInstance(UpdateTableSessionInformalNotesDto, { informal_notes: 'a'.repeat(2001) }), opts)).toHaveLength(1);
   });
 });

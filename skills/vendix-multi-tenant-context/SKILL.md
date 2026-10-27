@@ -73,5 +73,5 @@ Check:
 
 - `vendix-prisma-scopes` - Scoped Prisma model registration
 - `vendix-backend-auth` - JWT, public routes, guards
-- `vendix-app-architecture` - App/domain concepts
+- `vendix-core` - App/domain concepts
 - `vendix-mcp-server` - MCP auth/context injection
