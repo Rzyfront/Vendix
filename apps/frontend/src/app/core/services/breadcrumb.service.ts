@@ -813,6 +813,14 @@ export class BreadcrumbService {
       icon: 'eye',
     },
 
+    // Hospitality
+    {
+      path: '/admin/hospitality/rooms',
+      title: 'Habitaciones',
+      parent: 'Hotelería',
+      icon: 'bed-double',
+    },
+
     // Customers
     {
       path: '/admin/customers',
