@@ -1755,7 +1755,7 @@ export class OrderDetailsPageComponent {
   });
 
   serviceSessionStatusLabel(status: string): string {
-    return ({ open: 'En proceso', paused: 'En pausa', closed: 'Finalizada', cancelled: 'Cancelada', no_show: 'No se presentó' } as Record<string, string>)[status] ?? status;
+    return ({ open: 'En proceso', in_progress: 'En proceso', paused: 'En pausa', closed: 'Finalizada', cancelled: 'Cancelada', no_show: 'No se presentó' } as Record<string, string>)[status] ?? status;
   }
 
   readonly tableSession = computed<OrderTableSession | null>(() => {

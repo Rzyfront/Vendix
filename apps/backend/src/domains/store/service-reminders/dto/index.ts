@@ -8,7 +8,7 @@ export class ListServiceRemindersDto {
     enum: ['pending', 'sent', 'dismissed', 'all'],
   })
   @IsOptional()
-  @IsString()
+  @IsIn(['pending', 'sent', 'dismissed', 'all'])
   status?: string;
 
   @ApiPropertyOptional({ description: 'Número de página (1-based)', default: 1 })

@@ -1761,7 +1761,10 @@ export class CheckoutService {
       submittedBookingUnits.set(key, (submittedBookingUnits.get(key) ?? 0) + 1);
     }
     for (const [key, count] of submittedBookingUnits) {
-      if (count > (cartUnits.get(key) ?? 0)) {
+      // Solo las reservas de estación abortan el checkout; fuera de estación
+      // se mantiene el contrato anterior (se intentan post-orden y el fallo
+      // solo se registra).
+      if (stationRequiredKeys.has(key) && count > (cartUnits.get(key) ?? 0)) {
         throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La reserva no corresponde a una unidad del carrito.');
       }
     }

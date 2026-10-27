@@ -695,12 +695,6 @@ export class BreadcrumbService {
       icon: 'warehouse',
     },
     {
-      path: '/admin/reservations/stations',
-      title: 'Estaciones de Servicio',
-      parent: 'Reservas',
-      icon: 'warehouse',
-    },
-    {
       path: '/admin/reservations/reminders',
       title: 'Registro de Servicios',
       parent: 'Reservas',

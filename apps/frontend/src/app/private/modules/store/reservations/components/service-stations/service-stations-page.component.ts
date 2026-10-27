@@ -27,6 +27,7 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
 import {
@@ -125,6 +126,12 @@ export interface StationTypeMeta {
   vehicleNamePlaceholder: string;
   platePlaceholder: string;
 }
+
+/**
+ * Prefijo telefónico por defecto (Colombia-first) cuando el número trae 10 dígitos
+ * locales sin indicativo de país. Espejo del backend (service-reminders.utils.ts).
+ */
+const DEFAULT_WHATSAPP_COUNTRY_PREFIX = '57';
 
 export const STATION_TYPES_META: Record<StationType, StationTypeMeta> = {
   carro: {
@@ -894,7 +901,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.sessionAccessQrLoading.set(true);
     import('qrcode')
       .then((QRCode) => QRCode.toDataURL(url, { width: 320, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } }))
-      .then((dataUrl) => this.sessionAccessQrDataUrl.set(dataUrl))
+      .then((dataUrl) => {
+        // Si el usuario ya abrió otra cuenta, no pintar el QR de esta en el modal.
+        if (this.selectedSession()?.id === sessionId) {
+          this.sessionAccessQrDataUrl.set(dataUrl);
+        }
+      })
       .catch(() => {})
       .finally(() => this.sessionAccessQrLoading.set(false));
   }
@@ -2048,7 +2060,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const digitsOnly = rawPhone.replace(/\D/g, '');
     let formattedPhone = digitsOnly;
     if (digitsOnly.length === 10) {
-      formattedPhone = `57${digitsOnly}`;
+      formattedPhone = `${DEFAULT_WHATSAPP_COUNTRY_PREFIX}${digitsOnly}`;
     }
     const message = `Hola ${clientName}, sigue en tiempo real el servicio en ${stationName}: ${url}`;
     const waUrl = formattedPhone
@@ -2180,7 +2192,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       })
       .subscribe({
         next: (r) => {
-          this.budget.set(r?.data ?? r);
+          // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
+          if (this.selectedSession()?.id === session.id) {
+            this.budget.set(r?.data ?? r);
+          }
           this.saving.set(false);
           this.toastService.success('Techo de presupuesto actualizado.');
           this.loadActiveSessions();
@@ -2379,12 +2394,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   }
 
   private errorText(error: unknown, fallback: string): string {
-    if (error && typeof error === 'object' && 'error' in error) {
-      const body = (error as { error?: { message?: string | string[] } }).error;
-      if (Array.isArray(body?.message)) return body.message.join(' ');
-      if (body?.message) return body.message;
-    }
-    return fallback;
+    if (typeof error === 'string' && error.trim()) return error;
+    return extractApiErrorMessage(error) || fallback;
   }
 }
 

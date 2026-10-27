@@ -264,6 +264,7 @@ export class ProvidersService {
             station_id: stationId,
             provider_id: providerId,
           })),
+          skipDuplicates: true,
         });
       }
     });

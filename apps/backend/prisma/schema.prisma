@@ -13068,7 +13068,7 @@ model service_stations {
   track_time Boolean  @default(false)
   target_minutes Int?
   intake_template_id Int?
-  intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull)
+  intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -13395,17 +13395,16 @@ model service_reminder_logs {
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
   updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  store stores @relation("service_reminder_logs_store_id_fkey", fields: [store_id], references: [id], onDelete: Restrict, map: "service_reminder_logs_store_id_fkey")
-  customer users @relation("service_reminder_logs_customer_id_fkey", fields: [customer_id], references: [id], onDelete: Restrict, map: "service_reminder_logs_customer_id_fkey")
-  product products @relation("service_reminder_logs_product_id_fkey", fields: [product_id], references: [id], onDelete: Restrict, map: "service_reminder_logs_product_id_fkey")
-  source_order orders @relation("service_reminder_logs_source_order_id_fkey", fields: [source_order_id], references: [id], onDelete: Restrict, map: "service_reminder_logs_source_order_id_fkey")
+  store stores @relation("service_reminder_logs_store_id_fkey", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_store_id_fkey")
+  customer users @relation("service_reminder_logs_customer_id_fkey", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_customer_id_fkey")
+  product products @relation("service_reminder_logs_product_id_fkey", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_product_id_fkey")
+  source_order orders @relation("service_reminder_logs_source_order_id_fkey", fields: [source_order_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_source_order_id_fkey")
 
   @@unique([store_id, customer_id, product_id, source_order_id], map: "service_reminder_logs_store_customer_product_order_key")
   @@index([store_id, status], map: "service_reminder_logs_store_status_idx")
   @@map("service_reminder_logs")
 }
 
-/// Retos de decisión de propuestas de servicio (migración 20261013100000).
 /// F runtime procedural guidance. Global rows have NO tenant provenance.
 model ai_agent_recipes {
   id Int @id @default(autoincrement())

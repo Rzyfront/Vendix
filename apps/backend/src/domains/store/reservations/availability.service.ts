@@ -89,7 +89,10 @@ export class AvailabilityService {
         where: { id: product_variant_id, product_id },
         select: { service_duration_minutes: true, buffer_minutes: true },
       });
-      if (!variant) {
+      // Solo los servicios con estación exigen variante válida; fuera de
+      // estación se mantiene el contrato anterior (se ignora y se usa la
+      // duración del producto).
+      if (!variant && product.requires_station) {
         throw new BadRequestException('La variante no pertenece al servicio solicitado');
       }
     }

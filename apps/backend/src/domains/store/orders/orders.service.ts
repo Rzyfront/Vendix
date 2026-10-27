@@ -4670,7 +4670,12 @@ export class OrdersService {
             await tx.bookings.update({
               where: { id: b.booking_id },
               data: {
-                provider_id: b.provider_id ?? existing.provider_id,
+                // Preservar al técnico solo en reservas de estación (la
+                // reasignación pasa por el coordinador); fuera de estación se
+                // mantiene el contrato anterior: omitir lo desasigna.
+                provider_id: product?.requires_station
+                  ? (b.provider_id ?? existing.provider_id)
+                  : (b.provider_id ?? null),
                 date: b.date ? new Date(b.date) : undefined,
                 start_time: b.start_time ?? undefined,
                 end_time: b.end_time ?? undefined,

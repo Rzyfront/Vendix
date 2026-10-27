@@ -10,7 +10,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
-import { DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
+import { CreateServiceProposalDto, DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
+import { buildProposalSnapshotHash } from './utils/service-proposal-snapshot.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 
 /**
@@ -148,6 +149,196 @@ export class ServiceBudgetsService {
       : [];
     const decisionByProposal = new Map(decisions.map((row) => [row.proposal_id, row]));
     return proposals.map((proposal) => ({ ...proposal, decision_record: decisionByProposal.get(proposal.id) ?? null }));
+  }
+
+  /**
+   * El staff propone trabajo adicional con un nuevo total para que el cliente
+   * lo autorice desde el enlace de seguimiento. Los totales se calculan en el
+   * servidor (regla documentada abajo) y el snapshot se firma igual que lo
+   * verifica `verifyProposalSnapshot`: cualquier deriva lo vuelve invisible.
+   */
+  async createProposal(sessionId: number, dto: CreateServiceProposalDto) {
+    const session = await this.requireSession(sessionId);
+    if (session.status !== 'open' && session.status !== 'paused') {
+      throw new VendixHttpException(
+        ErrorCodes.STATION_006,
+        'Solo se pueden crear propuestas en sesiones abiertas o pausadas.',
+        { session_id: sessionId },
+      );
+    }
+    if (!session.order_id) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_BUDGET_002,
+        'La sesión no tiene una orden asociada para proponer cambios.',
+        { session_id: sessionId },
+      );
+    }
+    const now = new Date();
+    const expiresAt = dto.expires_at ? new Date(dto.expires_at) : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    if (Number.isNaN(expiresAt.getTime()) || expiresAt <= now) {
+      throw new BadRequestException('expires_at debe ser una fecha futura');
+    }
+    if (expiresAt.getTime() - now.getTime() > 7 * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('expires_at no puede superar 7 días');
+    }
+    if (dto.items.some((item) => item.product_variant_id != null && item.product_id == null)) {
+      throw new BadRequestException('product_variant_id requiere product_id');
+    }
+    const productIds = [...new Set(dto.items.map((item) => item.product_id).filter((id): id is number => id != null))];
+    if (productIds.length > 0) {
+      const found = await this.prisma.products.findMany({
+        where: { id: { in: productIds }, store_id: this.storeId },
+        select: { id: true },
+      });
+      const missing = productIds.filter((id) => !found.some((row) => row.id === id));
+      if (missing.length > 0) {
+        throw new BadRequestException(`Productos no pertenecen a esta tienda: ${missing.join(', ')}`);
+      }
+      for (const item of dto.items) {
+        if (item.product_variant_id != null) {
+          const variant = await this.prisma.product_variants.findFirst({
+            where: { id: item.product_variant_id, product_id: item.product_id! },
+            select: { id: true },
+          });
+          if (!variant) throw new BadRequestException('La variante no pertenece al producto indicado');
+        }
+      }
+    }
+    // Totales del servidor: línea = cantidad × precio; impuesto = tax_amount_item
+    // si viene, si no cantidad × precio × tasa; descuento global opcional.
+    const money = (value: Prisma.Decimal | number | string) =>
+      new Prisma.Decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const items = dto.items.map((item) => {
+      const quantity = Math.max(1, Math.floor(Number(item.quantity)));
+      const unitPrice = money(item.unit_price);
+      const lineSubtotal = money(unitPrice.times(quantity));
+      const lineTax = item.tax_amount_item != null
+        ? money(item.tax_amount_item)
+        : item.tax_rate != null
+          ? money(lineSubtotal.times(item.tax_rate).dividedBy(100))
+          : money(0);
+      return {
+        product_id: item.product_id ?? null,
+        product_variant_id: item.product_variant_id ?? null,
+        product_name: item.product_name ?? null,
+        description: item.description ?? null,
+        quantity,
+        unit_price: Number(unitPrice.toFixed(2)),
+        tax_rate: item.tax_rate ?? null,
+        tax_amount_item: Number(lineTax.toFixed(2)),
+        item_type: item.item_type ?? (item.product_id ? 'physical' : 'service'),
+        total: Number(lineSubtotal.plus(lineTax).toFixed(2)),
+      };
+    });
+    const subtotal = money(items.reduce((acc, item) => acc + item.quantity * item.unit_price, 0));
+    const tax = money(items.reduce((acc, item) => acc + item.tax_amount_item, 0));
+    const discount = money(dto.discount ?? 0);
+    if (discount.greaterThan(subtotal.plus(tax))) {
+      throw new BadRequestException('El descuento no puede superar el subtotal más impuestos');
+    }
+    const total = subtotal.plus(tax).minus(discount);
+
+    try {
+      const outcome = await this.prisma.$transaction(async (tx) => {
+        const locked = await lockOrderLifecycle(tx, session.order_id!, this.storeId);
+        if (locked.state !== 'draft') {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_002,
+            'La orden ya no admite propuestas.',
+            { session_id: sessionId },
+          );
+        }
+        const order = await tx.orders.findFirst({
+          where: { id: session.order_id!, store_id: this.storeId },
+          select: { service_version: true, currency: true },
+        });
+        if (!order) throw new NotFoundException('Orden de la sesión no encontrada');
+        const currentBudget = await tx.service_budgets.findFirst({
+          where: { store_id: this.storeId, session_id: sessionId },
+          orderBy: { version: 'desc' },
+          select: { version: true, amount: true, currency: true },
+        });
+        const pending = await tx.service_change_proposals.findFirst({
+          where: { store_id: this.storeId, session_id: sessionId, status: 'pending', expires_at: { gt: now } },
+          select: { id: true },
+        });
+        if (pending) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_002,
+            'Ya existe una propuesta pendiente para esta sesión.',
+            { session_id: sessionId },
+          );
+        }
+        const last = await tx.service_change_proposals.findFirst({
+          where: { store_id: this.storeId, session_id: sessionId },
+          orderBy: { version: 'desc' },
+          select: { version: true },
+        });
+        const budgetSnapshot = {
+          version: currentBudget?.version ?? null,
+          amount: currentBudget ? new Prisma.Decimal(currentBudget.amount).toFixed(2) : null,
+          currency: currentBudget?.currency ?? order.currency,
+        };
+        const snapshotHash = buildProposalSnapshotHash({
+          items,
+          subtotal: subtotal.toFixed(2),
+          tax: tax.toFixed(2),
+          discount: discount.toFixed(2),
+          currency: order.currency,
+          total: total.toFixed(2),
+          expires_at: expiresAt.toISOString(),
+          budget_snapshot: budgetSnapshot,
+        });
+        const proposal = await tx.service_change_proposals.create({
+          data: {
+            store_id: this.storeId,
+            session_id: sessionId,
+            version: (last?.version ?? 0) + 1,
+            order_version: order.service_version,
+            snapshot_hash: snapshotHash,
+            lines: { items, budget_snapshot: budgetSnapshot },
+            subtotal,
+            tax,
+            discount,
+            currency: order.currency,
+            total,
+            status: 'pending',
+            expires_at: expiresAt,
+          },
+        });
+        await tx.service_progress_events.create({
+          data: {
+            store_id: this.storeId,
+            session_id: sessionId,
+            event_type: 'proposal_submitted',
+            public_text: `El taller envió una propuesta de trabajo adicional por ${total.toFixed(2)} ${order.currency} para tu autorización.`,
+            metadata: { proposal_id: proposal.id, proposal_version: proposal.version, snapshot_hash: snapshotHash },
+          },
+        });
+        return proposal;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      this.notifications.push(this.storeId, {
+        id: ++this.eventId,
+        type: 'service_session.progress',
+        title: 'Propuesta enviada',
+        body: 'proposal_submitted',
+        data: { session_id: sessionId, event_type: 'proposal_submitted', status: session.status },
+        created_at: new Date().toISOString(),
+      });
+      return outcome;
+    } catch (error) {
+      if (
+        error instanceof ConflictException ||
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+      if ((error as { code?: string })?.code === 'P2002' || (error as { code?: string })?.code === 'P2034') {
+        throw new VendixHttpException(ErrorCodes.SERVICE_BUDGET_002, 'La propuesta cambió en otra solicitud; reintenta.');
+      }
+      throw error;
+    }
   }
 
   async decideWithToken(token: string, dto: DecideServiceProposalDto) {

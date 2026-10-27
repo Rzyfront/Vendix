@@ -476,13 +476,6 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.BusinessHoursComponent),
           },
           {
-            path: 'stations',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/components/service-stations/service-stations-page.component').then(
-                (c) => c.ServiceStationsPageComponent,
-              ),
-          },
-          {
             path: 'reminders',
             loadComponent: () =>
               import('../../private/modules/store/reservations/components/service-reminders-page/service-reminders-page.component').then(

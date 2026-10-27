@@ -929,6 +929,42 @@ describe('CheckoutService - promotions and coupons', () => {
         data: { order_id: 1, updated_at: expect.any(Date) },
       });
     });
+
+    it('booking extra SIN estación no aborta: mantiene log-and-continue', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 56 });
+      mockOrderCreate(10000);
+      const openBooking = {
+        product_id: OPEN_SERVICE_ID,
+        date: '2026-11-02',
+        start_time: '09:00',
+        end_time: '10:00',
+      };
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: OPEN_SERVICE_ID, quantity: 1 }],
+        bookings: [openBooking, openBooking],
+      } as any);
+
+      expect(result.order_id).toBe(1);
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('booking extra CON estación aborta con SERVICE_BOOKING_001', async () => {
+      mockServiceProducts();
+      mockBookingLinking();
+      mockOrderCreate(10000);
+      const stationBooking = (stationDto.bookings as any[])[0];
+
+      await expect(
+        service.checkout({ ...stationDto, bookings: [stationBooking, stationBooking] } as any),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'SERVICE_BOOKING_001' }),
+      });
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('whatsappCheckout() — promotions share the same source of truth', () => {

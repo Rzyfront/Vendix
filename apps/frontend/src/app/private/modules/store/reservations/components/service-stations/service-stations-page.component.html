@@ -1008,7 +1008,7 @@
             <div class="text-right">
               <span class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Total Acumulado</span>
               <span class="font-mono font-black text-lg text-emerald-600 dark:text-emerald-400">
-                {{ (sessionOrder()?.grand_total || session.order?.grand_total || session.budget_amount || 0) | currency }}
+                {{ (sessionOrder()?.grand_total ?? session.order?.grand_total ?? session.budget_amount ?? 0) | currency }}
               </span>
             </div>
           </div>

@@ -965,7 +965,9 @@ export class ServiceSessionsService {
     const session = await this.prisma.service_sessions.findFirst({
       where: { id, store_id: storeId },
     });
-    if (!session) throw new VendixHttpException(ErrorCodes.STATION_006);
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.STATION_004, 'Sesión de servicio no encontrada en esta tienda.');
+    }
     const [subjects, allocations, recentEvents, order] = await Promise.all([
       this.prisma.service_subjects.findMany({ where: { store_id: storeId, session_id: id }, orderBy: { created_at: 'asc' } }),
       this.prisma.service_allocations.findMany({ where: { store_id: storeId, session_id: id }, orderBy: { created_at: 'asc' } }),
@@ -1345,7 +1347,9 @@ export class ServiceSessionsService {
       where: { id, store_id: storeId },
       select: { id: true, status: true },
     });
-    if (!session) throw new VendixHttpException(ErrorCodes.STATION_006);
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.STATION_004, 'Sesión de servicio no encontrada en esta tienda.');
+    }
     const recentEvents = await this.prisma.service_progress_events.findMany({
       where: { store_id: storeId, session_id: id },
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }],

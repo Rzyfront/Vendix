@@ -113,6 +113,7 @@ export class ProviderAvailabilityQueryDto {
 
   @IsOptional()
   @IsDateString()
+  @Matches(/(?:Z|[+-]\d{2}:\d{2})$/i, { message: 'planned_end_at debe incluir zona horaria explícita' })
   planned_end_at?: string;
 }
 
