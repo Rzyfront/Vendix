@@ -94,6 +94,16 @@ const RESERVATION_DETAIL_INCLUDE = {
     include: { user: { select: { id: true, first_name: true, last_name: true } } },
     orderBy: { id: 'asc' },
   },
+  // H3.2 — folio opened at check-in, with the balance of its draft order.
+  folio: {
+    select: {
+      id: true,
+      status: true,
+      opened_at: true,
+      closed_at: true,
+      order: { select: { id: true, order_number: true, grand_total: true } },
+    },
+  },
 } satisfies Prisma.lodging_reservationsInclude;
 
 /** Reason stored when the no-show job moves an overdue arrival. */

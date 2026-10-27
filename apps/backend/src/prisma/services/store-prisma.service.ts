@@ -155,6 +155,8 @@ export class StorePrismaService extends BasePrismaService {
     'lodging_allotments',
     // Hospitality Suite (H3.1)
     'lodging_guests',
+    // Hospitality Suite (H3.2)
+    'lodging_folios',
     // ===== Restaurant Suite Foundation (Fase A) =====
     // Only the 8 models that carry a direct store_id column use direct-store
     // scoping. The 3 child tables (recipe_items, kitchen_ticket_items,
@@ -1877,6 +1879,11 @@ export class StorePrismaService extends BasePrismaService {
   // Hospitality Suite (H3.1)
   get lodging_guests() {
     return this.scoped_client.lodging_guests;
+  }
+
+  // Hospitality Suite (H3.2)
+  get lodging_folios() {
+    return this.scoped_client.lodging_folios;
   }
 
   get product_price_tier_overrides() {

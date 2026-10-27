@@ -3,8 +3,9 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { parseApiError, ParsedApiError } from '../../../../../../core/utils/parse-api-error';
 import {
+  CheckInRequest,
   CreateReservationRequest,
   LodgingReservation,
   Rack,
@@ -86,6 +87,19 @@ export class LodgingReservationsService {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/no-show`, { reason })
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /**
+   * H3.2 — check-in that opens the folio. Rejects with the parsed error so
+   * the screen can tell a dirty room (asks to confirm) from other errors.
+   */
+  checkIn(id: number, request: CheckInRequest): Observable<LodgingReservation> {
+    return this.http
+      .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/check-in`, request)
+      .pipe(
+        map((res) => res.data),
+        catchError((error: unknown) => throwError((): ParsedApiError => parseApiError(error))),
+      );
   }
 
   /** H2.1 — active rate plans with the room types each one prices. */

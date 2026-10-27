@@ -17,13 +17,19 @@ import {
   ButtonComponent,
   IconComponent,
   ModalComponent,
+  SelectorComponent,
+  SelectorOption,
   SpinnerComponent,
   TextareaComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { ParsedApiError } from '../../../../../../../core/utils/parse-api-error';
+import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
+import { LodgingUnitsService } from '../../../rooms/services/units.service';
 import {
   countNights,
+  FOLIO_STATUS_LABELS,
   LodgingReservation,
   LodgingReservationRoom,
   RESERVATION_STATUS_LABELS,
@@ -39,13 +45,16 @@ import {
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
-type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | null;
+type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
 
-const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null>, string> = {
+const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null | 'check_in'>, string> = {
   cancel: 'Reserva cancelada',
   no_show: 'Reserva marcada como no-show',
   cancel_room: 'Habitación cancelada',
 };
+
+/** H3.2 — a guest never enters a room in these states. */
+const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
 
 /** Local civil date `YYYY-MM-DD` of the browser (the desk's day). */
 function todayLocal(): string {
@@ -63,6 +72,8 @@ function todayLocal(): string {
  * H2.4: shows the cancellation policy booked (snapshot), the pending deposit
  * and the penalty before and after cancelling (charged in H3.5).
  * H3.1: guest register (holder and companions by room).
+ * H3.2: "Check-in" picks the room of each unassigned room, asks to confirm a
+ * dirty one and opens the folio ("Folio · Abierto · $0").
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -76,6 +87,7 @@ function todayLocal(): string {
     IconComponent,
     SpinnerComponent,
     TextareaComponent,
+    SelectorComponent,
     RoomChangeModalComponent,
     GuestRegisterComponent,
   ],
@@ -133,6 +145,16 @@ function todayLocal(): string {
               data-testid="reservation-penalty"
             >
               {{ penalty }}
+            </p>
+          }
+
+          @if (r.folio; as folio) {
+            <p
+              class="flex items-center gap-2 rounded-lg border border-border px-3 py-2 font-medium text-text-primary"
+              data-testid="reservation-folio"
+            >
+              <app-icon name="receipt" [size]="16" />
+              Folio · {{ folioStatus(folio.status) }} · {{ money(folio.order.grand_total) }}
             </p>
           }
 
@@ -222,7 +244,27 @@ function todayLocal(): string {
               {{ quoteLabel() }}
             </p>
           }
-          @if (pending()) {
+          @if (pending() === 'check_in') {
+            <div class="space-y-3" data-testid="check-in-panel">
+              @for (room of unassignedRooms(); track room.id) {
+                <app-selector
+                  [formControl]="unitControl(room.id)"
+                  [label]="'Habitación para ' + room.unit_type.name"
+                  placeholder="Selecciona una habitación"
+                  [options]="unitOptions(room)"
+                />
+              }
+              @if (dirtyWarning()) {
+                <p
+                  class="rounded-lg bg-warning/10 px-3 py-2 font-medium text-text-primary"
+                  data-testid="check-in-dirty"
+                >
+                  {{ dirtyWarning() }}
+                </p>
+              }
+            </div>
+          }
+          @if (pending() && pending() !== 'check_in') {
             <app-textarea
               [formControl]="reasonControl"
               [label]="reasonRequired() ? 'Motivo de la cancelación' : 'Motivo (opcional)'"
@@ -235,7 +277,17 @@ function todayLocal(): string {
       }
 
       <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (pending()) {
+        @if (pending() === 'check_in') {
+          <app-button variant="ghost" (clicked)="pending.set(null)">Volver</app-button>
+          <app-button
+            variant="primary"
+            [loading]="saving()"
+            [disabled]="!checkInReady()"
+            (clicked)="confirmCheckIn()"
+          >
+            {{ dirtyWarning() ? 'Check-in de todos modos' : 'Confirmar check-in' }}
+          </app-button>
+        } @else if (pending()) {
           <app-button variant="ghost" (clicked)="pending.set(null)">Volver</app-button>
           <app-button
             variant="danger"
@@ -250,6 +302,12 @@ function todayLocal(): string {
             <app-button variant="outline" (clicked)="startAction('no_show')">
               <app-icon slot="icon" name="user-x" [size]="16" />
               Marcar no-show
+            </app-button>
+          }
+          @if (canCheckIn()) {
+            <app-button variant="primary" (clicked)="startCheckIn()">
+              <app-icon slot="icon" name="log-in" [size]="16" />
+              Check-in
             </app-button>
           }
           @if (canCancel()) {
@@ -274,6 +332,7 @@ export class ReservationDetailModalComponent {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
+  private readonly unitsService = inject(LodgingUnitsService);
   private readonly destroyRef = inject(DestroyRef);
 
   /** Reservation to show; `null` keeps the modal closed. */
@@ -291,6 +350,13 @@ export class ReservationDetailModalComponent {
   readonly moveTarget = signal<RoomChangeTarget | null>(null);
   /** H2.4 — "Penalidad: $250.000 (1 noche)" of cancelling now. */
   readonly quoteLabel = signal<string>('Calculando penalidad…');
+  /** H3.2 — physical rooms to pick at check-in, and the room picked per reservation room. */
+  readonly units = signal<LodgingUnit[]>([]);
+  private readonly unitControls = signal(new Map<number, FormControl<number | null>>());
+  /** Bumped on each pick so `checkInReady` re-reads the controls. */
+  private readonly picks = signal(0);
+  /** "La 101 está sucia. ¿Hacer check-in de todos modos?" once the server asked. */
+  readonly dirtyWarning = signal('');
   readonly reasonControl = new FormControl('', {
     nonNullable: true,
     validators: [Validators.maxLength(500)],
@@ -363,6 +429,14 @@ export class ReservationDetailModalComponent {
     if (!r?.cancellation_penalty_amount) return '';
     return this.formatPenalty(r.cancellation_penalty_amount, r.cancellation_penalty_detail ?? null);
   });
+  /** H3.2 — the server rejects an early arrival with its reason. */
+  readonly canCheckIn = computed(() => this.reservation()?.status === 'confirmed');
+  readonly unassignedRooms = computed(() => this.activeRooms().filter((room) => !room.unit));
+  readonly checkInReady = computed(() => {
+    this.picks();
+    const controls = this.unitControls();
+    return this.unassignedRooms().every((room) => controls.get(room.id)?.value != null);
+  });
   readonly canNoShow = computed(
     () => this.reservation()?.status === 'confirmed' && this.arrival() <= todayLocal(),
   );
@@ -391,6 +465,88 @@ export class ReservationDetailModalComponent {
     const adults = `${room.adults} ${room.adults === 1 ? 'adulto' : 'adultos'}`;
     if (room.children < 1) return adults;
     return `${adults} · ${room.children} ${room.children === 1 ? 'niño' : 'niños'}`;
+  }
+
+  folioStatus(status: keyof typeof FOLIO_STATUS_LABELS): string {
+    return FOLIO_STATUS_LABELS[status] ?? status;
+  }
+
+  /** Active rooms of the same type; a dirty one says so before picking it. */
+  unitOptions(room: LodgingReservationRoom): SelectorOption[] {
+    return this.units()
+      .filter(
+        (u) =>
+          u.is_active &&
+          u.unit_type_id === room.unit_type_id &&
+          !BLOCKED_HOUSEKEEPING.includes(u.housekeeping_status),
+      )
+      .map((u) => ({
+        value: u.id,
+        label: u.housekeeping_status === 'dirty' ? `${u.code} · Sucia` : u.code,
+      }));
+  }
+
+  unitControl(roomId: number): FormControl<number | null> {
+    return this.unitControls().get(roomId)!;
+  }
+
+  /** H3.2 — opens the check-in step: a room picker for each unassigned room. */
+  startCheckIn(): void {
+    const controls = new Map<number, FormControl<number | null>>();
+    for (const room of this.unassignedRooms()) {
+      const control = new FormControl<number | null>(null);
+      control.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+        this.dirtyWarning.set('');
+        this.picks.update((n) => n + 1);
+      });
+      controls.set(room.id, control);
+    }
+    this.unitControls.set(controls);
+    this.dirtyWarning.set('');
+    this.pending.set('check_in');
+    if (controls.size > 0 && this.units().length === 0) {
+      this.unitsService
+        .list()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (units) => this.units.set(units),
+          error: () => this.units.set([]),
+        });
+    }
+  }
+
+  confirmCheckIn(): void {
+    const reservation = this.reservation();
+    if (!reservation || !this.checkInReady()) return;
+    const rooms = [...this.unitControls().entries()].map(([room_id, control]) => ({
+      room_id,
+      unit_id: Number(control.value),
+    }));
+    this.saving.set(true);
+    this.reservationsService
+      .checkIn(reservation.id, {
+        ...(rooms.length ? { rooms } : {}),
+        ...(this.dirtyWarning() ? { confirm_dirty: true } : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.saving.set(false);
+          this.pending.set(null);
+          this.dirtyWarning.set('');
+          this.reservation.set(updated);
+          this.toastService.success('Check-in realizado');
+          this.changed.emit();
+        },
+        error: (error: ParsedApiError) => {
+          this.saving.set(false);
+          if (error.errorCode === 'LODGING_CHECKIN_DIRTY_001') {
+            this.dirtyWarning.set(error.userMessage);
+            return;
+          }
+          this.toastService.error(error.userMessage || 'No se pudo hacer el check-in');
+        },
+      });
   }
 
   labelOf(status: keyof typeof RESERVATION_STATUS_LABELS): string {
@@ -477,7 +633,7 @@ export class ReservationDetailModalComponent {
   confirmAction(): void {
     const reservation = this.reservation();
     const action = this.pending();
-    if (!reservation || !action) return;
+    if (!reservation || !action || action === 'check_in') return;
     const reason = this.reasonControl.value.trim();
     const roomId = this.pendingRoomId();
     if (action === 'cancel_room' && roomId === null) return;

@@ -100,6 +100,28 @@ export interface LodgingReservation {
   cancellation_penalty_detail?: string | null;
   /** Status history, oldest first (detail only). */
   events?: LodgingReservationEvent[];
+  /** H3.2 — guest folio opened at check-in (detail only). */
+  folio?: LodgingFolio | null;
+}
+
+/** H3.2 — running account of a stay: its charges live in a draft order. */
+export interface LodgingFolio {
+  id: number;
+  status: 'open' | 'closed';
+  opened_at: string;
+  closed_at: string | null;
+  order: { id: number; order_number: string; grand_total: string };
+}
+
+export const FOLIO_STATUS_LABELS: Record<LodgingFolio['status'], string> = {
+  open: 'Abierto',
+  closed: 'Cerrado',
+};
+
+/** H3.2 — check-in: rooms picked now and the dirty-room confirmation. */
+export interface CheckInRequest {
+  rooms?: { room_id: number; unit_id: number }[];
+  confirm_dirty?: boolean;
 }
 
 /** One status change of a reservation (H1.2). `user` null = automatic. */

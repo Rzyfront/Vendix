@@ -122,6 +122,9 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H3.1 · registro de huéspedes y acompañantes
   'lodging_guests.travel_purpose',
+
+  // --- Hotelería H3.2 · check-in que abre el folio
+  'lodging_folios.order_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

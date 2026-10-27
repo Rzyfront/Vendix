@@ -16,6 +16,8 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { LodgingReservationsService } from './reservations.service';
 import { LodgingRoomChangesService } from './room-changes.service';
 import { LodgingRatePlansService } from '../rates/rate-plans.service';
+import { LodgingCheckInService } from './check-in/check-in.service';
+import { CheckInDto } from './check-in/check-in.dto';
 import {
   CancelReservationDto,
   CreateReservationDto,
@@ -25,7 +27,7 @@ import {
   RoomChangeDto,
 } from './dto';
 
-/** Hospitality Suite (H1.1/H1.2/H1.4/H1.5/H2.1) — nightly reservations of a hotel store. */
+/** Hospitality Suite (H1.1/H1.2/H1.4/H1.5/H2.1/H3.2) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
 @UseGuards(PermissionsGuard)
 export class LodgingReservationsController {
@@ -33,6 +35,7 @@ export class LodgingReservationsController {
     private readonly lodgingReservationsService: LodgingReservationsService,
     private readonly lodgingRoomChangesService: LodgingRoomChangesService,
     private readonly lodgingRatePlansService: LodgingRatePlansService,
+    private readonly lodgingCheckInService: LodgingCheckInService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -134,5 +137,13 @@ export class LodgingReservationsController {
   async noShow(@Param('id', ParseIntPipe) id: number, @Body() dto: NoShowReservationDto) {
     const result = await this.lodgingReservationsService.markNoShow(id, dto.reason);
     return this.responseService.success(result, 'Reserva marcada como no-show');
+  }
+
+  @ApiOperation({ summary: 'Check-in de una llegada: pasa a En casa y abre el folio' })
+  @Post(':id/check-in')
+  @Permissions('store:lodging:front_desk:operate')
+  async checkIn(@Param('id', ParseIntPipe) id: number, @Body() dto: CheckInDto) {
+    const result = await this.lodgingCheckInService.checkIn(id, dto);
+    return this.responseService.success(result, 'Check-in realizado');
   }
 }

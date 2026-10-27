@@ -1078,6 +1078,7 @@ model stores {
   lodging_cancellation_policies  lodging_cancellation_policies[]
   lodging_allotments             lodging_allotments[]
   lodging_guests                 lodging_guests[]
+  lodging_folios                 lodging_folios[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -1760,6 +1761,8 @@ model orders {
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions  table_sessions[]
+  // Hospitality Suite (H3.2) — the draft order of a guest folio.
+  lodging_folio   lodging_folios?
   kitchen_tickets kitchen_tickets[]
 
   // Dispatch (remisión) back-relation
@@ -2413,6 +2416,7 @@ model lodging_reservations {
   rooms      lodging_reservation_rooms[]
   events     lodging_reservation_events[]
   guests     lodging_guests[]
+  folio      lodging_folios?
 
   @@unique([store_id, reservation_number])
   @@index([store_id, arrival_date])
@@ -2513,6 +2517,32 @@ model lodging_guests {
   @@index([store_id])
   @@index([reservation_room_id])
   @@index([customer_id])
+}
+
+enum lodging_folio_status_enum {
+  open
+  closed
+}
+
+// Hospitality Suite (H3.2) — guest folio opened at check-in: the running
+// account of a stay. Same pattern as `table_sessions`: the charges live in a
+// `draft` POS order (1:1) of the reservation holder.
+model lodging_folios {
+  id             Int                       @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int                       @unique
+  order_id       Int                       @unique
+  status         lodging_folio_status_enum @default(open)
+  opened_at      DateTime                  @default(now()) @db.Timestamp(6)
+  closed_at      DateTime?                 @db.Timestamp(6)
+  created_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order       orders               @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, status])
 }
 
 // Hospitality Suite (H2.1) — rate plan of a hotel store ("Solo alojamiento",

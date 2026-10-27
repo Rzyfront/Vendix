@@ -5824,6 +5824,27 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
   },
+  // Hospitality Suite (H3.2) — check-in that opens the folio.
+  LODGING_CHECKIN_EARLY_001: {
+    code: 'LODGING_CHECKIN_EARLY_001',
+    httpStatus: 409,
+    devMessage: 'No se puede hacer check-in antes de la fecha de llegada',
+  },
+  LODGING_CHECKIN_GUESTS_001: {
+    code: 'LODGING_CHECKIN_GUESTS_001',
+    httpStatus: 409,
+    devMessage: 'Registra al menos al titular',
+  },
+  LODGING_CHECKIN_UNIT_001: {
+    code: 'LODGING_CHECKIN_UNIT_001',
+    httpStatus: 409,
+    devMessage: 'Asigna una habitación antes del check-in',
+  },
+  LODGING_CHECKIN_DIRTY_001: {
+    code: 'LODGING_CHECKIN_DIRTY_001',
+    httpStatus: 409,
+    devMessage: 'La habitación está sucia: confirma el check-in',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,
