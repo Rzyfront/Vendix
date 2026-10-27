@@ -582,6 +582,13 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/reservations',
           panelUiKey: 'hospitality_reservations',
         },
+        {
+          // H1.3 — read view of the reservations: same panel_ui key.
+          label: 'Rack',
+          icon: 'layout-grid',
+          route: '/admin/hospitality/rack',
+          panelUiKey: 'hospitality_reservations',
+        },
       ],
     },
     {

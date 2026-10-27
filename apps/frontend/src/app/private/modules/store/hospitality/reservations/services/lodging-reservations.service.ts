@@ -7,6 +7,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   CreateReservationRequest,
   LodgingReservation,
+  Rack,
   ReservationListQuery,
   ReservationListResult,
   ReservationQuote,
@@ -74,6 +75,15 @@ export class LodgingReservationsService {
   create(request: CreateReservationRequest): Observable<LodgingReservation> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(this.baseUrl, request)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Occupancy rack of the nights `[from, to)` (H1.3). */
+  rack(from: string, to: string): Observable<Rack> {
+    return this.http
+      .get<ApiResponse<Rack>>(`${environment.apiUrl}/store/hospitality/rack`, {
+        params: toParams({ from, to }),
+      })
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

@@ -1011,6 +1011,14 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/hospitality/reservations/routes/reservations.routes'
               ).then((m) => m.hospitalityReservationsRoutes),
           },
+          {
+            // H1.3 — occupancy rack; same panel_ui key as Reservas.
+            path: 'rack',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/rack-page/rack-page.component'
+              ).then((c) => c.HospitalityRackPageComponent),
+          },
         ],
       },
       // Subscription Routes

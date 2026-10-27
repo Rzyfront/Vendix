@@ -116,3 +116,48 @@ export function countNights(arrival: string, departure: string): number {
   const ms = Date.parse(`${departure}T00:00:00Z`) - Date.parse(`${arrival}T00:00:00Z`);
   return Number.isFinite(ms) ? Math.round(ms / 86_400_000) : 0;
 }
+
+/** One reservation room drawn on the rack (H1.3), clipped to the window. */
+export interface RackBar {
+  reservation_room_id: number;
+  reservation_id: number;
+  reservation_number: string;
+  status: LodgingReservationStatus;
+  guest: string;
+  unit_id: number | null;
+  arrival_date: string;
+  departure_date: string;
+  /** Index of the first visible night (0 = `from`). */
+  start: number;
+  span: number;
+  continues_before: boolean;
+  continues_after: boolean;
+  /** Row of the type's "Sin asignar" block. */
+  lane: number;
+}
+
+export interface RackUnit {
+  id: number;
+  code: string;
+  floor: string | null;
+  housekeeping_status: string;
+  is_active: boolean;
+}
+
+export interface RackType {
+  id: number;
+  name: string;
+  units: RackUnit[];
+  /** Rooms still for sale per night of the window. */
+  free: number[];
+  unassigned_lanes: number;
+  bars: RackBar[];
+}
+
+/** Occupancy rack: rooms grouped by type × nights `[from, to)`. */
+export interface Rack {
+  from: string;
+  to: string;
+  nights: string[];
+  types: RackType[];
+}

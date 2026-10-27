@@ -5629,6 +5629,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango de habitaciones no es válido (máximo 100)',
   },
+  // Hospitality Suite (H1.3) — occupancy rack
+  LODGING_RACK_RANGE_001: {
+    code: 'LODGING_RACK_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango del rack debe ser de 1 a 62 noches',
+  },
   // Hospitality Suite (H1.1) — reservations
   LODGING_RESERVATION_FIND_001: {
     code: 'LODGING_RESERVATION_FIND_001',
