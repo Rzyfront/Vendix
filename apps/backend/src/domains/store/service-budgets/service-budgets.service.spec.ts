@@ -60,6 +60,7 @@ describe('ServiceBudgetsService', () => {
       service_session_tokens: { findFirst: jest.fn() },
       products: { findMany: jest.fn().mockResolvedValue([]) },
       product_variants: { findFirst: jest.fn() },
+      product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
     };
     notifications = { push: jest.fn() };
     service = new ServiceBudgetsService(prisma as unknown as StorePrismaService, notifications as any);
@@ -206,6 +207,96 @@ describe('ServiceBudgetsService', () => {
         run(() => service.createProposal(7, { ...dto, expires_at: new Date(Date.now() - 1000).toISOString() })),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(tx.service_change_proposals.create).not.toHaveBeenCalled();
+    });
+
+    describe('compuerta de precio en líneas con producto (misma que addItems/POS)', () => {
+      const product = {
+        id: 2,
+        name: 'Aceite',
+        base_price: new Prisma.Decimal(10000),
+        is_on_sale: false,
+        sale_price: null,
+        allow_pos_price_override: false,
+      };
+      const iva19 = [
+        {
+          product_id: 2,
+          is_inclusive: false,
+          tax_categories: {
+            tax_type: 'IVA',
+            tax_rates: [{ id: 1, name: 'IVA', rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ];
+
+      beforeEach(() => {
+        prisma.products.findMany.mockResolvedValue([product]);
+        prisma.product_tax_assignments.findMany.mockResolvedValue(iva19);
+      });
+
+      it('acepta el precio de catálogo y resuelve el IVA en el servidor (ignora el tax_rate del DTO)', async () => {
+        await run(() =>
+          service.createProposal(7, {
+            items: [{ quantity: 2, unit_price: 10000, tax_rate: 5, product_id: 2, product_name: 'Aceite' }],
+          }),
+        );
+        const stored = tx.service_change_proposals.create.mock.calls[0][0].data;
+        expect(stored.lines).toMatchObject({
+          items: [
+            expect.objectContaining({
+              product_id: 2,
+              quantity: 2,
+              unit_price: 10000,
+              tax_rate: 0.19,
+              tax_amount_item: 1900,
+              total_price: 20000,
+              total: 23800,
+            }),
+          ],
+        });
+        expect(stored.subtotal.toFixed(2)).toBe('20000.00');
+        expect(stored.tax.toFixed(2)).toBe('3800.00');
+        expect(stored.total.toFixed(2)).toBe('23800.00');
+      });
+
+      it('rechaza precio distinto si el producto no permite override (POS_PRICE_OVERRIDE_NOT_ALLOWED_001)', async () => {
+        await expect(
+          run(() => service.createProposal(7, { items: [{ quantity: 1, unit_price: 1, product_id: 2 }] })),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'POS_PRICE_OVERRIDE_NOT_ALLOWED_001' }),
+        });
+        expect(tx.service_change_proposals.create).not.toHaveBeenCalled();
+      });
+
+      it('rechaza precio distinto sin el permiso store:pos:price_override (AUTH_PERM_001)', async () => {
+        prisma.products.findMany.mockResolvedValue([{ ...product, allow_pos_price_override: true }]);
+        await expect(
+          run(() => service.createProposal(7, { items: [{ quantity: 1, unit_price: 1, product_id: 2 }] })),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'AUTH_PERM_001' }),
+        });
+        expect(tx.service_change_proposals.create).not.toHaveBeenCalled();
+      });
+
+      it('acepta precio distinto con flag + permiso, despejando el impuesto del precio publicado', async () => {
+        prisma.products.findMany.mockResolvedValue([{ ...product, allow_pos_price_override: true }]);
+        await RequestContextService.runIsolated({ ...context, permissions: ['store:pos:price_override'] }, () =>
+          service.createProposal(7, { items: [{ quantity: 2, unit_price: 12000, product_id: 2 }] }),
+        );
+        const stored = tx.service_change_proposals.create.mock.calls[0][0].data;
+        expect(stored.lines).toMatchObject({
+          items: [
+            expect.objectContaining({
+              unit_price: 12000,
+              tax_rate: 0.19,
+              tax_amount_item: 2280,
+              total_price: 24000,
+              total: 28560,
+            }),
+          ],
+        });
+        expect(stored.total.toFixed(2)).toBe('28560.00');
+      });
     });
   });
 

@@ -13,6 +13,8 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { CreateServiceProposalDto, DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
 import { buildProposalSnapshotHash } from './utils/service-proposal-snapshot.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { FullTaxRow, resolveFullTaxRowsByProductId } from '../taxes/utils/product-tax-rows.util';
+import { resolveCatalogLine, resolveCatalogUnitPrice } from '../orders/utils/catalog-line-pricing.util';
 
 /**
  * Regla de consentimiento: el staff no puede subir por su cuenta un límite que
@@ -42,6 +44,27 @@ export class ServiceBudgetsService {
     const storeId = RequestContextService.getContext()?.store_id;
     if (!storeId) throw new BadRequestException('No se encontró contexto de tienda');
     return storeId;
+  }
+
+  /**
+   * Réplica del chequeo del POS (`PaymentsService.hasActivePermission` + `requireActivePermission`,
+   * igual que `ServiceSessionsService.requirePosPriceOverridePermission`): el helper del POS
+   * es privado, así que se lee del contexto, que ya trae solo permisos activos.
+   */
+  private requirePosPriceOverridePermission(): void {
+    const ctx = RequestContextService.getContext();
+    const roles = ctx?.roles || [];
+    const allowed =
+      ctx?.is_super_admin === true ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN') ||
+      (ctx?.permissions || []).includes('store:pos:price_override');
+    if (!allowed) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        'No tienes permiso para realizar esta operación en POS.',
+      );
+    }
   }
 
   private async requireSession(sessionId: number) {
@@ -185,31 +208,98 @@ export class ServiceBudgetsService {
       throw new BadRequestException('product_variant_id requiere product_id');
     }
     const productIds = [...new Set(dto.items.map((item) => item.product_id).filter((id): id is number => id != null))];
+    const productById = new Map<number, {
+      id: number;
+      name: string;
+      base_price: Prisma.Decimal | number | null;
+      is_on_sale: boolean | null;
+      sale_price: Prisma.Decimal | number | null;
+      allow_pos_price_override: boolean | null;
+    }>();
+    const variantByKey = new Map<string, {
+      price_override?: Prisma.Decimal | number | null;
+      is_on_sale?: boolean | null;
+      sale_price?: Prisma.Decimal | number | null;
+    }>();
+    let taxRowsByProduct = new Map<number, FullTaxRow[]>();
     if (productIds.length > 0) {
       const found = await this.prisma.products.findMany({
         where: { id: { in: productIds }, store_id: this.storeId },
-        select: { id: true },
+        select: { id: true, name: true, base_price: true, is_on_sale: true, sale_price: true, allow_pos_price_override: true },
       });
       const missing = productIds.filter((id) => !found.some((row) => row.id === id));
       if (missing.length > 0) {
         throw new BadRequestException(`Productos no pertenecen a esta tienda: ${missing.join(', ')}`);
       }
+      for (const row of found) productById.set(row.id, row);
       for (const item of dto.items) {
-        if (item.product_variant_id != null) {
+        if (item.product_id != null && item.product_variant_id != null) {
           const variant = await this.prisma.product_variants.findFirst({
-            where: { id: item.product_variant_id, product_id: item.product_id! },
-            select: { id: true },
+            where: { id: item.product_variant_id, product_id: item.product_id },
+            select: { id: true, price_override: true, is_on_sale: true, sale_price: true },
           });
           if (!variant) throw new BadRequestException('La variante no pertenece al producto indicado');
+          variantByKey.set(`${item.product_id}:${item.product_variant_id}`, variant);
         }
       }
+      taxRowsByProduct = await resolveFullTaxRowsByProductId(this.prisma, productIds);
     }
     // Totales del servidor: línea = cantidad × precio; impuesto = tax_amount_item
     // si viene, si no cantidad × precio × tasa; descuento global opcional.
+    // Líneas con producto: el precio pasa la misma compuerta del POS que
+    // addItems (precio de catálogo + allow_pos_price_override + permiso
+    // store:pos:price_override) y el impuesto se resuelve en el servidor con
+    // la configuración fiscal del producto: se ignora tax_rate/tax_amount_item
+    // del DTO para que el cliente no pueda aprobar un precio o IVA arbitrario.
     const money = (value: Prisma.Decimal | number | string) =>
       new Prisma.Decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-    const items = dto.items.map((item) => {
+    const priced = dto.items.map((item) => {
       const quantity = Math.max(1, Math.floor(Number(item.quantity)));
+      if (item.product_id != null) {
+        const product = productById.get(item.product_id)!;
+        const variant = item.product_variant_id != null
+          ? (variantByKey.get(`${item.product_id}:${item.product_variant_id}`) ?? null)
+          : null;
+        const catalogPrice = resolveCatalogUnitPrice(product, variant);
+        const published = Number(item.unit_price);
+        // Misma compuerta que el POS/addItemTx: cambiar el precio publicado
+        // exige que el producto lo permita y el permiso del usuario actual.
+        const priceOverridden = Math.round(published * 100) !== Math.round(catalogPrice * 100);
+        if (priceOverridden && !product.allow_pos_price_override) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_PRICE_OVERRIDE_NOT_ALLOWED_001,
+            `El producto "${product.name}" no permite editar el precio en POS.`,
+          );
+        }
+        if (priceOverridden) this.requirePosPriceOverridePermission();
+        const resolved = resolveCatalogLine({
+          catalogUnitPrice: published,
+          quantity,
+          priceUnitQuantityRaw: null,
+          rows: taxRowsByProduct.get(item.product_id) ?? [],
+        });
+        const lineSubtotal = money(resolved.totalPrice);
+        const lineTax = money(resolved.taxRows.reduce((acc, row) => acc + row.tax_amount, 0));
+        return {
+          snapshot: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            product_name: item.product_name ?? null,
+            description: item.description ?? null,
+            quantity,
+            unit_price: Number(money(resolved.unitBase).toFixed(2)),
+            tax_rate: resolved.taxRate,
+            tax_amount_item: Number(money(resolved.taxAmountItem).toFixed(2)),
+            // Base × unidades (sin impuesto), igual que addItemTx: así un
+            // recálculo posterior de la orden no duplica el IVA de estas líneas.
+            total_price: Number(lineSubtotal.toFixed(2)),
+            item_type: item.item_type ?? 'physical',
+            total: Number(lineSubtotal.plus(lineTax).toFixed(2)),
+          },
+          lineSubtotal,
+          lineTax,
+        };
+      }
       const unitPrice = money(item.unit_price);
       const lineSubtotal = money(unitPrice.times(quantity));
       const lineTax = item.tax_amount_item != null
@@ -218,20 +308,25 @@ export class ServiceBudgetsService {
           ? money(lineSubtotal.times(item.tax_rate).dividedBy(100))
           : money(0);
       return {
-        product_id: item.product_id ?? null,
-        product_variant_id: item.product_variant_id ?? null,
-        product_name: item.product_name ?? null,
-        description: item.description ?? null,
-        quantity,
-        unit_price: Number(unitPrice.toFixed(2)),
-        tax_rate: item.tax_rate ?? null,
-        tax_amount_item: Number(lineTax.toFixed(2)),
-        item_type: item.item_type ?? (item.product_id ? 'physical' : 'service'),
-        total: Number(lineSubtotal.plus(lineTax).toFixed(2)),
+        snapshot: {
+          product_id: item.product_id ?? null,
+          product_variant_id: item.product_variant_id ?? null,
+          product_name: item.product_name ?? null,
+          description: item.description ?? null,
+          quantity,
+          unit_price: Number(unitPrice.toFixed(2)),
+          tax_rate: item.tax_rate ?? null,
+          tax_amount_item: Number(lineTax.toFixed(2)),
+          item_type: item.item_type ?? (item.product_id ? 'physical' : 'service'),
+          total: Number(lineSubtotal.plus(lineTax).toFixed(2)),
+        },
+        lineSubtotal,
+        lineTax,
       };
     });
-    const subtotal = money(items.reduce((acc, item) => acc + item.quantity * item.unit_price, 0));
-    const tax = money(items.reduce((acc, item) => acc + item.tax_amount_item, 0));
+    const items = priced.map((entry) => entry.snapshot);
+    const subtotal = money(priced.reduce((acc, entry) => acc + Number(entry.lineSubtotal), 0));
+    const tax = money(priced.reduce((acc, entry) => acc + Number(entry.lineTax), 0));
     const discount = money(dto.discount ?? 0);
     if (discount.greaterThan(subtotal.plus(tax))) {
       throw new BadRequestException('El descuento no puede superar el subtotal más impuestos');
