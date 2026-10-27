@@ -618,6 +618,14 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/rates',
           panelUiKey: 'hospitality_rates',
         },
+        {
+          // H6.1 — iCal export per room: same panel_ui key as Tarifas
+          // (manager area; receptionist and housekeeper presets lack it).
+          label: 'Canales',
+          icon: 'share-2',
+          route: '/admin/hospitality/channels',
+          panelUiKey: 'hospitality_rates',
+        },
       ],
     },
     {

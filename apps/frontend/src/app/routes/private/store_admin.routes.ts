@@ -1043,6 +1043,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityHousekeepingPageComponent),
           },
           {
+            // H6.1 — Canales → iCal export; same panel_ui key as Tarifas.
+            path: 'channels',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/channels/pages/ical-export-page/ical-export-page.component'
+              ).then((c) => c.HospitalityIcalExportPageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

@@ -65,6 +65,7 @@ import { UnitsModule } from './hospitality/units/units.module';
 import { LodgingReservationsModule } from './hospitality/reservations/reservations.module';
 import { LodgingRatesModule } from './hospitality/rates/rates.module';
 import { HousekeepingModule } from './hospitality/housekeeping/housekeeping.module';
+import { LodgingChannelsModule } from './hospitality/channels/channels.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { ProductionOrdersModule } from './production/production.module';
 import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
@@ -145,6 +146,7 @@ import { CrmModule } from './crm/crm.module';
     LodgingReservationsModule,
     LodgingRatesModule,
     HousekeepingModule,
+    LodgingChannelsModule,
     RecipesModule,
     ProductionOrdersModule,
     KitchenFireModule,

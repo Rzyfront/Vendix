@@ -5688,6 +5688,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El bloqueo ya fue liberado',
   },
+  // Hospitality Suite (H6.1) — iCal export
+  LODGING_ICAL_FEED_001: {
+    code: 'LODGING_ICAL_FEED_001',
+    httpStatus: 404,
+    devMessage: 'Calendario no encontrado o revocado',
+  },
   // Hospitality Suite (H1.3) — occupancy rack
   LODGING_RACK_RANGE_001: {
     code: 'LODGING_RACK_RANGE_001',

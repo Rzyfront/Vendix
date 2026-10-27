@@ -42,6 +42,21 @@ describe('UnitsService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  it('H6.1: el listado y el detalle no exponen el secreto del iCal', async () => {
+    units.findMany.mockResolvedValue([]);
+    units.findFirst.mockResolvedValue({ id: 1, code: '101' });
+
+    await service.findAll();
+    await service.findOne(1);
+
+    expect(units.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ omit: { ical_export_token: true } }),
+    );
+    expect(units.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ omit: { ical_export_token: true } }),
+    );
+  });
+
   it('crea la 101 del tipo con piso y estado limpia por defecto', async () => {
     units.findMany
       .mockResolvedValueOnce([]) // número libre

@@ -9,6 +9,9 @@ const UNIT_INCLUDE = {
   unit_type: { select: { id: true, name: true } },
 } satisfies Prisma.lodging_unitsInclude;
 
+/** H6.1 — the iCal feed secret is only shown under Canales (channels:manage). */
+const UNIT_OMIT = { ical_export_token: true } satisfies Prisma.lodging_unitsOmit;
+
 /**
  * Hospitality Suite (H0.3) — physical rooms. Each room belongs to one room
  * type; active rooms are the sellable inventory counted on the type. Room
@@ -22,6 +25,7 @@ export class UnitsService {
     return this.prisma.lodging_units.findMany({
       where: unit_type_id ? { unit_type_id } : undefined,
       include: UNIT_INCLUDE,
+      omit: UNIT_OMIT,
       orderBy: [{ code: 'asc' }],
     });
   }
@@ -30,6 +34,7 @@ export class UnitsService {
     const unit = await this.prisma.lodging_units.findFirst({
       where: { id },
       include: UNIT_INCLUDE,
+      omit: UNIT_OMIT,
     });
     if (!unit) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_FIND_001);
@@ -106,6 +111,7 @@ export class UnitsService {
     return this.prisma.lodging_units.findMany({
       where: { code: { in: codes } },
       include: UNIT_INCLUDE,
+      omit: UNIT_OMIT,
       orderBy: [{ code: 'asc' }],
     });
   }
