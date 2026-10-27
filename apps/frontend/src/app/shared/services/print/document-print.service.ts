@@ -511,6 +511,84 @@ export class DocumentPrintService {
   }
 
   /**
+   * Prints several documents of ONE gateway format in a single print dialog.
+   *
+   * Each document is rendered by the Print Gateway with the merchant's
+   * configured format (same `/render` call as `printViaGateway`), in series.
+   * The first rendered document provides the `<head>` (styles, `@page`); the
+   * bodies of all of them are laid out with `composeBlocks`, so every document
+   * (and every configured copy) starts on a new sheet.
+   *
+   * No local fallback: a document that fails to render is reported in
+   * `failedIds` and the rest still print. An inactive format (403) aborts the
+   * whole batch and returns `null`, like `printViaGateway`.
+   */
+  async printGatewayBatch(params: {
+    formatType: PrintFormatType;
+    documentIds: readonly (number | string)[];
+    title?: string;
+  }): Promise<{ printedIds: (number | string)[]; failedIds: (number | string)[] } | null> {
+    const printedIds: (number | string)[] = [];
+    const failedIds: (number | string)[] = [];
+    const blocks: string[] = [];
+    let shell: string | null = null;
+
+    for (const documentId of params.documentIds) {
+      try {
+        const response = await firstValueFrom(
+          this.gatewayClient.renderDocument(params.formatType, documentId, 'html'),
+        );
+        const html = response?.html;
+        const parts = html ? this.splitGatewayBody(html) : null;
+        if (!html || !parts) {
+          failedIds.push(documentId);
+          continue;
+        }
+        shell ??= html;
+        const copies = this.normalizeGatewayCopies(response.copies);
+        for (let copy = 0; copy < copies; copy++) blocks.push(parts.content);
+        printedIds.push(documentId);
+      } catch (err) {
+        if (this.isForbiddenError(err)) return null;
+        console.warn(
+          `[DocumentPrintService] Print Gateway no renderizó ${params.formatType} #${documentId}:`,
+          err,
+        );
+        failedIds.push(documentId);
+      }
+    }
+
+    if (!shell || blocks.length === 0) {
+      return { printedIds: [], failedIds };
+    }
+
+    const parts = this.splitGatewayBody(shell)!;
+    const combined = shell.replace(
+      parts.body,
+      () => `${parts.opening}${this.composeBlocks(blocks, 1)}${parts.closing}`,
+    );
+    await this.sendToPrinter(this.withGatewayPrintGuard(combined));
+    return { printedIds, failedIds };
+  }
+
+  /** Splits a gateway HTML document into its `<body>` tag pair and content. */
+  private splitGatewayBody(
+    documentHtml: string,
+  ): { body: string; opening: string; content: string; closing: string } | null {
+    const body = documentHtml.match(/<body\b[^>]*>[\s\S]*?<\/body\s*>/i)?.[0];
+    if (!body) return null;
+    const opening = body.match(/^<body\b[^>]*>/i)?.[0];
+    const closing = body.match(/<\/body\s*>$/i)?.[0];
+    if (!opening || !closing) return null;
+    return {
+      body,
+      opening,
+      content: body.slice(opening.length, body.length - closing.length),
+      closing,
+    };
+  }
+
+  /**
    * [print-fiscal-gate P3] — Single entry FE para imprimir un documento POS.
    *
    * 1. Consulta `/resolve-for-document` para que el backend decida formato y

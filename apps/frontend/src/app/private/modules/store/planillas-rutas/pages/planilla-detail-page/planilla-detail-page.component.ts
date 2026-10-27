@@ -46,7 +46,11 @@ import {
 import { RouteTrackingService } from '../../services/route-tracking.service';
 import { AddNotesModalComponent } from '../../components/add-notes-modal/add-notes-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
-import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import {
+  DispatchNote,
+  DispatchNoteStatus,
+} from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import { DispatchNotePrintService } from '../../../dispatch-notes/services/dispatch-note-print.service';
 import {
   CloseDispatchRouteDto,
   DispatchDeliveryAddress,
@@ -416,6 +420,7 @@ export class PlanillaDetailPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
+  private readonly dispatchNotePrint = inject(DispatchNotePrintService);
   private readonly authFacade = inject(AuthFacade);
   private readonly positionPublisher = inject(RoutePositionPublisherService);
   private readonly trackingService = inject(RouteTrackingService);
@@ -630,9 +635,33 @@ export class PlanillaDetailPageComponent {
     return i < 0 ? 0 : i;
   });
 
+  /** True while the route's remisiones are being rendered and printed. */
+  readonly printingNotes = signal(false);
+
+  /**
+   * Remisiones still on this route (released stops left it), in stop order,
+   * for "Imprimir remisiones" (S3).
+   */
+  readonly routeDispatchNotes = computed(() =>
+    [...(this.route()?.stops ?? [])]
+      .filter((stop) => stop.status !== 'released' && !!stop.dispatch_note)
+      .sort((a, b) => a.stop_sequence - b.stop_sequence)
+      .map((stop) => ({
+        id: stop.dispatch_note!.id,
+        dispatch_number: stop.dispatch_note!.dispatch_number,
+        status: stop.dispatch_note!.status as DispatchNoteStatus,
+      })),
+  );
+
   /** Documental / AI actions surfaced in the Paradas options dropdown. */
   readonly documentalActions = computed<DropdownAction[]>(() => [
     { label: 'Imprimir ruta', icon: 'printer', action: 'print' },
+    {
+      label: this.printingNotes() ? 'Imprimiendo remisiones…' : 'Imprimir remisiones',
+      icon: 'printer',
+      action: 'print-notes',
+      disabled: this.printingNotes() || this.routeDispatchNotes().length === 0,
+    },
     {
       label: this.downloadingPdf() ? 'Descargando…' : 'Descargar PDF',
       icon: 'download',
@@ -1185,6 +1214,20 @@ export class PlanillaDetailPageComponent {
     this.showPdfViewer.set(true);
   }
 
+  /** Prints every remisión of the route in one dialog (S3), configured format. */
+  async printRouteDispatchNotes(): Promise<void> {
+    const notes = this.routeDispatchNotes();
+    if (notes.length === 0 || this.printingNotes()) return;
+    this.printingNotes.set(true);
+    try {
+      await this.dispatchNotePrint.printDispatchNotes(notes);
+    } catch (e) {
+      this.toast.error(parseApiError(e).userMessage);
+    } finally {
+      this.printingNotes.set(false);
+    }
+  }
+
   /** Download the route-sheet PDF as a file (blob → anchor download). */
   downloadPdf() {
     const r = this.route();
@@ -1254,6 +1297,9 @@ export class PlanillaDetailPageComponent {
     switch (action) {
       case 'print':
         this.print();
+        break;
+      case 'print-notes':
+        void this.printRouteDispatchNotes();
         break;
       case 'download':
         this.downloadPdf();

@@ -374,6 +374,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'dispatch-notes/bulk',
+            loadComponent: () =>
+              import('../../private/modules/store/dispatch-notes/bulk/dispatch-notes-bulk-page.component').then(
+                (c) => c.DispatchNotesBulkPageComponent,
+              ),
+          },
+          {
             path: 'dispatch-notes/:id',
             loadComponent: () =>
               import('../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component').then(
