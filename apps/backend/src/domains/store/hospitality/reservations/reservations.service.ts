@@ -14,7 +14,16 @@ import {
 } from './dto';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
-import { loadPlanPricing } from '../rates/rate-plans.service';
+import { loadPlanPricing, PlanTerms } from '../rates/rate-plans.service';
+import {
+  asPolicySnapshot,
+  combinePenalties,
+  depositRequired,
+  hoursBeforeCheckIn,
+  Penalty,
+  PenaltyEvent,
+  roomPenalty,
+} from '../rates/lodging-cancellation-penalty';
 import { PricedNight, resolveNightRates, sumNights } from '../rates/lodging-rate-resolver';
 import { restrictionViolations } from '../rates/lodging-restriction-validator';
 import {
@@ -95,7 +104,28 @@ interface PricedStay {
   rate_plan: { id: number; name: string } | null;
   nights: PricedNight[];
   total: Prisma.Decimal;
+  /** H2.4 — policy and deposit of the plan (none without a plan). */
+  terms: PlanTerms;
 }
+
+/** H2.4 — a room sold without a plan has no policy and asks no deposit. */
+const NO_TERMS: PlanTerms = { policy: null, deposit_percent: new Prisma.Decimal(0) };
+
+/** Check-in time used for the penalty windows when the store has none. */
+const DEFAULT_CHECK_IN_TIME = '15:00';
+
+/** H2.4 — the status a penalty is computed for. */
+const PENALTY_EVENTS: Partial<Record<ReservationStatus, PenaltyEvent>> = {
+  cancelled: 'cancel',
+  no_show: 'no_show',
+};
+
+interface PenaltyTiming {
+  timezone: string;
+  check_in_time: string;
+}
+
+type PenaltyClient = Pick<Prisma.TransactionClient, 'lodging_reservations'>;
 
 /**
  * Hospitality Suite (H1.1/H1.5) — nightly reservations of one or more rooms.
@@ -186,7 +216,31 @@ export class LodgingReservationsService {
     if (!reservation) {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_FIND_001);
     }
-    return reservation;
+    // H2.4 — deposit asked for the rooms still sold ("Depósito pendiente: 30 %").
+    const deposit = depositRequired(
+      reservation.rooms
+        .filter((room) => !room.cancelled_at)
+        .map((room) => ({
+          deposit_percent: new Prisma.Decimal(room.deposit_percent ?? 0),
+          total: new Prisma.Decimal(room.total_amount),
+        })),
+    );
+    return { ...reservation, deposit };
+  }
+
+  /**
+   * H2.4 — what cancelling now would cost under each room's policy snapshot,
+   * so the desk sees "Penalidad: $250.000 (1 noche)" before confirming.
+   */
+  async cancellationQuote(id: number) {
+    const store_id = this.requireStoreId();
+    await this.findOne(id);
+    const timing = await this.loadPenaltyTiming(store_id);
+    const penalty = await this.computePenalty(this.prisma, id, store_id, 'cancel', timing, new Date());
+    return {
+      penalty_amount: penalty ? penalty.amount.toFixed(2) : null,
+      penalty_detail: penalty?.detail ?? null,
+    };
   }
 
   /** Cancels a reservation and frees its nights for sale. */
@@ -264,6 +318,8 @@ export class LodgingReservationsService {
   ): Promise<boolean> {
     const from = statusesThatCanReach(to);
     const now = new Date();
+    const event = PENALTY_EVENTS[to];
+    const timing = event ? await this.loadPenaltyTiming(this.requireStoreId()) : null;
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.lodging_reservations.findFirst({
         where: { id, status: { in: from } },
@@ -275,6 +331,19 @@ export class LodgingReservationsService {
         data: { status: to, updated_at: now },
       });
       if (updated.count !== 1) return false;
+      if (event && timing) {
+        // H2.4 — computed on the nights still sold, before they are freed.
+        const penalty = await this.computePenalty(tx, id, current.store_id, event, timing, now);
+        if (penalty) {
+          await tx.lodging_reservations.update({
+            where: { id },
+            data: {
+              cancellation_penalty_amount: penalty.amount,
+              cancellation_penalty_detail: penalty.detail.slice(0, 200),
+            },
+          });
+        }
+      }
       if (
         NIGHT_HOLDING_STATUSES.includes(current.status) &&
         !NIGHT_HOLDING_STATUSES.includes(to)
@@ -296,6 +365,68 @@ export class LodgingReservationsService {
       });
       return true;
     });
+  }
+
+  /** Store time zone and check-in time: the penalty windows count to it. */
+  private async loadPenaltyTiming(store_id: number): Promise<PenaltyTiming> {
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const row = await this.prisma.store_settings.findFirst({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const settings = row?.settings as { hospitality?: { check_in_time?: string } } | null;
+    return { timezone, check_in_time: settings?.hospitality?.check_in_time || DEFAULT_CHECK_IN_TIME };
+  }
+
+  /**
+   * Penalty of the rooms still sold, each with its own policy snapshot,
+   * nights (in stay order) and arrival. Null = free.
+   */
+  private async computePenalty(
+    client: PenaltyClient,
+    reservation_id: number,
+    store_id: number,
+    event: PenaltyEvent,
+    timing: PenaltyTiming,
+    now: Date,
+  ): Promise<Penalty | null> {
+    const reservation = await client.lodging_reservations.findFirst({
+      where: { id: reservation_id, store_id },
+      select: {
+        rooms: {
+          where: { cancelled_at: null },
+          select: {
+            arrival_date: true,
+            total_amount: true,
+            cancellation_policy_snapshot: true,
+            nights: {
+              where: { is_active: true },
+              select: { rate_amount: true },
+              orderBy: { night_date: 'asc' },
+            },
+          },
+        },
+      },
+    });
+    if (!reservation) return null;
+    return combinePenalties(
+      reservation.rooms.map((room) =>
+        roomPenalty(
+          {
+            policy: asPolicySnapshot(room.cancellation_policy_snapshot),
+            nights: room.nights.map((night) => new Prisma.Decimal(night.rate_amount)),
+            total: new Prisma.Decimal(room.total_amount),
+          },
+          hoursBeforeCheckIn(
+            room.arrival_date.toISOString().slice(0, 10),
+            timing.check_in_time,
+            timing.timezone,
+            now,
+          ),
+          event,
+        ),
+      ),
+    );
   }
 
   private requireStoreId(): number {
@@ -339,6 +470,9 @@ export class LodgingReservationsService {
         rate_amount: n.rate_amount.toFixed(2),
       })),
       total_amount: priced.total.toFixed(2),
+      // H2.4 — what the guest agrees to when booking.
+      cancellation_policy: priced.terms.policy,
+      deposit_percent: priced.terms.deposit_percent.toString(),
       restrictions,
     };
   }
@@ -429,6 +563,11 @@ export class LodgingReservationsService {
             adults: line.adults,
             children: line.children,
             rate_plan_id: line.rate_plan?.id ?? null,
+            // H2.4 — the policy and deposit in force when booking.
+            cancellation_policy_snapshot: line.terms.policy
+              ? (line.terms.policy as unknown as Prisma.InputJsonValue)
+              : Prisma.DbNull,
+            deposit_percent: line.terms.deposit_percent,
             total_amount: line.total,
             updated_at: now,
           },
@@ -588,12 +727,17 @@ export class LodgingReservationsService {
   ): Promise<PricedStay> {
     if (rate_plan_id == null) {
       const base = nights.map((night_date) => ({ night_date, rate_amount: unitType.nightly_rate }));
-      return { rate_plan: null, nights: base, total: sumNights(base) };
+      return { rate_plan: null, nights: base, total: sumNights(base), terms: NO_TERMS };
     }
-    const { plan, prices } = await loadPlanPricing(this.prisma, store_id, rate_plan_id, unitType);
+    const { plan, prices, terms } = await loadPlanPricing(
+      this.prisma,
+      store_id,
+      rate_plan_id,
+      unitType,
+    );
     // A plan with a base price prices every night.
     const priced = resolveNightRates(nights, prices)!;
-    return { rate_plan: plan, nights: priced, total: sumNights(priced) };
+    return { rate_plan: plan, nights: priced, total: sumNights(priced), terms };
   }
 
   private async loadSellableType(unit_type_id: number): Promise<SellableType> {

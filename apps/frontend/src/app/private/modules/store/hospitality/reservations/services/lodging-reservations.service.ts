@@ -70,6 +70,17 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** H2.4 — penalty of cancelling now (null amount = free). */
+  cancellationQuote(
+    id: number,
+  ): Observable<{ penalty_amount: string | null; penalty_detail: string | null }> {
+    return this.http
+      .get<ApiResponse<{ penalty_amount: string | null; penalty_detail: string | null }>>(
+        `${this.baseUrl}/${id}/cancellation-quote`,
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
   markNoShow(id: number, reason?: string): Observable<LodgingReservation> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/no-show`, { reason })

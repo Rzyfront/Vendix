@@ -5793,6 +5793,22 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'La última fecha debe ser igual o posterior a la primera, en un rango de hasta 366 días',
   },
+  LODGING_CANCEL_POLICY_FIND_001: {
+    code: 'LODGING_CANCEL_POLICY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Política de cancelación no encontrada',
+  },
+  LODGING_CANCEL_POLICY_DUP_001: {
+    code: 'LODGING_CANCEL_POLICY_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una política de cancelación con ese nombre',
+  },
+  LODGING_CANCEL_POLICY_RULES_001: {
+    code: 'LODGING_CANCEL_POLICY_RULES_001',
+    httpStatus: 400,
+    devMessage:
+      'Revisa las penalidades: una por ventana de horas, hasta 30 noches o hasta 100 %',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

@@ -28,6 +28,8 @@ import {
 } from '../../../../../../../shared/components/index';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import {
+  CancellationPolicy,
+  describePolicy,
   MEAL_PLAN_LABELS,
   MealPlan,
   RatePlan,
@@ -54,6 +56,9 @@ interface RatePlanForm {
   meal_plan: FormControl<MealPlan>;
   is_default: FormControl<boolean>;
   is_active: FormControl<boolean>;
+  /** H2.4 — 0 = no policy (free cancellation). */
+  cancellation_policy_id: FormControl<number>;
+  deposit_percent: FormControl<number>;
   prices: FormArray<FormGroup<PriceRowForm>>;
 }
 
@@ -115,6 +120,21 @@ const hasValue = (value: number | null | undefined): value is number =>
             <app-toggle formControlName="is_default" label="Preseleccionar al reservar" />
             <app-toggle formControlName="is_active" label="Activo" />
           </div>
+          <app-selector
+            formControlName="cancellation_policy_id"
+            label="Política de cancelación"
+            [options]="policyOptions()"
+            [helpText]="policyHelp()"
+          />
+          <app-input
+            formControlName="deposit_percent"
+            label="Depósito exigido (% de la estadía)"
+            type="number"
+            [min]="0"
+            [max]="100"
+            helperText="0 = sin depósito. Se muestra como “Depósito pendiente” en la reserva."
+            customWrapperClass="mt-0"
+          />
         </div>
 
         <div class="space-y-3" formArrayName="prices">
@@ -199,6 +219,8 @@ export class RatePlanFormModalComponent {
   readonly hasDefault = input(false);
   /** H2.2: store seasons; active ones (and those the plan prices) get a price column. */
   readonly seasons = input<Season[]>([]);
+  /** H2.4: store cancellation policies; active ones (and the plan's) can be picked. */
+  readonly policies = input<CancellationPolicy[]>([]);
 
   readonly isOpenChange = output<boolean>();
   readonly saved = output<RatePlan>();
@@ -210,6 +232,18 @@ export class RatePlanFormModalComponent {
   readonly mealPlanOptions: SelectorOption[] = Object.entries(MEAL_PLAN_LABELS).map(
     ([value, label]) => ({ value, label }),
   );
+  readonly policyOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Sin política (cancelación gratis)' },
+    ...this.policies()
+      .filter((p) => p.is_active || p.id === this.plan()?.cancellation_policy_id)
+      .map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (inactiva)` })),
+  ]);
+  /** Selected policy id, mirrored as a signal for the help text. */
+  readonly selectedPolicyId = signal(0);
+  readonly policyHelp = computed(() => {
+    const policy = this.policies().find((p) => p.id === this.selectedPolicyId());
+    return policy ? describePolicy(policy) : 'Las reservas con este plan se cancelan sin penalidad.';
+  });
   /** Seasons shown as columns, fixed when the modal opens (`reset`). */
   readonly seasonColumns = signal<{ id: number; name: string; range: string }[]>([]);
   private readonly typeNames = computed(
@@ -224,8 +258,18 @@ export class RatePlanFormModalComponent {
     meal_plan: this.fb.nonNullable.control<MealPlan>('room_only'),
     is_default: this.fb.nonNullable.control(false),
     is_active: this.fb.nonNullable.control(true),
+    cancellation_policy_id: this.fb.nonNullable.control(0),
+    deposit_percent: this.fb.nonNullable.control(0, {
+      validators: [Validators.required, Validators.min(0), Validators.max(100)],
+    }),
     prices: this.fb.array<FormGroup<PriceRowForm>>([]),
   });
+
+  constructor() {
+    this.form.controls.cancellation_policy_id.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((id) => this.selectedPolicyId.set(Number(id) || 0));
+  }
 
   /** One price row per active type, plus inactive types the plan prices. */
   reset(): void {
@@ -278,6 +322,8 @@ export class RatePlanFormModalComponent {
       meal_plan: plan?.meal_plan ?? 'room_only',
       is_default: plan?.is_default ?? !this.hasDefault(),
       is_active: plan?.is_active ?? true,
+      cancellation_policy_id: plan?.cancellation_policy_id ?? 0,
+      deposit_percent: Number(plan?.deposit_percent ?? 0),
     });
     this.submitted.set(false);
   }
@@ -323,6 +369,8 @@ export class RatePlanFormModalComponent {
       name: raw.name.trim(),
       code: raw.code.trim() || undefined,
       meal_plan: raw.meal_plan,
+      cancellation_policy_id: Number(raw.cancellation_policy_id) || null,
+      deposit_percent: Number(raw.deposit_percent),
       is_default: raw.is_default,
       is_active: raw.is_active,
       prices: raw.prices.flatMap((row) => {

@@ -44,6 +44,10 @@ export interface RatePlan {
   is_active: boolean;
   sort_order: number;
   prices: RatePrice[];
+  /** H2.4 — cancellation policy and deposit (% of the stay) asked when booking. */
+  cancellation_policy_id: number | null;
+  cancellation_policy?: { id: number; name: string; is_active: boolean } | null;
+  deposit_percent: string | number;
 }
 
 export interface RatePlanPayload {
@@ -52,6 +56,8 @@ export interface RatePlanPayload {
   meal_plan: MealPlan;
   is_default: boolean;
   is_active: boolean;
+  cancellation_policy_id: number | null;
+  deposit_percent: number;
   /** Replaces every price of the plan. */
   prices: { unit_type_id: number; day_of_week?: number; season_id?: number; price: number }[];
 }
@@ -162,4 +168,61 @@ export function restrictionLabels(r: LodgingRestriction): string[] {
     r.closed_to_departure ? 'CTD' : '',
     r.stop_sell ? 'Stop' : '',
   ].filter(Boolean);
+}
+
+/**
+ * Hospitality Suite (H2.4) — penalty of a cancellation window or a no-show:
+ * the first N nights of the stay, or a percent of its total.
+ */
+export type PenaltyType = 'nights' | 'percent';
+
+export interface PenaltyTerm {
+  penalty_type: PenaltyType;
+  penalty_value: number;
+}
+
+/** Applies when cancelling less than `hours_before` hours before check-in. */
+export interface CancellationRule extends PenaltyTerm {
+  hours_before: number;
+}
+
+/** Policy as returned by `/store/hospitality/cancellation-policies`. */
+export interface CancellationPolicy {
+  id: number;
+  name: string;
+  rules: CancellationRule[];
+  no_show_penalty: PenaltyTerm | null;
+  is_active: boolean;
+}
+
+export interface CancellationPolicyPayload {
+  name: string;
+  rules: CancellationRule[];
+  no_show_penalty: PenaltyTerm | null;
+  is_active: boolean;
+}
+
+/** "1 noche", "2 noches", "50 %". */
+export function penaltyLabel(term: PenaltyTerm): string {
+  if (term.penalty_type === 'percent') return `${term.penalty_value} %`;
+  return `${term.penalty_value} ${term.penalty_value === 1 ? 'noche' : 'noches'}`;
+}
+
+/**
+ * "Gratis hasta 48 h antes, luego 1 noche · No-show: 100 %". Windows widest
+ * first; without windows the cancellation is free.
+ */
+export function describePolicy(
+  policy: Pick<CancellationPolicy, 'rules' | 'no_show_penalty'>,
+): string {
+  const rules = [...policy.rules].sort((a, b) => b.hours_before - a.hours_before);
+  const parts = rules.length
+    ? rules.map((rule, index) =>
+        index === 0
+          ? `Gratis hasta ${rule.hours_before} h antes, luego ${penaltyLabel(rule)}`
+          : `desde ${rule.hours_before} h antes, ${penaltyLabel(rule)}`,
+      )
+    : ['Cancelación gratis'];
+  const noShow = policy.no_show_penalty ? penaltyLabel(policy.no_show_penalty) : 'sin penalidad';
+  return `${parts.join('; ')} · No-show: ${noShow}`;
 }

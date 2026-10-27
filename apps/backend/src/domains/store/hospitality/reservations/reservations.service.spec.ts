@@ -18,6 +18,7 @@ interface NightRow {
   unit_type_id: number;
   night_date: Date;
   is_active: boolean;
+  rate_amount?: Prisma.Decimal;
 }
 
 const DOUBLE = {
@@ -46,15 +47,35 @@ const TYPES: Record<number, typeof DOUBLE> = { 11: DOUBLE, 12: SUITE };
  * H2.1 — store 5 plans: 3 "Con desayuno" prices the Doble at $250.000 with
  * Friday/Saturday at $320.000 (no Suite price); 4 is inactive.
  */
-const RATE_PLANS = [
+/**
+ * H2.4 — "Flexible: gratis hasta 48 h, luego 1 noche" (no-show = 100 %),
+ * assigned to plan 5 with a 30 % deposit.
+ */
+const FLEXIBLE = {
+  id: 8,
+  name: 'Flexible',
+  rules: [{ hours_before: 48, penalty_type: 'nights', penalty_value: 1 }],
+  no_show_penalty: { penalty_type: 'percent', penalty_value: 100 },
+};
+
+const RATE_PLANS: Record<string, unknown>[] = [
   { id: 3, store_id: 5, name: 'Con desayuno', is_active: true },
   { id: 4, store_id: 5, name: 'Promo vieja', is_active: false },
+  {
+    id: 5,
+    store_id: 5,
+    name: 'Flexible',
+    is_active: true,
+    deposit_percent: new Prisma.Decimal(30),
+    cancellation_policy: FLEXIBLE,
+  },
 ];
 const RATE_PRICES = [
   { rate_plan_id: 3, unit_type_id: 11, day_of_week: null, price: new Prisma.Decimal(250000) },
   { rate_plan_id: 3, unit_type_id: 11, day_of_week: 5, price: new Prisma.Decimal(320000) },
   { rate_plan_id: 3, unit_type_id: 11, day_of_week: 6, price: new Prisma.Decimal(320000) },
   { rate_plan_id: 4, unit_type_id: 11, day_of_week: null, price: new Prisma.Decimal(200000) },
+  { rate_plan_id: 5, unit_type_id: 11, day_of_week: null, price: new Prisma.Decimal(250000) },
 ];
 
 /** Lets every other pending async step run, so unlocked work interleaves. */
@@ -150,7 +171,14 @@ function createFakeStore(
           if (!r) return null;
           const active = rooms
             .filter((x) => x.reservation_id === r.id && !x.cancelled_at)
-            .map((x) => ({ ...x, unit_type: { name: TYPES[x.unit_type_id].name }, unit: null }));
+            .map((x) => ({
+              ...x,
+              unit_type: { name: TYPES[x.unit_type_id].name },
+              unit: null,
+              nights: nights
+                .filter((n) => n.reservation_room_id === x.id && n.is_active)
+                .sort((a, b) => a.night_date.getTime() - b.night_date.getTime()),
+            }));
           return { ...r, rooms: active, events: [] };
         }
         return reservations[reservations.length - 1] ?? null;
@@ -357,6 +385,8 @@ describe('LodgingReservationsService', () => {
         overbooking_allowance: 0,
         nights: 3,
         rate_plan: null,
+        cancellation_policy: null,
+        deposit_percent: '0',
         night_rates: [
           { night_date: '2026-11-10', rate_amount: '250000.00' },
           { night_date: '2026-11-11', rate_amount: '250000.00' },
@@ -895,6 +925,109 @@ describe('LodgingReservationsService', () => {
       await service.create(sale(dec('2026-12-10', '2026-12-12')));
       expect(events[0]).toMatchObject({ to_status: 'confirmed' });
       expect(events[0]).not.toHaveProperty('reason');
+    });
+  });
+
+  describe('política de cancelación y depósito (H2.4)', () => {
+    // 7 to 10-dic with plan "Flexible"; check-in 15:00 Bogotá = 20:00 UTC.
+    const flexible: CreateReservationDto = {
+      arrival_date: '2026-12-07',
+      departure_date: '2026-12-10',
+      customer_id: 77,
+      rooms: [{ unit_type_id: 11, adults: 2, rate_plan_id: 5 }],
+    };
+    const at = (iso: string) => jest.setSystemTime(new Date(iso));
+
+    beforeEach(() => jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] }));
+    afterEach(() => jest.useRealTimers());
+
+    it('la habitación guarda la política y el depósito; se ve "Depósito pendiente: 30 %"', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, rooms } = build(2);
+      const created = await service.create(flexible);
+      expect(rooms[0]).toMatchObject({
+        cancellation_policy_snapshot: FLEXIBLE,
+        deposit_percent: new Prisma.Decimal(30),
+      });
+      expect(created.deposit).toEqual({ percent: '30', amount: '225000.00' });
+      await expect(service.quote({ ...stay, ...flexible, unit_type_id: 11, adults: 2, rate_plan_id: 5 }))
+        .resolves.toMatchObject({ cancellation_policy: FLEXIBLE, deposit_percent: '30' });
+    });
+
+    it('sin plan no hay política ni depósito', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, rooms } = build(2);
+      const created = await service.create(sale(stay));
+      expect(rooms[0]).toMatchObject({ deposit_percent: new Prisma.Decimal(0) });
+      expect(created.deposit).toEqual({ percent: null, amount: '0.00' });
+    });
+
+    it('cancelar 24 h antes muestra "Penalidad: $250.000 (1 noche)" y la guarda', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, reservations } = build(2);
+      await service.create(flexible);
+
+      at('2026-12-06T20:00:00Z');
+      await expect(service.cancellationQuote(1)).resolves.toEqual({
+        penalty_amount: '250000.00',
+        penalty_detail: '1 noche',
+      });
+      await service.cancel(1, 'Cambio de planes');
+      expect(reservations[0]).toMatchObject({
+        status: 'cancelled',
+        cancellation_penalty_amount: new Prisma.Decimal(250000),
+        cancellation_penalty_detail: '1 noche',
+      });
+    });
+
+    it('cancelar 72 h antes es gratis', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, reservations } = build(2);
+      await service.create(flexible);
+
+      at('2026-12-04T20:00:00Z');
+      await expect(service.cancellationQuote(1)).resolves.toEqual({
+        penalty_amount: null,
+        penalty_detail: null,
+      });
+      await service.cancel(1, 'Cambio de planes');
+      expect(reservations[0].status).toBe('cancelled');
+      expect(reservations[0]).not.toHaveProperty('cancellation_penalty_amount');
+    });
+
+    it('editar la política después no cambia la reserva (snapshot)', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service } = build(2);
+      await service.create(flexible);
+      const plan = RATE_PLANS.find((p) => p.id === 5)!;
+      const original = plan.cancellation_policy;
+      plan.cancellation_policy = {
+        ...FLEXIBLE,
+        rules: [{ hours_before: 720, penalty_type: 'percent', penalty_value: 100 }],
+      };
+      try {
+        at('2026-12-04T20:00:00Z');
+        await expect(service.cancellationQuote(1)).resolves.toEqual({
+          penalty_amount: null,
+          penalty_detail: null,
+        });
+      } finally {
+        plan.cancellation_policy = original;
+      }
+    });
+
+    it('el no-show toma la penalidad de no-show de la política', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, reservations } = build(2);
+      await service.create(flexible);
+
+      at('2026-12-07T23:00:00Z');
+      await service.markNoShow(1);
+      expect(reservations[0]).toMatchObject({
+        status: 'no_show',
+        cancellation_penalty_amount: new Prisma.Decimal(750000),
+        cancellation_penalty_detail: '100 %',
+      });
     });
   });
 

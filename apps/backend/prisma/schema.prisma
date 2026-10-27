@@ -1073,6 +1073,7 @@ model stores {
   lodging_rate_prices            lodging_rate_prices[]
   lodging_seasons                lodging_seasons[]
   lodging_restrictions           lodging_restrictions[]
+  lodging_cancellation_policies  lodging_cancellation_policies[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2394,6 +2395,9 @@ model lodging_reservations {
   customer_id        Int
   total_amount       Decimal                         @default(0) @db.Decimal(14, 2)
   notes              String?                         @db.Text
+  // H2.4 — penalty computed when cancelled or no-show (charged in H3.5).
+  cancellation_penalty_amount Decimal?               @db.Decimal(14, 2)
+  cancellation_penalty_detail String?                @db.VarChar(200)
   created_by_user_id Int?
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
@@ -2447,6 +2451,9 @@ model lodging_reservation_rooms {
   cancelled_at   DateTime? @db.Timestamp(6)
   // H2.1 — plan the room was sold with; null = room type base price.
   rate_plan_id   Int?
+  // H2.4 — plan cancellation policy and deposit when sold; later edits never change them.
+  cancellation_policy_snapshot Json?
+  deposit_percent              Decimal   @default(0) @db.Decimal(5, 2)
   created_at     DateTime? @default(now()) @db.Timestamp(6)
   updated_at     DateTime? @default(now()) @db.Timestamp(6)
 
@@ -2475,12 +2482,37 @@ model lodging_rate_plans {
   is_default Boolean   @default(false)
   is_active  Boolean   @default(true)
   sort_order Int       @default(0)
+  // H2.4 — cancellation policy and deposit (% of the stay) asked when booking.
+  cancellation_policy_id Int?
+  deposit_percent        Decimal   @default(0) @db.Decimal(5, 2)
   created_at DateTime? @default(now()) @db.Timestamp(6)
   updated_at DateTime? @default(now()) @db.Timestamp(6)
 
   store             stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cancellation_policy lodging_cancellation_policies? @relation(fields: [cancellation_policy_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   prices            lodging_rate_prices[]
   reservation_rooms lodging_reservation_rooms[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+  @@index([cancellation_policy_id])
+}
+
+/// Hospitality Suite (H2.4) — cancellation policy of a rate plan.
+/// `rules`: [{ hours_before, penalty_type: nights|percent, penalty_value }];
+/// `no_show_penalty`: { penalty_type, penalty_value } or null (free).
+model lodging_cancellation_policies {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  name            String    @db.VarChar(120)
+  rules           Json      @default("[]")
+  no_show_penalty Json?
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  store      stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_plans lodging_rate_plans[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])

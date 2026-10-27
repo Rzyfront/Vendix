@@ -96,6 +96,14 @@ export class LodgingReservationsController {
     return this.responseService.success(result, 'Habitación cancelada');
   }
 
+  @ApiOperation({ summary: 'Penalidad de cancelar la reserva ahora (H2.4)' })
+  @Get(':id/cancellation-quote')
+  @Permissions('store:lodging:reservations:read')
+  async cancellationQuote(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.lodgingReservationsService.cancellationQuote(id);
+    return this.responseService.success(result);
+  }
+
   @ApiOperation({ summary: 'Obtener una reserva' })
   @Get(':id')
   @Permissions('store:lodging:reservations:read')

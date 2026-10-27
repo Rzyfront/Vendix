@@ -104,6 +104,24 @@ export class CreateRatePlanDto {
   sort_order?: number;
 
   @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'Política de cancelación (H2.4). Vacío = sin penalidad.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  cancellation_policy_id?: number | null;
+
+  @ApiProperty({ required: false, description: 'Depósito exigido al reservar, % de la estadía (H2.4).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  deposit_percent?: number;
+
+  @ApiProperty({
     type: [RatePriceDto],
     description: 'Precios del plan. Reemplazan todos los anteriores al editar.',
   })

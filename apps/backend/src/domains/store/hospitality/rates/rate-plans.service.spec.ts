@@ -27,7 +27,7 @@ const withBreakfast = (): CreateRatePlanDto => ({
   ],
 });
 
-function build({ defaults = 0, types = [11, 12], seasons = [1] } = {}) {
+function build({ defaults = 0, types = [11, 12], seasons = [1], policies = [8] } = {}) {
   const plans: any[] = [];
   const prices: any[] = [];
   const tables = {
@@ -70,6 +70,9 @@ function build({ defaults = 0, types = [11, 12], seasons = [1] } = {}) {
       count: jest.fn(async ({ where }: any) =>
         where.id.in.filter((id: number) => seasons.includes(id)).length,
       ),
+    },
+    lodging_cancellation_policies: {
+      count: jest.fn(async ({ where }: any) => (policies.includes(where.id) ? 1 : 0)),
     },
   };
   const prisma: any = {
@@ -125,6 +128,33 @@ describe('LodgingRatePlansService (H2.1)', () => {
     const { service, prisma } = build({ types: [12] });
     expect(await codeOf(service.create(withBreakfast()))).toBe('LODGING_UNIT_TYPE_FIND_001');
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('H2.4 — saves the cancellation policy and the deposit percent of the plan', async () => {
+    const { service } = build();
+    const plan = await service.create({
+      ...withBreakfast(),
+      cancellation_policy_id: 8,
+      deposit_percent: 30,
+    });
+    expect(plan).toMatchObject({
+      cancellation_policy_id: 8,
+      deposit_percent: new Prisma.Decimal(30),
+    });
+    const cleared = await service.update(plan.id, { cancellation_policy_id: null });
+    expect(cleared).toMatchObject({ cancellation_policy_id: null, deposit_percent: new Prisma.Decimal(30) });
+  });
+
+  it('H2.4 — rejects a policy of another store and a deposit above 100 %', async () => {
+    const { service, prisma } = build({ policies: [] });
+    expect(await codeOf(service.create({ ...withBreakfast(), cancellation_policy_id: 8 }))).toBe(
+      'LODGING_CANCEL_POLICY_FIND_001',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    const errors = await validate(
+      plainToInstance(CreateRatePlanDto, { ...withBreakfast(), deposit_percent: 101 }),
+    );
+    expect(errors.map((e) => e.property)).toEqual(['deposit_percent']);
   });
 
   it('a duplicate name is a 409', async () => {

@@ -39,7 +39,7 @@ import {
   ReservationQuote,
   ReservationQuoteRequest,
 } from '../../interfaces/reservation.interface';
-import { SellableRatePlan } from '../../../rates/interfaces/rate-plan.interface';
+import { describePolicy, SellableRatePlan } from '../../../rates/interfaces/rate-plan.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
 interface RoomLineForm {
@@ -183,6 +183,11 @@ export function formatShortDate(date: string): string {
                   data-testid="reservation-night-breakdown"
                 >
                   {{ breakdown }}
+                </p>
+              }
+              @if (lineTerms(i); as terms) {
+                <p class="col-span-2 text-xs text-text-secondary" data-testid="reservation-line-terms">
+                  {{ terms }}
                 </p>
               }
             </div>
@@ -521,6 +526,25 @@ export class ReservationFormModalComponent {
       state.quotes.length > 1 ? quote.unit_type.name : null,
       quote.rate_plan?.name ?? 'Precio base',
       nights,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+
+  /**
+   * H2.4 — what the guest agrees to with the line's plan: "Cancelación:
+   * Flexible (gratis hasta 48 h antes, luego 1 noche…) · Depósito 30 %".
+   */
+  lineTerms(index: number): string | null {
+    const state = this.quoteState();
+    if (state.kind !== 'ready') return null;
+    const quote = state.quotes[index];
+    if (!quote?.rate_plan) return null;
+    const policy = quote.cancellation_policy;
+    const deposit = Number(quote.deposit_percent ?? 0);
+    return [
+      `Cancelación: ${policy ? `${policy.name} (${describePolicy(policy)})` : 'gratis'}`,
+      deposit > 0 ? `Depósito ${deposit} %` : null,
     ]
       .filter(Boolean)
       .join(' · ');

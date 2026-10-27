@@ -5,10 +5,13 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateRatePlanDto, RatePriceDto, UpdateRatePlanDto } from './dto';
 import { hasBasePrice, RatePriceRow } from './lodging-rate-resolver';
+import { CancellationPolicySnapshot } from './lodging-cancellation-penalty';
+import { toPolicySnapshot } from './cancellation-policies.service';
 
 const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
 
 const PLAN_INCLUDE = {
+  cancellation_policy: { select: { id: true, name: true, is_active: true } },
   prices: {
     select: { id: true, unit_type_id: true, season_id: true, day_of_week: true, price: true },
     orderBy: [{ unit_type_id: 'asc' }, { season_id: 'asc' }, { day_of_week: 'asc' }],
@@ -17,9 +20,16 @@ const PLAN_INCLUDE = {
 
 type RatesClient = Pick<StorePrismaService, 'lodging_rate_plans' | 'lodging_rate_prices'>;
 
+/** H2.4 — what a room sold with the plan snapshots: policy and deposit. */
+export interface PlanTerms {
+  policy: CancellationPolicySnapshot | null;
+  deposit_percent: Prisma.Decimal;
+}
+
 export interface PlanPricing {
   plan: { id: number; name: string };
   prices: RatePriceRow[];
+  terms: PlanTerms;
 }
 
 /**
@@ -37,7 +47,15 @@ export async function loadPlanPricing(
 ): Promise<PlanPricing> {
   const plan = await client.lodging_rate_plans.findFirst({
     where: { id: rate_plan_id, store_id },
-    select: { id: true, name: true, is_active: true },
+    select: {
+      id: true,
+      name: true,
+      is_active: true,
+      deposit_percent: true,
+      cancellation_policy: {
+        select: { id: true, name: true, rules: true, no_show_penalty: true },
+      },
+    },
   });
   if (!plan) {
     throw new VendixHttpException(ErrorCodes.LODGING_RATE_PLAN_FIND_001);
@@ -79,7 +97,14 @@ export async function loadPlanPricing(
       `El plan ${plan.name} no tiene precio para ${unit_type.name}`,
     );
   }
-  return { plan: { id: plan.id, name: plan.name }, prices };
+  return {
+    plan: { id: plan.id, name: plan.name },
+    prices,
+    terms: {
+      policy: toPolicySnapshot(plan.cancellation_policy),
+      deposit_percent: new Prisma.Decimal(plan.deposit_percent ?? 0),
+    },
+  };
 }
 
 /**
@@ -161,6 +186,7 @@ export class LodgingRatePlansService {
     assertValidPrices(dto.prices);
     await this.assertTypesInStore(dto.prices);
     await this.assertSeasonsInStore(dto.prices);
+    await this.assertPolicyInStore(dto.cancellation_policy_id);
     const is_active = dto.is_active ?? true;
     const id = await this.save(store_id, async (tx, now) => {
       // The first active plan of the store becomes its default.
@@ -178,6 +204,8 @@ export class LodgingRatePlansService {
           is_default,
           is_active,
           sort_order: dto.sort_order ?? 0,
+          cancellation_policy_id: dto.cancellation_policy_id ?? null,
+          deposit_percent: new Prisma.Decimal(dto.deposit_percent ?? 0),
           updated_at: now,
         },
       });
@@ -195,6 +223,7 @@ export class LodgingRatePlansService {
       await this.assertTypesInStore(dto.prices);
       await this.assertSeasonsInStore(dto.prices);
     }
+    await this.assertPolicyInStore(dto.cancellation_policy_id);
     const is_active = dto.is_active ?? current.is_active;
     // An inactive plan cannot stay the default.
     const is_default = is_active && (dto.is_default ?? current.is_default);
@@ -207,6 +236,12 @@ export class LodgingRatePlansService {
           ...(dto.code !== undefined ? { code: dto.code || null } : {}),
           ...(dto.meal_plan !== undefined ? { meal_plan: dto.meal_plan } : {}),
           ...(dto.sort_order !== undefined ? { sort_order: dto.sort_order } : {}),
+          ...(dto.cancellation_policy_id !== undefined
+            ? { cancellation_policy_id: dto.cancellation_policy_id }
+            : {}),
+          ...(dto.deposit_percent !== undefined
+            ? { deposit_percent: new Prisma.Decimal(dto.deposit_percent) }
+            : {}),
           is_active,
           is_default,
           updated_at: now,
@@ -277,6 +312,15 @@ export class LodgingRatePlansService {
     const found = await this.prisma.lodging_unit_types.count({ where: { id: { in: ids } } });
     if (found !== ids.length) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_FIND_001);
+    }
+  }
+
+  /** H2.4 — the assigned policy must belong to the store (scoped lookup). */
+  private async assertPolicyInStore(id: number | null | undefined) {
+    if (id == null) return;
+    const found = await this.prisma.lodging_cancellation_policies.count({ where: { id } });
+    if (found !== 1) {
+      throw new VendixHttpException(ErrorCodes.LODGING_CANCEL_POLICY_FIND_001);
     }
   }
 

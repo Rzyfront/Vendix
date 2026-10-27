@@ -111,6 +111,11 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H2.2 · precio de un plan dentro de una temporada
   'lodging_rate_prices.season_id',
+
+  // --- Hotelería H2.4 · política de cancelación y depósito
+  'lodging_rate_plans.cancellation_policy_id',
+  'lodging_reservation_rooms.cancellation_policy_snapshot',
+  'lodging_reservations.cancellation_penalty_amount',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

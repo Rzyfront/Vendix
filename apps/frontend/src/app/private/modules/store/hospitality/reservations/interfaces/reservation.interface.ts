@@ -1,3 +1,11 @@
+import { CancellationPolicy } from '../../rates/interfaces/rate-plan.interface';
+
+/** H2.4 — policy a room keeps from its plan when sold. */
+export type CancellationPolicySnapshot = Pick<
+  CancellationPolicy,
+  'id' | 'name' | 'rules' | 'no_show_penalty'
+>;
+
 /** Hospitality Suite (H1.1) — lifecycle of a stay reservation. */
 export type LodgingReservationStatus =
   | 'tentative'
@@ -34,6 +42,9 @@ export interface LodgingReservationRoom {
   rate_plan?: { id: number; name: string } | null;
   /** H2.1 — sold nights with their price (detail only). */
   nights?: NightRate[];
+  /** H2.4 — policy and deposit in force when booking (null = no policy). */
+  cancellation_policy_snapshot?: CancellationPolicySnapshot | null;
+  deposit_percent?: string;
 }
 
 /** Price of one night (`night_date` date-only ISO or `YYYY-MM-DD`). */
@@ -79,6 +90,11 @@ export interface LodgingReservation {
   };
   rooms: LodgingReservationRoom[];
   created_at?: string;
+  /** H2.4 — deposit asked for the active rooms; `percent` only when all share it. */
+  deposit?: { percent: string | null; amount: string };
+  /** H2.4 — penalty computed when cancelled or no-show ("1 noche"). */
+  cancellation_penalty_amount?: string | null;
+  cancellation_penalty_detail?: string | null;
   /** Status history, oldest first (detail only). */
   events?: LodgingReservationEvent[];
 }
@@ -142,6 +158,9 @@ export interface ReservationQuote {
   rate_plan: { id: number; name: string } | null;
   night_rates: NightRate[];
   total_amount: string;
+  /** H2.4 — policy and deposit percent of the plan. */
+  cancellation_policy: CancellationPolicySnapshot | null;
+  deposit_percent: string;
   /** H2.3 — restrictions the stay breaks ("No se admiten llegadas el 8-dic"). */
   restrictions: string[];
 }

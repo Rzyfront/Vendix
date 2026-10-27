@@ -31,6 +31,7 @@ import {
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { describePolicy } from '../../../rates/interfaces/rate-plan.interface';
 import {
   RoomChangeModalComponent,
   RoomChangeTarget,
@@ -58,6 +59,8 @@ function todayLocal(): string {
  * Both free the nights for sale. "Mover" (H1.4) changes the room or the
  * dates without dragging (the mobile path of the rack). With several rooms
  * (H1.5) each one can be moved or cancelled alone; the others stay active.
+ * H2.4: shows the cancellation policy booked (snapshot), the pending deposit
+ * and the penalty before and after cancelling (charged in H3.5).
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -109,7 +112,26 @@ function todayLocal(): string {
               <dt class="text-text-secondary">Notas</dt>
               <dd>{{ r.notes }}</dd>
             }
+            <dt class="text-text-secondary">Cancelación</dt>
+            <dd data-testid="reservation-policy">{{ policySummary() }}</dd>
           </dl>
+
+          @if (depositLabel(); as deposit) {
+            <p
+              class="rounded-lg bg-warning/10 px-3 py-2 font-medium text-text-primary"
+              data-testid="reservation-deposit"
+            >
+              {{ deposit }}
+            </p>
+          }
+          @if (penaltyLabel(); as penalty) {
+            <p
+              class="rounded-lg bg-error/10 px-3 py-2 font-medium text-text-primary"
+              data-testid="reservation-penalty"
+            >
+              {{ penalty }}
+            </p>
+          }
 
           <div>
             <p class="mb-2 font-medium text-text-primary">
@@ -187,6 +209,14 @@ function todayLocal(): string {
             </ol>
           </div>
 
+          @if (pending() === 'cancel') {
+            <p
+              class="rounded-lg border border-border px-3 py-2 font-medium"
+              data-testid="cancellation-quote"
+            >
+              {{ quoteLabel() }}
+            </p>
+          }
           @if (pending()) {
             <app-textarea
               [formControl]="reasonControl"
@@ -254,6 +284,8 @@ export class ReservationDetailModalComponent {
   /** Room picked for `cancel_room`. */
   readonly pendingRoomId = signal<number | null>(null);
   readonly moveTarget = signal<RoomChangeTarget | null>(null);
+  /** H2.4 — "Penalidad: $250.000 (1 noche)" of cancelling now. */
+  readonly quoteLabel = signal<string>('Calculando penalidad…');
   readonly reasonControl = new FormControl('', {
     nonNullable: true,
     validators: [Validators.maxLength(500)],
@@ -300,6 +332,32 @@ export class ReservationDetailModalComponent {
   readonly canCancel = computed(() =>
     ['tentative', 'confirmed'].includes(this.reservation()?.status ?? ''),
   );
+  /** H2.4 — policies booked (one per distinct snapshot of the active rooms). */
+  readonly policySummary = computed(() => {
+    const snapshots = new Map<number, string>();
+    for (const room of this.activeRooms()) {
+      const policy = room.cancellation_policy_snapshot;
+      if (policy) snapshots.set(policy.id, `${policy.name}: ${describePolicy(policy)}`);
+    }
+    return snapshots.size ? [...snapshots.values()].join(' / ') : 'Sin política: cancelación gratis';
+  });
+  /** H2.4 — "Depósito pendiente: 30 % ($150.000)"; nothing when none is asked. */
+  readonly depositLabel = computed(() => {
+    const r = this.reservation();
+    const deposit = r?.deposit;
+    if (!r || !deposit || Number(deposit.amount) <= 0) return '';
+    if (!['tentative', 'confirmed'].includes(r.status)) return '';
+    const amount = this.currency.format(Number(deposit.amount), 0);
+    return deposit.percent
+      ? `Depósito pendiente: ${Number(deposit.percent)} % (${amount})`
+      : `Depósito pendiente: ${amount}`;
+  });
+  /** H2.4 — penalty kept when it was cancelled or marked no-show. */
+  readonly penaltyLabel = computed(() => {
+    const r = this.reservation();
+    if (!r?.cancellation_penalty_amount) return '';
+    return this.formatPenalty(r.cancellation_penalty_amount, r.cancellation_penalty_detail ?? null);
+  });
   readonly canNoShow = computed(
     () => this.reservation()?.status === 'confirmed' && this.arrival() <= todayLocal(),
   );
@@ -378,6 +436,32 @@ export class ReservationDetailModalComponent {
     this.reasonControl.setValue('');
     this.pendingRoomId.set(null);
     this.pending.set(action);
+    if (action === 'cancel') this.loadCancellationQuote();
+  }
+
+  /** H2.4 — penalty of cancelling now, shown before confirming. */
+  private loadCancellationQuote(): void {
+    const reservation = this.reservation();
+    if (!reservation) return;
+    this.quoteLabel.set('Calculando penalidad…');
+    this.reservationsService
+      .cancellationQuote(reservation.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (quote) =>
+          this.quoteLabel.set(
+            quote.penalty_amount
+              ? this.formatPenalty(quote.penalty_amount, quote.penalty_detail)
+              : 'Sin penalidad: la cancelación es gratis',
+          ),
+        error: () => this.quoteLabel.set('No se pudo calcular la penalidad'),
+      });
+  }
+
+  /** "Penalidad: $250.000 (1 noche)". */
+  private formatPenalty(amount: string, detail: string | null): string {
+    const money = this.currency.format(Number(amount), 0);
+    return detail ? `Penalidad: ${money} (${detail})` : `Penalidad: ${money}`;
   }
 
   startCancelRoom(roomId: number): void {
