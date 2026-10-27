@@ -17,6 +17,7 @@ import {
   RoomChangeRequest,
 } from '../interfaces/reservation.interface';
 import { SellableRatePlan } from '../../rates/interfaces/rate-plan.interface';
+import { LodgingGuest, LodgingGuestRequest } from '../interfaces/guest.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -134,6 +135,35 @@ export class LodgingReservationsService {
       .get<ApiResponse<Rack>>(`${environment.apiUrl}/store/hospitality/rack`, {
         params: toParams({ from, to }),
       })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.1 — guest register of a reservation. */
+  listGuests(reservationId: number): Observable<LodgingGuest[]> {
+    return this.http
+      .get<ApiResponse<LodgingGuest[]>>(`${this.baseUrl}/${reservationId}/guests`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  createGuest(reservationId: number, body: LodgingGuestRequest): Observable<LodgingGuest> {
+    return this.http
+      .post<ApiResponse<LodgingGuest>>(`${this.baseUrl}/${reservationId}/guests`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  updateGuest(
+    reservationId: number,
+    guestId: number,
+    body: LodgingGuestRequest,
+  ): Observable<LodgingGuest> {
+    return this.http
+      .patch<ApiResponse<LodgingGuest>>(`${this.baseUrl}/${reservationId}/guests/${guestId}`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  removeGuest(reservationId: number, guestId: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.baseUrl}/${reservationId}/guests/${guestId}`)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

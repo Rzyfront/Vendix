@@ -5793,6 +5793,37 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'No hay habitaciones libres suficientes para reservar ese cupo',
   },
+  // Hospitality Suite (H3.1) — guest register
+  LODGING_GUEST_FIND_001: {
+    code: 'LODGING_GUEST_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Huésped no encontrado',
+  },
+  LODGING_GUEST_FIELDS_001: {
+    code: 'LODGING_GUEST_FIELDS_001',
+    httpStatus: 400,
+    devMessage: 'Faltan datos obligatorios del huésped',
+  },
+  LODGING_GUEST_ROOM_001: {
+    code: 'LODGING_GUEST_ROOM_001',
+    httpStatus: 400,
+    devMessage: 'Elige una habitación activa de la reserva',
+  },
+  LODGING_GUEST_STATUS_001: {
+    code: 'LODGING_GUEST_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Los huéspedes solo se registran en reservas activas o en casa',
+  },
+  LODGING_GUEST_DUP_001: {
+    code: 'LODGING_GUEST_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ese documento ya está registrado en la reserva',
+  },
+  LODGING_GUEST_CUSTOMER_001: {
+    code: 'LODGING_GUEST_CUSTOMER_001',
+    httpStatus: 404,
+    devMessage: 'Cliente no encontrado en la tienda',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

@@ -87,6 +87,9 @@ export interface LodgingReservation {
     last_name: string | null;
     email: string | null;
     phone: string | null;
+    /** H3.1 — prefills the holder in the guest register. */
+    document_type?: string | null;
+    document_number?: string | null;
   };
   rooms: LodgingReservationRoom[];
   created_at?: string;

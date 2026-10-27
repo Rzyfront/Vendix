@@ -55,7 +55,16 @@ export function nextReservationNumber(last: string | null | undefined): string {
 
 const RESERVATION_INCLUDE = {
   customer: {
-    select: { id: true, first_name: true, last_name: true, email: true, phone: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      email: true,
+      phone: true,
+      // H3.1 — prefills the holder in the guest register.
+      document_type: true,
+      document_number: true,
+    },
   },
   rooms: {
     include: {

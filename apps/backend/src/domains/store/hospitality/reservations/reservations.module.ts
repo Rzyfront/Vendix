@@ -11,10 +11,17 @@ import { LodgingRackService } from './rack/lodging-rack.service';
 import { LodgingRatesModule } from '../rates/rates.module';
 import { LodgingAllotmentsController } from './allotments/allotments.controller';
 import { LodgingAllotmentsService } from './allotments/allotments.service';
+import { LodgingGuestsController } from './guests/guests.controller';
+import { LodgingGuestsService } from './guests/guests.service';
 
 @Module({
   imports: [ResponseModule, PrismaModule, LodgingRatesModule],
-  controllers: [LodgingReservationsController, LodgingRackController, LodgingAllotmentsController],
+  controllers: [
+    LodgingReservationsController,
+    LodgingRackController,
+    LodgingAllotmentsController,
+    LodgingGuestsController,
+  ],
   providers: [
     LodgingReservationsService,
     LodgingAvailabilityService,
@@ -22,6 +29,7 @@ import { LodgingAllotmentsService } from './allotments/allotments.service';
     LodgingNoShowJob,
     LodgingRackService,
     LodgingAllotmentsService,
+    LodgingGuestsService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

@@ -36,6 +36,7 @@ import {
   RoomChangeModalComponent,
   RoomChangeTarget,
 } from '../room-change-modal/room-change-modal.component';
+import { GuestRegisterComponent } from '../guest-register/guest-register.component';
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | null;
@@ -61,6 +62,7 @@ function todayLocal(): string {
  * (H1.5) each one can be moved or cancelled alone; the others stay active.
  * H2.4: shows the cancellation policy booked (snapshot), the pending deposit
  * and the penalty before and after cancelling (charged in H3.5).
+ * H3.1: guest register (holder and companions by room).
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -75,6 +77,7 @@ function todayLocal(): string {
     SpinnerComponent,
     TextareaComponent,
     RoomChangeModalComponent,
+    GuestRegisterComponent,
   ],
   template: `
     <app-modal
@@ -182,6 +185,8 @@ function todayLocal(): string {
               }
             </ul>
           </div>
+
+          <app-guest-register [reservation]="r" />
 
           <div>
             <p class="mb-2 font-medium text-text-primary">Historial</p>

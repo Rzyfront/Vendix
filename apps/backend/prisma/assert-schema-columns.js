@@ -119,6 +119,9 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H2.5 · cupos para agencias y empresas
   'lodging_allotments.release_days',
+
+  // --- Hotelería H3.1 · registro de huéspedes y acompañantes
+  'lodging_guests.travel_purpose',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

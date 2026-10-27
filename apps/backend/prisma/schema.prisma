@@ -207,6 +207,7 @@ model users {
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
   lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
+  lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
@@ -1076,6 +1077,7 @@ model stores {
   lodging_restrictions           lodging_restrictions[]
   lodging_cancellation_policies  lodging_cancellation_policies[]
   lodging_allotments             lodging_allotments[]
+  lodging_guests                 lodging_guests[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2410,6 +2412,7 @@ model lodging_reservations {
   created_by users?                      @relation("lodging_reservations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   rooms      lodging_reservation_rooms[]
   events     lodging_reservation_events[]
+  guests     lodging_guests[]
 
   @@unique([store_id, reservation_number])
   @@index([store_id, arrival_date])
@@ -2466,10 +2469,50 @@ model lodging_reservation_rooms {
   unit        lodging_units?        @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   nights      lodging_room_nights[]
+  guests      lodging_guests[]
 
   @@index([reservation_id])
   @@index([unit_type_id])
   @@index([rate_plan_id])
+}
+
+// Hospitality Suite (H3.1) — guest register: the holder and each companion
+// of a reservation, by room, with the fields the TRA (Res. 409/2022 art. 7)
+// and, for foreigners, the SIRE ask. Personal data (Ley 1581): no document
+// photo; `data_consent_at` records that the data notice was shown and
+// accepted. `customer_id` links the guest to an existing customer profile.
+model lodging_guests {
+  id                       Int                      @id @default(autoincrement())
+  store_id                 Int
+  reservation_id           Int
+  reservation_room_id      Int?
+  customer_id              Int?
+  is_primary               Boolean                  @default(false)
+  document_type            identification_type_enum
+  document_number          String                   @db.VarChar(50)
+  first_name               String                   @db.VarChar(100)
+  last_name                String                   @db.VarChar(100)
+  nationality_country_code String                   @db.Char(2)
+  birth_date               DateTime?                @db.Date
+  residence_city           String                   @db.VarChar(120)
+  origin_city              String                   @db.VarChar(120)
+  travel_purpose           String                   @db.VarChar(40)
+  // PIP/TP/PT stamp of a foreign visitor (IVA exemption support, H3.9).
+  entry_permit_type        String?                  @db.VarChar(20)
+  is_non_resident          Boolean                  @default(false)
+  data_consent_at          DateTime                 @db.Timestamp(6)
+  created_at               DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                @default(now()) @db.Timestamp(6)
+
+  store       stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  room        lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  customer    users?                     @relation("lodging_guests_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([reservation_id, document_type, document_number])
+  @@index([store_id])
+  @@index([reservation_room_id])
+  @@index([customer_id])
 }
 
 // Hospitality Suite (H2.1) — rate plan of a hotel store ("Solo alojamiento",
