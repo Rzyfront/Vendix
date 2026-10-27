@@ -488,6 +488,11 @@ export const APP_MODULES: {
           label: 'Habitaciones',
           description: 'Tipos de habitaci\u00f3n y habitaciones del hotel',
         },
+        {
+          key: 'hospitality_reservations',
+          label: 'Reservas',
+          description: 'Reservas por noches de las habitaciones del hotel',
+        },
       ],
     },
 

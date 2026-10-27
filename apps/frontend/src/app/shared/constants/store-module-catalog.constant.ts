@@ -125,6 +125,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   // Hotelería
   hospitality: '/admin/hospitality/rooms',
   hospitality_rooms: '/admin/hospitality/rooms',
+  hospitality_reservations: '/admin/hospitality/reservations',
 
   // Facturación electrónica
   invoicing: '/admin/invoicing',

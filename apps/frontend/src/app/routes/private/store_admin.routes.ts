@@ -1004,6 +1004,13 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/hospitality/rooms/routes/rooms.routes'
               ).then((m) => m.hospitalityRoomsRoutes),
           },
+          {
+            path: 'reservations',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/routes/reservations.routes'
+              ).then((m) => m.hospitalityReservationsRoutes),
+          },
         ],
       },
       // Subscription Routes

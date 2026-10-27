@@ -62,6 +62,7 @@ import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-a
 import { PriceTiersModule } from './price-tiers/price-tiers.module';
 import { UnitTypesModule } from './hospitality/unit-types/unit-types.module';
 import { UnitsModule } from './hospitality/units/units.module';
+import { LodgingReservationsModule } from './hospitality/reservations/reservations.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { ProductionOrdersModule } from './production/production.module';
 import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
@@ -139,6 +140,7 @@ import { CrmModule } from './crm/crm.module';
     PriceTiersModule,
     UnitTypesModule,
     UnitsModule,
+    LodgingReservationsModule,
     RecipesModule,
     ProductionOrdersModule,
     KitchenFireModule,

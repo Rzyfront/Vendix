@@ -574,6 +574,14 @@ export class StoreAdminLayoutComponent {
           icon: 'bed-double',
           route: '/admin/hospitality/rooms',
         },
+        {
+          // "Reservas" already maps to the appointments module
+          // (`orders_reservations`), so the key is explicit.
+          label: 'Reservas',
+          icon: 'calendar-check',
+          route: '/admin/hospitality/reservations',
+          panelUiKey: 'hospitality_reservations',
+        },
       ],
     },
     {

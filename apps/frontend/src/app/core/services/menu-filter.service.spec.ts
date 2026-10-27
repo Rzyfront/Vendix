@@ -242,7 +242,7 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
 });
 
 describe('gating de hotelería por industria (H0.1)', () => {
-  const HOSPITALITY_KEYS = ['hospitality', 'hospitality_rooms'];
+  const HOSPITALITY_KEYS = ['hospitality', 'hospitality_rooms', 'hospitality_reservations'];
 
   it('hospitality sola ve Hotelería y no la agenda de citas', () => {
     const hidden = getModulesHiddenByIndustries(['hospitality']);
@@ -282,7 +282,7 @@ describe('gating de hotelería por industria (H0.1)', () => {
     const keys = allStoreAdminKeys();
     for (const key of HOSPITALITY_KEYS) {
       expect(keys).withContext(key).toContain(key);
-      expect(MODULE_ROUTES[key]).withContext(key).toBe('/admin/hospitality/rooms');
+      expect(MODULE_ROUTES[key]).withContext(key).toMatch(/^\/admin\/hospitality\//);
     }
   });
 });

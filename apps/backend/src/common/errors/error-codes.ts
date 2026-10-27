@@ -5629,6 +5629,42 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango de habitaciones no es válido (máximo 100)',
   },
+  // Hospitality Suite (H1.1) — reservations
+  LODGING_RESERVATION_FIND_001: {
+    code: 'LODGING_RESERVATION_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Reserva no encontrada',
+  },
+  LODGING_RESERVATION_DATES_001: {
+    code: 'LODGING_RESERVATION_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La salida debe ser posterior a la llegada',
+  },
+  LODGING_RESERVATION_DATES_002: {
+    code: 'LODGING_RESERVATION_DATES_002',
+    httpStatus: 400,
+    devMessage: 'La estadía no puede superar las 365 noches',
+  },
+  LODGING_RESERVATION_CAPACITY_001: {
+    code: 'LODGING_RESERVATION_CAPACITY_001',
+    httpStatus: 400,
+    devMessage: 'Excede la capacidad del tipo',
+  },
+  LODGING_RESERVATION_AVAILABILITY_001: {
+    code: 'LODGING_RESERVATION_AVAILABILITY_001',
+    httpStatus: 409,
+    devMessage: 'Sin disponibilidad para esas fechas',
+  },
+  LODGING_RESERVATION_TYPE_001: {
+    code: 'LODGING_RESERVATION_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'El tipo de habitación no está activo',
+  },
+  LODGING_RESERVATION_CUSTOMER_001: {
+    code: 'LODGING_RESERVATION_CUSTOMER_001',
+    httpStatus: 404,
+    devMessage: 'Cliente no encontrado en esta tienda',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

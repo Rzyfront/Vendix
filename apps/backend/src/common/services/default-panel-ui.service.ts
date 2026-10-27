@@ -191,6 +191,7 @@ export class DefaultPanelUIService {
         // compuerta.
         hospitality: true,
         hospitality_rooms: true,
+        hospitality_reservations: true,
         reports: true,
         reports_dispatch: true,
         invoicing: true,

@@ -61,6 +61,7 @@ export const ROLE_PANEL_UI_PRESETS: Readonly<Record<string, readonly string[]>> 
     [RECEPTIONIST_ROLE]: [
       'hospitality',
       'hospitality_rooms',
+      'hospitality_reservations',
       'pos',
       'orders',
       'orders_sales',

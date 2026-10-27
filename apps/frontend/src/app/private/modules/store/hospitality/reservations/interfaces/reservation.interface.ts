@@ -1,0 +1,79 @@
+/** Hospitality Suite (H1.1) — lifecycle of a stay reservation. */
+export type LodgingReservationStatus =
+  | 'tentative'
+  | 'confirmed'
+  | 'checked_in'
+  | 'checked_out'
+  | 'cancelled'
+  | 'no_show';
+
+export const RESERVATION_STATUS_LABELS: Record<LodgingReservationStatus, string> = {
+  tentative: 'Tentativa',
+  confirmed: 'Confirmada',
+  checked_in: 'En casa',
+  checked_out: 'Salida',
+  cancelled: 'Cancelada',
+  no_show: 'No show',
+};
+
+export interface LodgingReservationRoom {
+  id: number;
+  unit_type_id: number;
+  unit_id: number | null;
+  adults: number;
+  children: number;
+  total_amount: string;
+  unit_type: { id: number; name: string };
+}
+
+/** Reservation as returned by the store API (dates are date-only ISO). */
+export interface LodgingReservation {
+  id: number;
+  reservation_number: string;
+  status: LodgingReservationStatus;
+  arrival_date: string;
+  departure_date: string;
+  total_amount: string;
+  notes: string | null;
+  customer: {
+    id: number;
+    first_name: string;
+    last_name: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  rooms: LodgingReservationRoom[];
+}
+
+/** Stay to price: dates are `YYYY-MM-DD`, departure exclusive. */
+export interface ReservationQuoteRequest {
+  unit_type_id: number;
+  arrival_date: string;
+  departure_date: string;
+  adults: number;
+  children?: number;
+}
+
+export interface ReservationQuote {
+  unit_type: { id: number; name: string };
+  available: number;
+  nights: number;
+  nightly_rate: string;
+  total_amount: string;
+}
+
+export interface CreateReservationRequest extends ReservationQuoteRequest {
+  customer_id: number;
+  notes?: string;
+}
+
+/** Date-only ISO from the API (`2026-11-10T00:00:00.000Z`) → `2026-11-10`. */
+export function toDateOnly(value: string): string {
+  return value.slice(0, 10);
+}
+
+/** Nights between two `YYYY-MM-DD` dates (departure night not counted). */
+export function countNights(arrival: string, departure: string): number {
+  const ms = Date.parse(`${departure}T00:00:00Z`) - Date.parse(`${arrival}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86_400_000) : 0;
+}

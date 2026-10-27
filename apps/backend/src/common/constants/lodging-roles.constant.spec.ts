@@ -135,6 +135,7 @@ describe('Hotel default roles (H0.5)', () => {
         STORE_ADMIN: {
           hospitality: true,
           hospitality_rooms: true,
+          hospitality_reservations: true,
           pos: true,
           settings: true,
           settings_general: true,
@@ -151,6 +152,7 @@ describe('Hotel default roles (H0.5)', () => {
       expect(out.panel_ui.STORE_ADMIN).toMatchObject({
         hospitality: true,
         hospitality_rooms: true,
+        hospitality_reservations: true,
         pos: true,
         settings: false,
         settings_general: false,
@@ -164,6 +166,7 @@ describe('Hotel default roles (H0.5)', () => {
       const out = applyRolePanelPreset(config, HOUSEKEEPER_ROLE);
       expect(out.panel_ui.STORE_ADMIN.pos).toBe(false);
       expect(out.panel_ui.STORE_ADMIN.hospitality_rooms).toBe(true);
+      expect(out.panel_ui.STORE_ADMIN.hospitality_reservations).toBe(false);
     });
 
     it('other roles keep the default panel untouched', () => {

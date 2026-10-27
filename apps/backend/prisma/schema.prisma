@@ -203,6 +203,8 @@ model users {
   // Bookings
   bookings_as_customer            bookings[]                    @relation("bookings_customer")
   bookings_created                bookings[]                    @relation("bookings_created_by")
+  lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
+  lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
   // back-relations. Three named FKs because a single user can be
   // requester, customer-portal requester, and decider in different
@@ -1062,6 +1064,9 @@ model stores {
   price_tiers                    price_tiers[]
   lodging_unit_types             lodging_unit_types[]
   lodging_units                  lodging_units[]
+  lodging_reservations           lodging_reservations[]
+  lodging_reservation_rooms      lodging_reservation_rooms[]
+  lodging_room_nights            lodging_room_nights[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2319,6 +2324,8 @@ model lodging_unit_types {
   store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product products @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   units   lodging_units[]
+  reservation_rooms lodging_reservation_rooms[]
+  room_nights       lodging_room_nights[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -2349,9 +2356,101 @@ model lodging_units {
 
   store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_rooms lodging_reservation_rooms[]
+  room_nights       lodging_room_nights[]
 
   @@unique([store_id, code])
   @@index([unit_type_id, is_active])
+}
+
+// Hospitality Suite (H1.1) — lifecycle of a lodging reservation.
+enum lodging_reservation_status_enum {
+  tentative
+  confirmed
+  checked_in
+  checked_out
+  cancelled
+  no_show
+}
+
+// Hospitality Suite (H1.1) — stay reservation of a hotel store: header with
+// the holder (customer) and the stay dates. Departure is exclusive: a stay
+// from the 10th to the 13th occupies the nights of the 10th, 11th and 12th.
+model lodging_reservations {
+  id                 Int                             @id @default(autoincrement())
+  store_id           Int
+  reservation_number String                          @db.VarChar(20)
+  status             lodging_reservation_status_enum @default(confirmed)
+  arrival_date       DateTime                        @db.Date
+  departure_date     DateTime                        @db.Date
+  customer_id        Int
+  total_amount       Decimal                         @default(0) @db.Decimal(14, 2)
+  notes              String?                         @db.Text
+  created_by_user_id Int?
+  created_at         DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer   users                       @relation("lodging_reservations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by users?                      @relation("lodging_reservations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rooms      lodging_reservation_rooms[]
+
+  @@unique([store_id, reservation_number])
+  @@index([store_id, arrival_date])
+  @@index([customer_id])
+}
+
+// Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
+// the physical room once assigned, and the occupancy. One per reservation
+// today; several with multi-room reservations (H1.5).
+model lodging_reservation_rooms {
+  id             Int       @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  unit_type_id   Int
+  unit_id        Int?
+  arrival_date   DateTime  @db.Date
+  departure_date DateTime  @db.Date
+  adults         Int       @default(1)
+  children       Int       @default(0)
+  total_amount   Decimal   @default(0) @db.Decimal(14, 2)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations  @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type   lodging_unit_types    @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit        lodging_units?        @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  nights      lodging_room_nights[]
+
+  @@index([reservation_id])
+  @@index([unit_type_id])
+}
+
+// Hospitality Suite (H1.1) — sellable inventory per night. Availability of a
+// room type on a night = its active rooms - its active nights. A partial
+// unique index (migration only, Prisma cannot express it) on
+// (unit_id, night_date) WHERE unit_id IS NOT NULL AND is_active keeps a
+// physical room from being assigned twice the same night.
+model lodging_room_nights {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  reservation_room_id Int
+  unit_type_id        Int
+  unit_id             Int?
+  night_date          DateTime  @db.Date
+  rate_amount         Decimal   @db.Decimal(14, 2)
+  is_active           Boolean   @default(true)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store            stores                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room lodging_reservation_rooms @relation(fields: [reservation_room_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type        lodging_unit_types        @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit             lodging_units?            @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([unit_type_id, night_date, is_active])
+  @@index([reservation_room_id])
 }
 
 model product_price_tier_overrides {

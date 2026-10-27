@@ -129,7 +129,7 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * first so the rule exists before the first contracts endpoint does.
  *
  * Hospitality Suite (H0.1): the `hospitality` parent and its submodules
- * (today `hospitality_rooms`) are visible ⟺ the store's industry includes
+ * (`hospitality_rooms`, `hospitality_reservations`) are visible ⟺ the store's industry includes
  * `hospitality`. Every other industry lists them as hidden. A hotel with a
  * restaurant (`['hospitality','restaurant']`) sees both "Hotelería" and the
  * restaurant suite ("Mesas") because each half of the intersection keeps
@@ -139,6 +139,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   retail: [
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
     'restaurant_ops',
     'memberships',
     'orders_reservations',
@@ -147,6 +148,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   restaurant: [
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
     'memberships',
     'orders_reservations',
     'orders_contracts',
@@ -161,6 +163,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   manufacturing: [
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
     'restaurant_ops',
     'memberships',
     'orders_reservations',
@@ -176,6 +179,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   service: [
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
     'restaurant_ops',
     'memberships',
     'orders_contracts',
@@ -190,6 +194,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   gym: [
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
     'restaurant_ops',
     'orders_reservations',
     'orders_contracts',
@@ -228,6 +233,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
     'hospitality',
     'hospitality_rooms',
+    'hospitality_reservations',
   ],
   // Hotelería (H0.1): un hotel opera habitaciones, reservas de estadía,
   // recepción y folio — no la agenda de citas (`orders_reservations`), ni
