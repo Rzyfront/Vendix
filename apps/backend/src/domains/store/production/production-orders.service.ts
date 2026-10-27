@@ -103,6 +103,31 @@ export class ProductionOrdersService {
     return Math.round(baseQty * factor * multiplier);
   }
 
+  /**
+   * Production always runs whole recipe batches: a recipe that yields 10 can
+   * produce 10, 20, 30… but never 3 or 25. This keeps the consumption factor
+   * (`qty / yield_quantity`) a positive integer, so no ingredient line can be
+   * rounded down to zero by a partial batch. A missing/invalid yield is
+   * treated as 1 (any positive integer quantity is accepted).
+   */
+  private assertWholeBatches(
+    qty: number,
+    yieldQuantity: unknown,
+    yieldUnit?: string | null,
+  ): void {
+    const yieldQty = Number(yieldQuantity);
+    if (!Number.isFinite(yieldQty) || yieldQty <= 0) return;
+    const batches = qty / yieldQty;
+    const wholeBatches = Math.round(batches);
+    if (wholeBatches >= 1 && Math.abs(batches - wholeBatches) < 1e-9) return;
+    const unit = yieldUnit ? ` ${yieldUnit}` : '';
+    throw new VendixHttpException(
+      ErrorCodes.PRODUCTION_QTY_NOT_YIELD_MULTIPLE,
+      `La receta rinde ${yieldQty}${unit} por tanda: la cantidad debe ser un múltiplo exacto (${yieldQty}, ${yieldQty * 2}, ${yieldQty * 3}…)`,
+      { quantity: qty, yield_quantity: yieldQty },
+    );
+  }
+
   // ------------------------------------------------------------------ create
   async create(dto: CreateProductionOrderDto) {
     const context = RequestContextService.getContext();
@@ -128,6 +153,7 @@ export class ProductionOrdersService {
           id: true,
           product_id: true,
           is_active: true,
+          yield_quantity: true,
           yield_unit: true,
         },
       }),
@@ -156,6 +182,12 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_INACTIVE,
       );
     }
+
+    this.assertWholeBatches(
+      Number(dto.planned_qty),
+      recipe.yield_quantity,
+      recipe.yield_unit,
+    );
 
     const created = await this.prisma.production_orders.create({
       data: {
@@ -340,6 +372,7 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_EMPTY,
       );
     }
+    this.assertWholeBatches(producedQty, recipe.yield_quantity, recipe.yield_unit);
 
     // Resolve the location for the produced good. Uses the same default
     // resolver as the rest of the inventory flow so we don't surprise

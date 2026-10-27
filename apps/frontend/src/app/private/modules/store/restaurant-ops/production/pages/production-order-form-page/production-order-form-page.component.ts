@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   DestroyRef,
   inject,
   OnInit,
@@ -83,6 +84,32 @@ export class ProductionOrderFormPageComponent implements OnInit {
   readonly isLoadingRecipes = signal(false);
   /** stock_unit of the selected product — surfaced as the planned_qty unit hint. */
   readonly selectedProductUnit = signal<string | null>(null);
+  /** Recipes loaded for the selected product, to resolve the chosen one's yield. */
+  private readonly loadedRecipes = signal<Recipe[]>([]);
+  readonly selectedRecipe = signal<Recipe | null>(null);
+  /** Whole recipe batches typed by the user (the form's planned_qty control). */
+  readonly batches = signal<number | null>(null);
+  /**
+   * Units that will be produced: batches × recipe yield. Production always
+   * runs whole batches (QUI-965) — a recipe that yields 10 run 3 times gives 30.
+   */
+  readonly plannedUnits = computed<number | null>(() => {
+    const batches = this.batches();
+    const recipe = this.selectedRecipe();
+    if (batches == null || !recipe) return null;
+    return batches * Number(recipe.yield_quantity);
+  });
+  readonly batchesHelperText = computed(() => {
+    const recipe = this.selectedRecipe();
+    if (!recipe) {
+      return 'Cuántas veces vas a preparar la receta. Elige una receta para ver cuánto produce.';
+    }
+    const units = this.plannedUnits();
+    const perBatch = `La receta rinde ${Number(recipe.yield_quantity)} ${recipe.yield_unit} por tanda`;
+    return units == null
+      ? `${perBatch}.`
+      : `${perBatch} · se producirán ${units} ${recipe.yield_unit}.`;
+  });
 
   readonly form: FormGroup<ProductionFormControls> = this.fb.group<ProductionFormControls>({
     product_id: this.fb.nonNullable.control<number | null>(null, [
@@ -96,9 +123,11 @@ export class ProductionOrderFormPageComponent implements OnInit {
       { value: null, disabled: true },
       [Validators.required, Validators.min(1)],
     ),
+    // Whole recipe batches (1, 2, 3…), not units: see plannedUnits.
     planned_qty: this.fb.nonNullable.control<number | null>(null, [
       Validators.required,
-      Validators.min(0.0001),
+      Validators.min(1),
+      Validators.pattern(/^\d+$/),
     ]),
     notes: this.fb.nonNullable.control(''),
   });
@@ -129,6 +158,22 @@ export class ProductionOrderFormPageComponent implements OnInit {
     this.form.controls.product_id.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((productId) => this.onProductChange(productId));
+
+    this.recipeIdControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((recipeId) => {
+        const id = recipeId != null ? Number(recipeId) : null;
+        this.selectedRecipe.set(
+          this.loadedRecipes().find((r) => r.id === id) ?? null,
+        );
+      });
+
+    this.plannedQtyControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        const n = value != null ? Number(value) : NaN;
+        this.batches.set(Number.isInteger(n) && n >= 1 ? n : null);
+      });
   }
 
   private loadPreparedProducts(): void {
@@ -181,6 +226,8 @@ export class ProductionOrderFormPageComponent implements OnInit {
     this.recipeIdControl.setValue(null, { emitEvent: false });
     this.recipeIdControl.disable({ emitEvent: false });
     this.recipeOptions.set([]);
+    this.loadedRecipes.set([]);
+    this.selectedRecipe.set(null);
 
     const id = productId != null ? Number(productId) : null;
     if (id == null || Number.isNaN(id) || id < 1) {
@@ -198,6 +245,7 @@ export class ProductionOrderFormPageComponent implements OnInit {
       .subscribe({
         next: (response) => {
           const rows = response.data ?? [];
+          this.loadedRecipes.set(rows);
           this.recipeOptions.set(
             rows.map((r: Recipe) => ({
               value: r.id,
@@ -239,7 +287,8 @@ export class ProductionOrderFormPageComponent implements OnInit {
     const dto: CreateProductionOrderDto = {
       product_id: Number(raw.product_id),
       recipe_id: Number(raw.recipe_id),
-      planned_qty: Number(raw.planned_qty),
+      // The API stores units; the form captures whole batches.
+      planned_qty: this.plannedUnits() ?? Number(raw.planned_qty),
       notes: raw.notes?.trim() || undefined,
     };
 

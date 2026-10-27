@@ -97,11 +97,11 @@
 
         <app-input
           type="number"
-          [label]="'Cantidad a producir (' + (selectedProductUnit() ?? 'unidades') + ')'"
-          placeholder="Ej. 10"
-          step="0.01"
-          [min]="0"
-          helperText="Cuántas unidades planeas producir, en la unidad de rendimiento de la receta."
+          label="Tandas de la receta"
+          placeholder="Ej. 3"
+          step="1"
+          [min]="1"
+          [helperText]="batchesHelperText()"
           [required]="true"
           [formControl]="plannedQtyControl"
         />
