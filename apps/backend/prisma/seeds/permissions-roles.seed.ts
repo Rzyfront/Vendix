@@ -517,6 +517,14 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      // H3.7 / D11 — dedicated review before the folio invoice; any user the
+      // owner grants it (accountant or another person), not a fixed role.
+      name: 'store:lodging:folio:verify',
+      description: 'Verificar el folio antes de emitir su factura',
+      path: '/api/store/hospitality/folios/verify',
+      method: 'POST',
+    },
+    {
       name: 'store:lodging:housekeeping:read',
       description: 'Ver el estado de limpieza y las tareas de habitaciones',
       path: '/api/store/hospitality/housekeeping',

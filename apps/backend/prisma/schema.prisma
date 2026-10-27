@@ -2591,6 +2591,11 @@ model lodging_folios {
   closed_at      DateTime?                 @db.Timestamp(6)
   // H3.6 — "Cargos bloqueados": POS and tables cannot charge this room.
   charges_blocked Boolean                  @default(false)
+  // H3.7 / D11 — review of the folio before its invoice, at `verified_total`.
+  verified_at         DateTime?            @db.Timestamp(6)
+  verified_by_user_id Int?
+  verified_total      Decimal?             @db.Decimal(14, 2)
+  closed_by_user_id   Int?
   created_at     DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
 

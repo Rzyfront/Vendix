@@ -32,6 +32,10 @@ import { InventoryModule } from '../../inventory/inventory.module';
 import { TablesModule } from '../../tables/tables.module';
 import { LodgingRoomChargesController } from './room-charges/room-charges.controller';
 import { LodgingRoomChargesService } from './room-charges/room-charges.service';
+import { InvoicingModule } from '../../invoicing/invoicing.module';
+import { AccountsReceivableModule } from '../../accounts-receivable/accounts-receivable.module';
+import { LodgingCheckOutController } from './check-out/check-out.controller';
+import { LodgingCheckOutService } from './check-out/check-out.service';
 
 @Module({
   imports: [
@@ -53,6 +57,10 @@ import { LodgingRoomChargesService } from './room-charges/room-charges.service';
     OrderStockCommitModule,
     InventoryModule,
     TablesModule,
+    // H3.7 — the check-out emits the folio invoice and charges the company's
+    // credit to receivables.
+    InvoicingModule,
+    AccountsReceivableModule,
   ],
   controllers: [
     LodgingReservationsController,
@@ -63,6 +71,7 @@ import { LodgingRoomChargesService } from './room-charges/room-charges.service';
     LodgingFolioController,
     LodgingDepositsController,
     LodgingRoomChargesController,
+    LodgingCheckOutController,
   ],
   providers: [
     LodgingReservationsService,
@@ -78,6 +87,7 @@ import { LodgingRoomChargesService } from './room-charges/room-charges.service';
     LodgingNightAuditJob,
     LodgingDepositsService,
     LodgingRoomChargesService,
+    LodgingCheckOutService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

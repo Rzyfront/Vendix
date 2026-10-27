@@ -44,6 +44,7 @@ import {
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
 import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
+import { CheckOutModalComponent } from '../check-out-modal/check-out-modal.component';
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
@@ -78,6 +79,7 @@ function todayLocal(): string {
  * H3.2: "Check-in" picks the room of each unassigned room, asks to confirm a
  * dirty one and opens the folio ("Folio · Abierto · $0").
  * H3.4: the folio panel shows nights, charges, voids, payments and balance.
+ * H3.7: "Check-out" pays the balance, closes the folio and emits the invoice.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -96,6 +98,7 @@ function todayLocal(): string {
     GuestRegisterComponent,
     FolioPanelComponent,
     DepositPanelComponent,
+    CheckOutModalComponent,
   ],
   template: `
     <app-modal
@@ -307,6 +310,12 @@ function todayLocal(): string {
               Marcar no-show
             </app-button>
           }
+          @if (reservation()?.status === 'checked_in') {
+            <app-button variant="primary" (clicked)="checkOutOpen.set(true)" data-testid="reservation-check-out">
+              <app-icon slot="icon" name="log-out" [size]="16" />
+              Check-out
+            </app-button>
+          }
           @if (canCheckIn()) {
             <app-button variant="primary" (clicked)="startCheckIn()">
               <app-icon slot="icon" name="log-in" [size]="16" />
@@ -323,6 +332,12 @@ function todayLocal(): string {
         }
       </div>
     </app-modal>
+
+    <app-check-out-modal
+      [reservation]="checkOutOpen() ? reservation() : null"
+      (closed)="checkOutOpen.set(false)"
+      (checkedOut)="onCheckedOut()"
+    />
 
     <app-room-change-modal
       [target]="moveTarget()"
@@ -357,6 +372,22 @@ export class ReservationDetailModalComponent {
 
   refreshFolio(): void {
     this.folioVersion.update((v) => v + 1);
+  }
+
+  /** H3.7 — the check-out modal is open over the detail. */
+  readonly checkOutOpen = signal(false);
+
+  /** H3.7 — the reservation left: reload it (Salida, folio Cerrado). */
+  onCheckedOut(): void {
+    const id = this.reservationId();
+    this.refreshFolio();
+    this.changed.emit();
+    if (id === null) return;
+    // Silent reload: `load` empties the detail and would close the result.
+    this.reservationsService
+      .get(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (reservation) => this.reservation.set(reservation) });
   }
 
   refreshDeposit(): void {

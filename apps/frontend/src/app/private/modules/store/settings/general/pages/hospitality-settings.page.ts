@@ -58,7 +58,8 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
               night_audit_time: '02:00',
               rnt_number: '',
               default_overbooking_allowance: 0,
-              room_charge_origin: 'Restaurante'
+              room_charge_origin: 'Restaurante',
+              folio_invoice_verification: true
             }
           "
           (settingsChange)="store.onSectionChange('hospitality', $event)" />

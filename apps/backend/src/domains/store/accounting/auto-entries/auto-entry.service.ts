@@ -1255,6 +1255,7 @@ export class AutoEntryService {
       'layaway.payment': 'auto_payment',
       'layaway.completed': 'auto_payment',
       'lodging.folio_payment': 'auto_payment',
+      'lodging.folio_settlement': 'auto_invoice',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
@@ -6247,6 +6248,82 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       description: `Pago de folio hotelero ${data.order_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.folio_settlement (H3.7): DR Anticipos de Clientes (2805) → CR
+   * Clientes (1305). The folio invoice books the whole stay as DR 1305 / CR
+   * revenue + VAT (`onInvoiceValidated`); the payments and the applied
+   * deposit of the folio already sit in 2805, so this entry crosses them and
+   * 1305 keeps only what the guest or the company still owes (the credit
+   * check-out). Amount = settled payments of the folio order, capped at the
+   * invoice total. Returns null when the invoice is not a folio's or nothing
+   * was paid. `source_id` = the `invoices.id` (one cross per invoice).
+   */
+  async onLodgingFolioInvoiced(data: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    total: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    // Runs from `invoice.accepted`, which also fires from jobs (DIAN polling,
+    // retries) without a store request context: explicit store filters.
+    const db = this.prisma.withoutScope();
+    const invoice = await db.invoices.findFirst({
+      where: {
+        id: data.invoice_id,
+        ...(data.store_id ? { store_id: data.store_id } : {}),
+        invoice_type: 'sales_invoice',
+      },
+      select: { order_id: true, store_id: true, invoice_number: true },
+    });
+    if (!invoice?.order_id) return null;
+    const folio = await db.lodging_folios.findFirst({
+      where: { order_id: invoice.order_id, store_id: invoice.store_id },
+      select: { id: true },
+    });
+    if (!folio) return null;
+    const paid = await db.payments.aggregate({
+      where: { order_id: invoice.order_id, state: { in: ['succeeded', 'captured'] } },
+      _sum: { amount: true },
+    });
+    const amount = Math.min(Number(paid._sum.amount ?? 0), Number(data.total));
+    if (!(amount > 0)) return null;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_settlement.customer_advance',
+        `Anticipo cruzado factura ${invoice.invoice_number}`,
+        amount,
+        0,
+        invoice.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.folio_settlement.receivable',
+        `Cobro folio factura ${invoice.invoice_number}`,
+        0,
+        amount,
+        invoice.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.folio_settlement',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: invoice.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Cruce de anticipos del folio hotelero - factura ${invoice.invoice_number}`,
       lines,
       user_id: data.user_id,
     });

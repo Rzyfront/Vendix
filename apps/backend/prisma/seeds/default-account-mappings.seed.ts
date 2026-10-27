@@ -162,6 +162,8 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'lodging.deposit.customer_advance': '2805',
   'lodging.deposit_retained.customer_advance': '2805',
   'lodging.deposit_retained.penalty_income': '4295',
+  'lodging.folio_settlement.customer_advance': '2805',
+  'lodging.folio_settlement.receivable': '1305',
   'layaway.payment.cash': '1105',
   'layaway.payment.bank': '1110',
   'layaway.payment.customer_advance': '2805',

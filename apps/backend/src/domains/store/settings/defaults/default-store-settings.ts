@@ -493,6 +493,9 @@ export function getDefaultStoreSettings(): StoreSettings {
       default_overbooking_allowance: 0,
       // H3.6 - folio origin of a POS or table room charge.
       room_charge_origin: 'Restaurante',
+      // H3.7 / D11 - the folio invoice waits for a review by a user holding
+      // store:lodging:folio:verify. Off: the desk invoices without it.
+      folio_invoice_verification: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

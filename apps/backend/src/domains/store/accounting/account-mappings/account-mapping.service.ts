@@ -487,6 +487,16 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '4295',
     description: 'Ingresos Diversos (penalidad de reserva)',
   },
+  // Hotelería (H3.7) — the folio invoice crosses the advance (payments and
+  // applied deposit) against the receivable it booked.
+  'lodging.folio_settlement.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (cruce con la factura del folio)',
+  },
+  'lodging.folio_settlement.receivable': {
+    code: '1305',
+    description: 'Clientes (factura del folio hotelero)',
+  },
   // Layaway (Plan Separé)
   'layaway.payment.cash': {
     code: '1105',

@@ -120,6 +120,8 @@ const MAPPING_KEYS_FALLBACK: MappingKeyDef[] = [
   { key: 'lodging.deposit.customer_advance', label: 'Depósito de reserva hotelera · Anticipos de Clientes (depósito de reserva)' },
   { key: 'lodging.deposit_retained.customer_advance', label: 'Penalidad retenida del depósito · Anticipos de Clientes (depósito retenido)' },
   { key: 'lodging.deposit_retained.penalty_income', label: 'Penalidad retenida del depósito · Ingresos Diversos (penalidad de reserva)' },
+  { key: 'lodging.folio_settlement.customer_advance', label: 'Factura del folio hotelero · Anticipos de Clientes (cruce con la factura del folio)' },
+  { key: 'lodging.folio_settlement.receivable', label: 'Factura del folio hotelero · Clientes (factura del folio hotelero)' },
   { key: 'layaway.payment.cash', label: 'Pago plan separe · Caja (pago cuota separé)' },
   { key: 'layaway.payment.bank', label: 'Pago plan separe · Banco (pago cuota separé)' },
   { key: 'layaway.payment.customer_advance', label: 'Pago plan separe · Anticipos de Clientes (separé)' },

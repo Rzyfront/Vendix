@@ -198,6 +198,11 @@ export class AccountingEventsListener {
       this.logger.log(
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
       );
+      // H3.7 — the invoice of a guest folio crosses the advance its payments
+      // left in 2805 against the receivable it just booked.
+      if (!event.financial_account_id) {
+        await this.handleLodgingFolioInvoiced(event);
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
@@ -1235,6 +1240,37 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for lodging.folio_payment - payment ${event.payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /** H3.7 — no-op unless the invoice belongs to a guest folio order. */
+  private async handleLodgingFolioInvoiced(event: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    total_amount: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      const entry = await this.auto_entry_service.onLodgingFolioInvoiced({
+        invoice_id: event.invoice_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        total: Number(event.total_amount),
+        customer: event.customer ? { ...event.customer, type: 'customer' } : undefined,
+        user_id: event.user_id,
+      });
+      if (entry) {
+        this.logger.log(`Auto-entry created for lodging.folio_settlement - invoice ${event.invoice_id}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_settlement - invoice ${event.invoice_id}: ${error.message}`,
         error.stack,
       );
     }

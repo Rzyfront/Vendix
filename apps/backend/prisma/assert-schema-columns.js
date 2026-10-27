@@ -135,6 +135,10 @@ const REQUIRED_COLUMNS = [
   // --- Hotelería H3.6 · cargo a habitación desde POS y mesa
   'lodging_folios.charges_blocked',
   'lodging_room_charges.item_ids',
+
+  // --- Hotelería H3.7 · check-out con cobro y factura
+  'lodging_folios.verified_total',
+  'lodging_folios.closed_by_user_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

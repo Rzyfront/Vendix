@@ -30,6 +30,8 @@ import {
   InHouseRoom,
   RoomChargeRequest,
   RoomChargeResult,
+  CheckOutRequest,
+  CheckOutResult,
 } from '../interfaces/folio.interface';
 
 interface ApiResponse<T> {
@@ -304,6 +306,27 @@ export class LodgingReservationsService {
         map((res) => ({ folio: res.data, message: res.message ?? 'Anticipo aplicado' })),
         catchError(this.handleError),
       );
+  }
+
+  /** H3.7 / D11 — "Verificar folio" (permission store:lodging:folio:verify). */
+  verifyFolio(reservationId: number): Observable<FolioDetail> {
+    return this.http
+      .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/verify`, {})
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.7 — check-out: pays the balance, closes the folio and emits the invoice. */
+  checkOut(reservationId: number, body: CheckOutRequest): Observable<CheckOutResult> {
+    return this.http
+      .post<ApiResponse<CheckOutResult>>(`${this.baseUrl}/${reservationId}/check-out`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.7 — signed URL of the folio invoice PDF. */
+  getFolioInvoicePdf(reservationId: number): Observable<string> {
+    return this.http
+      .get<ApiResponse<{ url: string }>>(`${this.baseUrl}/${reservationId}/folio/invoice/pdf`)
+      .pipe(map((res) => res.data.url), catchError(this.handleError));
   }
 
   /** Rejects with the user-facing message so screens can show it as-is. */

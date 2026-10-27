@@ -45,6 +45,7 @@ function newRequestId(): string {
  * night ("Noche 10-nov · Doble · $250.000 + IVA"), manual charges, voided
  * lines struck through with their reason, payments and the balance. Actions:
  * "Cargar noche", "Agregar cargo", "Registrar pago" and "Anular" per line.
+ * H3.7: "Verificar folio" (D11) and, once closed, "Descargar factura".
  */
 @Component({
   selector: 'app-folio-panel',
@@ -114,13 +115,42 @@ function newRequestId(): string {
               <app-icon slot="icon" [name]="folio()?.charges_blocked ? 'unlock' : 'lock'" [size]="14" />
               {{ folio()?.charges_blocked ? 'Permitir cargos' : 'Bloquear cargos' }}
             </app-button>
+            @if (!folio()?.verified_current) {
+              <app-button
+                variant="ghost"
+                size="sm"
+                [loading]="busy()"
+                (clicked)="verify()"
+                data-testid="folio-verify"
+              >
+                <app-icon slot="icon" name="shield-check" [size]="14" />
+                Verificar folio
+              </app-button>
+            }
           </div>
+        }
+        @if (folio()?.status === 'closed') {
+          <app-button
+            variant="outline"
+            size="sm"
+            [loading]="busy()"
+            (clicked)="downloadInvoice()"
+            data-testid="folio-invoice-pdf"
+          >
+            <app-icon slot="icon" name="download" [size]="14" />
+            Descargar factura
+          </app-button>
         }
       </div>
 
       @if (loading()) {
         <p class="px-3 py-2 text-xs text-text-secondary">Cargando folio…</p>
       } @else if (folio(); as f) {
+        @if (f.verified_current) {
+          <p class="border-b border-border px-3 py-2 text-xs font-medium text-success" data-testid="folio-verified">
+            Folio verificado para facturar
+          </p>
+        }
         @if (f.charges_blocked) {
           <p class="border-b border-border px-3 py-2 text-xs font-medium text-error" data-testid="folio-charges-blocked-note">
             Cargos bloqueados: el POS y las mesas no pueden cargar a esta habitación.
@@ -412,7 +442,36 @@ export class FolioPanelComponent {
       });
   }
 
-  /** H3.5 — moves the held deposit onto the folio ("Anticipo aplicado"). */
+  /** H3.7 / D11 — review before the invoice (needs "Verificar el folio"). */
+  verify(): void {
+    this.busy.set(true);
+    this.reservationsService
+      .verifyFolio(this.reservationId())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (folio) => {
+          this.applied(folio);
+          this.toastService.success('Folio verificado');
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
+  /** H3.7 — PDF of the folio invoice once checked out. */
+  downloadInvoice(): void {
+    this.busy.set(true);
+    this.reservationsService
+      .getFolioInvoicePdf(this.reservationId())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (url) => {
+          this.busy.set(false);
+          globalThis.open?.(url, '_blank', 'noopener');
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
   /** H3.6 — "Cargos bloqueados" on or off for the POS and the tables. */
   toggleChargesBlocked(): void {
     const blocked = !this.folio()?.charges_blocked;
@@ -429,6 +488,7 @@ export class FolioPanelComponent {
       });
   }
 
+  /** H3.5 — moves the held deposit onto the folio ("Anticipo aplicado"). */
   applyDeposit(): void {
     this.busy.set(true);
     this.reservationsService

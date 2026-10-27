@@ -234,8 +234,8 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       action: (row: BoardRow) => this.quickCheckIn(row),
     },
     {
-      // The folio closes with its charge and invoice in H3.7; today it opens
-      // the reservation detail with the folio and its balance.
+      // H3.7 — opens the reservation detail, whose "Check-out" pays the
+      // balance, closes the folio and emits the invoice.
       label: 'Check-out',
       icon: 'log-out',
       variant: 'secondary',

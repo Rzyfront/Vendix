@@ -5870,6 +5870,27 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El pago no es válido para el folio',
   },
+  // H3.7 — check-out with payment and electronic invoice.
+  LODGING_CHECKOUT_001: {
+    code: 'LODGING_CHECKOUT_001',
+    httpStatus: 409,
+    devMessage: 'Solo se hace check-out de una reserva en casa',
+  },
+  LODGING_CHECKOUT_BALANCE_001: {
+    code: 'LODGING_CHECKOUT_BALANCE_001',
+    httpStatus: 400,
+    devMessage: 'El folio tiene saldo pendiente',
+  },
+  LODGING_CHECKOUT_VERIFY_001: {
+    code: 'LODGING_CHECKOUT_VERIFY_001',
+    httpStatus: 403,
+    devMessage: 'El folio debe verificarse antes de facturar',
+  },
+  LODGING_CHECKOUT_BILL_TO_001: {
+    code: 'LODGING_CHECKOUT_BILL_TO_001',
+    httpStatus: 400,
+    devMessage: 'El cliente a facturar no es válido',
+  },
   LODGING_ROOM_CHARGE_001: {
     code: 'LODGING_ROOM_CHARGE_001',
     httpStatus: 409,

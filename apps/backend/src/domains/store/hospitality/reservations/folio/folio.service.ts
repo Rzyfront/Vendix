@@ -34,7 +34,7 @@ export interface FolioUser {
 }
 
 /** Same rule as the POS (`PaymentsService.hasActivePermission`). */
-function hasActivePermission(user: FolioUser | undefined, name: string): boolean {
+export function hasActivePermission(user: FolioUser | undefined, name: string): boolean {
   const roles = user?.roles ?? [];
   if (roles.includes('super_admin') || roles.includes('SUPER_ADMIN')) return true;
   return (user?.permissions ?? []).some((p) => p?.name === name && p?.status === 'active');
@@ -45,12 +45,15 @@ const toCents = (value: Prisma.Decimal | number | string | null | undefined) =>
 
 type Tx = Prisma.TransactionClient;
 
-interface FolioRow {
+export interface FolioRow {
   id: number;
   status: string;
   charges_blocked?: boolean;
   reservation_id: number;
   order_id: number;
+  verified_at?: Date | null;
+  verified_total?: Prisma.Decimal | null;
+  closed_at?: Date | null;
 }
 
 /**
@@ -217,6 +220,11 @@ export class LodgingFolioService {
       balance: Math.max(0, Math.round((total - paid) * 100) / 100),
       pending_nights,
       deposit_available: Number(deposit.balance.toFixed(2)),
+      // H3.7 / D11 — reviewed at this total; a later change asks again.
+      verified_at: folio.verified_at ?? null,
+      verified_current:
+        !!folio.verified_at && toCents(folio.verified_total) === toCents(order.grand_total),
+      closed_at: folio.closed_at ?? null,
     };
   }
 
@@ -735,10 +743,19 @@ export class LodgingFolioService {
     return store_id;
   }
 
-  private async findFolio(reservation_id: number): Promise<FolioRow> {
+  async findFolio(reservation_id: number): Promise<FolioRow> {
     const folio = await this.prisma.lodging_folios.findFirst({
       where: { reservation_id },
-      select: { id: true, status: true, charges_blocked: true, reservation_id: true, order_id: true },
+      select: {
+        id: true,
+        status: true,
+        charges_blocked: true,
+        reservation_id: true,
+        order_id: true,
+        verified_at: true,
+        verified_total: true,
+        closed_at: true,
+      },
     });
     if (!folio) throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_FIND_001);
     return folio;

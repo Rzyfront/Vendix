@@ -1269,6 +1269,16 @@ export class HospitalitySettingsDto {
   @IsString()
   @MaxLength(60)
   room_charge_origin?: string;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H3.7 / D11 — the folio invoice requires a prior review by a user with store:lodging:folio:verify.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  folio_invoice_verification?: boolean;
 }
 
 export class RestaurantSettingsDto {

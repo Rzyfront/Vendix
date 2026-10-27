@@ -49,6 +49,35 @@ export interface FolioDetail {
   pending_nights: number;
   /** H3.5 — deposit balance that can still be applied ("Aplicar anticipo"). */
   deposit_available?: number;
+  /** H3.7 / D11 — last review before the invoice, and whether it still matches the total. */
+  verified_at?: string | null;
+  verified_current?: boolean;
+  closed_at?: string | null;
+}
+
+/** H3.7 — check-out: pay the balance or charge it to the company's credit. */
+export interface CheckOutRequest {
+  store_payment_method_id?: number;
+  charge_to_credit?: boolean;
+  /** "Facturar a empresa (NIT)". */
+  bill_to_customer_id?: number;
+  /** The user (with "Verificar el folio") reviews it in this same step. */
+  verify?: boolean;
+  request_id: string;
+}
+
+/** Electronic invoice of the folio, as the POS fiscal emission reports it. */
+export interface FolioInvoiceStatus {
+  state: 'not_applicable' | 'pending' | 'issued' | 'contingency' | 'failed';
+  message: string;
+  invoice_id: number | null;
+  invoice_number: string | null;
+  invoice_status: string | null;
+}
+
+export interface CheckOutResult {
+  folio: FolioDetail;
+  invoice: FolioInvoiceStatus | null;
 }
 
 export interface FolioChargeRequest {

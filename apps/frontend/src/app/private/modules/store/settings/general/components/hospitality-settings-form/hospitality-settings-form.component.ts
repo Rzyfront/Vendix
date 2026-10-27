@@ -1,20 +1,21 @@
-import { Component, effect, input, output } from '@angular/core';
+import { Component, effect, input, output, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import { HospitalitySettings } from '../../../../../../../core/models/store-settings.interface';
 
 /** Same `HH:mm` rule the backend DTO enforces. */
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
- * Hotelería (H0.5/H1.2/H1.6/H3.4): check-in/check-out, no-show and night audit hours, the RNT
+ * Hotelería (H0.5/H1.2/H1.6/H3.4/H3.7): check-in/check-out, no-show and night audit hours, the RNT
  * number and the overbooking new room types start with.
  */
 @Component({
   selector: 'app-hospitality-settings-form',
   standalone: true,
-  imports: [ReactiveFormsModule, InputComponent],
+  imports: [ReactiveFormsModule, InputComponent, ToggleComponent],
   template: `
     <form [formGroup]="form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <app-input
@@ -75,6 +76,16 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
+      <div class="md:col-span-2">
+        <app-toggle
+          [checked]="verification()"
+          label="Verificar el folio antes de facturar"
+          (changed)="onVerificationChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          La factura del check-out espera la revisión de un usuario con el permiso «Verificar el folio».
+        </p>
+      </div>
     </form>
   `,
 })
@@ -113,6 +124,9 @@ export class HospitalitySettingsForm {
     validators: [Validators.maxLength(60)],
   });
 
+  /** H3.7 / D11 — signal, so the toggle re-renders zoneless. */
+  readonly verification = signal(true);
+
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
     check_out_time: this.checkOutControl,
@@ -126,8 +140,16 @@ export class HospitalitySettingsForm {
   constructor() {
     effect(() => {
       const current = this.settings();
-      if (current) this.form.patchValue(current, { emitEvent: false });
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+        this.verification.set(current.folio_invoice_verification ?? true);
+      }
     });
+  }
+
+  onVerificationChange(checked: boolean): void {
+    this.verification.set(checked);
+    this.onFieldChange();
   }
 
   onFieldChange(): void {
@@ -137,6 +159,7 @@ export class HospitalitySettingsForm {
       ...value,
       rnt_number: value.rnt_number.trim(),
       room_charge_origin: value.room_charge_origin.trim() || 'Restaurante',
+      folio_invoice_verification: this.verification(),
       default_overbooking_allowance: Math.trunc(Number(value.default_overbooking_allowance)),
     });
   }

@@ -404,6 +404,8 @@ export interface HospitalitySettings {
   default_overbooking_allowance?: number;
   /** H3.6 — folio origin of a POS/table room charge. Default "Restaurante". */
   room_charge_origin?: string;
+  /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */
+  folio_invoice_verification?: boolean;
 }
 
 export interface RestaurantSettings {
