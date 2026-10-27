@@ -398,6 +398,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinCustomerEmail = signal('');
   readonly checkinProductId = signal<number | null>(null);
   readonly checkinProviderId = signal<number | null>(null);
+  /** Se prende al intentar iniciar sin técnico (borde rojo + mensaje bajo el select). */
+  readonly checkinProviderError = signal(false);
   readonly checkinDurationMinutes = signal<number>(45);
   readonly checkinNotes = signal('');
 
@@ -577,16 +579,15 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         if (Number(this.checkinStationId()) !== stationId) return;
         this.checkinProviderAvailability.set(list);
         const chosen = Number(this.checkinProviderId() || 0);
-        if (chosen && !list.some((p) => p.provider_id === chosen && p.status === 'available')) this.checkinProviderId.set(0);
+        if (chosen && !list.some((p) => p.provider_id === chosen && p.status === 'available')) this.checkinProviderId.set(null);
       },
       error: () => this.checkinProviderAvailability.set([]),
     });
   }
 
   readonly providerSelectorOptions = computed<SelectorOption[]>(() => {
-    const opts: SelectorOption[] = [
-      { value: 0, label: 'Rotativo / Sin asignar' },
-    ];
+    // Sin opción "Rotativo": el técnico es obligatorio en el check-in.
+    const opts: SelectorOption[] = [];
     // Solo el personal de ESTA estación con horario que cubre este momento y libre
     // (sin otra atención ni reserva que se cruce); el backend lo vuelve a validar.
     for (const p of this.checkinProviderAvailability().filter((entry) => entry.status === 'available')) {
@@ -1436,7 +1437,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinCustomerEmail.set('');
     this.checkinProductId.set(this.defaultCheckinServiceId(target));
     this.loadCheckinIntake();
-    this.checkinProviderId.set(0);
+    this.checkinProviderId.set(null);
+    this.checkinProviderError.set(false);
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
     this.checkinNotes.set('');
 
@@ -1458,7 +1460,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   onCheckinStationChange(stationId: number | string): void {
     this.checkinStationId.set(Number(stationId));
-    this.checkinProviderId.set(0); // el técnico elegido puede no estar asignado a la nueva estación
+    this.checkinProviderId.set(null); // el técnico elegido puede no estar asignado a la nueva estación
+    this.checkinProviderError.set(false);
     this.loadCheckinProviderAvailability();
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
@@ -1805,6 +1808,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.toastService.error('Selecciona el servicio de la atención.');
       return;
     }
+    if (!this.checkinProviderId()) {
+      this.checkinProviderError.set(true);
+      this.toastService.error('Seleccione una persona de servicio.');
+      return;
+    }
+    this.checkinProviderError.set(false);
     if (this.checkinIntakeLoading()) {
       this.toastService.error('Espera a que cargue el formulario de recepción del servicio.');
       return;
