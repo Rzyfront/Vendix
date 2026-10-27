@@ -370,6 +370,15 @@ describe('LodgingReservationsService', () => {
       quoteSettlement: jest.fn(async () => ({})),
       cancelPendingLinksInTx: jest.fn(async (): Promise<number[]> => []),
       deactivateLinks: jest.fn(async () => undefined),
+      // H6.6 — no online payment unless a test says so.
+      settleOnlinePaymentsInTx: jest.fn(
+        async (): Promise<{ retained: unknown[]; retained_total: number; owed: number }> => ({
+          retained: [],
+          retained_total: 0,
+          owed: 0,
+        }),
+      ),
+      announceOnlineRetained: jest.fn(),
     };
     const service = new LodgingReservationsService(
       fake.prisma as any,
@@ -1141,6 +1150,32 @@ describe('LodgingReservationsService', () => {
       );
       expect(deposits.announceRetained).toHaveBeenCalledWith(retained);
       expect(deposits.announceRetained.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.$transaction.mock.invocationCallOrder.at(-1)!,
+      );
+    });
+
+    it('H6.6 — el pago en línea cubre lo que el depósito no cubrió y el resto queda "por devolver" en el historial', async () => {
+      at('2026-11-01T12:00:00Z');
+      const { service, deposits, prisma, events } = build(2);
+      await service.create(flexible);
+      deposits.retainInTx.mockResolvedValueOnce({ store_id: 5, deposit_id: 41, reservation_number: 'H-0001', amount: 50000 });
+      const online = [{ store_id: 5, reservation_payment_id: 7, reservation_number: 'H-0001', amount: 200000 }];
+      deposits.settleOnlinePaymentsInTx.mockResolvedValueOnce({ retained: online, retained_total: 200000, owed: 100000 });
+
+      at('2026-12-06T20:00:00Z');
+      await service.cancel(1, 'Cambio de planes');
+
+      expect(deposits.settleOnlinePaymentsInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reservation_id: 1, penalty: new Prisma.Decimal(200000), user_id: 9 }),
+      );
+      expect(events.at(-1)).toMatchObject({
+        from_status: 'cancelled',
+        to_status: 'cancelled',
+        reason: 'Pago en línea: $200.000 retenido como penalidad · $100.000 por devolver al huésped',
+      });
+      expect(deposits.announceOnlineRetained).toHaveBeenCalledWith(online);
+      expect(deposits.announceOnlineRetained.mock.invocationCallOrder[0]).toBeGreaterThan(
         prisma.$transaction.mock.invocationCallOrder.at(-1)!,
       );
     });

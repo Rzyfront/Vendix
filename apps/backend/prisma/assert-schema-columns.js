@@ -141,6 +141,8 @@ const REQUIRED_COLUMNS = [
   'lodging_folios.closed_by_user_id',
   // H7.1 — night posting skips the nights of a closed business day.
   'lodging_night_audits.status',
+  // H6.6 — penalty kept from an online payment of a cancelled reservation.
+  'lodging_reservation_payments.retained_amount',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

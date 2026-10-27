@@ -351,4 +351,67 @@ describe('LodgingDepositsService (H3.5)', () => {
       expect(walletBalance.debitInTransaction).not.toHaveBeenCalled();
     });
   });
+
+  describe('online payment of a cancelled reservation (H6.6)', () => {
+    const onlineTx = (rows: Record<string, any>[]) => ({
+      lodging_reservation_payments: {
+        findMany: jest.fn(async () => rows.map((row) => ({ ...row }))),
+        update: jest.fn(async ({ where, data }: any) => {
+          const row = rows.find((r) => r.id === where.id)!;
+          row.retained_amount = new Prisma.Decimal(row.retained_amount).add(data.retained_amount.increment);
+          return row;
+        }),
+      },
+    });
+    const input = {
+      store_id: 3,
+      reservation_id: 1,
+      reservation_number: 'H-0001',
+      customer_id: 9,
+      user_id: 42,
+    };
+
+    it('keeps the penalty from the web payment (no wallet) and leaves the rest "por devolver"', async () => {
+      const { service, walletBalance, eventEmitter } = build();
+      const rows = [{ id: 7, amount: new Prisma.Decimal(300000), applied_amount: 0, retained_amount: 0 }];
+      const tx = onlineTx(rows);
+
+      const settlement = await service.settleOnlinePaymentsInTx(tx as any, {
+        ...input,
+        penalty: new Prisma.Decimal(100000),
+      });
+
+      expect(settlement).toEqual({
+        retained: [
+          { store_id: 3, reservation_payment_id: 7, reservation_number: 'H-0001', amount: 100000, customer_id: 9, user_id: 42 },
+        ],
+        retained_total: 100000,
+        owed: 200000,
+      });
+      expect(Number(rows[0].retained_amount)).toBe(100000);
+      expect(walletBalance.debitInTransaction).not.toHaveBeenCalled();
+      // Booked only after the status change commits.
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      service.announceOnlineRetained(settlement.retained);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'lodging.reservation_payment.retained',
+        expect.objectContaining({ reservation_payment_id: 7, amount: 100000 }),
+      );
+    });
+
+    it('without a penalty nothing is kept: the whole open payment is owed back', async () => {
+      const { service } = build();
+      const tx = onlineTx([
+        { id: 7, amount: new Prisma.Decimal(300000), applied_amount: 50000, retained_amount: 0 },
+      ]);
+
+      const settlement = await service.settleOnlinePaymentsInTx(tx as any, {
+        ...input,
+        penalty: new Prisma.Decimal(0),
+      });
+
+      expect(settlement).toEqual({ retained: [], retained_total: 0, owed: 250000 });
+      expect(tx.lodging_reservation_payments.update).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -1174,6 +1174,8 @@ export interface HospitalitySettings {
   folio_invoice_verification?: boolean;
   /** H6.6 — minutes a web booking holds its rooms waiting for the payment. Default 15. */
   booking_hold_minutes?: number;
+  /** H6.2 — minutes between two automatic syncs of an imported iCal calendar. Default 15. */
+  ical_import_interval_minutes?: number;
 }
 
 // ============================================================================

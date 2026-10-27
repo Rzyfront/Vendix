@@ -118,7 +118,7 @@ function newRequestId(): string {
             <app-button
               variant="outline"
               size="sm"
-              [disabled]="!folio()?.balance"
+              [disabled]="!due()"
               (clicked)="startPayment()"
               data-testid="folio-add-payment"
             >
@@ -282,8 +282,12 @@ function newRequestId(): string {
             <dt class="text-text-secondary">Anticipo disponible</dt>
             <dd class="text-right" data-testid="folio-deposit-available">{{ money(f.deposit_available ?? 0) }}</dd>
           }
+          @if ((f.online_payment_available ?? 0) > 0) {
+            <dt class="text-text-secondary">Pago en línea por aplicar</dt>
+            <dd class="text-right" data-testid="folio-online-available">− {{ money(f.online_payment_available ?? 0) }}</dd>
+          }
           <dt class="font-semibold text-text-primary">Saldo</dt>
-          <dd class="text-right font-semibold" data-testid="folio-balance">{{ money(f.balance) }}</dd>
+          <dd class="text-right font-semibold" data-testid="folio-balance">{{ money(due()) }}</dd>
         </dl>
       }
 
@@ -466,7 +470,7 @@ function newRequestId(): string {
               [min]="1"
               label="Monto"
               size="sm"
-              [helperText]="'Saldo ' + money(folio()?.balance ?? 0)"
+              [helperText]="'Saldo ' + money(due())"
             />
             <app-selector
               [formControl]="paymentForm.controls.method_id"
@@ -588,6 +592,11 @@ export class FolioPanelComponent {
   });
 
   readonly editable = computed(() => this.inHouse() && this.folio()?.status === 'open');
+  /** H6.6 — balance left after the online payment, which any desk payment applies first. */
+  readonly due = computed(() => {
+    const f = this.folio();
+    return f ? Math.max(0, f.balance - (f.online_payment_available ?? 0)) : 0;
+  });
   /** "Dividir": open folio, single account, nothing paid, at least two active lines. */
   readonly canSplit = computed(() => {
     const f = this.folio();

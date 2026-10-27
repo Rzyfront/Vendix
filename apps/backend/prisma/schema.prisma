@@ -2739,6 +2739,8 @@ model lodging_reservation_payments {
   status          lodging_reservation_payment_status_enum @default(pending)
   amount          Decimal                                 @db.Decimal(14, 2)
   applied_amount  Decimal                                 @default(0) @db.Decimal(14, 2)
+  // Kept as a cancellation / no-show penalty; amount - applied - retained is owed back.
+  retained_amount Decimal                                 @default(0) @db.Decimal(14, 2)
   method          String                                  @db.VarChar(30)
   payment_link_id Int?                                    @unique
   transaction_id  String?                                 @db.VarChar(255)

@@ -1160,6 +1160,7 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'lodging.folio_sale_settlement': 'Cruce de anticipos de venta de folio hotelero',
   'lodging.deposit': 'Depósito de reserva hotelera',
   'lodging.deposit_retained': 'Penalidad retenida del depósito',
+  'lodging.reservation_payment_retained': 'Penalidad retenida del pago en línea',
   'order.completed': 'Orden completada',
   'order_item.prepared_waste': 'Merma de plato preparado',
   'order_item.prepared_reuse': 'Reuso de insumos de plato preparado',

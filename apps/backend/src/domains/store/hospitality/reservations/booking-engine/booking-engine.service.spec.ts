@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import {
   LodgingBookingEngineService,
+  HOLD_PAYMENT_GRACE_MS,
   WEB_HOLD_EXPIRED_REASON,
   WEB_HOLD_REASON,
 } from './booking-engine.service';
@@ -250,6 +251,32 @@ describe('LodgingBookingEngineService (H6.6)', () => {
     });
   });
 
+  describe('pago de un hold confirmado a mano', () => {
+    it('no pide devolver: registra el pago y envía la confirmación', async () => {
+      const { service, prisma, reservations, email } = build();
+      await service.hold(272, HOLD);
+      reservations.confirmHold.mockResolvedValueOnce(false);
+      prisma.lodging_reservations.findFirst
+        .mockResolvedValueOnce({ status: 'confirmed' })
+        .mockResolvedValueOnce({
+          reservation_number: 'H-0040',
+          arrival_date: new Date('2026-11-20T00:00:00.000Z'),
+          departure_date: new Date('2026-11-23T00:00:00.000Z'),
+          total_amount: new Prisma.Decimal(750000),
+          customer: { email: 'huesped@example.com', first_name: 'Ana' },
+          store: { name: 'Hotel Roku' },
+          rooms: [{ adults: 2, children: 0, cancellation_policy_snapshot: null, unit_type: { name: 'Doble' } }],
+        });
+
+      expect(await service.completePayment(900, null)).toBe(true);
+
+      const { reason } = (prisma.lodging_reservation_events.create.mock.calls[0] as any)[0].data;
+      expect(reason).not.toContain('devuélvelo');
+      expect(reason).toContain('Pago en línea recibido');
+      expect(email.sendEmail).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('expiración', () => {
     it('el hold vencido sin pago se cancela, su pago queda cancelado y su link se cierra', async () => {
       const { service, prisma, reservations, payments } = build();
@@ -260,7 +287,8 @@ describe('LodgingBookingEngineService (H6.6)', () => {
       expect(prisma.lodging_reservations.findMany).toHaveBeenLastCalledWith({
         where: {
           status: 'tentative',
-          hold_expires_at: { lt: NOW },
+          // Grace for a webhook of a payment made in the link's last minute.
+          hold_expires_at: { lt: new Date(NOW.getTime() - HOLD_PAYMENT_GRACE_MS) },
           online_payments: { none: { status: 'completed' } },
         },
         select: { id: true },

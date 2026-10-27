@@ -19,7 +19,7 @@ describe('iCal import fetch (H6.2)', () => {
   it('tells public addresses from internal ones', () => {
     expect(isPublicAddress('93.184.216.34')).toBe(true);
     expect(isPublicAddress('2606:4700::1111')).toBe(true);
-    for (const ip of ['127.0.0.1', '10.0.0.5', '172.20.0.2', '192.168.1.1', '169.254.169.254', '::1', 'fd00::1', '::ffff:127.0.0.1']) {
+    for (const ip of ['127.0.0.1', '10.0.0.5', '172.20.0.2', '192.168.1.1', '169.254.169.254', '::1', 'fd00::1', '::ffff:127.0.0.1', '64:ff9b::a9fe:a9fe', '2001:db8::1']) {
       expect(isPublicAddress(ip)).toBe(false);
     }
   });

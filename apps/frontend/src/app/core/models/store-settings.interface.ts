@@ -404,6 +404,8 @@ export interface HospitalitySettings {
   default_overbooking_allowance?: number;
   /** H6.6 — minutes a web booking holds the room while the guest pays (5-120, default 15). */
   booking_hold_minutes?: number;
+  /** H6.2 — minutes between two automatic syncs of an imported iCal calendar (5-1440, default 15). */
+  ical_import_interval_minutes?: number;
   /** H3.6 — folio origin of a POS/table room charge. Default "Restaurante". */
   room_charge_origin?: string;
   /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */

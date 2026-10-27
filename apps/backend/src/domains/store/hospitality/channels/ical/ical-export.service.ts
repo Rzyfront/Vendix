@@ -3,7 +3,9 @@ import { randomBytes } from 'crypto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
+import { UNSELLABLE_HOUSEKEEPING_STATUSES } from '../../housekeeping/housekeeping-status';
 import { buildIcalFeed, nightsOfRange } from './ical-feed';
+import { allocateUnassignedNights } from './ical-occupancy';
 
 /** Shape of a feed token: 32 url-safe chars (24 random bytes). */
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
@@ -21,7 +23,9 @@ export const ICAL_EVENT_SUMMARY = 'No disponible';
  * Each room may publish one feed whose URL carries a secret token. The
  * manager creates it, copies it into Airbnb/Booking and can rotate or revoke
  * it, which kills the URL already pasted. The feed lists the nights the room
- * cannot be sold: assigned reservation nights and active blocks. Blocks that
+ * cannot be sold: assigned reservation nights, active blocks and the nights
+ * an unassigned reservation of its type needs this room (see
+ * `allocateUnassignedNights`; every sale is born without a room). Blocks that
  * came from an iCal import (`reason=ical`, H6.2) are left out so a channel
  * does not receive its own dates back.
  */
@@ -81,6 +85,7 @@ export class LodgingIcalExportService {
         id: true,
         store_id: true,
         code: true,
+        unit_type_id: true,
         unit_type: { select: { name: true } },
       },
     });
@@ -90,27 +95,48 @@ export class LodgingIcalExportService {
 
     const from = toDateOnly(new Date(now.getTime() - DAY_MS));
     const fromDb = new Date(`${from}T00:00:00.000Z`);
-    const [nights, blocks] = await Promise.all([
+    // The whole room type: unassigned nights take a free room of the type.
+    const [units, nights, blocks] = await Promise.all([
+      this.globalPrisma.lodging_units.findMany({
+        where: {
+          store_id: unit.store_id,
+          unit_type_id: unit.unit_type_id,
+          is_active: true,
+          housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] },
+        },
+        select: { id: true },
+        orderBy: [{ code: 'asc' }, { id: 'asc' }],
+      }),
       this.globalPrisma.lodging_room_nights.findMany({
         where: {
           store_id: unit.store_id,
-          unit_id: unit.id,
+          unit_type_id: unit.unit_type_id,
           is_active: true,
           night_date: { gte: fromDb },
         },
-        select: { night_date: true },
+        select: { night_date: true, unit_id: true },
       }),
       this.globalPrisma.lodging_inventory_blocks.findMany({
         where: {
           store_id: unit.store_id,
-          unit_id: unit.id,
           released_at: null,
-          reason: { not: 'ical' },
           to_date: { gt: fromDb },
+          unit: { unit_type_id: unit.unit_type_id },
         },
-        select: { from_date: true, to_date: true },
+        select: { unit_id: true, from_date: true, to_date: true, reason: true },
       }),
     ]);
+
+    const blockNights = blocks.flatMap((b) =>
+      nightsOfRange(toDateOnly(b.from_date), toDateOnly(b.to_date), from).map(
+        (night) => ({ night, unit_id: b.unit_id, reason: b.reason }),
+      ),
+    );
+    const allocation = allocateUnassignedNights({
+      unit_ids: units.map((u) => u.id),
+      nights: nights.map((n) => ({ night: toDateOnly(n.night_date), unit_id: n.unit_id })),
+      blocked: blockNights,
+    });
 
     return buildIcalFeed({
       unit_id: unit.id,
@@ -118,10 +144,13 @@ export class LodgingIcalExportService {
       summary: ICAL_EVENT_SUMMARY,
       now,
       nights: [
-        ...nights.map((n) => toDateOnly(n.night_date)),
-        ...blocks.flatMap((b) =>
-          nightsOfRange(toDateOnly(b.from_date), toDateOnly(b.to_date), from),
-        ),
+        ...nights.filter((n) => n.unit_id === unit.id).map((n) => toDateOnly(n.night_date)),
+        ...blockNights
+          .filter((b) => b.unit_id === unit.id && b.reason !== 'ical')
+          .map((b) => b.night),
+        ...[...allocation]
+          .filter(([, occupancy]) => occupancy.taken.includes(unit.id))
+          .map(([night]) => night),
       ],
     });
   }

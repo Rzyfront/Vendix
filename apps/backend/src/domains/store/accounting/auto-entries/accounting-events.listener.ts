@@ -1428,6 +1428,41 @@ export class AccountingEventsListener {
     }
   }
 
+  // H6.6 — online reservation payment kept as a cancellation / no-show penalty.
+  @OnEvent('lodging.reservation_payment.retained')
+  async handleLodgingReservationPaymentRetained(event: {
+    store_id: number;
+    organization_id?: number;
+    reservation_payment_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingReservationPaymentRetained({
+        reservation_payment_id: event.reservation_payment_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(
+        `Auto-entry created for lodging.reservation_payment_retained - payment ${event.reservation_payment_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.reservation_payment_retained - payment ${event.reservation_payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== LAYAWAY (PLAN SEPARÉ) =====
 
   @OnEvent('layaway.payment_received')

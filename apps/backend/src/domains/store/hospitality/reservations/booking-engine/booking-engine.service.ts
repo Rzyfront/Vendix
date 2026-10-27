@@ -23,6 +23,13 @@ import {
   policyText,
 } from './booking-engine-text';
 
+/**
+ * The Wompi link and the hold end at the same moment; a payment made in the
+ * last minute can confirm a little later. The hold is released only this
+ * long after it expires, so a late webhook still finds it.
+ */
+export const HOLD_PAYMENT_GRACE_MS = 5 * 60_000;
+
 /** History line of a web booking waiting for its payment. */
 export const WEB_HOLD_REASON = 'Reserva web: pendiente de pago en línea';
 export const WEB_HOLD_EXPIRED_REASON = 'Reserva web vencida sin pago';
@@ -398,6 +405,9 @@ export class LodgingBookingEngineService {
         where: { id: reservation.id },
         select: { status: true },
       });
+      // The desk may have confirmed the hold by hand: the stay stands and
+      // the payment counts for it; only a cancelled one is owed back.
+      const lost = !current || current.status === 'cancelled' || current.status === 'no_show';
       if (current) {
         await this.prisma.lodging_reservation_events.create({
           data: {
@@ -405,13 +415,17 @@ export class LodgingBookingEngineService {
             reservation_id: reservation.id,
             from_status: current.status,
             to_status: current.status,
-            reason: `Pago en línea recibido ${paidText} con la reserva ya vencida: devuélvelo al huésped o crea la reserva de nuevo`,
+            reason: lost
+              ? `Pago en línea recibido ${paidText} con la reserva ya vencida: devuélvelo al huésped o crea la reserva de nuevo`
+              : `Pago en línea recibido ${paidText} (Wompi)`,
             user_id: null,
           },
         });
       }
-      this.logger.warn(`Payment ${pending.id} arrived for reservation ${reservation.id} no longer held`);
-      return true;
+      if (lost) {
+        this.logger.warn(`Payment ${pending.id} arrived for reservation ${reservation.id} no longer held`);
+        return true;
+      }
     }
     await this.sendConfirmation(reservation.id, store_id, settings, amount);
     return true;
@@ -424,7 +438,7 @@ export class LodgingBookingEngineService {
     const expired = await this.prisma.lodging_reservations.findMany({
       where: {
         status: 'tentative',
-        hold_expires_at: { lt: now },
+        hold_expires_at: { lt: new Date(now.getTime() - HOLD_PAYMENT_GRACE_MS) },
         // A payment already confirmed wins over the clock.
         online_payments: { none: { status: 'completed' } },
       },

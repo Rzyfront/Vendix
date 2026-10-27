@@ -240,7 +240,8 @@ function host(url: string): string {
               calendario solo lleva fechas, sin precios ni datos del huésped.
             } @else {
               Las reservas de cada canal bloquean la habitación en Vendix y se ven en el rack.
-              Se sincroniza cada 15 minutos y con «Sincronizar ahora».
+              Se sincroniza cada 15 minutos (ajustable en Configuración → Hotelería) y con
+              «Sincronizar ahora».
             }
           </p>
 

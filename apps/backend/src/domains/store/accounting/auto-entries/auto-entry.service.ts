@@ -1260,6 +1260,7 @@ export class AutoEntryService {
       'lodging.folio_sale_settlement': 'auto_invoice',
       'lodging.deposit': 'auto_payment',
       'lodging.deposit_retained': 'auto_payment',
+      'lodging.reservation_payment_retained': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
@@ -6583,6 +6584,55 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       description: `Penalidad retenida del depósito ${data.reservation_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * lodging.reservation_payment_retained (H6.6): DR Anticipos de Clientes
+   * (2805) → CR Ingreso por penalidad. A reservation paid online is cancelled
+   * or no-show: its web payment (a direct payment, not a deposit, D3) keeps
+   * what the deposit did not cover of the penalty; the rest stays in 2805,
+   * owed back to the guest. Same accounts as the deposit retention.
+   * `source_id` = `lodging_reservation_payments.id`.
+   */
+  async onLodgingReservationPaymentRetained(data: {
+    reservation_payment_id: number;
+    reservation_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.customer_advance',
+        `Pago en línea retenido reserva ${data.reservation_number}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'lodging.deposit_retained.penalty_income',
+        `Penalidad reserva ${data.reservation_number}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'lodging.reservation_payment_retained',
+      source_id: data.reservation_payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Penalidad retenida del pago en línea ${data.reservation_number}`,
       lines,
       user_id: data.user_id,
     });

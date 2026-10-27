@@ -73,4 +73,17 @@ describe('AutoEntryService · depósito de reserva hotelera (H3.5)', () => {
     expect(dr).toMatchObject({ account_code: '2805', debit_amount: 225000, credit_amount: 0 });
     expect(cr).toMatchObject({ account_code: '4295', debit_amount: 0, credit_amount: 225000 });
   });
+
+  it('H6.6 — la penalidad retenida del pago en línea sale de 2805 hacia el ingreso, con su propia fuente', async () => {
+    const { service, create } = build();
+
+    await service.onLodgingReservationPaymentRetained({ ...base, reservation_payment_id: 7 });
+
+    const arg = create.mock.calls[0][0] as any;
+    expect(arg.source_type).toBe('lodging.reservation_payment_retained');
+    expect(arg.source_id).toBe(7);
+    const [dr, cr] = arg.lines;
+    expect(dr).toMatchObject({ account_code: '2805', debit_amount: 225000, credit_amount: 0 });
+    expect(cr).toMatchObject({ account_code: '4295', debit_amount: 0, credit_amount: 225000 });
+  });
 });

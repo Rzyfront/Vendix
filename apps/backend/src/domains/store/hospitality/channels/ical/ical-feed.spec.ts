@@ -68,6 +68,8 @@ describe('ical-feed (H6.1)', () => {
 
     it('escapes text values', () => {
       expect(feed).toContain('X-WR-CALNAME:Habitación 101 · Doble\\, vista');
+      const semicolon = buildIcalFeed({ unit_id: 1, calendar_name: 'A;B', summary: 'C', now: NOW, nights: [] });
+      expect(semicolon).toContain('X-WR-CALNAME:A\\;B');
     });
 
     it('is an empty calendar when the room has no busy night', () => {

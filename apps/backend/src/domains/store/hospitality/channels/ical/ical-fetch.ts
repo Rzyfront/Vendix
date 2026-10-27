@@ -35,6 +35,10 @@ for (const [net, prefix] of [
   ['fc00::', 7],
   ['fe80::', 10],
   ['ff00::', 8],
+  // NAT64 (well-known and local-use prefixes) can reach internal IPv4.
+  ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
+  ['2001:db8::', 32],
 ] as const) {
   PRIVATE_RANGES.addSubnet(net, prefix, 'ipv6');
 }

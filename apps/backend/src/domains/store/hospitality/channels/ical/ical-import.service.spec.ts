@@ -20,7 +20,9 @@ const feed = (...events: [string, string, string][]) =>
     'END:VCALENDAR',
   ].join('\r\n');
 
-function build(opts: { blocks?: unknown[]; nights?: unknown[]; active?: boolean } = {}) {
+function build(
+  opts: { blocks?: unknown[]; nights?: unknown[]; active?: boolean; units?: { id: number }[] } = {},
+) {
   const tx = {
     $executeRaw: jest.fn(),
     lodging_ical_imports: {
@@ -33,6 +35,10 @@ function build(opts: { blocks?: unknown[]; nights?: unknown[]; active?: boolean 
       createMany: jest.fn(),
     },
     lodging_room_nights: { findMany: jest.fn(async () => opts.nights ?? []) },
+    lodging_units: {
+      findFirst: jest.fn(async () => ({ unit_type_id: 2 })),
+      findMany: jest.fn(async () => opts.units ?? [{ id: ROW.unit_id }]),
+    },
   };
   const prisma = {
     $transaction: jest.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
@@ -98,8 +104,8 @@ describe('LodgingIcalImportService.sync (H6.2)', () => {
     jest.mocked(fetchIcalFeed).mockResolvedValue(feed(['a', '2026-11-10', '2026-11-12']));
     const { service, prisma } = build({
       nights: [
-        { night_date: d('2026-11-11'), reservation_room: { reservation: { reservation_number: 'RES-0007' } } },
-        { night_date: d('2026-11-12'), reservation_room: { reservation: { reservation_number: 'RES-0007' } } },
+        { night_date: d('2026-11-11'), unit_id: 5, reservation_room: { reservation: { reservation_number: 'RES-0007' } } },
+        { night_date: d('2026-11-12'), unit_id: 5, reservation_room: { reservation: { reservation_number: 'RES-0007' } } },
       ],
     });
 
@@ -110,6 +116,44 @@ describe('LodgingIcalImportService.sync (H6.2)', () => {
     expect(data.last_sync_message).toBe(
       'Posible doble venta: Airbnb tiene ocupada la noche del 11-nov y en Vendix está la reserva RES-0007. Muévela a otra habitación.',
     );
+  });
+
+  it('warns when an unassigned Vendix reservation is left without a free room of the type', async () => {
+    jest.mocked(fetchIcalFeed).mockResolvedValue(feed(['a', '2026-11-10', '2026-11-12']));
+    const { service, prisma, tx } = build({
+      nights: [
+        { night_date: d('2026-11-10'), unit_id: null, reservation_room: { reservation: { reservation_number: 'RES-0009' } } },
+      ],
+    });
+    // 1st read: this import's blocks (none yet); 2nd read: the type's blocks,
+    // with the one this sync just created on the only room of the type.
+    tx.lodging_inventory_blocks.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { unit_id: 5, from_date: d('2026-11-10'), to_date: d('2026-11-12') },
+      ] as any);
+
+    await service.sync(ROW, NOW);
+
+    const { data } = prisma.lodging_ical_imports.updateMany.mock.calls[0][0];
+    expect(data.last_sync_status).toBe('warning');
+    expect(data.last_sync_message).toContain('noche del 10-nov');
+    expect(data.last_sync_message).toContain('RES-0009');
+  });
+
+  it('no warning when another room of the type is free for the unassigned reservation', async () => {
+    jest.mocked(fetchIcalFeed).mockResolvedValue(feed(['a', '2026-11-10', '2026-11-12']));
+    const { service, prisma } = build({
+      units: [{ id: 5 }, { id: 6 }],
+      nights: [
+        { night_date: d('2026-11-10'), unit_id: null, reservation_room: { reservation: { reservation_number: 'RES-0009' } } },
+      ],
+    });
+
+    await service.sync(ROW, NOW);
+
+    const { data } = prisma.lodging_ical_imports.updateMany.mock.calls[0][0];
+    expect(data.last_sync_status).toBe('ok');
   });
 
   it('a feed that cannot be read changes no block and records the error', async () => {

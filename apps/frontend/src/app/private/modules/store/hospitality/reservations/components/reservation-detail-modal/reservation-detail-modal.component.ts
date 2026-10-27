@@ -29,6 +29,7 @@ import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
 import { LodgingUnitsService } from '../../../rooms/services/units.service';
 import {
   countNights,
+  LodgingOnlinePayment,
   LodgingReservation,
   LodgingReservationRoom,
   RESERVATION_STATUS_LABELS,
@@ -150,6 +151,14 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
                 Pago en línea {{ money(payment.amount) }}
                 @if (Number(payment.applied_amount) > 0) {
                   <span class="font-normal text-text-secondary"> · aplicado {{ money(payment.applied_amount) }}</span>
+                }
+                @if (Number(payment.retained_amount ?? 0) > 0) {
+                  <span class="font-normal text-text-secondary"> · retenido {{ money(payment.retained_amount ?? '0') }}</span>
+                }
+                @if ((r.status === 'cancelled' || r.status === 'no_show') && onlineOwed(payment) > 0) {
+                  <span class="font-normal text-warning" data-testid="reservation-online-owed">
+                    · por devolver {{ money(String(onlineOwed(payment))) }}</span
+                  >
                 }
               </p>
             } @else if (payment.status === 'pending') {
@@ -496,6 +505,15 @@ export class ReservationDetailModalComponent {
   }
 
   protected readonly Number = Number;
+  protected readonly String = String;
+
+  /** H6.6 — open part of a web payment: not applied to the folio nor kept as penalty. */
+  onlineOwed(payment: LodgingOnlinePayment): number {
+    return Math.max(
+      0,
+      Number(payment.amount) - Number(payment.applied_amount) - Number(payment.retained_amount ?? 0),
+    );
+  }
 
   money(amount: string): string {
     return this.currency.format(Number(amount), 0);

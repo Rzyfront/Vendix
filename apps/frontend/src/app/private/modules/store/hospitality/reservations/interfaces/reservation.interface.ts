@@ -112,6 +112,8 @@ export interface LodgingOnlinePayment {
   status: 'pending' | 'completed' | 'cancelled';
   paid_at: string | null;
   applied_amount: string;
+  /** Kept as a cancellation / no-show penalty; amount − applied − retained is owed back. */
+  retained_amount?: string;
 }
 
 /** H3.2 — running account of a stay: its charges live in a draft order. */

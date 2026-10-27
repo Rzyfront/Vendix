@@ -19,22 +19,30 @@ function build() {
         id: 5,
         store_id: 9,
         code: '101',
+        unit_type_id: 2,
         unit_type: { name: 'Doble' },
       })),
+      findMany: jest.fn(async () => [{ id: 5 }]),
     },
     lodging_room_nights: {
-      findMany: jest.fn(async () => [
-        { night_date: d('2026-11-10') },
-        { night_date: d('2026-11-11') },
+      findMany: jest.fn(async (): Promise<{ night_date: Date; unit_id: number | null }[]> => [
+        { night_date: d('2026-11-10'), unit_id: 5 },
+        { night_date: d('2026-11-11'), unit_id: 5 },
+        // another room of the type: not this feed
+        { night_date: d('2026-11-15'), unit_id: 6 },
       ]),
     },
     lodging_inventory_blocks: {
-      findMany: jest.fn(async () => [
-        // started before the window: only the nights still to come are sent
-        { from_date: d('2026-10-20'), to_date: d('2026-11-02') },
-        // touches the reservation: one merged event
-        { from_date: d('2026-11-12'), to_date: d('2026-11-13') },
-      ]),
+      findMany: jest.fn(
+        async (): Promise<{ unit_id: number; from_date: Date; to_date: Date; reason: string }[]> => [
+          // started before the window: only the nights still to come are sent
+          { unit_id: 5, from_date: d('2026-10-20'), to_date: d('2026-11-02'), reason: 'maintenance' },
+          // touches the reservation: one merged event
+          { unit_id: 5, from_date: d('2026-11-12'), to_date: d('2026-11-13'), reason: 'owner_use' },
+          // the channel's own dates are not sent back
+          { unit_id: 5, from_date: d('2026-11-20'), to_date: d('2026-11-22'), reason: 'ical' },
+        ],
+      ),
     },
   };
   const service = new LodgingIcalExportService(prisma as any, globalPrisma as any);
@@ -55,29 +63,72 @@ describe('LodgingIcalExportService (H6.1)', () => {
     expect(feed.match(/BEGIN:VEVENT/g)).toHaveLength(2);
   });
 
-  it('reads only this room of its store, active nights and non-iCal blocks', async () => {
+  it('reads the room type of its store: rooms, active nights and active blocks', async () => {
     const { service, globalPrisma } = build();
     await service.renderFeed(TOKEN, NOW);
 
+    expect(globalPrisma.lodging_units.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ store_id: 9, unit_type_id: 2, is_active: true }),
+        orderBy: [{ code: 'asc' }, { id: 'asc' }],
+      }),
+    );
     expect(globalPrisma.lodging_room_nights.findMany).toHaveBeenCalledWith({
       where: {
         store_id: 9,
-        unit_id: 5,
+        unit_type_id: 2,
         is_active: true,
         night_date: { gte: d('2026-10-31') },
       },
-      select: { night_date: true },
+      select: { night_date: true, unit_id: true },
     });
     expect(globalPrisma.lodging_inventory_blocks.findMany).toHaveBeenCalledWith({
       where: {
         store_id: 9,
-        unit_id: 5,
         released_at: null,
-        reason: { not: 'ical' },
         to_date: { gt: d('2026-10-31') },
+        unit: { unit_type_id: 2 },
       },
-      select: { from_date: true, to_date: true },
+      select: { unit_id: true, from_date: true, to_date: true, reason: true },
     });
+  });
+
+  it('blocks the nights of a reservation without a room assigned (every sale is born unassigned)', async () => {
+    const { service, globalPrisma } = build();
+    globalPrisma.lodging_room_nights.findMany.mockResolvedValueOnce([
+      { night_date: d('2026-11-25'), unit_id: null },
+      { night_date: d('2026-11-26'), unit_id: null },
+    ]);
+    globalPrisma.lodging_inventory_blocks.findMany.mockResolvedValueOnce([]);
+
+    const feed = await service.renderFeed(TOKEN, NOW);
+
+    expect(feed).toContain('DTSTART;VALUE=DATE:20261125\r\nDTEND;VALUE=DATE:20261127');
+    expect(feed.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+  });
+
+  it('an unassigned night takes the first free room of the type, not one already busy', async () => {
+    const { service, globalPrisma } = build();
+    globalPrisma.lodging_units.findMany.mockResolvedValue([{ id: 5 }, { id: 6 }, { id: 7 }]);
+    globalPrisma.lodging_room_nights.findMany.mockResolvedValue([
+      { night_date: d('2026-11-25'), unit_id: 5 }, // 101 sold that night
+      { night_date: d('2026-11-25'), unit_id: null }, // needs a free room: 102
+    ]);
+    globalPrisma.lodging_inventory_blocks.findMany.mockResolvedValue([]);
+    const feedOf = async (id: number) => {
+      globalPrisma.lodging_units.findUnique.mockResolvedValueOnce({
+        id,
+        store_id: 9,
+        code: String(100 + id - 4),
+        unit_type_id: 2,
+        unit_type: { name: 'Doble' },
+      });
+      return service.renderFeed(TOKEN, NOW);
+    };
+
+    expect((await feedOf(5)).match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(await feedOf(6)).toContain('DTSTART;VALUE=DATE:20261125');
+    expect(await feedOf(7)).not.toContain('BEGIN:VEVENT');
   });
 
   it('carries no guest or reservation data', async () => {

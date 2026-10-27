@@ -6,6 +6,9 @@ import { dateOnlyToDb, formatShortDate } from '../../reservations/stay-dates';
 import { CreateIcalImportDto } from './ical-import.dto';
 import { fetchIcalFeed, IcalFetchError, normalizeIcalUrl } from './ical-fetch';
 import { diffIcalBlocks, IcalImportEvent, parseIcalEvents } from './ical-import-sync';
+import { nightsOfRange } from './ical-feed';
+import { allocateUnassignedNights } from './ical-occupancy';
+import { UNSELLABLE_HOUSEKEEPING_STATUSES } from '../../housekeeping/housekeeping-status';
 
 /** Same queue as a sale: a sync waits on the store's sale lock. */
 const SYNC_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
@@ -210,27 +213,76 @@ export class LodgingIcalImportService {
       }
 
       // Nights sold in Vendix that the channel also sold: possible double sale.
+      // A night of this room, or an unassigned night of its type left without
+      // a free room now that the channel took this one.
       const upcoming = events.filter((e) => e.to > today);
       if (upcoming.length === 0) return [];
-      const sold = await tx.lodging_room_nights.findMany({
-        where: {
-          store_id: row.store_id,
-          unit_id: row.unit_id,
-          is_active: true,
-          night_date: { gte: dateOnlyToDb(today) },
-        },
-        select: {
-          night_date: true,
-          reservation_room: { select: { reservation: { select: { reservation_number: true } } } },
-        },
-        orderBy: { night_date: 'asc' },
+      const unit = await tx.lodging_units.findFirst({
+        where: { id: row.unit_id, store_id: row.store_id },
+        select: { unit_type_id: true },
       });
-      return sold
-        .map((n) => ({
-          night: toDateOnly(n.night_date),
-          reservation: n.reservation_room.reservation.reservation_number,
-        }))
-        .filter(({ night }) => upcoming.some((e) => night >= e.from && night < e.to));
+      if (!unit) return [];
+      const [units, sold, blocks] = await Promise.all([
+        tx.lodging_units.findMany({
+          where: {
+            store_id: row.store_id,
+            unit_type_id: unit.unit_type_id,
+            is_active: true,
+            housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] },
+          },
+          select: { id: true },
+          orderBy: [{ code: 'asc' }, { id: 'asc' }],
+        }),
+        tx.lodging_room_nights.findMany({
+          where: {
+            store_id: row.store_id,
+            unit_type_id: unit.unit_type_id,
+            is_active: true,
+            night_date: { gte: dateOnlyToDb(today) },
+          },
+          select: {
+            night_date: true,
+            unit_id: true,
+            reservation_room: { select: { reservation: { select: { reservation_number: true } } } },
+          },
+          orderBy: { night_date: 'asc' },
+        }),
+        tx.lodging_inventory_blocks.findMany({
+          where: {
+            store_id: row.store_id,
+            released_at: null,
+            to_date: { gt: dateOnlyToDb(today) },
+            unit: { unit_type_id: unit.unit_type_id },
+          },
+          select: { unit_id: true, from_date: true, to_date: true },
+        }),
+      ]);
+      const nights = sold.map((n) => ({
+        night: toDateOnly(n.night_date),
+        unit_id: n.unit_id,
+        reservation: n.reservation_room.reservation.reservation_number,
+      }));
+      const allocation = allocateUnassignedNights({
+        unit_ids: units.map((u) => u.id),
+        nights,
+        blocked: blocks.flatMap((b) =>
+          nightsOfRange(toDateOnly(b.from_date), toDateOnly(b.to_date), today).map(
+            (night) => ({ night, unit_id: b.unit_id }),
+          ),
+        ),
+      });
+      const inChannel = (night: string) =>
+        upcoming.some((e) => night >= e.from && night < e.to);
+      return [
+        ...nights.filter((n) => n.unit_id === row.unit_id),
+        ...[...allocation]
+          .filter(([, occupancy]) => occupancy.overflow > 0)
+          .flatMap(([night, occupancy]) =>
+            occupancy.unassigned_reservations.map((reservation) => ({ night, reservation })),
+          ),
+      ]
+        .filter(({ night }) => inChannel(night))
+        .sort((x, y) => x.night.localeCompare(y.night));
     }, SYNC_TX_OPTIONS);
 
     if (conflicts === null) return;

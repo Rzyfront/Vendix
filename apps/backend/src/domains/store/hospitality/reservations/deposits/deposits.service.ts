@@ -52,6 +52,28 @@ export interface DepositRetainedEvent {
   user_id: number | null;
 }
 
+/**
+ * Payload of `lodging.reservation_payment.retained` (H6.6): part of an online
+ * reservation payment kept as a penalty, booked DR 2805 / CR penalty income.
+ */
+export interface OnlinePaymentRetainedEvent {
+  store_id: number;
+  reservation_payment_id: number;
+  reservation_number: string;
+  amount: number;
+  customer_id: number;
+  user_id: number | null;
+}
+
+/** H6.6 — outcome of a cancelled / no-show reservation paid online. */
+export interface OnlinePaymentSettlement {
+  retained: OnlinePaymentRetainedEvent[];
+  /** Kept as penalty, in total. */
+  retained_total: number;
+  /** Still owed back to the guest ("por devolver"). */
+  owed: number;
+}
+
 const money = (value: Prisma.Decimal) => Number(value.toFixed(2));
 
 /**
@@ -545,6 +567,66 @@ export class LodgingDepositsService {
   /** After the status change commits, so accounting reads the committed row. */
   announceRetained(event: DepositRetainedEvent | null): void {
     if (event) this.eventEmitter.emit('lodging.deposit.retained', event);
+  }
+
+  // ------------------------------------------------ online payment (H6.6)
+
+  /**
+   * H6.6 — a reservation paid online is cancelled or marked no-show. The web
+   * payment is a direct payment, never a deposit (D3): no wallet. Its open
+   * part (not applied to a folio nor kept yet) covers what the deposit left
+   * of `penalty`, booked DR 2805 / CR penalty income after commit
+   * (`announceOnlineRetained`); the rest is owed back to the guest.
+   */
+  async settleOnlinePaymentsInTx(
+    tx: Tx,
+    input: {
+      store_id: number;
+      reservation_id: number;
+      reservation_number: string;
+      customer_id: number;
+      penalty: Prisma.Decimal;
+      user_id: number | null;
+    },
+  ): Promise<OnlinePaymentSettlement> {
+    const rows = await tx.lodging_reservation_payments.findMany({
+      where: { store_id: input.store_id, reservation_id: input.reservation_id, status: 'completed' },
+      select: { id: true, amount: true, applied_amount: true, retained_amount: true },
+      orderBy: { id: 'asc' },
+    });
+    let left = input.penalty.gt(0) ? input.penalty : new Prisma.Decimal(0);
+    let kept = new Prisma.Decimal(0);
+    let owed = new Prisma.Decimal(0);
+    const retained: OnlinePaymentRetainedEvent[] = [];
+    const now = new Date();
+    for (const row of rows) {
+      const open = new Prisma.Decimal(row.amount).sub(row.applied_amount).sub(row.retained_amount);
+      if (open.lte(0)) continue;
+      const keep = Prisma.Decimal.min(open, left);
+      if (keep.gt(0)) {
+        await tx.lodging_reservation_payments.update({
+          where: { id: row.id },
+          data: { retained_amount: { increment: keep }, updated_at: now },
+        });
+        retained.push({
+          store_id: input.store_id,
+          reservation_payment_id: row.id,
+          reservation_number: input.reservation_number,
+          amount: money(keep),
+          customer_id: input.customer_id,
+          user_id: input.user_id,
+        });
+        left = left.sub(keep);
+        kept = kept.add(keep);
+      }
+      owed = owed.add(open.sub(keep));
+    }
+    return { retained, retained_total: money(kept), owed: money(owed) };
+  }
+
+  /** After the status change commits, so accounting reads the committed row. */
+  announceOnlineRetained(events: OnlinePaymentRetainedEvent[]): void {
+    for (const event of events) this.eventEmitter.emit('lodging.reservation_payment.retained', event);
   }
 
   // -------------------------------------------------------------- helpers

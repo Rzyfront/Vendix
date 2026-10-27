@@ -79,6 +79,16 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
+        [formControl]="icalIntervalControl"
+        type="number"
+        [min]="5"
+        [max]="1440"
+        label="Minutos entre sincronizaciones iCal"
+        helperText="Cada cuánto se leen los calendarios importados de Airbnb o Booking (5 a 1440)."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+      <app-input
         [formControl]="roomChargeOriginControl"
         label="Origen del cargo a habitación"
         placeholder="Restaurante"
@@ -134,6 +144,11 @@ export class HospitalitySettingsForm {
     validators: [Validators.required, Validators.min(5), Validators.max(120)],
   });
 
+  readonly icalIntervalControl = new FormControl<number>(15, {
+    nonNullable: true,
+    validators: [Validators.required, Validators.min(5), Validators.max(1440)],
+  });
+
   readonly roomChargeOriginControl = new FormControl('Restaurante', {
     nonNullable: true,
     validators: [Validators.maxLength(60)],
@@ -150,6 +165,7 @@ export class HospitalitySettingsForm {
     rnt_number: this.rntControl,
     default_overbooking_allowance: this.overbookingControl,
     booking_hold_minutes: this.holdMinutesControl,
+    ical_import_interval_minutes: this.icalIntervalControl,
     room_charge_origin: this.roomChargeOriginControl,
   });
 
@@ -178,6 +194,7 @@ export class HospitalitySettingsForm {
       folio_invoice_verification: this.verification(),
       default_overbooking_allowance: Math.trunc(Number(value.default_overbooking_allowance)),
       booking_hold_minutes: Math.trunc(Number(value.booking_hold_minutes)),
+      ical_import_interval_minutes: Math.trunc(Number(value.ical_import_interval_minutes)),
     });
   }
 }

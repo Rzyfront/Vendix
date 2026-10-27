@@ -1292,6 +1292,19 @@ export class HospitalitySettingsDto {
   @Min(5)
   @Max(120)
   booking_hold_minutes?: number;
+
+  @ApiProperty({
+    example: 15,
+    required: false,
+    description:
+      'H6.2 — minutes between two automatic syncs of an imported iCal calendar (5-1440).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  ical_import_interval_minutes?: number;
 }
 
 export class RestaurantSettingsDto {

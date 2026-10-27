@@ -83,6 +83,11 @@ export interface FolioDetail {
   pending_nights: number;
   /** H3.5 — deposit balance that can still be applied ("Aplicar anticipo"). */
   deposit_available?: number;
+  /**
+   * H6.6 — online reservation payment not applied yet. A direct payment, not
+   * a deposit (D3): any desk payment or the check-out applies it first.
+   */
+  online_payment_available?: number;
   /** H3.7 / D11 — last review before the invoice, and whether it still matches the total. */
   verified_at?: string | null;
   verified_current?: boolean;

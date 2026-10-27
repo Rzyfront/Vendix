@@ -13,7 +13,12 @@ import {
   ReservationQuoteDto,
 } from './dto';
 import { LodgingAvailabilityService } from './lodging-availability.service';
-import { DepositRetainedEvent, LodgingDepositsService } from './deposits/deposits.service';
+import {
+  DepositRetainedEvent,
+  LodgingDepositsService,
+  OnlinePaymentRetainedEvent,
+  OnlinePaymentSettlement,
+} from './deposits/deposits.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { lodgingBusinessDate } from './folio/folio-nights';
 import { loadPlanPricing, PlanTerms } from '../rates/rate-plans.service';
@@ -114,7 +119,14 @@ const RESERVATION_DETAIL_INCLUDE = {
   },
   // H6.6 — direct payments made online with the booking engine.
   online_payments: {
-    select: { id: true, amount: true, applied_amount: true, status: true, paid_at: true },
+    select: {
+      id: true,
+      amount: true,
+      applied_amount: true,
+      retained_amount: true,
+      status: true,
+      paid_at: true,
+    },
     orderBy: { id: 'asc' },
   },
 } satisfies Prisma.lodging_reservationsInclude;
@@ -124,6 +136,25 @@ export interface ReservationHold {
   expires_at: Date;
   /** History line of the creation ("Reserva web pendiente de pago"). */
   reason: string;
+}
+
+const historyMoney = (amount: number) =>
+  `$${amount.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
+
+/**
+ * H6.6 — history line of a cancelled / no-show reservation paid online:
+ * what was kept as penalty and what the desk must refund. Null = nothing open.
+ */
+export function onlinePaymentNote(settlement: OnlinePaymentSettlement | null): string | null {
+  if (!settlement) return null;
+  const parts: string[] = [];
+  if (settlement.retained_total > 0) {
+    parts.push(`${historyMoney(settlement.retained_total)} retenido como penalidad`);
+  }
+  if (settlement.owed > 0) {
+    parts.push(`${historyMoney(settlement.owed)} por devolver al huésped`);
+  }
+  return parts.length > 0 ? `Pago en línea: ${parts.join(' · ')}` : null;
 }
 
 /** Reason stored when the no-show job moves an overdue arrival. */
@@ -386,6 +417,7 @@ export class LodgingReservationsService {
     const event = options.penalty === false ? undefined : PENALTY_EVENTS[to];
     const timing = event ? await this.loadPenaltyTiming(this.requireStoreId()) : null;
     let retained: DepositRetainedEvent | null = null;
+    let onlineRetained: OnlinePaymentRetainedEvent[] = [];
     let cancelledLinks: number[] = [];
     const changed = await this.prisma.$transaction(async (tx) => {
       const current = await tx.lodging_reservations.findFirst({
@@ -399,6 +431,7 @@ export class LodgingReservationsService {
         data: { status: to, updated_at: now, hold_expires_at: null },
       });
       if (updated.count !== 1) return false;
+      let penaltyLeft = new Prisma.Decimal(0);
       if (event && timing) {
         // H2.4 — computed on the nights still sold, before they are freed.
         const penalty = await this.computePenalty(tx, id, current.store_id, event, timing, now);
@@ -419,7 +452,22 @@ export class LodgingReservationsService {
             penalty: penalty.amount,
             user_id,
           });
+          penaltyLeft = new Prisma.Decimal(penalty.amount).sub(retained?.amount ?? 0);
         }
+      }
+      // H6.6 — a reservation paid online: the web payment covers what the
+      // deposit left of the penalty and the rest is owed back to the guest.
+      let onlineSettlement: OnlinePaymentSettlement | null = null;
+      if (to === 'cancelled' || to === 'no_show') {
+        onlineSettlement = await this.deposits.settleOnlinePaymentsInTx(tx, {
+          store_id: current.store_id,
+          reservation_id: id,
+          reservation_number: current.reservation_number,
+          customer_id: current.customer_id,
+          penalty: penaltyLeft,
+          user_id,
+        });
+        onlineRetained = onlineSettlement.retained;
       }
       // H3.5 — a Wompi link still pending is not collected after the stay ends.
       if (to === 'cancelled' || to === 'no_show') {
@@ -444,10 +492,24 @@ export class LodgingReservationsService {
           user_id,
         },
       });
+      const onlineNote = onlinePaymentNote(onlineSettlement);
+      if (onlineNote) {
+        await tx.lodging_reservation_events.create({
+          data: {
+            store_id: current.store_id,
+            reservation_id: id,
+            from_status: to,
+            to_status: to,
+            reason: onlineNote,
+            user_id,
+          },
+        });
+      }
       return true;
     });
     if (changed) {
       this.deposits.announceRetained(retained);
+      this.deposits.announceOnlineRetained(onlineRetained);
       await this.deposits.deactivateLinks(cancelledLinks);
     }
     return changed;

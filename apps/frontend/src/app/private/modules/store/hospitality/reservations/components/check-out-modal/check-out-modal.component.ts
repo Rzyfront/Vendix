@@ -112,6 +112,10 @@ function newRequestId(): string {
             <dd class="text-right">{{ money(f.total) }}</dd>
             <dt class="text-text-secondary">Pagado</dt>
             <dd class="text-right">{{ money(f.paid) }}</dd>
+            @if ((f.online_payment_available ?? 0) > 0) {
+              <dt class="text-text-secondary">Pago en línea por aplicar</dt>
+              <dd class="text-right" data-testid="check-out-online-available">− {{ money(f.online_payment_available ?? 0) }}</dd>
+            }
             @if ((f.deposit_available ?? 0) > 0) {
               <dt class="text-text-secondary">Anticipo por aplicar</dt>
               <dd class="text-right">− {{ money(f.deposit_available ?? 0) }}</dd>
@@ -287,10 +291,15 @@ export class CheckOutModalComponent {
     const c = this.reservation()?.customer;
     return c ? `${c.first_name} ${c.last_name ?? ''}`.trim() : 'Huésped';
   });
-  /** Balance after the held deposit, which the check-out applies first. */
+  /**
+   * Balance after the online reservation payment (H6.6) and the held
+   * deposit, which the check-out applies first, in that order.
+   */
   readonly due = computed(() => {
     const f = this.folio();
-    return f ? Math.max(0, f.balance - (f.deposit_available ?? 0)) : 0;
+    return f
+      ? Math.max(0, f.balance - (f.online_payment_available ?? 0) - (f.deposit_available ?? 0))
+      : 0;
   });
   readonly credit = computed(() => this.billTo() === 'company' && this.chargeToCredit());
   readonly canConfirm = computed(() => {

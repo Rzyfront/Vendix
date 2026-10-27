@@ -498,6 +498,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       folio_invoice_verification: true,
       // H6.6 - minutes a web booking holds its rooms waiting for the payment.
       booking_hold_minutes: 15,
+      // H6.2 - minutes between two automatic syncs of an imported iCal calendar.
+      ical_import_interval_minutes: 15,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

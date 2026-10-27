@@ -50,6 +50,12 @@ export function hasActivePermission(user: FolioUser | undefined, name: string): 
 const toCents = (value: Prisma.Decimal | number | string | null | undefined) =>
   Math.round(Number(value ?? 0) * 100);
 
+type Cents = Prisma.Decimal | number | string | null | undefined;
+
+/** H6.6 — what an online payment still has open: not applied, not kept as penalty. */
+const openCents = (row: { amount: Cents; applied_amount: Cents; retained_amount?: Cents }) =>
+  toCents(row.amount) - toCents(row.applied_amount) - toCents(row.retained_amount);
+
 type Tx = Prisma.TransactionClient;
 
 export interface FolioRow {
@@ -779,6 +785,13 @@ export class LodgingFolioService {
     // an open session before taking money.
     await this.cashSessions.assertSessionForSales(user_id);
 
+    // H6.6 — what the guest already paid online pays the folio first: the
+    // desk only collects what is left, never the same stay twice, and the
+    // web payment is not stranded in 2805 by a full desk payment.
+    if ((await this.onlinePaymentAvailable(reservation_id)) > 0) {
+      await this.applyOnlinePayments(reservation_id);
+    }
+
     const emitted = await this.prisma.$transaction(
       async (tx) => {
         const order = await this.lockFolioOrder(tx, folio, store_id);
@@ -966,9 +979,9 @@ export class LodgingFolioService {
   private async onlinePaymentAvailable(reservation_id: number): Promise<number> {
     const rows = await this.prisma.lodging_reservation_payments.findMany({
       where: { reservation_id, status: 'completed' },
-      select: { amount: true, applied_amount: true },
+      select: { amount: true, applied_amount: true, retained_amount: true },
     });
-    const cents = rows.reduce((sum, row) => sum + toCents(row.amount) - toCents(row.applied_amount), 0);
+    const cents = rows.reduce((sum, row) => sum + openCents(row), 0);
     return Math.max(0, cents) / 100;
   }
 
@@ -977,8 +990,8 @@ export class LodgingFolioService {
    * its balance, as a folio payment "Pago en línea de la reserva". It is a
    * direct payment, never a deposit (D3): no wallet. No accounting entry
    * either: Wompi's confirmation already booked it DR bank / CR 2805, as any
-   * folio payment, and the folio invoice crosses it. The check-out (H3.7)
-   * calls it before the deposit.
+   * folio payment, and the folio invoice crosses it. A desk payment
+   * (`registerPayment`) and the check-out (H3.7, before the deposit) call it.
    */
   async applyOnlinePayments(reservation_id: number) {
     const folio = await this.findFolio(reservation_id);
@@ -991,14 +1004,14 @@ export class LodgingFolioService {
         const order = await this.lockFolioOrder(tx, folio, store_id);
         const rows = await tx.lodging_reservation_payments.findMany({
           where: { store_id, reservation_id, status: 'completed' },
-          select: { id: true, amount: true, applied_amount: true, method: true },
+          select: { id: true, amount: true, applied_amount: true, retained_amount: true, method: true },
           orderBy: { id: 'asc' },
         });
         let balanceCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
         let appliedCents = 0;
         const now = new Date();
         for (const row of rows) {
-          const amountCents = Math.min(toCents(row.amount) - toCents(row.applied_amount), balanceCents);
+          const amountCents = Math.min(openCents(row), balanceCents);
           if (amountCents <= 0) continue;
           const amount = amountCents / 100;
           const payment = await tx.payments.create({

@@ -740,6 +740,22 @@ describe('LodgingFolioService (H3.4)', () => {
       expect(payments[0].amount).toBe(297500);
       expect(online[0].applied_amount).toBe(297500);
     });
+
+    it('a desk payment applies the web payment first and only collects what is left', async () => {
+      const { service, payments, online, order } = build({ online: 225000 });
+      await service.postNights(1); // $297.500
+
+      const error = await errorOf(
+        service.registerPayment(1, { amount: 297500, store_payment_method_id: 4, request_id: 'req-0002-abcd' }),
+      );
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_FOLIO_PAYMENT_001.code);
+      expect(online[0].applied_amount).toBe(225000);
+
+      await service.registerPayment(1, { amount: 72500, store_payment_method_id: 4, request_id: 'req-0003-abcd' });
+
+      expect(payments.map((p) => p.amount)).toEqual([225000, 72500]);
+      expect(order.total_paid).toBe(297500);
+    });
   });
 
   describe('VAT exemption of a non-resident holder (H3.9)', () => {
