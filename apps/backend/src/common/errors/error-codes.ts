@@ -5607,6 +5607,22 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'La ocupación base no puede superar la ocupación máxima',
   },
+  // Hospitality Suite (H0.3) — rooms
+  LODGING_UNIT_FIND_001: {
+    code: 'LODGING_UNIT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Habitación no encontrada',
+  },
+  LODGING_UNIT_DUP_001: {
+    code: 'LODGING_UNIT_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una habitación con ese número',
+  },
+  LODGING_UNIT_RANGE_001: {
+    code: 'LODGING_UNIT_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango de habitaciones no es válido (máximo 100)',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

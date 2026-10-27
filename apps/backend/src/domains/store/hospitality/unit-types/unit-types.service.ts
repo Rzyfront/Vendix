@@ -51,6 +51,8 @@ const UNIT_TYPE_INCLUDE = {
       },
     },
   },
+  // H0.3 — sellable rooms of the type: inactive rooms are out of the count.
+  _count: { select: { units: { where: { is_active: true } } } },
 } satisfies Prisma.lodging_unit_typesInclude;
 
 /**

@@ -122,6 +122,19 @@ describe('UnitTypesService', () => {
     expect(productsService.remove).toHaveBeenCalledWith(40);
   });
 
+  it('lista los tipos con el conteo de habitaciones activas', async () => {
+    unitTypes.findMany.mockResolvedValue([{ id: 11, _count: { units: 2 } }]);
+    const result = await service.findAll();
+    expect(unitTypes.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: { select: { units: { where: { is_active: true } } } },
+        }),
+      }),
+    );
+    expect(result[0]._count.units).toBe(2);
+  });
+
   it('un tipo de otra tienda no existe para el cliente con scope (404)', async () => {
     unitTypes.findFirst.mockResolvedValue(null);
     await expectCode(service.findOne(99), 'LODGING_UNIT_TYPE_FIND_001');

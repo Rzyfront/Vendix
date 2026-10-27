@@ -1061,6 +1061,7 @@ model stores {
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers                    price_tiers[]
   lodging_unit_types             lodging_unit_types[]
+  lodging_units                  lodging_units[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2313,9 +2314,40 @@ model lodging_unit_types {
 
   store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product products @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  units   lodging_units[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
+}
+
+// Hospitality Suite (H0.3) — housekeeping state of a physical room.
+enum lodging_housekeeping_status_enum {
+  clean
+  dirty
+  inspected
+  out_of_order
+  out_of_service
+}
+
+// Hospitality Suite (H0.3) — physical room (101, Cabaña 1) of a room type.
+// Active units are the sellable inventory of their type.
+model lodging_units {
+  id                  Int                              @id @default(autoincrement())
+  store_id            Int
+  unit_type_id        Int
+  code                String                           @db.VarChar(30)
+  floor               String?                          @db.VarChar(30)
+  zone                String?                          @db.VarChar(60)
+  housekeeping_status lodging_housekeeping_status_enum @default(clean)
+  is_active           Boolean                          @default(true)
+  created_at          DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, code])
+  @@index([unit_type_id, is_active])
 }
 
 model product_price_tier_overrides {

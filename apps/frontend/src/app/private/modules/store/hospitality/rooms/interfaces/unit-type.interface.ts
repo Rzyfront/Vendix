@@ -21,6 +21,8 @@ export interface UnitType {
     state: string;
     product_tax_assignments: { tax_categories: { id: number; name: string } }[];
   };
+  /** H0.3 — active rooms of the type (sellable inventory). */
+  _count?: { units: number };
 }
 
 export interface UnitTypePayload {
