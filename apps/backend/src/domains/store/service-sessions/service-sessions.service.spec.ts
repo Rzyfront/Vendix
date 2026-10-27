@@ -496,4 +496,62 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       expect(result.find((r: any) => r.display_name === 'Libre')).toMatchObject({ status: 'off_schedule' });
     });
   });
+
+  describe('transition — la estación no se libera hasta cobrar', () => {
+    const session = { id: 21, store_id: 1, order_id: 149, status: 'open', station_id: 9 };
+    let tx: any;
+
+    beforeEach(() => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(session as any);
+      tx = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 149, state: 'draft' }]),
+        orders: { findFirst: jest.fn() },
+        service_sessions: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        service_allocations: { updateMany: jest.fn() },
+        service_session_tokens: { updateMany: jest.fn() },
+        service_budgets: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+        service_progress_events: { create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+    });
+
+    it('cierra con saldo pendiente → 409 y la sesión sigue abierta', async () => {
+      tx.orders.findFirst.mockResolvedValue({ remaining_balance: 50000 });
+      await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_006' }),
+      });
+      expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('cierra con cuenta en cero y libera la asignación', async () => {
+      tx.orders.findFirst.mockImplementation((args: any) =>
+        Promise.resolve(
+          args?.select?.remaining_balance !== undefined
+            ? { remaining_balance: 0 }
+            : { grand_total: 100, tip_amount: 0, currency: 'COP' },
+        ),
+      );
+      await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({
+        status: 'closed',
+      });
+      expect(tx.service_allocations.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: 'released' }) }),
+      );
+    });
+
+    it('cierra si la orden se canceló aunque tenga saldo', async () => {
+      tx.$queryRaw.mockResolvedValue([{ id: 149, state: 'cancelled' }]);
+      tx.orders.findFirst.mockImplementation((args: any) =>
+        Promise.resolve(
+          args?.select?.remaining_balance !== undefined
+            ? { remaining_balance: 50000 }
+            : { grand_total: 100, tip_amount: 0, currency: 'COP' },
+        ),
+      );
+      await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({
+        status: 'closed',
+      });
+    });
+  });
 });

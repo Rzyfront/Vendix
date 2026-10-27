@@ -790,6 +790,23 @@ export class ServiceSessionsService {
     if (!allowed) throw new VendixHttpException(ErrorCodes.STATION_006);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Regla de negocio: la estación no se libera hasta cobrar la cuenta.
+      // Cerrar con saldo pendiente se rechaza (409); el cobro vive en la orden.
+      if (dto.action === 'close' && existing.order_id) {
+        const locked = await lockOrderLifecycle(tx, existing.order_id, storeId);
+        if (locked.state !== 'cancelled') {
+          const totals = await tx.orders.findFirst({
+            where: { id: existing.order_id, store_id: storeId },
+            select: { remaining_balance: true },
+          });
+          if (totals && Number(totals.remaining_balance) > 0) {
+            throw new VendixHttpException(
+              ErrorCodes.STATION_006,
+              'La atención tiene saldo pendiente; registra el pago antes de finalizar.',
+            );
+          }
+        }
+      }
       const claimed = await tx.service_sessions.updateMany({
         where: { id, store_id: storeId, status: existing.status },
         data: { status: nextStatus, closed_at: terminal ? new Date() : null, updated_at: new Date() },

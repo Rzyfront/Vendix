@@ -2268,9 +2268,19 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close', assignCustomerId: number | null = null): void {
     this.saving.set(true);
-    // Saldo pendiente al cerrar → se lleva a cobrar la cuenta.
     const order = this.sessionOrder()?.id === session.order?.id ? this.sessionOrder() ?? session.order : session.order;
-    const pendingOrderId = action === 'close' && order?.id && Number(order.remaining_balance ?? order.grand_total ?? 0) > 0 ? order.id : null;
+    // Regla: la estación no se libera hasta cobrar. Con saldo pendiente no se
+    // cierra: se avisa y se lleva a registrar el pago (el backend lo revalida).
+    if (action === 'close' && order?.id && Number(order.remaining_balance ?? order.grand_total ?? 0) > 0) {
+      this.saving.set(false);
+      this.toastService.warning(
+        'Esta cuenta tiene saldo pendiente. Regístralo para poder finalizar y liberar la estación.',
+        undefined,
+        6000,
+      );
+      this.router.navigate(['/admin/orders', order.id]);
+      return;
+    }
     this.http.patch<any>(`${environment.apiUrl}/store/service-sessions/${session.id}`, { action }).subscribe({
       next: () => {
         this.saving.set(false);
@@ -2290,11 +2300,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
                   6000,
                 ),
             });
-        }
-        if (pendingOrderId) {
-          this.toastService.success('Atención finalizada. Registra el pago de la cuenta.');
-          this.router.navigate(['/admin/orders', pendingOrderId]);
-          return;
         }
         this.toastService.success(
           action === 'close'
