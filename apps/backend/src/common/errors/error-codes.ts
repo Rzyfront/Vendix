@@ -5662,6 +5662,32 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
   },
+  // Hospitality Suite (H5.3) — inventory blocks (maintenance, owner use)
+  LODGING_BLOCK_FIND_001: {
+    code: 'LODGING_BLOCK_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Bloqueo no encontrado',
+  },
+  LODGING_BLOCK_RESERVED_001: {
+    code: 'LODGING_BLOCK_RESERVED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene una reserva asignada en esas fechas. Muévela antes de bloquearla.',
+  },
+  LODGING_BLOCK_OVERLAP_001: {
+    code: 'LODGING_BLOCK_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'La habitación ya está bloqueada en esas fechas',
+  },
+  LODGING_BLOCK_OVERSOLD_001: {
+    code: 'LODGING_BLOCK_OVERSOLD_001',
+    httpStatus: 409,
+    devMessage: 'Bloquearla deja sin habitación a reservas sin asignar de ese tipo',
+  },
+  LODGING_BLOCK_RELEASED_001: {
+    code: 'LODGING_BLOCK_RELEASED_001',
+    httpStatus: 409,
+    devMessage: 'El bloqueo ya fue liberado',
+  },
   // Hospitality Suite (H1.3) — occupancy rack
   LODGING_RACK_RANGE_001: {
     code: 'LODGING_RACK_RANGE_001',

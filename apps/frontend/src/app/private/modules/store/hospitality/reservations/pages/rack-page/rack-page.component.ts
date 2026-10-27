@@ -26,9 +26,15 @@ import {
   RoomChangeTarget,
 } from '../../components/room-change-modal/room-change-modal.component';
 import {
+  RoomBlockModalComponent,
+  RoomBlockTarget,
+} from '../../components/room-block-modal/room-block-modal.component';
+import {
+  INVENTORY_BLOCK_REASON_LABELS,
   LodgingReservationStatus,
   Rack,
   RackBar,
+  RackBlock,
   RESERVATION_STATUS_LABELS,
   RoomChangeRequest,
 } from '../../interfaces/reservation.interface';
@@ -71,11 +77,19 @@ interface RackRow {
   free?: number[];
   /** H2.5 — allotment rooms held per night. */
   held?: number[];
+  /** H5.3 — rooms blocked per night (maintenance, owner use). */
+  blocked?: number[];
   /** H1.6 — nights sold above the type's rooms, and the "Sobreventa: 3/2" alert. */
   overbooked?: boolean[];
   overbooking?: string;
   muted?: boolean;
   hint?: string;
+}
+
+interface PlacedBlock extends RackBlock {
+  row: number;
+  label: string;
+  title: string;
 }
 
 interface PlacedBar extends RackBar {
@@ -99,6 +113,9 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
  * validated first: a collision shows its message and nothing moves;
  * otherwise the change modal shows the price difference to confirm. On
  * mobile the same change is made with "Mover" in the reservation detail.
+ *
+ * H5.3: "Bloquear" takes a room out of sale for maintenance or owner use;
+ * the block shows on its room row and tapping it releases it.
  */
 @Component({
   selector: 'app-hospitality-rack-page',
@@ -113,6 +130,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
     StickyHeaderComponent,
     ReservationDetailModalComponent,
     RoomChangeModalComponent,
+    RoomBlockModalComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -150,13 +168,24 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                 {{ rangeLabel() }}
               </span>
             </div>
-            <app-selector
-              class="w-32"
-              size="sm"
-              [options]="windowOptions"
-              [value]="days()"
-              (valueChange)="setDays($event)"
-            />
+            <div class="flex items-center gap-2">
+              <app-button
+                variant="outline"
+                size="sm"
+                data-testid="rack-block-room"
+                (clicked)="blockTarget.set({ mode: 'create', from_date: from() })"
+              >
+                <app-icon slot="icon" name="lock" [size]="16" />
+                Bloquear
+              </app-button>
+              <app-selector
+                class="w-32"
+                size="sm"
+                [options]="windowOptions"
+                [value]="days()"
+                (valueChange)="setDays($event)"
+              />
+            </div>
           </div>
 
           @if (loading() && !rack()) {
@@ -242,7 +271,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                             (row.overbooked?.[i] ? 'Sobreventa: ' : '') +
                             row.free[i] +
                             ' libres' +
-                            (row.held?.[i] ? ' · ' + row.held?.[i] + ' en cupo' : '')
+                            (row.held?.[i] ? ' · ' + row.held?.[i] + ' en cupo' : '') +
+                            (row.blocked?.[i] ? ' · ' + row.blocked?.[i] + ' bloqueadas' : '')
                           "
                           >{{ row.free[i] }}</span
                         >
@@ -256,6 +286,25 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                       }
                     </div>
                   }
+                }
+
+                <!-- H5.3 — maintenance / owner use blocks on their room row -->
+                @for (block of blockBars(); track block.id) {
+                  <button
+                    type="button"
+                    class="relative z-10 mx-0.5 my-1 flex min-w-0 items-center truncate border border-dashed border-text-secondary/50 bg-surface-secondary px-1.5 text-left text-[11px] font-medium text-text-secondary"
+                    [class.rounded-l-md]="!block.continues_before"
+                    [class.rounded-r-md]="!block.continues_after"
+                    [class.pointer-events-none]="drag() !== null"
+                    [style.grid-row]="block.row"
+                    [style.grid-column]="block.start + 2 + ' / span ' + block.span"
+                    [attr.title]="block.title"
+                    [attr.data-testid]="'rack-block-' + block.id"
+                    (click)="openBlock(block)"
+                  >
+                    <app-icon name="lock" [size]="12" class="mr-1 shrink-0" />
+                    <span class="truncate">{{ block.label }}</span>
+                  </button>
                 }
 
                 @for (bar of bars(); track bar.reservation_room_id) {
@@ -310,6 +359,13 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         (closed)="changeTarget.set(null)"
         (changed)="load()"
       />
+
+      <app-room-block-modal
+        [target]="blockTarget()"
+        [units]="unitOptions()"
+        (closed)="blockTarget.set(null)"
+        (changed)="load()"
+      />
     </div>
   `,
 })
@@ -330,6 +386,8 @@ export class HospitalityRackPageComponent implements OnInit {
   /** `rowKey:night` of the cell under the dragged bar. */
   readonly dropHover = signal<string | null>(null);
   readonly changeTarget = signal<RoomChangeTarget | null>(null);
+  /** H5.3 — block being created or viewed. */
+  readonly blockTarget = signal<RoomBlockTarget | null>(null);
 
   readonly gridColumns = computed(
     () => `minmax(6.5rem, 9rem) repeat(${this.days()}, minmax(2.5rem, 1fr))`,
@@ -376,6 +434,7 @@ export class HospitalityRackPageComponent implements OnInit {
         typeId: type.id,
         free: type.free,
         held: type.held,
+        blocked: type.blocked,
         overbooked,
         overbooking: peak > type.capacity ? `Sobreventa: ${peak}/${type.capacity}` : undefined,
       });
@@ -433,6 +492,35 @@ export class HospitalityRackPageComponent implements OnInit {
       }),
     );
   });
+
+  /** H5.3 — blocks placed on their room rows. */
+  readonly blockBars = computed<PlacedBlock[]>(() => {
+    const { unitRow } = this.layout();
+    return (this.rack()?.types ?? []).flatMap((type) =>
+      type.blocks.flatMap((block) => {
+        const row = unitRow.get(block.unit_id);
+        if (row === undefined) return [];
+        const label = INVENTORY_BLOCK_REASON_LABELS[block.reason];
+        return [
+          {
+            ...block,
+            row,
+            label,
+            title: `${label} · ${block.from_date} → ${block.to_date}${block.notes ? ' · ' + block.notes : ''}`,
+          },
+        ];
+      }),
+    );
+  });
+
+  /** Rooms the manager can block: active rooms of the rack. */
+  readonly unitOptions = computed(() =>
+    (this.rack()?.types ?? []).flatMap((type) =>
+      type.units
+        .filter((unit) => unit.is_active)
+        .map((unit) => ({ value: unit.id, label: `${unit.code} · ${type.name}` })),
+    ),
+  );
 
   ngOnInit(): void {
     this.load();
@@ -521,6 +609,11 @@ export class HospitalityRackPageComponent implements OnInit {
     const departure = toDateString(addDays(parseISO(this.from()), night + 1));
     if (departure <= bar.arrival_date || departure === bar.departure_date) return null;
     return { departure_date: departure };
+  }
+
+  openBlock(block: PlacedBlock): void {
+    const row = this.rows().find((r) => r.unitId === block.unit_id);
+    this.blockTarget.set({ mode: 'view', block, unit_label: row?.label ?? '' });
   }
 
   move(direction: 1 | -1): void {

@@ -16,7 +16,7 @@ export class LodgingRackService {
     const nights = rackNights(from, to);
     const range = { gte: dateOnlyToDb(from), lt: dateOnlyToDb(to) };
 
-    const [rooms, sold] = await Promise.all([
+    const [rooms, sold, blocks] = await Promise.all([
       this.prisma.lodging_reservation_rooms.findMany({
         where: {
           arrival_date: { lt: dateOnlyToDb(to) },
@@ -44,6 +44,22 @@ export class LodgingRackService {
         by: ['unit_type_id', 'night_date'],
         where: { is_active: true, night_date: range },
         _count: { _all: true },
+      }),
+      // H5.3 — active blocks overlapping the window.
+      this.prisma.lodging_inventory_blocks.findMany({
+        where: {
+          released_at: null,
+          from_date: { lt: dateOnlyToDb(to) },
+          to_date: { gt: dateOnlyToDb(from) },
+        },
+        select: {
+          id: true,
+          unit_id: true,
+          from_date: true,
+          to_date: true,
+          reason: true,
+          notes: true,
+        },
       }),
     ]);
 
@@ -87,6 +103,7 @@ export class LodgingRackService {
         count: s._count._all,
       })),
       held,
+      blocks,
     });
   }
 }

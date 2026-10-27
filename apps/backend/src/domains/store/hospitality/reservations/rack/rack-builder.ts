@@ -1,4 +1,7 @@
-import { lodging_reservation_status_enum } from '@prisma/client';
+import {
+  lodging_inventory_block_reason_enum,
+  lodging_reservation_status_enum,
+} from '@prisma/client';
 import { daysBetweenDateStrings } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { addDays, NIGHT_HOLDING_STATUSES } from '../reservation-status';
@@ -49,6 +52,30 @@ export interface RackSoldNightInput {
   count: number;
 }
 
+/** H5.3 — active block of a room (maintenance, owner use). */
+export interface RackBlockInput {
+  id: number;
+  unit_id: number;
+  from_date: Date;
+  to_date: Date;
+  reason: lodging_inventory_block_reason_enum;
+  notes: string | null;
+}
+
+/** H5.3 — a block drawn on its room row, clipped to the window. */
+export interface RackBlockBar {
+  id: number;
+  unit_id: number;
+  reason: lodging_inventory_block_reason_enum;
+  notes: string | null;
+  from_date: string;
+  to_date: string;
+  start: number;
+  span: number;
+  continues_before: boolean;
+  continues_after: boolean;
+}
+
 /** One reservation room drawn as a bar, clipped to the window. */
 export interface RackBar {
   reservation_room_id: number;
@@ -81,11 +108,14 @@ export interface RackType {
   sold: number[];
   /** H2.5 — rooms held for allotments on each night (not for public sale). */
   held: number[];
+  /** H5.3 — sellable rooms blocked on each night (maintenance, owner use). */
+  blocked: number[];
   /** Rooms of the type still for sale on each night (overbooking included). */
   free: number[];
   /** Rows the unassigned bars need (0 = no "Sin asignar" row). */
   unassigned_lanes: number;
   bars: RackBar[];
+  blocks: RackBlockBar[];
 }
 
 export interface Rack {
@@ -121,6 +151,8 @@ export function buildRack(input: {
   sold: RackSoldNightInput[];
   /** H2.5 — allotment rooms held per night `[from, to)`, by type id. */
   held?: Map<number, number[]>;
+  /** H5.3 — active blocks overlapping the window. */
+  blocks?: RackBlockInput[];
 }): Rack {
   const nights = rackNights(input.from, input.to);
   const nightIndex = new Map(nights.map((night, i) => [night, i]));
@@ -128,9 +160,23 @@ export function buildRack(input: {
   const types = input.types.map<RackType>((type) => {
     const units = input.units.filter((u) => u.unit_type_id === type.id);
     // H5.1 — rooms out of order/service are not sellable capacity.
-    const capacity = units.filter(
-      (u) => u.is_active && isSellableHousekeeping(u.housekeeping_status),
-    ).length;
+    const sellable = new Set(
+      units
+        .filter((u) => u.is_active && isSellableHousekeeping(u.housekeeping_status))
+        .map((u) => u.id),
+    );
+    const capacity = sellable.size;
+    const unitIds = new Set(units.map((u) => u.id));
+    const blocks = (input.blocks ?? [])
+      .filter((block) => unitIds.has(block.unit_id))
+      .map((block) => toBlockBar(block, input.from, nights.length))
+      .filter((bar): bar is RackBlockBar => bar !== null);
+    // A block of a room already out of service does not count twice.
+    const blocked = nights.map(() => 0);
+    for (const block of blocks) {
+      if (!sellable.has(block.unit_id)) continue;
+      for (let i = block.start; i < block.start + block.span; i++) blocked[i] += 1;
+    }
     const allowance = Math.max(0, type.overbooking_allowance);
     const sold = nights.map(() => 0);
     for (const night of input.sold) {
@@ -138,7 +184,9 @@ export function buildRack(input: {
       if (night.unit_type_id === type.id && i !== undefined) sold[i] += night.count;
     }
     const held = input.held?.get(type.id) ?? nights.map(() => 0);
-    const free = sold.map((count, i) => Math.max(0, capacity + allowance - count - held[i]));
+    const free = sold.map((count, i) =>
+      Math.max(0, capacity + allowance - count - held[i] - blocked[i]),
+    );
     const bars = input.rooms
       .filter((room) => room.unit_type_id === type.id)
       .map((room) => toBar(room, input.from, nights.length))
@@ -152,9 +200,11 @@ export function buildRack(input: {
       overbooking_allowance: allowance,
       sold,
       held,
+      blocked,
       free,
       unassigned_lanes: packUnassigned(bars),
       bars,
+      blocks,
     };
   });
 
@@ -184,6 +234,32 @@ function toBar(room: RackRoomInput, from: string, windowNights: number): RackBar
     continues_before: first < 0,
     continues_after: end > windowNights,
     lane: 0,
+  };
+}
+
+function toBlockBar(
+  block: RackBlockInput,
+  from: string,
+  windowNights: number,
+): RackBlockBar | null {
+  const from_date = toDateOnly(block.from_date);
+  const to_date = toDateOnly(block.to_date);
+  const first = daysBetweenDateStrings(from, from_date);
+  const end = daysBetweenDateStrings(from, to_date);
+  const start = Math.max(0, first);
+  const stop = Math.min(windowNights, end);
+  if (stop <= start) return null;
+  return {
+    id: block.id,
+    unit_id: block.unit_id,
+    reason: block.reason,
+    notes: block.notes,
+    from_date,
+    to_date,
+    start,
+    span: stop - start,
+    continues_before: first < 0,
+    continues_after: end > windowNights,
   };
 }
 

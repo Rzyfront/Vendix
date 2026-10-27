@@ -268,6 +268,7 @@ function createFakeStore(
         return data;
       }),
     },
+    lodging_inventory_blocks: { findMany: jest.fn(async () => []) },
     lodging_allotments: {
       findMany: jest.fn(async ({ where }: any) =>
         allotments.filter(

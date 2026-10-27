@@ -7,6 +7,7 @@ import { parseApiError, ParsedApiError } from '../../../../../../core/utils/pars
 import {
   CancellationQuote,
   CheckInRequest,
+  CreateInventoryBlockRequest,
   CreateReservationRequest,
   FrontDeskBoard,
   LodgingDepositRequest,
@@ -175,6 +176,26 @@ export class LodgingReservationsService {
         params: toParams({ from, to }),
       })
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H5.3 — takes a room out of sale (maintenance, owner use). */
+  createBlock(request: CreateInventoryBlockRequest): Observable<void> {
+    return this.http
+      .post<ApiResponse<unknown>>(`${environment.apiUrl}/store/hospitality/blocks`, request)
+      .pipe(
+        map(() => undefined),
+        catchError(this.handleError),
+      );
+  }
+
+  /** H5.3 — closes the ticket: the room returns to sale. */
+  releaseBlock(blockId: number): Observable<void> {
+    return this.http
+      .post<ApiResponse<unknown>>(`${environment.apiUrl}/store/hospitality/blocks/${blockId}/release`, {})
+      .pipe(
+        map(() => undefined),
+        catchError(this.handleError),
+      );
   }
 
   /** H3.1 — guest register of a reservation. */

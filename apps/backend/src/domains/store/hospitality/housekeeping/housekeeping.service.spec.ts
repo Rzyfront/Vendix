@@ -174,6 +174,7 @@ describe('HousekeepingService', () => {
       lodging_units: { count: jest.fn().mockResolvedValue(1) },
       lodging_room_nights: { groupBy: jest.fn().mockResolvedValue([]) },
       lodging_allotments: { findMany: jest.fn().mockResolvedValue([]) },
+      lodging_inventory_blocks: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const availability = new LodgingAvailabilityService(client as any);
 

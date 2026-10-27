@@ -268,6 +268,39 @@ export interface RackBar {
   lane: number;
 }
 
+/** H5.3 — why a room is out of sale without a reservation. */
+export type InventoryBlockReason = 'maintenance' | 'owner_use' | 'ical';
+
+export const INVENTORY_BLOCK_REASON_LABELS: Record<InventoryBlockReason, string> = {
+  maintenance: 'Mantenimiento',
+  owner_use: 'Uso del propietario',
+  ical: 'Calendario externo',
+};
+
+/** H5.3 — active block drawn on its room row, clipped to the window. */
+export interface RackBlock {
+  id: number;
+  unit_id: number;
+  reason: InventoryBlockReason;
+  notes: string | null;
+  from_date: string;
+  /** Day the room returns to sale (exclusive). */
+  to_date: string;
+  start: number;
+  span: number;
+  continues_before: boolean;
+  continues_after: boolean;
+}
+
+/** H5.3 — new block: nights `[from_date, to_date)`. */
+export interface CreateInventoryBlockRequest {
+  unit_id: number;
+  from_date: string;
+  to_date: string;
+  reason: Exclude<InventoryBlockReason, 'ical'>;
+  notes?: string;
+}
+
 export interface RackUnit {
   id: number;
   code: string;
@@ -288,10 +321,13 @@ export interface RackType {
   sold: number[];
   /** H2.5 — rooms held for allotments per night (not for public sale). */
   held: number[];
+  /** H5.3 — sellable rooms blocked per night (maintenance, owner use). */
+  blocked: number[];
   /** Rooms still for sale per night of the window (overbooking included). */
   free: number[];
   unassigned_lanes: number;
   bars: RackBar[];
+  blocks: RackBlock[];
 }
 
 /** Occupancy rack: rooms grouped by type × nights `[from, to)`. */

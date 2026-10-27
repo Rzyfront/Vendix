@@ -186,4 +186,58 @@ describe('rack builder (H1.3)', () => {
     expect(r.types[0].units.map((u) => u.code)).toEqual(['101', '102', '103']);
     expect(r.types[0].free).toEqual([2]);
   });
+  it('H5.3 — a maintenance block is drawn on its room and lowers the free rooms', () => {
+    const r = buildRack({
+      from: '2026-11-10',
+      to: '2026-11-15',
+      types: TYPES,
+      units: UNITS,
+      rooms: [],
+      sold: [],
+      blocks: [
+        {
+          id: 7,
+          unit_id: 102,
+          from_date: d('2026-11-08'),
+          to_date: d('2026-11-12'),
+          reason: 'maintenance',
+          notes: 'Fuga en el baño',
+        },
+      ],
+    });
+    expect(r.types[0].blocks).toEqual([
+      {
+        id: 7,
+        unit_id: 102,
+        reason: 'maintenance',
+        notes: 'Fuga en el baño',
+        from_date: '2026-11-08',
+        to_date: '2026-11-12',
+        start: 0,
+        span: 2,
+        continues_before: true,
+        continues_after: false,
+      },
+    ]);
+    expect(r.types[0].blocked).toEqual([1, 1, 0, 0, 0]);
+    expect(r.types[0].free).toEqual([1, 1, 2, 2, 2]);
+    expect(r.types[1].blocks).toEqual([]);
+  });
+
+  it('H5.3 — a block of a room already out of service does not count twice', () => {
+    const r = buildRack({
+      from: '2026-11-10',
+      to: '2026-11-11',
+      types: TYPES,
+      units: [{ ...unit(101, 1, '101'), housekeeping_status: 'out_of_service' }, unit(102, 1, '102')],
+      rooms: [],
+      sold: [],
+      blocks: [
+        { id: 8, unit_id: 101, from_date: d('2026-11-10'), to_date: d('2026-11-11'), reason: 'maintenance', notes: null },
+      ],
+    });
+    expect(r.types[0].blocked).toEqual([0]);
+    expect(r.types[0].free).toEqual([1]);
+    expect(r.types[0].blocks).toHaveLength(1);
+  });
 });

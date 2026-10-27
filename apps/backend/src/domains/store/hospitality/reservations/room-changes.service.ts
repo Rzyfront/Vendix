@@ -300,6 +300,25 @@ export class LodgingRoomChangesService {
           `La ${unit.code} está ocupada el ${formatShortDate(toDateOnly(taken.night_date))}`,
         );
       }
+      // H5.3 — nor blocked for maintenance or owner use.
+      const block = await client.lodging_inventory_blocks.findFirst({
+        where: {
+          store_id,
+          unit_id: unit.id,
+          released_at: null,
+          from_date: { lt: dateOnlyToDb(departure) },
+          to_date: { gt: dateOnlyToDb(arrival) },
+        },
+        select: { from_date: true },
+        orderBy: { from_date: 'asc' },
+      });
+      if (block) {
+        const first = toDateOnly(block.from_date) > arrival ? toDateOnly(block.from_date) : arrival;
+        throw new VendixHttpException(
+          ErrorCodes.LODGING_RESERVATION_ROOM_CONFLICT_001,
+          `La ${unit.code} está bloqueada el ${formatShortDate(first)}`,
+        );
+      }
     }
 
     return {

@@ -38,6 +38,8 @@ import { LodgingCheckOutController } from './check-out/check-out.controller';
 import { LodgingCheckOutService } from './check-out/check-out.service';
 import { LodgingFolioSplitController } from './folio-split/folio-split.controller';
 import { LodgingFolioSplitService } from './folio-split/folio-split.service';
+import { LodgingInventoryBlocksController } from './blocks/inventory-blocks.controller';
+import { LodgingInventoryBlocksService } from './blocks/inventory-blocks.service';
 
 import { LodgingVatExemptServicesController } from './reports/vat-exempt-services.controller';
 import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
@@ -80,6 +82,7 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     LodgingCheckOutController,
     LodgingFolioSplitController,
     LodgingVatExemptServicesController,
+    LodgingInventoryBlocksController,
   ],
   providers: [
     LodgingReservationsService,
@@ -98,6 +101,7 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     LodgingCheckOutService,
     LodgingFolioSplitService,
     LodgingVatExemptServicesService,
+    LodgingInventoryBlocksService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

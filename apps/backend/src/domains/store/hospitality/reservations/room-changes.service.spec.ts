@@ -31,6 +31,8 @@ interface Options {
   cancelled?: boolean;
   /** H2.1 — rate plan the room was sold with. */
   ratePlanId?: number;
+  /** H5.3 — active block of a room (maintenance). */
+  block?: { unit_id: number; from_date: string; to_date: string };
 }
 
 /**
@@ -138,6 +140,18 @@ function createFake(options: Options = {}) {
       ),
     },
     lodging_allotments: { findMany: jest.fn(async () => []) },
+    lodging_inventory_blocks: {
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async ({ where }: any) => {
+        const b = options.block;
+        return b &&
+          where.unit_id === b.unit_id &&
+          where.from_date.lt > D(b.from_date) &&
+          where.to_date.gt < D(b.to_date)
+          ? { from_date: D(b.from_date) }
+          : null;
+      }),
+    },
     lodging_reservations: { update: jest.fn(async () => ({})) },
     lodging_reservation_events: { create: jest.fn(async () => ({})) },
   };
@@ -211,6 +225,23 @@ describe('LodgingRoomChangesService', () => {
       expect(messageOf(error)).toBe('La 102 está ocupada el 11-nov');
       expect(client.lodging_room_nights.updateMany).not.toHaveBeenCalled();
       expect(client.lodging_reservation_events.create).not.toHaveBeenCalled();
+    });
+
+    it('H5.3 — rejects a room blocked for maintenance on a night of the stay', async () => {
+      const { service, client } = createFake({
+        block: { unit_id: 2, from_date: '2026-11-12', to_date: '2026-11-20' },
+      });
+      const error = await rejection(service.apply(5, { unit_id: 2 }));
+      expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_CONFLICT_001');
+      expect(messageOf(error)).toBe('La 102 está bloqueada el 12-nov');
+      expect(client.lodging_room_nights.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('H5.3 — a block that ends on the arrival day does not collide', async () => {
+      const { service } = createFake({
+        block: { unit_id: 2, from_date: '2026-11-05', to_date: '2026-11-10' },
+      });
+      await expect(service.apply(5, { unit_id: 2 })).resolves.toBe(9);
     });
 
     it('the quote shows the same collision before confirming', async () => {

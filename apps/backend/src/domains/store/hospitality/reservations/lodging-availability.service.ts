@@ -15,6 +15,7 @@ export type LodgingInventoryClient = Pick<
   | 'lodging_units'
   | 'lodging_room_nights'
   | 'lodging_allotments'
+  | 'lodging_inventory_blocks'
 >;
 
 const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
@@ -45,9 +46,11 @@ export interface LodgingTypeInventory {
   sold: number;
   /** Most rooms held for other customers' allotments on a night (H2.5). */
   held: number;
+  /** Most sellable rooms blocked for maintenance or owner use on a night (H5.3). */
+  blocked: number;
   /**
    * Rooms still for sale: `units + overbooking_allowance` minus the busiest
-   * night's sold + held rooms, never below 0.
+   * night's sold + held + blocked rooms, never below 0.
    */
   available: number;
 }
@@ -97,7 +100,7 @@ export class LodgingAvailabilityService {
     buyer_customer_id?: number,
   ): Promise<LodgingTypeInventory> {
     const nights = stayNights(arrival_date, departure_date);
-    const [type, units, booked, holds] = await Promise.all([
+    const [type, units, booked, holds, blocks] = await Promise.all([
       client.lodging_unit_types.findFirst({
         where: { id: unit_type_id },
         select: { overbooking_allowance: true },
@@ -125,16 +128,21 @@ export class LodgingAvailabilityService {
         buyer_customer_id,
         exclude_reservation_room_id,
       ),
+      this.blockedByType([unit_type_id], nights, client),
     ]);
     const overbooking_allowance = Math.max(0, type?.overbooking_allowance ?? 0);
     const soldOn = countByNight(booked);
     const held = holds.get(unit_type_id) ?? nights.map(() => 0);
-    const taken = nights.map((night, i) => (soldOn.get(night) ?? 0) + held[i]);
+    const blocked = blocks.get(unit_type_id) ?? nights.map(() => 0);
+    const taken = nights.map(
+      (night, i) => (soldOn.get(night) ?? 0) + held[i] + blocked[i],
+    );
     return {
       units,
       overbooking_allowance,
       sold: Math.max(0, ...soldOn.values()),
       held: Math.max(0, ...held),
+      blocked: Math.max(0, ...blocked),
       available: Math.max(
         0,
         units + overbooking_allowance - Math.max(0, ...taken),
@@ -158,7 +166,7 @@ export class LodgingAvailabilityService {
       gte: dateOnlyToDb(nights[0]),
       lte: dateOnlyToDb(nights[nights.length - 1]),
     };
-    const [type, units, booked, own, holds] = await Promise.all([
+    const [type, units, booked, own, holds, blocks] = await Promise.all([
       client.lodging_unit_types.findFirst({
         where: { id: unit_type_id },
         select: { overbooking_allowance: true },
@@ -180,21 +188,69 @@ export class LodgingAvailabilityService {
         _count: { _all: true },
       }),
       this.holdsByType([unit_type_id], nights, client, customer_id),
+      this.blockedByType([unit_type_id], nights, client),
     ]);
     const sellable = units + Math.max(0, type?.overbooking_allowance ?? 0);
     const soldOn = countByNight(booked);
     const ownOn = countByNight(own);
     const held = holds.get(unit_type_id) ?? nights.map(() => 0);
+    const blocked = blocks.get(unit_type_id) ?? nights.map(() => 0);
     return nights
       .map((night, i) => ({
         night,
         free:
           sellable -
           (soldOn.get(night) ?? 0) -
-          held[i] +
+          held[i] -
+          blocked[i] +
           (ownOn.get(night) ?? 0),
       }))
       .reduce((tightest, n) => (n.free < tightest.free ? n : tightest));
+  }
+
+  /**
+   * H5.3 — sellable rooms blocked per night (maintenance, owner use), by room
+   * type (types without a block in range are absent). Only active blocks of
+   * rooms still counted as sellable: a room already out of service is not
+   * subtracted twice. `nights` are consecutive `YYYY-MM-DD`; a block covers
+   * `[from_date, to_date)`. Room types are store-owned ids, so the filter stays
+   * inside the store even with an unscoped transaction client.
+   */
+  async blockedByType(
+    unit_type_ids: number[],
+    nights: string[],
+    client: LodgingInventoryClient = this.prisma,
+  ): Promise<Map<number, number[]>> {
+    const result = new Map<number, number[]>();
+    if (unit_type_ids.length === 0 || nights.length === 0) return result;
+    const blocks = await client.lodging_inventory_blocks.findMany({
+      where: {
+        released_at: null,
+        from_date: { lte: dateOnlyToDb(nights[nights.length - 1]) },
+        to_date: { gt: dateOnlyToDb(nights[0]) },
+        unit: {
+          unit_type_id: { in: unit_type_ids },
+          is_active: true,
+          housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] },
+        },
+      },
+      select: {
+        from_date: true,
+        to_date: true,
+        unit: { select: { unit_type_id: true } },
+      },
+    });
+    for (const block of blocks) {
+      const typeId = block.unit.unit_type_id;
+      const perNight = result.get(typeId) ?? nights.map(() => 0);
+      const from = toDateOnly(block.from_date);
+      const to = toDateOnly(block.to_date);
+      nights.forEach((night, i) => {
+        if (night >= from && night < to) perNight[i] += 1;
+      });
+      result.set(typeId, perNight);
+    }
+    return result;
   }
 
   /**
