@@ -45,12 +45,21 @@ export class ReservationQuoteDto {
   @IsInt()
   @Min(0)
   children?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Plan tarifario (H2.1). Vacío = precio base del tipo de habitación.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  rate_plan_id?: number;
 }
 
 /** Most rooms one reservation can hold (a group bigger than this is split). */
 export const MAX_ROOMS_PER_RESERVATION = 30;
 
-/** One room of a reservation: the room type and its occupancy. */
+/** One room of a reservation: the room type, its occupancy and its rate plan. */
 export class ReservationRoomDto {
   @ApiProperty({ description: 'Tipo de habitación.' })
   @Type(() => Number)
@@ -69,6 +78,15 @@ export class ReservationRoomDto {
   @IsInt()
   @Min(0)
   children?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Plan tarifario (H2.1). Vacío = precio base del tipo de habitación.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  rate_plan_id?: number;
 }
 
 /**

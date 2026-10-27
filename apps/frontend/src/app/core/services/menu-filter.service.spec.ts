@@ -242,7 +242,12 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
 });
 
 describe('gating de hotelería por industria (H0.1)', () => {
-  const HOSPITALITY_KEYS = ['hospitality', 'hospitality_rooms', 'hospitality_reservations'];
+  const HOSPITALITY_KEYS = [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
+  ];
 
   it('hospitality sola ve Hotelería y no la agenda de citas', () => {
     const hidden = getModulesHiddenByIndustries(['hospitality']);

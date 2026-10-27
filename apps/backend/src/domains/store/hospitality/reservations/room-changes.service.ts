@@ -8,6 +8,8 @@ import { LodgingAvailabilityService, LodgingInventoryClient } from './lodging-av
 import { assertCapacity } from './reservations.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
+import { loadPlanPricing } from '../rates/rate-plans.service';
+import { resolveNightRate } from '../rates/lodging-rate-resolver';
 
 /** Same queue and limits as a sale: changes wait on the store's sale lock. */
 const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
@@ -18,7 +20,13 @@ const UNSELLABLE_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
 const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
 
 type ChangeClient = LodgingInventoryClient &
-  Pick<StorePrismaService, 'lodging_reservation_rooms' | 'lodging_unit_types'>;
+  Pick<
+    StorePrismaService,
+    'lodging_reservation_rooms' | 'lodging_unit_types' | 'lodging_rate_plans' | 'lodging_rate_prices'
+  >;
+
+/** Price of a night of the stay (rate plan by weekday, or base price). */
+export type NightRateFn = (night_date: string) => Prisma.Decimal;
 
 export interface NightRate {
   night_date: string;
@@ -27,13 +35,13 @@ export interface NightRate {
 
 /**
  * Nights of a changed stay. Kept nights keep their sold rate unless the room
- * type changes (then every night takes the new type's rate); added nights
- * take `rate`. Pure, so the price recalculation is testable.
+ * type changes (then every night is repriced); added nights take
+ * `rateFor(night)`. Pure, so the price recalculation is testable.
  */
 export function diffStayNights(
   current: NightRate[],
   nights: string[],
-  rate: Prisma.Decimal,
+  rateFor: NightRateFn,
   repriceAll: boolean,
 ) {
   const sold = new Map(current.map((n) => [n.night_date, n.rate_amount]));
@@ -42,7 +50,7 @@ export function diffStayNights(
   const added = nights.filter((n) => !sold.has(n));
   const removed = current.map((n) => n.night_date).filter((n) => !wanted.has(n));
   const total = nights.reduce(
-    (sum, n) => sum.add(repriceAll || !sold.has(n) ? rate : sold.get(n)!),
+    (sum, n) => sum.add(repriceAll || !sold.has(n) ? rateFor(n) : sold.get(n)!),
     new Prisma.Decimal(0),
   );
   return { kept, added, removed, total };
@@ -61,7 +69,7 @@ interface ChangePlan {
   room_id: number;
   reservation_id: number;
   status: lodging_reservation_status_enum;
-  rate: Prisma.Decimal;
+  rateFor: NightRateFn;
   unit_changed: boolean;
   type_changed: boolean;
   nights: ReturnType<typeof diffStayNights>;
@@ -162,6 +170,7 @@ export class LodgingRoomChangesService {
         adults: true,
         children: true,
         total_amount: true,
+        rate_plan_id: true,
         unit: { select: { id: true, code: true } },
         unit_type: { select: { id: true, name: true } },
         cancelled_at: true,
@@ -192,6 +201,7 @@ export class LodgingRoomChangesService {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_ARRIVAL_001);
     }
     const nights = stayNights(arrival, departure);
+    const soldNights = new Set(room.nights.map((n) => toDateOnly(n.night_date)));
 
     let unit = room.unit;
     let unit_type_id = room.unit_type_id;
@@ -233,11 +243,20 @@ export class LodgingRoomChangesService {
     if (!type) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_FIND_001);
     }
-    const rate = new Prisma.Decimal(type.product.base_price);
+    // The room keeps its rate plan (H2.1): repriced and added nights take the
+    // plan's price for their weekday, or the type base price without a plan.
+    let rateFor: NightRateFn;
+    if (room.rate_plan_id != null && (type_changed || nights.some((n) => !soldNights.has(n)))) {
+      const { prices } = await loadPlanPricing(client, store_id, room.rate_plan_id, type, true);
+      rateFor = (night) => resolveNightRate(night, prices)!;
+    } else {
+      const base = new Prisma.Decimal(type.product.base_price);
+      rateFor = () => base;
+    }
     const diff = diffStayNights(
       room.nights.map((n) => ({ night_date: toDateOnly(n.night_date), rate_amount: n.rate_amount })),
       nights,
-      rate,
+      rateFor,
       type_changed,
     );
 
@@ -287,7 +306,7 @@ export class LodgingRoomChangesService {
       room_id: room.id,
       reservation_id: room.reservation_id,
       status,
-      rate,
+      rateFor,
       unit_changed,
       type_changed,
       nights: diff,
@@ -335,13 +354,26 @@ export class LodgingRoomChangesService {
     if (plan.unit_changed || plan.type_changed) {
       await tx.lodging_room_nights.updateMany({
         where: { reservation_room_id: plan.room_id, is_active: true },
-        data: {
-          unit_id,
-          unit_type_id,
-          ...(plan.type_changed ? { rate_amount: plan.rate } : {}),
-          updated_at: now,
-        },
+        data: { unit_id, unit_type_id, updated_at: now },
       });
+    }
+    if (plan.type_changed) {
+      // Kept nights take the new type's price, grouped by amount.
+      const byRate = new Map<string, string[]>();
+      for (const night of nights.kept) {
+        const key = plan.rateFor(night).toFixed(2);
+        byRate.set(key, [...(byRate.get(key) ?? []), night]);
+      }
+      for (const [rate_amount, dates] of byRate) {
+        await tx.lodging_room_nights.updateMany({
+          where: {
+            reservation_room_id: plan.room_id,
+            is_active: true,
+            night_date: { in: dates.map(dateOnlyToDb) },
+          },
+          data: { rate_amount: new Prisma.Decimal(rate_amount), updated_at: now },
+        });
+      }
     }
     if (nights.added.length > 0) {
       await tx.lodging_room_nights.createMany({
@@ -351,7 +383,7 @@ export class LodgingRoomChangesService {
           unit_type_id,
           unit_id,
           night_date: dateOnlyToDb(night),
-          rate_amount: plan.rate,
+          rate_amount: plan.rateFor(night),
           updated_at: now,
         })),
       });

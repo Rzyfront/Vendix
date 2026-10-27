@@ -8,9 +8,10 @@ import { LodgingRoomChangesService } from './room-changes.service';
 import { LodgingNoShowJob } from './jobs/lodging-no-show.job';
 import { LodgingRackController } from './rack/rack.controller';
 import { LodgingRackService } from './rack/lodging-rack.service';
+import { LodgingRatesModule } from '../rates/rates.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  imports: [ResponseModule, PrismaModule, LodgingRatesModule],
   controllers: [LodgingReservationsController, LodgingRackController],
   providers: [
     LodgingReservationsService,

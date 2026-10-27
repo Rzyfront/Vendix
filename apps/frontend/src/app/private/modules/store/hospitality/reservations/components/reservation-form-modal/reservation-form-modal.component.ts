@@ -34,17 +34,24 @@ import { PosCustomer } from '../../../../pos/models/customer.model';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import {
   CreateReservationRequest,
+  formatNightBreakdown,
   LodgingReservation,
   ReservationQuote,
   ReservationQuoteRequest,
 } from '../../interfaces/reservation.interface';
+import { SellableRatePlan } from '../../../rates/interfaces/rate-plan.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
 interface RoomLineForm {
   unit_type_id: FormControl<number | null>;
+  /** H2.1 — rate plan id; `BASE_PRICE` = room type base price. */
+  rate_plan_id: FormControl<number>;
   adults: FormControl<number>;
   children: FormControl<number>;
 }
+
+/** Plan option value for "no plan": the room type base price. */
+const BASE_PRICE = 0;
 
 interface ReservationForm {
   arrival_date: FormControl<string>;
@@ -74,6 +81,9 @@ export function formatShortDate(date: string): string {
  * live ("2 disponibles · 3 noches · $750.000"; with several rooms the
  * consolidated total). The holder is picked or created with the shared POS
  * customer selector. The backend sells all the rooms or none.
+ * H2.1 — each room picks a rate plan that prices its type (the default plan
+ * is preselected) and shows the per-night breakdown
+ * ("jue $250.000 · vie $320.000 = $570.000").
  */
 @Component({
   selector: 'app-reservation-form-modal',
@@ -143,6 +153,15 @@ export function formatShortDate(date: string): string {
                   </app-button>
                 }
               </div>
+              @if (planOptionsFor(line.controls.unit_type_id.value); as plans) {
+                <app-selector
+                  class="col-span-2"
+                  formControlName="rate_plan_id"
+                  label="Plan tarifario"
+                  [options]="plans"
+                  data-testid="reservation-rate-plan"
+                />
+              }
               <app-input
                 formControlName="adults"
                 label="Adultos"
@@ -158,8 +177,13 @@ export function formatShortDate(date: string): string {
                 [min]="0"
                 customWrapperClass="mt-0"
               />
-              @if (lineTotal(i); as subtotal) {
-                <p class="col-span-2 text-xs text-text-secondary">{{ subtotal }}</p>
+              @if (lineBreakdown(i); as breakdown) {
+                <p
+                  class="col-span-2 text-xs text-text-secondary"
+                  data-testid="reservation-night-breakdown"
+                >
+                  {{ breakdown }}
+                </p>
               }
             </div>
           }
@@ -263,6 +287,8 @@ export class ReservationFormModalComponent {
   readonly saving = signal(false);
   readonly customer = signal<PosCustomer | null>(null);
   readonly quoteState = signal<QuoteState>({ kind: 'idle' });
+  /** H2.1 — active plans with the room types each one prices. */
+  readonly ratePlans = signal<SellableRatePlan[]>([]);
   /** Number of room lines (the FormArray length is not a signal). */
   readonly lineCount = signal(1);
   /** Same cap as the API (`MAX_ROOMS_PER_RESERVATION`). */
@@ -274,6 +300,23 @@ export class ReservationFormModalComponent {
       .filter((t) => t.is_active)
       .map((t) => ({ value: t.id, label: t.name })),
   );
+
+  /**
+   * Plan options per room type: plans that price it (default first) plus
+   * the base price. Types no plan prices get none (the selector hides).
+   */
+  private readonly planOptionsByType = computed(() => {
+    const byType = new Map<number, SelectorOption[]>();
+    for (const type of this.unitTypes()) {
+      const plans = this.ratePlans().filter((p) => p.unit_type_ids.includes(type.id));
+      if (plans.length === 0) continue;
+      byType.set(type.id, [
+        ...plans.map((p) => ({ value: p.id, label: p.name })),
+        { value: BASE_PRICE, label: 'Precio base del tipo' },
+      ]);
+    }
+    return byType;
+  });
 
   /** First type (by id, like the API) asking more rooms than are free. */
   private readonly shortage = computed(() => {
@@ -376,12 +419,29 @@ export class ReservationFormModalComponent {
     this.form.reset({
       arrival_date: '',
       departure_date: '',
-      rooms: [{ unit_type_id: this.defaultTypeId(), adults: 2, children: 0 }],
+      rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 2, children: 0 }],
       notes: '',
     });
     this.customer.set(null);
     this.customerSelector()?.reset();
     this.quoteState.set({ kind: 'idle' });
+    // Plans may have changed since the last opening: reload, then preselect.
+    this.reservationsService
+      .sellableRatePlans()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (plans) => {
+          this.ratePlans.set(plans);
+          for (const line of this.form.controls.rooms.controls) {
+            line.controls.rate_plan_id.setValue(this.defaultPlanFor(line.controls.unit_type_id.value));
+          }
+        },
+        error: () => this.ratePlans.set([]),
+      });
+  }
+
+  planOptionsFor(unitTypeId: number | null): SelectorOption[] | null {
+    return unitTypeId == null ? null : (this.planOptionsByType().get(unitTypeId) ?? null);
   }
 
   addRoom(): void {
@@ -400,14 +460,26 @@ export class ReservationFormModalComponent {
     this.lineCount.set(rooms.length);
   }
 
-  /** Subtotal of a line once quoted, e.g. "Suite · 3 noches · $1.200.000". */
-  lineTotal(index: number): string | null {
+  /**
+   * Per-night breakdown of a line once quoted (H2.1), e.g. "Con desayuno ·
+   * jue $250.000 · vie $320.000 = $570.000"; with several rooms it starts
+   * with the type.
+   */
+  lineBreakdown(index: number): string | null {
     const state = this.quoteState();
-    if (state.kind !== 'ready' || state.quotes.length < 2) return null;
+    if (state.kind !== 'ready') return null;
     const quote = state.quotes[index];
     if (!quote) return null;
-    const nights = `${quote.nights} ${quote.nights === 1 ? 'noche' : 'noches'}`;
-    return `${quote.unit_type.name} · ${nights} · ${this.currency.format(Number(quote.total_amount), 0)}`;
+    const nights = formatNightBreakdown(quote.night_rates, (amount) =>
+      this.currency.format(amount, 0),
+    );
+    return [
+      state.quotes.length > 1 ? quote.unit_type.name : null,
+      quote.rate_plan?.name ?? 'Precio base',
+      nights,
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
 
   clearCustomer(): void {
@@ -428,10 +500,11 @@ export class ReservationFormModalComponent {
     const payload: CreateReservationRequest = {
       arrival_date: raw.arrival_date,
       departure_date: raw.departure_date,
-      rooms: request.map(({ unit_type_id, adults, children }) => ({
+      rooms: request.map(({ unit_type_id, adults, children, rate_plan_id }) => ({
         unit_type_id,
         adults,
         children,
+        rate_plan_id,
       })),
       customer_id: Number(customer.id),
       notes: raw.notes.trim() || undefined,
@@ -475,17 +548,39 @@ export class ReservationFormModalComponent {
       departure_date: raw.departure_date,
       adults: Number(room.adults) || 0,
       children: Number(room.children) || 0,
+      rate_plan_id: this.planIdFor(room.unit_type_id, room.rate_plan_id),
     }));
   }
 
+  /** The line's plan when it prices the type; otherwise base price (none). */
+  private planIdFor(unitTypeId: number | null, planId: number): number | undefined {
+    if (planId === BASE_PRICE || unitTypeId == null) return undefined;
+    const plan = this.ratePlans().find((p) => p.id === planId);
+    return plan?.unit_type_ids.includes(unitTypeId) ? planId : undefined;
+  }
+
+  /** Default plan when it prices the type; otherwise the base price. */
+  private defaultPlanFor(unitTypeId: number | null): number {
+    const plan = this.ratePlans().find((p) => p.is_default);
+    return plan && unitTypeId != null && plan.unit_type_ids.includes(unitTypeId)
+      ? plan.id
+      : BASE_PRICE;
+  }
+
   private roomLine(unitTypeId: number | null): FormGroup<RoomLineForm> {
-    return this.fb.group<RoomLineForm>({
+    const line = this.fb.group<RoomLineForm>({
       unit_type_id: this.fb.control<number | null>(unitTypeId, {
         validators: [Validators.required],
       }),
+      rate_plan_id: this.fb.nonNullable.control(this.defaultPlanFor(unitTypeId)),
       adults: this.fb.nonNullable.control(2, { validators: [Validators.min(1)] }),
       children: this.fb.nonNullable.control(0, { validators: [Validators.min(0)] }),
     });
+    // A new type preselects the default plan again (or the base price).
+    line.controls.unit_type_id.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((typeId) => line.controls.rate_plan_id.setValue(this.defaultPlanFor(typeId)));
+    return line;
   }
 
   private defaultTypeId(): number | null {

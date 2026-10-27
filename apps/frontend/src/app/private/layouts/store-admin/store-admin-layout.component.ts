@@ -589,6 +589,13 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/rack',
           panelUiKey: 'hospitality_reservations',
         },
+        {
+          // H2.1 — rate plans and nightly prices.
+          label: 'Tarifas',
+          icon: 'tag',
+          route: '/admin/hospitality/rates',
+          panelUiKey: 'hospitality_rates',
+        },
       ],
     },
     {

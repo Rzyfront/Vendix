@@ -493,6 +493,11 @@ export const APP_MODULES: {
           label: 'Reservas',
           description: 'Reservas por noches de las habitaciones del hotel',
         },
+        {
+          key: 'hospitality_rates',
+          label: 'Tarifas',
+          description: 'Planes tarifarios y precio por noche por día de la semana',
+        },
       ],
     },
 

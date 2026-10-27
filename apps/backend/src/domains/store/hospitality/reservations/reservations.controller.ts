@@ -15,6 +15,7 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { LodgingReservationsService } from './reservations.service';
 import { LodgingRoomChangesService } from './room-changes.service';
+import { LodgingRatePlansService } from '../rates/rate-plans.service';
 import {
   CancelReservationDto,
   CreateReservationDto,
@@ -24,13 +25,14 @@ import {
   RoomChangeDto,
 } from './dto';
 
-/** Hospitality Suite (H1.1/H1.2/H1.4/H1.5) — nightly reservations of a hotel store. */
+/** Hospitality Suite (H1.1/H1.2/H1.4/H1.5/H2.1) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
 @UseGuards(PermissionsGuard)
 export class LodgingReservationsController {
   constructor(
     private readonly lodgingReservationsService: LodgingReservationsService,
     private readonly lodgingRoomChangesService: LodgingRoomChangesService,
+    private readonly lodgingRatePlansService: LodgingRatePlansService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -55,6 +57,14 @@ export class LodgingReservationsController {
   @Permissions('store:lodging:reservations:read')
   async quote(@Query() dto: ReservationQuoteDto) {
     const result = await this.lodgingReservationsService.quote(dto);
+    return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Planes tarifarios activos para reservar, con los tipos que tienen precio' })
+  @Get('rate-plans')
+  @Permissions('store:lodging:reservations:read')
+  async sellableRatePlans() {
+    const result = await this.lodgingRatePlansService.findSellable();
     return this.responseService.success(result);
   }
 

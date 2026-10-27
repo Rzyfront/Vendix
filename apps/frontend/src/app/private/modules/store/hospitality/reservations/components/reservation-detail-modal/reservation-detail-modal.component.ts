@@ -27,6 +27,7 @@ import {
   LodgingReservation,
   LodgingReservationRoom,
   RESERVATION_STATUS_LABELS,
+  formatNightBreakdown,
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
@@ -130,6 +131,14 @@ function todayLocal(): string {
                         · Cancelada
                       }
                     </p>
+                    @if (!room.cancelled_at && room.nights?.length) {
+                      <p
+                        class="text-xs text-text-secondary"
+                        data-testid="reservation-night-breakdown"
+                      >
+                        {{ nightBreakdown(room) }}
+                      </p>
+                    }
                   </div>
                   @if (!room.cancelled_at && !pending()) {
                     <div class="flex flex-wrap justify-end gap-1">
@@ -305,6 +314,14 @@ export class ReservationDetailModalComponent {
 
   money(amount: string): string {
     return this.currency.format(Number(amount), 0);
+  }
+
+  /** H2.1 — "Con desayuno · jue $250.000 · vie $320.000 = $570.000". */
+  nightBreakdown(room: LodgingReservationRoom): string {
+    const nights = formatNightBreakdown(room.nights ?? [], (amount) =>
+      this.currency.format(amount, 0),
+    );
+    return `${room.rate_plan?.name ?? 'Precio base'} · ${nights}`;
   }
 
   roomGuests(room: LodgingReservationRoom): string {

@@ -14,6 +14,8 @@ import {
 } from './dto';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
+import { loadPlanPricing } from '../rates/rate-plans.service';
+import { PricedNight, resolveNightRates, sumNights } from '../rates/lodging-rate-resolver';
 import {
   canTransition,
   NIGHT_HOLDING_STATUSES,
@@ -45,6 +47,7 @@ const RESERVATION_INCLUDE = {
     include: {
       unit_type: { select: { id: true, name: true } },
       unit: { select: { id: true, code: true } },
+      rate_plan: { select: { id: true, name: true } },
     },
     orderBy: { id: 'asc' },
   },
@@ -52,6 +55,18 @@ const RESERVATION_INCLUDE = {
 
 const RESERVATION_DETAIL_INCLUDE = {
   ...RESERVATION_INCLUDE,
+  // H2.1 — sold nights with their price snapshot, for the per-night breakdown.
+  rooms: {
+    include: {
+      ...RESERVATION_INCLUDE.rooms.include,
+      nights: {
+        where: { is_active: true },
+        select: { night_date: true, rate_amount: true },
+        orderBy: { night_date: 'asc' },
+      },
+    },
+    orderBy: { id: 'asc' },
+  },
   events: {
     include: { user: { select: { id: true, first_name: true, last_name: true } } },
     orderBy: { id: 'asc' },
@@ -70,13 +85,21 @@ interface SellableType {
   nightly_rate: Prisma.Decimal;
 }
 
+/** Price of one room for the stay: its plan (null = base) and every night. */
+interface PricedStay {
+  rate_plan: { id: number; name: string } | null;
+  nights: PricedNight[];
+  total: Prisma.Decimal;
+}
+
 /**
  * Hospitality Suite (H1.1/H1.5) — nightly reservations of one or more rooms.
  *
  * Every sold night is a `lodging_room_nights` row of the type; availability
  * counts them. Sales of a store are serialized by a transaction-scoped
  * advisory lock taken before counting, so two desks cannot both sell the last
- * room. Price = room type base price × nights (rate plans arrive in H2.1).
+ * room. Each night takes its rate plan price for its weekday (H2.1), or the
+ * room type base price without a plan; the price is snapshotted per night.
  */
 @Injectable()
 export class LodgingReservationsService {
@@ -283,9 +306,11 @@ export class LodgingReservationsService {
    * `sold` let the form warn when the sale goes into overbooking (H1.6).
    */
   async quote(dto: ReservationQuoteDto) {
+    const store_id = this.requireStoreId();
     const nights = stayNights(dto.arrival_date, dto.departure_date);
     const unitType = await this.loadSellableType(dto.unit_type_id);
     assertCapacity(unitType, dto.adults, dto.children ?? 0);
+    const priced = await this.priceStay(store_id, unitType, dto.rate_plan_id, nights);
     const inventory = await this.availability.getInventory(
       unitType.id,
       dto.arrival_date,
@@ -298,8 +323,12 @@ export class LodgingReservationsService {
       sold: inventory.sold,
       overbooking_allowance: inventory.overbooking_allowance,
       nights: nights.length,
-      nightly_rate: unitType.nightly_rate.toFixed(2),
-      total_amount: unitType.nightly_rate.mul(nights.length).toFixed(2),
+      rate_plan: priced.rate_plan,
+      night_rates: priced.nights.map((n) => ({
+        night_date: n.night_date,
+        rate_amount: n.rate_amount.toFixed(2),
+      })),
+      total_amount: priced.total.toFixed(2),
     };
   }
 
@@ -320,17 +349,14 @@ export class LodgingReservationsService {
     for (const typeId of typeIds) {
       types.set(typeId, await this.loadSellableType(typeId));
     }
-    const lines = dto.rooms.map((room) => {
+    const lines: Array<PricedStay & { unitType: SellableType; adults: number; children: number }> = [];
+    for (const room of dto.rooms) {
       const unitType = types.get(room.unit_type_id)!;
       const children = room.children ?? 0;
       assertCapacity(unitType, room.adults, children);
-      return {
-        unitType,
-        adults: room.adults,
-        children,
-        total: unitType.nightly_rate.mul(nights.length),
-      };
-    });
+      const priced = await this.priceStay(store_id, unitType, room.rate_plan_id, nights);
+      lines.push({ unitType, adults: room.adults, children, ...priced });
+    }
     await this.assertCustomerInStore(store_id, dto.customer_id);
 
     const total = lines.reduce((sum, line) => sum.add(line.total), new Prisma.Decimal(0));
@@ -390,17 +416,18 @@ export class LodgingReservationsService {
             departure_date: departure,
             adults: line.adults,
             children: line.children,
+            rate_plan_id: line.rate_plan?.id ?? null,
             total_amount: line.total,
             updated_at: now,
           },
         });
         await tx.lodging_room_nights.createMany({
-          data: nights.map((night) => ({
+          data: line.nights.map((night) => ({
             store_id,
             reservation_room_id: room.id,
             unit_type_id: line.unitType.id,
-            night_date: dateOnlyToDb(night),
-            rate_amount: line.unitType.nightly_rate,
+            night_date: dateOnlyToDb(night.night_date),
+            rate_amount: night.rate_amount,
             updated_at: now,
           })),
         });
@@ -505,6 +532,26 @@ export class LodgingReservationsService {
       return reservation.id;
     }, SALE_TX_OPTIONS);
     return this.findOne(reservationId);
+  }
+
+  /**
+   * Prices every night of a room: with a plan, each night takes the plan's
+   * price for its weekday; without one, the room type base price.
+   */
+  private async priceStay(
+    store_id: number,
+    unitType: SellableType,
+    rate_plan_id: number | undefined,
+    nights: string[],
+  ): Promise<PricedStay> {
+    if (rate_plan_id == null) {
+      const base = nights.map((night_date) => ({ night_date, rate_amount: unitType.nightly_rate }));
+      return { rate_plan: null, nights: base, total: sumNights(base) };
+    }
+    const { plan, prices } = await loadPlanPricing(this.prisma, store_id, rate_plan_id, unitType);
+    // A plan with a base price prices every night.
+    const priced = resolveNightRates(nights, prices)!;
+    return { rate_plan: plan, nights: priced, total: sumNights(priced) };
   }
 
   private async loadSellableType(unit_type_id: number): Promise<SellableType> {

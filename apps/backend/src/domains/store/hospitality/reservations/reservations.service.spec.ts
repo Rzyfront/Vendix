@@ -42,6 +42,21 @@ const SUITE = {
 
 const TYPES: Record<number, typeof DOUBLE> = { 11: DOUBLE, 12: SUITE };
 
+/**
+ * H2.1 — store 5 plans: 3 "Con desayuno" prices the Doble at $250.000 with
+ * Friday/Saturday at $320.000 (no Suite price); 4 is inactive.
+ */
+const RATE_PLANS = [
+  { id: 3, store_id: 5, name: 'Con desayuno', is_active: true },
+  { id: 4, store_id: 5, name: 'Promo vieja', is_active: false },
+];
+const RATE_PRICES = [
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: null, price: new Prisma.Decimal(250000) },
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: 5, price: new Prisma.Decimal(320000) },
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: 6, price: new Prisma.Decimal(320000) },
+  { rate_plan_id: 4, unit_type_id: 11, day_of_week: null, price: new Prisma.Decimal(200000) },
+];
+
 /** Lets every other pending async step run, so unlocked work interleaves. */
 const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -191,6 +206,19 @@ function createFakeStore(units: number | Record<number, number>, overbooking_all
         return data;
       }),
     },
+    lodging_rate_plans: {
+      findFirst: jest.fn(
+        async ({ where }: any) =>
+          RATE_PLANS.find((p) => p.id === where.id && p.store_id === where.store_id) ?? null,
+      ),
+    },
+    lodging_rate_prices: {
+      findMany: jest.fn(async ({ where }: any) =>
+        RATE_PRICES.filter(
+          (p) => p.rate_plan_id === where.rate_plan_id && p.unit_type_id === where.unit_type_id,
+        ),
+      ),
+    },
   };
 
   const prisma = {
@@ -313,7 +341,12 @@ describe('LodgingReservationsService', () => {
         sold: 0,
         overbooking_allowance: 0,
         nights: 3,
-        nightly_rate: '250000.00',
+        rate_plan: null,
+        night_rates: [
+          { night_date: '2026-11-10', rate_amount: '250000.00' },
+          { night_date: '2026-11-11', rate_amount: '250000.00' },
+          { night_date: '2026-11-12', rate_amount: '250000.00' },
+        ],
         total_amount: '750000.00',
       });
     });
@@ -411,6 +444,82 @@ describe('LodgingReservationsService', () => {
       prisma.lodging_unit_types.findFirst.mockResolvedValueOnce({ ...DOUBLE, is_active: false, overbooking_allowance: 0 });
 
       await expectCode(service.create(sale(stay)), 'LODGING_RESERVATION_TYPE_001');
+    });
+  });
+
+  /**
+   * H2.1 — a rate plan prices each night by its weekday and the price is
+   * snapshotted per night; plans without a price for the type are refused.
+   */
+  describe('planes tarifarios', () => {
+    // Thursday 12-nov → Saturday 14-nov: Thursday and Friday nights.
+    const weekend = { ...stay, arrival_date: '2026-11-12', departure_date: '2026-11-14' };
+
+    it('cotiza el desglose "jue $250.000 · vie $320.000 = $570.000"', async () => {
+      const { service } = build(2);
+      await expect(service.quote({ ...weekend, rate_plan_id: 3 })).resolves.toMatchObject({
+        rate_plan: { id: 3, name: 'Con desayuno' },
+        night_rates: [
+          { night_date: '2026-11-12', rate_amount: '250000.00' },
+          { night_date: '2026-11-13', rate_amount: '320000.00' },
+        ],
+        total_amount: '570000.00',
+      });
+    });
+
+    it('la reserva guarda el plan y el precio de cada noche (snapshot)', async () => {
+      const { service, prisma, nights, reservations } = build(2);
+      const { unit_type_id, adults, ...rest } = weekend;
+      await service.create({ ...rest, rooms: [{ unit_type_id, adults, rate_plan_id: 3 }] });
+
+      expect(prisma.lodging_reservation_rooms.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          rate_plan_id: 3,
+          total_amount: new Prisma.Decimal(570000),
+        }),
+      });
+      expect(
+        nights.map((n: any) => [n.night_date.toISOString().slice(0, 10), n.rate_amount.toFixed(2)]),
+      ).toEqual([
+        ['2026-11-12', '250000.00'],
+        ['2026-11-13', '320000.00'],
+      ]);
+      expect(reservations[0].total_amount?.toFixed(2)).toBe('570000.00');
+    });
+
+    it('sin plan la reserva sigue al precio base del tipo y sin plan guardado', async () => {
+      const { service, prisma } = build(2);
+      await service.create(sale(weekend));
+      expect(prisma.lodging_reservation_rooms.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          rate_plan_id: null,
+          total_amount: new Prisma.Decimal(500000),
+        }),
+      });
+    });
+
+    it('un plan sin precio para el tipo no se puede usar con ese tipo', async () => {
+      const { service, prisma } = build(2);
+      const body = await expectCode(
+        service.quote({ ...weekend, unit_type_id: 12, rate_plan_id: 3 }),
+        'LODGING_RATE_PLAN_UNPRICED_001',
+      );
+      expect(body.message).toBe('El plan Con desayuno no tiene precio para Suite');
+      const { unit_type_id, adults, ...rest } = weekend;
+      await expectCode(
+        service.create({ ...rest, rooms: [{ unit_type_id: 12, adults, rate_plan_id: 3 }] }),
+        'LODGING_RATE_PLAN_UNPRICED_001',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('un plan inactivo o de otra tienda no se vende', async () => {
+      const { service } = build(2);
+      await expectCode(service.quote({ ...weekend, rate_plan_id: 4 }), 'LODGING_RATE_PLAN_INACTIVE_001');
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 6, user_id: 9 } as any);
+      await expectCode(service.quote({ ...weekend, rate_plan_id: 3 }), 'LODGING_RATE_PLAN_FIND_001');
     });
   });
 

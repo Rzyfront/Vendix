@@ -5728,6 +5728,31 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Es la única habitación activa de la reserva: cancela la reserva completa',
   },
+  LODGING_RATE_PLAN_FIND_001: {
+    code: 'LODGING_RATE_PLAN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Plan tarifario no encontrado',
+  },
+  LODGING_RATE_PLAN_DUP_001: {
+    code: 'LODGING_RATE_PLAN_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe un plan tarifario con ese nombre',
+  },
+  LODGING_RATE_PLAN_PRICES_001: {
+    code: 'LODGING_RATE_PLAN_PRICES_001',
+    httpStatus: 400,
+    devMessage: 'Cada tipo de habitación del plan necesita un precio base y un solo precio por día',
+  },
+  LODGING_RATE_PLAN_INACTIVE_001: {
+    code: 'LODGING_RATE_PLAN_INACTIVE_001',
+    httpStatus: 409,
+    devMessage: 'El plan tarifario está inactivo',
+  },
+  LODGING_RATE_PLAN_UNPRICED_001: {
+    code: 'LODGING_RATE_PLAN_UNPRICED_001',
+    httpStatus: 409,
+    devMessage: 'El plan tarifario no tiene precio para ese tipo de habitación',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

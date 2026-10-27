@@ -16,6 +16,7 @@ import {
   RoomChangeQuote,
   RoomChangeRequest,
 } from '../interfaces/reservation.interface';
+import { SellableRatePlan } from '../../rates/interfaces/rate-plan.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -72,6 +73,13 @@ export class LodgingReservationsService {
   markNoShow(id: number, reason?: string): Observable<LodgingReservation> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/no-show`, { reason })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H2.1 — active rate plans with the room types each one prices. */
+  sellableRatePlans(): Observable<SellableRatePlan[]> {
+    return this.http
+      .get<ApiResponse<SellableRatePlan[]>>(`${this.baseUrl}/rate-plans`)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

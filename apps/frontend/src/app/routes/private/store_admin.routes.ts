@@ -1012,6 +1012,13 @@ export const storeAdminRoutes: Routes = [
               ).then((m) => m.hospitalityReservationsRoutes),
           },
           {
+            path: 'rates',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/rates/routes/rates.routes'
+              ).then((m) => m.hospitalityRatesRoutes),
+          },
+          {
             // H1.3 — occupancy rack; same panel_ui key as Reservas.
             path: 'rack',
             loadComponent: () =>

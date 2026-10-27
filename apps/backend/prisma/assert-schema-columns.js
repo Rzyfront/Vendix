@@ -105,6 +105,9 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H1.5 · cancelar una habitación de una reserva multi-habitación
   'lodging_reservation_rooms.cancelled_at',
+
+  // --- Hotelería H2.1 · plan tarifario con el que se vendió cada habitación
+  'lodging_reservation_rooms.rate_plan_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

@@ -1069,6 +1069,8 @@ model stores {
   lodging_reservation_rooms      lodging_reservation_rooms[]
   lodging_reservation_events     lodging_reservation_events[]
   lodging_room_nights            lodging_room_nights[]
+  lodging_rate_plans             lodging_rate_plans[]
+  lodging_rate_prices            lodging_rate_prices[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2328,6 +2330,7 @@ model lodging_unit_types {
   units   lodging_units[]
   reservation_rooms lodging_reservation_rooms[]
   room_nights       lodging_room_nights[]
+  rate_prices       lodging_rate_prices[]
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -2439,6 +2442,8 @@ model lodging_reservation_rooms {
   total_amount   Decimal   @default(0) @db.Decimal(14, 2)
   // H1.5 — one room of a multi-room reservation cancelled alone; null = active.
   cancelled_at   DateTime? @db.Timestamp(6)
+  // H2.1 — plan the room was sold with; null = room type base price.
+  rate_plan_id   Int?
   created_at     DateTime? @default(now()) @db.Timestamp(6)
   updated_at     DateTime? @default(now()) @db.Timestamp(6)
 
@@ -2446,9 +2451,57 @@ model lodging_reservation_rooms {
   reservation lodging_reservations  @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   unit_type   lodging_unit_types    @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   unit        lodging_units?        @relation(fields: [unit_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   nights      lodging_room_nights[]
 
   @@index([reservation_id])
+  @@index([unit_type_id])
+  @@index([rate_plan_id])
+}
+
+// Hospitality Suite (H2.1) — rate plan of a hotel store ("Solo alojamiento",
+// "Con desayuno"). A partial unique index (migration only) keeps one default
+// plan per store; the default is preselected when booking.
+model lodging_rate_plans {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  name       String    @db.VarChar(120)
+  code       String?   @db.VarChar(30)
+  // room_only | breakfast | half_board | full_board | all_inclusive
+  meal_plan  String    @default("room_only") @db.VarChar(30)
+  is_default Boolean   @default(false)
+  is_active  Boolean   @default(true)
+  sort_order Int       @default(0)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  prices            lodging_rate_prices[]
+  reservation_rooms lodging_reservation_rooms[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+}
+
+// Hospitality Suite (H2.1) — nightly price of a room type in a plan.
+// `day_of_week` null = base price of every night; 0 (Sunday) .. 6 (Saturday)
+// overrides that weekday. Partial unique indexes (migration only) allow one
+// base row and one row per weekday for each plan × type.
+model lodging_rate_prices {
+  id           Int       @id @default(autoincrement())
+  store_id     Int
+  rate_plan_id Int
+  unit_type_id Int
+  day_of_week  Int?      @db.SmallInt
+  price        Decimal   @db.Decimal(14, 2)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_plan lodging_rate_plans @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([rate_plan_id, unit_type_id])
   @@index([unit_type_id])
 }
 

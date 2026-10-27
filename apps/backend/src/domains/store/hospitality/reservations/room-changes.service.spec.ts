@@ -29,7 +29,19 @@ interface Options {
   updateError?: Error;
   /** Room cancelled alone in a multi-room reservation (H1.5). */
   cancelled?: boolean;
+  /** H2.1 — rate plan the room was sold with. */
+  ratePlanId?: number;
 }
+
+/**
+ * H2.1 — plan 3 "Con desayuno": Doble $250.000 base, Friday and Saturday
+ * $320.000. It does not price the Suite.
+ */
+const PLAN_PRICES = [
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: null, price: dec(250000) },
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: 5, price: dec(320000) },
+  { rate_plan_id: 3, unit_type_id: 11, day_of_week: 6, price: dec(320000) },
+];
 
 /**
  * Room 5 of reservation 9: Doble estándar, 10-nov → 13-nov (3 nights at
@@ -48,6 +60,7 @@ function createFake(options: Options = {}) {
     unit: options.unit === undefined ? null : options.unit,
     unit_type: { id: 11, name: 'Doble estándar' },
     cancelled_at: options.cancelled ? D('2026-11-01') : null,
+    rate_plan_id: options.ratePlanId ?? null,
     reservation: { status: options.status ?? 'confirmed' },
     nights: ['2026-11-10', '2026-11-11', '2026-11-12'].map((d) => ({
       night_date: D(d),
@@ -110,6 +123,20 @@ function createFake(options: Options = {}) {
       }),
       createMany: jest.fn(async ({ data }: any) => ({ count: data.length })),
     },
+    lodging_rate_plans: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.id === 3 && where.store_id === 1
+          ? { id: 3, name: 'Con desayuno', is_active: true }
+          : null,
+      ),
+    },
+    lodging_rate_prices: {
+      findMany: jest.fn(async ({ where }: any) =>
+        PLAN_PRICES.filter(
+          (p) => p.rate_plan_id === where.rate_plan_id && p.unit_type_id === where.unit_type_id,
+        ),
+      ),
+    },
     lodging_reservations: { update: jest.fn(async () => ({})) },
     lodging_reservation_events: { create: jest.fn(async () => ({})) },
   };
@@ -144,7 +171,7 @@ describe('diffStayNights', () => {
     const diff = diffStayNights(
       sold,
       ['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'],
-      dec(300000),
+      () => dec(300000),
       false,
     );
     expect(diff.added).toEqual(['2026-11-13']);
@@ -153,13 +180,13 @@ describe('diffStayNights', () => {
   });
 
   it('shortening drops the last night from the total', () => {
-    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11'], dec(250000), false);
+    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11'], () => dec(250000), false);
     expect(diff.removed).toEqual(['2026-11-12']);
     expect(diff.total.toFixed(2)).toBe('500000.00');
   });
 
   it('a type change reprices every night', () => {
-    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11', '2026-11-12'], dec(400000), true);
+    const diff = diffStayNights(sold, ['2026-11-10', '2026-11-11', '2026-11-12'], () => dec(400000), true);
     expect(diff.total.toFixed(2)).toBe('1200000.00');
   });
 });
@@ -338,6 +365,32 @@ describe('LodgingRoomChangesService', () => {
       const { service } = createFake({ unit: { id: 1, code: '101' } });
       const error = await rejection(service.quote(5, { unit_id: 1 }));
       expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_NOCHANGE_001');
+    });
+  });
+
+  describe('rate plan of the room (H2.1)', () => {
+    it('an added Friday night takes the plan weekday price and is snapshotted', async () => {
+      const { service, client } = createFake({ ratePlanId: 3 });
+      const quote = await service.quote(5, { departure_date: '2026-11-14' });
+      // 10/11/12-nov at the sold $250.000 + Friday 13-nov at $320.000.
+      expect(quote.proposed.total_amount).toBe('1070000.00');
+
+      await service.apply(5, { departure_date: '2026-11-14' });
+      expect(client.lodging_room_nights.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            night_date: D('2026-11-13'),
+            rate_amount: dec(320000),
+          }),
+        ],
+      });
+    });
+
+    it('a move to a type the plan does not price is rejected naming both', async () => {
+      const { service } = createFake({ ratePlanId: 3 });
+      const error = await rejection(service.quote(5, { unit_id: 3 }));
+      expect(codeOf(error)).toBe('LODGING_RATE_PLAN_UNPRICED_001');
+      expect(messageOf(error)).toBe('El plan Con desayuno no tiene precio para Suite');
     });
   });
 });

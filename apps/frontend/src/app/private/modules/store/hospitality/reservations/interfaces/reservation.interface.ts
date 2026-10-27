@@ -30,6 +30,35 @@ export interface LodgingReservationRoom {
   unit?: { id: number; code: string } | null;
   /** Set when this room was cancelled alone (H1.5); null = active. */
   cancelled_at?: string | null;
+  /** H2.1 — plan it was sold with; null = room type base price. */
+  rate_plan?: { id: number; name: string } | null;
+  /** H2.1 — sold nights with their price (detail only). */
+  nights?: NightRate[];
+}
+
+/** Price of one night (`night_date` date-only ISO or `YYYY-MM-DD`). */
+export interface NightRate {
+  night_date: string;
+  rate_amount: string;
+}
+
+const WEEKDAY_SHORT = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+/**
+ * H2.1 — per-night breakdown: "jue $250.000 · vie $320.000 = $570.000".
+ * `format` renders money (CurrencyFormatService).
+ */
+export function formatNightBreakdown(
+  nights: NightRate[],
+  format: (amount: number) => string,
+): string {
+  if (nights.length === 0) return '';
+  const parts = nights.map((n) => {
+    const day = WEEKDAY_SHORT[new Date(`${n.night_date.slice(0, 10)}T00:00:00Z`).getUTCDay()];
+    return `${day} ${format(Number(n.rate_amount))}`;
+  });
+  const total = nights.reduce((sum, n) => sum + Number(n.rate_amount), 0);
+  return `${parts.join(' · ')} = ${format(total)}`;
 }
 
 /** Reservation as returned by the store API (dates are date-only ISO). */
@@ -97,6 +126,8 @@ export interface ReservationQuoteRequest {
   departure_date: string;
   adults: number;
   children?: number;
+  /** H2.1 — rate plan; omitted = room type base price. */
+  rate_plan_id?: number;
 }
 
 export interface ReservationQuote {
@@ -107,7 +138,9 @@ export interface ReservationQuote {
   sold: number;
   overbooking_allowance: number;
   nights: number;
-  nightly_rate: string;
+  /** H2.1 — plan applied (null = base price) and the price of each night. */
+  rate_plan: { id: number; name: string } | null;
+  night_rates: NightRate[];
   total_amount: string;
 }
 
@@ -116,6 +149,7 @@ export interface ReservationRoomRequest {
   unit_type_id: number;
   adults: number;
   children?: number;
+  rate_plan_id?: number;
 }
 
 /** New reservation of one or more rooms sharing the stay dates. */

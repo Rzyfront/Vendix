@@ -192,6 +192,7 @@ export class DefaultPanelUIService {
         hospitality: true,
         hospitality_rooms: true,
         hospitality_reservations: true,
+        hospitality_rates: true,
         reports: true,
         reports_dispatch: true,
         invoicing: true,
