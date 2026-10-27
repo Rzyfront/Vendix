@@ -805,6 +805,132 @@ describe('CheckoutService - promotions and coupons', () => {
     });
   });
 
+  describe('bookings con y sin estación (punto 2 review)', () => {
+    const STATION_SERVICE_ID = 200;
+    const OPEN_SERVICE_ID = 201;
+
+    function mockServiceProducts() {
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) => {
+        if (args.where.id === STATION_SERVICE_ID) {
+          return Promise.resolve({
+            ...buildProduct({
+              id: STATION_SERVICE_ID,
+              name: 'Alineación',
+              product_type: 'service',
+            }),
+            requires_station: true,
+            requires_booking: true,
+          });
+        }
+        if (args.where.id === OPEN_SERVICE_ID) {
+          return Promise.resolve({
+            ...buildProduct({
+              id: OPEN_SERVICE_ID,
+              name: 'Domicilio',
+              product_type: 'service',
+            }),
+            requires_station: false,
+            requires_booking: true,
+          });
+        }
+        return baseImpl!(args);
+      });
+    }
+
+    function mockBookingLinking() {
+      const linkBookings = jest.fn().mockResolvedValue({ count: 1 });
+      prisma.$transaction = jest.fn(async (cb: any) =>
+        cb({ bookings: { updateMany: linkBookings } }),
+      );
+      prisma.orders.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const reservations = (service as any).reservationsService;
+      reservations.create.mockReset();
+      reservations.cancel = jest.fn().mockResolvedValue(undefined);
+      return { reservations, linkBookings };
+    }
+
+    const stationDto = {
+      payment_method_id: 7,
+      items: [{ product_id: STATION_SERVICE_ID, quantity: 1 }],
+      bookings: [
+        {
+          product_id: STATION_SERVICE_ID,
+          station_id: 5,
+          date: '2026-11-02',
+          start_time: '09:00',
+          end_time: '10:00',
+        },
+      ],
+    };
+
+    it('falla el checkout cuando la reserva CON estación falla (sin orden creada)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockRejectedValue(new Error('sin cupo'));
+      mockOrderCreate(10000);
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toThrow(
+        'sin cupo',
+      );
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('crea la orden aunque falle la reserva SIN estación (solo queda en el log)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockRejectedValue(new Error('sin agenda'));
+      mockOrderCreate(10000);
+      const warn = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => {});
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: OPEN_SERVICE_ID, quantity: 1 }],
+        bookings: [
+          {
+            product_id: OPEN_SERVICE_ID,
+            date: '2026-11-02',
+            start_time: '09:00',
+            end_time: '10:00',
+          },
+        ],
+      } as any);
+
+      expect(result.order_id).toBe(1);
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to create booking'),
+      );
+      warn.mockRestore();
+    });
+
+    it('reserva la estación antes de crear la orden y la vincula después', async () => {
+      mockServiceProducts();
+      const { reservations, linkBookings } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 55 });
+      mockOrderCreate(10000);
+
+      const result: any = await service.checkout({ ...stationDto } as any);
+
+      expect(result.order_id).toBe(1);
+      expect(reservations.create).toHaveBeenCalledTimes(1);
+      expect(reservations.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          product_id: STATION_SERVICE_ID,
+          station_id: 5,
+          skip_order_creation: true,
+        }),
+      );
+      // La reserva previa queda vinculada a la orden creada.
+      expect(linkBookings).toHaveBeenCalledWith({
+        where: { id: 55, store_id: 1, order_id: null },
+        data: { order_id: 1, updated_at: expect.any(Date) },
+      });
+    });
+  });
+
   describe('whatsappCheckout() — promotions share the same source of truth', () => {
     it('applies automatic promotions and returns discount details', async () => {
       promotionEngine.quoteDiscounts.mockResolvedValue({

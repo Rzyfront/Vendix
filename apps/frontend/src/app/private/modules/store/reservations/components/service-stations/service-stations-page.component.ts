@@ -272,6 +272,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
+  readonly currencyCode = this.currencyService.currencyCode;
 
   private timerInterval?: any;
   readonly now = signal(Date.now());

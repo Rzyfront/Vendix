@@ -607,6 +607,24 @@ export class ReservationsService {
       }
     }
 
+    if (dto.provider_id) {
+      // Same rule as create(): the technician must belong to this store, be
+      // active and offer this service before it is persisted on the hold.
+      const providerAssignment = await this.prisma.provider_services.findFirst({
+        where: {
+          provider_id: dto.provider_id,
+          product_id: dto.product_id,
+          provider: { store_id, is_active: true },
+        },
+        select: { id: true },
+      });
+      if (!providerAssignment) {
+        throw new BadRequestException(
+          'El proveedor especificado no ofrece este servicio o no esta activo',
+        );
+      }
+    }
+
     const isFreeBooking =
       product.booking_mode === booking_mode_enum.free_booking;
 

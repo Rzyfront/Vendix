@@ -260,7 +260,7 @@ export class ServiceSessionsService {
             state: 'draft',
             channel: booking?.channel ?? 'pos',
             delivery_type: 'direct_delivery',
-            currency: currency || 'COP',
+            currency,
             subtotal_amount: 0,
             tax_amount: 0,
             shipping_cost: 0,
@@ -843,7 +843,7 @@ export class ServiceSessionsService {
     if (!budget || budget.is_system) {
       if (!budget || !authorized.equals(budget.amount)) {
         await tx.service_budgets.create({
-          data: { store_id: storeId, session_id: sessionId, version: (budget?.version ?? 0) + 1, amount: authorized, currency: order.currency ?? 'COP', approved_at: null, is_system: true },
+          data: { store_id: storeId, session_id: sessionId, version: (budget?.version ?? 0) + 1, amount: authorized, currency: order.currency ?? (await this.settings.getStoreCurrency()), approved_at: null, is_system: true },
         });
       }
       return { covered: true };
@@ -1186,7 +1186,7 @@ export class ServiceSessionsService {
           state: 'draft',
           channel: 'pos',
           delivery_type: 'direct_delivery',
-          currency: currency || 'COP',
+          currency,
           subtotal_amount: 0,
           tax_amount: 0,
           shipping_cost: 0,

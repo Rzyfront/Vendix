@@ -1746,11 +1746,13 @@ export class CheckoutService {
     // cart/booking relationship before creating an order or payment.
     const requiredServiceUnits = new Map<string, number>();
     const cartUnits = new Map<string, number>();
+    const stationRequiredKeys = new Set<string>();
     for (const item of cart_items) {
       const key = `${item.product_id}:${item.product_variant_id ?? ''}`;
       cartUnits.set(key, (cartUnits.get(key) ?? 0) + Number(item.quantity));
       if (item.product?.requires_station) {
         requiredServiceUnits.set(key, (requiredServiceUnits.get(key) ?? 0) + Number(item.quantity));
+        stationRequiredKeys.add(key);
       }
     }
     const submittedBookingUnits = new Map<string, number>();
@@ -2328,11 +2330,25 @@ export class CheckoutService {
       guest_customer,
       resolved_customer_id,
     );
-    // Reserve all submitted appointments before order/payment creation. Any
-    // allocation error now aborts checkout without leaving a payable order.
+    // Only station-required services reserve before order/payment creation:
+    // a scheduled sale cannot exist without its slot, so any allocation
+    // error aborts checkout without leaving a payable order. Services
+    // without station keep the historical behavior below (order first, booking
+    // failures only logged).
+    const stationBookings = (dto.bookings ?? []).filter((booking) =>
+      stationRequiredKeys.has(
+        `${booking.product_id}:${booking.product_variant_id ?? ''}`,
+      ),
+    );
+    const openBookings = (dto.bookings ?? []).filter(
+      (booking) =>
+        !stationRequiredKeys.has(
+          `${booking.product_id}:${booking.product_variant_id ?? ''}`,
+        ),
+    );
     const createdBookingIds: number[] = [];
     try {
-      for (const booking of dto.bookings ?? []) {
+      for (const booking of stationBookings) {
         const created = await this.reservationsService.create({
           customer_id: resolved_customer_id ?? undefined,
           product_id: booking.product_id,
@@ -2457,23 +2473,27 @@ export class CheckoutService {
       throw error;
     });
 
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        for (const bookingId of createdBookingIds) {
-          const linked = await tx.bookings.updateMany({
-            where: { id: bookingId, store_id: order.store_id, order_id: null },
-            data: { order_id: order.id, updated_at: new Date() },
-          });
-          if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
-        }
-      });
-    } catch (error) {
-      await this.prisma.orders.updateMany({
-        where: { id: order.id, store_id: order.store_id },
-        data: { state: 'cancelled', updated_at: new Date() },
-      });
-      await this.cancelCheckoutBookings(createdBookingIds);
-      throw error;
+    // Only station bookings pre-exist here; checkouts without them skip the
+    // link transaction entirely (an empty $transaction is a wasted roundtrip).
+    if (createdBookingIds.length > 0) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          for (const bookingId of createdBookingIds) {
+            const linked = await tx.bookings.updateMany({
+              where: { id: bookingId, store_id: order.store_id, order_id: null },
+              data: { order_id: order.id, updated_at: new Date() },
+            });
+            if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+          }
+        });
+      } catch (error) {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
+      }
     }
 
     // Persist applied promotions + coupon usage. We do this OUTSIDE the order
@@ -2618,7 +2638,32 @@ export class CheckoutService {
       }
     }
 
-    // Bookings were allocated before order creation and linked atomically above.
+    // Station bookings were allocated before order creation and linked
+    // atomically above. Services without station keep the historical
+    // behavior: the order is already created, so a booking failure is logged
+    // and never aborts checkout (the booking can be retried manually).
+    for (const booking of openBookings) {
+      try {
+        await this.reservationsService.create({
+          customer_id: resolved_customer_id ?? undefined,
+          product_id: booking.product_id,
+          product_variant_id: booking.product_variant_id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          channel: order_channel_enum.ecommerce,
+          order_id: order.id,
+          skip_availability_check: false,
+        });
+        this.logger.log(
+          `Booking created for product ${booking.product_id} linked to order ${order.id}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to create booking for product ${booking.product_id}: ${(error as Error).message}`,
+        );
+      }
+    }
 
     // pending_shipping_assignment: nunca facturar DIAN automáticamente — el
     // envío ($0 en este punto) todavía no está acordado con el comprador, y

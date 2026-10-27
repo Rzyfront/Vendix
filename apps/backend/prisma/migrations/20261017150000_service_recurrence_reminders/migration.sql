@@ -2,7 +2,7 @@
 -- Tables affected: products (nullable recurrence_interval_days), new service_reminder_logs.
 -- Expected row changes: existing products retain NULL recurrence_interval_days; no existing reminder logs.
 -- Destructive operations: none.
--- FK/cascade risk: none.
+-- FK/cascade risk: RESTRICT FKs to stores/users/products/orders (no cascade); existing rows verified to satisfy them.
 -- Idempotency: additive column/table/indexes use IF NOT EXISTS; constraints guarded by pg_constraint.
 -- Approval: implementation continuation.
 
@@ -41,6 +41,30 @@ BEGIN
     ALTER TABLE "service_reminder_logs"
       ADD CONSTRAINT "service_reminder_logs_store_id_fkey"
       FOREIGN KEY ("store_id") REFERENCES "stores"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'service_reminder_logs_customer_id_fkey'
+  ) THEN
+    ALTER TABLE "service_reminder_logs"
+      ADD CONSTRAINT "service_reminder_logs_customer_id_fkey"
+      FOREIGN KEY ("customer_id") REFERENCES "users"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'service_reminder_logs_product_id_fkey'
+  ) THEN
+    ALTER TABLE "service_reminder_logs"
+      ADD CONSTRAINT "service_reminder_logs_product_id_fkey"
+      FOREIGN KEY ("product_id") REFERENCES "products"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'service_reminder_logs_source_order_id_fkey'
+  ) THEN
+    ALTER TABLE "service_reminder_logs"
+      ADD CONSTRAINT "service_reminder_logs_source_order_id_fkey"
+      FOREIGN KEY ("source_order_id") REFERENCES "orders"("id")
       ON DELETE RESTRICT ON UPDATE CASCADE;
   END IF;
 END $$;

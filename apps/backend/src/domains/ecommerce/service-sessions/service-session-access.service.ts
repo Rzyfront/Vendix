@@ -12,6 +12,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService, RequestContext } from '../../../common/context/request-context.service';
 import { REDIS_CLIENT } from '../../../common/redis/redis.module';
 import { NotificationsSseService } from '../../store/notifications/notifications-sse.service';
+import { mergeStoreSettingsWithDefaults } from '../../store/settings/defaults/default-store-settings';
 
 const PUBLIC_EVENT_TYPES = new Set([
   'opened', 'paused', 'resumed', 'extended', 'closed', 'cancelled', 'no_show', 'provider_changed',
@@ -123,6 +124,15 @@ export class ServiceSessionAccessService {
     return { token, token_id: tokenRow.id, expires_at: expiresAt };
   }
 
+  /** Store currency for public views (no request store settings here). */
+  private async resolveStoreCurrency(storeId: number): Promise<string> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings)?.general?.currency || 'USD';
+  }
+
   async getPublicProgress(token: string) {
     const binding = await this.resolveToken(token);
     const [events, budget, proposal, order, details] = await Promise.all([
@@ -216,7 +226,7 @@ export class ServiceSessionAccessService {
         approved_at: budget.approved_at,
       } : null,
       account: {
-        currency: order?.currency ?? budget?.currency ?? 'COP',
+        currency: order?.currency ?? budget?.currency ?? (await this.resolveStoreCurrency(binding.store_id)),
         // Precios con impuestos (lo que el cliente pagará); líneas viejas sin
         // final_unit_price caen a su base.
         items: (order?.order_items ?? []).map((item) => {

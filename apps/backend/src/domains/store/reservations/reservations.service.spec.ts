@@ -524,3 +524,72 @@ describe('ReservationsService.confirmHold — hold expirado', () => {
     expect(prisma.bookings.delete).not.toHaveBeenCalled();
   });
 });
+
+describe('ReservationsService.hold — provider_id del técnico', () => {
+  function build(providerAssignment: { id: number } | null) {
+    const prisma: any = {
+      products: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 3,
+          name: 'Corte',
+          requires_booking: true,
+          requires_station: false,
+          booking_mode: 'free_booking',
+        }),
+      },
+      provider_services: {
+        findFirst: jest.fn().mockResolvedValue(providerAssignment),
+      },
+      bookings: {
+        create: jest.fn().mockResolvedValue({ id: 11 }),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
+    };
+    const service = new ReservationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'generateBookingNumber').mockResolvedValue('BK-1');
+    jest.spyOn(service as any, 'mapBooking').mockImplementation(async (b: any) => b);
+    return { service, prisma };
+  }
+
+  const dto = {
+    customer_id: 1,
+    product_id: 3,
+    date: '2026-11-02',
+    start_time: '09:00',
+    end_time: '09:30',
+    provider_id: 99,
+  };
+
+  it('rechaza un técnico que no es de la tienda (u otro servicio / inactivo) y no crea la reserva', async () => {
+    const { service, prisma } = build(null);
+    await expect(service.hold(dto)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.provider_services.findFirst).toHaveBeenCalledWith({
+      where: {
+        provider_id: 99,
+        product_id: 3,
+        provider: { store_id: 1, is_active: true },
+      },
+      select: { id: true },
+    });
+    expect(prisma.bookings.create).not.toHaveBeenCalled();
+  });
+
+  it('guarda el técnico cuando es de la tienda y ofrece el servicio', async () => {
+    const { service, prisma } = build({ id: 5 });
+    await service.hold(dto);
+    expect(prisma.bookings.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ provider_id: 99, store_id: 1 }) }),
+    );
+  });
+});

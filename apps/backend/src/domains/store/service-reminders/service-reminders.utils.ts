@@ -182,9 +182,16 @@ export function digitsOnlyPhone(phone: string | null | undefined): string | null
   return digits.length >= 10 && digits.length <= 15 ? digits : null;
 }
 
-/** Normaliza un teléfono para wa.me (10 a 15 dígitos; 10 dígitos → prefijo 57). */
+/**
+ * Prefijo telefónico por defecto (Colombia) cuando el número trae 10 dígitos
+ * locales sin indicativo de país. Los números de 11-15 dígitos ya traen
+ * indicativo y se dejan tal cual.
+ */
+export const DEFAULT_WHATSAPP_COUNTRY_PREFIX = '57';
+
+/** Normaliza un teléfono para wa.me (10 a 15 dígitos). */
 export function normalizeWhatsappPhone(phone: string | null | undefined): string | null {
   const digits = digitsOnlyPhone(phone);
   if (!digits) return null;
-  return digits.length === 10 ? `57${digits}` : digits;
+  return digits.length === 10 ? `${DEFAULT_WHATSAPP_COUNTRY_PREFIX}${digits}` : digits;
 }

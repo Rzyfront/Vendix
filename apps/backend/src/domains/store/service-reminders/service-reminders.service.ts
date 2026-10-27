@@ -554,7 +554,10 @@ export class ServiceRemindersService {
     }
     const message = this.messageFor(ctx);
     const subject = `Recordatorio de tu servicio en ${ctx.storeName}`;
-    await this.email.sendEmail(ctx.row.customer.email, subject, `<p>${escapeHtml(message)}</p>`, message);
+    const result = await this.email.sendEmail(ctx.row.customer.email, subject, `<p>${escapeHtml(message)}</p>`, message);
+    if (!result.success) {
+      throw new BadRequestException(`No se pudo enviar el correo: ${result.error ?? 'error del proveedor'}`);
+    }
     if (logId) await this.markSent(logId, 'email');
     return { success: true, message: 'Correo enviado correctamente', reminder_id: logId };
   }
@@ -566,7 +569,8 @@ export class ServiceRemindersService {
     const phone = normalizeWhatsappPhone(ctx.row.customer.phone);
     if (!phone) throw new BadRequestException('El teléfono del cliente no es válido');
     const message = this.messageFor(ctx);
-    if (logId) await this.markSent(logId, 'whatsapp');
+    // Generar el enlace no garantiza que el mensaje se envió: el
+    // recordatorio queda pendiente hasta una confirmación real de envío.
     return { url: `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, message, reminder_id: logId };
   }
 

@@ -3,6 +3,7 @@ import {
   isFinancialSplitSettled,
 } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
+import { serviceBudgetBlocks } from '../utils/service-budget-cap.util';
 import {
   getCancellationBlocker,
   SETTLED_PAYMENT_STATES,
@@ -1983,16 +1984,12 @@ export class OrderFlowService {
       const budget = await this.prisma.service_budgets.findFirst({
         where: { store_id: order.store_id, session_id: order.service_session_id },
         orderBy: { version: 'desc' },
-        select: { amount: true, currency: true },
+        select: { amount: true, currency: true, is_system: true },
       });
       const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
         order.tip_amount ?? 0,
       );
-      if (
-        !budget ||
-        budget.currency !== order.currency ||
-        authorizedTotal.greaterThan(budget.amount)
-      ) {
+      if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
         throw new VendixHttpException(
           ErrorCodes.SERVICE_BUDGET_001,
           'No se puede cobrar: el total de la orden supera el presupuesto vigente o su moneda no coincide.',
@@ -8205,16 +8202,12 @@ export class OrderFlowService {
       const budget = await this.prisma.service_budgets.findFirst({
         where: { store_id: order.store_id, session_id: order.service_session_id },
         orderBy: { version: 'desc' },
-        select: { amount: true, currency: true },
+        select: { amount: true, currency: true, is_system: true },
       });
       const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
         order.tip_amount ?? 0,
       );
-      if (
-        !budget ||
-        budget.currency !== order.currency ||
-        authorizedTotal.greaterThan(budget.amount)
-      ) {
+      if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
         throw new VendixHttpException(
           ErrorCodes.SERVICE_BUDGET_001,
           'No se puede registrar el abono: el total de la orden supera el presupuesto vigente o su moneda no coincide.',
