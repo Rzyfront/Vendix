@@ -5597,6 +5597,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Ya existe un tipo de habitación con ese nombre',
   },
+  LODGING_UNIT_TYPE_PRODUCT_001: {
+    code: 'LODGING_UNIT_TYPE_PRODUCT_001',
+    httpStatus: 409,
+    devMessage:
+      'Este servicio pertenece a un tipo de habitación; edítalo desde Hotelería',
+  },
+  // A store without the `hospitality` industry gets 403 even through curl:
+  // the menu is UX only, LodgingIndustryGuard is the real boundary.
+  LODGING_INDUSTRY_001: {
+    code: 'LODGING_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'La industria de la tienda no incluye Hotelería',
+  },
   LODGING_UNIT_TYPE_CAPACITY_001: {
     code: 'LODGING_UNIT_TYPE_CAPACITY_001',
     httpStatus: 400,

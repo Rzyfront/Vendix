@@ -2329,6 +2329,8 @@ model lodging_unit_types {
   id                    Int       @id @default(autoincrement())
   store_id              Int
   product_id            Int       @unique
+  /// Also unique per store case-insensitive via
+  /// `lodging_unit_types_store_id_lower_name_key` ON (store_id, lower(name)).
   name                  String    @db.VarChar(120)
   code                  String?   @db.VarChar(30)
   description           String?   @db.Text
@@ -2376,6 +2378,8 @@ model lodging_units {
   id                  Int                              @id @default(autoincrement())
   store_id            Int
   unit_type_id        Int
+  /// Also unique per store case-insensitive via
+  /// `lodging_units_store_id_lower_code_key` ON (store_id, lower(code)).
   code                String                           @db.VarChar(30)
   floor               String?                          @db.VarChar(30)
   zone                String?                          @db.VarChar(60)

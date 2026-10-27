@@ -129,6 +129,22 @@ describe('UnitTypesService', () => {
     expect(productsService.remove).toHaveBeenCalledWith(40);
   });
 
+  it('si archivar el producto huérfano falla, lo registra y devuelve el error original', async () => {
+    const logError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+    unitTypes.findFirst.mockResolvedValueOnce(null);
+    productsService.create.mockResolvedValue({ id: 40 });
+    productsService.remove.mockRejectedValue(new Error('reservas activas'));
+    unitTypes.create.mockRejectedValue(new Error('db down'));
+
+    await expect(service.create(dto)).rejects.toThrow('db down');
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('Orphan night product 40'),
+      expect.anything(),
+    );
+  });
+
   it('lista los tipos con el conteo de habitaciones activas', async () => {
     unitTypes.findMany.mockResolvedValue([
       { id: 11, images: [], _count: { units: 2 } },
@@ -171,15 +187,76 @@ describe('UnitTypesService', () => {
 
     await service.update(11, { name: 'Doble superior', base_price: 280000 });
 
-    expect(productsService.update).toHaveBeenCalledWith(40, {
-      name: 'Noche – Doble superior',
-      slug: 'noche-doble-superior',
-      base_price: 280000,
-    });
+    expect(productsService.update).toHaveBeenCalledWith(
+      40,
+      {
+        name: 'Noche – Doble superior',
+        slug: 'noche-doble-superior',
+        base_price: 280000,
+      },
+      { from_lodging: true },
+    );
     expect(unitTypes.update).toHaveBeenCalledWith({
       where: { id: 11 },
       data: expect.objectContaining({ name: 'Doble superior', max_occupancy: 4 }),
     });
+    // The type is written before the product.
+    expect(unitTypes.update.mock.invocationCallOrder[0]).toBeLessThan(
+      productsService.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('si el producto noche no se puede editar, el tipo vuelve a su nombre anterior', async () => {
+    const current = {
+      id: 11,
+      product_id: 40,
+      name: 'Doble estándar',
+      base_occupancy: 2,
+      max_adults: 3,
+      max_children: 1,
+      max_occupancy: 4,
+      images: [],
+    };
+    unitTypes.findFirst
+      .mockResolvedValueOnce(current) // findOne inicial
+      .mockResolvedValueOnce(null); // nombre libre
+    unitTypes.update.mockResolvedValue({});
+    productsService.update.mockRejectedValue(new Error('impuesto inválido'));
+
+    await expect(
+      service.update(11, { name: 'Doble superior', base_price: 280000 }),
+    ).rejects.toThrow('impuesto inválido');
+    expect(unitTypes.update).toHaveBeenLastCalledWith({
+      where: { id: 11 },
+      data: expect.objectContaining({ name: 'Doble estándar', max_occupancy: 4 }),
+    });
+  });
+
+  it('un nombre de solo espacios no pasa el DTO', async () => {
+    const errors = await validate(
+      plainToInstance(CreateUnitTypeDto, { ...dto, name: '   ' }),
+    );
+    expect(errors.map((e) => e.property)).toContain('name');
+  });
+
+  it('la camarera no recibe el precio por noche; el dueño sí', async () => {
+    unitTypes.findMany.mockResolvedValue([
+      { id: 11, images: [], product: { id: 40, base_price: 250000 } },
+    ]);
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 5,
+      permissions: [
+        'store:lodging:inventory:read',
+        'store:lodging:housekeeping:read',
+        'store:lodging:housekeeping:operate',
+      ],
+    } as any);
+    expect((await service.findAll())[0].product.base_price).toBeNull();
+
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 5, is_owner: true } as any);
+    expect((await service.findAll())[0].product.base_price).toBe(250000);
   });
 
   it('al editar solo la capacidad no toca el producto', async () => {

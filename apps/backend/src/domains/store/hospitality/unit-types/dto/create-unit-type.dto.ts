@@ -1,11 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -22,6 +23,9 @@ import {
 /** H1.6 — upper bound of a type's overbooking allowance. */
 export const MAX_OVERBOOKING_ALLOWANCE = 99;
 
+const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
+
 export const MAX_CAPACITY_MESSAGE =
   'La capacidad máxima debe ser mayor que cero';
 
@@ -32,7 +36,9 @@ export const MAX_CAPACITY_MESSAGE =
  */
 export class CreateUnitTypeDto {
   @ApiProperty({ description: 'Nombre del tipo: "Doble estándar", "Suite".' })
+  @Transform(trim)
   @IsString()
+  @IsNotEmpty()
   @MaxLength(120)
   name!: string;
 

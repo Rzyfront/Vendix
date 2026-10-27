@@ -12,6 +12,7 @@ import {
 import { ApiOperation } from '@nestjs/swagger';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { LodgingIndustryGuard } from '@common/guards/lodging-industry.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { UnitsService } from './units.service';
 import { CreateUnitDto, CreateUnitsBulkDto, UpdateUnitDto } from './dto';
@@ -21,7 +22,7 @@ import { CreateUnitDto, CreateUnitsBulkDto, UpdateUnitDto } from './dto';
  * room-inventory permissions with room types.
  */
 @Controller('store/hospitality/units')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, LodgingIndustryGuard)
 export class UnitsController {
   constructor(
     private readonly unitsService: UnitsService,

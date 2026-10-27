@@ -23,7 +23,8 @@ export interface UnitType {
   product: {
     id: number;
     name: string;
-    base_price: string | number;
+    /** `null` for users without a price permission (housekeeping). */
+    base_price: string | number | null;
     state: string;
     product_tax_assignments: { tax_categories: { id: number; name: string } }[];
   };
@@ -40,7 +41,8 @@ export interface UnitTypePayload {
   max_children: number;
   bed_config?: string;
   base_price: number;
-  tax_category_ids: number[];
+  /** Omitted on edit when unchanged, so extra taxes added in Productos stay. */
+  tax_category_ids?: number[];
   images?: string[];
   amenities?: string[];
   /** H1.6 — sent only by users who may change it (`rates:write`). */

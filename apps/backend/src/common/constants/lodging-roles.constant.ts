@@ -56,7 +56,8 @@ export const LODGING_ROLE_PERMISSIONS: Readonly<
 /**
  * STORE_ADMIN panel modules a new user of the role sees. Every other module
  * starts hidden; the owner can still change it per user in "Módulos del
- * panel". Hotel modules are also gated by permission in the sidebar.
+ * panel". The sidebar does not check permissions: each hotel screen hides
+ * the actions the role lacks, and the API answers 403.
  */
 export const ROLE_PANEL_UI_PRESETS: Readonly<Record<string, readonly string[]>> =
   {

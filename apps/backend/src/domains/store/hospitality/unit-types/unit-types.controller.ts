@@ -11,6 +11,7 @@ import {
 import { ApiOperation } from '@nestjs/swagger';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { LodgingIndustryGuard } from '@common/guards/lodging-industry.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { UnitTypesService } from './unit-types.service';
 import { CreateUnitTypeDto, UpdateUnitTypeDto } from './dto';
@@ -21,7 +22,7 @@ import { LODGING_AMENITIES } from './lodging-media';
  * catch: VendixHttpException reaches the global filter with its real status.
  */
 @Controller('store/hospitality/unit-types')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, LodgingIndustryGuard)
 export class UnitTypesController {
   constructor(
     private readonly unitTypesService: UnitTypesService,

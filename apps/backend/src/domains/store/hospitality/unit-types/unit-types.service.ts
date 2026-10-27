@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -60,6 +60,24 @@ export function assertCanChangeOverbooking(): void {
   throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_OVERBOOKING_001);
 }
 
+/**
+ * H0.5 — the nightly price is money: it goes to whoever already sees the
+ * catalog or the rates (owner, admin, receptionist), never to housekeeping.
+ */
+const NIGHT_PRICE_READ_PERMISSIONS = [
+  'store:lodging:rates:read',
+  'store:products:read',
+];
+
+function canSeeNightPrice(): boolean {
+  const context = RequestContextService.getContext();
+  return Boolean(
+    context?.is_super_admin ||
+      context?.is_owner ||
+      context?.permissions?.some((p) => NIGHT_PRICE_READ_PERMISSIONS.includes(p)),
+  );
+}
+
 const UNIT_TYPE_INCLUDE = {
   product: {
     select: {
@@ -86,6 +104,8 @@ const UNIT_TYPE_INCLUDE = {
  */
 @Injectable()
 export class UnitTypesService {
+  private readonly logger = new Logger(UnitTypesService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
@@ -157,7 +177,12 @@ export class UnitTypesService {
     } catch (error) {
       // The product lives in its own transaction inside ProductsService:
       // archive it so a failed room type never leaves an orphan night product.
-      await this.productsService.remove(product.id).catch(() => undefined);
+      await this.productsService.remove(product.id).catch((cleanupError) =>
+        this.logger.error(
+          `Orphan night product ${product.id}: archiving it after a failed room type create failed`,
+          cleanupError instanceof Error ? cleanupError.stack : cleanupError,
+        ),
+      );
       throw this.mapUniqueViolation(error);
     }
   }
@@ -197,10 +222,8 @@ export class UnitTypesService {
         tax_category_ids: dto.tax_category_ids,
       }),
     };
-    if (Object.keys(productChanges).length > 0) {
-      await this.productsService.update(current.product_id, productChanges);
-    }
-
+    // The type is written first: a name race (P2002) fails before the product
+    // changes, and a failing product update restores the previous type row.
     try {
       await this.prisma.lodging_unit_types.update({
         where: { id },
@@ -227,17 +250,54 @@ export class UnitTypesService {
     } catch (error) {
       throw this.mapUniqueViolation(error);
     }
+
+    if (Object.keys(productChanges).length > 0) {
+      try {
+        await this.productsService.update(current.product_id, productChanges, {
+          from_lodging: true,
+        });
+      } catch (error) {
+        await this.prisma.lodging_unit_types.update({
+          where: { id },
+          data: {
+            name: current.name,
+            code: current.code,
+            description: current.description,
+            base_occupancy: current.base_occupancy,
+            max_adults: current.max_adults,
+            max_children: current.max_children,
+            max_occupancy: current.max_occupancy,
+            bed_config: current.bed_config,
+            images: current.images,
+            amenities: current.amenities,
+            overbooking_allowance: current.overbooking_allowance,
+            sort_order: current.sort_order,
+            is_active: current.is_active,
+            updated_at: current.updated_at,
+          },
+        });
+        throw error;
+      }
+    }
     return this.findOne(id);
   }
 
-  /** Photos are stored as S3 keys and signed on every read. */
-  private async withImageUrls<T extends { images: string[] }>(unitType: T) {
+  /**
+   * Photos are stored as S3 keys and signed on every read. The night price is
+   * `null` for users without a price permission.
+   */
+  private async withImageUrls<
+    T extends { images: string[]; product: { base_price: unknown } },
+  >(unitType: T) {
     const image_urls = await Promise.all(
       unitType.images.map(
         async (key) => (await this.s3Service.signUrl(key)) ?? '',
       ),
     );
-    return { ...unitType, image_urls };
+    const product = canSeeNightPrice()
+      ? unitType.product
+      : { ...unitType.product, base_price: null };
+    return { ...unitType, product, image_urls };
   }
 
   private normalizeImages(images: string[] | undefined): string[] | undefined {

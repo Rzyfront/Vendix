@@ -23,6 +23,7 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { UnitFormModalComponent } from '../../components/unit-form-modal/unit-form-modal.component';
 import { UnitTypeFormModalComponent } from '../../components/unit-type-form-modal/unit-type-form-modal.component';
@@ -110,10 +111,12 @@ export function formatCapacity(u: UnitType): string {
               >
                 Tipos de habitación ({{ unitTypes().length }})
               </h2>
-              <app-button variant="primary" size="md" (clicked)="openCreate()">
-                <app-icon slot="icon" name="plus" [size]="16" />
-                Nuevo tipo
-              </app-button>
+              @if (canWrite()) {
+                <app-button variant="primary" size="md" (clicked)="openCreate()">
+                  <app-icon slot="icon" name="plus" [size]="16" />
+                  Nuevo tipo
+                </app-button>
+              }
             </div>
           </div>
 
@@ -130,7 +133,7 @@ export function formatCapacity(u: UnitType): string {
                 description="Crea tipos como Doble, Suite o Cabaña con su capacidad y precio base."
                 actionButtonText="Nuevo tipo"
                 actionButtonIcon="plus"
-                [showActionButton]="true"
+                [showActionButton]="canWrite()"
                 (actionClick)="openCreate()"
               />
             } @else {
@@ -155,15 +158,17 @@ export function formatCapacity(u: UnitType): string {
               >
                 Habitaciones ({{ units().length }})
               </h2>
-              <app-button
-                variant="primary"
-                size="md"
-                [disabled]="!hasActiveTypes()"
-                (clicked)="openCreateUnit()"
-              >
-                <app-icon slot="icon" name="plus" [size]="16" />
-                Nueva
-              </app-button>
+              @if (canWrite()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [disabled]="!hasActiveTypes()"
+                  (clicked)="openCreateUnit()"
+                >
+                  <app-icon slot="icon" name="plus" [size]="16" />
+                  Nueva
+                </app-button>
+              }
             </div>
           </div>
 
@@ -189,7 +194,7 @@ export function formatCapacity(u: UnitType): string {
                 description="Registra cada habitación física (101, 102, Cabaña 1) con su tipo y piso."
                 actionButtonText="Nueva habitación"
                 actionButtonIcon="plus"
-                [showActionButton]="true"
+                [showActionButton]="canWrite()"
                 (actionClick)="openCreateUnit()"
               />
             } @else {
@@ -231,6 +236,12 @@ export class HospitalityRoomsPageComponent implements OnInit {
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Housekeeping and front desk only read rooms: no create or edit actions. */
+  readonly canWrite = computed(() =>
+    this.authFacade.hasPermission('store:lodging:inventory:write'),
+  );
 
   readonly tabs: ScrollableTab[] = [
     { id: 'types', label: 'Tipos', icon: 'bed-double' },
@@ -275,12 +286,14 @@ export class HospitalityRoomsPageComponent implements OnInit {
       label: 'Editar',
       icon: 'edit-2',
       variant: 'primary',
+      show: () => this.canWrite(),
       action: (item: LodgingUnit) => this.openEditUnit(item),
     },
     {
       label: (item: LodgingUnit) => (item.is_active ? 'Desactivar' : 'Activar'),
       icon: (item: LodgingUnit) => (item.is_active ? 'eye-off' : 'eye'),
       variant: 'secondary',
+      show: () => this.canWrite(),
       action: (item: LodgingUnit) => this.toggleUnitActive(item),
     },
   ];
@@ -300,7 +313,11 @@ export class HospitalityRoomsPageComponent implements OnInit {
       ...u,
       capacity: formatCapacity(u),
       units: formatUnitCount(u._count?.units ?? 0),
-      price: this.currency.format(u.product.base_price, 0),
+      // `null` when the user has no price permission (housekeeping).
+      price:
+        u.product.base_price === null
+          ? '—'
+          : this.currency.format(u.product.base_price, 0),
       tax:
         u.product.product_tax_assignments
           .map((a) => a.tax_categories.name)
@@ -324,6 +341,7 @@ export class HospitalityRoomsPageComponent implements OnInit {
       label: 'Editar',
       icon: 'edit-2',
       variant: 'primary',
+      show: () => this.canWrite(),
       action: (item: UnitType) => this.openEdit(item),
     },
   ];

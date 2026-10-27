@@ -394,7 +394,8 @@ export class UnitTypeFormModalComponent {
       max_adults: u?.max_adults ?? 2,
       max_children: u?.max_children ?? 0,
       bed_config: u?.bed_config ?? '',
-      base_price: u ? Number(u.product.base_price) : null,
+      base_price:
+        u && u.product.base_price !== null ? Number(u.product.base_price) : null,
       tax_category_id:
         u?.product.product_tax_assignments[0]?.tax_categories.id ?? NO_TAX,
       overbooking_allowance: u ? u.overbooking_allowance : null,
@@ -471,7 +472,6 @@ export class UnitTypeFormModalComponent {
       max_children: raw.max_children ?? 0,
       bed_config: raw.bed_config.trim() || undefined,
       base_price: raw.base_price ?? 0,
-      tax_category_ids: raw.tax_category_id ? [raw.tax_category_id] : [],
       images: this.photos().map((p) => p.key),
       amenities: this.amenities(),
       // Empty on a new type = the store default; never sent without permission.
@@ -481,6 +481,15 @@ export class UnitTypeFormModalComponent {
         }),
     };
     const current = this.unitType();
+    // The form edits one tax: send it only when it changed, so a second tax
+    // added from Productos is not wiped by saving the room type.
+    const initialTax =
+      current?.product.product_tax_assignments[0]?.tax_categories.id ?? NO_TAX;
+    if (!current || raw.tax_category_id !== initialTax) {
+      payload.tax_category_ids = raw.tax_category_id
+        ? [raw.tax_category_id]
+        : [];
+    }
     const request$ = current
       ? this.unitTypesService.update(current.id, payload)
       : this.unitTypesService.create(payload);

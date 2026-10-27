@@ -88,7 +88,6 @@ jobs:
             mobile:
               - *shared
               - 'apps/mobile/**'
-              - 'scripts/industry-parity-audit.sh'
             backend:
               - *shared
               - 'apps/backend/**'
@@ -124,7 +123,7 @@ jobs:
         if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && steps.filter.outputs.backend == 'true' }}
         run: bash scripts/check-tools-no-prisma.sh
       - name: Industry Parity Audit
-        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && (steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.mobile == 'true') }}
+        if: ${{ !cancelled() && steps.ci_gate.outputs.run_ci == 'true' && (steps.filter.outputs.backend == 'true' || steps.filter.outputs.frontend == 'true') }}
         run: bash scripts/industry-parity-audit.sh
 
   backend-build:
