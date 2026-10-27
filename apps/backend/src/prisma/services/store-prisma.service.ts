@@ -169,6 +169,8 @@ export class StorePrismaService extends BasePrismaService {
     'lodging_ical_imports',
     // H6.6 — online payments of web bookings.
     'lodging_reservation_payments',
+    // Hospitality Suite (H7.1)
+    'lodging_night_audits',
     // ===== Restaurant Suite Foundation (Fase A) =====
     // Only the 8 models that carry a direct store_id column use direct-store
     // scoping. The 3 child tables (recipe_items, kitchen_ticket_items,
@@ -1925,6 +1927,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get lodging_reservation_payments() {
     return this.scoped_client.lodging_reservation_payments;
+  }
+
+  // Hospitality Suite (H7.1)
+  get lodging_night_audits() {
+    return this.scoped_client.lodging_night_audits;
   }
 
   get product_price_tier_overrides() {

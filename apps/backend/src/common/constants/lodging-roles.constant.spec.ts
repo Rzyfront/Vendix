@@ -28,6 +28,7 @@ describe('Hotel default roles (H0.5)', () => {
           'store:lodging:front_desk:operate',
           'store:lodging:housekeeping:read',
           'store:lodging:inventory:read',
+          'store:lodging:night_audit:close',
           'store:lodging:reservations:read',
           'store:lodging:reservations:write',
           'store:orders:create',

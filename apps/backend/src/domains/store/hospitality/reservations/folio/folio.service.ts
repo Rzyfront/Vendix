@@ -470,8 +470,17 @@ export class LodgingFolioService {
       reservation_room: { reservation_id: folio.reservation_id, cancelled_at: null },
     };
     // Cheap pre-check outside the transaction: the job visits every folio.
-    const due = await this.prisma.lodging_room_nights.count({ where: nightWhere });
-    if (due === 0) return 0;
+    const first = await this.prisma.lodging_room_nights.findFirst({
+      where: nightWhere,
+      orderBy: { night_date: 'asc' },
+      select: { night_date: true },
+    });
+    if (!first) return 0;
+    // H7.1 — a closed business day is frozen: its nights wait for a reopen.
+    const frozen = await this.closedNightDates(first.night_date, bound);
+    if (frozen.length > 0) {
+      nightWhere.night_date = inclusive ? { lte: bound, notIn: frozen } : { lt: bound, notIn: frozen };
+    }
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -688,6 +697,7 @@ export class LodgingFolioService {
           throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_VOID_001, 'El cargo no pertenece a este folio');
         }
         if (item.cancelled_at) return; // Already voided: nothing to write.
+        await this.assertNightDayOpen(item.id);
         if (item.inventory_committed || item.inventory_consumed_at_fire) {
           throw new VendixHttpException(
             ErrorCodes.LODGING_FOLIO_VOID_001,
@@ -1064,6 +1074,34 @@ export class LodgingFolioService {
     });
     if (!folio) throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_FIND_001);
     return folio;
+  }
+
+  /**
+   * H7.1 — business days closed by the night audit between `from` and `to`
+   * (inclusive). Their nights are frozen: not posted until the day reopens.
+   */
+  private async closedNightDates(from: Date, to: Date): Promise<Date[]> {
+    const closed = await this.prisma.lodging_night_audits.findMany({
+      where: { status: 'closed', business_date: { gte: from, lte: to } },
+      select: { business_date: true },
+    });
+    return closed.map((row) => row.business_date);
+  }
+
+  /** H7.1 — a night line of a closed business day cannot be voided. */
+  private async assertNightDayOpen(order_item_id: number): Promise<void> {
+    const night = await this.prisma.lodging_room_nights.findFirst({
+      where: { posted_order_item_id: order_item_id },
+      select: { night_date: true },
+    });
+    if (!night) return;
+    const frozen = await this.closedNightDates(night.night_date, night.night_date);
+    if (frozen.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001,
+        `El día ${night.night_date.toISOString().slice(0, 10)} está cerrado: reábrelo para anular esta noche`,
+      );
+    }
   }
 
   private assertOpen(folio: FolioRow): void {

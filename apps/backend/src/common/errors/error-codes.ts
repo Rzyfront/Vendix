@@ -5950,6 +5950,22 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El pago no es válido para el folio',
   },
+  // H7.1 — night audit (business day close and reopen).
+  LODGING_NIGHT_AUDIT_CLOSED_001: {
+    code: 'LODGING_NIGHT_AUDIT_CLOSED_001',
+    httpStatus: 409,
+    devMessage: 'El día de negocio está cerrado',
+  },
+  LODGING_NIGHT_AUDIT_DATE_001: {
+    code: 'LODGING_NIGHT_AUDIT_DATE_001',
+    httpStatus: 400,
+    devMessage: 'No se puede cerrar un día que aún no llega',
+  },
+  LODGING_NIGHT_AUDIT_REOPEN_001: {
+    code: 'LODGING_NIGHT_AUDIT_REOPEN_001',
+    httpStatus: 409,
+    devMessage: 'Solo se reabre un día cerrado',
+  },
   // H3.7 — check-out with payment and electronic invoice.
   LODGING_CHECKOUT_001: {
     code: 'LODGING_CHECKOUT_001',

@@ -39,6 +39,7 @@ import {
   SplitResult,
   VatExemptServicesReport,
 } from '../interfaces/folio.interface';
+import { NightAuditView } from '../interfaces/night-audit.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -53,6 +54,7 @@ export class LodgingReservationsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/store/hospitality/reservations`;
   private readonly roomChargesUrl = `${environment.apiUrl}/store/hospitality/room-charges`;
+  private readonly nightAuditUrl = `${environment.apiUrl}/store/hospitality/night-audit`;
 
   list(query: ReservationListQuery = {}): Observable<ReservationListResult> {
     return this.http
@@ -291,6 +293,31 @@ export class LodgingReservationsService {
         `${environment.apiUrl}/store/hospitality/reports/vat-exempt-services`,
         { params },
       )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.1 — "Cerrar día": summary of a business day (default: the current one). */
+  nightAudit(date?: string): Observable<NightAuditView> {
+    const params = date ? new HttpParams().set('date', date) : undefined;
+    return this.http
+      .get<ApiResponse<NightAuditView>>(this.nightAuditUrl, { params })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.1 — closes the day: posts the nights, marks no-shows, freezes the date. */
+  closeNightAudit(date: string, markNoShows: boolean): Observable<NightAuditView> {
+    return this.http
+      .post<ApiResponse<NightAuditView>>(`${this.nightAuditUrl}/close`, {
+        date,
+        mark_no_shows: markNoShows,
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.1 — reopens a closed day (permission store:lodging:night_audit:reopen). */
+  reopenNightAudit(date: string, reason: string): Observable<NightAuditView> {
+    return this.http
+      .post<ApiResponse<NightAuditView>>(`${this.nightAuditUrl}/reopen`, { date, reason })
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

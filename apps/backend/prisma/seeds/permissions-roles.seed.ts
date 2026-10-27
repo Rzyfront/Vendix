@@ -557,6 +557,20 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      // H7.1 — night audit: close the business day (the night auditor is a
+      // receptionist) and reopen a closed one (owner/admin/manager).
+      name: 'store:lodging:night_audit:close',
+      description: 'Cerrar el día de negocio del hotel (auditoría nocturna)',
+      path: '/api/store/hospitality/night-audit/close',
+      method: 'POST',
+    },
+    {
+      name: 'store:lodging:night_audit:reopen',
+      description: 'Reabrir un día de negocio cerrado del hotel',
+      path: '/api/store/hospitality/night-audit/reopen',
+      method: 'POST',
+    },
+    {
       name: 'store:lodging:reports:read',
       description: 'Ver reportes del hotel',
       path: '/api/store/hospitality/reports',

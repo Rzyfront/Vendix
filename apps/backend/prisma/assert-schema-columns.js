@@ -139,6 +139,8 @@ const REQUIRED_COLUMNS = [
   // --- Hotelería H3.7 · check-out con cobro y factura
   'lodging_folios.verified_total',
   'lodging_folios.closed_by_user_id',
+  // H7.1 — night posting skips the nights of a closed business day.
+  'lodging_night_audits.status',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

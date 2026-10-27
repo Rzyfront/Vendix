@@ -80,10 +80,13 @@ function build(
   const lineTotal = (it: Item) =>
     it.total_price + it.order_item_taxes.reduce((s, t) => s + t.tax_amount, 0);
 
+  // H7.1 — business days closed by the night audit (`YYYY-MM-DD`).
+  const closedDays: string[] = [];
   const unposted = (where: any) =>
     nights.filter((n) => {
       if (n.posted_order_item_id !== null) return false;
       const date = where.night_date;
+      if (date.notIn?.some((d: Date) => d.getTime() === n.night_date.getTime())) return false;
       if (date.lte) return n.night_date <= date.lte;
       return n.night_date < date.lt;
     });
@@ -238,7 +241,24 @@ function build(
     lodging_folios: {
       findFirst: jest.fn(async () => ({ id: 70, status: 'open', reservation_id: 1, order_id: 500 })),
     },
-    lodging_room_nights: { count: jest.fn(async ({ where }: any) => unposted(where).length) },
+    lodging_room_nights: {
+      findFirst: jest.fn(async ({ where }: any) => {
+        // H7.1 — the void guard looks the night up by its folio line.
+        if (typeof where.posted_order_item_id === 'number') {
+          return nights.find((n) => n.posted_order_item_id === where.posted_order_item_id) ?? null;
+        }
+        const due = unposted(where);
+        return due.length > 0 ? { night_date: due[0].night_date } : null;
+      }),
+    },
+    lodging_night_audits: {
+      findMany: jest.fn(async ({ where }: any) =>
+        closedDays
+          .map((d) => new Date(`${d}T00:00:00Z`))
+          .filter((d) => d >= where.business_date.gte && d <= where.business_date.lte)
+          .map((business_date) => ({ business_date })),
+      ),
+    },
     store_settings: {
       findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })),
     },
@@ -313,6 +333,7 @@ function build(
   // The folio view is a plain read; these specs assert the writes.
   jest.spyOn(service, 'getFolio').mockResolvedValue({} as any);
   return {
+    closedDays,
     online,
     service,
     prisma,
@@ -410,6 +431,22 @@ describe('LodgingFolioService (H3.4)', () => {
       expect(nights.map((n) => n.posted_order_item_id)).toEqual([items[0].id, null]);
     });
 
+    it('H7.1 — a night of a closed business day is not posted until the day reopens', async () => {
+      const { service, items, nights, closedDays } = build();
+      const folio = { id: 70, status: 'open', reservation_id: 1, order_id: 500 };
+      closedDays.push('2026-11-10');
+
+      expect(await service.postNightsThrough(folio, '2026-11-11', true)).toBe(1);
+      expect(items).toHaveLength(1);
+      expect(items[0].description).toBe('Noche 11-nov · Doble · 101');
+      expect(nights[0].posted_order_item_id).toBeNull();
+
+      // Reopened: the frozen night is charged.
+      closedDays.length = 0;
+      expect(await service.postNightsThrough(folio, '2026-11-11', true)).toBe(1);
+      expect(nights[0].posted_order_item_id).toBe(items[1].id);
+    });
+
     it('a closed folio takes no nights', async () => {
       const { service, prisma, items } = build();
       prisma.lodging_folios.findFirst.mockResolvedValueOnce({
@@ -462,6 +499,17 @@ describe('LodgingFolioService (H3.4)', () => {
       const error = await errorOf(service.voidCharge(1, 1000, { reason: 'Error de digitación' }));
 
       expect(error.errorCode).toBe(ErrorCodes.LODGING_FOLIO_VOID_001.code);
+      expect(items[0].cancelled_at).toBeNull();
+    });
+
+    it('H7.1 — rejects voiding a night of a closed business day', async () => {
+      const { service, items, closedDays } = build();
+      await service.postNights(1);
+      closedDays.push('2026-11-10');
+
+      const error = await errorOf(service.voidCharge(1, 1000, { reason: 'Cortesía de la casa' }));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001.code);
       expect(items[0].cancelled_at).toBeNull();
     });
 

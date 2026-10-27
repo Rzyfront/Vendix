@@ -24,6 +24,8 @@ export const LODGING_ROLE_PERMISSIONS: Readonly<
     'store:lodging:front_desk:operate',
     'store:lodging:folio:charge',
     'store:lodging:folio:close',
+    // H7.1 — the night auditor closes the day; reopening stays with managers.
+    'store:lodging:night_audit:close',
     'store:lodging:housekeeping:read',
     'store:lodging:compliance:operate',
     // Guest profiles (the reservation holder is a customer).

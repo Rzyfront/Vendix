@@ -47,6 +47,8 @@ import { EmailModule } from '../../../../email/email.module';
 import { S3Module } from '@common/services/s3.module';
 import { LodgingVatExemptServicesController } from './reports/vat-exempt-services.controller';
 import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
+import { LodgingNightAuditController } from './night-audit/night-audit.controller';
+import { LodgingNightAuditService } from './night-audit/night-audit.service';
 
 @Module({
   imports: [
@@ -90,6 +92,7 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     LodgingFolioSplitController,
     LodgingVatExemptServicesController,
     LodgingInventoryBlocksController,
+    LodgingNightAuditController,
   ],
   providers: [
     LodgingReservationsService,
@@ -111,6 +114,7 @@ import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.s
     LodgingInventoryBlocksService,
     LodgingBookingEngineService,
     BookingHoldExpiryJob,
+    LodgingNightAuditService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
 })

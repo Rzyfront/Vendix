@@ -1085,6 +1085,7 @@ model stores {
   lodging_inventory_blocks       lodging_inventory_blocks[]
   lodging_ical_imports           lodging_ical_imports[]
   lodging_reservation_payments   lodging_reservation_payments[]
+  lodging_night_audits           lodging_night_audits[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2447,6 +2448,29 @@ enum lodging_inventory_block_reason_enum {
 // [from_date, to_date) without a reservation (maintenance, owner use). It
 // lowers the type availability while active; releasing it (released_at)
 // returns the room to sale.
+// Hospitality Suite (H7.1) — night audit: one row per closed business day.
+// `status` closed freezes the day (no night of that date is posted or voided);
+// reopened (with permission and a reason) unfreezes it until it closes again.
+// `summary` is the snapshot shown by "Cerrar día" at closing time.
+model lodging_night_audits {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  business_date       DateTime  @db.Date
+  status              String    @default("closed") @db.VarChar(20)
+  summary             Json
+  closed_by_user_id   Int?
+  closed_at           DateTime  @db.Timestamp(6)
+  reopened_by_user_id Int?
+  reopened_at         DateTime? @db.Timestamp(6)
+  reopen_reason       String?   @db.VarChar(500)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, business_date])
+}
+
 model lodging_inventory_blocks {
   id                  Int                                 @id @default(autoincrement())
   store_id            Int

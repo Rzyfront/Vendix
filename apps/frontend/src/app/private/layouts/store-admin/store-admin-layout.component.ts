@@ -605,6 +605,13 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_reservations',
         },
         {
+          // H7.1 — night audit (close the business day): same panel_ui key.
+          label: 'Cierre del día',
+          icon: 'moon',
+          route: '/admin/hospitality/night-audit',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
           label: 'Servicios exentos',
           icon: 'file-check',

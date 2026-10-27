@@ -1051,6 +1051,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityIcalExportPageComponent),
           },
           {
+            // H7.1 — "Cierre del día" (night audit); same panel_ui key as Reservas.
+            path: 'night-audit',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/night-audit-page/night-audit-page.component'
+              ).then((c) => c.HospitalityNightAuditPageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

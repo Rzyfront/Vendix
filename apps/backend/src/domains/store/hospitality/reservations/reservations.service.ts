@@ -301,9 +301,14 @@ export class LodgingReservationsService {
   /**
    * Moves the store's confirmed reservations that arrive before
    * `arrivalCutoff` (exclusive) to no-show. Used by the no-show job inside
-   * the store context. Returns how many moved.
+   * the store context, and by the night audit close (H7.1) with its own
+   * reason and user. Returns how many moved.
    */
-  async autoNoShow(arrivalCutoff: string): Promise<number> {
+  async autoNoShow(
+    arrivalCutoff: string,
+    reason: string = AUTO_NO_SHOW_REASON,
+    user_id: number | null = null,
+  ): Promise<number> {
     const overdue = await this.prisma.lodging_reservations.findMany({
       where: { status: 'confirmed', arrival_date: { lt: dateOnlyToDb(arrivalCutoff) } },
       select: { id: true },
@@ -312,7 +317,7 @@ export class LodgingReservationsService {
     });
     let moved = 0;
     for (const { id } of overdue) {
-      if (await this.applyTransition(id, 'no_show', AUTO_NO_SHOW_REASON, null)) moved += 1;
+      if (await this.applyTransition(id, 'no_show', reason, user_id)) moved += 1;
     }
     return moved;
   }
