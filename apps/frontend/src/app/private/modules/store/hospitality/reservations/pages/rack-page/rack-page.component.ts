@@ -33,6 +33,10 @@ import {
   RoomChangeRequest,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import {
+  HOUSEKEEPING_STATUS_LABELS,
+  HousekeepingStatus,
+} from '../../../rooms/interfaces/unit.interface';
 
 /** Days the arrows move the window. */
 const STEP_DAYS = 14;
@@ -386,7 +390,12 @@ export class HospitalityRackPageComponent implements OnInit {
           typeId: type.id,
           unitId: unit.id,
           muted: !unit.is_active || outOfOrder,
-          hint: !unit.is_active ? 'Inactiva' : outOfOrder ? 'Fuera de servicio' : undefined,
+          // H5.1 — housekeeping status set on the Housekeeping board.
+          hint: !unit.is_active
+            ? 'Inactiva'
+            : outOfOrder || unit.housekeeping_status === 'dirty'
+              ? HOUSEKEEPING_STATUS_LABELS[unit.housekeeping_status as HousekeepingStatus]
+              : undefined,
         });
         unitRow.set(unit.id, row);
       }

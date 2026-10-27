@@ -6,6 +6,7 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { dateOnlyToDb, stayNights } from './stay-dates';
 import { allotmentHolds, consumedKey } from './lodging-allotment-holds';
+import { UNSELLABLE_HOUSEKEEPING_STATUSES } from '../housekeeping/housekeeping-status';
 
 /** Prisma client or interactive transaction exposing the lodging models. */
 export type LodgingInventoryClient = Pick<
@@ -17,6 +18,16 @@ export type LodgingInventoryClient = Pick<
 >;
 
 const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
+/**
+ * H5.1 — sellable rooms of a type: active and not out of order/service.
+ * Taking a room out of service lowers its type's availability at once.
+ */
+const sellableUnitsWhere = (unit_type_id: number) => ({
+  unit_type_id,
+  is_active: true,
+  housekeeping_status: { notIn: [...UNSELLABLE_HOUSEKEEPING_STATUSES] },
+});
 
 /** `groupBy(['night_date'])` counts → rooms per `YYYY-MM-DD`. */
 const countByNight = (rows: { night_date: Date; _count: { _all: number } }[]) =>
@@ -91,7 +102,7 @@ export class LodgingAvailabilityService {
         where: { id: unit_type_id },
         select: { overbooking_allowance: true },
       }),
-      client.lodging_units.count({ where: { unit_type_id, is_active: true } }),
+      client.lodging_units.count({ where: sellableUnitsWhere(unit_type_id) }),
       client.lodging_room_nights.groupBy({
         by: ['night_date'],
         where: {
@@ -152,7 +163,7 @@ export class LodgingAvailabilityService {
         where: { id: unit_type_id },
         select: { overbooking_allowance: true },
       }),
-      client.lodging_units.count({ where: { unit_type_id, is_active: true } }),
+      client.lodging_units.count({ where: sellableUnitsWhere(unit_type_id) }),
       client.lodging_room_nights.groupBy({
         by: ['night_date'],
         where: { unit_type_id, is_active: true, night_date: range },

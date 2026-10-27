@@ -1035,6 +1035,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityFrontDeskPageComponent),
           },
           {
+            // H5.1 — housekeeping board; same panel_ui key as Habitaciones.
+            path: 'housekeeping',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/housekeeping/pages/housekeeping-page/housekeeping-page.component'
+              ).then((c) => c.HospitalityHousekeepingPageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

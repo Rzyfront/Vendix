@@ -575,6 +575,14 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/rooms',
         },
         {
+          // H5.1 — room status board: same panel_ui key as Habitaciones, so
+          // the Camarera preset (hospitality_rooms) already shows it.
+          label: 'Housekeeping',
+          icon: 'sparkles',
+          route: '/admin/hospitality/housekeeping',
+          panelUiKey: 'hospitality_rooms',
+        },
+        {
           // H3.3 — front desk board of the day: same panel_ui key as Reservas.
           label: 'Recepción',
           icon: 'concierge-bell',

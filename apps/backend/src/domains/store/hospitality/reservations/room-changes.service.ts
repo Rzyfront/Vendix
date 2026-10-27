@@ -10,12 +10,10 @@ import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
 import { loadPlanPricing } from '../rates/rate-plans.service';
 import { resolveNightRate } from '../rates/lodging-rate-resolver';
+import { isSellableHousekeeping } from '../housekeeping/housekeeping-status';
 
 /** Same queue and limits as a sale: changes wait on the store's sale lock. */
 const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
-
-/** Housekeeping states that take a room out of sale. */
-const UNSELLABLE_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
 
 const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -213,7 +211,7 @@ export class LodgingRoomChangesService {
       if (!target) {
         throw new VendixHttpException(ErrorCodes.LODGING_UNIT_FIND_001);
       }
-      if (!target.is_active || UNSELLABLE_HOUSEKEEPING.includes(target.housekeeping_status)) {
+      if (!target.is_active || !isSellableHousekeeping(target.housekeeping_status)) {
         throw new VendixHttpException(
           ErrorCodes.LODGING_RESERVATION_ROOM_UNIT_001,
           `La ${target.code} no está disponible para asignar`,

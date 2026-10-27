@@ -5635,6 +5635,17 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El rango de habitaciones no es válido (máximo 100)',
   },
+  // Hospitality Suite (H5.1) — housekeeping status
+  LODGING_HOUSEKEEPING_TRANSITION_001: {
+    code: 'LODGING_HOUSEKEEPING_TRANSITION_001',
+    httpStatus: 409,
+    devMessage: 'La habitación no puede pasar a ese estado de limpieza',
+  },
+  LODGING_HOUSEKEEPING_STALE_001: {
+    code: 'LODGING_HOUSEKEEPING_STALE_001',
+    httpStatus: 409,
+    devMessage: 'El estado de la habitación cambió. Actualiza el tablero.',
+  },
   // Hospitality Suite (H1.3) — occupancy rack
   LODGING_RACK_RANGE_001: {
     code: 'LODGING_RACK_RANGE_001',

@@ -2,6 +2,7 @@ import { lodging_reservation_status_enum } from '@prisma/client';
 import { daysBetweenDateStrings } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { addDays, NIGHT_HOLDING_STATUSES } from '../reservation-status';
+import { isSellableHousekeeping } from '../../housekeeping/housekeeping-status';
 
 /** Widest window the rack accepts (two months of nights). */
 export const MAX_RACK_NIGHTS = 62;
@@ -126,7 +127,10 @@ export function buildRack(input: {
 
   const types = input.types.map<RackType>((type) => {
     const units = input.units.filter((u) => u.unit_type_id === type.id);
-    const capacity = units.filter((u) => u.is_active).length;
+    // H5.1 — rooms out of order/service are not sellable capacity.
+    const capacity = units.filter(
+      (u) => u.is_active && isSellableHousekeeping(u.housekeeping_status),
+    ).length;
     const allowance = Math.max(0, type.overbooking_allowance);
     const sold = nights.map(() => 0);
     for (const night of input.sold) {

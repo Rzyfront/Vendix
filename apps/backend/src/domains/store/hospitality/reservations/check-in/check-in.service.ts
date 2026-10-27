@@ -9,9 +9,7 @@ import { LodgingRoomChangesService } from '../room-changes.service';
 import { canTransition } from '../reservation-status';
 import { formatShortDate } from '../stay-dates';
 import { CheckInDto } from './check-in.dto';
-
-/** Housekeeping states that cannot receive a guest at all. */
-const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
+import { isSellableHousekeeping } from '../../housekeeping/housekeeping-status';
 
 /** Order number of a folio: one per reservation, so unique per store. */
 export function folioOrderNumber(reservation_number: string): string {
@@ -115,7 +113,7 @@ export class LodgingCheckInService {
     for (const target of targets) {
       const unit = unitById.get(target.unit_id!);
       if (!unit) throw new VendixHttpException(ErrorCodes.LODGING_UNIT_FIND_001);
-      if (!unit.is_active || BLOCKED_HOUSEKEEPING.includes(unit.housekeeping_status)) {
+      if (!unit.is_active || !isSellableHousekeeping(unit.housekeeping_status)) {
         throw new VendixHttpException(
           ErrorCodes.LODGING_RESERVATION_ROOM_UNIT_001,
           `La ${unit.code} no está disponible`,
