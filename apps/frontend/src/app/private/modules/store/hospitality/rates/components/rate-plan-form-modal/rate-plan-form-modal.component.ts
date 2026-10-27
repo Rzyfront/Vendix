@@ -32,6 +32,8 @@ import {
   MealPlan,
   RatePlan,
   RatePlanPayload,
+  Season,
+  seasonRange,
   WEEKDAYS,
 } from '../../interfaces/rate-plan.interface';
 import { RatePlansService } from '../../services/rate-plans.service';
@@ -42,6 +44,8 @@ interface PriceRowForm {
   base: FormControl<number | null>;
   /** Weekday overrides in `WEEKDAYS` order; empty = base price. */
   days: FormArray<FormControl<number | null>>;
+  /** H2.2: nightly price in each season of `seasonColumns`; empty = regular price. */
+  seasons: FormArray<FormControl<number | null>>;
 }
 
 interface RatePlanForm {
@@ -57,10 +61,10 @@ const hasValue = (value: number | null | undefined): value is number =>
   value !== null && value !== undefined && `${value}` !== '';
 
 /**
- * Hospitality Suite (H2.1) — create or edit a rate plan ("Con desayuno") with
- * a nightly base price per room type and optional weekday prices (e.g. Friday
- * and Saturday higher). A type without base price is not offered with the
- * plan when booking.
+ * Hospitality Suite (H2.1, H2.2) — create or edit a rate plan ("Con desayuno")
+ * with a nightly base price per room type, optional weekday prices (e.g.
+ * Friday and Saturday higher) and a price per season (e.g. "Alta" $400.000).
+ * A type without base price is not offered with the plan when booking.
  */
 @Component({
   selector: 'app-rate-plan-form-modal',
@@ -116,7 +120,8 @@ const hasValue = (value: number | null | undefined): value is number =>
         <div class="space-y-3" formArrayName="prices">
           <p class="text-sm text-text-secondary">
             Precios antes de impuestos. Deja vacío el precio base de un tipo para no ofrecer el
-            plan con ese tipo; un día vacío usa el precio base.
+            plan con ese tipo; un día vacío usa el precio base. En una temporada, las noches
+            toman su precio de temporada; vacío = precio normal.
           </p>
           @for (row of form.controls.prices.controls; track row; let i = $index) {
             <div
@@ -145,6 +150,22 @@ const hasValue = (value: number | null | undefined): value is number =>
                   />
                 }
               </div>
+              @if (seasonColumns().length) {
+                <div class="grid grid-cols-2 gap-2 md:grid-cols-3" formArrayName="seasons">
+                  @for (season of seasonColumns(); track season.id; let s = $index) {
+                    <app-input
+                      [formControlName]="s"
+                      [label]="'Temporada ' + season.name + ' (' + season.range + ')'"
+                      [currency]="true"
+                      [control]="row.controls.seasons.at(s)"
+                      [error]="seasonWithoutBase(i, s) ? 'Falta el precio base' : ''"
+                      placeholder="Precio normal"
+                      customWrapperClass="mt-0"
+                      data-testid="rate-plan-season-price"
+                    />
+                  }
+                </div>
+              }
             </div>
           } @empty {
             <p class="text-sm text-text-secondary">
@@ -176,6 +197,8 @@ export class RatePlanFormModalComponent {
   readonly unitTypes = input<UnitType[]>([]);
   /** Whether the store already has a default plan (a new one starts as default otherwise). */
   readonly hasDefault = input(false);
+  /** H2.2: store seasons; active ones (and those the plan prices) get a price column. */
+  readonly seasons = input<Season[]>([]);
 
   readonly isOpenChange = output<boolean>();
   readonly saved = output<RatePlan>();
@@ -187,6 +210,8 @@ export class RatePlanFormModalComponent {
   readonly mealPlanOptions: SelectorOption[] = Object.entries(MEAL_PLAN_LABELS).map(
     ([value, label]) => ({ value, label }),
   );
+  /** Seasons shown as columns, fixed when the modal opens (`reset`). */
+  readonly seasonColumns = signal<{ id: number; name: string; range: string }[]>([]);
   private readonly typeNames = computed(
     () => new Map(this.unitTypes().map((t) => [t.id, t.name] as const)),
   );
@@ -206,13 +231,22 @@ export class RatePlanFormModalComponent {
   reset(): void {
     const plan = this.plan();
     const priced = new Set(plan?.prices.map((p) => p.unit_type_id) ?? []);
+    const pricedSeasons = new Set(plan?.prices.map((p) => p.season_id) ?? []);
+    const columns = this.seasons()
+      .filter((season) => season.is_active || pricedSeasons.has(season.id))
+      .map((season) => ({
+        id: season.id,
+        name: season.name,
+        range: seasonRange(season),
+      }));
+    this.seasonColumns.set(columns);
     const rows = this.form.controls.prices;
     rows.clear();
     for (const type of this.unitTypes()) {
       if (!type.is_active && !priced.has(type.id)) continue;
       const prices = plan?.prices.filter((p) => p.unit_type_id === type.id) ?? [];
-      const priceOf = (day: number | null) => {
-        const row = prices.find((p) => p.day_of_week === day);
+      const priceOf = (day: number | null, season: number | null = null) => {
+        const row = prices.find((p) => p.day_of_week === day && (p.season_id ?? null) === season);
         return row ? Number(row.price) : null;
       };
       rows.push(
@@ -224,6 +258,13 @@ export class RatePlanFormModalComponent {
           days: this.fb.array(
             WEEKDAYS.map((day) =>
               this.fb.control<number | null>(priceOf(day.value), {
+                validators: [Validators.min(0)],
+              }),
+            ),
+          ),
+          seasons: this.fb.array(
+            columns.map((season) =>
+              this.fb.control<number | null>(priceOf(null, season.id), {
                 validators: [Validators.min(0)],
               }),
             ),
@@ -252,6 +293,13 @@ export class RatePlanFormModalComponent {
     return !hasValue(row.base) && row.days.some(hasValue);
   }
 
+  /** A season price needs the regular base price of the type. */
+  seasonWithoutBase(index: number, season: number): boolean {
+    if (!this.submitted()) return false;
+    const row = this.form.controls.prices.at(index).getRawValue();
+    return !hasValue(row.base) && hasValue(row.seasons[season]);
+  }
+
   onCancel(): void {
     this.isOpenChange.emit(false);
   }
@@ -260,7 +308,15 @@ export class RatePlanFormModalComponent {
     this.submitted.set(true);
     this.form.markAllAsTouched();
     const rows = this.form.controls.prices.controls;
-    if (this.form.invalid || rows.some((_, i) => this.missingBase(i))) return;
+    const seasonGaps = rows.some((row, i) =>
+      row.controls.seasons.controls.some((_, s) => this.seasonWithoutBase(i, s)),
+    );
+    if (this.form.invalid || seasonGaps || rows.some((_, i) => this.missingBase(i))) return;
+    const columns = this.seasonColumns();
+    // Season weekday prices are API-only; keep them while their season keeps a price.
+    const seasonDays = (this.plan()?.prices ?? []).filter(
+      (p) => p.season_id !== null && p.day_of_week !== null,
+    );
 
     const raw = this.form.getRawValue();
     const payload: RatePlanPayload = {
@@ -278,6 +334,21 @@ export class RatePlanFormModalComponent {
             return hasValue(price)
               ? [{ unit_type_id: row.unit_type_id, day_of_week: day.value, price: Number(price) }]
               : [];
+          }),
+          ...columns.flatMap((season, s) => {
+            const price = row.seasons[s];
+            if (!hasValue(price)) return [];
+            return [
+              { unit_type_id: row.unit_type_id, season_id: season.id, price: Number(price) },
+              ...seasonDays
+                .filter((p) => p.unit_type_id === row.unit_type_id && p.season_id === season.id)
+                .map((p) => ({
+                  unit_type_id: p.unit_type_id,
+                  season_id: season.id,
+                  day_of_week: p.day_of_week as number,
+                  price: Number(p.price),
+                })),
+            ];
           }),
         ];
       }),

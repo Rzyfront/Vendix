@@ -108,6 +108,9 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H2.1 · plan tarifario con el que se vendió cada habitación
   'lodging_reservation_rooms.rate_plan_id',
+
+  // --- Hotelería H2.2 · precio de un plan dentro de una temporada
+  'lodging_rate_prices.season_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

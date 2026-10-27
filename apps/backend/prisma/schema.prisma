@@ -1071,6 +1071,7 @@ model stores {
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
+  lodging_seasons                lodging_seasons[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -2493,6 +2494,8 @@ model lodging_rate_prices {
   rate_plan_id Int
   unit_type_id Int
   day_of_week  Int?      @db.SmallInt
+  // H2.2: null = regular price; set = price inside that season.
+  season_id    Int?
   price        Decimal   @db.Decimal(14, 2)
   created_at   DateTime? @default(now()) @db.Timestamp(6)
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
@@ -2500,9 +2503,34 @@ model lodging_rate_prices {
   store     stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   rate_plan lodging_rate_plans @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   unit_type lodging_unit_types @relation(fields: [unit_type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  season    lodging_seasons?   @relation(fields: [season_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([rate_plan_id, unit_type_id])
   @@index([unit_type_id])
+  @@index([season_id])
+}
+
+// Hospitality Suite (H2.2) — demand seasons ("Alta: 15-dic al 15-ene").
+// `to_date` is the last night inside the season. Plans price a season per
+// room type; when two active seasons overlap, the higher `priority` wins.
+model lodging_seasons {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  name       String    @db.VarChar(80)
+  from_date  DateTime  @db.Date
+  to_date    DateTime  @db.Date
+  priority   Int       @default(0)
+  // Calendar color, #RRGGBB.
+  color      String    @default("#F59E0B") @db.VarChar(7)
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rate_prices lodging_rate_prices[]
+
+  @@unique([store_id, name])
+  @@index([store_id, from_date, to_date])
 }
 
 // Hospitality Suite (H1.1) — sellable inventory per night. Availability of a

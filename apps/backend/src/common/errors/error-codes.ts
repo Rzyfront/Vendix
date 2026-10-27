@@ -5753,6 +5753,26 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El plan tarifario no tiene precio para ese tipo de habitación',
   },
+  LODGING_SEASON_FIND_001: {
+    code: 'LODGING_SEASON_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Temporada no encontrada',
+  },
+  LODGING_SEASON_DUP_001: {
+    code: 'LODGING_SEASON_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una temporada con ese nombre',
+  },
+  LODGING_SEASON_DATES_001: {
+    code: 'LODGING_SEASON_DATES_001',
+    httpStatus: 400,
+    devMessage: 'La última noche de la temporada no puede ser anterior a la primera',
+  },
+  LODGING_SEASON_OVERLAP_001: {
+    code: 'LODGING_SEASON_OVERLAP_001',
+    httpStatus: 409,
+    devMessage: 'La temporada se solapa con otra de la misma prioridad',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

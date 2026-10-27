@@ -6,10 +6,12 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateRatePlanDto, RatePriceDto, UpdateRatePlanDto } from './dto';
 import { hasBasePrice, RatePriceRow } from './lodging-rate-resolver';
 
+const toDateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
 const PLAN_INCLUDE = {
   prices: {
-    select: { id: true, unit_type_id: true, day_of_week: true, price: true },
-    orderBy: [{ unit_type_id: 'asc' }, { day_of_week: 'asc' }],
+    select: { id: true, unit_type_id: true, season_id: true, day_of_week: true, price: true },
+    orderBy: [{ unit_type_id: 'asc' }, { season_id: 'asc' }, { day_of_week: 'asc' }],
   },
 } satisfies Prisma.lodging_rate_plansInclude;
 
@@ -46,10 +48,31 @@ export async function loadPlanPricing(
       `El plan ${plan.name} está inactivo`,
     );
   }
-  const prices = await client.lodging_rate_prices.findMany({
-    where: { store_id, rate_plan_id, unit_type_id: unit_type.id },
-    select: { day_of_week: true, price: true },
+  // Regular prices plus the prices of active seasons (H2.2).
+  const rows = await client.lodging_rate_prices.findMany({
+    where: {
+      store_id,
+      rate_plan_id,
+      unit_type_id: unit_type.id,
+      OR: [{ season_id: null }, { season: { is_active: true } }],
+    },
+    select: {
+      day_of_week: true,
+      price: true,
+      season: { select: { id: true, from_date: true, to_date: true, priority: true } },
+    },
   });
+  const prices: RatePriceRow[] = rows.map(({ season, ...row }) => ({
+    ...row,
+    season: season
+      ? {
+          id: season.id,
+          from_date: toDateOnly(season.from_date),
+          to_date: toDateOnly(season.to_date),
+          priority: season.priority,
+        }
+      : null,
+  }));
   if (!hasBasePrice(prices)) {
     throw new VendixHttpException(
       ErrorCodes.LODGING_RATE_PLAN_UNPRICED_001,
@@ -60,22 +83,25 @@ export async function loadPlanPricing(
 }
 
 /**
- * Checks the price rows of a plan: one base price per room type (required as
- * soon as the type has any row) and at most one price per weekday.
+ * Checks the price rows of a plan: one regular base price per room type
+ * (required as soon as the type has any row), one base price per season the
+ * type is priced in, and at most one price per weekday in each of them.
  */
 export function assertValidPrices(prices: readonly RatePriceDto[]): void {
   const seen = new Set<string>();
-  const withBase = new Set<number>();
+  const withBase = new Set<string>();
+  const group = (row: RatePriceDto, season = row.season_id ?? null) =>
+    `${row.unit_type_id}:${season ?? 'regular'}`;
   for (const row of prices) {
     const day = row.day_of_week ?? null;
-    const key = `${row.unit_type_id}:${day ?? 'base'}`;
+    const key = `${group(row)}:${day ?? 'base'}`;
     if (seen.has(key)) {
       throw new VendixHttpException(ErrorCodes.LODGING_RATE_PLAN_PRICES_001);
     }
     seen.add(key);
-    if (day === null) withBase.add(row.unit_type_id);
+    if (day === null) withBase.add(group(row));
   }
-  if (prices.some((row) => !withBase.has(row.unit_type_id))) {
+  if (prices.some((row) => !withBase.has(group(row)) || !withBase.has(group(row, null)))) {
     throw new VendixHttpException(ErrorCodes.LODGING_RATE_PLAN_PRICES_001);
   }
 }
@@ -120,7 +146,7 @@ export class LodgingRatePlansService {
         name: true,
         meal_plan: true,
         is_default: true,
-        prices: { where: { day_of_week: null }, select: { unit_type_id: true } },
+        prices: { where: { day_of_week: null, season_id: null }, select: { unit_type_id: true } },
       },
       orderBy: [{ is_default: 'desc' }, { sort_order: 'asc' }, { name: 'asc' }],
     });
@@ -134,6 +160,7 @@ export class LodgingRatePlansService {
     const store_id = this.requireStoreId();
     assertValidPrices(dto.prices);
     await this.assertTypesInStore(dto.prices);
+    await this.assertSeasonsInStore(dto.prices);
     const is_active = dto.is_active ?? true;
     const id = await this.save(store_id, async (tx, now) => {
       // The first active plan of the store becomes its default.
@@ -166,6 +193,7 @@ export class LodgingRatePlansService {
     if (dto.prices) {
       assertValidPrices(dto.prices);
       await this.assertTypesInStore(dto.prices);
+      await this.assertSeasonsInStore(dto.prices);
     }
     const is_active = dto.is_active ?? current.is_active;
     // An inactive plan cannot stay the default.
@@ -235,6 +263,7 @@ export class LodgingRatePlansService {
         rate_plan_id,
         unit_type_id: row.unit_type_id,
         day_of_week: row.day_of_week ?? null,
+        season_id: row.season_id ?? null,
         price: new Prisma.Decimal(row.price),
         updated_at: now,
       })),
@@ -248,6 +277,16 @@ export class LodgingRatePlansService {
     const found = await this.prisma.lodging_unit_types.count({ where: { id: { in: ids } } });
     if (found !== ids.length) {
       throw new VendixHttpException(ErrorCodes.LODGING_UNIT_TYPE_FIND_001);
+    }
+  }
+
+  /** Every season used by a price must belong to the store (scoped lookup). */
+  private async assertSeasonsInStore(prices: readonly RatePriceDto[]) {
+    const ids = [...new Set(prices.flatMap((row) => (row.season_id != null ? [row.season_id] : [])))];
+    if (ids.length === 0) return;
+    const found = await this.prisma.lodging_seasons.count({ where: { id: { in: ids } } });
+    if (found !== ids.length) {
+      throw new VendixHttpException(ErrorCodes.LODGING_SEASON_FIND_001);
     }
   }
 

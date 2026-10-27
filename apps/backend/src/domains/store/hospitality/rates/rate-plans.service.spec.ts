@@ -4,7 +4,8 @@ import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { CreateRatePlanDto } from './dto';
-import { assertValidPrices, LodgingRatePlansService } from './rate-plans.service';
+import { assertValidPrices, loadPlanPricing, LodgingRatePlansService } from './rate-plans.service';
+import { resolveNightRates } from './lodging-rate-resolver';
 
 const codeOf = async (promise: Promise<unknown> | (() => unknown)) => {
   const error = await (typeof promise === 'function'
@@ -26,7 +27,7 @@ const withBreakfast = (): CreateRatePlanDto => ({
   ],
 });
 
-function build({ defaults = 0, types = [11, 12] } = {}) {
+function build({ defaults = 0, types = [11, 12], seasons = [1] } = {}) {
   const plans: any[] = [];
   const prices: any[] = [];
   const tables = {
@@ -63,6 +64,11 @@ function build({ defaults = 0, types = [11, 12] } = {}) {
     lodging_unit_types: {
       count: jest.fn(async ({ where }: any) =>
         where.id.in.filter((id: number) => types.includes(id)).length,
+      ),
+    },
+    lodging_seasons: {
+      count: jest.fn(async ({ where }: any) =>
+        where.id.in.filter((id: number) => seasons.includes(id)).length,
       ),
     },
   };
@@ -152,5 +158,95 @@ describe('LodgingRatePlansService (H2.1)', () => {
     expect(await errorsOf({ unit_type_id: 11, price: 250000 })).toEqual([]);
     expect(await errorsOf({ unit_type_id: 11, day_of_week: 7, price: 1 })).toEqual(['prices']);
     expect(await errorsOf({ unit_type_id: 11, price: -1 })).toEqual(['prices']);
+  });
+});
+
+describe('LodgingRatePlansService seasons (H2.2)', () => {
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 5, user_id: 9 } as any);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  /** "Con desayuno" Doble $250.000, "Alta" (season 1) $400.000. */
+  const withHighSeason = (): CreateRatePlanDto => ({
+    name: 'Con desayuno',
+    prices: [
+      { unit_type_id: 11, price: 250000 },
+      { unit_type_id: 11, season_id: 1, price: 400000 },
+    ],
+  });
+
+  it('saves the season price next to the regular one', async () => {
+    const { service, prices } = build();
+    await service.create(withHighSeason());
+    expect(prices).toEqual([
+      expect.objectContaining({ unit_type_id: 11, season_id: null, day_of_week: null, price: new Prisma.Decimal(250000) }),
+      expect.objectContaining({ unit_type_id: 11, season_id: 1, day_of_week: null, price: new Prisma.Decimal(400000) }),
+    ]);
+  });
+
+  it('rejects a season of another store', async () => {
+    const { service, prisma } = build({ seasons: [2] });
+    expect(await codeOf(service.create(withHighSeason()))).toBe('LODGING_SEASON_FIND_001');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('a season price needs the regular base price and its own base price', async () => {
+    expect(() => assertValidPrices(withHighSeason().prices)).not.toThrow();
+    // Season price without a regular price for the type.
+    expect(
+      await codeOf(() => assertValidPrices([{ unit_type_id: 11, season_id: 1, price: 400000 }])),
+    ).toBe('LODGING_RATE_PLAN_PRICES_001');
+    // Season weekday price without the season base price.
+    expect(
+      await codeOf(() =>
+        assertValidPrices([
+          { unit_type_id: 11, price: 250000 },
+          { unit_type_id: 11, season_id: 1, day_of_week: 6, price: 450000 },
+        ]),
+      ),
+    ).toBe('LODGING_RATE_PLAN_PRICES_001');
+    // Two base prices for the same season.
+    expect(
+      await codeOf(() =>
+        assertValidPrices([
+          ...withHighSeason().prices,
+          { unit_type_id: 11, season_id: 1, price: 1 },
+        ]),
+      ),
+    ).toBe('LODGING_RATE_PLAN_PRICES_001');
+  });
+
+  it('loadPlanPricing only reads active seasons and prices 14-dic regular, 15-dic in season', async () => {
+    const findMany = jest.fn(async () => [
+      { day_of_week: null, price: new Prisma.Decimal(250000), season: null },
+      {
+        day_of_week: null,
+        price: new Prisma.Decimal(400000),
+        season: { id: 1, from_date: new Date('2026-12-15'), to_date: new Date('2027-01-15'), priority: 0 },
+      },
+    ]);
+    const client: any = {
+      lodging_rate_plans: {
+        findFirst: jest.fn(async () => ({ id: 3, name: 'Con desayuno', is_active: true })),
+      },
+      lodging_rate_prices: { findMany },
+    };
+    const { prices } = await loadPlanPricing(client, 5, 3, { id: 11, name: 'Doble' });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          store_id: 5,
+          OR: [{ season_id: null }, { season: { is_active: true } }],
+        }),
+      }),
+    );
+    const nights = resolveNightRates(['2026-12-14', '2026-12-15'], prices)!;
+    expect(nights.map((n) => [n.night_date, n.rate_amount.toFixed(2)])).toEqual([
+      ['2026-12-14', '250000.00'],
+      ['2026-12-15', '400000.00'],
+    ]);
   });
 });

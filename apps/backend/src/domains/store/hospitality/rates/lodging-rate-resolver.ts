@@ -1,16 +1,27 @@
 import { Prisma } from '@prisma/client';
 
 /**
- * Hospitality Suite (H2.1) — pure nightly price resolution, no I/O.
+ * Hospitality Suite (H2.1, H2.2) — pure nightly price resolution, no I/O.
  *
  * A plan prices a room type with a base row (`day_of_week` null) and optional
- * weekday rows (0 = Sunday .. 6 = Saturday). A night takes its weekday price
- * when it exists, otherwise the base price. Seasons (H2.2) slot in above the
- * weekday later without changing callers.
+ * weekday rows (0 = Sunday .. 6 = Saturday). Rows tied to a season (H2.2)
+ * price the nights inside it. Order for one night: season + weekday > season
+ * > weekday > base. When several seasons with prices cover the night, the
+ * highest priority wins (ties: the newest season).
  */
+export interface RateSeason {
+  id: number;
+  /** First and last night inside the season, `YYYY-MM-DD`. */
+  from_date: string;
+  to_date: string;
+  priority: number;
+}
+
 export interface RatePriceRow {
   day_of_week: number | null;
   price: Prisma.Decimal.Value;
+  /** H2.2: null or absent = regular price. */
+  season?: RateSeason | null;
 }
 
 export interface PricedNight {
@@ -23,9 +34,28 @@ export function dayOfWeek(date: string): number {
   return new Date(`${date}T00:00:00.000Z`).getUTCDay();
 }
 
-/** A plan sells a room type only when it gives the type a base price. */
+/** A plan sells a room type only when it gives the type a regular base price. */
 export function hasBasePrice(prices: readonly RatePriceRow[]): boolean {
-  return prices.some((row) => row.day_of_week == null);
+  return prices.some((row) => row.day_of_week == null && !row.season);
+}
+
+/** The season that prices a night: covering it, highest priority, newest on ties. */
+export function winningSeason<S extends RateSeason>(
+  night: string,
+  seasons: readonly S[],
+): S | null {
+  let best: S | null = null;
+  for (const season of seasons) {
+    if (night < season.from_date || night > season.to_date) continue;
+    if (
+      !best ||
+      season.priority > best.priority ||
+      (season.priority === best.priority && season.id > best.id)
+    ) {
+      best = season;
+    }
+  }
+  return best;
 }
 
 /** Price of one night, or null when the plan does not price it. */
@@ -34,9 +64,13 @@ export function resolveNightRate(
   prices: readonly RatePriceRow[],
 ): Prisma.Decimal | null {
   const dow = dayOfWeek(night);
-  const row =
-    prices.find((p) => p.day_of_week === dow) ??
-    prices.find((p) => p.day_of_week == null);
+  const seasons = prices.flatMap((row) => (row.season ? [row.season] : []));
+  const season = winningSeason(night, seasons);
+  const pick = (seasonId: number | null) => {
+    const rows = prices.filter((row) => (row.season?.id ?? null) === seasonId);
+    return rows.find((p) => p.day_of_week === dow) ?? rows.find((p) => p.day_of_week == null);
+  };
+  const row = (season && pick(season.id)) ?? pick(null);
   return row ? new Prisma.Decimal(row.price) : null;
 }
 

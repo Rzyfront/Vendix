@@ -22,8 +22,16 @@ import {
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import { RatePlanFormModalComponent } from '../../components/rate-plan-form-modal/rate-plan-form-modal.component';
-import { MEAL_PLAN_LABELS, RatePlan } from '../../interfaces/rate-plan.interface';
+import { RatesCalendarComponent } from '../../components/rates-calendar/rates-calendar.component';
+import { SeasonFormModalComponent } from '../../components/season-form-modal/season-form-modal.component';
+import {
+  MEAL_PLAN_LABELS,
+  RatePlan,
+  Season,
+  seasonRange,
+} from '../../interfaces/rate-plan.interface';
 import { RatePlansService } from '../../services/rate-plans.service';
+import { SeasonsService } from '../../services/seasons.service';
 
 interface RatePlanRow extends RatePlan {
   meal_plan_label: string;
@@ -32,10 +40,16 @@ interface RatePlanRow extends RatePlan {
   default_label: string;
 }
 
+interface SeasonRow extends Season {
+  range: string;
+  status: 'active' | 'inactive';
+}
+
 /**
- * Hospitality Suite (H2.1) — Tarifas: rate plans ("Solo alojamiento", "Con
- * desayuno") with a nightly price per room type and weekday. The default plan
- * is preselected when booking.
+ * Hospitality Suite (H2.1, H2.2) — Tarifas: rate plans ("Solo alojamiento",
+ * "Con desayuno") with a nightly price per room type and weekday, demand
+ * seasons ("Alta") priced inside each plan, and the rates calendar colored by
+ * season. The default plan is preselected when booking.
  */
 @Component({
   selector: 'app-hospitality-rates-page',
@@ -49,12 +63,14 @@ interface RatePlanRow extends RatePlan {
     IconComponent,
     ResponsiveDataViewComponent,
     RatePlanFormModalComponent,
+    SeasonFormModalComponent,
+    RatesCalendarComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
       <app-sticky-header
         title="Tarifas"
-        subtitle="Planes tarifarios y precio por noche de tu hotel"
+        subtitle="Planes tarifarios, temporadas y precio por noche de tu hotel"
         icon="tag"
         variant="glass"
       />
@@ -101,13 +117,78 @@ interface RatePlanRow extends RatePlan {
         </app-card>
       </div>
 
+      <div class="p-2 md:p-4">
+        <app-card [responsive]="true" [padding]="false" overflow="visible">
+          <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
+            <div class="flex items-center justify-between gap-2">
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+              >
+                Temporadas ({{ seasons().length }})
+              </h2>
+              <app-button variant="outline" size="md" (clicked)="openSeasonForm(null)">
+                <app-icon slot="icon" name="plus" [size]="16" />
+                Nueva temporada
+              </app-button>
+            </div>
+          </div>
+
+          <div class="px-2 pb-2 pt-3 md:px-6 md:pb-6">
+            @if (!seasonsLoading() && seasons().length === 0) {
+              <app-empty-state
+                icon="calendar-days"
+                title="Aún no tienes temporadas"
+                description="Define fechas de alta demanda (ej. Alta: 15-dic al 15-ene) y ponles precio propio en cada plan."
+                actionButtonText="Nueva temporada"
+                actionButtonIcon="plus"
+                [showActionButton]="true"
+                (actionClick)="openSeasonForm(null)"
+              />
+            } @else {
+              <app-responsive-data-view
+                [data]="seasonRows()"
+                [columns]="seasonColumns"
+                [cardConfig]="seasonCardConfig"
+                [loading]="seasonsLoading()"
+                [striped]="true"
+                [hoverable]="true"
+                (rowClick)="openSeasonForm($event)"
+              />
+            }
+          </div>
+        </app-card>
+      </div>
+
+      <div class="p-2 md:p-4">
+        <app-card [responsive]="true" [padding]="false" overflow="visible">
+          <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+            >
+              Calendario de tarifas
+            </h2>
+          </div>
+          <div class="px-2 pb-2 pt-3 md:px-6 md:pb-6">
+            <app-rates-calendar [seasons]="seasons()" />
+          </div>
+        </app-card>
+      </div>
+
       <app-rate-plan-form-modal
         [isOpen]="isFormOpen()"
         [plan]="editing()"
         [unitTypes]="unitTypes()"
+        [seasons]="seasons()"
         [hasDefault]="hasDefault()"
         (isOpenChange)="isFormOpen.set($event)"
         (saved)="refresh()"
+      />
+
+      <app-season-form-modal
+        [isOpen]="isSeasonFormOpen()"
+        [season]="editingSeason()"
+        (isOpenChange)="isSeasonFormOpen.set($event)"
+        (saved)="refreshSeasons()"
       />
     </div>
   `,
@@ -115,6 +196,7 @@ interface RatePlanRow extends RatePlan {
 export class HospitalityRatesPageComponent implements OnInit {
   private readonly ratePlansService = inject(RatePlansService);
   private readonly unitTypesService = inject(UnitTypesService);
+  private readonly seasonsService = inject(SeasonsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -123,6 +205,10 @@ export class HospitalityRatesPageComponent implements OnInit {
   readonly isLoading = signal(true);
   readonly isFormOpen = signal(false);
   readonly editing = signal<RatePlan | null>(null);
+  readonly seasons = signal<Season[]>([]);
+  readonly seasonsLoading = signal(true);
+  readonly isSeasonFormOpen = signal(false);
+  readonly editingSeason = signal<Season | null>(null);
 
   readonly hasDefault = computed(() => this.plans().some((p) => p.is_default));
 
@@ -130,7 +216,11 @@ export class HospitalityRatesPageComponent implements OnInit {
     const names = new Map(this.unitTypes().map((t) => [t.id, t.name] as const));
     return this.plans().map((plan) => {
       const typeIds = [
-        ...new Set(plan.prices.filter((p) => p.day_of_week === null).map((p) => p.unit_type_id)),
+        ...new Set(
+          plan.prices
+            .filter((p) => p.day_of_week === null && p.season_id === null)
+            .map((p) => p.unit_type_id),
+        ),
       ];
       return {
         ...plan,
@@ -168,8 +258,39 @@ export class HospitalityRatesPageComponent implements OnInit {
     ],
   };
 
+  readonly seasonRows = computed<SeasonRow[]>(() =>
+    this.seasons().map((season) => ({
+      ...season,
+      range: seasonRange(season),
+      status: season.is_active ? 'active' : 'inactive',
+    })),
+  );
+
+  readonly seasonColumns: TableColumn[] = [
+    { key: 'name', label: 'Temporada', sortable: true },
+    { key: 'range', label: 'Noches' },
+    { key: 'priority', label: 'Prioridad', align: 'center' },
+    {
+      key: 'status',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: { type: 'status' },
+      transform: (value: string) => (value === 'active' ? 'Activa' : 'Inactiva'),
+    },
+  ];
+
+  readonly seasonCardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'range',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' },
+    badgeTransform: (value: string) => (value === 'active' ? 'Activa' : 'Inactiva'),
+    detailKeys: [{ key: 'priority', label: 'Prioridad' }],
+  };
+
   ngOnInit(): void {
     this.refresh();
+    this.refreshSeasons();
     this.unitTypesService
       .list()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -199,6 +320,32 @@ export class HospitalityRatesPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  refreshSeasons(): void {
+    this.seasonsLoading.set(true);
+    this.seasonsService
+      .list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (seasons) => {
+          this.seasons.set(seasons);
+          this.seasonsLoading.set(false);
+        },
+        error: (message: unknown) => {
+          this.seasonsLoading.set(false);
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudieron cargar las temporadas',
+          );
+        },
+      });
+  }
+
+  openSeasonForm(season: Season | null): void {
+    this.editingSeason.set(
+      season ? (this.seasons().find((s) => s.id === season.id) ?? null) : null,
+    );
+    this.isSeasonFormOpen.set(true);
   }
 
   openForm(plan: RatePlan | null): void {

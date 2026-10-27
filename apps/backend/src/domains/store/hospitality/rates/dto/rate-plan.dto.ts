@@ -28,7 +28,7 @@ export const MEAL_PLANS = [
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 
-/** Nightly price of a room type: base (no weekday) or a weekday override. */
+/** Nightly price of a room type: base (no weekday) or a weekday override, regular or inside a season. */
 export class RatePriceDto {
   @ApiProperty({ description: 'Tipo de habitación.' })
   @Type(() => Number)
@@ -46,6 +46,16 @@ export class RatePriceDto {
   @Min(0)
   @Max(6)
   day_of_week?: number | null;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'Temporada (H2.2). Vacío = precio regular, fuera de temporada.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  season_id?: number | null;
 
   @ApiProperty({ description: 'Precio por noche antes de impuestos.' })
   @Type(() => Number)
