@@ -562,6 +562,21 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
+      // Hospedaje (Hospitality Suite, H0.1). Hidden by INDUSTRY_HIDDEN_MODULES
+      // for every industry except `hospitality`. Labels map to panel_ui keys
+      // via MenuFilterService ('Hospedaje' → hospitality, Habitaciones →
+      // hospitality_rooms).
+      label: 'Hospedaje',
+      icon: 'hotel',
+      children: [
+        {
+          label: 'Habitaciones',
+          icon: 'bed-double',
+          route: '/admin/hospitality/rooms',
+        },
+      ],
+    },
+    {
       label: 'Órdenes',
       icon: 'cart',
       children: [

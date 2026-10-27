@@ -987,6 +987,25 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Hospitality Suite (H0.1). Industry gating is UX (panelUiGuard +
+      // INDUSTRY_HIDDEN_MODULES); lodging APIs land with H0.2+.
+      {
+        path: 'hospitality',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'rooms',
+          },
+          {
+            path: 'rooms',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/hospitality/rooms/routes/rooms.routes'
+              ).then((m) => m.hospitalityRoomsRoutes),
+          },
+        ],
+      },
       // Subscription Routes
       {
         path: 'subscription',

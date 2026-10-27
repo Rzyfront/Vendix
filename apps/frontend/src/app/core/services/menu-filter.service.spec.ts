@@ -241,6 +241,52 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
   });
 });
 
+describe('gating de hospedaje por industria (H0.1)', () => {
+  const HOSPITALITY_KEYS = ['hospitality', 'hospitality_rooms'];
+
+  it('hospitality sola ve Hospedaje y no la agenda de citas', () => {
+    const hidden = getModulesHiddenByIndustries(['hospitality']);
+    for (const key of HOSPITALITY_KEYS) {
+      expect(hidden).withContext(key).not.toContain(key);
+    }
+    expect(hidden).toContain('orders_reservations');
+    expect(hidden).toContain('restaurant_ops');
+  });
+
+  it('hospitality + restaurant ve Hospedaje y Mesas', () => {
+    const hidden = getModulesHiddenByIndustries(['hospitality', 'restaurant']);
+    for (const key of [...HOSPITALITY_KEYS, 'restaurant_ops', 'restaurant_ops_tables']) {
+      expect(hidden).withContext(key).not.toContain(key);
+    }
+  });
+
+  it('toda industria sin hospitality oculta Hospedaje', () => {
+    for (const industries of [
+      ['retail'],
+      ['restaurant'],
+      ['manufacturing'],
+      ['service'],
+      ['gym'],
+      ['construction'],
+    ]) {
+      const hidden = getModulesHiddenByIndustries(industries);
+      for (const key of HOSPITALITY_KEYS) {
+        expect(hidden)
+          .withContext(`industrias [${industries.join(',')}] → ${key}`)
+          .toContain(key);
+      }
+    }
+  });
+
+  it('las keys de hospedaje existen en APP_MODULES y MODULE_ROUTES', () => {
+    const keys = allStoreAdminKeys();
+    for (const key of HOSPITALITY_KEYS) {
+      expect(keys).withContext(key).toContain(key);
+      expect(MODULE_ROUTES[key]).withContext(key).toBe('/admin/hospitality/rooms');
+    }
+  });
+});
+
 describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
   let service: MenuFilterService;
   let authFacade: {

@@ -241,6 +241,12 @@ export class MenuFilterService {
     Miembros: 'memberships_members',
     Accesos: 'memberships_access',
 
+    // Hospedaje (Hospitality Suite, H0.1) — padre + submódulos. El padre
+    // mapea al key padre para que el sidebar renderice el grupo cuando la
+    // industria `hospitality` lo permita.
+    Hospedaje: 'hospitality',
+    Habitaciones: 'hospitality_rooms',
+
     // ERP Modules
     Facturación: 'invoicing',
     Facturas: 'invoicing_invoices',

@@ -475,6 +475,22 @@ export const APP_MODULES: {
       ],
     },
 
+    // Hospedaje (Hospitality Suite, H0.1). Parent module hidden by
+    // `INDUSTRY_HIDDEN_MODULES` for every industry except `hospitality`.
+    {
+      key: 'hospitality',
+      label: 'Hospedaje',
+      description: 'Habitaciones, reservas y recepci\u00f3n del hotel',
+      isParent: true,
+      children: [
+        {
+          key: 'hospitality_rooms',
+          label: 'Habitaciones',
+          description: 'Tipos de habitaci\u00f3n y habitaciones del hotel',
+        },
+      ],
+    },
+
     // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',

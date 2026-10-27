@@ -3,6 +3,9 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { GeneralSettingsDto } from './dto/settings-schemas.dto';
 
 /**
  * QUI-560 — regresión del guard de transición de settings.
@@ -277,6 +280,49 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       );
       expect(updates.every((v) => v === null)).toBe(true);
       expect(persisted().branding.logo_url).toBeNull();
+    });
+  });
+
+  // ------------------------------------------------- sync de industrias (H0.1)
+
+  /**
+   * H0.1 (hospitality): marcar "Hospedaje" en Configuración → General debe
+   * llegar a `stores.industries`, que es lo que lee el gating del menú. El
+   * sync no filtra valores, así que el riesgo está en la validación del DTO:
+   * si `hospitality` no estuviera en `StoreIndustry`, el PATCH respondería 400.
+   */
+  describe('updateSettings — sync de industrias (H0.1)', () => {
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      prisma.stores.findUnique.mockResolvedValue(null);
+    });
+
+    it('sincroniza hospitality + restaurant a la tabla stores', async () => {
+      await service.updateSettings({
+        general: { industries: ['hospitality', 'restaurant'] },
+      } as any);
+
+      expect(prisma.stores.update).toHaveBeenCalledWith({
+        where: { id: STORE_ID },
+        data: { industries: ['hospitality', 'restaurant'] },
+      });
+    });
+
+    it('el DTO de ajustes generales acepta hospitality', async () => {
+      const dto = plainToInstance(GeneralSettingsDto, {
+        industries: ['hospitality'],
+      });
+
+      expect(await validate(dto)).toEqual([]);
+    });
+
+    it('el DTO sigue rechazando una industria desconocida', async () => {
+      const dto = plainToInstance(GeneralSettingsDto, {
+        industries: ['hotel'],
+      });
+      const errors = await validate(dto);
+
+      expect(errors.map((e) => e.property)).toEqual(['industries']);
     });
   });
 

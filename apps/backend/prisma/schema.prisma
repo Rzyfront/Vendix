@@ -4522,6 +4522,7 @@ enum industry_enum {
   service
   gym
   construction
+  hospitality
 }
 
 enum crm_generation_status_enum {
