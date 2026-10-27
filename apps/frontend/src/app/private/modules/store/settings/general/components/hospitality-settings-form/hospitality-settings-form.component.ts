@@ -67,6 +67,14 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
+      <app-input
+        [formControl]="roomChargeOriginControl"
+        label="Origen del cargo a habitación"
+        placeholder="Restaurante"
+        helperText="Cómo se ve en el folio un consumo cargado desde el POS o una mesa."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
     </form>
   `,
 })
@@ -100,6 +108,11 @@ export class HospitalitySettingsForm {
     validators: [Validators.required, Validators.min(0), Validators.max(99)],
   });
 
+  readonly roomChargeOriginControl = new FormControl('Restaurante', {
+    nonNullable: true,
+    validators: [Validators.maxLength(60)],
+  });
+
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
     check_out_time: this.checkOutControl,
@@ -107,6 +120,7 @@ export class HospitalitySettingsForm {
     night_audit_time: this.nightAuditControl,
     rnt_number: this.rntControl,
     default_overbooking_allowance: this.overbookingControl,
+    room_charge_origin: this.roomChargeOriginControl,
   });
 
   constructor() {
@@ -122,6 +136,7 @@ export class HospitalitySettingsForm {
     this.settingsChange.emit({
       ...value,
       rnt_number: value.rnt_number.trim(),
+      room_charge_origin: value.room_charge_origin.trim() || 'Restaurante',
       default_overbooking_allowance: Math.trunc(Number(value.default_overbooking_allowance)),
     });
   }

@@ -48,6 +48,7 @@ type Tx = Prisma.TransactionClient;
 interface FolioRow {
   id: number;
   status: string;
+  charges_blocked?: boolean;
   reservation_id: number;
   order_id: number;
 }
@@ -152,6 +153,16 @@ export class LodgingFolioService {
       },
     });
 
+    // H3.6 — lines moved here by a POS sale or table bill keep their origin.
+    const origins = new Map<number, string>();
+    const roomCharges = await this.prisma.lodging_room_charges.findMany({
+      where: { folio_id: folio.id },
+      select: { origin: true, item_ids: true },
+    });
+    for (const charge of roomCharges) {
+      for (const itemId of charge.item_ids) origins.set(itemId, charge.origin);
+    }
+
     const total = Number(order.grand_total);
     const paid = Number(order.total_paid ?? 0);
     // H3.5 — deposit still held for the stay, applicable as "Anticipo aplicado".
@@ -164,6 +175,7 @@ export class LodgingFolioService {
     return {
       id: folio.id,
       status: folio.status,
+      charges_blocked: folio.charges_blocked ?? false,
       reservation_id,
       order_id: order.id,
       order_number: order.order_number,
@@ -172,8 +184,10 @@ export class LodgingFolioService {
         return {
           id: item.id,
           kind: item.lodging_room_night ? ('night' as const) : ('charge' as const),
+          origin: origins.get(item.id) ?? null,
           night_date: item.lodging_room_night?.night_date.toISOString().slice(0, 10) ?? null,
-          description: item.description || item.product_name,
+          // A POS/table line carries the catalog description: show its name.
+          description: origins.has(item.id) ? item.product_name : item.description || item.product_name,
           product_name: item.product_name,
           quantity: item.quantity,
           unit_price: Number(item.unit_price),
@@ -481,6 +495,20 @@ export class LodgingFolioService {
     return this.getFolio(reservation_id);
   }
 
+  /**
+   * H3.6 — "Cargos bloqueados": while on, the POS and the tables cannot charge
+   * this room (the desk can still add charges here).
+   */
+  async setChargesBlocked(reservation_id: number, blocked: boolean) {
+    const folio = await this.findFolio(reservation_id);
+    this.assertOpen(folio);
+    await this.prisma.lodging_folios.update({
+      where: { id: folio.id },
+      data: { charges_blocked: blocked, updated_at: new Date() },
+    });
+    return this.getFolio(reservation_id);
+  }
+
   // -------------------------------------------------------------- payments
 
   /** Partial payment of the balance with a manual method (cash, card, transfer). */
@@ -710,7 +738,7 @@ export class LodgingFolioService {
   private async findFolio(reservation_id: number): Promise<FolioRow> {
     const folio = await this.prisma.lodging_folios.findFirst({
       where: { reservation_id },
-      select: { id: true, status: true, reservation_id: true, order_id: true },
+      select: { id: true, status: true, charges_blocked: true, reservation_id: true, order_id: true },
     });
     if (!folio) throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_FIND_001);
     return folio;

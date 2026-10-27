@@ -1168,6 +1168,8 @@ export interface HospitalitySettings {
    * sell above its active rooms (H1.6). Default `0`.
    */
   default_overbooking_allowance?: number;
+  /** H3.6 — folio origin of a POS or table room charge. Default "Restaurante". */
+  room_charge_origin?: string;
 }
 
 // ============================================================================

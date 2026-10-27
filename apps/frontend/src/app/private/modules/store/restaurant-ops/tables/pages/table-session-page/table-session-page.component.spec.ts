@@ -91,7 +91,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
         { provide: KdsSseService, useValue: kdsSse },
         { provide: AdminTablesSseService, useValue: { lastEvent: signal(null) } },
         { provide: StoreSettingsFacade, useValue: { settings } },
-        { provide: AuthFacade, useValue: {} },
+        { provide: AuthFacade, useValue: { isHospitality: () => false, userPermissions: () => [] } },
         { provide: ToastService, useValue: toast },
         { provide: DialogService, useValue: dialog },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '7' } } } },

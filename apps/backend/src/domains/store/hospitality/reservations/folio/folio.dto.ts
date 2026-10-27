@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsNumber,
   IsOptional,
@@ -67,4 +68,10 @@ export class FolioPaymentDto {
   @IsString()
   @Matches(/^[A-Za-z0-9-]{8,64}$/)
   request_id!: string;
+}
+
+/** H3.6 — "Cargos bloqueados" on or off. */
+export class FolioChargesBlockedDto {
+  @IsBoolean()
+  blocked!: boolean;
 }

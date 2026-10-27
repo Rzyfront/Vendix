@@ -55,6 +55,11 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
+import { of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
+import { RoomChargeModalComponent } from '../../../hospitality/reservations/components/room-charge-modal/room-charge-modal.component';
+import { LodgingReservationsService } from '../../../hospitality/reservations/services/lodging-reservations.service';
+import { InHouseRoom } from '../../../hospitality/reservations/interfaces/folio.interface';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
 export type { EntregaChoice };
@@ -86,6 +91,7 @@ export type { EntregaChoice };
     PosPaymentStepComponent,
     PosShippingStepComponent,
     NgTemplateOutlet,
+    RoomChargeModalComponent,
   ],
   templateUrl: './pos-checkout-shell.component.html',
   styleUrl: './pos-checkout-shell.component.scss',
@@ -2503,6 +2509,98 @@ export class PosCheckoutShellComponent {
     return this.saleMode() === 'alias'
       ? this.customerAlias().trim() || undefined
       : undefined;
+  }
+
+  // ── H3.6 Cargo a habitación ─────────────────────────────────────────────
+  private readonly lodgingReservations = inject(LodgingReservationsService);
+  readonly roomChargeOpen = signal(false);
+  readonly roomChargeBusy = signal(false);
+  /** Draft already saved by a failed attempt: a retry charges the same sale. */
+  private roomChargeOrderId: number | null = null;
+
+  /**
+   * Hotel stores (Hotelería) with `store:lodging:folio:charge` can charge a
+   * new POS sale to an in-house room instead of collecting money. Not for an
+   * edit, a draft-only checkout or a sale already on a table account.
+   */
+  readonly canChargeToRoom = computed(
+    () =>
+      this.authFacade.isHospitality() &&
+      this.authFacade.userPermissions().includes('store:lodging:folio:charge') &&
+      this.effectiveMode() === 'create-payment' &&
+      this.integration.currentTableSession() == null &&
+      (this.cartState()?.items?.length ?? 0) > 0,
+  );
+
+  openRoomCharge(): void {
+    if (!this.canChargeToRoom() || this.footerProcessing()) return;
+    this.roomChargeOpen.set(true);
+  }
+
+  closeRoomCharge(): void {
+    if (this.roomChargeBusy()) return;
+    this.roomChargeOpen.set(false);
+    if (this.roomChargeOrderId != null) {
+      this.toastService.warning('La venta quedó guardada como borrador; puedes cobrarla desde Borradores.');
+      this.roomChargeOrderId = null;
+    }
+  }
+
+  /**
+   * Saves the sale as a draft with the existing POS endpoint (no payment, no
+   * cash, no POS document), fires its prepared items like any counter draft
+   * and moves it to the room folio. The folio invoice bills it at check-out.
+   */
+  onRoomChargeConfirmed(room: InHouseRoom): void {
+    const state = this.cartState();
+    if (!state?.items?.length || this.roomChargeBusy()) return;
+    this.roomChargeBusy.set(true);
+    const draftState = state.customer?.id != null ? state : { ...state, customer: null };
+    const orderId$ =
+      this.roomChargeOrderId != null
+        ? of(this.roomChargeOrderId)
+        : this.integration.createCounterDraftOrder(draftState, this.customerAliasForPayload()).pipe(
+            switchMap((order) => {
+              this.roomChargeOrderId = order.id;
+              return this.integration
+                .maybeFireKitchen(order.id, this.preparedItemIdsFromOrder(order))
+                .pipe(
+                  catchError(() => of(null)),
+                  map(() => order.id),
+                );
+            }),
+          );
+    orderId$
+      .pipe(
+        switchMap((order_id) =>
+          this.lodgingReservations.chargeToRoom({
+            reservation_room_id: room.reservation_room_id,
+            order_id,
+          }),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (result) => {
+          this.roomChargeBusy.set(false);
+          this.roomChargeOrderId = null;
+          this.roomChargeOpen.set(false);
+          this.toastService.success(result.message);
+          this.cartService
+            .clearCart()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => this.isOpenChange.emit(false),
+              error: () => this.isOpenChange.emit(false),
+            });
+        },
+        error: (err: unknown) => {
+          this.roomChargeBusy.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : this.toastError(err, 'No se pudo cargar a la habitación'),
+          );
+        },
+      });
   }
 
   private toastError(err: any, fallback: string): string {

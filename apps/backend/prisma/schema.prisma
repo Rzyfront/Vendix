@@ -1080,6 +1080,7 @@ model stores {
   lodging_guests                 lodging_guests[]
   lodging_folios                 lodging_folios[]
   lodging_deposits               lodging_deposits[]
+  lodging_room_charges           lodging_room_charges[]
   /// Assignments de presentación de sus productos. La relación existe solo
   /// para sostener el índice único de `barcode` por tienda (ver el modelo).
   product_price_tier_assignments product_price_tier_assignments[]
@@ -1766,6 +1767,8 @@ model orders {
   table_sessions  table_sessions[]
   // Hospitality Suite (H3.2) — the draft order of a guest folio.
   lodging_folio   lodging_folios?
+  // Hospitality Suite (H3.6) — POS sale or table bill charged to a room.
+  lodging_room_charge lodging_room_charges?
   kitchen_tickets kitchen_tickets[]
 
   // Dispatch (remisión) back-relation
@@ -2586,14 +2589,42 @@ model lodging_folios {
   status         lodging_folio_status_enum @default(open)
   opened_at      DateTime                  @default(now()) @db.Timestamp(6)
   closed_at      DateTime?                 @db.Timestamp(6)
+  // H3.6 — "Cargos bloqueados": POS and tables cannot charge this room.
+  charges_blocked Boolean                  @default(false)
   created_at     DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
 
-  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  order       orders               @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation  lodging_reservations   @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order        orders                 @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  room_charges lodging_room_charges[]
 
   @@index([store_id, status])
+}
+
+// Hospitality Suite (H3.6) — a POS sale or table bill charged to an in-house
+// room. Its lines moved to the folio order (`item_ids`) and the source order
+// was cancelled without payment; the folio invoice (H3.7) bills them once.
+// `cost_amount` is the stock cost the transfer committed (COGS for H3.7).
+model lodging_room_charges {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  folio_id            Int
+  reservation_room_id Int
+  source_order_id     Int       @unique
+  table_session_id    Int?
+  origin              String    @db.VarChar(80)
+  item_ids            Int[]
+  amount              Decimal   @db.Decimal(14, 2)
+  cost_amount         Decimal   @default(0) @db.Decimal(14, 2)
+  created_by_user_id  Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  folio        lodging_folios @relation(fields: [folio_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  source_order orders         @relation(fields: [source_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([folio_id])
 }
 
 // Hospitality Suite (H2.1) — rate plan of a hotel store ("Solo alojamiento",

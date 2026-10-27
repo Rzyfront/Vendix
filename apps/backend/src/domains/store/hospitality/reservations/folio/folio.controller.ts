@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { CurrentUser } from '../../../../auth/decorators/current-user.decorator';
 import { FolioUser, LodgingFolioService } from './folio.service';
-import { AddFolioChargeDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
+import { AddFolioChargeDto, FolioChargesBlockedDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
 
 /** Hospitality Suite (H3.4) — guest folio: nights, manual charges, voids and payments. */
 @Controller('store/hospitality/reservations/:id/folio')
@@ -57,6 +57,14 @@ export class LodgingFolioController {
   ) {
     const result = await this.lodgingFolioService.voidCharge(id, itemId, dto);
     return this.responseService.success(result, 'Cargo anulado');
+  }
+
+  @ApiOperation({ summary: 'Bloquear o permitir los cargos a la habitación desde POS y mesas' })
+  @Patch('charges-blocked')
+  @Permissions('store:lodging:folio:close')
+  async setChargesBlocked(@Param('id', ParseIntPipe) id: number, @Body() dto: FolioChargesBlockedDto) {
+    const result = await this.lodgingFolioService.setChargesBlocked(id, dto.blocked);
+    return this.responseService.success(result, dto.blocked ? 'Cargos bloqueados' : 'Cargos permitidos');
   }
 
   @ApiOperation({ summary: 'Aplicar al folio el depósito de la reserva (anticipo)' })

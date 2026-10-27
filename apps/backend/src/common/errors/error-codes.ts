@@ -5870,6 +5870,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El pago no es válido para el folio',
   },
+  LODGING_ROOM_CHARGE_001: {
+    code: 'LODGING_ROOM_CHARGE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cargar esta cuenta a la habitación',
+  },
+  LODGING_ROOM_CHARGE_BLOCKED_001: {
+    code: 'LODGING_ROOM_CHARGE_BLOCKED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación tiene los cargos bloqueados',
+  },
   LODGING_DEPOSIT_001: {
     code: 'LODGING_DEPOSIT_001',
     httpStatus: 400,

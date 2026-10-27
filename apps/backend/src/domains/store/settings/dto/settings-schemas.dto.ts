@@ -1259,6 +1259,16 @@ export class HospitalitySettingsDto {
   @Min(0)
   @Max(99)
   default_overbooking_allowance?: number;
+
+  @ApiProperty({
+    example: 'Restaurante',
+    required: false,
+    description: 'Folio origin shown for a POS sale or table bill charged to a room (H3.6).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  room_charge_origin?: string;
 }
 
 export class RestaurantSettingsDto {

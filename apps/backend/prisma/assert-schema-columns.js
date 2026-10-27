@@ -131,6 +131,10 @@ const REQUIRED_COLUMNS = [
 
   // --- Hotelería H3.5 · depósitos y anticipos
   'lodging_deposits.wallet_transaction_id',
+
+  // --- Hotelería H3.6 · cargo a habitación desde POS y mesa
+  'lodging_folios.charges_blocked',
+  'lodging_room_charges.item_ids',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

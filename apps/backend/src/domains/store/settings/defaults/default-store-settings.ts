@@ -491,6 +491,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       rnt_number: '',
       // H1.6 - overbooking a new room type starts with (0 = never oversell).
       default_overbooking_allowance: 0,
+      // H3.6 - folio origin of a POS or table room charge.
+      room_charge_origin: 'Restaurante',
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

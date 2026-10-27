@@ -27,6 +27,11 @@ import { WalletModule } from '../../wallet/wallet.module';
 import { PaymentLinksModule } from '../../payment-links/payment-links.module';
 import { LodgingDepositsController } from './deposits/deposits.controller';
 import { LodgingDepositsService } from './deposits/deposits.service';
+import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commit.module';
+import { InventoryModule } from '../../inventory/inventory.module';
+import { TablesModule } from '../../tables/tables.module';
+import { LodgingRoomChargesController } from './room-charges/room-charges.controller';
+import { LodgingRoomChargesService } from './room-charges/room-charges.service';
 
 @Module({
   imports: [
@@ -43,6 +48,11 @@ import { LodgingDepositsService } from './deposits/deposits.service';
     // Wompi payment link.
     WalletModule,
     PaymentLinksModule,
+    // H3.6 — a room charge commits stock like a paid POS sale and closes the
+    // table session it came from.
+    OrderStockCommitModule,
+    InventoryModule,
+    TablesModule,
   ],
   controllers: [
     LodgingReservationsController,
@@ -52,6 +62,7 @@ import { LodgingDepositsService } from './deposits/deposits.service';
     LodgingFrontDeskController,
     LodgingFolioController,
     LodgingDepositsController,
+    LodgingRoomChargesController,
   ],
   providers: [
     LodgingReservationsService,
@@ -66,6 +77,7 @@ import { LodgingDepositsService } from './deposits/deposits.service';
     LodgingFolioService,
     LodgingNightAuditJob,
     LodgingDepositsService,
+    LodgingRoomChargesService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

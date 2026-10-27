@@ -104,6 +104,16 @@ function newRequestId(): string {
               <app-icon slot="icon" name="banknote" [size]="14" />
               Registrar pago
             </app-button>
+            <app-button
+              variant="ghost"
+              size="sm"
+              [loading]="busy()"
+              (clicked)="toggleChargesBlocked()"
+              data-testid="folio-charges-blocked"
+            >
+              <app-icon slot="icon" [name]="folio()?.charges_blocked ? 'unlock' : 'lock'" [size]="14" />
+              {{ folio()?.charges_blocked ? 'Permitir cargos' : 'Bloquear cargos' }}
+            </app-button>
           </div>
         }
       </div>
@@ -111,6 +121,11 @@ function newRequestId(): string {
       @if (loading()) {
         <p class="px-3 py-2 text-xs text-text-secondary">Cargando folio…</p>
       } @else if (folio(); as f) {
+        @if (f.charges_blocked) {
+          <p class="border-b border-border px-3 py-2 text-xs font-medium text-error" data-testid="folio-charges-blocked-note">
+            Cargos bloqueados: el POS y las mesas no pueden cargar a esta habitación.
+          </p>
+        }
         <ul class="divide-y divide-border">
           @for (line of f.lines; track line.id) {
             <li class="flex items-start justify-between gap-2 px-3 py-2" data-testid="folio-line">
@@ -125,6 +140,9 @@ function newRequestId(): string {
                   <p class="text-xs text-text-secondary">
                     {{ money(line.subtotal) }}{{ line.tax_amount > 0 ? ' + IVA ' + money(line.tax_amount) : '' }}
                   </p>
+                  @if (line.origin) {
+                    <p class="text-xs text-text-secondary" data-testid="folio-line-origin">Origen: {{ line.origin }}</p>
+                  }
                 </div>
                 @if (line.cancelled_at) {
                   <p class="text-xs text-error" data-testid="folio-line-void-reason">
@@ -136,7 +154,7 @@ function newRequestId(): string {
                 <span class="whitespace-nowrap font-medium" [class.line-through]="line.cancelled_at">
                   {{ money(line.total) }}
                 </span>
-                @if (editable() && !line.cancelled_at && !action()) {
+                @if (editable() && !line.cancelled_at && !line.origin && !action()) {
                   <app-button
                     variant="ghost"
                     size="sm"
@@ -395,6 +413,22 @@ export class FolioPanelComponent {
   }
 
   /** H3.5 — moves the held deposit onto the folio ("Anticipo aplicado"). */
+  /** H3.6 — "Cargos bloqueados" on or off for the POS and the tables. */
+  toggleChargesBlocked(): void {
+    const blocked = !this.folio()?.charges_blocked;
+    this.busy.set(true);
+    this.reservationsService
+      .setFolioChargesBlocked(this.reservationId(), blocked)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (folio) => {
+          this.applied(folio);
+          this.toastService.success(blocked ? 'Cargos bloqueados' : 'Cargos permitidos');
+        },
+        error: (message: string) => this.failed(message),
+      });
+  }
+
   applyDeposit(): void {
     this.busy.set(true);
     this.reservationsService

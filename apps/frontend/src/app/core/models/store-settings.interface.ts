@@ -402,6 +402,8 @@ export interface HospitalitySettings {
   rnt_number: string;
   /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
   default_overbooking_allowance?: number;
+  /** H3.6 — folio origin of a POS/table room charge. Default "Restaurante". */
+  room_charge_origin?: string;
 }
 
 export interface RestaurantSettings {

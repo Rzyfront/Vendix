@@ -2,6 +2,8 @@
 export interface FolioLine {
   id: number;
   kind: 'night' | 'charge';
+  /** H3.6 — where a POS/table room charge came from ("Restaurante · Mesa 4"). */
+  origin?: string | null;
   /** Night date `YYYY-MM-DD` of a night line; null for charges. */
   night_date: string | null;
   description: string;
@@ -31,6 +33,8 @@ export interface FolioPayment {
 export interface FolioDetail {
   id: number;
   status: 'open' | 'closed';
+  /** H3.6 — "Cargos bloqueados": POS and tables cannot charge this room. */
+  charges_blocked?: boolean;
   reservation_id: number;
   order_id: number;
   order_number: string;
@@ -59,4 +63,35 @@ export interface FolioPaymentRequest {
   store_payment_method_id: number;
   /** One key per payment attempt: a double click registers it once. */
   request_id: string;
+}
+
+/** H3.6 — an in-house room the POS and the tables can charge. */
+export interface InHouseRoom {
+  reservation_room_id: number;
+  reservation_id: number;
+  reservation_number: string;
+  room_code: string;
+  unit_type_name: string;
+  guest_name: string;
+  departure_date: string;
+  charges_blocked: boolean;
+}
+
+/** H3.6 — POS draft sale (`order_id`) or table bill (`table_session_id`). */
+export interface RoomChargeRequest {
+  reservation_room_id: number;
+  order_id?: number;
+  table_session_id?: number;
+}
+
+export interface RoomChargeResult {
+  id: number;
+  reservation_id: number;
+  reservation_room_id: number;
+  room_code: string;
+  guest_name: string;
+  origin: string;
+  amount: number;
+  /** "Cargado a 101 · Juan Pérez". */
+  message: string;
 }

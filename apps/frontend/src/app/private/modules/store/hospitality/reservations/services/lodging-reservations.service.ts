@@ -27,6 +27,9 @@ import {
   FolioChargeRequest,
   FolioDetail,
   FolioPaymentRequest,
+  InHouseRoom,
+  RoomChargeRequest,
+  RoomChargeResult,
 } from '../interfaces/folio.interface';
 
 interface ApiResponse<T> {
@@ -41,6 +44,7 @@ interface ApiResponse<T> {
 export class LodgingReservationsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/store/hospitality/reservations`;
+  private readonly roomChargesUrl = `${environment.apiUrl}/store/hospitality/room-charges`;
 
   list(query: ReservationListQuery = {}): Observable<ReservationListResult> {
     return this.http
@@ -230,6 +234,30 @@ export class LodgingReservationsService {
   registerFolioPayment(reservationId: number, body: FolioPaymentRequest): Observable<FolioDetail> {
     return this.http
       .post<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/payments`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.6 — "Cargos bloqueados" on or off for the POS and the tables. */
+  setFolioChargesBlocked(reservationId: number, blocked: boolean): Observable<FolioDetail> {
+    return this.http
+      .patch<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/charges-blocked`, {
+        blocked,
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.6 — in-house rooms for "Cargo a habitación" (room number or guest). */
+  getInHouseRooms(search = ''): Observable<InHouseRoom[]> {
+    const params = search.trim() ? new HttpParams().set('search', search.trim()) : undefined;
+    return this.http
+      .get<ApiResponse<InHouseRoom[]>>(`${this.roomChargesUrl}/rooms`, { params })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.6 — moves a POS draft sale or a table bill to the room folio. */
+  chargeToRoom(body: RoomChargeRequest): Observable<RoomChargeResult> {
+    return this.http
+      .post<ApiResponse<RoomChargeResult>>(this.roomChargesUrl, body)
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
