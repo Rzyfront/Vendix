@@ -12,6 +12,10 @@
       {
         "include": "ai-engine/playbooks/content/*.md",
         "outDir": "dist/src"
+      },
+      {
+        "include": "ai-engine/playbooks/content/*.md",
+        "outDir": "dist"
       }
     ]
   }
