@@ -24,7 +24,7 @@ import {
   RoomChangeDto,
 } from './dto';
 
-/** Hospitality Suite (H1.1/H1.2/H1.4) — nightly reservations of a hotel store. */
+/** Hospitality Suite (H1.1/H1.2/H1.4/H1.5) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
 @UseGuards(PermissionsGuard)
 export class LodgingReservationsController {
@@ -75,6 +75,17 @@ export class LodgingReservationsController {
     return this.responseService.success(result, 'Reserva actualizada');
   }
 
+  @ApiOperation({ summary: 'Cancelar una habitación de una reserva multi-habitación' })
+  @Post('rooms/:roomId/cancel')
+  @Permissions('store:lodging:reservations:write')
+  async cancelRoom(
+    @Param('roomId', ParseIntPipe) roomId: number,
+    @Body() dto: CancelReservationDto,
+  ) {
+    const result = await this.lodgingReservationsService.cancelRoom(roomId, dto.reason);
+    return this.responseService.success(result, 'Habitación cancelada');
+  }
+
   @ApiOperation({ summary: 'Obtener una reserva' })
   @Get(':id')
   @Permissions('store:lodging:reservations:read')
@@ -83,7 +94,7 @@ export class LodgingReservationsController {
     return this.responseService.success(result);
   }
 
-  @ApiOperation({ summary: 'Crear una reserva por noches' })
+  @ApiOperation({ summary: 'Crear una reserva por noches de una o varias habitaciones' })
   @Post()
   @Permissions('store:lodging:reservations:write')
   async create(@Body() dto: CreateReservationDto) {

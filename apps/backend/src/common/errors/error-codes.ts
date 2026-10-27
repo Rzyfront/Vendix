@@ -5712,6 +5712,16 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La habitación está ocupada en esas fechas',
   },
+  LODGING_RESERVATION_ROOM_CANCELLED_001: {
+    code: 'LODGING_RESERVATION_ROOM_CANCELLED_001',
+    httpStatus: 409,
+    devMessage: 'La habitación de la reserva ya está cancelada',
+  },
+  LODGING_RESERVATION_ROOM_LAST_001: {
+    code: 'LODGING_RESERVATION_ROOM_LAST_001',
+    httpStatus: 409,
+    devMessage: 'Es la única habitación activa de la reserva: cancela la reserva completa',
+  },
   PRICE_TIER_DUP_001: {
     code: 'PRICE_TIER_DUP_001',
     httpStatus: 409,

@@ -270,7 +270,10 @@ export class HospitalityReservationsPageComponent implements OnInit {
       return {
         ...r,
         guest: [r.customer.first_name, r.customer.last_name].filter(Boolean).join(' '),
-        room_type: r.rooms.map((room) => room.unit_type.name).join(', '),
+        room_type: r.rooms
+          .filter((room) => !room.cancelled_at)
+          .map((room) => room.unit_type.name)
+          .join(', '),
         stay: `${arrival} → ${departure}`,
         nights: String(countNights(arrival, departure)),
         total: this.currency.format(Number(r.total_amount), 0),

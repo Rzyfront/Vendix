@@ -17,6 +17,7 @@ export class LodgingRackService {
         where: {
           arrival_date: { lt: dateOnlyToDb(to) },
           departure_date: { gt: dateOnlyToDb(from) },
+          cancelled_at: null,
           reservation: { status: { in: RACK_STATUSES } },
         },
         select: {

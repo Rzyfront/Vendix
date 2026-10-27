@@ -25,6 +25,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import {
   countNights,
   LodgingReservation,
+  LodgingReservationRoom,
   RESERVATION_STATUS_LABELS,
   toDateOnly,
 } from '../../interfaces/reservation.interface';
@@ -34,7 +35,14 @@ import {
   RoomChangeTarget,
 } from '../room-change-modal/room-change-modal.component';
 
-type PendingAction = 'cancel' | 'no_show' | null;
+/** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
+type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | null;
+
+const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null>, string> = {
+  cancel: 'Reserva cancelada',
+  no_show: 'Reserva marcada como no-show',
+  cancel_room: 'Habitación cancelada',
+};
 
 /** Local civil date `YYYY-MM-DD` of the browser (the desk's day). */
 function todayLocal(): string {
@@ -47,7 +55,8 @@ function todayLocal(): string {
  * Hospitality Suite (H1.2) — reservation detail: stay, guests, total and
  * status history, with "Cancelar" (reason required) and "Marcar no-show".
  * Both free the nights for sale. "Mover" (H1.4) changes the room or the
- * dates without dragging (the mobile path of the rack).
+ * dates without dragging (the mobile path of the rack). With several rooms
+ * (H1.5) each one can be moved or cancelled alone; the others stay active.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -87,10 +96,6 @@ function todayLocal(): string {
                 </span>
               }
             </dd>
-            <dt class="text-text-secondary">Tipo</dt>
-            <dd>{{ roomTypes() }}</dd>
-            <dt class="text-text-secondary">Habitación</dt>
-            <dd data-testid="reservation-unit">{{ roomUnits() }}</dd>
             <dt class="text-text-secondary">Llegada → Salida</dt>
             <dd>{{ arrival() }} → {{ departure() }}</dd>
             <dt class="text-text-secondary">Noches</dt>
@@ -104,6 +109,48 @@ function todayLocal(): string {
               <dd>{{ r.notes }}</dd>
             }
           </dl>
+
+          <div>
+            <p class="mb-2 font-medium text-text-primary">
+              {{ r.rooms.length > 1 ? 'Habitaciones (' + activeRooms().length + ')' : 'Habitación' }}
+            </p>
+            <ul class="divide-y divide-border rounded-lg border border-border">
+              @for (room of r.rooms; track room.id) {
+                <li
+                  class="flex items-center justify-between gap-2 px-3 py-2"
+                  data-testid="reservation-room"
+                >
+                  <div [class.opacity-60]="room.cancelled_at">
+                    <p class="font-medium" data-testid="reservation-unit">
+                      {{ room.unit_type.name }} · {{ room.unit?.code ?? 'Sin asignar' }}
+                    </p>
+                    <p class="text-xs text-text-secondary">
+                      {{ roomGuests(room) }} · {{ money(room.total_amount) }}
+                      @if (room.cancelled_at) {
+                        · Cancelada
+                      }
+                    </p>
+                  </div>
+                  @if (!room.cancelled_at && !pending()) {
+                    <div class="flex flex-wrap justify-end gap-1">
+                      @if (canMove()) {
+                        <app-button variant="ghost" size="sm" (clicked)="startMove(room)">
+                          <app-icon slot="icon" name="arrow-right-left" [size]="14" />
+                          Mover
+                        </app-button>
+                      }
+                      @if (canCancelRoom()) {
+                        <app-button variant="ghost" size="sm" (clicked)="startCancelRoom(room.id)">
+                          <app-icon slot="icon" name="x-circle" [size]="14" />
+                          Cancelar habitación
+                        </app-button>
+                      }
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+          </div>
 
           <div>
             <p class="mb-2 font-medium text-text-primary">Historial</p>
@@ -134,8 +181,8 @@ function todayLocal(): string {
           @if (pending()) {
             <app-textarea
               [formControl]="reasonControl"
-              [label]="pending() === 'cancel' ? 'Motivo de la cancelación' : 'Motivo (opcional)'"
-              [required]="pending() === 'cancel'"
+              [label]="reasonRequired() ? 'Motivo de la cancelación' : 'Motivo (opcional)'"
+              [required]="reasonRequired()"
               [rows]="2"
               placeholder="Ej.: el huésped cambió de planes"
             />
@@ -149,18 +196,12 @@ function todayLocal(): string {
           <app-button
             variant="danger"
             [loading]="saving()"
-            [disabled]="pending() === 'cancel' && !reasonControl.value.trim()"
+            [disabled]="reasonRequired() && !reasonControl.value.trim()"
             (clicked)="confirmAction()"
           >
-            {{ pending() === 'cancel' ? 'Confirmar cancelación' : 'Confirmar no-show' }}
+            {{ confirmLabel() }}
           </app-button>
         } @else {
-          @if (canMove()) {
-            <app-button variant="outline" (clicked)="startMove()">
-              <app-icon slot="icon" name="arrow-right-left" [size]="16" />
-              Mover
-            </app-button>
-          }
           @if (canNoShow()) {
             <app-button variant="outline" (clicked)="startAction('no_show')">
               <app-icon slot="icon" name="user-x" [size]="16" />
@@ -201,6 +242,8 @@ export class ReservationDetailModalComponent {
   readonly loading = signal(false);
   readonly saving = signal(false);
   readonly pending = signal<PendingAction>(null);
+  /** Room picked for `cancel_room`. */
+  readonly pendingRoomId = signal<number | null>(null);
   readonly moveTarget = signal<RoomChangeTarget | null>(null);
   readonly reasonControl = new FormControl('', {
     nonNullable: true,
@@ -210,25 +253,33 @@ export class ReservationDetailModalComponent {
   readonly arrival = computed(() => toDateOnly(this.reservation()?.arrival_date ?? ''));
   readonly departure = computed(() => toDateOnly(this.reservation()?.departure_date ?? ''));
   readonly nights = computed(() => countNights(this.arrival(), this.departure()));
-  readonly roomTypes = computed(
-    () => this.reservation()?.rooms.map((room) => room.unit_type.name).join(', ') ?? '',
-  );
-  readonly roomUnits = computed(
-    () =>
-      this.reservation()
-        ?.rooms.map((room) => room.unit?.code ?? 'Sin asignar')
-        .join(', ') ?? '',
+  /** Rooms still sold (a room cancelled alone keeps showing as "Cancelada"). */
+  readonly activeRooms = computed(
+    () => this.reservation()?.rooms.filter((room) => !room.cancelled_at) ?? [],
   );
   readonly canMove = computed(
     () =>
       ['tentative', 'confirmed', 'checked_in'].includes(this.reservation()?.status ?? '') &&
-      (this.reservation()?.rooms.length ?? 0) > 0,
+      this.activeRooms().length > 0,
   );
+  /** One room alone only while another stays: the last one cancels the reservation. */
+  readonly canCancelRoom = computed(() => this.canCancel() && this.activeRooms().length > 1);
   readonly guests = computed(() => {
-    const rooms = this.reservation()?.rooms ?? [];
+    const rooms = this.activeRooms();
     const adults = rooms.reduce((sum, room) => sum + room.adults, 0);
     const children = rooms.reduce((sum, room) => sum + room.children, 0);
     return children > 0 ? `${adults} adultos · ${children} niños` : `${adults} adultos`;
+  });
+  readonly reasonRequired = computed(() => this.pending() !== 'no_show');
+  readonly confirmLabel = computed(() => {
+    switch (this.pending()) {
+      case 'no_show':
+        return 'Confirmar no-show';
+      case 'cancel_room':
+        return 'Cancelar esta habitación';
+      default:
+        return 'Confirmar cancelación';
+    }
   });
   readonly total = computed(() =>
     this.currency.format(Number(this.reservation()?.total_amount ?? 0), 0),
@@ -250,6 +301,16 @@ export class ReservationDetailModalComponent {
       const id = this.reservationId();
       if (id !== null) untracked(() => this.load(id));
     });
+  }
+
+  money(amount: string): string {
+    return this.currency.format(Number(amount), 0);
+  }
+
+  roomGuests(room: LodgingReservationRoom): string {
+    const adults = `${room.adults} ${room.adults === 1 ? 'adulto' : 'adultos'}`;
+    if (room.children < 1) return adults;
+    return `${adults} · ${room.children} ${room.children === 1 ? 'niño' : 'niños'}`;
   }
 
   labelOf(status: keyof typeof RESERVATION_STATUS_LABELS): string {
@@ -277,10 +338,9 @@ export class ReservationDetailModalComponent {
       });
   }
 
-  startMove(): void {
+  startMove(room: LodgingReservationRoom): void {
     const r = this.reservation();
-    const room = r?.rooms[0];
-    if (!r || !room) return;
+    if (!r) return;
     this.moveTarget.set({
       reservation_room_id: room.id,
       reservation_number: r.reservation_number,
@@ -299,7 +359,13 @@ export class ReservationDetailModalComponent {
 
   startAction(action: Exclude<PendingAction, null>): void {
     this.reasonControl.setValue('');
+    this.pendingRoomId.set(null);
     this.pending.set(action);
+  }
+
+  startCancelRoom(roomId: number): void {
+    this.startAction('cancel_room');
+    this.pendingRoomId.set(roomId);
   }
 
   confirmAction(): void {
@@ -307,19 +373,21 @@ export class ReservationDetailModalComponent {
     const action = this.pending();
     if (!reservation || !action) return;
     const reason = this.reasonControl.value.trim();
+    const roomId = this.pendingRoomId();
+    if (action === 'cancel_room' && roomId === null) return;
     const request =
-      action === 'cancel'
-        ? this.reservationsService.cancel(reservation.id, reason)
-        : this.reservationsService.markNoShow(reservation.id, reason || undefined);
+      action === 'cancel_room'
+        ? this.reservationsService.cancelRoom(roomId!, reason)
+        : action === 'cancel'
+          ? this.reservationsService.cancel(reservation.id, reason)
+          : this.reservationsService.markNoShow(reservation.id, reason || undefined);
     this.saving.set(true);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (updated) => {
         this.saving.set(false);
         this.pending.set(null);
         this.reservation.set(updated);
-        this.toastService.success(
-          action === 'cancel' ? 'Reserva cancelada' : 'Reserva marcada como no-show',
-        );
+        this.toastService.success(SUCCESS_MESSAGES[action]);
         this.changed.emit();
       },
       error: (message: unknown) => {

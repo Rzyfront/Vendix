@@ -28,6 +28,8 @@ export interface LodgingReservationRoom {
   unit_type: { id: number; name: string };
   /** Physical room once assigned (H1.4). */
   unit?: { id: number; code: string } | null;
+  /** Set when this room was cancelled alone (H1.5); null = active. */
+  cancelled_at?: string | null;
 }
 
 /** Reservation as returned by the store API (dates are date-only ISO). */
@@ -105,7 +107,18 @@ export interface ReservationQuote {
   total_amount: string;
 }
 
-export interface CreateReservationRequest extends ReservationQuoteRequest {
+/** One room of a new reservation: type and occupancy (H1.5). */
+export interface ReservationRoomRequest {
+  unit_type_id: number;
+  adults: number;
+  children?: number;
+}
+
+/** New reservation of one or more rooms sharing the stay dates. */
+export interface CreateReservationRequest {
+  arrival_date: string;
+  departure_date: string;
+  rooms: ReservationRoomRequest[];
   customer_id: number;
   notes?: string;
 }

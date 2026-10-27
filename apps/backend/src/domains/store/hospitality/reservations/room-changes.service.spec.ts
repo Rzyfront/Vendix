@@ -27,6 +27,8 @@ interface Options {
   soldOfType?: Record<number, number>;
   /** Error thrown by the night update (database guard). */
   updateError?: Error;
+  /** Room cancelled alone in a multi-room reservation (H1.5). */
+  cancelled?: boolean;
 }
 
 /**
@@ -45,6 +47,7 @@ function createFake(options: Options = {}) {
     total_amount: dec(750000),
     unit: options.unit === undefined ? null : options.unit,
     unit_type: { id: 11, name: 'Doble estándar' },
+    cancelled_at: options.cancelled ? D('2026-11-01') : null,
     reservation: { status: options.status ?? 'confirmed' },
     nights: ['2026-11-10', '2026-11-11', '2026-11-12'].map((d) => ({
       night_date: D(d),
@@ -317,6 +320,18 @@ describe('LodgingRoomChangesService', () => {
       const { service } = createFake({ status: 'cancelled' });
       const error = await rejection(service.quote(5, { departure_date: '2026-11-14' }));
       expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_STATUS_001');
+    });
+
+    it('rejects changes of a room cancelled alone, and totals count active rooms only', async () => {
+      const cancelled = createFake({ cancelled: true });
+      const error = await rejection(cancelled.service.quote(5, { departure_date: '2026-11-14' }));
+      expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_CANCELLED_001');
+
+      const { service, client } = createFake();
+      await service.apply(5, { departure_date: '2026-11-14' });
+      expect(client.lodging_reservation_rooms.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { reservation_id: 9, cancelled_at: null } }),
+      );
     });
 
     it('rejects a no-op change', async () => {

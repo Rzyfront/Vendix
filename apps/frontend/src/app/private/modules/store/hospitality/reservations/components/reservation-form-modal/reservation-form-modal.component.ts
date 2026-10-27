@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  FormArray,
   FormBuilder,
   FormControl,
   FormGroup,
@@ -16,7 +17,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { of } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap, tap } from 'rxjs/operators';
 import {
   ButtonComponent,
@@ -32,25 +33,31 @@ import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-cus
 import { PosCustomer } from '../../../../pos/models/customer.model';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import {
+  CreateReservationRequest,
   LodgingReservation,
   ReservationQuote,
   ReservationQuoteRequest,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
-interface ReservationForm {
+interface RoomLineForm {
   unit_type_id: FormControl<number | null>;
-  arrival_date: FormControl<string>;
-  departure_date: FormControl<string>;
   adults: FormControl<number>;
   children: FormControl<number>;
+}
+
+interface ReservationForm {
+  arrival_date: FormControl<string>;
+  departure_date: FormControl<string>;
+  rooms: FormArray<FormGroup<RoomLineForm>>;
   notes: FormControl<string>;
 }
 
+/** One quote per room line, in the order of the lines. */
 type QuoteState =
   | { kind: 'idle' }
   | { kind: 'loading' }
-  | { kind: 'ready'; quote: ReservationQuote }
+  | { kind: 'ready'; quotes: ReservationQuote[]; requested: Map<number, number> }
   | { kind: 'error'; message: string };
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -62,9 +69,11 @@ export function formatShortDate(date: string): string {
 }
 
 /**
- * Hospitality Suite (H1.1) — new nightly reservation: room type, dates and
- * occupancy are quoted live ("2 disponibles · 3 noches · $750.000"), then the
- * holder is picked or created with the shared POS customer selector.
+ * Hospitality Suite (H1.1/H1.5) — new nightly reservation: dates plus one or
+ * more rooms ("Agregar habitación"), each with its type and occupancy, quoted
+ * live ("2 disponibles · 3 noches · $750.000"; with several rooms the
+ * consolidated total). The holder is picked or created with the shared POS
+ * customer selector. The backend sells all the rooms or none.
  */
 @Component({
   selector: 'app-reservation-form-modal',
@@ -87,7 +96,7 @@ export function formatShortDate(date: string): string {
       [size]="'md'"
       [dialog]="true"
       title="Nueva reserva"
-      subtitle="Fechas, tipo de habitación y huésped titular"
+      subtitle="Fechas, habitaciones y huésped titular"
     >
       <form [formGroup]="form" class="space-y-4">
         <div class="grid grid-cols-2 gap-3">
@@ -105,29 +114,64 @@ export function formatShortDate(date: string): string {
             [required]="true"
             customWrapperClass="mt-0"
           />
-          <app-selector
-            class="col-span-2"
-            formControlName="unit_type_id"
-            label="Tipo de habitación"
-            placeholder="Selecciona un tipo"
-            [required]="true"
-            [options]="typeOptions()"
-          />
-          <app-input
-            formControlName="adults"
-            label="Adultos"
-            type="number"
-            [min]="1"
-            [required]="true"
-            customWrapperClass="mt-0"
-          />
-          <app-input
-            formControlName="children"
-            label="Niños"
-            type="number"
-            [min]="0"
-            customWrapperClass="mt-0"
-          />
+        </div>
+
+        <div formArrayName="rooms" class="space-y-3">
+          @for (line of form.controls.rooms.controls; track line; let i = $index) {
+            <div
+              [formGroupName]="i"
+              class="grid grid-cols-2 gap-3 rounded-lg border border-border p-3"
+              data-testid="reservation-room-line"
+            >
+              <div class="col-span-2 flex items-end gap-2">
+                <app-selector
+                  class="flex-1"
+                  formControlName="unit_type_id"
+                  [label]="lineCount() > 1 ? 'Habitación ' + (i + 1) : 'Tipo de habitación'"
+                  placeholder="Selecciona un tipo"
+                  [required]="true"
+                  [options]="typeOptions()"
+                />
+                @if (lineCount() > 1) {
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    [attr.aria-label]="'Quitar habitación ' + (i + 1)"
+                    (clicked)="removeRoom(i)"
+                  >
+                    <app-icon name="trash-2" [size]="16" />
+                  </app-button>
+                }
+              </div>
+              <app-input
+                formControlName="adults"
+                label="Adultos"
+                type="number"
+                [min]="1"
+                [required]="true"
+                customWrapperClass="mt-0"
+              />
+              <app-input
+                formControlName="children"
+                label="Niños"
+                type="number"
+                [min]="0"
+                customWrapperClass="mt-0"
+              />
+              @if (lineTotal(i); as subtotal) {
+                <p class="col-span-2 text-xs text-text-secondary">{{ subtotal }}</p>
+              }
+            </div>
+          }
+          <app-button
+            variant="outline"
+            size="sm"
+            [disabled]="lineCount() >= maxRooms"
+            (clicked)="addRoom()"
+          >
+            <app-icon slot="icon" name="plus" [size]="16" />
+            Agregar habitación
+          </app-button>
         </div>
 
         <div
@@ -211,6 +255,10 @@ export class ReservationFormModalComponent {
   readonly saving = signal(false);
   readonly customer = signal<PosCustomer | null>(null);
   readonly quoteState = signal<QuoteState>({ kind: 'idle' });
+  /** Number of room lines (the FormArray length is not a signal). */
+  readonly lineCount = signal(1);
+  /** Same cap as the API (`MAX_ROOMS_PER_RESERVATION`). */
+  readonly maxRooms = 30;
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   readonly typeOptions = computed<SelectorOption[]>(() =>
@@ -219,33 +267,46 @@ export class ReservationFormModalComponent {
       .map((t) => ({ value: t.id, label: t.name })),
   );
 
-  readonly canBook = computed(() => {
+  /** First type (by id, like the API) asking more rooms than are free. */
+  private readonly shortage = computed(() => {
     const state = this.quoteState();
-    return state.kind === 'ready' && state.quote.available > 0;
+    if (state.kind !== 'ready') return null;
+    for (const [typeId, requested] of [...state.requested].sort((a, b) => a[0] - b[0])) {
+      const quote = state.quotes.find((q) => q.unit_type.id === typeId);
+      if (quote && quote.available < requested) return quote;
+    }
+    return null;
   });
+
+  readonly canBook = computed(
+    () => this.quoteState().kind === 'ready' && this.shortage() === null,
+  );
 
   readonly quoteMessage = computed(() => {
     const state = this.quoteState();
     if (state.kind === 'error') return state.message;
     if (state.kind !== 'ready') return '';
-    const { quote } = state;
-    if (quote.available < 1) {
+    const short = this.shortage();
+    if (short) {
       const raw = this.form.getRawValue();
-      return `Sin disponibilidad de ${quote.unit_type.name} para el ${formatShortDate(raw.arrival_date)} al ${formatShortDate(raw.departure_date)}`;
+      const left = short.available > 0 ? ` (quedan ${short.available})` : '';
+      return `Sin disponibilidad de ${short.unit_type.name} para el ${formatShortDate(raw.arrival_date)} al ${formatShortDate(raw.departure_date)}${left}`;
     }
-    const nights = `${quote.nights} ${quote.nights === 1 ? 'noche' : 'noches'}`;
-    const available = `${quote.available} ${quote.available === 1 ? 'disponible' : 'disponibles'}`;
-    return `${available} · ${nights} · ${this.currency.format(Number(quote.total_amount), 0)}`;
+    const [first] = state.quotes;
+    const nights = `${first.nights} ${first.nights === 1 ? 'noche' : 'noches'}`;
+    const total = state.quotes.reduce((sum, q) => sum + Number(q.total_amount), 0);
+    const amount = this.currency.format(total, 0);
+    if (state.quotes.length === 1) {
+      const available = `${first.available} ${first.available === 1 ? 'disponible' : 'disponibles'}`;
+      return `${available} · ${nights} · ${amount}`;
+    }
+    return `${state.quotes.length} habitaciones · ${nights} · ${amount}`;
   });
 
   readonly form: FormGroup<ReservationForm> = this.fb.group<ReservationForm>({
-    unit_type_id: this.fb.control<number | null>(null, {
-      validators: [Validators.required],
-    }),
     arrival_date: this.fb.nonNullable.control('', { validators: [Validators.required] }),
     departure_date: this.fb.nonNullable.control('', { validators: [Validators.required] }),
-    adults: this.fb.nonNullable.control(2, { validators: [Validators.min(1)] }),
-    children: this.fb.nonNullable.control(0, { validators: [Validators.min(0)] }),
+    rooms: this.fb.array([this.roomLine(null)]),
     notes: this.fb.nonNullable.control('', { validators: [Validators.maxLength(1000)] }),
   });
 
@@ -259,8 +320,12 @@ export class ReservationFormModalComponent {
         debounceTime(300),
         switchMap((request) =>
           request
-            ? this.reservationsService.quote(request).pipe(
-                map((quote): QuoteState => ({ kind: 'ready', quote })),
+            ? forkJoin(request.map((line) => this.reservationsService.quote(line))).pipe(
+                map((quotes): QuoteState => ({
+                  kind: 'ready',
+                  quotes,
+                  requested: countByType(request),
+                })),
                 catchError((message: unknown) =>
                   of<QuoteState>({
                     kind: 'error',
@@ -279,17 +344,45 @@ export class ReservationFormModalComponent {
   }
 
   reset(): void {
+    const rooms = this.form.controls.rooms;
+    rooms.clear({ emitEvent: false });
+    rooms.push(this.roomLine(null), { emitEvent: false });
+    this.lineCount.set(1);
     this.form.reset({
-      unit_type_id: (this.typeOptions()[0]?.value as number | undefined) ?? null,
       arrival_date: '',
       departure_date: '',
-      adults: 2,
-      children: 0,
+      rooms: [{ unit_type_id: this.defaultTypeId(), adults: 2, children: 0 }],
       notes: '',
     });
     this.customer.set(null);
     this.customerSelector()?.reset();
     this.quoteState.set({ kind: 'idle' });
+  }
+
+  addRoom(): void {
+    const rooms = this.form.controls.rooms;
+    if (rooms.length >= this.maxRooms) return;
+    // A new line repeats the last type: groups usually book several alike.
+    const last = rooms.at(rooms.length - 1)?.controls.unit_type_id.value ?? null;
+    rooms.push(this.roomLine(last ?? this.defaultTypeId()));
+    this.lineCount.set(rooms.length);
+  }
+
+  removeRoom(index: number): void {
+    const rooms = this.form.controls.rooms;
+    if (rooms.length < 2) return;
+    rooms.removeAt(index);
+    this.lineCount.set(rooms.length);
+  }
+
+  /** Subtotal of a line once quoted, e.g. "Suite · 3 noches · $1.200.000". */
+  lineTotal(index: number): string | null {
+    const state = this.quoteState();
+    if (state.kind !== 'ready' || state.quotes.length < 2) return null;
+    const quote = state.quotes[index];
+    if (!quote) return null;
+    const nights = `${quote.nights} ${quote.nights === 1 ? 'noche' : 'noches'}`;
+    return `${quote.unit_type.name} · ${nights} · ${this.currency.format(Number(quote.total_amount), 0)}`;
   }
 
   clearCustomer(): void {
@@ -306,12 +399,20 @@ export class ReservationFormModalComponent {
     if (!request || !customer || !this.canBook()) return;
 
     this.saving.set(true);
+    const raw = this.form.getRawValue();
+    const payload: CreateReservationRequest = {
+      arrival_date: raw.arrival_date,
+      departure_date: raw.departure_date,
+      rooms: request.map(({ unit_type_id, adults, children }) => ({
+        unit_type_id,
+        adults,
+        children,
+      })),
+      customer_id: Number(customer.id),
+      notes: raw.notes.trim() || undefined,
+    };
     this.reservationsService
-      .create({
-        ...request,
-        customer_id: Number(customer.id),
-        notes: this.form.controls.notes.value.trim() || undefined,
-      })
+      .create(payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (reservation) => {
@@ -332,18 +433,46 @@ export class ReservationFormModalComponent {
       });
   }
 
-  /** Request to quote, or null while the stay is incomplete. */
-  private quoteRequest(): ReservationQuoteRequest | null {
+  /** One quote request per room line, or null while the stay is incomplete. */
+  private quoteRequest(): ReservationQuoteRequest[] | null {
     const raw = this.form.getRawValue();
-    if (raw.unit_type_id == null || !raw.arrival_date || !raw.departure_date) {
+    if (
+      !raw.arrival_date ||
+      !raw.departure_date ||
+      raw.rooms.length === 0 ||
+      raw.rooms.some((room) => room.unit_type_id == null)
+    ) {
       return null;
     }
-    return {
-      unit_type_id: Number(raw.unit_type_id),
+    return raw.rooms.map((room) => ({
+      unit_type_id: Number(room.unit_type_id),
       arrival_date: raw.arrival_date,
       departure_date: raw.departure_date,
-      adults: Number(raw.adults) || 0,
-      children: Number(raw.children) || 0,
-    };
+      adults: Number(room.adults) || 0,
+      children: Number(room.children) || 0,
+    }));
   }
+
+  private roomLine(unitTypeId: number | null): FormGroup<RoomLineForm> {
+    return this.fb.group<RoomLineForm>({
+      unit_type_id: this.fb.control<number | null>(unitTypeId, {
+        validators: [Validators.required],
+      }),
+      adults: this.fb.nonNullable.control(2, { validators: [Validators.min(1)] }),
+      children: this.fb.nonNullable.control(0, { validators: [Validators.min(0)] }),
+    });
+  }
+
+  private defaultTypeId(): number | null {
+    return (this.typeOptions()[0]?.value as number | undefined) ?? null;
+  }
+}
+
+/** Rooms asked per type id. */
+function countByType(lines: ReservationQuoteRequest[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const line of lines) {
+    counts.set(line.unit_type_id, (counts.get(line.unit_type_id) ?? 0) + 1);
+  }
+  return counts;
 }

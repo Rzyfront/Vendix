@@ -164,6 +164,7 @@ export class LodgingRoomChangesService {
         total_amount: true,
         unit: { select: { id: true, code: true } },
         unit_type: { select: { id: true, name: true } },
+        cancelled_at: true,
         reservation: { select: { status: true } },
         nights: {
           where: { is_active: true },
@@ -174,6 +175,9 @@ export class LodgingRoomChangesService {
     });
     if (!room) {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_FIND_001);
+    }
+    if (room.cancelled_at) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_CANCELLED_001);
     }
     const status = room.reservation.status;
     if (!NIGHT_HOLDING_STATUSES.includes(status)) {
@@ -363,9 +367,9 @@ export class LodgingRoomChangesService {
         updated_at: now,
       },
     });
-    // The header spans all its rooms and sums their totals.
+    // The header spans its active rooms and sums their totals.
     const rooms = await tx.lodging_reservation_rooms.aggregate({
-      where: { reservation_id: plan.reservation_id },
+      where: { reservation_id: plan.reservation_id, cancelled_at: null },
       _min: { arrival_date: true },
       _max: { departure_date: true },
       _sum: { total_amount: true },

@@ -1,6 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsInt,
   IsOptional,
@@ -8,6 +11,7 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,8 +47,53 @@ export class ReservationQuoteDto {
   children?: number;
 }
 
-/** Nightly reservation of one room of a type for a customer (holder). */
-export class CreateReservationDto extends ReservationQuoteDto {
+/** Most rooms one reservation can hold (a group bigger than this is split). */
+export const MAX_ROOMS_PER_RESERVATION = 30;
+
+/** One room of a reservation: the room type and its occupancy. */
+export class ReservationRoomDto {
+  @ApiProperty({ description: 'Tipo de habitación.' })
+  @Type(() => Number)
+  @IsInt()
+  unit_type_id!: number;
+
+  @ApiProperty({ description: 'Adultos.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  adults!: number;
+
+  @ApiProperty({ required: false, description: 'Niños.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  children?: number;
+}
+
+/**
+ * Nightly reservation of one or more rooms (H1.5) for a customer (holder).
+ * Every room shares the stay dates; it is sold all or nothing.
+ */
+export class CreateReservationDto {
+  @ApiProperty({ description: 'Llegada, fecha civil de la tienda (YYYY-MM-DD).' })
+  @Matches(DATE_ONLY)
+  @IsDateString({ strict: true })
+  arrival_date!: string;
+
+  @ApiProperty({ description: 'Salida, exclusiva: esa noche no se cobra (YYYY-MM-DD).' })
+  @Matches(DATE_ONLY)
+  @IsDateString({ strict: true })
+  departure_date!: string;
+
+  @ApiProperty({ type: [ReservationRoomDto], description: 'Habitaciones de la reserva.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_ROOMS_PER_RESERVATION)
+  @ValidateNested({ each: true })
+  @Type(() => ReservationRoomDto)
+  rooms!: ReservationRoomDto[];
+
   @ApiProperty({ description: 'Cliente titular de la reserva.' })
   @Type(() => Number)
   @IsInt()

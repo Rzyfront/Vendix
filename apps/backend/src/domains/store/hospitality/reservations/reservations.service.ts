@@ -71,7 +71,7 @@ interface SellableType {
 }
 
 /**
- * Hospitality Suite (H1.1) — nightly reservations of one room type.
+ * Hospitality Suite (H1.1/H1.5) — nightly reservations of one or more rooms.
  *
  * Every sold night is a `lodging_room_nights` row of the type; availability
  * counts them. Sales of a store are serialized by a transaction-scoped
@@ -297,40 +297,62 @@ export class LodgingReservationsService {
     };
   }
 
+  /**
+   * Sells every room of the reservation in one transaction (H1.5): if one
+   * type lacks rooms nothing is created and the error names that type.
+   */
   async create(dto: CreateReservationDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const children = dto.children ?? 0;
     const nights = stayNights(dto.arrival_date, dto.departure_date);
-    const unitType = await this.loadSellableType(dto.unit_type_id);
-    assertCapacity(unitType, dto.adults, children);
+    // Types in id order, so checks (and the type a shortage names) are stable.
+    const typeIds = [...new Set(dto.rooms.map((r) => r.unit_type_id))].sort((a, b) => a - b);
+    const types = new Map<number, SellableType>();
+    for (const typeId of typeIds) {
+      types.set(typeId, await this.loadSellableType(typeId));
+    }
+    const lines = dto.rooms.map((room) => {
+      const unitType = types.get(room.unit_type_id)!;
+      const children = room.children ?? 0;
+      assertCapacity(unitType, room.adults, children);
+      return {
+        unitType,
+        adults: room.adults,
+        children,
+        total: unitType.nightly_rate.mul(nights.length),
+      };
+    });
     await this.assertCustomerInStore(store_id, dto.customer_id);
 
-    const rate = unitType.nightly_rate;
-    const total = rate.mul(nights.length);
+    const total = lines.reduce((sum, line) => sum.add(line.total), new Prisma.Decimal(0));
     const arrival = dateOnlyToDb(dto.arrival_date);
     const departure = dateOnlyToDb(dto.departure_date);
     const now = new Date();
 
     const id = await this.prisma.$transaction(async (tx) => {
       // Serializes every sale of the store: availability and the sequence
-      // number are read and written while no other sale can run.
+      // number are read and written while no other sale can run. One lock
+      // for all the types of the reservation, so they cannot deadlock.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`lodging_reservations:${store_id}`}))`;
 
-      const available = await this.availability.countAvailable(
-        unitType.id,
-        dto.arrival_date,
-        dto.departure_date,
-        tx,
-      );
-      if (available < 1) {
-        throw new VendixHttpException(
-          ErrorCodes.LODGING_RESERVATION_AVAILABILITY_001,
-          `Sin disponibilidad de ${unitType.name} para el ${formatShortDate(dto.arrival_date)} al ${formatShortDate(dto.departure_date)}`,
+      for (const typeId of typeIds) {
+        const requested = lines.filter((line) => line.unitType.id === typeId).length;
+        const available = await this.availability.countAvailable(
+          typeId,
+          dto.arrival_date,
+          dto.departure_date,
+          tx,
         );
+        if (available < requested) {
+          const left = available > 0 ? ` (quedan ${available})` : '';
+          throw new VendixHttpException(
+            ErrorCodes.LODGING_RESERVATION_AVAILABILITY_001,
+            `Sin disponibilidad de ${types.get(typeId)!.name} para el ${formatShortDate(dto.arrival_date)} al ${formatShortDate(dto.departure_date)}${left}`,
+          );
+        }
       }
 
       const last = await tx.lodging_reservations.findFirst({
@@ -352,29 +374,31 @@ export class LodgingReservationsService {
           updated_at: now,
         },
       });
-      const room = await tx.lodging_reservation_rooms.create({
-        data: {
-          store_id,
-          reservation_id: reservation.id,
-          unit_type_id: unitType.id,
-          arrival_date: arrival,
-          departure_date: departure,
-          adults: dto.adults,
-          children,
-          total_amount: total,
-          updated_at: now,
-        },
-      });
-      await tx.lodging_room_nights.createMany({
-        data: nights.map((night) => ({
-          store_id,
-          reservation_room_id: room.id,
-          unit_type_id: unitType.id,
-          night_date: dateOnlyToDb(night),
-          rate_amount: rate,
-          updated_at: now,
-        })),
-      });
+      for (const line of lines) {
+        const room = await tx.lodging_reservation_rooms.create({
+          data: {
+            store_id,
+            reservation_id: reservation.id,
+            unit_type_id: line.unitType.id,
+            arrival_date: arrival,
+            departure_date: departure,
+            adults: line.adults,
+            children: line.children,
+            total_amount: line.total,
+            updated_at: now,
+          },
+        });
+        await tx.lodging_room_nights.createMany({
+          data: nights.map((night) => ({
+            store_id,
+            reservation_room_id: room.id,
+            unit_type_id: line.unitType.id,
+            night_date: dateOnlyToDb(night),
+            rate_amount: line.unitType.nightly_rate,
+            updated_at: now,
+          })),
+        });
+      }
       await tx.lodging_reservation_events.create({
         data: {
           store_id,
@@ -388,6 +412,93 @@ export class LodgingReservationsService {
     }, SALE_TX_OPTIONS);
 
     return this.findOne(id);
+  }
+
+  /**
+   * Cancels one room of a multi-room reservation (H1.5): frees its nights,
+   * keeps the other rooms active and recomputes the header total and dates.
+   * The last active room cannot be cancelled alone: cancel the reservation.
+   */
+  async cancelRoom(room_id: number, reason: string) {
+    const store_id = this.requireStoreId();
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+    const now = new Date();
+    const reservationId = await this.prisma.$transaction(async (tx) => {
+      // Inside `$transaction` the client is not store-scoped: name the store.
+      const room = await tx.lodging_reservation_rooms.findFirst({
+        where: { id: room_id, store_id },
+        select: { reservation_id: true },
+      });
+      if (!room) {
+        throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_FIND_001);
+      }
+      // Serializes with a room change, a cancellation or a no-show of the
+      // same reservation.
+      await tx.$executeRaw`SELECT id FROM lodging_reservations WHERE id = ${room.reservation_id} AND store_id = ${store_id} FOR UPDATE`;
+      const reservation = await tx.lodging_reservations.findFirst({
+        where: { id: room.reservation_id, store_id },
+        select: {
+          id: true,
+          status: true,
+          rooms: {
+            where: { cancelled_at: null },
+            select: {
+              id: true,
+              unit_type: { select: { name: true } },
+              unit: { select: { code: true } },
+            },
+          },
+        },
+      });
+      if (!reservation || !canTransition(reservation.status, 'cancelled')) {
+        throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_STATUS_001);
+      }
+      const target = reservation.rooms.find((r) => r.id === room_id);
+      if (!target) {
+        throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_CANCELLED_001);
+      }
+      if (reservation.rooms.length < 2) {
+        throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_ROOM_LAST_001);
+      }
+
+      await tx.lodging_reservation_rooms.update({
+        where: { id: room_id },
+        data: { cancelled_at: now, updated_at: now },
+      });
+      await tx.lodging_room_nights.updateMany({
+        where: { reservation_room_id: room_id, is_active: true },
+        data: { is_active: false, updated_at: now },
+      });
+      // The header spans its active rooms and sums their totals.
+      const active = await tx.lodging_reservation_rooms.aggregate({
+        where: { reservation_id: reservation.id, cancelled_at: null },
+        _min: { arrival_date: true },
+        _max: { departure_date: true },
+        _sum: { total_amount: true },
+      });
+      await tx.lodging_reservations.update({
+        where: { id: reservation.id },
+        data: {
+          ...(active._min.arrival_date ? { arrival_date: active._min.arrival_date } : {}),
+          ...(active._max.departure_date ? { departure_date: active._max.departure_date } : {}),
+          total_amount: active._sum.total_amount ?? new Prisma.Decimal(0),
+          updated_at: now,
+        },
+      });
+      const label = [target.unit_type.name, target.unit?.code].filter(Boolean).join(' · ');
+      await tx.lodging_reservation_events.create({
+        data: {
+          store_id,
+          reservation_id: reservation.id,
+          from_status: reservation.status,
+          to_status: reservation.status,
+          reason: `Habitación cancelada: ${label} — ${reason}`.slice(0, 500),
+          user_id,
+        },
+      });
+      return reservation.id;
+    }, SALE_TX_OPTIONS);
+    return this.findOne(reservationId);
   }
 
   private async loadSellableType(unit_type_id: number): Promise<SellableType> {

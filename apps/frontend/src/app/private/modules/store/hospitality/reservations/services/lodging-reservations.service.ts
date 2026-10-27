@@ -62,6 +62,13 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** Cancels one room of a multi-room reservation; the others stay (H1.5). */
+  cancelRoom(roomId: number, reason: string): Observable<LodgingReservation> {
+    return this.http
+      .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/rooms/${roomId}/cancel`, { reason })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
   markNoShow(id: number, reason?: string): Observable<LodgingReservation> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/no-show`, { reason })

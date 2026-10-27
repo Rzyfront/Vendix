@@ -2424,8 +2424,8 @@ model lodging_reservation_events {
 }
 
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
-// the physical room once assigned, and the occupancy. One per reservation
-// today; several with multi-room reservations (H1.5).
+// the physical room once assigned, and the occupancy. A reservation holds one
+// or more rooms (H1.5, groups and families under one holder).
 model lodging_reservation_rooms {
   id             Int       @id @default(autoincrement())
   store_id       Int
@@ -2437,6 +2437,8 @@ model lodging_reservation_rooms {
   adults         Int       @default(1)
   children       Int       @default(0)
   total_amount   Decimal   @default(0) @db.Decimal(14, 2)
+  // H1.5 — one room of a multi-room reservation cancelled alone; null = active.
+  cancelled_at   DateTime? @db.Timestamp(6)
   created_at     DateTime? @default(now()) @db.Timestamp(6)
   updated_at     DateTime? @default(now()) @db.Timestamp(6)
 

@@ -102,6 +102,9 @@ const REQUIRED_COLUMNS = [
   'accounts_receivable.cancelled_at',
   'accounts_receivable.cancellation_reason',
   'refunds.ar_payment_id',
+
+  // --- Hotelería H1.5 · cancelar una habitación de una reserva multi-habitación
+  'lodging_reservation_rooms.cancelled_at',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
