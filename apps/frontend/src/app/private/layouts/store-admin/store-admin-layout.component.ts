@@ -612,6 +612,13 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_reservations',
         },
         {
+          // H7.2 — occupancy, ADR and RevPAR: same panel_ui key.
+          label: 'Indicadores',
+          icon: 'chart-line',
+          route: '/admin/hospitality/performance',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
           label: 'Servicios exentos',
           icon: 'file-check',

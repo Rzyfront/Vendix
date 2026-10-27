@@ -5966,6 +5966,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Solo se reabre un día cerrado',
   },
+  // H7.2 — occupancy, ADR and RevPAR report.
+  LODGING_PERFORMANCE_RANGE_001: {
+    code: 'LODGING_PERFORMANCE_RANGE_001',
+    httpStatus: 400,
+    devMessage: 'El rango debe ir de la fecha inicial a la final y cubrir como máximo 366 días',
+  },
   // H3.7 — check-out with payment and electronic invoice.
   LODGING_CHECKOUT_001: {
     code: 'LODGING_CHECKOUT_001',

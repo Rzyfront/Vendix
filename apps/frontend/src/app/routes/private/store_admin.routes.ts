@@ -1059,6 +1059,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityNightAuditPageComponent),
           },
           {
+            // H7.2 — "Indicadores" (occupancy, ADR, RevPAR); same panel_ui key as Reservas.
+            path: 'performance',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/performance-page/performance-page.component'
+              ).then((c) => c.HospitalityPerformancePageComponent),
+          },
+          {
             // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
             path: 'exempt-services',
             loadComponent: () =>

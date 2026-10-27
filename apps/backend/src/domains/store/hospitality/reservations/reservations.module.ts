@@ -49,6 +49,8 @@ import { LodgingVatExemptServicesController } from './reports/vat-exempt-service
 import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
 import { LodgingNightAuditController } from './night-audit/night-audit.controller';
 import { LodgingNightAuditService } from './night-audit/night-audit.service';
+import { LodgingPerformanceController } from './reports/performance.controller';
+import { LodgingPerformanceService } from './reports/performance.service';
 
 @Module({
   imports: [
@@ -93,6 +95,7 @@ import { LodgingNightAuditService } from './night-audit/night-audit.service';
     LodgingVatExemptServicesController,
     LodgingInventoryBlocksController,
     LodgingNightAuditController,
+    LodgingPerformanceController,
   ],
   providers: [
     LodgingReservationsService,
@@ -115,6 +118,7 @@ import { LodgingNightAuditService } from './night-audit/night-audit.service';
     LodgingBookingEngineService,
     BookingHoldExpiryJob,
     LodgingNightAuditService,
+    LodgingPerformanceService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
 })

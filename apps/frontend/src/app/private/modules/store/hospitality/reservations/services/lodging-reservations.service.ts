@@ -40,6 +40,7 @@ import {
   VatExemptServicesReport,
 } from '../interfaces/folio.interface';
 import { NightAuditView } from '../interfaces/night-audit.interface';
+import { LodgingPerformanceReport } from '../interfaces/performance.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -291,6 +292,17 @@ export class LodgingReservationsService {
     return this.http
       .get<ApiResponse<VatExemptServicesReport>>(
         `${environment.apiUrl}/store/hospitality/reports/vat-exempt-services`,
+        { params },
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H7.2 — occupancy, ADR and RevPAR by business day and month. */
+  performance(from: string, to: string): Observable<LodgingPerformanceReport> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get<ApiResponse<LodgingPerformanceReport>>(
+        `${environment.apiUrl}/store/hospitality/reports/performance`,
         { params },
       )
       .pipe(map((res) => res.data), catchError(this.handleError));
