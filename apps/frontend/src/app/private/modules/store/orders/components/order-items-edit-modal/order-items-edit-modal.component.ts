@@ -25,6 +25,7 @@ import {
 import {
   ButtonComponent,
   IconComponent,
+  InputsearchComponent,
   ModalComponent,
   ToastService,
 } from '../../../../../../shared/components';
@@ -154,7 +155,14 @@ function variantLabelOf(raw: unknown): string {
 @Component({
   selector: 'app-order-items-edit-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [
+    FormsModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    InputsearchComponent,
+    CurrencyPipe,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './order-items-edit-modal.component.html',
 })
