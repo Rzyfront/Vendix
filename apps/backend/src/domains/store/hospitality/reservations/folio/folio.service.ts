@@ -23,6 +23,13 @@ import { WalletBalanceService } from '../../../wallet/services/wallet-balance.se
 import { depositTotals } from '../deposits/lodging-deposit-math';
 import { AddFolioChargeDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
 import { nightLineDescription } from './folio-nights';
+import {
+  exemptNightTaxRows,
+  isVatExemptRow,
+  NightTaxRow,
+  VAT_EXEMPTION_TAX_NAME,
+  vatExemptionBlockers,
+} from '../guests/lodging-vat-exemption';
 
 /** Payment methods the desk registers by hand (gateways settle themselves). */
 const MANUAL_METHODS = new Set(['cash', 'bank_transfer', 'card']);
@@ -118,7 +125,7 @@ export class LodgingFolioService {
             cancelled_at: true,
             cancellation_reason: true,
             created_at: true,
-            order_item_taxes: { select: { tax_amount: true } },
+            order_item_taxes: { select: { tax_amount: true, tax_name: true } },
             lodging_room_night: { select: { night_date: true } },
           },
           orderBy: { id: 'asc' },
@@ -197,6 +204,8 @@ export class LodgingFolioService {
           subtotal: Number(item.total_price),
           tax_amount: Math.round(tax * 100) / 100,
           total: Math.round((Number(item.total_price) + tax) * 100) / 100,
+          // H3.9 — night invoiced with VAT 0 % "Exento – art. 481 lit. d ET".
+          vat_exempt: item.order_item_taxes.some(isVatExemptRow),
           cancelled_at: item.cancelled_at,
           cancellation_reason: item.cancellation_reason,
           created_at: item.created_at,
@@ -225,7 +234,199 @@ export class LodgingFolioService {
       verified_current:
         !!folio.verified_at && toCents(folio.verified_total) === toCents(order.grand_total),
       closed_at: folio.closed_at ?? null,
+      vat_exemption: await this.vatExemptionStatus(reservation_id),
     };
+  }
+
+  // ---------------------------------------------------------- VAT exemption
+
+  /**
+   * H3.9 — "No residente – exento de IVA" of the holder: applied or not, and
+   * why it cannot be applied (no RNT, no passport, no entry permit...).
+   */
+  async vatExemptionStatus(reservation_id: number) {
+    const holder = await this.findHolder(reservation_id);
+    const reasons = vatExemptionBlockers(await this.rntNumber(), holder);
+    return {
+      applied: !!holder?.vat_exempt_at,
+      available: reasons.length === 0,
+      reasons,
+      applied_at: holder?.vat_exempt_at ?? null,
+    };
+  }
+
+  /**
+   * Marks or clears the holder's exemption and re-prices the nights already
+   * on the folio: exempt nights keep their pre-tax base with VAT 0 %, cleared
+   * ones go back to the catalog taxes. Consumptions and manual charges never
+   * change. The folio total changes, so a D11 review asks again.
+   */
+  async setVatExemption(reservation_id: number, enabled: boolean) {
+    const folio = await this.findFolio(reservation_id);
+    this.assertOpen(folio);
+    const store_id = this.requireStoreId();
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+
+    const holder = await this.findHolder(reservation_id);
+    if (enabled) {
+      const reasons = vatExemptionBlockers(await this.rntNumber(), holder);
+      if (reasons.length > 0) {
+        throw new VendixHttpException(ErrorCodes.LODGING_VAT_EXEMPT_001, reasons.join('. '));
+      }
+    }
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockFolioOrder(tx, folio, store_id);
+        if (holder) {
+          await tx.lodging_guests.update({
+            where: { id: holder.id },
+            data: {
+              vat_exempt_at: enabled ? new Date() : null,
+              vat_exempt_by_user_id: enabled ? user_id : null,
+              updated_at: new Date(),
+            },
+          });
+        }
+        await this.repriceNights(tx, folio.order_id, enabled);
+        await this.recalcTotals(tx, folio.order_id);
+        const order = await tx.orders.findUnique({
+          where: { id: folio.order_id },
+          include: { payments: { select: { amount: true, state: true } } },
+        });
+        if (order && toCents(getSettledOrderAmount(order)) > toCents(order.grand_total)) {
+          throw new VendixHttpException(
+            ErrorCodes.LODGING_VAT_EXEMPT_001,
+            'Los pagos del folio superarían el nuevo total',
+          );
+        }
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
+    this.logger.log(`Folio ${folio.id}: VAT exemption ${enabled ? 'applied' : 'cleared'}`);
+    return this.getFolio(reservation_id);
+  }
+
+  /**
+   * Check-out guard: exempt nights are invoiced only while the holder still
+   * qualifies (the guest or the store RNT may have changed since).
+   */
+  async assertVatExemptionHolds(folio: FolioRow): Promise<void> {
+    const exemptLines = await this.prisma.order_items.count({
+      where: {
+        order_id: folio.order_id,
+        cancelled_at: null,
+        order_item_taxes: { some: { tax_name: VAT_EXEMPTION_TAX_NAME } },
+      },
+    });
+    if (exemptLines === 0) return;
+    const holder = await this.findHolder(folio.reservation_id);
+    const reasons = vatExemptionBlockers(await this.rntNumber(), holder);
+    if (!holder?.vat_exempt_at) reasons.push('El titular ya no tiene la exención aplicada');
+    if (reasons.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_VAT_EXEMPT_001,
+        `La exención de IVA ya no aplica: ${reasons.join('. ')}. Quítala del folio para facturar` +
+          (folio.order_id && (await this.hasActiveSplit(folio.order_id)) ? ' (cancela antes la división del folio)' : ''),
+      );
+    }
+  }
+
+  private async hasActiveSplit(order_id: number): Promise<boolean> {
+    const order = await this.prisma.orders.findUnique({
+      where: { id: order_id },
+      select: { active_financial_split_id: true },
+    });
+    return !!order?.active_financial_split_id;
+  }
+
+  /**
+   * Every active night line of the folio, re-priced exempt or taxed from its
+   * OWN pre-tax base and product: the exemption only drops or restores the
+   * VAT, it never re-reads the night rate (a room change may have moved it).
+   * The rows go exclusive on that base, so the base never changes.
+   */
+  private async repriceNights(tx: Tx, order_id: number, exempt: boolean): Promise<void> {
+    const items = await tx.order_items.findMany({
+      where: { order_id, cancelled_at: null, lodging_room_night: { isNot: null } },
+      select: {
+        id: true,
+        quantity: true,
+        unit_price: true,
+        product_id: true,
+        products: { select: { price_unit_quantity: true } },
+      },
+    });
+    if (items.length === 0) return;
+    const taxRows = await resolveFullTaxRowsByProductId(
+      tx,
+      items.map((i) => i.product_id).filter((id): id is number => id !== null),
+    );
+    for (const item of items) {
+      const catalog = item.product_id !== null ? (taxRows.get(item.product_id) ?? []) : [];
+      const rows = (exempt ? exemptNightTaxRows(catalog) : catalog).map((row) => ({
+        ...row,
+        is_inclusive: false,
+      }));
+      const line = resolveCatalogLine({
+        catalogUnitPrice: Number(item.unit_price),
+        quantity: item.quantity,
+        priceUnitQuantityRaw: item.products?.price_unit_quantity ?? null,
+        rows: rows as FullTaxRow[],
+      });
+      await tx.order_item_taxes.deleteMany({ where: { order_item_id: item.id } });
+      await tx.order_items.update({
+        where: { id: item.id },
+        data: {
+          unit_price: new Prisma.Decimal(line.unitBase),
+          total_price: new Prisma.Decimal(line.totalPrice),
+          tax_rate: new Prisma.Decimal(line.taxRate),
+          tax_amount_item: new Prisma.Decimal(line.taxAmountItem),
+          final_unit_price: new Prisma.Decimal(line.finalUnitPrice),
+          updated_at: new Date(),
+          ...(rows.length > 0 ? { order_item_taxes: { create: this.taxRowsData(line.taxRows) } } : {}),
+        },
+      });
+    }
+  }
+
+  /**
+   * Price and tax rows of a night. Taxed: the rate with the catalog rows.
+   * Exempt (H3.9): the pre-tax base the catalog rows give that rate, with the
+   * VAT rows replaced by the exempt VAT 0 % row; a product without VAT has
+   * nothing to exempt and keeps its rows.
+   */
+  private nightPricing(
+    rate: number,
+    priceUnitQuantityRaw: unknown,
+    rows: FullTaxRow[],
+    exempt: boolean,
+  ): { catalogUnitPrice: number; rows: NightTaxRow[] } {
+    const exemptRows = exempt ? exemptNightTaxRows(rows) : rows;
+    if (exemptRows === rows) return { catalogUnitPrice: rate, rows };
+    const taxed = resolveCatalogLine({ catalogUnitPrice: rate, quantity: 1, priceUnitQuantityRaw, rows });
+    return { catalogUnitPrice: taxed.unitBase, rows: exemptRows };
+  }
+
+  /** Holder (primary guest) of the reservation with the exemption evidence. */
+  private findHolder(reservation_id: number) {
+    return this.prisma.lodging_guests.findFirst({
+      where: { reservation_id, is_primary: true },
+      select: {
+        id: true,
+        is_primary: true,
+        document_type: true,
+        nationality_country_code: true,
+        entry_permit_type: true,
+        is_non_resident: true,
+        vat_exempt_at: true,
+      },
+    });
+  }
+
+  private async rntNumber(): Promise<string | null> {
+    const settings = (await this.settings.getSettings()) as { hospitality?: { rnt_number?: string } };
+    return settings?.hospitality?.rnt_number ?? null;
   }
 
   // ---------------------------------------------------------------- nights
@@ -289,6 +490,9 @@ export class LodgingFolioService {
         });
         if (nights.length === 0) return 0;
 
+        // H3.9 — the holder took the VAT exemption: nights go out at VAT 0 %.
+        // Read after the order lock, so a concurrent change already committed.
+        const exempt = !!(await this.findHolder(folio.reservation_id))?.vat_exempt_at;
         const taxRows = await resolveFullTaxRowsByProductId(
           tx,
           nights.map((n) => n.unit_type.product.id),
@@ -296,15 +500,21 @@ export class LodgingFolioService {
         for (const night of nights) {
           const product = night.unit_type.product;
           const nightDate = night.night_date.toISOString().slice(0, 10);
+          const priced = this.nightPricing(
+            Number(night.rate_amount),
+            product.price_unit_quantity,
+            taxRows.get(product.id) ?? [],
+            exempt,
+          );
           const item = await this.createLine(tx, order.id, {
             product_id: product.id,
             product_variant_id: null,
             product_name: product.name,
             description: nightLineDescription(nightDate, night.unit_type.name, night.unit?.code ?? null),
             quantity: 1,
-            catalogUnitPrice: Number(night.rate_amount),
+            catalogUnitPrice: priced.catalogUnitPrice,
             priceUnitQuantityRaw: product.price_unit_quantity,
-            rows: taxRows.get(product.id) ?? [],
+            rows: priced.rows,
             override: null,
           });
           // Conditional: only a night still unposted takes the line.
@@ -794,15 +1004,17 @@ export class LodgingFolioService {
       quantity: number;
       catalogUnitPrice: number;
       priceUnitQuantityRaw: unknown;
-      rows: FullTaxRow[];
+      rows: NightTaxRow[];
       override: { user_id: number | null; catalogUnitPrice: number } | null;
     },
   ) {
+    // The exempt VAT row (H3.9) has no catalog rate; pricing reads only rate
+    // and inclusiveness, so it prices like any other row.
     const line = resolveCatalogLine({
       catalogUnitPrice: input.catalogUnitPrice,
       quantity: input.quantity,
       priceUnitQuantityRaw: input.priceUnitQuantityRaw,
-      rows: input.rows,
+      rows: input.rows as FullTaxRow[],
     });
     return tx.order_items.create({
       data: {
@@ -827,23 +1039,24 @@ export class LodgingFolioService {
         item_type: 'service',
         updated_at: new Date(),
         ...(input.rows.length > 0
-          ? {
-              order_item_taxes: {
-                create: line.taxRows.map(({ row, tax_amount }) => ({
-                  tax_rate_id: row.tax_rate_id,
-                  tax_name: row.name,
-                  tax_rate: Math.round((row.rate + Number.EPSILON) * 100000) / 100000,
-                  tax_amount,
-                  tax_type: row.tax_type,
-                  is_compound: false,
-                  is_inclusive: row.is_inclusive,
-                })),
-              },
-            }
+          ? { order_item_taxes: { create: this.taxRowsData(line.taxRows) } }
           : {}),
       },
       select: { id: true },
     });
+  }
+
+  /** `order_item_taxes` rows of a priced line (snapshot per rate). */
+  private taxRowsData(taxRows: ReturnType<typeof resolveCatalogLine>['taxRows']) {
+    return taxRows.map(({ row, tax_amount }) => ({
+      tax_rate_id: (row as NightTaxRow).tax_rate_id,
+      tax_name: row.name,
+      tax_rate: Math.round((row.rate + Number.EPSILON) * 100000) / 100000,
+      tax_amount,
+      tax_type: row.tax_type,
+      is_compound: false,
+      is_inclusive: row.is_inclusive,
+    }));
   }
 
   /** Totals and balance from the active lines (the shared order rule). */

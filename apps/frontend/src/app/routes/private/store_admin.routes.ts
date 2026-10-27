@@ -1034,6 +1034,14 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/hospitality/reservations/pages/front-desk-page/front-desk-page.component'
               ).then((c) => c.HospitalityFrontDeskPageComponent),
           },
+          {
+            // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
+            path: 'exempt-services',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reservations/pages/vat-exempt-services-page/vat-exempt-services-page.component'
+              ).then((c) => c.HospitalityVatExemptServicesPageComponent),
+          },
         ],
       },
       // Subscription Routes

@@ -75,3 +75,9 @@ export class FolioChargesBlockedDto {
   @IsBoolean()
   blocked!: boolean;
 }
+
+/** H3.9 — "No residente – exento de IVA" of the holder on or off. */
+export class FolioVatExemptionDto {
+  @IsBoolean()
+  enabled!: boolean;
+}

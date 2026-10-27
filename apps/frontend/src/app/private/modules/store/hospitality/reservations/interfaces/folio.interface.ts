@@ -15,9 +15,43 @@ export interface FolioLine {
   tax_amount: number;
   total: number;
   /** Voided lines stay listed, struck through with their reason. */
+  /** H3.9 — night invoiced with VAT 0 % "Exento – art. 481 lit. d ET". */
+  vat_exempt?: boolean;
   cancelled_at: string | null;
   cancellation_reason: string | null;
   created_at: string | null;
+}
+
+/** H3.9 — "No residente – exento de IVA" of the holder. */
+export interface FolioVatExemption {
+  applied: boolean;
+  /** False when a reason blocks it (no RNT, no passport, no entry permit…). */
+  available: boolean;
+  reasons: string[];
+  applied_at: string | null;
+}
+
+/** H3.9 — one invoice of the "Servicios exentos" report. */
+export interface VatExemptServiceRow {
+  invoice_id: number;
+  invoice_number: string | null;
+  issue_date: string;
+  status: string;
+  reservation_id: number | null;
+  reservation_number: string | null;
+  guest_name: string | null;
+  document_type: string | null;
+  document_number: string | null;
+  nationality_country_code: string | null;
+  entry_permit_type: string | null;
+  exempt_base: number;
+  invoice_total: number;
+}
+
+export interface VatExemptServicesReport {
+  from: string;
+  to: string;
+  rows: VatExemptServiceRow[];
 }
 
 export interface FolioPayment {
@@ -53,6 +87,7 @@ export interface FolioDetail {
   verified_at?: string | null;
   verified_current?: boolean;
   closed_at?: string | null;
+  vat_exemption?: FolioVatExemption;
 }
 
 /** H3.7 — check-out: pay the balance or charge it to the company's credit. */

@@ -178,6 +178,32 @@ function newRequestId(): string {
             Cargos bloqueados: el POS y las mesas no pueden cargar a esta habitación.
           </p>
         }
+        @if (f.vat_exemption; as vx) {
+          <div class="space-y-1 border-b border-border px-3 py-2" data-testid="folio-vat-exemption">
+            <label class="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                class="h-4 w-4 accent-primary"
+                [checked]="vx.applied"
+                [disabled]="!editable() || !!split() || busy() || (!vx.applied && !vx.available)"
+                (change)="setVatExemption($event)"
+                data-testid="folio-vat-exempt-box"
+              />
+              No residente – exento de IVA
+            </label>
+            @if (vx.applied) {
+              <p class="text-xs text-text-secondary">
+                Las noches salen con IVA 0 % «Exento – art. 481 lit. d ET». Los consumos conservan su impuesto.
+              </p>
+            } @else if (!vx.available) {
+              <ul class="list-disc pl-5 text-xs text-text-secondary" data-testid="folio-vat-exempt-reasons">
+                @for (reason of vx.reasons; track reason) {
+                  <li>{{ reason }}</li>
+                }
+              </ul>
+            }
+          </div>
+        }
         <ul class="divide-y divide-border">
           @for (line of f.lines; track line.id) {
             <li class="flex items-start justify-between gap-2 px-3 py-2" data-testid="folio-line">
@@ -192,6 +218,11 @@ function newRequestId(): string {
                   <p class="text-xs text-text-secondary">
                     {{ money(line.subtotal) }}{{ line.tax_amount > 0 ? ' + IVA ' + money(line.tax_amount) : '' }}
                   </p>
+                  @if (line.vat_exempt) {
+                    <p class="text-xs font-medium text-primary" data-testid="folio-line-vat-exempt">
+                      IVA 0 % · Exento – art. 481 lit. d ET
+                    </p>
+                  }
                   @if (line.origin) {
                     <p class="text-xs text-text-secondary" data-testid="folio-line-origin">Origen: {{ line.origin }}</p>
                   }
@@ -747,6 +778,29 @@ export class FolioPanelComponent {
           this.toastService.success(blocked ? 'Cargos bloqueados' : 'Cargos permitidos');
         },
         error: (message: string) => this.failed(message),
+      });
+  }
+
+  /**
+   * H3.9 — "No residente – exento de IVA": the nights are re-priced at VAT 0 %
+   * (or back to their IVA). The total changes, so the D11 review asks again.
+   */
+  setVatExemption(event: Event): void {
+    const box = event.target as HTMLInputElement;
+    const enabled = box.checked;
+    this.busy.set(true);
+    this.reservationsService
+      .setFolioVatExemption(this.reservationId(), enabled)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (folio) => {
+          this.applied(folio);
+          this.toastService.success(enabled ? 'Exención de IVA aplicada a las noches' : 'Exención de IVA quitada');
+        },
+        error: (message: string) => {
+          box.checked = !enabled;
+          this.failed(message);
+        },
       });
   }
 

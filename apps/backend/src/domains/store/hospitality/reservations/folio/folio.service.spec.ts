@@ -6,6 +6,8 @@ import { nightAuditCutoff } from './folio-nights';
 interface Item {
   id: number;
   order_id: number;
+  product_id?: number | null;
+  unit_price?: number;
   product_name: string;
   description: string | null;
   total_price: number;
@@ -15,14 +17,37 @@ interface Item {
   cancellation_reason: string | null;
   inventory_committed: boolean;
   inventory_consumed_at_fire: boolean;
-  order_item_taxes: Array<{ tax_amount: number }>;
+  order_item_taxes: Array<{ tax_amount: number; tax_name?: string; tax_rate_id?: number | null }>;
 }
 
 /**
  * H3.4 — folio of H-0001 (order 500): one Doble room 101 with the nights of
  * 10-nov and 11-nov at $250.000 + IVA 19 %, store in Bogotá.
  */
-function build(options: { paid?: number; allowOverride?: boolean; deposit?: number } = {}) {
+/** H3.9 — holder of H-0001: US passport with the PIP-5 tourist stamp. */
+function touristHolder(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 80,
+    is_primary: true,
+    document_type: 'PA',
+    nationality_country_code: 'US',
+    entry_permit_type: 'PIP-5',
+    is_non_resident: true,
+    vat_exempt_at: null as Date | null,
+    ...overrides,
+  };
+}
+
+function build(
+  options: {
+    paid?: number;
+    allowOverride?: boolean;
+    deposit?: number;
+    holder?: ReturnType<typeof touristHolder> | null;
+    rnt?: string;
+  } = {},
+) {
+  const holder = options.holder ?? null;
   const nights = [
     { id: 1, night_date: new Date('2026-11-10T00:00:00Z'), posted_order_item_id: null as number | null },
     { id: 2, night_date: new Date('2026-11-11T00:00:00Z'), posted_order_item_id: null as number | null },
@@ -100,7 +125,7 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
         {
           product_id: 900,
           is_inclusive: false,
-          tax_categories: { tax_type: 'IVA', tax_rates: [{ id: 7, name: 'IVA 19%', rate: 0.19 }] },
+          tax_categories: { tax_type: 'iva', tax_rates: [{ id: 7, name: 'IVA 19%', rate: 0.19 }] },
         },
       ]),
     },
@@ -109,7 +134,9 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
         const item: Item = {
           id: 1000 + items.length,
           order_id: data.order_id,
+          product_id: data.product_id ?? null,
           product_name: data.product_name,
+          unit_price: Number(data.unit_price),
           description: data.description,
           total_price: Number(data.total_price),
           tax_amount_item: Number(data.tax_amount_item),
@@ -120,18 +147,55 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
           inventory_consumed_at_fire: false,
           order_item_taxes: (data.order_item_taxes?.create ?? []).map((t: any) => ({
             tax_amount: t.tax_amount,
+            tax_name: t.tax_name,
+            tax_rate_id: t.tax_rate_id,
           })),
         };
         items.push(item);
         return { id: item.id };
       }),
+      // H3.9 — the posted night lines, re-priced by the exemption.
+      findMany: jest.fn(async () =>
+        items
+          .filter((it) => !it.cancelled_at && it.description?.startsWith('Noche'))
+          .map((it) => ({
+            id: it.id,
+            quantity: it.quantity,
+            unit_price: it.unit_price,
+            product_id: it.product_id,
+            products: { price_unit_quantity: null },
+          })),
+      ),
       findFirst: jest.fn(async ({ where }: any) =>
         items.find((it) => it.id === where.id && it.order_id === where.order_id) ?? null,
       ),
       update: jest.fn(async ({ where, data }: any) => {
         const item = items.find((it) => it.id === where.id)!;
-        Object.assign(item, data);
+        const { order_item_taxes, ...rest } = data;
+        Object.assign(item, rest);
+        if (rest.total_price !== undefined) item.total_price = Number(rest.total_price);
+        if (rest.unit_price !== undefined) item.unit_price = Number(rest.unit_price);
+        if (order_item_taxes?.create) {
+          item.order_item_taxes = order_item_taxes.create.map((t: any) => ({
+            tax_amount: t.tax_amount,
+            tax_name: t.tax_name,
+            tax_rate_id: t.tax_rate_id,
+          }));
+        }
         return item;
+      }),
+    },
+    order_item_taxes: {
+      deleteMany: jest.fn(async ({ where }: any) => {
+        const item = items.find((it) => it.id === where.order_item_id);
+        if (item) item.order_item_taxes = [];
+        return { count: 1 };
+      }),
+    },
+    lodging_guests: {
+      update: jest.fn(async ({ data }: any) => {
+        if (holder) Object.assign(holder, data);
+        return holder;
       }),
     },
     payments: {
@@ -146,6 +210,16 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
     },
   };
   const prisma = {
+    lodging_guests: { findFirst: jest.fn(async () => (holder ? { ...holder } : null)) },
+    orders: { findUnique: jest.fn(async () => order) },
+    order_items: {
+      count: jest.fn(
+        async () =>
+          items.filter(
+            (it) => !it.cancelled_at && it.order_item_taxes.some((t) => t.tax_name === 'Exento – art. 481 lit. d ET'),
+          ).length,
+      ),
+    },
     lodging_folios: {
       findFirst: jest.fn(async () => ({ id: 70, status: 'open', reservation_id: 1, order_id: 500 })),
     },
@@ -196,7 +270,12 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
     getActiveSession: jest.fn(async () => ({ id: 30 })),
   };
   const cashMovements = { recordSaleMovement: jest.fn(async () => ({ id: 1 })) };
-  const settings = { getSettings: jest.fn(async () => ({ pos: { cash_register: { enabled: true } } })) };
+  const settings = {
+    getSettings: jest.fn(async () => ({
+      pos: { cash_register: { enabled: true } },
+      hospitality: { rnt_number: options.rnt ?? '' },
+    })),
+  };
   const events: string[] = [];
   const eventEmitter = { emit: jest.fn((name: string) => events.push(name)) };
   const walletBalance = {
@@ -231,6 +310,7 @@ function build(options: { paid?: number; allowOverride?: boolean; deposit?: numb
     cashMovements,
     deposits,
     walletBalance,
+    holder,
   };
 }
 
@@ -555,6 +635,119 @@ describe('LodgingFolioService (H3.4)', () => {
 
       expect(error.errorCode).toBe(ErrorCodes.LODGING_DEPOSIT_001.code);
       expect(payments).toHaveLength(0);
+    });
+  });
+  describe('VAT exemption of a non-resident holder (H3.9)', () => {
+    const EXEMPT = 'Exento – art. 481 lit. d ET';
+
+    it('an exempt holder gets the nights at VAT 0 % "Exento – art. 481 lit. d ET"; the laundry keeps its IVA', async () => {
+      const { service, items, order, tx } = build({ holder: touristHolder({ vat_exempt_at: new Date() }), rnt: '12345' });
+      // The laundry is a taxed service too: IVA 19 % on both products.
+      tx.product_tax_assignments.findMany.mockImplementation(async () =>
+        [900, 77].map((product_id) => ({
+          product_id,
+          is_inclusive: false,
+          tax_categories: { tax_type: 'iva', tax_rates: [{ id: 7, name: 'IVA 19%', rate: 0.19 }] },
+        })),
+      );
+
+      await service.postNights(1);
+      await service.addCharge(1, { product_id: 77, quantity: 1 });
+
+      expect(items[0]).toMatchObject({
+        description: 'Noche 10-nov · Doble · 101',
+        total_price: 250000,
+        tax_amount_item: 0,
+        order_item_taxes: [{ tax_amount: 0, tax_name: EXEMPT, tax_rate_id: null }],
+      });
+      expect(items[1]).toMatchObject({
+        product_name: 'Lavandería',
+        total_price: 30000,
+        order_item_taxes: [{ tax_amount: 5700, tax_name: 'IVA 19%', tax_rate_id: 7 }],
+      });
+      expect(order.grand_total).toBe(250000 + 35700);
+    });
+
+    it('"No residente – exento de IVA" re-prices the posted nights without their IVA and records who', async () => {
+      const { service, items, order, holder } = build({ holder: touristHolder(), rnt: '12345' });
+      await service.postNights(1);
+      expect(order.grand_total).toBe(297500);
+
+      await service.setVatExemption(1, true);
+
+      expect(holder!.vat_exempt_at).toBeInstanceOf(Date);
+      expect((holder as any).vat_exempt_by_user_id).toBe(42);
+      expect(items[0]).toMatchObject({ total_price: 250000, order_item_taxes: [{ tax_amount: 0, tax_name: EXEMPT }] });
+      expect(order.grand_total).toBe(250000);
+
+      await service.setVatExemption(1, false);
+
+      expect(holder!.vat_exempt_at).toBeNull();
+      expect(items[0]).toMatchObject({ total_price: 250000, order_item_taxes: [{ tax_amount: 47500, tax_name: 'IVA 19%' }] });
+      expect(order.grand_total).toBe(297500);
+    });
+
+    it('a room change that moved the night rate does not re-price the posted night', async () => {
+      const { service, items, order, tx } = build({ holder: touristHolder(), rnt: '12345' });
+      await service.postNights(1);
+      // The desk upgraded the room: the night row now says $400.000.
+      tx.lodging_room_nights.findMany.mockImplementation(async () => [
+        { id: 1, night_date: new Date('2026-11-10T00:00:00Z'), rate_amount: 400000 } as any,
+      ]);
+
+      await service.setVatExemption(1, true);
+      expect(items[0]).toMatchObject({ total_price: 250000, order_item_taxes: [{ tax_amount: 0 }] });
+      await service.setVatExemption(1, false);
+
+      expect(items[0]).toMatchObject({ total_price: 250000, order_item_taxes: [{ tax_amount: 47500 }] });
+      expect(order.grand_total).toBe(297500);
+    });
+
+    it('a store without RNT cannot apply it and the nights keep their IVA', async () => {
+      const { service, items, holder } = build({ holder: touristHolder(), rnt: '' });
+      await service.postNights(1);
+
+      const error = await errorOf(service.setVatExemption(1, true));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_VAT_EXEMPT_001.code);
+      expect(error.message).toContain('La tienda no tiene RNT');
+      expect(holder!.vat_exempt_at).toBeNull();
+      expect(items[0].order_item_taxes).toEqual([{ tax_amount: 47500, tax_name: 'IVA 19%', tax_rate_id: 7 }]);
+    });
+
+    it('a holder without passport nor permit is refused with the reason', async () => {
+      const { service } = build({
+        holder: touristHolder({ document_type: 'CC', entry_permit_type: null }),
+        rnt: '12345',
+      });
+
+      const error = await errorOf(service.setVatExemption(1, true));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_VAT_EXEMPT_001.code);
+      expect(error.message).toContain('El titular debe identificarse con pasaporte');
+      expect(error.message).toContain('Falta el sello o permiso de ingreso');
+    });
+
+    it('the status explains why the box is disabled', async () => {
+      const { service } = build({ holder: touristHolder({ entry_permit_type: null }), rnt: '12345' });
+
+      const status = await service.vatExemptionStatus(1);
+
+      expect(status).toMatchObject({ applied: false, available: false });
+      expect(status.reasons).toEqual([expect.stringContaining('Falta el sello o permiso de ingreso')]);
+    });
+
+    it('check-out refuses exempt nights when the holder no longer qualifies', async () => {
+      const { service, holder, prisma } = build({ holder: touristHolder({ vat_exempt_at: new Date() }), rnt: '12345' });
+      await service.postNights(1);
+      await expect(service.assertVatExemptionHolds(await service.findFolio(1))).resolves.toBeUndefined();
+
+      holder!.is_non_resident = false;
+      const error = await errorOf(service.assertVatExemptionHolds(await service.findFolio(1)));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_VAT_EXEMPT_001.code);
+      expect(error.message).toContain('La exención de IVA ya no aplica');
+      expect(prisma.order_items.count).toHaveBeenCalled();
     });
   });
 });

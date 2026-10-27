@@ -39,6 +39,9 @@ import { LodgingCheckOutService } from './check-out/check-out.service';
 import { LodgingFolioSplitController } from './folio-split/folio-split.controller';
 import { LodgingFolioSplitService } from './folio-split/folio-split.service';
 
+import { LodgingVatExemptServicesController } from './reports/vat-exempt-services.controller';
+import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
+
 @Module({
   imports: [
     ResponseModule,
@@ -76,6 +79,7 @@ import { LodgingFolioSplitService } from './folio-split/folio-split.service';
     LodgingRoomChargesController,
     LodgingCheckOutController,
     LodgingFolioSplitController,
+    LodgingVatExemptServicesController,
   ],
   providers: [
     LodgingReservationsService,
@@ -93,6 +97,7 @@ import { LodgingFolioSplitService } from './folio-split/folio-split.service';
     LodgingRoomChargesService,
     LodgingCheckOutService,
     LodgingFolioSplitService,
+    LodgingVatExemptServicesService,
   ],
   exports: [LodgingReservationsService, LodgingAvailabilityService],
 })

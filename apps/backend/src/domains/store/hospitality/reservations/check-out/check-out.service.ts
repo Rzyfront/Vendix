@@ -138,6 +138,8 @@ export class LodgingCheckOutService {
 
     // 1. The folio as it will be invoiced: every night slept is charged.
     await this.postSleptNights(folio);
+    // H3.9 — exempt nights only while the holder still qualifies.
+    await this.folios.assertVatExemptionHolds(folio);
 
     // 2. D11 review at this total (before any money moves).
     await this.assertVerified(reservation_id, folio, dto, user);

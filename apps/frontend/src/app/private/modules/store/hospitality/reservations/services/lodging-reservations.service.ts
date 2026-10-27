@@ -36,6 +36,7 @@ import {
   SplitConfirmRequest,
   SplitPaymentRequest,
   SplitResult,
+  VatExemptServicesReport,
 } from '../interfaces/folio.interface';
 
 interface ApiResponse<T> {
@@ -249,6 +250,26 @@ export class LodgingReservationsService {
       .patch<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/charges-blocked`, {
         blocked,
       })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.9 — "No residente – exento de IVA" on or off; the nights are re-priced. */
+  setFolioVatExemption(reservationId: number, enabled: boolean): Observable<FolioDetail> {
+    return this.http
+      .patch<ApiResponse<FolioDetail>>(`${this.baseUrl}/${reservationId}/folio/vat-exemption`, {
+        enabled,
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H3.9 — "Servicios exentos": invoices with exempt lodging in the period. */
+  vatExemptServices(from: string, to: string): Observable<VatExemptServicesReport> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get<ApiResponse<VatExemptServicesReport>>(
+        `${environment.apiUrl}/store/hospitality/reports/vat-exempt-services`,
+        { params },
+      )
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

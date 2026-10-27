@@ -5897,6 +5897,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'No se puede dividir el folio',
   },
+  LODGING_VAT_EXEMPT_001: {
+    code: 'LODGING_VAT_EXEMPT_001',
+    httpStatus: 409,
+    devMessage: 'No se puede aplicar la exención de IVA al titular',
+  },
   LODGING_ROOM_CHARGE_001: {
     code: 'LODGING_ROOM_CHARGE_001',
     httpStatus: 409,

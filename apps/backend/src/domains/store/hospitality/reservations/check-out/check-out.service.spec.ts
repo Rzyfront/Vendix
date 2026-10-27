@@ -1,5 +1,5 @@
 import { RequestContextService } from '@common/context/request-context.service';
-import { ErrorCodes } from 'src/common/errors';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { LodgingCheckOutService } from './check-out.service';
 
 /**
@@ -42,6 +42,7 @@ function build(
     findFolio: jest.fn(async () => folioRow),
     getFolio: jest.fn(async () => folioView()),
     postNightsThrough: jest.fn(async () => 0),
+    assertVatExemptionHolds: jest.fn(async () => undefined),
     applyDeposit: jest.fn(async () => {
       state.paid += state.deposit;
       state.deposit = 0;
@@ -202,6 +203,20 @@ describe('LodgingCheckOutService (H3.7)', () => {
     await expect(service.checkOut(7, { request_id: REQUEST }, DESK)).rejects.toMatchObject({
       errorCode: ErrorCodes.LODGING_CHECKOUT_BALANCE_001.code,
     });
+    expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+    expect(fiscal.emitForOrder).not.toHaveBeenCalled();
+  });
+
+  it('H3.9 — con noches exentas y un titular que ya no califica no cobra ni factura', async () => {
+    const { service, tx, folios, fiscal } = build();
+    folios.assertVatExemptionHolds.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.LODGING_VAT_EXEMPT_001, 'La exención de IVA ya no aplica'),
+    );
+
+    await expect(
+      service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK),
+    ).rejects.toMatchObject({ errorCode: ErrorCodes.LODGING_VAT_EXEMPT_001.code });
+    expect(folios.registerPayment).not.toHaveBeenCalled();
     expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
     expect(fiscal.emitForOrder).not.toHaveBeenCalled();
   });

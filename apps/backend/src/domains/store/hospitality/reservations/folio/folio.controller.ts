@@ -5,7 +5,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { CurrentUser } from '../../../../auth/decorators/current-user.decorator';
 import { FolioUser, LodgingFolioService } from './folio.service';
-import { AddFolioChargeDto, FolioChargesBlockedDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
+import {
+  AddFolioChargeDto,
+  FolioChargesBlockedDto,
+  FolioPaymentDto,
+  FolioVatExemptionDto,
+  VoidFolioChargeDto,
+} from './folio.dto';
 
 /** Hospitality Suite (H3.4) — guest folio: nights, manual charges, voids and payments. */
 @Controller('store/hospitality/reservations/:id/folio')
@@ -65,6 +71,17 @@ export class LodgingFolioController {
   async setChargesBlocked(@Param('id', ParseIntPipe) id: number, @Body() dto: FolioChargesBlockedDto) {
     const result = await this.lodgingFolioService.setChargesBlocked(id, dto.blocked);
     return this.responseService.success(result, dto.blocked ? 'Cargos bloqueados' : 'Cargos permitidos');
+  }
+
+  @ApiOperation({ summary: 'Aplicar o quitar la exención de IVA del titular no residente (H3.9)' })
+  @Patch('vat-exemption')
+  @Permissions('store:lodging:folio:charge')
+  async setVatExemption(@Param('id', ParseIntPipe) id: number, @Body() dto: FolioVatExemptionDto) {
+    const result = await this.lodgingFolioService.setVatExemption(id, dto.enabled);
+    return this.responseService.success(
+      result,
+      dto.enabled ? 'Exención de IVA aplicada a las noches' : 'Exención de IVA quitada',
+    );
   }
 
   @ApiOperation({ summary: 'Aplicar al folio el depósito de la reserva (anticipo)' })

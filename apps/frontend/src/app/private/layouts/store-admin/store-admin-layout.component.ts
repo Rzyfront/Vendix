@@ -597,6 +597,13 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_reservations',
         },
         {
+          // H3.9 — VAT-exempt lodging of non-residents: same panel_ui key.
+          label: 'Servicios exentos',
+          icon: 'file-check',
+          route: '/admin/hospitality/exempt-services',
+          panelUiKey: 'hospitality_reservations',
+        },
+        {
           // H2.1 — rate plans and nightly prices.
           label: 'Tarifas',
           icon: 'tag',
