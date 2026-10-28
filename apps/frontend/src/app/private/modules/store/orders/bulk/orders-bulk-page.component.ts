@@ -68,6 +68,13 @@ import {
   OrdersBulkConfirmModalComponent,
   type BulkOrdersConfirmRequest,
 } from './orders-bulk-confirm-modal.component';
+import { OrdersBulkInvoiceModalComponent } from './orders-bulk-invoice-modal.component';
+import type { BulkInvoiceRunSummary } from './orders-bulk-invoice.util';
+import { OptionsDropdownComponent } from '../../../../../shared/components/options-dropdown/options-dropdown.component';
+import type {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CustomersService } from '../../customers/services/customers.service';
 import {
   Order,
@@ -116,7 +123,8 @@ type BulkActionId =
   | 'delivered'
   | 'cancelled'
   | 'assign-route'
-  | 'print';
+  | 'print'
+  | 'invoice';
 
 /**
  * Grupo al que pertenece una acción. Gobierna en qué `<section>` del panel se
@@ -138,7 +146,10 @@ interface BulkActionDef {
   icon: string;
   variant: 'primary' | 'outline' | 'danger';
   /** Permiso requerido (affordance; el backend refuerza por nombre). */
-  permission: 'store:orders:bulk_update' | 'store:orders:bulk_print';
+  permission:
+    | 'store:orders:bulk_update'
+    | 'store:orders:bulk_print'
+    | 'invoicing:write';
   /** Confirmación reforzada antes de disparar. */
   confirm: boolean;
   confirmTitle: string;
@@ -234,6 +245,20 @@ const BULK_ACTIONS: BulkActionDef[] = [
     confirmMessage: '',
   },
   {
+    id: 'invoice',
+    group: 'documents',
+    label: 'Facturar electrónicamente',
+    description:
+      'Emite la factura electrónica de cada orden. Antes ves, orden por orden, a nombre de quién sale y cuáles pasan a crédito.',
+    cta: 'Facturar',
+    icon: 'file-text',
+    variant: 'outline',
+    permission: 'invoicing:write',
+    confirm: false,
+    confirmTitle: '',
+    confirmMessage: '',
+  },
+  {
     id: 'cancelled',
     group: 'danger',
     label: 'Cancelar órdenes',
@@ -271,7 +296,7 @@ const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
     key: 'documents',
     label: 'Documentos',
     icon: 'printer',
-    hint: 'Imprime los documentos de la selección en una sola tanda, con un único diálogo de impresión.',
+    hint: 'Imprime o factura electrónicamente la selección. La facturación muestra antes el titular de cada factura.',
   },
 ];
 
@@ -284,6 +309,8 @@ const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
     ButtonComponent,
     StickyHeaderComponent,
     OrdersBulkConfirmModalComponent,
+    OrdersBulkInvoiceModalComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './orders-bulk-page.component.html',
   styleUrl: './orders-bulk-page.component.scss',
@@ -314,9 +341,86 @@ export class OrdersBulkPageComponent {
   );
 
   readonly searchTerm = signal<string>('');
-  readonly selectedStatus = signal<string>('');
-  readonly selectedChannel = signal<string>('');
-  readonly selectedPaymentStatus = signal<string>('');
+  /** Values of `app-options-dropdown` (multi-select → string[], select → string). */
+  readonly filterValues = signal<FilterValues>({});
+
+  /** Server-side filters; each one maps to a query param of the orders list. */
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'multi-select',
+      placeholder: 'Todos los estados',
+      options: [
+        { value: 'draft', label: 'Borrador' },
+        { value: 'created', label: 'Creada' },
+        { value: 'pending_payment', label: 'Pago pendiente' },
+        { value: 'processing', label: 'Procesando' },
+        { value: 'shipped', label: 'Enviada' },
+        { value: 'delivered', label: 'Entregada' },
+        { value: 'cancelled', label: 'Cancelada' },
+        { value: 'refunded', label: 'Reembolsada' },
+        { value: 'finished', label: 'Finalizada' },
+      ],
+    },
+    {
+      key: 'channel',
+      label: 'Canal',
+      type: 'multi-select',
+      placeholder: 'Todos los canales',
+      options: [
+        { value: 'pos', label: 'POS' },
+        { value: 'ecommerce', label: 'Online' },
+        { value: 'agent', label: 'IA' },
+        { value: 'whatsapp', label: 'WhatsApp' },
+        { value: 'marketplace', label: 'Marketplace' },
+      ],
+    },
+    {
+      key: 'payment_status',
+      label: 'Estado de pago',
+      type: 'multi-select',
+      placeholder: 'Todos',
+      options: [
+        { value: 'pending', label: 'Pendiente' },
+        { value: 'succeeded', label: 'Pagado' },
+        { value: 'authorized', label: 'Autorizado' },
+        { value: 'captured', label: 'Capturado' },
+        { value: 'failed', label: 'Fallido' },
+        { value: 'partially_refunded', label: 'Reembolso parcial' },
+        { value: 'refunded', label: 'Reembolsado' },
+        { value: 'cancelled', label: 'Cancelado' },
+      ],
+    },
+    {
+      key: 'invoice_status',
+      label: 'Factura',
+      type: 'select',
+      placeholder: 'Todas',
+      options: [
+        { value: 'none', label: 'Sin factura' },
+        { value: 'invoiced', label: 'Facturada' },
+        { value: 'rejected', label: 'Rechazada' },
+      ],
+    },
+    {
+      key: 'has_customer',
+      label: 'Cliente',
+      type: 'select',
+      placeholder: 'Todos',
+      options: [
+        { value: 'true', label: 'Con cliente' },
+        { value: 'false', label: 'Sin cliente (Consumidor final)' },
+      ],
+    },
+    {
+      key: 'date',
+      label: 'Fecha',
+      type: 'date-range',
+      startKey: 'date_from',
+      endKey: 'date_to',
+    },
+  ];
 
   // ───────────────────────────────────────────────────────────────────────────
   // Selección
@@ -434,6 +538,23 @@ export class OrdersBulkPageComponent {
   readonly confirmOpen = signal<boolean>(false);
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Facturación electrónica masiva
+  // ───────────────────────────────────────────────────────────────────────────
+
+  readonly invoiceOpen = signal<boolean>(false);
+  /**
+   * True while the invoice modal is sending chunks (the modal writes it).
+   * While true every other bulk action is disabled: a bulk invoice run holds
+   * per-order leases and an incompatible operation would collide with it.
+   */
+  readonly invoiceRunning = signal<boolean>(false);
+  readonly invoiceLockReason = 'Hay una facturación masiva en curso';
+  /** Single gate for the action buttons and the header. */
+  readonly actionsLocked = computed<boolean>(
+    () => this.running() || this.invoiceRunning(),
+  );
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Permisos (affordance; el backend refuerza por nombre)
   // ───────────────────────────────────────────────────────────────────────────
 
@@ -457,17 +578,25 @@ export class OrdersBulkPageComponent {
   readonly canBulkPrint = computed<boolean>(() =>
     this.authFacade.hasPermission('store:orders:bulk_print'),
   );
+  readonly canInvoice = computed<boolean>(() =>
+    this.authFacade.hasPermission('invoicing:write'),
+  );
 
   /**
    * Operaciones que este usuario puede ver, ya filtradas por permiso. Es la
    * base de la que se derivan las secciones y la zona peligrosa.
    */
   readonly allowedActions = computed<BulkActionDef[]>(() =>
-    BULK_ACTIONS.filter((a) =>
-      a.permission === 'store:orders:bulk_print'
-        ? this.canBulkPrint()
-        : this.canBulkUpdate(),
-    ),
+    BULK_ACTIONS.filter((a) => {
+      switch (a.permission) {
+        case 'store:orders:bulk_print':
+          return this.canBulkPrint();
+        case 'invoicing:write':
+          return this.canInvoice();
+        default:
+          return this.canBulkUpdate();
+      }
+    }),
   );
 
   /**
@@ -504,7 +633,10 @@ export class OrdersBulkPageComponent {
       variant: 'primary',
       icon: 'printer',
       disabled:
-        this.selectedCount() === 0 || !this.canBulkPrint() || this.overLimit(),
+        this.selectedCount() === 0 ||
+        !this.canBulkPrint() ||
+        this.overLimit() ||
+        this.invoiceRunning(),
       loading: this.running() && this.bulkService.progress().phase === 'print',
       visible: this.canBulkPrint(),
     },
@@ -565,10 +697,32 @@ export class OrdersBulkPageComponent {
       sort_order: 'desc',
     };
     if (this.searchTerm()) query.search = this.searchTerm();
-    if (this.selectedStatus()) query.status = this.selectedStatus() as OrderState;
-    if (this.selectedChannel()) query.channel = this.selectedChannel() as OrderChannel;
-    if (this.selectedPaymentStatus())
-      query.payment_status = this.selectedPaymentStatus() as PaymentStatus;
+    const values = this.filterValues();
+    const multi = (key: string): string[] => {
+      const v = values[key];
+      return Array.isArray(v) ? v : v ? [v] : [];
+    };
+    const single = (key: string): string => {
+      const v = values[key];
+      return typeof v === 'string' ? v : '';
+    };
+
+    const status = multi('status');
+    if (status.length) query.status = status as OrderState[];
+    const channel = multi('channel');
+    if (channel.length) query.channel = channel as OrderChannel[];
+    const paymentStatus = multi('payment_status');
+    if (paymentStatus.length)
+      query.payment_status = paymentStatus as PaymentStatus[];
+    const invoiceStatus = single('invoice_status');
+    if (invoiceStatus)
+      query.invoice_status = invoiceStatus as OrderQuery['invoice_status'];
+    const hasCustomer = single('has_customer');
+    if (hasCustomer) query.has_customer = hasCustomer === 'true';
+    const dateFrom = single('date_from');
+    const dateTo = single('date_to');
+    if (dateFrom) query.date_from = dateFrom;
+    if (dateTo) query.date_to = dateTo;
     return query;
   }
 
@@ -714,14 +868,14 @@ export class OrdersBulkPageComponent {
     this.fetchPage();
   }
 
-  onStatusChange(value: string): void {
-    this.selectedStatus.set(value);
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set({ ...values });
     this.page.set(1);
     this.fetchPage();
   }
 
-  onChannelChange(value: string): void {
-    this.selectedChannel.set(value);
+  onClearFilters(): void {
+    this.filterValues.set({});
     this.page.set(1);
     this.fetchPage();
   }
@@ -860,7 +1014,19 @@ export class OrdersBulkPageComponent {
       );
       return;
     }
-    if (this.running()) return;
+    if (this.actionsLocked()) {
+      this.toastService.warning(this.invoiceLockReason);
+      return;
+    }
+
+    if (action.id === 'invoice') {
+      if (!this.canInvoice()) {
+        this.toastService.error('No tienes permiso para facturar');
+        return;
+      }
+      this.invoiceOpen.set(true);
+      return;
+    }
 
     if (action.id === 'assign-route') {
       if (this.routes().length === 0) {
@@ -889,6 +1055,20 @@ export class OrdersBulkPageComponent {
       danger: action.variant === 'danger',
     });
     this.confirmOpen.set(true);
+  }
+
+  /** The invoice modal was closed after a run: refresh and clear the selection. */
+  onInvoiceCompleted(summary: BulkInvoiceRunSummary): void {
+    this.invoiceRunning.set(false);
+    if (summary.failed === 0) {
+      this.toastService.success(`${summary.successful} facturas emitidas`);
+    } else {
+      this.toastService.warning(
+        `${summary.successful} emitidas y ${summary.failed} con error (facturación)`,
+      );
+    }
+    this.selectedIds.set(new Set<number>());
+    this.fetchPage();
   }
 
   /**
@@ -927,6 +1107,10 @@ export class OrdersBulkPageComponent {
       this.toastService.warning(
         `Máximo ${this.maxIds} órdenes por impresión. Tienes ${this.selectedCount()} seleccionadas.`,
       );
+      return;
+    }
+    if (this.invoiceRunning()) {
+      this.toastService.warning(this.invoiceLockReason);
       return;
     }
     const requested = this.selectedCount();

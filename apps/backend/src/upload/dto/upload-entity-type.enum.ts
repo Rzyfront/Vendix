@@ -9,4 +9,6 @@ export enum UploadEntityType {
   MARKETING_ADS = 'marketing_ads',
   RECEIPTS = 'receipts',
   BANK_ACCOUNT_LOGOS = 'bank_account_logos',
+  // Hospitality Suite (H0.4) — room type photos.
+  LODGING = 'lodging',
 }

@@ -2,6 +2,7 @@ import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { assertOrderNotInvoiceLocked } from './utils/invoice-lock.util';
 import {
   CreateOrderDto,
   CreateOrderItemDto,
@@ -19,6 +20,11 @@ import {
   payments_state_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '@common/utils/store-timezone.util';
 import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -232,6 +238,8 @@ export const SORTABLE_COLUMNS = [
 ] as const;
 
 export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 @Injectable()
 export class OrdersService {
@@ -1065,6 +1073,38 @@ export class OrdersService {
     }
   }
 
+  /**
+   * `created_at` filter for the orders list. Each bound applies on its own
+   * (only `gte`, only `lte`, both or none). A date-only value (`YYYY-MM-DD`, the
+   * bulk-operations date filter) is a CALENDAR day in the store timezone: from
+   * local 00:00 to local 23:59:59.999, so «hoy a hoy» is the whole local day
+   * instead of the empty `[00:00Z, 00:00Z]`. A full ISO instant (the main list
+   * presets) is applied as is.
+   */
+  private async createdAtRange(
+    date_from?: string,
+    date_to?: string,
+  ): Promise<Prisma.DateTimeFilter | undefined> {
+    if (!date_from && !date_to) return undefined;
+    const isDateOnly = (v?: string) => !!v && DATE_ONLY_PATTERN.test(v);
+    let tz = DEFAULT_STORE_TIMEZONE;
+    if (isDateOnly(date_from) || isDateOnly(date_to)) {
+      const store_id = RequestContextService.getContext()?.store_id;
+      if (store_id) tz = await resolveStoreTimezone(this.prisma, store_id);
+    }
+    const bound = (v: string, endOfDay: boolean): Date => {
+      if (!isDateOnly(v)) return new Date(v);
+      const [y, m, d] = v.split('-').map(Number);
+      return endOfDay
+        ? zonedWallClockToUtc(y, m, d, 23, 59, 59, 999, tz)
+        : zonedWallClockToUtc(y, m, d, 0, 0, 0, 0, tz);
+    };
+    return {
+      ...(date_from && { gte: bound(date_from, false) }),
+      ...(date_to && { lte: bound(date_to, true) }),
+    };
+  }
+
   async findAll(query: OrderQueryDto) {
     const {
       page = 1,
@@ -1093,10 +1133,13 @@ export class OrdersService {
       // `status && !dispatchable` que evita que ambos spreads pisen la
       // misma clave `state` del `where`.
       dispatchable,
+      invoice_status,
+      has_customer,
     } = query;
     const skip = (page - 1) * limit;
 
     // Context validation handled by StorePrismaService auto-scoping
+    const createdAt = await this.createdAtRange(date_from, date_to);
 
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
@@ -1124,6 +1167,11 @@ export class OrdersService {
         state: Array.isArray(status) ? { in: status } : status,
       }),
       ...(customer_id && { customer_id }),
+      // Filtro «cliente» del módulo de operaciones masivas: con / sin cliente.
+      // Un `customer_id` explícito manda sobre `has_customer`.
+      ...(!customer_id && has_customer !== undefined && {
+        customer_id: has_customer ? { not: null } : null,
+      }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
       // pudo haber migrado entre mesas durante su vida).
@@ -1205,15 +1253,38 @@ export class OrdersService {
       // fecha desaparecía silenciosamente. Ahora cada bound se aplica
       // independiente: sólo `gte` si hay `date_from`, sólo `lte` si hay
       // `date_to`, ambos si hay los dos, nada si no hay ninguno.
-      ...(date_from || date_to
-        ? {
-            created_at: {
-              ...(date_from && { gte: new Date(date_from) }),
-              ...(date_to && { lte: new Date(date_to) }),
-            },
-          }
-        : {}),
+      ...(createdAt && { created_at: createdAt }),
     };
+
+    // Filtro «factura» (operaciones masivas). «Documento de venta» = mismo
+    // criterio que `assertOrderNotInvoiceLocked`: sales_invoice, export_invoice
+    // o pos_equivalent_document de la orden (no de una cuenta del reparto).
+    if (invoice_status) {
+      const saleDoc = (statuses: string[]): Prisma.ordersWhereInput => ({
+        invoices: {
+          some: {
+            invoice_type: {
+              in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+            },
+            financial_account_id: null,
+            status: { in: statuses as any },
+          },
+        },
+      });
+      const live = ['validated', 'sent', 'accepted'];
+      const extra: Prisma.ordersWhereInput[] =
+        invoice_status === 'none'
+          ? [{ NOT: saleDoc([...live, 'rejected']) }]
+          : invoice_status === 'invoiced'
+            ? [saleDoc(live)]
+            : // rejected: el rechazado no fue reemplazado por uno vigente.
+              [saleDoc(['rejected']), { NOT: saleDoc(live) }];
+      const current = where.AND;
+      where.AND = [
+        ...(Array.isArray(current) ? current : current ? [current] : []),
+        ...extra,
+      ];
+    }
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
     if (sort_by) {
@@ -1445,6 +1516,9 @@ export class OrdersService {
             transmission_status: true,
             send_status: true,
             issue_date: true,
+            // «Facturada · Crédito, vence DD/MM» del detalle de orden.
+            due_date: true,
+            payment_form: true,
           },
           orderBy: { id: 'desc' },
           take: 1,
@@ -1769,6 +1843,10 @@ export class OrdersService {
     const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
       SETTLED_PAYMENT_STATES.has(p.state),
     );
+    // Same statuses `assertOrderNotInvoiceLocked` rejects on.
+    const invoiceLocked = ['validated', 'sent', 'accepted', 'rejected'].includes(
+      activeTitularInvoice?.status ?? '',
+    );
     // Modo cocina: UNA lectura por orden (no por item). Solo gobierna la
     // elegibilidad de `deliver` (fisico: sin KDS, entregable desde pending).
     const kitchenMode = await resolveKitchenMode(
@@ -1787,6 +1865,7 @@ export class OrdersService {
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
         kitchen_mode: kitchenMode,
+        invoiceLocked,
       }),
     }));
 
@@ -2336,6 +2415,24 @@ export class OrdersService {
     ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
     }
+    // Orden facturada: los campos económicos se congelan (el titular conserva
+    // su propia guarda `ORD_TITULAR_INVOICED_001`, más abajo).
+    const invoiceLockedKeys = [
+      'items',
+      'subtotal',
+      'total_amount',
+      'tax_amount',
+      'discount_amount',
+      'currency',
+    ];
+    // Reasignar método/tarifa SIN cambiar el costo no mueve el monto
+    // facturado: sólo el costo de envío entra en el bloqueo.
+    if (
+      differsByAtLeastCents(nextShippingCost, persistedShippingCost, 1) ||
+      invoiceLockedKeys.some((key) => hasShippingKey(key))
+    ) {
+      await this.assertOrderNotInvoiceLocked(id);
+    }
     // Regla vigente — titular vs factura electrónica. El titular es
     // inmutable SOLO cuando la orden tiene un documento electrónico
     // TRANSMITIDO y vigente (`sales_invoice` / `export_invoice` /
@@ -2740,6 +2837,10 @@ export class OrdersService {
     });
   }
 
+  private assertOrderNotInvoiceLocked(orderId: number): Promise<void> {
+    return assertOrderNotInvoiceLocked(this.prisma, orderId);
+  }
+
   async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {
     // ADR-07: una sesión nueva abierta manda sobre cualquier historial cerrado.
     const openSession = await this.prisma.table_sessions.findFirst({
@@ -2779,6 +2880,7 @@ export class OrdersService {
     }
 
     await this.assertTableOrderEditable(id, order.store_id);
+    await this.assertOrderNotInvoiceLocked(id);
 
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
@@ -3199,6 +3301,7 @@ export class OrdersService {
 
     // ADR-07: protege ambos escritores de ítems con la misma regla.
     await this.assertTableOrderEditable(orderId, storeId);
+    await this.assertOrderNotInvoiceLocked(orderId);
 
     const isDraft = existingOrder.state === 'draft';
 
@@ -5161,6 +5264,11 @@ export class OrdersService {
       throw new VendixHttpException(
         ErrorCodes.ORD_SHIP_CHARGED_COST_CHANGE_001,
       );
+    }
+    // Orden facturada: sólo se bloquea si el costo cambia (el monto facturado);
+    // reasignar método/tarifa al mismo costo sigue permitido.
+    if (shippingCostChanged) {
+      await this.assertOrderNotInvoiceLocked(orderId);
     }
 
     // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa

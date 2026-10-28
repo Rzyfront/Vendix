@@ -81,6 +81,7 @@ import {
   PosProductVariant,
 } from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
+import { PosHolderWarningComponent } from './components/pos-holder-warning.component';
 import {
   PosCheckoutShellComponent,
   type EntregaChoice,
@@ -175,6 +176,7 @@ export function resolvePosPaymentCustomerName(
     CardComponent,
     PosProductSelectionComponent,
     PosCustomerModalComponent,
+    PosHolderWarningComponent,
     PosCheckoutShellComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
@@ -666,6 +668,8 @@ export function resolvePosPaymentCustomerName(
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
+
+    <app-pos-holder-warning [customerId]="selectedCustomer()?.id ?? null"></app-pos-holder-warning>
 
     <app-pos-customer-modal
       [isOpen]="showCustomerModal()"

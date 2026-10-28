@@ -3,6 +3,14 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import {
+  GeneralSettingsDto,
+  HospitalitySettingsDto,
+} from './dto/settings-schemas.dto';
+import { mergeStoreSettingsWithDefaults } from './defaults/default-store-settings';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
 
 /**
  * QUI-560 — regresión del guard de transición de settings.
@@ -280,6 +288,78 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     });
   });
 
+  // ------------------------------------------------- sync de industrias (H0.1)
+
+  /**
+   * H0.1 (hospitality): marcar "Hotelería" en Configuración → General debe
+   * llegar a `stores.industries`, que es lo que lee el gating del menú. El
+   * sync no filtra valores, así que el riesgo está en la validación del DTO:
+   * si `hospitality` no estuviera en `StoreIndustry`, el PATCH respondería 400.
+   */
+  describe('updateSettings — sync de industrias (H0.1)', () => {
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      prisma.stores.findUnique.mockResolvedValue(null);
+    });
+
+    it('sincroniza hospitality + restaurant a la tabla stores', async () => {
+      await service.updateSettings({
+        general: { industries: ['hospitality', 'restaurant'] },
+      } as any);
+
+      expect(prisma.stores.update).toHaveBeenCalledWith({
+        where: { id: STORE_ID },
+        data: { industries: ['hospitality', 'restaurant'] },
+      });
+    });
+
+    it('el DTO de ajustes generales acepta hospitality', async () => {
+      const dto = plainToInstance(GeneralSettingsDto, {
+        industries: ['hospitality'],
+      });
+
+      expect(await validate(dto)).toEqual([]);
+    });
+
+    it('el DTO sigue rechazando una industria desconocida', async () => {
+      const dto = plainToInstance(GeneralSettingsDto, {
+        industries: ['hotel'],
+      });
+      const errors = await validate(dto);
+
+      expect(errors.map((e) => e.property)).toEqual(['industries']);
+    });
+  });
+
+  describe('updateSettings — sobreventa por defecto (H1.6)', () => {
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+    });
+
+    it('sin rates:write no se puede cambiar la sobreventa por defecto', async () => {
+      const error = await service
+        .updateSettings({ hospitality: { default_overbooking_allowance: 5 } } as any)
+        .catch((e) => e);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getResponse()).toMatchObject({ error_code: 'LODGING_UNIT_TYPE_OVERBOOKING_001' });
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('con rates:write se cambia, y reenviar el mismo valor no lo exige', async () => {
+      await service.updateSettings({ hospitality: { default_overbooking_allowance: 0 } } as any);
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE_ID,
+        user_id: USER_ID,
+        permissions: ['store:lodging:rates:write'],
+      } as any);
+      await service.updateSettings({ hospitality: { default_overbooking_allowance: 5 } } as any);
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(2);
+    });
+  });
+
   // ------------------------------------------- merge por clave de la sección vexi
 
   /**
@@ -467,6 +547,79 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       ).rejects.toMatchObject({ errorCode: 'SYS_FORBIDDEN_001' });
 
       expect(stored.vex).toEqual({ enabled: false });
+    });
+  });
+
+  // ------------------------------------------------ sección hotelería (H0.5)
+
+  /**
+   * Configuración → Hotelería guarda check-in, check-out y RNT. Una sección
+   * fuera de `KNOWN_SECTIONS` o de `UpdateSettingsDto` se pierde en silencio
+   * con 200, así que se prueba el PATCH completo y los defaults al leer.
+   */
+  describe('sección hospitality (H0.5)', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      stored = { ...STORED_WITH_CASH_REGISTER_ON };
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('una tienda sin la sección lee check-in 15:00, check-out 12:00, no-show 06:00, RNT vacío y sobreventa 0', () => {
+      expect(mergeStoreSettingsWithDefaults({}).hospitality).toMatchObject({
+        check_in_time: '15:00',
+        check_out_time: '12:00',
+        no_show_time: '06:00',
+        rnt_number: '',
+        default_overbooking_allowance: 0,
+      });
+    });
+
+    it('persiste los ajustes guardados', async () => {
+      await service.updateSettings({
+        hospitality: {
+          check_in_time: '14:00',
+          check_out_time: '11:30',
+          rnt_number: '12345',
+        },
+      } as any);
+
+      expect(stored.hospitality).toEqual({
+        check_in_time: '14:00',
+        check_out_time: '11:30',
+        rnt_number: '12345',
+      });
+    });
+
+    it('el DTO acepta la sección y rechaza una hora fuera de HH:mm', async () => {
+      const ok = plainToInstance(UpdateSettingsDto, {
+        hospitality: { check_in_time: '15:00', rnt_number: '12345' },
+      });
+      expect(await validate(ok)).toEqual([]);
+
+      const bad = plainToInstance(HospitalitySettingsDto, {
+        check_in_time: '3pm',
+        check_out_time: '24:00',
+        no_show_time: '6',
+        default_overbooking_allowance: -1,
+      });
+      const errors = await validate(bad);
+      expect(errors.map((e) => e.property).sort()).toEqual([
+        'check_in_time',
+        'check_out_time',
+        'default_overbooking_allowance',
+        'no_show_time',
+      ]);
     });
   });
 });

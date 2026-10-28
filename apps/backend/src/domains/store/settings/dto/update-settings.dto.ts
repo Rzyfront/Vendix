@@ -20,6 +20,7 @@ import {
   OperationsSettingsDto,
   DispatchSettingsDto,
   RestaurantSettingsDto,
+  HospitalitySettingsDto,
   MembershipSettingsDto,
   VexiSettingsDto,
   InvoicingSettingsDto,
@@ -148,6 +149,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => MembershipSettingsDto)
   membership?: MembershipSettingsDto;
+
+  @ApiProperty({ type: HospitalitySettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HospitalitySettingsDto)
+  hospitality?: HospitalitySettingsDto;
 
   @ApiProperty({ type: VexiSettingsDto, required: false })
   @IsOptional()

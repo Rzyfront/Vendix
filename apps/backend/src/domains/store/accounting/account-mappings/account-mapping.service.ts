@@ -450,6 +450,53 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '4175',
     description: 'Descuentos en Ventas (Crédito)',
   },
+  // Hotelería (H3.4) — payment of an open guest folio before its invoice:
+  // received as a customer advance, never as revenue (the folio invoice
+  // recognizes the sale and crosses the advance).
+  'lodging.folio_payment.cash': {
+    code: '1105',
+    description: 'Caja (pago de folio hotelero)',
+  },
+  'lodging.folio_payment.bank': {
+    code: '1110',
+    description: 'Banco (pago de folio hotelero)',
+  },
+  'lodging.folio_payment.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (folio hotelero)',
+  },
+  // Hotelería (H3.5) — reservation deposit: a customer advance (D3), applied
+  // to the folio or retained as the cancellation / no-show penalty.
+  'lodging.deposit.cash': {
+    code: '1105',
+    description: 'Caja (depósito de reserva)',
+  },
+  'lodging.deposit.bank': {
+    code: '1110',
+    description: 'Banco (depósito de reserva)',
+  },
+  'lodging.deposit.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (depósito de reserva)',
+  },
+  'lodging.deposit_retained.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (depósito retenido)',
+  },
+  'lodging.deposit_retained.penalty_income': {
+    code: '4295',
+    description: 'Ingresos Diversos (penalidad de reserva)',
+  },
+  // Hotelería (H3.7) — the folio invoice crosses the advance (payments and
+  // applied deposit) against the receivable it booked.
+  'lodging.folio_settlement.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (cruce con la factura del folio)',
+  },
+  'lodging.folio_settlement.receivable': {
+    code: '1305',
+    description: 'Clientes (factura del folio hotelero)',
+  },
   // Layaway (Plan Separé)
   'layaway.payment.cash': {
     code: '1105',
@@ -1107,6 +1154,13 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'layaway.cancelled': 'Plan separe cancelado',
   'layaway.completed': 'Plan separe completado',
   'layaway.payment': 'Pago plan separe',
+  'lodging.folio_payment': 'Pago de folio hotelero',
+  'lodging.folio_settlement': 'Cruce de anticipos de factura de folio hotelero',
+  'lodging.folio_sale': 'Venta de folio hotelero sin factura electrónica',
+  'lodging.folio_sale_settlement': 'Cruce de anticipos de venta de folio hotelero',
+  'lodging.deposit': 'Depósito de reserva hotelera',
+  'lodging.deposit_retained': 'Penalidad retenida del depósito',
+  'lodging.reservation_payment_retained': 'Penalidad retenida del pago en línea',
   'order.completed': 'Orden completada',
   'order_item.prepared_waste': 'Merma de plato preparado',
   'order_item.prepared_reuse': 'Reuso de insumos de plato preparado',

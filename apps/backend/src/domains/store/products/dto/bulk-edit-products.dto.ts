@@ -247,10 +247,10 @@ export class BulkRelationalTaxActionDto {
    * boolean no estricto, reglas por modo) la rechaza el servicio con 400
    * PROD_TAXMAP_001, que el `ValidationPipe` no puede emitir.
    *
-   * - ADD: solo se lee para categorías NUEVAS (las ya asignadas conservan su
-   *   flag); la ausente hereda el default del catálogo.
-   * - REPLACE: si viene debe cubrir TODOS los `ids` (parcial ⇒ 400); ausente
-   *   ⇒ todos heredan.
+   * - ADD: la entrada explícita gana también sobre categorías ya asignadas;
+   *   sin entrada, la ya asignada conserva su flag y la nueva hereda el
+   *   default del catálogo.
+   * - REPLACE: cada id toma su entrada; la ausente hereda el catálogo.
    * - REMOVE: PROHIBIDO (cualquier mapa, incluso `{}`, ⇒ 400): quitar la
    *   categoría elimina su flag con ella.
    */

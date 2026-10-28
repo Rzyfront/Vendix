@@ -127,6 +127,8 @@ export class ArEventsListener {
     store_id: number;
     organization_id: number;
     user_id?: number;
+    /** Route-collection withholding settled with this payment (credit orders). */
+    withholding_amount?: number;
   }) {
     try {
       const source_id = event.order_id || event.credit_id;
@@ -144,7 +146,9 @@ export class ArEventsListener {
       await this.ar_service.registerPayment(
         ar.id,
         {
-          amount: event.amount,
+          // The AR drops once by cash + withholding (W is 0/absent for cashier
+          // abonos, so their behavior is unchanged).
+          amount: Number(event.amount) + Number(event.withholding_amount || 0),
           payment_id: event.payment_id,
           payment_method: event.payment_method,
         },

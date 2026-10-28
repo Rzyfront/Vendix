@@ -57,6 +57,7 @@ describe('ProductsService', () => {
   let variantService: ProductVariantService;
 
   const mockPrismaService = {
+    lodging_unit_types: { findFirst: jest.fn() },
     products: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -1169,6 +1170,55 @@ describe('ProductsService', () => {
       mockPrismaService.products.findFirst.mockResolvedValue(null);
 
       await expect(service.deactivate(999)).rejects.toThrow(VendixHttpException);
+    });
+  });
+
+  // Hotelería (H0.2): the "Noche – {type}" product belongs to its room type.
+  describe('producto noche de un tipo de habitación', () => {
+    const nightProduct = {
+      id: 40,
+      store_id: 1,
+      name: 'Noche – Doble',
+      product_type: 'service',
+      state: ProductState.ACTIVE,
+    };
+    const expectOwnedByRoomType = async (promise: Promise<unknown>) => {
+      const error = await promise.catch((e) => e);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect((error as VendixHttpException).errorCode).toBe(
+        'LODGING_UNIT_TYPE_PRODUCT_001',
+      );
+      expect((error as VendixHttpException).message).toBe(
+        'Este servicio pertenece al tipo de habitación "Doble"; edítalo desde Hotelería',
+      );
+    };
+
+    beforeEach(() => {
+      mockPrismaService.products.findFirst.mockResolvedValue(nightProduct);
+      mockPrismaService.lodging_unit_types.findFirst.mockResolvedValue({
+        name: 'Doble',
+      });
+    });
+    // clearAllMocks keeps implementations: later tests must see no room type.
+    afterEach(() => mockPrismaService.lodging_unit_types.findFirst.mockReset());
+
+    it('no se archiva ni se desactiva desde Productos', async () => {
+      await expectOwnedByRoomType(service.remove(40));
+      await expectOwnedByRoomType(service.deactivate(40));
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('no se renombra ni cambia de estado desde Productos', async () => {
+      await expectOwnedByRoomType(service.update(40, { name: 'Otro' }));
+      await expectOwnedByRoomType(
+        service.update(40, { state: ProductState.INACTIVE }),
+      );
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('el precio sí se edita desde Productos sin consultar el tipo', async () => {
+      await service.update(40, { base_price: 300000 }).catch(() => undefined);
+      expect(mockPrismaService.lodging_unit_types.findFirst).not.toHaveBeenCalled();
     });
   });
 

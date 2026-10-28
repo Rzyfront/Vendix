@@ -22,6 +22,7 @@ import {
   PurchaseOrdersService,
 } from '../../../inventory/services/purchase-orders.service';
 import { PosCustomerService } from '../../../pos/services/pos-customer.service';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 /**
  * Party step (step 1 for non-customer_delivery subtypes — ref R4a).
@@ -333,7 +334,7 @@ import { PosCustomerService } from '../../../pos/services/pos-customer.service';
                         <app-icon name="user" [size]="14" color="var(--color-text-muted)"></app-icon>
                         <div class="flex-1 min-w-0">
                           <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                            {{ cust.first_name }} {{ cust.last_name }}
+                            {{ customerName(cust) }}
                           </p>
                           @if (cust.document_number) {
                             <p class="text-xs text-[var(--color-text-muted)] truncate">Doc: {{ cust.document_number }}</p>
@@ -578,8 +579,12 @@ export class PartyStepComponent {
       });
   }
 
+  customerName(cust: any): string {
+    return customerDisplayName(cust, '');
+  }
+
   selectCustomer(cust: any): void {
-    const name = `${cust.first_name ?? ''} ${cust.last_name ?? ''}`.trim() || `Cliente #${cust.id}`;
+    const name = customerDisplayName(cust, '') || `Cliente #${cust.id}`;
     this.wizardService.setCustomerParty(cust.id, name);
     this.customerResults.set([]);
     this.loadDeliveredDispatches(cust.id);

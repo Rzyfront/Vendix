@@ -583,6 +583,18 @@
           <app-icon name="save" [size]="16"></app-icon>
           Guardar borrador
         </button>
+        @if (canChargeToRoom()) {
+          <button
+            type="button"
+            class="btn-draft"
+            [disabled]="footerProcessing()"
+            (click)="openRoomCharge()"
+            data-testid="pos-room-charge"
+          >
+            <app-icon name="bed-double" [size]="16"></app-icon>
+            Cargo a habitación
+          </button>
+        }
         @if (!isLastStep() || cobroNeedsAdvance()) {
           <button
             type="button"
@@ -624,6 +636,18 @@
         <app-icon name="arrow-left" [size]="18"></app-icon>
         Atrás
       </button>
+      @if (canChargeToRoom()) {
+        <button
+          type="button"
+          class="btn-back-mobile"
+          [disabled]="footerProcessing()"
+          (click)="openRoomCharge()"
+          data-testid="pos-room-charge-mobile"
+        >
+          <app-icon name="bed-double" [size]="18"></app-icon>
+          Habitación
+        </button>
+      }
       @if (!isLastStep() || cobroNeedsAdvance()) {
         <button
           type="button"
@@ -654,3 +678,14 @@
     </div>
   </div>
 </app-modal>
+
+<!-- H3.6 — Cargo a habitación (Hotelería): picker of in-house rooms. -->
+@if (canChargeToRoom() || roomChargeOpen()) {
+  <app-room-charge-modal
+    [isOpen]="roomChargeOpen()"
+    [amount]="totalToPay()"
+    [busy]="roomChargeBusy()"
+    (confirmed)="onRoomChargeConfirmed($event)"
+    (closed)="closeRoomCharge()"
+  />
+}

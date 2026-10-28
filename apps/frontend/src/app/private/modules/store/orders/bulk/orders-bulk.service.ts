@@ -66,6 +66,17 @@ import {
   type BulkPrintPayload,
   type BulkTransitionOrdersRequest,
 } from './orders-bulk.interface';
+import type {
+  BulkInvoiceChunkOutcome,
+  BulkInvoiceCredit,
+  BulkInvoiceItem,
+  BulkInvoicePreviewResult,
+  BulkInvoiceResultItem,
+} from './orders-bulk-invoice.interface';
+import {
+  alignChunkResults,
+  failedChunkOutcome,
+} from './orders-bulk-invoice.util';
 
 /** Envoltorio estándar de `ResponseService` del backend. */
 interface ApiEnvelope<T> {
@@ -232,6 +243,59 @@ export class OrdersBulkService {
       ),
       toArray(),
       map((parts) => mergeResults(parts)),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Facturación electrónica masiva
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Read-only preview of holder and payment handling per order. One request:
+   * the preview DTO shares the 300-id cap of the page selection. A failure is
+   * propagated (the modal shows it and nothing is emitted).
+   */
+  previewInvoice(ids: readonly number[]): Observable<BulkInvoicePreviewResult> {
+    return this.http
+      .post<ApiEnvelope<BulkInvoicePreviewResult>>(
+        `${this.apiUrl}/store/orders/bulk/invoice/preview`,
+        { ids: [...ids] },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Executes the invoice chunks ONE AFTER ANOTHER (`concatMap`, DIAN numbering
+   * stays sequential) and emits each chunk's outcome as soon as it returns, so
+   * the UI can animate per order. A failed chunk request does not stop the
+   * chain: its orders are reported as error and the next chunk is sent.
+   * `credit` travels with EVERY chunk when present.
+   */
+  invoiceInChunks(
+    chunks: readonly (readonly BulkInvoiceItem[])[],
+    credit?: BulkInvoiceCredit,
+  ): Observable<BulkInvoiceChunkOutcome> {
+    return from(chunks).pipe(
+      concatMap((items) => {
+        const ids = items.map((i) => i.order_id);
+        return this.http
+          .post<ApiEnvelope<{ results: BulkInvoiceResultItem[] }>>(
+            `${this.apiUrl}/store/orders/bulk/invoice`,
+            { items, ...(credit ? { credit } : {}) },
+          )
+          .pipe(
+            map(
+              (res): BulkInvoiceChunkOutcome => ({
+                ids,
+                results: alignChunkResults(ids, res.data?.results ?? []),
+              }),
+            ),
+            catchError((err: unknown) => {
+              const { errorCode, userMessage } = parseApiError(err);
+              return of(failedChunkOutcome(ids, errorCode, userMessage));
+            }),
+          );
+      }),
     );
   }
 

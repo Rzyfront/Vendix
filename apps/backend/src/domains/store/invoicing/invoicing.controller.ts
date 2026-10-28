@@ -20,6 +20,7 @@ import {
 } from '../../../common/guards/module-flow.guard';
 import { InvoicingService } from './invoicing.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
+import { EmitOrderDto } from './dto/emit-order.dto';
 import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
@@ -84,6 +85,18 @@ export class InvoicingController {
   }
 
   // --- Static Routes (MUST be before :id) ---
+
+  /**
+   * ¿La ficha de este cliente alcanza para una factura nominativa? Misma regla
+   * que la emisión de una orden (`evaluateOrderHolder`); el POS la consulta al
+   * elegir cliente para avisar ANTES de cobrar.
+   */
+  @Get('holder-check')
+  @Permissions('invoicing:read')
+  async holderCheck(@Query('customer_id', ParseIntPipe) customer_id: number) {
+    const result = await this.invoicing_service.getHolderCheck(customer_id);
+    return this.response_service.success(result);
+  }
 
   @Get('stats')
   @Permissions('invoicing:read')
@@ -219,12 +232,23 @@ export class InvoicingController {
     return this.response_service.success(result);
   }
 
-  /** Crear + prevalidar + emitir a la DIAN en una sola llamada (cualquier canal). */
+  /**
+   * Crear + prevalidar + emitir a la DIAN en una sola llamada (cualquier canal).
+   * Cuerpo opcional `{ credit: { due_date, payment_means_code? } }`: factura a
+   * crédito una orden sin cobrar (sin él, una orden con saldo responde 409).
+   */
   @Post('orders/:orderId/emit')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
-  async emitOrder(@Param('orderId', ParseIntPipe) order_id: number) {
-    const result = await this.one_shot_emission.emitOrder(order_id);
+  async emitOrder(
+    @Param('orderId', ParseIntPipe) order_id: number,
+    @Body() body?: EmitOrderDto,
+  ) {
+    const result = await this.one_shot_emission.emitOrder(
+      order_id,
+      body?.credit,
+      body?.allow_final_consumer ? { force_final_consumer: true } : undefined,
+    );
     return this.response_service.success(result, result.message ?? undefined);
   }
 

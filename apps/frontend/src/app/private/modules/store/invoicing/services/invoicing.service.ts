@@ -30,6 +30,19 @@ import {
 } from '../interfaces/invoice.interface';
 
 /**
+ * Cuerpo opcional de `POST orders/:id/emit`: `credit` factura una orden sin
+ * pagos como venta a crédito (forma de pago 2) con su fecha de vencimiento.
+ */
+export interface EmitOrderBody {
+  /** Explicit opt-in: emit as Consumidor final despite an incomplete customer. */
+  allow_final_consumer?: boolean;
+  credit?: {
+    due_date: string;
+    payment_means_code?: string;
+  };
+}
+
+/**
  * Resultado de la emisión de un clic (`POST orders/:id/emit` y
  * `POST financial-accounts/:id/emit`): `issued` = aceptada, `pending` = en
  * proceso ante la DIAN, `failed` = no emitida (se puede reintentar).
@@ -40,6 +53,33 @@ export interface InvoiceEmitResult {
   invoice_number: string | null;
   dian_status: string | null;
   message: string | null;
+}
+
+/** `GET store/invoicing/holder-check?customer_id=`: can this customer be the invoice holder? */
+export interface HolderCheckResult {
+  rail: 'nominative' | 'final_consumer';
+  holder: {
+    name: string | null;
+    document_type: string | null;
+    document_number: string | null;
+    verification_digit: string | null;
+  };
+  holder_issue: {
+    code:
+      | 'missing_document_number'
+      | 'missing_name'
+      | 'final_consumer_sentinel'
+      | 'document_type_required';
+    missing_fields: (
+      | 'document_number'
+      | 'document_type'
+      | 'first_name'
+      | 'last_name'
+      | 'legal_name'
+    )[];
+    message: string;
+  } | null;
+  cf_overridable: boolean;
 }
 
 @Injectable({
@@ -108,10 +148,21 @@ export class InvoicingService {
   }
 
   /** Facturación de un clic de la orden completa (crea, valida y envía). */
-  emitOrder(orderId: number): Observable<ApiResponse<InvoiceEmitResult>> {
+  emitOrder(
+    orderId: number,
+    body?: EmitOrderBody,
+  ): Observable<ApiResponse<InvoiceEmitResult>> {
     return this.http.post<ApiResponse<InvoiceEmitResult>>(
       this.getApiUrl(`orders/${orderId}/emit`),
-      {},
+      body ?? {},
+    );
+  }
+
+  /** Read-only check of a customer as invoice holder (same rule as the emission). */
+  holderCheck(customerId: number): Observable<ApiResponse<HolderCheckResult>> {
+    return this.http.get<ApiResponse<HolderCheckResult>>(
+      this.getApiUrl('holder-check'),
+      { params: { customer_id: String(customerId) } },
     );
   }
 

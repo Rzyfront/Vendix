@@ -584,6 +584,9 @@ export interface StoreSettings {
   // Membership - gym/membership suite behavior toggles
   membership?: MembershipSettings;
 
+  // Hotelería - check-in/check-out hours and RNT
+  hospitality?: HospitalitySettings;
+
   // Vexi - the AI assistant's master switch
   vexi?: VexiSettings;
 
@@ -1138,6 +1141,41 @@ export interface PromotionsSettings {
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
   ticket_closing_hour?: number;
+}
+
+// ============================================================================
+// HOSPITALITY (Hotelería) - hotel operation settings
+// ============================================================================
+export interface HospitalitySettings {
+  /** Check-in time, `HH:mm` in the store time zone. Default `15:00`. */
+  check_in_time?: string;
+  /** Check-out time, `HH:mm` in the store time zone. Default `12:00`. */
+  check_out_time?: string;
+  /**
+   * Time (`HH:mm`, store time zone) of the day after arrival when a confirmed
+   * reservation whose guest never arrived becomes no-show. Default `06:00`.
+   */
+  no_show_time?: string;
+  /**
+   * H3.4 — `HH:mm` (store time): from this time the night audit charges the
+   * nights before the current business day to each in-house folio.
+   */
+  night_audit_time?: string;
+  /** Registro Nacional de Turismo number. Empty until the owner sets it. */
+  rnt_number?: string;
+  /**
+   * Overbooking allowance a new room type starts with: reservations it may
+   * sell above its active rooms (H1.6). Default `0`.
+   */
+  default_overbooking_allowance?: number;
+  /** H3.6 — folio origin of a POS or table room charge. Default "Restaurante". */
+  room_charge_origin?: string;
+  /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */
+  folio_invoice_verification?: boolean;
+  /** H6.6 — minutes a web booking holds its rooms waiting for the payment. Default 15. */
+  booking_hold_minutes?: number;
+  /** H6.2 — minutes between two automatic syncs of an imported iCal calendar. Default 15. */
+  ical_import_interval_minutes?: number;
 }
 
 // ============================================================================

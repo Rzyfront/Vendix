@@ -21,6 +21,7 @@ import {
   VexiUiHostRegistry,
   vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
+import { customerDisplayName } from '../../../../shared/utils/customer-display-name.util';
 
 @Component({
   selector: 'app-customers',
@@ -165,7 +166,7 @@ export class CustomersComponent {
       title: 'Clientes',
       visible_count: this.customers().length,
       selection: this.selectedCustomer()
-        ? `${this.selectedCustomer()!.first_name} ${this.selectedCustomer()!.last_name}`.trim()
+        ? customerDisplayName(this.selectedCustomer(), '')
         : null,
       filters: { search: this.searchQuery() || undefined },
       form_fields: this.isModalOpen()
@@ -571,7 +572,7 @@ export class CustomersComponent {
     this.dialogService
       .confirm({
         title: '¿Eliminar cliente?',
-        message: `Esta acción no se puede deshacer. Se eliminará a ${customer.first_name} ${customer.last_name}.`,
+        message: `Esta acción no se puede deshacer. Se eliminará a ${customerDisplayName(customer, 'este cliente')}.`,
         confirmVariant: 'danger',
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',

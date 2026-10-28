@@ -104,6 +104,9 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     // los muestra bloqueados aunque el backend sí los acepta.
     'waiter',
     'kitchen',
+    // H0.5 — roles base de hotelería (Recepcionista, Camarera). Espejo del backend.
+    'receptionist',
+    'housekeeper',
   ],
   store: [
     'manager',
@@ -115,6 +118,9 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     // puede asignar mesero/cocina desde la tienda.
     'waiter',
     'kitchen',
+    // H0.5 — roles base de hotelería (Recepcionista, Camarera). Espejo del backend.
+    'receptionist',
+    'housekeeper',
   ],
 };
 

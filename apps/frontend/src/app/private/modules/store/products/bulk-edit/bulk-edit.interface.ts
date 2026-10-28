@@ -91,11 +91,11 @@ export interface BulkRelationalTaxAction {
   ids: number[];
   /**
    * Flag "incluido en el precio" por impuesto, filtrado a `ids` (F-028).
-   * Espejo de `tax_category_action.inclusive?` del DTO backend (contrato A.2;
-   * deploy backend-primero, F-030). Ausente ⇒ el backend conserva el flag que
-   * cada producto ya tenga.
+   * Espejo de `tax_category_action.tax_inclusive_map?` del DTO backend.
+   * Ausente ⇒ el backend conserva el flag que cada producto ya tenga (ADD) o
+   * hereda el catálogo (REPLACE). Nunca viaja en REMOVE.
    */
-  inclusive?: Record<string, boolean>;
+  tax_inclusive_map?: Record<string, boolean>;
 }
 
 export interface BulkEditableChanges {

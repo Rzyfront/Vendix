@@ -37,6 +37,7 @@ export interface StoreSettings {
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
   membership?: MembershipSettings;
+  hospitality?: HospitalitySettings;
   carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
@@ -389,6 +390,27 @@ export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'requi
  * - `physical`: printed kitchen tickets; dishes are marked delivered manually.
  */
 export type KitchenMode = 'virtual' | 'physical';
+
+/** Hotelería (H0.5): check-in/check-out hours (`HH:mm`) and RNT number. */
+export interface HospitalitySettings {
+  check_in_time: string;
+  check_out_time: string;
+  /** Day after arrival, `HH:mm`: unarrived confirmed reservations become no-show. */
+  no_show_time: string;
+  /** H3.4 — `HH:mm`: from this time last night is charged to each folio. */
+  night_audit_time?: string;
+  rnt_number: string;
+  /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
+  default_overbooking_allowance?: number;
+  /** H6.6 — minutes a web booking holds the room while the guest pays (5-120, default 15). */
+  booking_hold_minutes?: number;
+  /** H6.2 — minutes between two automatic syncs of an imported iCal calendar (5-1440, default 15). */
+  ical_import_interval_minutes?: number;
+  /** H3.6 — folio origin of a POS/table room charge. Default "Restaurante". */
+  room_charge_origin?: string;
+  /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */
+  folio_invoice_verification?: boolean;
+}
 
 export interface RestaurantSettings {
   /**

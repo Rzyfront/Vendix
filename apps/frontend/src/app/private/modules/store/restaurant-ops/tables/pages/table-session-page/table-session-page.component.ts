@@ -86,10 +86,22 @@ import {
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
 import { QuickStatusModalComponent } from '../../components/quick-status-modal/quick-status-modal.component';
 import { TransferTableModalComponent } from '../../components/transfer-table-modal/transfer-table-modal.component';
+import { RoomChargeModalComponent } from '../../../../hospitality/reservations/components/room-charge-modal/room-charge-modal.component';
+import { LodgingReservationsService } from '../../../../hospitality/reservations/services/lodging-reservations.service';
+import { InHouseRoom } from '../../../../hospitality/reservations/interfaces/folio.interface';
 
 /** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
 interface SecondaryAction {
-  id: 'pay' | 'split' | 'transfer' | 'reassign' | 'customer' | 'table-status' | 'history' | 'close';
+  id:
+    | 'pay'
+    | 'split'
+    | 'room-charge'
+    | 'transfer'
+    | 'reassign'
+    | 'customer'
+    | 'table-status'
+    | 'history'
+    | 'close';
   label: string;
   icon: string;
   disabled?: boolean;
@@ -140,6 +152,7 @@ interface SecondaryAction {
     KitchenConfirmModalComponent,
     QuickStatusModalComponent,
     TransferTableModalComponent,
+    RoomChargeModalComponent,
   ],
   templateUrl: './table-session-page.component.html',
   styleUrl: './table-session-page.component.scss',
@@ -647,6 +660,16 @@ export class TableSessionPageComponent implements OnInit {
           disabled: this.items().length === 0,
         },
       );
+    }
+
+    // H3.6 — Hotelería: the bill goes to the folio of an in-house room.
+    if (this.canChargeToRoom()) {
+      actions.push({
+        id: 'room-charge',
+        label: 'Cargar a habitación',
+        icon: 'bed-double',
+        disabled: this.items().length === 0 || this.hasFinancialSplit(),
+      });
     }
 
     actions.push(
@@ -1735,6 +1758,11 @@ export class TableSessionPageComponent implements OnInit {
       case 'split':
         this.openSplit();
         return;
+      case 'room-charge':
+        if (this.canChargeToRoom() && this.items().length > 0 && !this.hasFinancialSplit()) {
+          this.isRoomChargeOpen.set(true);
+        }
+        return;
       case 'transfer':
         if (this.isClosed()) return;
         this.tableMoveMode.set('transfer');
@@ -1984,6 +2012,43 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al confirmar el pago',
           );
+        },
+      });
+  }
+
+  // ── H3.6 Cargar a habitación ────────────────────────────────────────────
+  private readonly lodgingReservations = inject(LodgingReservationsService);
+  readonly isRoomChargeOpen = signal(false);
+  readonly isChargingRoom = signal(false);
+
+  /** Hotel store (Hotelería) and the folio charge permission. */
+  readonly canChargeToRoom = computed(
+    () =>
+      this.authFacade.isHospitality() &&
+      this.authFacade.userPermissions().includes('store:lodging:folio:charge'),
+  );
+
+  /**
+   * Closes the bill without money: its lines move to the room folio, the
+   * table is freed and the guest pays everything at check-out.
+   */
+  onRoomChargeConfirmed(room: InHouseRoom): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isChargingRoom()) return;
+    this.isChargingRoom.set(true);
+    this.lodgingReservations
+      .chargeToRoom({ reservation_room_id: room.reservation_room_id, table_session_id: sessionId })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.isChargingRoom.set(false);
+          this.isRoomChargeOpen.set(false);
+          this.toastService.success(result.message);
+          this.router.navigate(['/admin/restaurant-ops/tables']);
+        },
+        error: (err: unknown) => {
+          this.isChargingRoom.set(false);
+          this.toastService.error(typeof err === 'string' ? err : 'No se pudo cargar a la habitación');
         },
       });
   }

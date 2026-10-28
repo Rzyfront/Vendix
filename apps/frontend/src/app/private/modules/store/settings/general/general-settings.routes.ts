@@ -24,7 +24,7 @@ export interface GeneralSettingsTabDef {
    * cuando corre un guard, y guardear sobre estado no hidratado produce
    * redirecciones falsas.
    */
-  readonly requiresIndustry?: 'restaurant';
+  readonly requiresIndustry?: 'restaurant' | 'hospitality';
 }
 
 /**
@@ -81,6 +81,14 @@ export const SETTINGS_TABS: readonly GeneralSettingsTabDef[] = [
     shortLabel: 'Mesas',
     icon: 'utensils',
     requiresIndustry: 'restaurant',
+  },
+  {
+    id: 'hoteleria',
+    path: 'hoteleria',
+    label: 'Hotelería',
+    shortLabel: 'Hotelería',
+    icon: 'hotel',
+    requiresIndustry: 'hospitality',
   },
   {
     id: 'notificaciones',
@@ -168,6 +176,14 @@ export const GENERAL_SETTINGS_ROUTES: Routes = [
         loadComponent: () =>
           import('./pages/tables-settings.page').then(
             (c) => c.TablesSettingsPage,
+          ),
+      },
+      {
+        path: 'hoteleria',
+        title: 'Hotelería - Configuración General',
+        loadComponent: () =>
+          import('./pages/hospitality-settings.page').then(
+            (c) => c.HospitalitySettingsPage,
           ),
       },
       {

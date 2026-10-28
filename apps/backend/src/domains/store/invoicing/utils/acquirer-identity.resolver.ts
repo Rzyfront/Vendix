@@ -2,6 +2,10 @@ import { Logger } from '@nestjs/common';
 import { onlyDigits } from '@common/utils/nit.util';
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
 
+/** DIAN Consumidor final sentinel (mirrors DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER;
+ * not imported to avoid a cycle with the fiscal identity validator). */
+const FINAL_CONSUMER_DOCUMENT_NUMBER = '222222222222';
+
 const logger = new Logger('AcquirerIdentityResolver');
 
 /**
@@ -273,7 +277,25 @@ export function resolveAcquirerIdentity(params: {
   snapshot: AcquirerIdentitySnapshot;
   customer?: AcquirerIdentityCustomer | null;
 }): ResolvedAcquirerIdentity {
-  const { snapshot, customer } = params;
+  // A document whose snapshot number is the DIAN Consumidor final sentinel
+  // resolves ENTIRELY as Consumidor final, whatever the live customer record
+  // says: name «Consumidor Final», type 13, the sentinel number, and no DV,
+  // responsibilities, person type, email, phone or names. Falling back field
+  // by field mixed the customer's data with the CF number («Miguel Santos · CC
+  // 222222222222», or «CC 1020304050 Juan» on a forced CF). `customer_id` stays
+  // on the invoice for receivables; a customer completed later only changes
+  // the holder through `refreshDraftAcquirer` BEFORE numbering.
+  const born_final_consumer =
+    onlyDigits(params.snapshot.customer_tax_id ?? '') ===
+    FINAL_CONSUMER_DOCUMENT_NUMBER;
+  const snapshot: AcquirerIdentitySnapshot = born_final_consumer
+    ? {
+        customer_name: 'Consumidor Final',
+        customer_tax_id: FINAL_CONSUMER_DOCUMENT_NUMBER,
+        customer_document_type: '13',
+      }
+    : params.snapshot;
+  const customer = born_final_consumer ? null : params.customer;
 
   // P1-B — `''` cuenta como AUSENTE en el respaldo ficha→snapshot. `??` sólo
   // cae al lado derecho cuando el izquierdo es `null`/`undefined`, así que una

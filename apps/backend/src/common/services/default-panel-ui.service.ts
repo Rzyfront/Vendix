@@ -181,6 +181,18 @@ export class DefaultPanelUIService {
         memberships_plans: true,
         memberships_members: true,
         memberships_access: true,
+        // Hotelería (Hospitality Suite, H0.1).
+        // Plan decisions: `default_visible_for_privileged_users=true`
+        // (owner/admin de un hotel ven "Hotelería" en el próximo login sin
+        // backfill), `show_new_badge=yes` (banner del dropdown + Settings →
+        // "Módulos del Panel" lo muestran como nuevo hasta que se toque).
+        // El gating por industria vive en `INDUSTRY_HIDDEN_MODULES` (todas
+        // menos `hospitality` lo ocultan); esta key es el default, no la
+        // compuerta.
+        hospitality: true,
+        hospitality_rooms: true,
+        hospitality_reservations: true,
+        hospitality_rates: true,
         reports: true,
         reports_dispatch: true,
         invoicing: true,

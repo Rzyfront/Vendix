@@ -9,7 +9,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { createHash } from 'node:crypto';
-import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from '../../../common/errors';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { SubscriptionAccessService } from '../../store/subscriptions/services/subscription-access.service';
@@ -451,7 +451,7 @@ export class ReceivedDocumentScanQueueService {
 
   private safeErrorCode(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
-    const entry = Object.values(ErrorCodes).find((candidate) => candidate.code === value);
+    const entry = findErrorCodeEntry(value);
     return entry?.code;
   }
 

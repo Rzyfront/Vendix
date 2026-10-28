@@ -152,6 +152,9 @@ describe('PaymentsService', () => {
         findMany: jest.fn(),
         count: jest.fn(),
       },
+      lodging_folios: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       store_users: {
         findMany: jest.fn(),
       },
@@ -576,6 +579,29 @@ describe('PaymentsService', () => {
         data: mockPaymentResult,
         message: 'Payment processed successfully',
       });
+    });
+
+    it('rejects paying the order of a hotel folio (only Hotelería charges it)', async () => {
+      jest
+        .spyOn(prisma.store_users, 'findMany')
+        .mockResolvedValue([{ store_id: 1 }]);
+      (prisma as any).lodging_folios.findFirst.mockResolvedValueOnce({ id: 40 });
+      const gatewaySpy = jest.spyOn(paymentGateway, 'processPayment');
+
+      await expect(
+        service.processPayment(
+          {
+            orderId: 1,
+            customerId: 1,
+            amount: 100,
+            currency: 'COP',
+            storePaymentMethodId: 1,
+            storeId: 1,
+          } as any,
+          mockUser,
+        ),
+      ).rejects.toMatchObject({ errorCode: 'ORD_STATUS_001' });
+      expect(gatewaySpy).not.toHaveBeenCalled();
     });
 
     it('should handle payment errors', async () => {

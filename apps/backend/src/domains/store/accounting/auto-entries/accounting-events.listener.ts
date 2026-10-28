@@ -198,6 +198,11 @@ export class AccountingEventsListener {
       this.logger.log(
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
       );
+      // H3.7 — the invoice of a guest folio crosses the advance its payments
+      // left in 2805 against the receivable it just booked.
+      if (!event.financial_account_id) {
+        await this.handleLodgingFolioInvoiced(event);
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
@@ -283,8 +288,25 @@ export class AccountingEventsListener {
     user_id?: number;
     /** C4-followup: propagado desde payments.service.ts (order.customer_id). */
     customer?: { id: number; name?: string; tax_id?: string };
+    /**
+     * Set by the dispatch-route settlement when the stop's order is a credit
+     * sale (payment_form '2'). That collection is booked once by
+     * `installment_payment.received` (DR Caja / CR CxC); booking it here too
+     * would debit cash twice and recognise revenue again ("venta directa").
+     */
+    source_type?: string;
+    credit_order_collection?: boolean;
+    /**
+     * Real `orders.id` of a route collection (the route event keeps
+     * `order_id` null on purpose). Lets the entry resolve the invoice branch.
+     */
+    accounting_order_id?: number;
   }) {
     try {
+      if (event.source_type === 'dispatch_route' && event.credit_order_collection) {
+        return;
+      }
+      const is_route_collection = event.source_type === 'dispatch_route';
       if (
         !(await this.isFlowEnabled(
           event.store_id,
@@ -298,7 +320,9 @@ export class AccountingEventsListener {
         payment_id: event.payment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
-        order_id: event.order_id,
+        order_id: is_route_collection
+          ? (event.accounting_order_id ?? event.order_id)
+          : event.order_id,
         order_number: event.order_number,
         payment_method: event.payment_method,
         amount: Number(event.amount),
@@ -322,6 +346,7 @@ export class AccountingEventsListener {
           event.tip_amount != null ? Number(event.tip_amount) : undefined,
         user_id: event.user_id,
         customer: event.customer,
+        ...(is_route_collection ? { route_collection: true } : {}),
       });
       this.logger.log(
         `Auto-entry created for payment.received #${event.payment_id}`,
@@ -1204,6 +1229,260 @@ export class AccountingEventsListener {
     }
   }
 
+  // ===== HOTELERÍA (H3.4) =====
+
+  @OnEvent('lodging.folio_payment.received')
+  async handleLodgingFolioPayment(event: {
+    store_id: number;
+    organization_id?: number;
+    payment_id: number;
+    order_number: string;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingFolioPayment({
+        payment_id: event.payment_id,
+        order_number: event.order_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for lodging.folio_payment - payment ${event.payment_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_payment - payment ${event.payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * Check-out of a folio in a store WITHOUT electronic invoicing: the sale is
+   * recognized at check-out (owner decision 2026-10-27). Same `payments` flow
+   * as the folio payments that created the 2805 advance.
+   */
+  @OnEvent('lodging.folio.sale_recognized')
+  async handleLodgingFolioSaleRecognized(event: {
+    order_id: number;
+    organization_id?: number;
+    store_id: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    shipping_amount?: number;
+    discount_amount?: number;
+    total_amount: number;
+    tip_amount?: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id = event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingFolioSale({
+        order_id: event.order_id,
+        organization_id,
+        store_id: event.store_id,
+        order_number: event.order_number,
+        subtotal_amount: Number(event.subtotal_amount),
+        tax_amount: Number(event.tax_amount),
+        tax_breakdown: event.tax_breakdown,
+        shipping_amount: Number(event.shipping_amount ?? 0),
+        discount_amount:
+          event.discount_amount != null ? Number(event.discount_amount) : undefined,
+        total_amount: Number(event.total_amount),
+        tip_amount: Number(event.tip_amount ?? 0),
+        user_id: event.user_id,
+        customer: event.customer,
+      });
+      this.logger.log(`Auto-entry created for lodging.folio_sale - order ${event.order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_sale - order ${event.order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /** H3.7 — no-op unless the invoice belongs to a guest folio order. */
+  private async handleLodgingFolioInvoiced(event: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    total_amount: number;
+    user_id?: number;
+    customer?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      // The advance came from the `payments` flow: cross it only if it was booked.
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const entry = await this.auto_entry_service.onLodgingFolioInvoiced({
+        invoice_id: event.invoice_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        total: Number(event.total_amount),
+        customer: event.customer ? { ...event.customer, type: 'customer' } : undefined,
+        user_id: event.user_id,
+      });
+      if (entry) {
+        this.logger.log(`Auto-entry created for lodging.folio_settlement - invoice ${event.invoice_id}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.folio_settlement - invoice ${event.invoice_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // H6.6 — reservation paid online with the booking engine (direct payment, D3).
+  @OnEvent('lodging.reservation_payment.received')
+  async handleLodgingReservationPayment(event: {
+    store_id: number;
+    organization_id?: number;
+    reservation_payment_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingReservationPayment({
+        reservation_payment_id: event.reservation_payment_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+      });
+      this.logger.log(
+        `Auto-entry created for lodging.reservation_payment - payment ${event.reservation_payment_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.reservation_payment - payment ${event.reservation_payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // H3.5 — reservation deposit received (customer advance, D3).
+  @OnEvent('lodging.deposit.received')
+  async handleLodgingDeposit(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    reservation_number: string;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingDeposit({
+        deposit_id: event.deposit_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for lodging.deposit - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.deposit - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // H3.5 — deposit retained as a cancellation / no-show penalty.
+  @OnEvent('lodging.deposit.retained')
+  async handleLodgingDepositRetained(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingDepositRetained({
+        deposit_id: event.deposit_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for lodging.deposit_retained - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.deposit_retained - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // H6.6 — online reservation payment kept as a cancellation / no-show penalty.
+  @OnEvent('lodging.reservation_payment.retained')
+  async handleLodgingReservationPaymentRetained(event: {
+    store_id: number;
+    organization_id?: number;
+    reservation_payment_id: number;
+    reservation_number: string;
+    amount: number;
+    customer_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLodgingReservationPaymentRetained({
+        reservation_payment_id: event.reservation_payment_id,
+        reservation_number: event.reservation_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(
+        `Auto-entry created for lodging.reservation_payment_retained - payment ${event.reservation_payment_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for lodging.reservation_payment_retained - payment ${event.reservation_payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== LAYAWAY (PLAN SEPARÉ) =====
 
   @OnEvent('layaway.payment_received')
@@ -1346,6 +1625,12 @@ export class AccountingEventsListener {
     customer_id: number;
     order_id: number;
     organization_id?: number;
+    withholding_amount?: number;
+    withholding_breakdown?: {
+      retefuente?: number;
+      reteiva?: number;
+      reteica?: number;
+    };
   }) {
     try {
       if (
@@ -1358,19 +1643,37 @@ export class AccountingEventsListener {
         return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
-      await this.auto_entry_service.onInstallmentPaymentReceived({
-        credit_id: event.credit_id,
-        installment_id: event.installment_id,
-        payment_id: event.payment_id,
-        amount: Number(event.amount),
-        store_id: event.store_id,
-        organization_id,
-        store_payment_method_id: event.store_payment_method_id,
-        credit_number: event.credit_number,
-        installment_number: event.installment_number,
-        customer_id: event.customer_id,
-        order_id: event.order_id,
-      });
+      // A withholding-only collection (cash 0) has no cash entry to book.
+      if (Number(event.amount) > 0) {
+        await this.auto_entry_service.onInstallmentPaymentReceived({
+          credit_id: event.credit_id,
+          installment_id: event.installment_id,
+          payment_id: event.payment_id,
+          amount: Number(event.amount),
+          store_id: event.store_id,
+          organization_id,
+          store_payment_method_id: event.store_payment_method_id,
+          credit_number: event.credit_number,
+          installment_number: event.installment_number,
+          customer_id: event.customer_id,
+          order_id: event.order_id,
+        });
+      }
+      // Route collection with customer withholding on a credit order: the
+      // retention also settles the CxC (DR 1355xx / CR CxC).
+      if (
+        Number(event.withholding_amount || 0) > 0 &&
+        event.withholding_breakdown
+      ) {
+        await this.auto_entry_service.onInstallmentWithholdingApplied({
+          payment_id: event.payment_id,
+          order_id: event.order_id,
+          store_id: event.store_id,
+          organization_id,
+          credit_number: event.credit_number,
+          breakdown: event.withholding_breakdown,
+        });
+      }
       this.logger.log(
         `Auto-entry created for installment_payment.received - Credit ${event.credit_number} cuota #${event.installment_number}`,
       );

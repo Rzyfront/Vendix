@@ -3919,7 +3919,12 @@ export class ProductsService {
   async update(
     id: number,
     updateProductDto: UpdateProductDto,
-    options?: { lean?: boolean; skip_embedding_event?: boolean },
+    options?: {
+      lean?: boolean;
+      skip_embedding_event?: boolean;
+      /** Hotelería edits its own "Noche – {type}" product (H0.2). */
+      from_lodging?: boolean;
+    },
   ): Promise<any> {
     // Fase 1: pure-ingredient sanitization. Idempotent.
     let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
@@ -3937,6 +3942,18 @@ export class ProductsService {
 
       if (!existingProduct) {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
+      }
+
+      if (
+        !options?.from_lodging &&
+        ((sanitizedDto.name !== undefined &&
+          sanitizedDto.name !== existingProduct.name) ||
+          (sanitizedDto.product_type !== undefined &&
+            sanitizedDto.product_type !== existingProduct.product_type) ||
+          (sanitizedDto.state !== undefined &&
+            sanitizedDto.state !== existingProduct.state))
+      ) {
+        await this.assertNotLodgingNightProduct(id);
       }
 
       // Cross-cutting gate: only stores whose industries support ingredients
@@ -5050,6 +5067,7 @@ export class ProductsService {
     if (!existingProduct) {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
+    await this.assertNotLodgingNightProduct(id);
 
     return await this.prisma.products.update({
       where: { id },
@@ -5073,6 +5091,25 @@ export class ProductsService {
    * así que un id inexistente y uno ya archivado siguen siendo el mismo
    * `PROD_FIND_001` de siempre.
    */
+  /**
+   * Hotelería (H0.2): the "Noche – {type}" product belongs to its room type.
+   * Its name, type and state change only from Hotelería, so a room type never
+   * sells nights through a renamed or archived product. Price and tax stay
+   * editable here: the room type reads them from the product.
+   */
+  private async assertNotLodgingNightProduct(productId: number) {
+    const unitType = await this.prisma.lodging_unit_types.findFirst({
+      where: { product_id: productId },
+      select: { name: true },
+    });
+    if (unitType) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_UNIT_TYPE_PRODUCT_001,
+        `Este servicio pertenece al tipo de habitación "${unitType.name}"; edítalo desde Hotelería`,
+      );
+    }
+  }
+
   private async loadProductForArchive(id: number) {
     const context = RequestContextService.getContext();
 
@@ -5352,6 +5389,7 @@ export class ProductsService {
     try {
       const product = await this.loadProductForArchive(id);
 
+      await this.assertNotLodgingNightProduct(id);
       await this.assertNoActiveReservationsForArchive(id);
 
       const plan = await this.buildArchiveWriteOffPlan(product);

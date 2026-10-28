@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 
 import {
   TableColumn,
@@ -28,6 +29,7 @@ import {
   CardComponent,
 } from '../../../../../../shared/components/index';
 
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import {
   STATUS_LABELS,
@@ -73,6 +75,8 @@ export class DispatchNoteListComponent {
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
+  private authFacade = inject(AuthFacade);
 
   readonly viewDetail = output<DispatchNote>();
   readonly create = output<void>();
@@ -165,14 +169,31 @@ export class DispatchNoteListComponent {
 
   readonly filter_values = signal<FilterValues>({});
 
-  dropdown_actions: DropdownAction[] = [
-    {
-      label: 'Nueva Remisión',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  // 'Operaciones masivas' solo se ofrece a quien puede imprimir, confirmar,
+  // entregar o anular. Es `computed` para reaccionar al snapshot de permisos;
+  // el backend sigue siendo el límite real de autorización.
+  readonly dropdown_actions = computed<DropdownAction[]>(() => {
+    const canBulk = this.authFacade.hasAnyPermission([
+      'store:dispatch_notes:print',
+      'store:dispatch_notes:confirm',
+      'store:dispatch_notes:deliver',
+      'store:dispatch_notes:void',
+    ]);
+    const all: DropdownAction[] = [
+      {
+        label: 'Nueva Remisión',
+        icon: 'plus',
+        action: 'create',
+        variant: 'primary',
+      },
+      {
+        label: 'Operaciones masivas',
+        icon: 'list-checks',
+        action: 'bulk-operations',
+      },
+    ];
+    return all.filter((a) => (a.action === 'bulk-operations' ? canBulk : true));
+  });
 
   // Table configuration
   table_columns: TableColumn[] = [
@@ -485,7 +506,15 @@ export class DispatchNoteListComponent {
       case 'create':
         this.create.emit(undefined);
         break;
+      case 'bulk-operations':
+        this.navigateToBulkPage();
+        break;
     }
+  }
+
+  /** Entrada a la vista de operaciones masivas (`dispatch-notes/bulk`). */
+  navigateToBulkPage(): void {
+    void this.router.navigate(['/admin/orders/dispatch-notes/bulk']);
   }
 
   get hasFilters(): boolean {

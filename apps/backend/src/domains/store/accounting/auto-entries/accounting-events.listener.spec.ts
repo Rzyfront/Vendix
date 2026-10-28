@@ -558,3 +558,200 @@ describe('AccountingEventsListener payment.voided', () => {
     error.mockRestore();
   });
 });
+
+/**
+ * Review ola 3 — hotel folio: the 2805 advance is booked by the `payments`
+ * flow, so both its cross on invoice acceptance and the sale recognized at a
+ * check-out without e-invoicing depend on that same flow (findings 1 and 15).
+ */
+describe('AccountingEventsListener — hotel folio (lodging)', () => {
+  const createListener = (flows: Record<string, boolean>) => {
+    const auto_entry_service = {
+      onInvoiceValidated: jest.fn().mockResolvedValue({ id: 1 }),
+      onLodgingFolioInvoiced: jest.fn().mockResolvedValue({ id: 3 }),
+      onLodgingFolioSale: jest.fn().mockResolvedValue({ sale: { id: 4 }, cross: null }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const fiscal_gate = {
+      isSubflowEnabled: jest.fn(async (_org: number, _store: number, flow: string) => flows[flow] ?? true),
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      { getPlatformContext: jest.fn() } as any,
+      { recordSkip: jest.fn(), recordFailure: jest.fn() } as any,
+    );
+    return { listener, auto_entry_service };
+  };
+
+  const invoiceEvent = {
+    invoice_id: 55,
+    invoice_number: 'FE100',
+    invoice_type: 'sales_invoice',
+    organization_id: 1,
+    store_id: 2,
+    subtotal_amount: 500000,
+    tax_amount: 95000,
+    tax_breakdown: [],
+    withholding_breakdown: [],
+    total_amount: 595000,
+  };
+  const saleEvent = {
+    order_id: 500,
+    organization_id: 1,
+    store_id: 2,
+    order_number: 'F-H-0001',
+    subtotal_amount: 500000,
+    tax_amount: 95000,
+    total_amount: 595000,
+    customer: { id: 9 },
+  };
+
+  it('with `payments` off it does not cross 2805 on the invoice (the advance was never booked)', async () => {
+    const { listener, auto_entry_service } = createListener({ payments: false });
+
+    await listener.handleInvoiceAccepted(invoiceEvent as any);
+
+    expect(auto_entry_service.onInvoiceValidated).toHaveBeenCalled();
+    expect(auto_entry_service.onLodgingFolioInvoiced).not.toHaveBeenCalled();
+  });
+
+  it('with `payments` on the invoice crosses the folio advance', async () => {
+    const { listener, auto_entry_service } = createListener({});
+
+    await listener.handleInvoiceAccepted(invoiceEvent as any);
+
+    expect(auto_entry_service.onLodgingFolioInvoiced).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice_id: 55, organization_id: 1 }),
+    );
+  });
+
+  it('check-out without e-invoicing books the folio sale under the `payments` flow', async () => {
+    const { listener, auto_entry_service } = createListener({});
+
+    await listener.handleLodgingFolioSaleRecognized(saleEvent);
+
+    expect(auto_entry_service.onLodgingFolioSale).toHaveBeenCalledWith(
+      expect.objectContaining({ order_id: 500, total_amount: 595000, tax_amount: 95000, customer: { id: 9 } }),
+    );
+  });
+
+  it('with `payments` off the folio sale is not booked, and a failure never throws', async () => {
+    const off = createListener({ payments: false });
+    await off.listener.handleLodgingFolioSaleRecognized(saleEvent);
+    expect(off.auto_entry_service.onLodgingFolioSale).not.toHaveBeenCalled();
+
+    const failing = createListener({});
+    failing.auto_entry_service.onLodgingFolioSale.mockRejectedValueOnce(new Error('db down'));
+    await expect(failing.listener.handleLodgingFolioSaleRecognized(saleEvent)).resolves.toBeUndefined();
+  });
+});
+
+describe('AccountingEventsListener payment.received — route collection on a credit order', () => {
+  const build = () => {
+    const auto_entry_service = {
+      onPaymentReceived: jest.fn().mockResolvedValue({ id: 1 }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const fiscal_gate = { isSubflowEnabled: jest.fn().mockResolvedValue(true) };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      {} as any,
+      {} as any,
+    );
+    return { listener, auto_entry_service };
+  };
+  const routeEvent = {
+    payment_id: null as any,
+    source_type: 'dispatch_route',
+    store_id: 2,
+    organization_id: 1,
+    order_id: null as any,
+    amount: 150,
+    currency: 'COP',
+    payment_method: 'cash',
+  };
+
+  it('credit order: the route payment.received books NO entry (installment_payment.received books the single DR Caja / CR CxC)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, credit_order_collection: true } as any);
+    expect(auto_entry_service.onPaymentReceived).not.toHaveBeenCalled();
+  });
+
+  it('COD route collection with a resolved order: passes the real order id and the route flag to the entry', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, accounting_order_id: 55 } as any);
+    expect(auto_entry_service.onPaymentReceived).toHaveBeenCalledWith(
+      expect.objectContaining({ order_id: 55, route_collection: true }),
+    );
+  });
+
+  it('non-route payment: no route flag (unchanged)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, source_type: undefined, order_id: 9, payment_id: 3 } as any);
+    const arg = auto_entry_service.onPaymentReceived.mock.calls[0][0];
+    expect(arg.order_id).toBe(9);
+    expect(arg.route_collection).toBeUndefined();
+  });
+
+  it('COD route collection: still books as before', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent } as any);
+    expect(auto_entry_service.onPaymentReceived).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AccountingEventsListener installment_payment.received — withholding on route credit collections', () => {
+  const build = () => {
+    const auto_entry_service = {
+      onInstallmentPaymentReceived: jest.fn().mockResolvedValue({ id: 1 }),
+      onInstallmentWithholdingApplied: jest.fn().mockResolvedValue({ id: 2 }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      { isSubflowEnabled: jest.fn().mockResolvedValue(true) } as any,
+      {} as any,
+      {} as any,
+    );
+    return { listener, auto_entry_service };
+  };
+  const ev = {
+    credit_id: 5, installment_id: 0, payment_id: 77, amount: 100, store_id: 2,
+    credit_number: 'ORD-5', installment_number: 0, customer_id: 9, order_id: 5,
+    organization_id: 1,
+  };
+
+  it('W > 0: books the cash entry AND the withholding entry', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived({
+      ...ev, withholding_amount: 20, withholding_breakdown: { retefuente: 20 },
+    } as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(auto_entry_service.onInstallmentWithholdingApplied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_id: 77, order_id: 5, breakdown: { retefuente: 20 }, organization_id: 1, store_id: 2,
+      }),
+    );
+  });
+
+  it('C = 0, W > 0: only the withholding entry (no zero-amount cash entry)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived({
+      ...ev, amount: 0, withholding_amount: 20, withholding_breakdown: { retefuente: 20 },
+    } as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).not.toHaveBeenCalled();
+    expect(auto_entry_service.onInstallmentWithholdingApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it('W = 0: only the cash entry (unchanged)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived(ev as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(auto_entry_service.onInstallmentWithholdingApplied).not.toHaveBeenCalled();
+  });
+});

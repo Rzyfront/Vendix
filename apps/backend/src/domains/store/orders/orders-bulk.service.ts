@@ -5,6 +5,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OrderFlowService } from './order-flow/order-flow.service';
 import { OrdersService } from './orders.service';
+import { PRINTABLE_ORDER_INVOICE_WHERE } from '../print-formats/lib/printable-order-invoice';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import {
@@ -21,6 +22,7 @@ import {
 } from './order-flow/order-action-policy.util';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import { OrderLeaseService } from '@common/locks/order-lease.service';
 import {
   BulkAssignRouteDto,
   BulkPrintOrdersDto,
@@ -181,6 +183,7 @@ export class OrdersBulkService {
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchRoutesService: DispatchRoutesService,
     private readonly stockValidator: StockValidatorService,
+    private readonly lease: OrderLeaseService,
   ) {}
 
   /**
@@ -527,9 +530,13 @@ export class OrdersBulkService {
 
     for (const id of dto.ids) {
       try {
-        await this.orderFlowService.forceOrderState(id, dto.targetState, {
-          reason,
-        });
+        // Lease por orden (S6b): si la facturación masiva u otra operación ya
+        // la tiene, esta orden falla con ORDERS_BULK_LOCKED_001 y el lote sigue.
+        await this.lease.withLease(id, () =>
+          this.orderFlowService.forceOrderState(id, dto.targetState, {
+            reason,
+          }),
+        );
         results.push({
           id,
           status: 'ok',
@@ -538,7 +545,8 @@ export class OrdersBulkService {
         successful++;
       } catch (error: any) {
         failed++;
-        const code = error?.code ?? 'ORD_BULK_TRANSITION_FAIL';
+        const code =
+          error?.errorCode ?? error?.code ?? 'ORD_BULK_TRANSITION_FAIL';
         const message =
           error?.message ??
           `No se pudo transicionar la orden ${id} a ${dto.targetState}`;
@@ -815,21 +823,62 @@ export class OrdersBulkService {
     let successful = 0;
     let failed = 0;
 
+    // 0. Lease por orden (S6b): las que otra operación está procesando se
+    //    reportan con ORDERS_BULK_LOCKED_001 y no entran al lote.
+    const leases: Array<{ release(): Promise<void> }> = [];
+    const lockable_ids: number[] = [];
+    for (const id of dto.ids) {
+      const handle = await this.lease.acquire(id);
+      if (!handle) {
+        failed++;
+        results.push({
+          id,
+          status: 'error',
+          code: ErrorCodes.ORDERS_BULK_LOCKED_001.code,
+          message: ErrorCodes.ORDERS_BULK_LOCKED_001.devMessage,
+        });
+        continue;
+      }
+      leases.push(handle);
+      lockable_ids.push(id);
+    }
+    try {
+      const inner = await this.assignRouteLocked(dto, lockable_ids);
+      return {
+        total: dto.ids.length,
+        successful: inner.successful,
+        failed: failed + inner.failed,
+        results: [...results, ...inner.results],
+      };
+    } finally {
+      await Promise.all(leases.map((handle) => handle.release()));
+    }
+  }
+
+  private async assignRouteLocked(
+    dto: BulkAssignRouteDto,
+    ids: number[],
+  ): Promise<BulkOrdersResultDto> {
+    const results: BulkOrderResultItemDto[] = [];
+    let successful = 0;
+    let failed = 0;
+    if (ids.length === 0) return { total: 0, successful, failed, results };
+
     // 1. Crear remisiones en lote reutilizando el seam existente.
     let batchResult;
     try {
       batchResult = await this.dispatchNotesService.createFromOrdersBatch({
-        orders: dto.ids,
+        orders: ids,
         target_status: 'confirmed',
       } as any);
     } catch (error: any) {
       // Si el batch entero falla (p. ej. store context ausente), todas las
       // órdenes se reportan como failed con el mismo code/mensaje.
       return {
-        total: dto.ids.length,
+        total: ids.length,
         successful: 0,
-        failed: dto.ids.length,
-        results: dto.ids.map((id) => ({
+        failed: ids.length,
+        results: ids.map((id) => ({
           id,
           status: 'error' as BulkOrderItemStatus,
           code: error?.code ?? 'ORD_BULK_CREATE_NOTES_FAIL',
@@ -902,7 +951,7 @@ export class OrdersBulkService {
       }
     }
 
-    return { total: dto.ids.length, successful, failed, results };
+    return { total: ids.length, successful, failed, results };
   }
 
   // ─── Print ─────────────────────────────────────────────────────────
@@ -1058,7 +1107,7 @@ export class OrdersBulkService {
         // consulta— es lo que le permite exigirla en vez de tratar su ausencia
         // como "aceptada", que sería afirmar validación DIAN por defecto.
         invoices: {
-          where: { dian_status: 'accepted', financial_account_id: null },
+          where: PRINTABLE_ORDER_INVOICE_WHERE,
           select: { invoice_number: true, cufe: true, dian_status: true },
           orderBy: { id: 'desc' },
           take: 1,

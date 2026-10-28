@@ -813,6 +813,80 @@ export class BreadcrumbService {
       icon: 'eye',
     },
 
+    // Hospitality
+    {
+      path: '/admin/hospitality/rooms',
+      title: 'Habitaciones',
+      parent: 'Hotelería',
+      icon: 'bed-double',
+    },
+    {
+      path: '/admin/hospitality/reservations',
+      title: 'Reservas',
+      parent: 'Hotelería',
+      icon: 'calendar-check',
+    },
+    {
+      path: '/admin/hospitality/rack',
+      title: 'Rack',
+      parent: 'Hotelería',
+      icon: 'layout-grid',
+    },
+    {
+      path: '/admin/hospitality/rates',
+      title: 'Tarifas',
+      parent: 'Hotelería',
+      icon: 'tag',
+    },
+    {
+      path: '/admin/hospitality/front-desk',
+      title: 'Recepción',
+      parent: 'Hotelería',
+      icon: 'concierge-bell',
+    },
+    {
+      path: '/admin/hospitality/exempt-services',
+      title: 'Servicios exentos',
+      parent: 'Hotelería',
+      icon: 'file-check',
+    },
+    {
+      path: '/admin/hospitality/housekeeping',
+      title: 'Housekeeping',
+      parent: 'Hotelería',
+      icon: 'sparkles',
+    },
+    {
+      path: '/admin/hospitality/channels',
+      title: 'Canales',
+      parent: 'Hotelería',
+      icon: 'share-2',
+    },
+    {
+      path: '/admin/hospitality/night-audit',
+      title: 'Cierre del día',
+      parent: 'Hotelería',
+      icon: 'moon',
+    },
+    {
+      path: '/admin/hospitality/performance',
+      title: 'Indicadores',
+      parent: 'Hotelería',
+      icon: 'chart-line',
+    },
+    {
+      path: '/admin/hospitality/pickup',
+      title: 'Pickup y pronóstico',
+      parent: 'Hotelería',
+      icon: 'calendar-clock',
+    },
+    {
+      path: '/admin/hospitality/cancellations',
+      title: 'No-shows y cancelaciones',
+      parent: 'Hotelería',
+      icon: 'calendar-x',
+    },
+
     // Customers
     {
       path: '/admin/customers',

@@ -3,9 +3,9 @@
 # industry-parity-audit.sh — Guardia anti-deriva de la lista de industrias.
 #
 # `industry_enum` en Postgres es la fuente única de verdad de qué industrias
-# existen. Esa lista está espejada A MANO en tres lugares más, y NINGÚN tipo
-# une el enum de Prisma con los espejos del frontend y del móvil: viven en
-# proyectos tsconfig distintos y ni Angular ni Expo importan `@prisma/client`.
+# existen. Esa lista está espejada A MANO en dos lugares más, y NINGÚN tipo
+# une el enum de Prisma con el espejo del frontend: viven en proyectos
+# tsconfig distintos y Angular no importa `@prisma/client`.
 # Esa grieta no la detecta `tsc`, no la detecta ningún build, y no la detecta
 # ningún spec — porque cada espejo es internamente consistente consigo mismo.
 #
@@ -13,7 +13,10 @@
 #   1. apps/backend/prisma/schema.prisma            → `enum industry_enum`  (VERDAD)
 #   2. apps/backend/src/domains/store/stores/dto/index.ts → `StoreIndustry` (const derivado)
 #   3. apps/frontend/src/app/shared/constants/industry-modules.constant.ts
-#   4. apps/mobile/src/shared/constants/industry-modules.constant.ts
+#
+# `apps/mobile` ya NO se vigila (decisión del dueño, 2026-10-27): la app móvil
+# está abandonada y no se edita, así que exigirle paridad bloqueaba cada
+# industria nueva sin proteger nada en uso.
 #
 # Por qué existe: el 2026-08-23, al agregar `construction`, se encontraron
 # CUATRO copias escritas a mano de la unión de industrias y DOS ya estaban
@@ -37,7 +40,7 @@
 # (`as const satisfies Record<Uppercase<$Enums.industry_enum>, ...>`), así que
 # la regla 5 vigila que esa defensa siga en su sitio: si alguien la revierte a
 # un `export enum` escrito a mano, el backend vuelve a poder driftear en
-# silencio y este script se quedaría vigilando solo tres cuartas partes.
+# silencio y este script se quedaría vigilando solo dos terceras partes.
 #
 # Espejo estructural de scripts/tenant-host-audit.sh y scripts/tz-audit.sh.
 set -euo pipefail
@@ -47,7 +50,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCHEMA="$ROOT/apps/backend/prisma/schema.prisma"
 BACKEND_DTO="$ROOT/apps/backend/src/domains/store/stores/dto/index.ts"
 WEB_CONST="$ROOT/apps/frontend/src/app/shared/constants/industry-modules.constant.ts"
-MOBILE_CONST="$ROOT/apps/mobile/src/shared/constants/industry-modules.constant.ts"
 
 FAIL=0
 
@@ -160,35 +162,27 @@ echo "== industry-parity-audit: verdad = enum industry_enum ($ENUM_COUNT valores
 echo "$ENUM_VALUES" | sed 's/^/     · /'
 echo ""
 
-echo "== (1/5) backend: StoreIndustry en stores/dto/index.ts =="
+echo "== (1/4) backend: StoreIndustry en stores/dto/index.ts =="
 if require_file "$BACKEND_DTO"; then
   compare_sets "el enum" "$ENUM_VALUES" "StoreIndustry (backend)" \
     "$(extract_backend_values)"
 fi
 
-echo "== (2/5) web: STORE_INDUSTRIES =="
+echo "== (2/4) web: STORE_INDUSTRIES =="
 if require_file "$WEB_CONST"; then
   compare_sets "el enum" "$ENUM_VALUES" "STORE_INDUSTRIES (web)" \
     "$(extract_const_array "$WEB_CONST" "STORE_INDUSTRIES")"
 
-  echo "== (3/5) web: INDUSTRY_METADATA e INDUSTRY_HIDDEN_MODULES =="
+  echo "== (3/4) web: INDUSTRY_METADATA e INDUSTRY_HIDDEN_MODULES =="
   compare_sets "el enum" "$ENUM_VALUES" "INDUSTRY_METADATA (web)" \
     "$(extract_record_keys "$WEB_CONST" "INDUSTRY_METADATA")"
   compare_sets "el enum" "$ENUM_VALUES" "INDUSTRY_HIDDEN_MODULES (web)" \
     "$(extract_record_keys "$WEB_CONST" "INDUSTRY_HIDDEN_MODULES")"
 fi
 
-echo "== (4/5) móvil: STORE_INDUSTRIES e INDUSTRY_HIDDEN_MODULES =="
-if require_file "$MOBILE_CONST"; then
-  compare_sets "el enum" "$ENUM_VALUES" "STORE_INDUSTRIES (móvil)" \
-    "$(extract_const_array "$MOBILE_CONST" "STORE_INDUSTRIES")"
-  compare_sets "el enum" "$ENUM_VALUES" "INDUSTRY_HIDDEN_MODULES (móvil)" \
-    "$(extract_record_keys "$MOBILE_CONST" "INDUSTRY_HIDDEN_MODULES")"
-fi
-
-# Regla 5: el vínculo en tiempo de compilación del backend sigue en su sitio.
-# Sin él, el backend puede driftear en silencio y este guard cubriría 3 de 4.
-echo "== (5/5) el vínculo compile-time del backend sigue en pie =="
+# Regla 4: el vínculo en tiempo de compilación del backend sigue en su sitio.
+# Sin él, el backend puede driftear en silencio y este guard cubriría 2 de 3.
+echo "== (4/4) el vínculo compile-time del backend sigue en pie =="
 if [ -f "$BACKEND_DTO" ]; then
   if grep -qF 'as const satisfies Record<' "$BACKEND_DTO" \
      && grep -qF 'Uppercase<$Enums.industry_enum>' "$BACKEND_DTO"; then
@@ -212,7 +206,7 @@ if [ "$FAIL" -ne 0 ]; then
 industry-parity-audit FALLÓ.
 
 `industry_enum` en apps/backend/prisma/schema.prisma es la fuente de verdad.
-Agregar una industria son CINCO cambios en el mismo commit:
+Agregar una industria son CUATRO cambios en el mismo commit:
 
   1. migración `ALTER TYPE "industry_enum" ADD VALUE IF NOT EXISTS '<x>';`
      (sola en su propia migración: Postgres no puede usar un valor de enum
@@ -221,14 +215,10 @@ Agregar una industria son CINCO cambios en el mismo commit:
   3. `StoreIndustry` en apps/backend/src/domains/store/stores/dto/index.ts
   4. STORE_INDUSTRIES + INDUSTRY_METADATA + INDUSTRY_HIDDEN_MODULES en
      apps/frontend/src/app/shared/constants/industry-modules.constant.ts
-  5. STORE_INDUSTRIES + INDUSTRY_HIDDEN_MODULES en
-     apps/mobile/src/shared/constants/industry-modules.constant.ts
 
-Ojo con el punto 5: `Record<StoreIndustry, string[]>` NO protege ahí, porque
-`StoreIndustry` se deriva de la propia lista del archivo. Compila perfecto y
-deja la industria nueva sin reglas de ocultamiento en runtime.
+apps/mobile no se vigila: la app móvil está abandonada.
 MSG
   exit 1
 fi
 
-echo "industry-parity-audit OK — las cuatro superficies coinciden con el enum."
+echo "industry-parity-audit OK — las superficies de backend y web coinciden con el enum."

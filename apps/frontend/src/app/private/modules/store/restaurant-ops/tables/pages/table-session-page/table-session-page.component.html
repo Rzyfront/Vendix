@@ -843,6 +843,16 @@
     (reassigned)="onReassignmentConfirmed($event)"
   />
 
+  @if (canChargeToRoom()) {
+    <app-room-charge-modal
+      [isOpen]="isRoomChargeOpen()"
+      [amount]="orderTotal()"
+      [busy]="isChargingRoom()"
+      (confirmed)="onRoomChargeConfirmed($event)"
+      (closed)="isRoomChargeOpen.set(false)"
+    />
+  }
+
   @if (checkoutEnabled()) {
     <app-table-payment-modal
       [isOpen]="isPayOpen()"

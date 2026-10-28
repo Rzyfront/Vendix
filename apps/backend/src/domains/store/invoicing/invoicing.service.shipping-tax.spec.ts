@@ -76,6 +76,8 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
 
     prisma = createPrismaMock({
       orders: ['findFirst'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
       invoices: ['findFirst', 'create', 'update'],
       invoice_items: ['findMany', 'deleteMany'],
       invoice_taxes: ['createMany', 'deleteMany'],

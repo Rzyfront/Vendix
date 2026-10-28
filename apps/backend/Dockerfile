@@ -41,6 +41,8 @@ COPY --from=builder /app/dist ./dist
 # Copy Prisma schema and generated client
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
+# Seeds run with tsx inside this image and import this constant from src/.
+COPY --from=builder /app/src/common/constants/lodging-roles.constant.ts ./src/common/constants/
 # Environment files are NOT copied - secrets are loaded from AWS Secrets Manager in production
 EXPOSE 3000
 # Un solo entrypoint para los dos roles del backend (QUI-674). `main.ts` lee

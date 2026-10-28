@@ -408,6 +408,13 @@ describe('order-action-policy — canCancelItem', () => {
   it('allows cancelling an ordinary unpaid, undelivered item', () => {
     expect(canCancelItem(item())).toEqual({ enabled: true });
   });
+
+  it('rejects an item of an order with a current electronic invoice', () => {
+    expect(canCancelItem(item({ invoiceLocked: true }))).toEqual({
+      enabled: false,
+      reason: 'ORD_INVOICED_LOCKED_001',
+    });
+  });
 });
 
 describe('order-action-policy — canReverseDeliveredItem', () => {
@@ -428,6 +435,12 @@ describe('order-action-policy — canReverseDeliveredItem', () => {
     expect(
       canReverseDeliveredItem(item({ delivered_at: new Date(), orderHasSettledPayment: true })),
     ).toEqual({ enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' });
+  });
+
+  it('rejects a delivered item of an order with a current electronic invoice', () => {
+    expect(
+      canReverseDeliveredItem(item({ delivered_at: new Date(), invoiceLocked: true })),
+    ).toEqual({ enabled: false, reason: 'ORD_INVOICED_LOCKED_001' });
   });
 
   it('rejects an item that was never delivered', () => {

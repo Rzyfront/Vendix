@@ -18,7 +18,7 @@ import {
 import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
-import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from 'src/common/errors';
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
 import { ProcessReservedPosPaymentDto } from '../dto/create-payment.dto';
@@ -558,9 +558,7 @@ export class PaymentGatewayService {
 
     if (!orderValid.valid) {
       if (orderValid.errorCode) {
-        const typedError = Object.values(ErrorCodes).find(
-          (entry) => entry.code === orderValid.errorCode,
-        );
+        const typedError = findErrorCodeEntry(orderValid.errorCode);
         if (typedError) {
           throw new VendixHttpException(typedError, orderValid.errors?.join(', '));
         }

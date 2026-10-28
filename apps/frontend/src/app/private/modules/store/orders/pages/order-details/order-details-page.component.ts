@@ -182,6 +182,15 @@ import {
   OrderPaymentModalComponent,
   type OrderPendingPaymentPreset,
 } from '../../components/order-payment-modal/order-payment-modal.component';
+import {
+  CreditInvoiceModalComponent,
+  type CreditInvoiceSubmit,
+} from '../../components/credit-invoice-modal/credit-invoice-modal.component';
+import { CustomerHolderCompletionModalComponent } from '../../../customers/components/customer-holder-completion-modal/customer-holder-completion-modal.component';
+import {
+  holderIssueFromDetails,
+  type HolderIssue,
+} from '../../../customers/components/customer-holder-completion-modal/holder-issue.model';
 import { OrderItemsEditModalComponent } from '../../components/order-items-edit-modal/order-items-edit-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import {
@@ -1047,6 +1056,8 @@ export interface InvoiceCardView {
     CurrencyPipe,
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
+    CreditInvoiceModalComponent,
+    CustomerHolderCompletionModalComponent,
     OrderItemsEditModalComponent,
     OrderRefundModalComponent,
     OrderCompleteModalComponent,
@@ -2336,9 +2347,12 @@ export class OrderDetailsPageComponent {
       'ship', // collect_payment ("Pasar a Cobro")
       'cancel',
     ]);
+    const invoiceLocked = this.invoiceLocked();
     const buttons = buildOrderActionButtons(order).filter(
       (b) =>
-        !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)),
+        !(order.active_financial_split_id && SPLIT_HIDDEN_BUTTONS.has(b.id)) &&
+        // Orden facturada: sin «Modificar Orden» (ORD_INVOICED_LOCKED_001).
+        !(invoiceLocked && b.id === 'edit-order'),
     );
 
     // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
@@ -5257,6 +5271,10 @@ export class OrderDetailsPageComponent {
   openItemsEditModal(): void {
     const order = this.order();
     if (!order || order.active_financial_split_id) return;
+    if (this.invoiceLocked()) {
+      this.toastService.info(this.invoiceLockedMessage);
+      return;
+    }
     this.showItemsEditModal.set(true);
   }
 
@@ -6644,6 +6662,47 @@ export class OrderDetailsPageComponent {
   }
 
   /**
+   * ¿La orden está BLOQUEADA por tener factura electrónica de venta emitida?
+   * Espejo de `ORD_INVOICED_LOCKED_001` (backend): factura de venta en estado
+   * `validated | sent | accepted | rejected`. Borradores, anuladas y
+   * canceladas no bloquean. Se lee de `active_sales_invoice` (misma guarda del
+   * backend); si no viaja, cae a la última factura de la orden.
+   */
+  readonly invoiceLocked = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const status =
+      order.active_sales_invoice !== undefined
+        ? order.active_sales_invoice?.status
+        : order.invoices?.[0]?.status;
+    return (
+      status === 'validated' ||
+      status === 'sent' ||
+      status === 'accepted' ||
+      status === 'rejected'
+    );
+  });
+
+  /** «Facturada · Crédito, vence DD/MM» cuando la factura bloqueada es a crédito. */
+  readonly creditInvoiceLabel = computed<string | null>(() => {
+    const order = this.order();
+    if (!order || !this.invoiceLocked()) return null;
+    const invoice = order.invoices?.[0];
+    const isCredit =
+      order.payment_form === '2' || invoice?.payment_form === '2';
+    if (!isCredit) return null;
+    // `due_date` es date-only (YYYY-MM-DD o ISO a medianoche UTC): se lee por
+    // texto para no desplazar el día por zona horaria.
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(invoice?.due_date ?? '');
+    return match
+      ? `Facturada · Crédito, vence ${match[3]}/${match[2]}`
+      : 'Facturada · Crédito';
+  });
+
+  readonly invoiceLockedMessage =
+    'Esta orden ya tiene factura electrónica. Para corregirla emite una nota crédito.';
+
+  /**
    * LA ÚLTIMA FACTURA DE ESTA ORDEN, EN CUALQUIER ESTADO, O `null`.
    *
    * `order.invoices` dejó de venir filtrado por el backend a `dian_status:
@@ -7567,6 +7626,16 @@ export class OrderDetailsPageComponent {
    * factura). Se apaga al reparar con éxito o al emitir la factura.
    */
   readonly shippingTaxRepairNeeded = signal(false);
+  /** Modal «Facturar a crédito» y el saldo que el backend reportó sin cobrar. */
+  readonly showCreditModal = signal(false);
+  readonly creditBalance = signal(0);
+  /** «Datos del cliente incompletos»: hallazgo del 409 y modal para completarlos. */
+  readonly holderIssue = signal<HolderIssue | null>(null);
+  readonly showHolderModal = signal(false);
+  /** Card key of the emission that hit the holder 409 (the retry reuses it). */
+  private holderEmitKey = 'order';
+  /** The user explicitly accepted Consumidor final: threaded into the credit retry too. */
+  private emitAllowFinalConsumer = false;
   readonly isRepairingShippingTax = signal(false);
 
   /**
@@ -7584,12 +7653,14 @@ export class OrderDetailsPageComponent {
       return;
     }
     if (!this.orderId || this.hasSalesInvoice()) return;
+    this.emitAllowFinalConsumer = false;
     this.runEmit('order', null);
   }
 
   /** Acción «Facturar» / «Reintentar» de una tarjeta de factura. */
   emitFromCard(card: InvoiceCardView): void {
     if (card.accountId == null && this.hasSalesInvoice()) return;
+    this.emitAllowFinalConsumer = false;
     this.runEmit(
       card.emitKey === 'order-new' ? 'order' : card.emitKey,
       card.accountId,
@@ -7601,19 +7672,33 @@ export class OrderDetailsPageComponent {
    * vuelo vive por clave de tarjeta: dos clics seguidos no disparan dos
    * emisiones y el botón conserva su tamaño (el spinner es el ícono).
    */
-  private runEmit(key: string, accountId: number | null): void {
+  private runEmit(
+    key: string,
+    accountId: number | null,
+    credit?: CreditInvoiceSubmit,
+    allowFinalConsumer = false,
+  ): void {
     if (this.emittingKeys().has(key)) return;
     const orderId = Number(this.orderId);
     if (accountId == null && !orderId) return;
     const request$ =
       accountId != null
         ? this.invoicingService.emitFinancialAccount(accountId)
-        : this.invoicingService.emitOrder(orderId);
+        : this.invoicingService.emitOrder(
+            orderId,
+            credit || allowFinalConsumer
+              ? {
+                  ...(credit ? { credit } : {}),
+                  ...(allowFinalConsumer ? { allow_final_consumer: true } : {}),
+                }
+              : undefined,
+          );
     this.setEmitting(key, true);
     this.setEmitError(key, null);
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.setEmitting(key, false);
+        this.showCreditModal.set(false);
         // `success: false` con HTTP 2xx es un caso real de este backend
         // (`responseService.error()` RETORNA el sobre): llega por `next`.
         if (!response?.success || !response.data) {
@@ -7649,6 +7734,14 @@ export class OrderDetailsPageComponent {
         // NO `err.message`: en un `HttpErrorResponse` es la cadena sintética
         // de Angular, nunca el mensaje del backend.
         const parsed = parseApiError(err);
+        this.showCreditModal.set(false);
+        // The holder check runs BEFORE the unpaid/credit check on the backend.
+        if (accountId == null && this.handleHolderIncomplete(key, parsed)) {
+          return;
+        }
+        if (accountId == null && this.handleUnpaidEmitRejection(key, parsed)) {
+          return;
+        }
         if (accountId == null) {
           // B5 — La guarda rechazó por copia incoherente del impuesto del
           // envío: ofrecer la reparación. Solo este rechazo la muestra.
@@ -7680,6 +7773,80 @@ export class OrderDetailsPageComponent {
         this.toastService.error(message);
       },
     });
+  }
+
+  /**
+   * `INVOICING_HOLDER_INCOMPLETE_001`: el cliente de la orden no alcanza para una
+   * factura nominativa. Nunca cae a Consumidor final en silencio: abre el modal
+   * para completar los datos (o aceptar Consumidor final de forma explícita).
+   * Devuelve `true` cuando atendió el rechazo.
+   */
+  private handleHolderIncomplete(
+    key: string,
+    parsed: ReturnType<typeof parseApiError>,
+  ): boolean {
+    if (parsed.errorCode !== 'INVOICING_HOLDER_INCOMPLETE_001') return false;
+    const issue = holderIssueFromDetails(parsed.details);
+    if (!issue) {
+      this.setEmitError(key, parsed.userMessage);
+      this.toastService.error(parsed.userMessage);
+      return true;
+    }
+    this.holderEmitKey = key;
+    this.holderIssue.set(issue);
+    this.showHolderModal.set(true);
+    return true;
+  }
+
+  /** The customer was completed and saved: retry the emission automatically. */
+  onHolderCompleted(): void {
+    this.showHolderModal.set(false);
+    this.runEmit(this.holderEmitKey, null, undefined, this.emitAllowFinalConsumer);
+  }
+
+  /** Explicit «Emitir como Consumidor final»: retry with the override. */
+  onHolderUseFinalConsumer(): void {
+    this.showHolderModal.set(false);
+    this.emitAllowFinalConsumer = true;
+    this.runEmit(this.holderEmitKey, null, undefined, true);
+  }
+
+  /**
+   * `INVOICING_ORDER_UNPAID_001`: la orden tiene saldo sin cobrar. Si el backend
+   * dice que admite crédito (`details.credit_eligible`) abre el modal «Facturar
+   * a crédito» y NO es un error; si no, avisa el bloqueo (`credit_blocker`).
+   * Devuelve `true` cuando atendió el rechazo.
+   */
+  private handleUnpaidEmitRejection(
+    key: string,
+    parsed: ReturnType<typeof parseApiError>,
+  ): boolean {
+    if (parsed.errorCode !== 'INVOICING_ORDER_UNPAID_001') return false;
+    const details: Record<string, unknown> =
+      parsed.details && typeof parsed.details === 'object'
+        ? (parsed.details as Record<string, unknown>)
+        : {};
+    if (details['credit_eligible'] === true) {
+      const remaining = Number(details['remaining_balance']);
+      this.creditBalance.set(Number.isFinite(remaining) ? remaining : 0);
+      this.showCreditModal.set(true);
+      return true;
+    }
+    const blocker = details['credit_blocker'];
+    const message =
+      blocker === 'customer_required'
+        ? 'Asigna un cliente identificado para facturar a crédito.'
+        : blocker === 'partial_payment'
+          ? 'La orden tiene abonos; registra el saldo o anula los abonos para facturar a crédito.'
+          : parsed.userMessage;
+    this.setEmitError(key, message);
+    this.toastService.error(message);
+    return true;
+  }
+
+  /** Confirmación del modal «Facturar a crédito»: reenvía la emisión con `credit`. */
+  onCreditInvoiceConfirmed(credit: CreditInvoiceSubmit): void {
+    this.runEmit('order', null, credit, this.emitAllowFinalConsumer);
   }
 
   /**

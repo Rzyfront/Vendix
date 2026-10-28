@@ -51,6 +51,7 @@ import {
   CreateFromOrdersBatchDto,
   CreateFromOrdersBatchResultItem,
 } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 interface AvailableNote {
   id: number;
@@ -190,7 +191,7 @@ interface AvailableNote {
                         </p>
                       }
                       <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                        Si el encargado es usuario del sistema, solo él podrá despachar la ruta y se compartirá su ubicación en tiempo real mientras esté en curso. Si es externo, cualquiera con permiso puede despachar y no hay rastreo.
+                        Cualquier usuario con permiso puede despachar la ruta. Si el encargado es usuario del sistema y la despacha él mismo, se compartirá su ubicación en tiempo real mientras esté en curso; si la despacha otra persona, el rastreo inicia cuando el encargado sincronice su ubicación desde la ruta. Si es externo, no hay rastreo.
                       </p>
                     </div>
                     <div>
@@ -998,7 +999,7 @@ export class PlanillaWizardComponent {
   /** Nombre legible del cliente de una orden (fallback a "Cliente #id"). */
   orderCustomerName(order: Order): string {
     const u = order.users;
-    const name = u ? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() : '';
+    const name = u ? customerDisplayName(u, '') : '';
     return name || (order.customer_id ? `Cliente #${order.customer_id}` : 'Sin cliente');
   }
 

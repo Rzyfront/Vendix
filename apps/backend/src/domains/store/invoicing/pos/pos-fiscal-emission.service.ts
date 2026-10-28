@@ -3,7 +3,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { InvoicingService } from '../invoicing.service';
+import { InvoicingService, CreateFromOrderOptions } from '../invoicing.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
@@ -94,14 +94,17 @@ export class PosFiscalEmissionService {
    * Devuelve SIEMPRE un estado. Los únicos lanzamientos posibles son de
    * contrato —pedido inexistente o de otra tienda—, no de emisión.
    */
-  async emitForOrder(order_id: number): Promise<PosFiscalStatus> {
+  async emitForOrder(
+    order_id: number,
+    opts?: CreateFromOrderOptions,
+  ): Promise<PosFiscalStatus> {
     // Un solo punto de salida para que TODA rama que termine en `failed` —la
     // creación, la prevalidación, la transmisión— deje su constancia por el
     // mismo sitio. Registrarlo en cada `return this.failed(...)` era invitar a
     // que la próxima rama nueva se olvidara, y la rama olvidada sería
     // precisamente una venta sin documento de la que nadie se entera.
     const status = await this.registerFailure(
-      await this.runEmission(order_id),
+      await this.runEmission(order_id, null, opts),
       order_id,
     );
     // Emitido: si una emisión AUTOMÁTICA anterior había dejado el banner de
@@ -275,6 +278,7 @@ export class PosFiscalEmissionService {
   private async runEmission(
     order_id: number,
     account_id: number | null = null,
+    opts?: CreateFromOrderOptions,
   ): Promise<PosFiscalStatus> {
     // Con `account_id` el documento es la factura de ESA cuenta del reparto;
     // sin él, la factura de la orden. Mismo flujo, distinto «cuál es la fila».
@@ -304,7 +308,12 @@ export class PosFiscalEmissionService {
       );
     }
 
-    const existing = await find();
+    let existing = await find();
+    // Borrador descartado por un intento fallido anterior de la emisión en un
+    // paso: no es una anulación deliberada, se vuelve a crear.
+    if (opts?.recreate_after_discard && existing?.status === 'cancelled') {
+      existing = null;
+    }
 
     // Ya aceptado: no hay nada que hacer y volver a transmitir sería emitir dos
     // veces el mismo hecho económico.
@@ -336,7 +345,9 @@ export class PosFiscalEmissionService {
         // emisión y sea barato de comprobar ya se comprobó arriba.
         const created =
           account_id === null
-            ? await this.invoicing.createFromOrder(order_id)
+            ? await (opts
+                ? this.invoicing.createFromOrder(order_id, opts)
+                : this.invoicing.createFromOrder(order_id))
             : await this.invoicing.createFromFinancialAccount(account_id);
         invoice = await find();
         if (!invoice) {

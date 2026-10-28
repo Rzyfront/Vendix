@@ -963,6 +963,8 @@ describe('InvoicingService.createFromOrder — el escalar de línea escala por u
 
     prisma = createPrismaMock({
       orders: ['findFirst'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
       invoices: ['findFirst', 'create'],
       // F-090 remediación (Agente E) — el catálogo de la línea huérfana
       // (población 3) se resuelve con una consulta APARTE

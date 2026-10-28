@@ -36,6 +36,9 @@
           <a routerLink="/products" routerLinkActive="active">Productos</a>
           <a routerLink="/new" routerLinkActive="active">Novedades</a>
           <a routerLink="/sale" routerLinkActive="active">Ofertas</a>
+          @if (is_hotel()) {
+            <a routerLink="/hotel" routerLinkActive="active">Reservar habitación</a>
+          }
         </nav>
       </div>
 
@@ -608,6 +611,9 @@
       <a routerLink="/products" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
       <a routerLink="/new" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
       <a routerLink="/sale" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
+      @if (is_hotel()) {
+        <a routerLink="/hotel" routerLinkActive="active" (click)="toggleMobileMenu()">Reservar habitación</a>
+      }
     </div>
 
     <hr class="nav-divider">
