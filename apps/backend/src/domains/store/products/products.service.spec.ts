@@ -906,6 +906,63 @@ describe('ProductsService', () => {
     });
   });
 
+  /**
+   * Vexi (`get_product_pricing`) calcula `price_with_tax` con
+   * `getEffectiveTaxRate` sobre la fila de `findProductPricingForAgent`. Si el
+   * select no trae `is_inclusive`, un producto con IVA incluido se lee como IVA
+   * adicional y Vexi le suma el 19 % encima. La fila se proyecta con el select
+   * REAL: solo llega lo que el select pide, como en Prisma. Spec S11.
+   */
+  describe('findProductPricingForAgent — IVA incluido', () => {
+    const project = (row: any, select: any): any => {
+      if (row == null || typeof row !== 'object') return row;
+      if (Array.isArray(row)) return row.map((r) => project(r, select));
+      const out: any = {};
+      for (const [key, rule] of Object.entries(select ?? {})) {
+        if (!(key in row)) continue;
+        const nested = (rule as any)?.select;
+        out[key] = nested ? project(row[key], nested) : row[key];
+      }
+      return out;
+    };
+
+    const dbRow = {
+        id: 1,
+        base_price: 11900,
+        is_on_sale: false,
+        sale_price: null,
+        product_tax_assignments: [
+          {
+            is_inclusive: true,
+            tax_categories: {
+              is_inclusive: true,
+              tax_rates: [{ rate: 0.19, name: 'IVA 19%', is_inclusive: true }],
+            },
+          },
+        ],
+      };
+
+    it('un producto con IVA incluido no suma impuesto en el precio de Vexi', async () => {
+      mockPrismaService.products.findFirst.mockImplementation(({ select }: any) =>
+        Promise.resolve(project(dbRow, select)),
+      );
+
+      const product = await service.findProductPricingForAgent(1);
+
+      expect(service.getEffectiveTaxRate(product)).toBe(0);
+    });
+
+    it('find_product tampoco suma impuesto a un producto con IVA incluido', async () => {
+      mockPrismaService.products.findMany.mockImplementation(({ select }: any) =>
+        Promise.resolve([project(dbRow, select)]),
+      );
+
+      const [card] = await service.findProductCardsForAgent([1]);
+
+      expect(service.getEffectiveTaxRate(card)).toBe(0);
+    });
+  });
+
   describe('findOne', () => {
     it('should return a product by ID', async () => {
       const storedProduct = {

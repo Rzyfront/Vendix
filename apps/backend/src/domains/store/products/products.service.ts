@@ -6383,10 +6383,17 @@ export class ProductsService {
         requires_booking: true,
         has_multiple_price_tiers: true,
         brands: { select: { name: true } },
+        // `is_inclusive`: ver findProductPricingForAgent.
         product_tax_assignments: {
           select: {
+            is_inclusive: true,
             tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
+              select: {
+                is_inclusive: true,
+                tax_rates: {
+                  select: { rate: true, name: true, is_inclusive: true },
+                },
+              },
             },
           },
         },
@@ -6430,10 +6437,18 @@ export class ProductsService {
         sale_price: true,
         track_inventory: true,
         has_multiple_price_tiers: true,
+        // `is_inclusive` en los tres niveles que lee `extractTypedRates`: sin
+        // él, el IVA incluido se lee como adicional y el precio sube 19 %.
         product_tax_assignments: {
           select: {
+            is_inclusive: true,
             tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
+              select: {
+                is_inclusive: true,
+                tax_rates: {
+                  select: { rate: true, name: true, is_inclusive: true },
+                },
+              },
             },
           },
         },
