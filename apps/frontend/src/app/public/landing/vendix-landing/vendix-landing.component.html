@@ -30,9 +30,10 @@
             Vexi
             <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">IA</span>
           </button>
-          <button (click)="scrollToSection('precios-section')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+          <!-- Enlace rastreable a /pricing (SEO-TECH-09): antes era un botón de scroll a #precios-section. -->
+          <a routerLink="/pricing" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
             Planes y Precios
-          </button>
+          </a>
           <button (click)="scrollToSection('faq')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
             FAQ
           </button>
@@ -75,9 +76,9 @@
           <span>Vexi IA Copilot</span>
           <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">NUEVO</span>
         </button>
-        <button (click)="scrollToSection('precios-section')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+        <a routerLink="/pricing" (click)="closeMobileMenu()" class="block w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
           Planes y Precios
-        </button>
+        </a>
         <button (click)="scrollToSection('faq')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
           Preguntas Frecuentes (FAQ)
         </button>
