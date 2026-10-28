@@ -122,15 +122,18 @@ export function defaultPaymentsFilterState(
 
 export function buildPaymentsFilterConfigs(
   methods: StorePaymentMethodOption[],
-  opts: { withGranularity: boolean },
+  opts: { withGranularity: boolean; withDateRange?: boolean },
 ): FilterConfig[] {
-  const configs: FilterConfig[] = [
-    {
+  const configs: FilterConfig[] = [];
+  if (opts.withDateRange !== false) {
+    configs.push({
       key: 'date_range',
       label: 'Período',
       type: 'date-range',
       showPresets: true,
-    },
+    });
+  }
+  configs.push(
     {
       key: 'state',
       label: 'Estado',
@@ -148,7 +151,7 @@ export function buildPaymentsFilterConfigs(
       placeholder: 'Todos los métodos',
       options: methods.map((m) => ({ value: String(m.id), label: m.label })),
     },
-  ];
+  );
   if (opts.withGranularity) {
     configs.push({
       key: 'granularity',

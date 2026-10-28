@@ -19,7 +19,7 @@ imports: [
   ],
   template: `
     <div
-      class="flex gap-2"
+      class="flex gap-2 flex-wrap"
       [class.flex-col]="stacked()"
       [class.sm:gap-3]="!stacked()"
       [class.sm:flex-row]="!stacked()"

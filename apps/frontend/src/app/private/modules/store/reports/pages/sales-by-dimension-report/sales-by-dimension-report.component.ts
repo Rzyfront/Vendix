@@ -31,6 +31,7 @@ import {
   dateRangeToQueryParams,
 } from '../../../shared/utils/date-range-params.util';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { DateRangeFilterComponent } from '../../../../../../shared/components/date-range-filter/date-range-filter.component';
 import {
   DropdownAction,
   FilterConfig,
@@ -66,6 +67,7 @@ const EMPTY_SUMMARY: SalesByDimensionSummary = {
     StatsComponent,
     IconComponent,
     OptionsDropdownComponent,
+    DateRangeFilterComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
   ],
@@ -137,6 +139,10 @@ const EMPTY_SUMMARY: SalesByDimensionSummary = {
             </span>
           </div>
           <div class="flex items-end gap-2 flex-wrap shrink-0">
+            <vendix-date-range-filter
+              [value]="dateRange()"
+              (valueChange)="onDateRangeChange($event)"
+            ></vendix-date-range-filter>
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs()"
@@ -244,7 +250,6 @@ export class SalesByDimensionReportComponent implements OnInit {
   readonly filterConfigs = computed<FilterConfig[]>(() => {
     const noneLabel = this.dimension() === 'supplier' ? 'Sin proveedor' : 'Sin marca';
     return [
-      { key: 'date_range', type: 'date-range', label: 'Período' },
       {
         key: 'ids',
         type: 'multi-select',
@@ -410,42 +415,40 @@ export class SalesByDimensionReportComponent implements OnInit {
   }
 
   private syncDropdownValues(): void {
-    const r = this.dateRange();
     this.dropdownFilterValues.set({
-      date_range_start: r.start_date,
-      date_range_end: r.end_date,
-      date_range_preset: r.preset ?? null,
       ids: this.selectedIds(),
       view: this.view(),
     });
   }
 
-  onFiltersDropdownChange(values: FilterValues): void {
-    const start = values['date_range_start'] as string | null;
-    const end = values['date_range_end'] as string | null;
-    const preset = values['date_range_preset'] as string | null;
-    if (!start || !end) return;
+  /** Período del control suelto del header (fuera del dropdown). */
+  onDateRangeChange(range: DateRangeFilter): void {
+    if (!range?.start_date || !range?.end_date) return;
+    const cur = this.dateRange();
+    if (
+      range.start_date === cur.start_date &&
+      range.end_date === cur.end_date &&
+      range.preset === cur.preset
+    ) {
+      return;
+    }
+    this.dateRange.set(range);
+    this.page.set(1);
+    this.syncDropdownValues();
+    this.persistQueryParams();
+    this.loadData();
+  }
 
+  onFiltersDropdownChange(values: FilterValues): void {
     const rawIds = values['ids'];
     const ids = Array.isArray(rawIds) ? rawIds : rawIds ? [rawIds] : [];
     const rawView = values['view'] as SalesDimensionView | null;
     const view = rawView && VIEW_VALUES.includes(rawView) ? rawView : 'product';
 
-    const next: DateRangeFilter = {
-      start_date: start,
-      end_date: end,
-      preset: (preset || 'custom') as DateRangeFilter['preset'],
-    };
-    const cur = this.dateRange();
     const same =
-      next.start_date === cur.start_date &&
-      next.end_date === cur.end_date &&
-      next.preset === cur.preset &&
-      view === this.view() &&
-      ids.join(',') === this.selectedIds().join(',');
+      view === this.view() && ids.join(',') === this.selectedIds().join(',');
     if (same) return;
 
-    this.dateRange.set(next);
     this.view.set(view);
     this.selectedIds.set(ids);
     this.page.set(1);
