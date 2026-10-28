@@ -7197,6 +7197,7 @@ export class OrderFlowService {
     if (dto.issueCreditNote === true) {
       const blocker = getCancellationBlocker(order);
       if (blocker === null || blocker === 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
+        await this.resolveCancelPaymentLegs(order, this.prisma);
         await this.issueCancellationCreditNotes(order, dto.reason);
       }
     }
@@ -7254,24 +7255,6 @@ export class OrderFlowService {
       // Gate DIAN (antes de mutar): factura electrónica aceptada sin su nota
       // crédito aceptada bloquea con 409 tipado — precondición, no efecto.
       await this.assertNoBlockingFiscalInvoice(tx, orderId, freshOrder.store_id);
-      // ADR-12: el único liquidado que cancelOrder NO deriva solo es
-      // `partially_refunded` — una reversa parcial ya movió parte del dinero
-      // por el carril de reembolso y aquí no se sabe cuánto resta: crear una
-      // pierna por el total duplicaría lo ya devuelto. ERR-38 conserva su rol
-      // de "derivar al reembolso" para ese caso. `captured` (dinero recibido
-      // por pasarela, igual que `succeeded` para el webhook) genera su
-      // `requested` abajo; `refunded` se salta — su dinero ya volvió por su
-      // propio carril y bloquearlo dejaría al operador sin salida.
-      const externallyDerived = freshOrder.payments.filter((payment) =>
-        payment.state === 'partially_refunded',
-      );
-      if (externallyDerived.length > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-          'La orden tiene pagos con reembolso parcial en curso: ciérralos en el flujo de reembolso antes de cancelar.',
-          { payment_ids: externallyDerived.map((payment) => payment.id) },
-        );
-      }
       previousState = freshOrder.state as OrderState;
       claimableStates = force ? [previousState] : CANCELABLE_STATES;
       let existingMetadata: Record<string, any> = {};
@@ -7295,47 +7278,9 @@ export class OrderFlowService {
         },
         notes: existingMetadata.original_notes || '',
       });
-      cashReversal = await this.resolveCancelCashReversal(freshOrder, tx);
-      const nonCashLegs = await this.resolveCancelNonCashLegs(freshOrder, tx);
-      const nonCashIds = new Set(nonCashLegs.map((leg) => leg.payment_id));
-      // ADR-12: la guarda es cash-only — un recibido (`succeeded`/`captured`)
-      // no-efectivo sin reversa ya no es un error (genera su reembolso `processing`
-      // abajo); solo falla si EXISTE efectivo liquidado y no se pudo
-      // resolver su monto.
-      const cashSucceededIds = freshOrder.payments
-        .filter(
-          (payment) =>
-            (payment.state === 'succeeded' || payment.state === 'captured') &&
-            !nonCashIds.has(payment.id),
-        )
-        .map((payment) => payment.id);
-      if (cashSucceededIds.length > 0 && !cashReversal) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-          'No se pudo verificar el monto del pago en efectivo; concilia el cobro antes de cancelar.',
-        );
-      }
-      // Partición completa: todo recibido (`succeeded`/`captured`) está en el
-      // cash-out o en una pierna. Un huérfano (p. ej. `captured` con canal
-      // efectivo, imposible por código) falla cerrado en vez de perderse.
-      const coveredIds = new Set<number>([
-        ...(cashReversal?.paymentIds ?? []),
-        ...nonCashIds,
-      ]);
-      const orphanIds = freshOrder.payments
-        .filter(
-          (payment) =>
-            (payment.state === 'succeeded' || payment.state === 'captured') &&
-            !coveredIds.has(payment.id),
-        )
-        .map((payment) => payment.id);
-      if (orphanIds.length > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-          'No se pudo clasificar un cobro recibido para su devolución; concilia el cobro antes de cancelar.',
-          { payment_ids: orphanIds },
-        );
-      }
+      const legs = await this.resolveCancelPaymentLegs(freshOrder, tx);
+      cashReversal = legs.cashReversal;
+      const { nonCashLegs, nonCashIds } = legs;
       if (cashReversal) {
         if (!this.refundFlowService) {
           throw new InternalServerErrorException('RefundFlowService no disponible para documentar la devolución en efectivo');
@@ -7685,6 +7630,78 @@ export class OrderFlowService {
   }
 
   /**
+   * Payment preconditions of {@link cancelOrder}, read-only. Runs twice: before
+   * the cancellation credit note (release review #989, finding 2 — never issue
+   * a DIAN-accepted note for an order a payment check will refuse to cancel)
+   * and again in-tx under the lifecycle lock, where its result is used.
+   */
+  private async resolveCancelPaymentLegs(
+    order: { payments: { id: number; state: string }[] },
+    client: Prisma.TransactionClient | StorePrismaService,
+  ) {
+    // ADR-12: el único liquidado que cancelOrder NO deriva solo es
+    // `partially_refunded` — una reversa parcial ya movió parte del dinero
+    // por el carril de reembolso y aquí no se sabe cuánto resta: crear una
+    // pierna por el total duplicaría lo ya devuelto. ERR-38 conserva su rol
+    // de "derivar al reembolso" para ese caso. `captured` (dinero recibido
+    // por pasarela, igual que `succeeded` para el webhook) genera su
+    // `requested` abajo; `refunded` se salta — su dinero ya volvió por su
+    // propio carril y bloquearlo dejaría al operador sin salida.
+    const externallyDerived = order.payments.filter((payment) =>
+      payment.state === 'partially_refunded',
+    );
+    if (externallyDerived.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+        'La orden tiene pagos con reembolso parcial en curso: ciérralos en el flujo de reembolso antes de cancelar.',
+        { payment_ids: externallyDerived.map((payment) => payment.id) },
+      );
+    }
+    const cashReversal = await this.resolveCancelCashReversal(order, client);
+    const nonCashLegs = await this.resolveCancelNonCashLegs(order, client);
+    const nonCashIds = new Set(nonCashLegs.map((leg) => leg.payment_id));
+    // ADR-12: la guarda es cash-only — un recibido (`succeeded`/`captured`)
+    // no-efectivo sin reversa ya no es un error (genera su reembolso `processing`
+    // abajo); solo falla si EXISTE efectivo liquidado y no se pudo
+    // resolver su monto.
+    const cashSucceededIds = order.payments
+      .filter(
+        (payment) =>
+          (payment.state === 'succeeded' || payment.state === 'captured') &&
+          !nonCashIds.has(payment.id),
+      )
+      .map((payment) => payment.id);
+    if (cashSucceededIds.length > 0 && !cashReversal) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+        'No se pudo verificar el monto del pago en efectivo; concilia el cobro antes de cancelar.',
+      );
+    }
+    // Partición completa: todo recibido (`succeeded`/`captured`) está en el
+    // cash-out o en una pierna. Un huérfano (p. ej. `captured` con canal
+    // efectivo, imposible por código) falla cerrado en vez de perderse.
+    const coveredIds = new Set<number>([
+      ...(cashReversal?.paymentIds ?? []),
+      ...nonCashIds,
+    ]);
+    const orphanIds = order.payments
+      .filter(
+        (payment) =>
+          (payment.state === 'succeeded' || payment.state === 'captured') &&
+          !coveredIds.has(payment.id),
+      )
+      .map((payment) => payment.id);
+    if (orphanIds.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+        'No se pudo clasificar un cobro recibido para su devolución; concilia el cobro antes de cancelar.',
+        { payment_ids: orphanIds },
+      );
+    }
+    return { cashReversal, nonCashLegs, nonCashIds };
+  }
+
+  /**
    * Clasifica cuánto efectivo hay que sacar del cajón por cancelar esta orden.
    *
    * SÓLO los pagos `succeeded`: un pago `pending` nunca movió dinero, y
@@ -7764,7 +7781,7 @@ export class OrderFlowService {
    */
   private async resolveCancelNonCashLegs(order: {
     payments: { id: number; state: string }[];
-  }, tx: Prisma.TransactionClient): Promise<{ payment_id: number; amount: Prisma.Decimal; method_type: string | null }[]> {
+  }, tx: Prisma.TransactionClient | StorePrismaService): Promise<{ payment_id: number; amount: Prisma.Decimal; method_type: string | null }[]> {
     const receivedIds = order.payments
       .filter((p) => p.state === 'succeeded' || p.state === 'captured')
       .map((p) => p.id);
@@ -7823,33 +7840,63 @@ export class OrderFlowService {
     const { CreditNotesService: CreditNotesToken } = require('../../invoicing/credit-notes/credit-notes.service') as typeof import('../../invoicing/credit-notes/credit-notes.service');
     const creditNotes = this.moduleRef.get(CreditNotesToken, { strict: false });
 
-    for (const invoice of acceptedInvoices) {
-      const notes = await this.prisma.invoices.findMany({
-        where: {
-          related_invoice_id: invoice.id,
-          accounting_entity_id: invoice.accounting_entity_id,
-          invoice_type: 'credit_note',
-        },
-        orderBy: { id: 'desc' },
-        select: { id: true, status: true },
-      });
-      // `validated` = el envío falló y la cola de reintentos la transmitirá:
-      // re-validarla choca con la máquina de estados (validated → validated).
-      if (notes.some((n) => ['accepted', 'sent', 'validated'].includes(n.status))) continue;
-      const pending = notes.find((n) => n.status === 'draft');
-      const noteId =
-        pending?.id ??
-        (
-          await creditNotes.createCreditNote({
+    // Release review #989, finding 3: two concurrent cancellations would each
+    // create and issue their own total note. The lock serializes them; the
+    // loser gets a typed 409 and its retry finds the winner's note.
+    await this.withOrderFiscalNoteLock(order.id, async () => {
+      for (const invoice of acceptedInvoices) {
+        const notes = await this.prisma.invoices.findMany({
+          where: {
             related_invoice_id: invoice.id,
-            reason: `Anulación de la orden ${order.order_number ?? `#${order.id}`}: ${reason}`,
-          })
-        ).id;
-      await creditNotes.issueNote(noteId);
-      this.logger.log(
-        `[cancel credit note] order=${order.id} invoice=${invoice.id} note=${noteId}`,
-      );
-    }
+            accounting_entity_id: invoice.accounting_entity_id,
+            invoice_type: 'credit_note',
+          },
+          orderBy: { id: 'desc' },
+          select: { id: true, status: true },
+        });
+        // `validated` = el envío falló y la cola de reintentos la transmitirá:
+        // re-validarla choca con la máquina de estados (validated → validated).
+        if (notes.some((n) => ['accepted', 'sent', 'validated'].includes(n.status))) continue;
+        const pending = notes.find((n) => n.status === 'draft');
+        const noteId =
+          pending?.id ??
+          (
+            await creditNotes.createCreditNote({
+              related_invoice_id: invoice.id,
+              reason: `Anulación de la orden ${order.order_number ?? `#${order.id}`}: ${reason}`,
+            })
+          ).id;
+        await creditNotes.issueNote(noteId);
+        this.logger.log(
+          `[cancel credit note] order=${order.id} invoice=${invoice.id} note=${noteId}`,
+        );
+      }
+    });
+  }
+
+  /**
+   * Serializes fiscal note emission per order (cancellation credit note,
+   * adjustment notes of an edited invoiced order). Transaction-scoped advisory
+   * lock held while `work` runs on its own connections: it touches no row, so
+   * the DIAN call inside never deadlocks against the order or invoice locks.
+   * Non-blocking — a concurrent caller fails fast with a typed 409 instead of
+   * holding a pooled connection for the length of another DIAN round trip.
+   */
+  private async withOrderFiscalNoteLock<T>(orderId: number, work: () => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const [row] = await tx.$queryRaw<Array<{ locked: boolean }>>`
+          SELECT pg_try_advisory_xact_lock(hashtext('order_fiscal_note'), ${orderId}::int) AS locked
+        `;
+        if (!row?.locked) {
+          throw new VendixHttpException(ErrorCodes.ORD_FISCAL_NOTE_IN_PROGRESS_001, undefined, {
+            order_id: orderId,
+          });
+        }
+        return work();
+      },
+      { maxWait: 5_000, timeout: 120_000 },
+    );
   }
 
   /**

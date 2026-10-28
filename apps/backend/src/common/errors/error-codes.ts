@@ -1201,6 +1201,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Order has a DIAN-accepted electronic invoice without an accepted credit note; issue the credit note before cancelling',
   },
+  ORD_FISCAL_NOTE_IN_PROGRESS_001: {
+    code: 'ORD_FISCAL_NOTE_IN_PROGRESS_001',
+    httpStatus: 409,
+    devMessage: 'Another request is already issuing a fiscal note for this order; retry in a few seconds',
+  },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
     httpStatus: 409,
