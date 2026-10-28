@@ -6128,6 +6128,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El cliente a facturar no es válido',
   },
+  LODGING_CHECKOUT_FROZEN_NIGHTS_001: {
+    code: 'LODGING_CHECKOUT_FROZEN_NIGHTS_001',
+    httpStatus: 409,
+    devMessage: 'Hay noches sin cobrar en días cerrados: reabre el día',
+  },
   // H3.8 — split folio.
   LODGING_FOLIO_SPLIT_001: {
     code: 'LODGING_FOLIO_SPLIT_001',
