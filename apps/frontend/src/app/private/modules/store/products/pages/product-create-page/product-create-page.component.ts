@@ -3193,9 +3193,11 @@ export class ProductCreatePageComponent {
       try {
         await this.productsService.deleteProductVariant(variant.id).toPromise();
         this.toastService.success('Variante eliminada correctamente');
-      } catch (err: any) {
-        console.error('Error deleting variant:', err);
-        this.toastService.error('Error al eliminar la variante');
+      } catch (err: unknown) {
+        // El motivo (existencias, reservas) le dice al usuario qué hacer.
+        this.toastService.error(
+          extractApiErrorMessage(err) || 'Error al eliminar la variante',
+        );
         return; // Don't remove from UI if backend failed
       }
     }

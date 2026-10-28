@@ -51,6 +51,10 @@ import {
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
 import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
+import {
+  assertVariantRemovalAllowed,
+  VariantRemovalCandidate,
+} from './services/variant-removal-guard.util';
 import { resolvePackSize } from './services/packaging.util';
 import {
   buildSaleConfigExplanation,
@@ -4796,15 +4800,15 @@ export class ProductsService {
               (ev) => !keptVariantIds.has(ev.id),
             );
             if (variantsToDelete.length > 0 && allExistingVariants.length > 0) {
-              // BLOCK: Deleting variants with stock requires explicit variant_removal_stock_mode
+              // Partial removal with stock or reservations is blocked whatever
+              // the mode: only removing ALL variants has a place (the base
+              // product) to move the balance to.
+              const candidates: VariantRemovalCandidate[] = [];
               for (const vt of variantsToDelete) {
                 const variantStock = await prisma.stock_levels.aggregate({
                   where: { product_variant_id: vt.id },
                   _sum: { quantity_on_hand: true },
                 });
-                const hasStock = (variantStock._sum.quantity_on_hand ?? 0) > 0;
-
-                // Check for active reservations
                 const hasActiveReservations =
                   await prisma.stock_reservations.findFirst({
                     where: {
@@ -4812,17 +4816,18 @@ export class ProductsService {
                       status: 'active',
                     },
                   });
-
-                if (
-                  (hasStock || hasActiveReservations) &&
-                  !sanitizedDto.variant_removal_stock_mode
-                ) {
-                  throw new VendixHttpException(
-                    ErrorCodes.PROD_VALIDATE_001,
-                    'Deleting variants with stock or active reservations requires explicit variant_removal_stock_mode',
-                  );
-                }
+                candidates.push({
+                  id: vt.id,
+                  sku: vt.sku ?? null,
+                  on_hand: Number(variantStock._sum.quantity_on_hand ?? 0),
+                  has_active_reservations: !!hasActiveReservations,
+                });
               }
+              assertVariantRemovalAllowed(candidates, {
+                removingAll:
+                  variantsToDelete.length === allExistingVariants.length,
+                removalMode: sanitizedDto.variant_removal_stock_mode,
+              });
 
               const allVariantsDeleting =
                 variantsToDelete.length === allExistingVariants.length;
