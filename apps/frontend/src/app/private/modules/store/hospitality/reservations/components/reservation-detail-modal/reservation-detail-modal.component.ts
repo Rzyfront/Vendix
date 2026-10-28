@@ -328,7 +328,7 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
                 [inHouse]="r.status === 'checked_in'"
                 [refreshKey]="folioVersion()"
                 [holder]="{ id: r.customer.id, name: guestName() }"
-                (changed)="refreshDeposit()"
+                (changed)="onFolioChanged()"
                 (dueChange)="due.set($event)"
               />
             } @else {
@@ -502,6 +502,11 @@ export class ReservationDetailModalComponent {
 
   refreshDeposit(): void {
     this.depositVersion.update((v) => v + 1);
+  }
+  /** U3 (R-FB-05) — a folio action refreshes the deposit and the list behind the detail. */
+  onFolioChanged(): void {
+    this.refreshDeposit();
+    this.changed.emit();
   }
   /** H2.4 — "Penalidad: $250.000 (1 noche)" of cancelling now. */
   readonly quoteLabel = signal<string>('Calculando penalidad…');

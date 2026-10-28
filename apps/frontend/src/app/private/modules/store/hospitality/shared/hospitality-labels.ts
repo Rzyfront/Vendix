@@ -30,3 +30,22 @@ export const HOSPITALITY_TERMS = {
 } as const;
 
 export type HospitalityTerm = keyof typeof HOSPITALITY_TERMS;
+
+/**
+ * U3 (R-TERM-01) — the desk phrase of each reason the backend gives for a
+ * holder who cannot take the VAT exemption. The permit reason lists raw
+ * Migración codes (PIP-3, TP-12, PT…), so it becomes a plain sentence; an
+ * unknown reason is shown as it came.
+ */
+const VAT_EXEMPTION_REASON_PHRASES: ReadonlyArray<[RegExp, string]> = [
+  [/^La tienda no tiene RNT/, `Falta el ${HOSPITALITY_TERMS.rnt} del hotel (Configuración → Hotelería)`],
+  [/^Registra al titular/, 'Falta registrar al titular de la reserva'],
+  [/pasaporte/, 'Falta el pasaporte del titular'],
+  [/nacionalidad extranjera/, 'Falta la nacionalidad extranjera del titular'],
+  [/no residente/, 'Falta marcar al titular como no residente'],
+  [/permiso de ingreso/, 'Falta el sello o permiso de ingreso de Migración del titular'],
+];
+
+export function vatExemptionReasonLabel(reason: string): string {
+  return VAT_EXEMPTION_REASON_PHRASES.find(([pattern]) => pattern.test(reason))?.[1] ?? reason;
+}

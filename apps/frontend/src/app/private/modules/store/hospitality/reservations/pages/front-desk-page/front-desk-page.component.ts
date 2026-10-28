@@ -92,7 +92,7 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
   departures: {
     icon: 'log-out',
     title: 'Sin salidas pendientes',
-    description: 'Los huéspedes en casa que salen hoy aparecen aquí con el saldo de su folio.',
+    description: 'Los huéspedes en casa que salen hoy aparecen aquí con el saldo de su cuenta.',
   },
   in_house: {
     icon: 'bed-double',
@@ -367,7 +367,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   readonly filterConfigs = computed<FilterConfig[]>(() => [
     {
       key: 'balance',
-      label: 'Saldo del folio',
+      label: 'Saldo de la cuenta',
       type: 'select',
       disabled: this.tab() === 'arrivals',
       options: [
@@ -403,7 +403,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
 
   readonly pendingBalanceText = computed(() => {
     const count = this.pendingRows().length;
-    return count === 1 ? '1 folio en casa con saldo' : `${count} folios en casa con saldo`;
+    return count === 1 ? '1 cuenta en casa con saldo' : `${count} cuentas en casa con saldo`;
   });
 
   readonly tabs = computed<ScrollableTab[]>(() => {

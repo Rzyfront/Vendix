@@ -120,8 +120,8 @@ export interface LodgingFolio {
 }
 
 export const FOLIO_STATUS_LABELS: Record<LodgingFolio['status'], string> = {
-  open: 'Abierto',
-  closed: 'Cerrado',
+  open: 'Abierta',
+  closed: 'Cerrada',
 };
 
 /** H3.2 — check-in: rooms picked now and the dirty-room confirmation. */
