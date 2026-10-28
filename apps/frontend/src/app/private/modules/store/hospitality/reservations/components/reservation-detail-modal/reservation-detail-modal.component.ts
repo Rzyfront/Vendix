@@ -14,11 +14,14 @@ import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
+  BadgeComponent,
   ButtonComponent,
   IconComponent,
   ModalComponent,
   SelectorComponent,
   SelectorOption,
+  ScrollableTab,
+  ScrollableTabsComponent,
   SpinnerComponent,
   TextareaComponent,
   ToastService,
@@ -37,6 +40,9 @@ import {
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { RESERVATION_STATUS_CHIPS } from '../../../shared/hospitality-status';
+import { format, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { storeToday } from '../../../../../../../shared/utils/date.util';
 import { describePolicy } from '../../../rates/interfaces/rate-plan.interface';
@@ -58,6 +64,19 @@ const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null | 'check_in'>, string
   cancel_room: 'Habitación cancelada',
 };
 
+/** U2 (R-MOD-04) — the detail's sections. */
+type DetailTab = 'summary' | 'account' | 'guests' | 'history';
+
+const DETAIL_TABS: ScrollableTab[] = [
+  { id: 'summary', label: 'Resumen', icon: 'file-text' },
+  { id: 'account', label: 'Cuenta', icon: 'receipt' },
+  { id: 'guests', label: 'Huéspedes', icon: 'users' },
+  { id: 'history', label: 'Historial', icon: 'history' },
+];
+
+/** `2026-10-27` → `27 oct` (R-FORM-11: never raw ISO). */
+const shortDate = (date: string) => format(parseISO(date), 'd MMM', { locale: es });
+
 /** H3.2 — a guest never enters a room in these states. */
 const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
 
@@ -76,6 +95,8 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
  * dirty one and opens the folio ("Folio · Abierto · $0").
  * H3.4: the folio panel shows nights, charges, voids, payments and balance.
  * H3.7: "Check-out" pays the balance, closes the folio and emits the invoice.
+ * U2: stay and balance on top, then tabs (Resumen · Cuenta · Huéspedes ·
+ * Historial); full screen on mobile with the primary action fixed below.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -85,6 +106,8 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
     DatePipe,
     ReactiveFormsModule,
     ModalComponent,
+    BadgeComponent,
+    ScrollableTabsComponent,
     ButtonComponent,
     IconComponent,
     SpinnerComponent,
@@ -103,163 +126,40 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
       (cancel)="close()"
       [size]="'md'"
       [dialog]="true"
-      [title]="reservation()?.reservation_number ?? 'Reserva'"
-      [subtitle]="statusLabel()"
+      [fullScreenOnMobile]="true"
+      customClasses="md:max-w-2xl"
+      [title]="title()"
     >
+      @if (statusChip(); as chip) {
+        <app-badge slot="header-end" [variant]="chip.variant" data-testid="reservation-status-chip">
+          {{ chip.label }}
+        </app-badge>
+      }
       @if (loading()) {
-        <div class="flex justify-center py-8"><app-spinner size="md" /></div>
+        <div class="flex justify-center py-8"><app-spinner size="md" text="Cargando reserva…" /></div>
       } @else if (reservation(); as r) {
         <div class="space-y-4 text-sm" data-testid="reservation-detail">
-          <dl class="grid grid-cols-2 gap-x-4 gap-y-2">
-            <dt class="text-text-secondary">Huésped</dt>
-            <dd class="font-medium text-text-primary">
-              {{ r.customer.first_name }} {{ r.customer.last_name ?? '' }}
-              @if (r.customer.phone || r.customer.email) {
-                <span class="block text-xs font-normal text-text-secondary">
-                  {{ r.customer.phone || r.customer.email }}
-                </span>
-              }
-            </dd>
-            <dt class="text-text-secondary">Llegada → Salida</dt>
-            <dd>{{ arrival() }} → {{ departure() }}</dd>
-            <dt class="text-text-secondary">Noches</dt>
-            <dd>{{ nights() }}</dd>
-            <dt class="text-text-secondary">Huéspedes</dt>
-            <dd>{{ guests() }}</dd>
-            <dt class="text-text-secondary">Total</dt>
-            <dd class="font-semibold">{{ total() }}</dd>
-            @if (r.notes) {
-              <dt class="text-text-secondary">Notas</dt>
-              <dd>{{ r.notes }}</dd>
-            }
-            <dt class="text-text-secondary">Cancelación</dt>
-            <dd data-testid="reservation-policy">{{ policySummary() }}</dd>
-          </dl>
-
-          @if (penaltyLabel(); as penalty) {
-            <p
-              class="rounded-lg bg-error/10 px-3 py-2 font-medium text-text-primary"
-              data-testid="reservation-penalty"
-            >
-              {{ penalty }}
-            </p>
-          }
-
-          @for (payment of r.online_payments ?? []; track payment.id) {
-            @if (payment.status === 'completed') {
-              <p class="font-medium text-text-primary" data-testid="reservation-online-payment">
-                Pago en línea {{ money(payment.amount) }}
-                @if (Number(payment.applied_amount) > 0) {
-                  <span class="font-normal text-text-secondary"> · aplicado {{ money(payment.applied_amount) }}</span>
-                }
-                @if (Number(payment.retained_amount ?? 0) > 0) {
-                  <span class="font-normal text-text-secondary"> · retenido {{ money(payment.retained_amount ?? '0') }}</span>
-                }
-                @if ((r.status === 'cancelled' || r.status === 'no_show') && onlineOwed(payment) > 0) {
-                  <span class="font-normal text-warning" data-testid="reservation-online-owed">
-                    · por devolver {{ money(String(onlineOwed(payment))) }}</span
-                  >
-                }
+          <!-- U2 (R-MOD-04): balance and stay always above the fold. -->
+          <div
+            class="grid grid-cols-2 gap-3 rounded-lg border border-border bg-background px-3 py-2"
+            data-testid="reservation-summary"
+          >
+            <div class="min-w-0">
+              <p class="text-xs text-text-secondary">Estadía</p>
+              <p class="font-medium text-text-primary" data-testid="reservation-stay">
+                {{ stayLabel().dates }} <span class="whitespace-nowrap">{{ stayLabel().nights }}</span>
               </p>
-            } @else if (payment.status === 'pending') {
-              <p class="text-warning" data-testid="reservation-online-payment-pending">
-                Pago en línea pendiente {{ money(payment.amount) }}
+            </div>
+            <div class="text-right">
+              <p class="text-xs text-text-secondary">{{ r.folio ? 'Saldo pendiente' : 'Total' }}</p>
+              <p
+                class="text-base font-semibold"
+                [class.text-warning]="r.folio && (due() ?? 0) > 0"
+                data-testid="reservation-balance"
+              >
+                {{ r.folio ? (due() === null ? '…' : money(String(due()))) : total() }}
               </p>
-            }
-          }
-
-          <app-deposit-panel
-            [reservationId]="r.id"
-            [refreshKey]="depositVersion()"
-            (changed)="refreshFolio()"
-          />
-
-          @if (r.folio) {
-            <app-folio-panel
-              [reservationId]="r.id"
-              [inHouse]="r.status === 'checked_in'"
-              [refreshKey]="folioVersion()"
-              [holder]="{ id: r.customer.id, name: (r.customer.first_name + ' ' + (r.customer.last_name ?? '')).trim() }"
-              (changed)="refreshDeposit()"
-            />
-          }
-
-          <div>
-            <p class="mb-2 font-medium text-text-primary">
-              {{ r.rooms.length > 1 ? 'Habitaciones (' + activeRooms().length + ')' : 'Habitación' }}
-            </p>
-            <ul class="divide-y divide-border rounded-lg border border-border">
-              @for (room of r.rooms; track room.id) {
-                <li
-                  class="flex items-center justify-between gap-2 px-3 py-2"
-                  data-testid="reservation-room"
-                >
-                  <div [class.opacity-60]="room.cancelled_at">
-                    <p class="font-medium" data-testid="reservation-unit">
-                      {{ room.unit_type.name }} · {{ room.unit?.code ?? 'Sin asignar' }}
-                    </p>
-                    <p class="text-xs text-text-secondary">
-                      {{ roomGuests(room) }} · {{ money(room.total_amount) }}
-                      @if (room.cancelled_at) {
-                        · Cancelada
-                      }
-                    </p>
-                    @if (!room.cancelled_at && room.nights?.length) {
-                      <p
-                        class="text-xs text-text-secondary"
-                        data-testid="reservation-night-breakdown"
-                      >
-                        {{ nightBreakdown(room) }}
-                      </p>
-                    }
-                  </div>
-                  @if (!room.cancelled_at && !pending()) {
-                    <div class="flex flex-wrap justify-end gap-1">
-                      @if (canMove()) {
-                        <app-button variant="ghost" size="sm" (clicked)="startMove(room)">
-                          <app-icon slot="icon" name="arrow-right-left" [size]="14" />
-                          Mover
-                        </app-button>
-                      }
-                      @if (canCancelRoom()) {
-                        <app-button variant="ghost" size="sm" (clicked)="startCancelRoom(room.id)">
-                          <app-icon slot="icon" name="x-circle" [size]="14" />
-                          Cancelar habitación
-                        </app-button>
-                      }
-                    </div>
-                  }
-                </li>
-              }
-            </ul>
-          </div>
-
-          <app-guest-register [reservation]="r" />
-
-          <div>
-            <p class="mb-2 font-medium text-text-primary">Historial</p>
-            <ol class="space-y-2 border-l border-border pl-3" data-testid="reservation-history">
-              @for (e of r.events ?? []; track e.id) {
-                <li>
-                  <p class="font-medium">
-                    {{ e.from_status === e.to_status ? 'Cambio' : labelOf(e.to_status) }}
-                  </p>
-                  <p class="text-xs text-text-secondary">
-                    {{ e.created_at | date: 'dd/MM/yyyy HH:mm' }} ·
-                    {{ e.user ? e.user.first_name + ' ' + (e.user.last_name ?? '') : 'Automático' }}
-                  </p>
-                  @if (e.reason) {
-                    <p class="text-xs text-text-secondary">
-                      {{ e.from_status === e.to_status ? e.reason : 'Motivo: ' + e.reason }}
-                    </p>
-                  }
-                </li>
-              } @empty {
-                <li class="text-xs text-text-secondary">
-                  Creada {{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}
-                </li>
-              }
-            </ol>
+            </div>
           </div>
 
           @if (pending() === 'cancel') {
@@ -299,56 +199,240 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
               placeholder="Ej.: el huésped cambió de planes"
             />
           }
+
+          <app-scrollable-tabs
+            [tabs]="tabs"
+            [activeTab]="activeTab()"
+            size="sm"
+            ariaLabel="Secciones de la reserva"
+            (tabChange)="activeTab.set($any($event))"
+          />
+
+          <!-- Panels stay mounted so the folio keeps the balance fresh. -->
+          <div class="space-y-4" [class.hidden]="activeTab() !== 'summary'" data-testid="reservation-tab-summary">
+            <dl class="grid grid-cols-2 gap-x-4 gap-y-2">
+              <dt class="text-text-secondary">Titular</dt>
+              <dd class="font-medium text-text-primary">
+                {{ guestName() }}
+                @if (r.customer.phone || r.customer.email) {
+                  <span class="block text-xs font-normal text-text-secondary">
+                    {{ r.customer.phone || r.customer.email }}
+                  </span>
+                }
+              </dd>
+              <dt class="text-text-secondary">Huéspedes</dt>
+              <dd>{{ guests() }}</dd>
+              <dt class="text-text-secondary">Total</dt>
+              <dd class="font-semibold">{{ total() }}</dd>
+              @if (r.notes) {
+                <dt class="text-text-secondary">Notas</dt>
+                <dd>{{ r.notes }}</dd>
+              }
+              <dt class="text-text-secondary">Cancelación</dt>
+              <dd data-testid="reservation-policy">{{ policySummary() }}</dd>
+            </dl>
+
+            @if (penaltyLabel(); as penalty) {
+              <p
+                class="rounded-lg bg-error/10 px-3 py-2 font-medium text-text-primary"
+                data-testid="reservation-penalty"
+              >
+                {{ penalty }}
+              </p>
+            }
+
+            <div>
+              <p class="mb-2 font-medium text-text-primary">
+                {{ r.rooms.length > 1 ? 'Habitaciones (' + activeRooms().length + ')' : 'Habitación' }}
+              </p>
+              <ul class="divide-y divide-border rounded-lg border border-border">
+                @for (room of r.rooms; track room.id) {
+                  <li
+                    class="flex items-center justify-between gap-2 px-3 py-2"
+                    data-testid="reservation-room"
+                  >
+                    <div [class.opacity-60]="room.cancelled_at">
+                      <p class="font-medium" data-testid="reservation-unit">
+                        {{ room.unit_type.name }} · {{ room.unit?.code ?? 'Sin asignar' }}
+                      </p>
+                      <p class="text-xs text-text-secondary">
+                        {{ roomGuests(room) }} · {{ money(room.total_amount) }}
+                        @if (room.cancelled_at) {
+                          · Cancelada
+                        }
+                      </p>
+                      @if (!room.cancelled_at && room.nights?.length) {
+                        <p
+                          class="text-xs text-text-secondary"
+                          data-testid="reservation-night-breakdown"
+                        >
+                          {{ nightBreakdown(room) }}
+                        </p>
+                      }
+                    </div>
+                    @if (!room.cancelled_at && !pending()) {
+                      <div class="flex flex-wrap justify-end gap-1">
+                        @if (canMove()) {
+                          <app-button variant="ghost" size="sm" (clicked)="startMove(room)">
+                            <app-icon slot="icon" name="arrow-right-left" [size]="14" />
+                            Mover
+                          </app-button>
+                        }
+                        @if (canCancelRoom()) {
+                          <app-button variant="ghost" size="sm" (clicked)="startCancelRoom(room.id)">
+                            <app-icon slot="icon" name="x-circle" [size]="14" />
+                            Cancelar habitación
+                          </app-button>
+                        }
+                      </div>
+                    }
+                  </li>
+                }
+              </ul>
+            </div>
+          </div>
+
+          <div class="space-y-4" [class.hidden]="activeTab() !== 'account'" data-testid="reservation-tab-account">
+            @for (payment of r.online_payments ?? []; track payment.id) {
+              @if (payment.status === 'completed') {
+                <p class="font-medium text-text-primary" data-testid="reservation-online-payment">
+                  Pago en línea {{ money(payment.amount) }}
+                  @if (Number(payment.applied_amount) > 0) {
+                    <span class="font-normal text-text-secondary"> · aplicado {{ money(payment.applied_amount) }}</span>
+                  }
+                  @if (Number(payment.retained_amount ?? 0) > 0) {
+                    <span class="font-normal text-text-secondary"> · retenido {{ money(payment.retained_amount ?? '0') }}</span>
+                  }
+                  @if ((r.status === 'cancelled' || r.status === 'no_show') && onlineOwed(payment) > 0) {
+                    <span class="font-normal text-warning" data-testid="reservation-online-owed">
+                      · por devolver {{ money(String(onlineOwed(payment))) }}</span
+                    >
+                  }
+                </p>
+              } @else if (payment.status === 'pending') {
+                <p class="text-warning" data-testid="reservation-online-payment-pending">
+                  Pago en línea pendiente {{ money(payment.amount) }}
+                </p>
+              }
+            }
+
+            <app-deposit-panel
+              [reservationId]="r.id"
+              [refreshKey]="depositVersion()"
+              (changed)="refreshFolio()"
+            />
+
+            @if (r.folio) {
+              <app-folio-panel
+                [reservationId]="r.id"
+                [inHouse]="r.status === 'checked_in'"
+                [refreshKey]="folioVersion()"
+                [holder]="{ id: r.customer.id, name: guestName() }"
+                (changed)="refreshDeposit()"
+                (dueChange)="due.set($event)"
+              />
+            } @else {
+              <p class="text-xs text-text-secondary">La cuenta del huésped se abre al hacer el check-in.</p>
+            }
+          </div>
+
+          <div [class.hidden]="activeTab() !== 'guests'" data-testid="reservation-tab-guests">
+            <app-guest-register [reservation]="r" />
+          </div>
+
+          <div [class.hidden]="activeTab() !== 'history'" data-testid="reservation-tab-history">
+            <ol class="space-y-2 border-l border-border pl-3" data-testid="reservation-history">
+              @for (e of r.events ?? []; track e.id) {
+                <li>
+                  <p class="font-medium">
+                    {{ e.from_status === e.to_status ? 'Cambio' : labelOf(e.to_status) }}
+                  </p>
+                  <p class="text-xs text-text-secondary">
+                    {{ e.created_at | date: 'dd/MM/yyyy HH:mm' }} ·
+                    {{ e.user ? e.user.first_name + ' ' + (e.user.last_name ?? '') : 'Automático' }}
+                  </p>
+                  @if (e.reason) {
+                    <p class="text-xs text-text-secondary">
+                      {{ e.from_status === e.to_status ? e.reason : 'Motivo: ' + e.reason }}
+                    </p>
+                  }
+                </li>
+              } @empty {
+                <li class="text-xs text-text-secondary">
+                  Creada {{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                </li>
+              }
+            </ol>
+          </div>
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (pending() === 'check_in') {
-          <app-button variant="ghost" (clicked)="pending.set(null)">Volver</app-button>
-          <app-button
-            variant="primary"
-            [loading]="saving()"
-            [disabled]="!checkInReady()"
-            (clicked)="confirmCheckIn()"
-          >
-            {{ dirtyWarning() ? 'Check-in de todos modos' : 'Confirmar check-in' }}
-          </app-button>
-        } @else if (pending()) {
-          <app-button variant="ghost" (clicked)="pending.set(null)">Volver</app-button>
-          <app-button
-            variant="danger"
-            [loading]="saving()"
-            [disabled]="reasonRequired() && !reasonControl.value.trim()"
-            (clicked)="confirmAction()"
-          >
-            {{ confirmLabel() }}
-          </app-button>
-        } @else {
-          @if (canNoShow()) {
-            <app-button variant="outline" (clicked)="startAction('no_show')">
-              <app-icon slot="icon" name="user-x" [size]="16" />
-              Marcar no-show
+      <!-- U2 (R-MOD-02, R-CTA-09): secondary left, one primary right; on
+           mobile the primary sits on top at full width, fixed at the bottom. -->
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 pb-[env(safe-area-inset-bottom)] sm:flex-row sm:items-center sm:justify-between"
+      >
+        @if (pending()) {
+          <app-button variant="outline" customClasses="w-full min-h-11 sm:w-auto sm:min-h-0" (clicked)="pending.set(null)">Volver</app-button>
+          @if (pending() === 'check_in') {
+            <app-button
+              variant="primary"
+              class="w-full sm:w-auto" customClasses="w-full min-h-12 sm:min-h-0"
+              [loading]="saving()"
+              [disabled]="!checkInReady()"
+              (clicked)="confirmCheckIn()"
+            >
+              {{ dirtyWarning() ? 'Check-in de todos modos' : 'Confirmar check-in' }}
+            </app-button>
+          } @else {
+            <app-button
+              variant="danger"
+              class="w-full sm:w-auto" customClasses="w-full min-h-12 sm:min-h-0"
+              [loading]="saving()"
+              [disabled]="reasonRequired() && !reasonControl.value.trim()"
+              (clicked)="confirmAction()"
+            >
+              {{ confirmLabel() }}
             </app-button>
           }
+        } @else {
+          <div class="flex flex-wrap gap-2">
+            <app-button variant="outline" customClasses="min-h-11 sm:min-h-0" (clicked)="close()" data-testid="reservation-close">Cerrar</app-button>
+            @if (canNoShow()) {
+              <app-button variant="ghost" customClasses="min-h-11 sm:min-h-0" (clicked)="startAction('no_show')">
+                <app-icon slot="icon" name="user-x" [size]="16" />
+                Marcar no-show
+              </app-button>
+            }
+            @if (canCancel()) {
+              <app-button variant="ghost" customClasses="min-h-11 sm:min-h-0" (clicked)="startAction('cancel')">
+                <app-icon slot="icon" name="x-circle" [size]="16" />
+                Cancelar reserva
+              </app-button>
+            }
+          </div>
           @if (reservation()?.status === 'checked_in') {
-            <app-button variant="primary" (clicked)="checkOutOpen.set(true)" data-testid="reservation-check-out">
+            <app-button
+              variant="primary"
+              class="w-full sm:w-auto" customClasses="w-full min-h-12 sm:min-h-0"
+              (clicked)="checkOutOpen.set(true)"
+              data-testid="reservation-check-out"
+            >
               <app-icon slot="icon" name="log-out" [size]="16" />
               Check-out
             </app-button>
-          }
-          @if (canCheckIn()) {
-            <app-button variant="primary" (clicked)="startCheckIn()">
+          } @else if (canCheckIn()) {
+            <app-button
+              variant="primary"
+              class="w-full sm:w-auto" customClasses="w-full min-h-12 sm:min-h-0"
+              (clicked)="startCheckIn()"
+              data-testid="reservation-check-in"
+            >
               <app-icon slot="icon" name="log-in" [size]="16" />
               Check-in
             </app-button>
           }
-          @if (canCancel()) {
-            <app-button variant="danger" (clicked)="startAction('cancel')">
-              <app-icon slot="icon" name="x-circle" [size]="16" />
-              Cancelar
-            </app-button>
-          }
-          <app-button variant="ghost" (clicked)="close()">Cerrar</app-button>
         }
       </div>
     </app-modal>
@@ -467,9 +551,31 @@ export class ReservationDetailModalComponent {
   readonly total = computed(() =>
     this.currency.format(Number(this.reservation()?.total_amount ?? 0), 0),
   );
-  readonly statusLabel = computed(() => {
+  readonly tabs = DETAIL_TABS;
+  readonly activeTab = signal<DetailTab>('summary');
+  /** Folio balance still to collect, reported by the folio panel; null until it loads. */
+  readonly due = signal<number | null>(null);
+  readonly guestName = computed(() => {
+    const customer = this.reservation()?.customer;
+    return customer ? `${customer.first_name} ${customer.last_name ?? ''}`.trim() : '';
+  });
+  /** R-MOD-06 — "Reserva H-0024 · Tata Martínez". */
+  readonly title = computed(() => {
+    const r = this.reservation();
+    return r ? `Reserva ${r.reservation_number} · ${this.guestName()}` : 'Reserva';
+  });
+  readonly statusChip = computed(() => {
     const status = this.reservation()?.status;
-    return status ? RESERVATION_STATUS_LABELS[status] : '';
+    return status ? RESERVATION_STATUS_CHIPS[status] : null;
+  });
+  /** "27 oct → 29 oct (2 noches)". */
+  readonly stayLabel = computed(() => {
+    if (!this.arrival() || !this.departure()) return { dates: '', nights: '' };
+    const nights = this.nights();
+    return {
+      dates: `${shortDate(this.arrival())} → ${shortDate(this.departure())}`,
+      nights: `(${nights} ${nights === 1 ? 'noche' : 'noches'})`,
+    };
   });
   readonly canCancel = computed(() =>
     ['tentative', 'confirmed'].includes(this.reservation()?.status ?? ''),
@@ -505,7 +611,10 @@ export class ReservationDetailModalComponent {
     // Load each time a reservation is opened.
     effect(() => {
       const id = this.reservationId();
-      if (id !== null) untracked(() => this.load(id, this.startWith()));
+      if (id !== null) untracked(() => {
+        this.activeTab.set('summary');
+        this.load(id, this.startWith());
+      });
     });
   }
 
@@ -625,6 +734,7 @@ export class ReservationDetailModalComponent {
     this.loading.set(true);
     this.pending.set(null);
     this.reservation.set(null);
+    this.due.set(null);
     this.reservationsService
       .get(id)
       .pipe(takeUntilDestroyed(this.destroyRef))

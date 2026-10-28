@@ -88,17 +88,19 @@ function newRequestId(): string {
               </app-button>
             }
             @if (!split()) {
-            <app-button
-              variant="outline"
-              size="sm"
-              [loading]="busy()"
-              [disabled]="!folio()?.pending_nights"
-              (clicked)="postNights()"
-              data-testid="folio-post-nights"
-            >
-              <app-icon slot="icon" name="moon" [size]="14" />
-              Cargar noche
-            </app-button>
+            <span [attr.title]="postNightsHint() || null">
+              <app-button
+                variant="outline"
+                size="sm"
+                [loading]="busy()"
+                [disabled]="!folio()?.pending_nights"
+                (clicked)="postNights()"
+                data-testid="folio-post-nights"
+              >
+                <app-icon slot="icon" name="moon" [size]="14" />
+                Cargar noche
+              </app-button>
+            </span>
             <app-button variant="outline" size="sm" (clicked)="startCharge()" data-testid="folio-add-charge">
               <app-icon slot="icon" name="plus" [size]="14" />
               Agregar cargo
@@ -163,6 +165,11 @@ function newRequestId(): string {
           </app-button>
         }
       </div>
+      @if (editable() && !action() && !split() && postNightsHint()) {
+        <p class="border-b border-border px-3 py-1.5 text-xs text-text-secondary" data-testid="folio-post-nights-hint">
+          {{ postNightsHint() }}
+        </p>
+      }
 
       @if (loading()) {
         <p class="px-3 py-2 text-xs text-text-secondary">Cargando folio…</p>
@@ -549,6 +556,8 @@ export class FolioPanelComponent {
   readonly refreshKey = input<number>(0);
   /** Emitted after every change so the detail refreshes its summary. */
   readonly changed = output<void>();
+  /** U2 — balance still to collect, each time the folio loads (detail summary). */
+  readonly dueChange = output<number>();
 
   readonly folio = signal<FolioDetail | null>(null);
   /** VAT-exemption value the desk just toggled, until the server answers. */
@@ -597,6 +606,12 @@ export class FolioPanelComponent {
     const f = this.folio();
     return f ? Math.max(0, f.balance - (f.online_payment_available ?? 0)) : 0;
   });
+  /** U2 (R-CTA-06) — why "Cargar noche" is disabled. */
+  readonly postNightsHint = computed(() =>
+    this.folio() && !this.folio()!.pending_nights
+      ? 'Las noches hasta hoy ya están cargadas; la siguiente se carga mañana.'
+      : '',
+  );
   /** "Dividir": open folio, single account, nothing paid, at least two active lines. */
   readonly canSplit = computed(() => {
     const f = this.folio();
@@ -624,6 +639,9 @@ export class FolioPanelComponent {
       const id = this.reservationId();
       this.refreshKey();
       untracked(() => this.load(id));
+    });
+    effect(() => {
+      if (this.folio()) this.dueChange.emit(this.due());
     });
   }
 
