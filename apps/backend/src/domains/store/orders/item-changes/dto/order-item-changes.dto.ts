@@ -60,6 +60,22 @@ export class OrderItemChangeRemoveDto {
 }
 
 /**
+ * Cambia la tarifa de una línea existente (tarifa preferencial del cliente).
+ * `price_tier_id` null (u omitido) restaura el precio regular del catálogo.
+ * El precio lo resuelve el servidor; la cantidad no cambia.
+ */
+export class OrderItemChangeRetierDto {
+  @IsInt()
+  @Min(1)
+  order_item_id: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  price_tier_id?: number | null;
+}
+
+/**
  * Change-set por diferencia sobre las líneas de una orden (QUI-650).
  * Las reglas cruzadas (vacío, ids repetidos, motivo/versión obligatorios en
  * apply) las valida `OrderItemChangesService`.
@@ -85,6 +101,13 @@ export class OrderItemChangesDto {
   @ValidateNested({ each: true })
   @Type(() => OrderItemChangeRemoveDto)
   remove?: OrderItemChangeRemoveDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemChangeRetierDto)
+  retier?: OrderItemChangeRetierDto[];
 
   @IsOptional()
   @IsString()

@@ -51,6 +51,7 @@ import { OrderSseService } from './services/order-sse.service';
 import { InvoicingModule } from '../invoicing/invoicing.module';
 import { OrderItemChangesController } from './item-changes/order-item-changes.controller';
 import { OrderItemChangesService } from './item-changes/order-item-changes.service';
+import { PriceResolverService } from '../products/services/price-resolver.service';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module'; // QUI-650: fire en la misma tx (sin ciclo: KitchenFireModule no importa OrdersModule)
 import { OrderLeaseModule } from '../../../common/locks/order-lease.module';
 import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
@@ -88,6 +89,8 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     OrdersService,
     OrdersBulkService,
     OrderItemChangesService,
+    // Sin dependencias; mismo patrón que PaymentsModule (precio de tarifa).
+    PriceResolverService,
     StockLevelManager,
     StockValidatorService,
     SellableStockAllocator,
