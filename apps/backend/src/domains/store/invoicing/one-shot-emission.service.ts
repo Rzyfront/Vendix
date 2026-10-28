@@ -21,6 +21,7 @@ import { EmitOrderCreditDto } from './dto/emit-order.dto';
 import {
   describeHolderSource,
   evaluateOrderHolder,
+  holderCurrentData,
   isCfOverridable,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
@@ -28,6 +29,18 @@ import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 /** A credit sale needs an identified holder: it is never issued as Consumidor final. */
 export const CREDIT_FINAL_CONSUMER_MESSAGE =
   'Una venta a crédito no puede facturarse a Consumidor Final: completa los datos del cliente.';
+
+/**
+ * An order with an unpaid balance (not a credit sale yet) cannot be issued as
+ * Consumidor final: a cash invoice needs the payment registered, and a credit
+ * invoice needs an identified holder. Said plainly so the UI never goes mute.
+ */
+export function unpaidFinalConsumerMessage(remaining_balance: string): string {
+  const amount = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 }).format(
+    Number(remaining_balance),
+  );
+  return `La orden tiene un saldo sin cobrar de $${amount}. Para emitir a Consumidor final registra primero el pago; si es una venta a crédito, completa los datos del cliente.`;
+}
 
 /** Por qué una orden con saldo no puede facturarse a crédito (`null` = sí puede). */
 export type CreditBlocker =
@@ -199,7 +212,7 @@ export class OneShotEmissionService {
     // Titular: misma regla que `createFromOrder` y la vista previa masiva. Se
     // evalúa ANTES del saldo/crédito para no convertir una orden a crédito y
     // luego descubrir que la factura saldría a Consumidor final.
-    const force = await this.resolveHolderGate(order, emit_options);
+    const force = await this.resolveHolderGate(order, emit_options, !!credit);
     // Borrador colgado de un intento anterior: su titular se re-sincroniza con
     // la evaluación actual (misma construcción que la creación) antes de numerar.
     await this.refreshHangingDraftHolder(order_id, force);
@@ -300,6 +313,7 @@ export class OneShotEmissionService {
       invoice_data_requests?: Parameters<typeof evaluateOrderHolder>[0]['invoice_data_requests'];
     },
     emit_options?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
+    credit_requested = false,
   ): Promise<Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined> {
     // El titular se evalúa mientras no exista un documento numerado, también
     // en órdenes que ya son crédito (`payment_form '2'`).
@@ -317,22 +331,44 @@ export class OneShotEmissionService {
     if (numbered) return undefined;
 
     const overridable = isCfOverridable(holder.issue);
+    const details = {
+      order_id: order.id,
+      customer_id: order.customer_id,
+      customer_name: describeHolderSource(order),
+      issue_code: holder.issue.code,
+      missing_fields: holder.issue.missing_fields,
+      // What the holder already has: the UI prefills it and asks only the rest.
+      current: holderCurrentData(order),
+    };
     if (overridable && emit_options?.force_final_consumer) {
-      // Venta a crédito (ya crédito o con saldo): nunca sale a Consumidor final.
-      const is_credit =
-        order.payment_form === '2' ||
-        computeOrderUnpaidBalance(order as any).remaining.greaterThanOrEqualTo(0.01);
-      if (!is_credit) return { force_final_consumer: true };
+      // Venta a crédito (ya crédito o pedida a crédito): nunca sale a Consumidor final.
+      if (order.payment_form === '2' || credit_requested) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
+          CREDIT_FINAL_CONSUMER_MESSAGE,
+          {
+            ...details,
+            message: CREDIT_FINAL_CONSUMER_MESSAGE,
+            cf_overridable: false,
+            cf_blocker: 'credit_sale',
+          },
+        );
+      }
+      // Saldo sin cobrar: una factura de contado a Consumidor final exige el
+      // pago registrado (misma regla que `INVOICING_ORDER_UNPAID_001`).
+      const { remaining } = computeOrderUnpaidBalance(order as any);
+      if (remaining.lessThan(0.01)) return { force_final_consumer: true };
+      const remaining_balance = remaining.toFixed(2);
+      const message = unpaidFinalConsumerMessage(remaining_balance);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
-        CREDIT_FINAL_CONSUMER_MESSAGE,
+        message,
         {
-          order_id: order.id,
-          customer_id: order.customer_id,
-          issue_code: holder.issue.code,
-          missing_fields: holder.issue.missing_fields,
-          message: CREDIT_FINAL_CONSUMER_MESSAGE,
+          ...details,
+          message,
           cf_overridable: false,
+          cf_blocker: 'unpaid_balance',
+          remaining_balance,
         },
       );
     }
@@ -340,11 +376,7 @@ export class OneShotEmissionService {
       ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
       undefined,
       {
-        order_id: order.id,
-        customer_id: order.customer_id,
-        customer_name: describeHolderSource(order),
-        issue_code: holder.issue.code,
-        missing_fields: holder.issue.missing_fields,
+        ...details,
         message: holder.issue.message,
         cf_overridable: overridable,
       },

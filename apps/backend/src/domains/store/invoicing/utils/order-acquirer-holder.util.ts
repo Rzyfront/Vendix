@@ -262,3 +262,37 @@ export function describeHolderSource(order: OrderHolderSourceRows): string | nul
     null
   );
 }
+
+/** Holder data already on file, shaped like the completion form. */
+export interface OrderHolderCurrentData {
+  document_type: string | null;
+  document_number: string | null;
+  verification_digit: string | null;
+  legal_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+/**
+ * What the declared holder (customer row or guest request) already has, so the
+ * UI can prefill it and ask only for what is missing. The Consumidor final
+ * sentinel is not a real document and is reported as absent.
+ */
+export function holderCurrentData(
+  order: OrderHolderSourceRows,
+): OrderHolderCurrentData | null {
+  const { source, input } = buildDeclaredAcquirer(order);
+  if (source === 'none') return null;
+  const value = (v: string | null | undefined): string | null => trim(v) || null;
+  const number = value(input.document_number);
+  return {
+    document_type: value(input.document_type),
+    document_number:
+      number && digits(number) === FINAL_CONSUMER_NUMBER ? null : number,
+    verification_digit:
+      source === 'customer' ? value(order.users?.verification_digit) : null,
+    legal_name: value(input.legal_name),
+    first_name: value(input.first_name),
+    last_name: value(input.last_name),
+  };
+}

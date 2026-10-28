@@ -1,7 +1,11 @@
 import { VendixHttpException, FinancialSplitErrors, ErrorCodes } from 'src/common/errors';
 import { OrderLeaseService } from 'src/common/locks/order-lease.service';
 import { RequestContextService } from 'src/common/context/request-context.service';
-import { CREDIT_FINAL_CONSUMER_MESSAGE, OneShotEmissionService } from './one-shot-emission.service';
+import {
+  CREDIT_FINAL_CONSUMER_MESSAGE,
+  OneShotEmissionService,
+  unpaidFinalConsumerMessage,
+} from './one-shot-emission.service';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { PaymentsService } from '../payments/payments.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
@@ -769,7 +773,7 @@ describe('OneShotEmissionService', () => {
         service.emitOrder(1, undefined, { force_final_consumer: true }),
       );
       expect(body.message).toBe(CREDIT_FINAL_CONSUMER_MESSAGE);
-      expect(body.details).toMatchObject({ cf_overridable: false });
+      expect(body.details).toMatchObject({ cf_overridable: false, cf_blocker: 'credit_sale' });
       expect(emitSpy).not.toHaveBeenCalled();
       expect(invoicing.createFromOrder).not.toHaveBeenCalled();
     });
@@ -787,6 +791,53 @@ describe('OneShotEmissionService', () => {
       );
       expect(body.message).toBe(CREDIT_FINAL_CONSUMER_MESSAGE);
       expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('el 409 trae los datos que el cliente YA tiene (`current`) para precargar el formulario', async () => {
+      const { service } = build({
+        order: baseOrder({
+          users: customerRow({ document_type: null, document_number: null, last_name: 'Pérez' }),
+        }),
+      });
+      const body = await holderError(service.emitOrder(1));
+      expect(body.details.current).toEqual({
+        document_type: null,
+        document_number: null,
+        verification_digit: null,
+        legal_name: null,
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      });
+    });
+
+    it('`current` no expone el documento centinela de Consumidor final', async () => {
+      const { service } = build({
+        order: baseOrder({ users: customerRow({ document_number: '222222222222' }) }),
+      });
+      const body = await holderError(service.emitOrder(1));
+      expect(body.details.current).toMatchObject({ document_type: 'CC', document_number: null });
+    });
+
+    it('orden sin cobrar (no es crédito) + allow_final_consumer: motivo claro con el saldo, no «venta a crédito»', async () => {
+      const { service, emitSpy, invoicing } = build({
+        order: incompleteOrder({ payments: [{ state: 'pending', amount: 100 }], state: 'finished' }),
+      });
+      const body = await holderError(
+        service.emitOrder(1, undefined, { force_final_consumer: true }),
+      );
+      expect(body.message).toBe(unpaidFinalConsumerMessage('100.00'));
+      expect(body.message).toContain('saldo sin cobrar de $100. Para emitir a Consumidor final registra primero el pago');
+      expect(body.message).not.toBe(CREDIT_FINAL_CONSUMER_MESSAGE);
+      expect(body.details).toMatchObject({
+        cf_overridable: false,
+        cf_blocker: 'unpaid_balance',
+        remaining_balance: '100.00',
+        customer_name: 'Juan',
+        missing_fields: ['last_name'],
+      });
+      expect(body.details.current).toMatchObject({ first_name: 'Juan' });
+      expect(emitSpy).not.toHaveBeenCalled();
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
     });
 
     it('factura ya numerada: el reintento no se bloquea (titular congelado)', async () => {
