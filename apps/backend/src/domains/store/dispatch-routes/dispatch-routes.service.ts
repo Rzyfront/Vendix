@@ -12,6 +12,10 @@ import {
 } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
+  CustomerNameSource,
+  resolveCustomerSnapshotName,
+} from '../../../common/helpers/customer-display-name.helper';
+import {
   CreateDispatchRouteDto,
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
@@ -80,7 +84,15 @@ const DISPATCH_ROUTE_INCLUDE = {
           },
           // Withholding-agent flag drives the UI banner + the backend
           // re-validation in route-flow.service.settleStop().
-          customer: { select: { is_withholding_agent: true } },
+          customer: {
+            select: {
+              is_withholding_agent: true,
+              // Live name fallback for legacy notes whose snapshot is blank.
+              legal_name: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
         },
       },
       settled_by_user: {
@@ -129,6 +141,9 @@ const MAP_STOPS_INCLUDE = {
           id: true,
           customer_id: true,
           customer_name: true,
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           customer_address: true,
           order: {
             select: {
@@ -171,6 +186,7 @@ interface MapStopDispatchNote {
   id: number;
   customer_id: number | null;
   customer_name: string | null;
+  customer: CustomerNameSource | null;
   customer_address: Prisma.JsonValue | null;
   order: {
     shipping_address_id: number | null;
@@ -726,6 +742,10 @@ export class DispatchRoutesService {
         is_prepaid,
         dispatch_note: {
           ...dn,
+          customer_name: resolveCustomerSnapshotName(
+            dn.customer_name,
+            dn.customer,
+          ),
           customer_is_withholding_agent:
             dn.customer?.is_withholding_agent ?? false,
         },
@@ -1305,6 +1325,9 @@ export class DispatchRoutesService {
         id: true,
         dispatch_number: true,
         customer_name: true,
+        customer: {
+          select: { legal_name: true, first_name: true, last_name: true },
+        },
         grand_total: true,
         status: true,
         needs_collection: true,
@@ -1319,7 +1342,7 @@ export class DispatchRoutesService {
       .map((n) => ({
         id: n.id,
         dispatch_number: n.dispatch_number,
-        customer_name: n.customer_name,
+        customer_name: resolveCustomerSnapshotName(n.customer_name, n.customer),
         grand_total: n.grand_total,
         status: n.status,
         needs_collection: n.needs_collection,
@@ -1380,7 +1403,11 @@ export class DispatchRoutesService {
     // (results are Redis-cached anyway, so warm stops are effectively free).
     for (const stop of route.stops as unknown as MapStopSource[]) {
       const resolved = await this.resolveStopCoordinates(stop);
-      const customerName = stop.dispatch_note?.customer_name ?? null;
+      const customerName =
+        resolveCustomerSnapshotName(
+          stop.dispatch_note?.customer_name,
+          stop.dispatch_note?.customer,
+        ) || null;
       const isDelivered =
         stop.status === dispatch_route_stop_status_enum.delivered;
       const hasCoords = resolved.lat != null && resolved.lng != null;

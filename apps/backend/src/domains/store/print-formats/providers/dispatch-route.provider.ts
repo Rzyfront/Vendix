@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { customerDisplayName } from '../../../../common/helpers/customer-display-name.helper';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
@@ -67,6 +68,11 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
                 id: true,
                 dispatch_number: true,
                 customer_name: true,
+                // Fallback de nombre en vivo para remisiones viejas con
+                // snapshot vacío (clientes JURIDICA, solo razón social).
+                customer: {
+                  select: { legal_name: true, first_name: true, last_name: true },
+                },
                 // `dispatch_notes` no tiene columna `customer_phone` (rompía
                 // con PrismaClientValidationError). El telefono ya tenia
                 // fallback a `note.order.users.phone` (linea ~232) — se
@@ -80,7 +86,14 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
                     // `users` (`customer_id`) — mismo defecto que `vehicles`
                     // arriba, habria tumbado esta rama en cuanto Prisma
                     // llegara a validarla.
-                    users: { select: { first_name: true, last_name: true, phone: true } },
+                    users: {
+                      select: {
+                        first_name: true,
+                        last_name: true,
+                        legal_name: true,
+                        phone: true,
+                      },
+                    },
                   },
                 },
               },
@@ -239,9 +252,9 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
       const note = s.dispatch_note || {};
       const user = note.order?.users || {};
       const customerName =
-        note.customer_name ||
-        `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
-        'Cliente';
+        note.customer_name?.trim() ||
+        customerDisplayName(note.customer) ||
+        customerDisplayName(user, 'Cliente');
       const phone = user.phone || '';
       const address = this.formatAddress(note.customer_address);
 

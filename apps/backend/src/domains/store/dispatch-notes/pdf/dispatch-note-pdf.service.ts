@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { resolveCustomerSnapshotName } from '../../../../common/helpers/customer-display-name.helper';
 import { S3Service } from '../../../../common/services/s3.service';
 import {
   DispatchNotePdfBuilder,
@@ -38,6 +39,7 @@ const DISPATCH_NOTE_PDF_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
       phone: true,
     },
@@ -228,7 +230,9 @@ export class DispatchNotePdfService {
       origin_location_name: note.dispatch_location?.name || undefined,
       origin_address: origin_address || undefined,
 
-      customer_name: note.customer_name || 'Consumidor Final',
+      customer_name:
+        resolveCustomerSnapshotName(note.customer_name, note.customer) ||
+        'Consumidor Final',
       customer_tax_id: note.customer_tax_id || undefined,
 
       delivery_address,

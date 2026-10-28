@@ -9,6 +9,7 @@ import {
   dispatch_route_status_enum,
 } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { resolveCustomerSnapshotName } from '../../../../common/helpers/customer-display-name.helper';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -58,6 +59,10 @@ const ROUTE_INCLUDE = {
           dispatch_number: true,
           customer_id: true,
           customer_name: true,
+          // Live name fallback for legacy notes whose snapshot is blank.
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           grand_total: true,
           status: true,
           sales_order_id: true,
@@ -125,6 +130,10 @@ const ROUTE_PDF_INCLUDE = {
           dispatch_number: true,
           customer_id: true,
           customer_name: true,
+          // Live name fallback for legacy notes whose snapshot is blank.
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           grand_total: true,
           status: true,
           sales_order_id: true,
@@ -259,6 +268,12 @@ export class RouteFlowService {
       stops: Array<{
         is_prepaid: boolean;
         dispatch_note?: {
+          customer_name?: string | null;
+          customer?: {
+            legal_name?: string | null;
+            first_name?: string | null;
+            last_name?: string | null;
+          } | null;
           needs_collection?: boolean | null;
           invoice?: { payment_date: Date | null } | null;
           order?: { remaining_balance: Prisma.Decimal | null } | null;
@@ -271,6 +286,15 @@ export class RouteFlowService {
       stops: route.stops.map((stop) => ({
         ...stop,
         is_prepaid: deriveStopIsPrepaid(stop),
+        dispatch_note: stop.dispatch_note
+          ? {
+              ...stop.dispatch_note,
+              customer_name: resolveCustomerSnapshotName(
+                stop.dispatch_note.customer_name,
+                stop.dispatch_note.customer,
+              ),
+            }
+          : stop.dispatch_note,
       })),
     };
   }

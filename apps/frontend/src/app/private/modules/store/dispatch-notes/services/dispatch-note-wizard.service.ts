@@ -18,6 +18,7 @@ export interface WizardCustomer {
   id: number;
   first_name: string;
   last_name: string;
+  legal_name?: string | null;
   phone?: string;
   email?: string;
   document_number?: string;
@@ -405,6 +406,7 @@ export class DispatchNoteWizardService {
         id: user.id,
         first_name: user.first_name,
         last_name: user.last_name,
+        legal_name: user.legal_name,
         phone: user.phone,
         email: user.email,
         document_number: user.document_number,
