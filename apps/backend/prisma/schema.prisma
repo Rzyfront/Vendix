@@ -306,14 +306,19 @@ model user_settings {
 
 /// Relación flexible entre usuarios y tiendas (clientes, staff, managers, etc)
 model store_users {
-  id        Int      @id @default(autoincrement())
-  store_id  Int
-  user_id   Int
-  createdAt DateTime @default(now())
-  store     stores   @relation(fields: [store_id], references: [id])
-  user      users    @relation(fields: [user_id], references: [id])
+  id            Int          @id @default(autoincrement())
+  store_id      Int
+  user_id       Int
+  createdAt     DateTime     @default(now())
+  /// Tarifa preferencial del cliente en esta tienda (solo `customer_tier`).
+  /// Borrar la tarifa deja al cliente sin tarifa, nunca borra la membresía.
+  price_tier_id Int?
+  store         stores       @relation(fields: [store_id], references: [id])
+  user          users        @relation(fields: [user_id], references: [id])
+  price_tier    price_tiers? @relation(fields: [price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
+  @@index([price_tier_id])
 }
 
 model roles {
@@ -2321,6 +2326,7 @@ model price_tiers {
 
   store               stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product_overrides   product_price_tier_overrides[]
+  store_users         store_users[]
   product_assignments product_price_tier_assignments[]
   order_items         order_items[]                    @relation("order_items_applied_price_tier")
   quotation_items     quotation_items[]                @relation("quotation_items_applied_price_tier")
