@@ -13,8 +13,12 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { CreateServiceProposalDto, DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
 import { buildProposalSnapshotHash } from './utils/service-proposal-snapshot.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
-import { FullTaxRow, resolveFullTaxRowsByProductId } from '../taxes/utils/product-tax-rows.util';
-import { resolveCatalogLine, resolveCatalogUnitPrice } from '../orders/utils/catalog-line-pricing.util';
+import {
+  FullTaxRow,
+  resolveCatalogLine,
+  resolveCatalogUnitPrice,
+  resolveFullTaxRowsByProductId,
+} from '../orders/utils/catalog-line-pricing.util';
 
 /**
  * Regla de consentimiento: el staff no puede subir por su cuenta un límite que

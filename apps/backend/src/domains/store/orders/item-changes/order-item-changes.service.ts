@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { VendixHttpException, ErrorCodeEntry, ErrorCodes } from '@common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import {
@@ -14,13 +14,11 @@ import { OrderSseService } from '../services/order-sse.service';
 import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
 import { assertVariantRequiredForPrepared } from '../utils/variant-required.validator';
 import {
+  FullTaxRow,
   resolveCatalogLine,
   resolveCatalogUnitPrice,
-} from '../utils/catalog-line-pricing.util';
-import {
-  FullTaxRow,
   resolveFullTaxRowsByProductId,
-} from '../../taxes/utils/product-tax-rows.util';
+} from '../utils/catalog-line-pricing.util';
 import { createHash } from 'crypto';
 import {
   roundMoney2,
@@ -2122,8 +2120,9 @@ export class OrderItemChangesService {
     const line = plan.preview.lines.find((l) => l.blocked);
     if (line) {
       const code = plan.blockedCodes.get(line.key);
+      const codes = Object.values(ErrorCodes) as ErrorCodeEntry[];
       const def =
-        Object.values(ErrorCodes).find((c: any) => c.code === code) ??
+        codes.find((c) => c.code === code) ??
         ErrorCodes.ORD_ITEM_CHANGES_INVALID_001;
       return new VendixHttpException(def as any, line.blocked_reason ?? undefined, {
         key: line.key,

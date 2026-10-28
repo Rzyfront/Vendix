@@ -25,24 +25,25 @@ import {
   resolveLineUnits,
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
-import { FullTaxRow, resolveFullTaxRowsByProductId } from '../taxes/utils/product-tax-rows.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { serviceBudgetBlocks, serviceOrderTxOptions } from '../orders/utils/service-budget-cap.util';
 import {
+  FullTaxRow,
   resolveCatalogLine,
   resolveCatalogUnitPrice,
+  resolveFullTaxRowsByProductId,
 } from '../orders/utils/catalog-line-pricing.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
-// `FullTaxRow` y su resolver viven en taxes/utils/product-tax-rows.util.ts
+// `FullTaxRow` y su resolver viven en orders/utils/catalog-line-pricing.util
 // (compartidos con las cuentas de estaciones de servicio y con
-// `OrderItemChangesService` vía catalog-line-pricing.util, QUI-650).
+// `OrderItemChangesService`, QUI-650).
 
 /**
  * Public shape returned by `openSession` and `findOne`.
@@ -3246,7 +3247,7 @@ export class TableSessionsService {
   }
 
   /**
-   * Delegado fino: la lógica vive en `taxes/utils/product-tax-rows.util`
+   * Delegado fino: la lógica vive en `orders/utils/catalog-line-pricing.util`
    * (compartida con estaciones de servicio y con `OrderItemChangesService`,
    * QUI-650). Se conserva el método para que los specs y llamadores
    * existentes no cambien.

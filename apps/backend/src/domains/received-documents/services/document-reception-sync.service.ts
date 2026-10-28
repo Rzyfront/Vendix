@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { ErrorCodeEntry, ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { SubscriptionAccessService } from '../../store/subscriptions/services/subscription-access.service';
 import { DocumentReceptionEnvelope } from '../interfaces/document-reception-envelope.interface';
@@ -168,7 +168,8 @@ export class DocumentReceptionSyncService {
       throw new ServiceUnavailableException('No fue posible validar el acceso a la recepción de documentos.');
     }
     if (!access.allowed || access.mode === 'block') {
-      const entry = Object.values(ErrorCodes).find((candidate) => candidate.code === access.reason) ?? ErrorCodes.SUBSCRIPTION_005;
+      const codes = Object.values(ErrorCodes) as ErrorCodeEntry[];
+      const entry = codes.find((candidate) => candidate.code === access.reason) ?? ErrorCodes.SUBSCRIPTION_005;
       throw new VendixHttpException(entry);
     }
   }

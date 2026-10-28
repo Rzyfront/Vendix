@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { entity_type_enum, order_items, Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
-import { FullTaxRow, resolveFullTaxRowsByProductId } from '../taxes/utils/product-tax-rows.util';
+import { FullTaxRow, resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import { resolveLineUnits, roundMoney2 } from '../taxes/utils/final-price.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
