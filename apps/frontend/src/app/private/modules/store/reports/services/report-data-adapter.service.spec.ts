@@ -49,18 +49,20 @@ describe('ReportDataAdapterService summary adaptation', () => {
         supplier_name: 'Test',
         created_by_name: 'Ana Ríos',
         order_day: '2026-09-18',
-        order_time: '10:30',
         status: 'received',
         net_amount: 20000,
+        iva_amount: 3800,
+        total_with_iva: 23800,
       },
       {
         order_number: 'PO-20260906-146',
         supplier_name: 'Test',
         created_by_name: 'Ana Ríos',
         order_day: '2026-09-06',
-        order_time: '09:15',
         status: 'received',
         net_amount: 200000,
+        iva_amount: 0,
+        total_with_iva: 200000,
       },
     ];
     const result = adapter.adapt(

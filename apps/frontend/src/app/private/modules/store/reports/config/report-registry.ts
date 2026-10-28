@@ -94,7 +94,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'created_by_name', header: 'Creada por', type: 'text' },
       { key: 'order_day', header: 'Fecha', type: 'text' },
-      { key: 'order_time', header: 'Hora', type: 'text' },
       {
         key: 'status',
         header: 'Estado',
@@ -108,6 +107,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         },
       },
       { key: 'net_amount', header: 'Total sin IVA', type: 'currency', footer: 'sum' },
+      { key: 'iva_amount', header: 'Total IVA', type: 'currency', footer: 'sum' },
+      { key: 'total_with_iva', header: 'Total con IVA', type: 'currency', footer: 'sum' },
     ],
     exportFilename: 'resumen-compras',
     stats: [

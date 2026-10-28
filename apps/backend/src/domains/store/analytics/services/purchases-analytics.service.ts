@@ -75,11 +75,13 @@ interface PurchaseOrderRow {
   created_by_name: string | null;
   /** Día de negocio `YYYY-MM-DD` en la TZ de la tienda (texto desde SQL). */
   order_day: string;
-  /** Hora `HH:MM` en la TZ de la tienda (texto desde SQL). */
-  order_time: string;
   status: string;
   /** Neto sin IVA (`subtotal_amount`): suma al card `total_spent`. */
   net_amount: number;
+  /** IVA cobrado por el proveedor, SUMADO DE LAS LÍNEAS (0 si no lleva). */
+  iva_amount: number;
+  /** Neto + IVA de la orden. */
+  total_with_iva: number;
 }
 
 /** Tope explícito del detalle por orden (el visor pagina en cliente). */
@@ -204,14 +206,17 @@ export class PurchasesAnalyticsService {
 
   /**
    * Detalle por orden de compra de la ventana ACTUAL, para la tabla del Resumen
-   * de Compras (QUI-696: quién la creó, qué día y a qué hora). Mismo universo
-   * que `aggregatePurchaseWindow` (`location.store_id` + estados committed +
-   * ventana por `order_date`) para que la columna Total sume al card
-   * `total_spent`: por eso cada fila trae el NETO sin IVA (`subtotal_amount`).
+   * de Compras (QUI-696: quién la creó y qué día; el IVA y total con IVA por
+   * fila). Mismo universo que `aggregatePurchaseWindow` (`location.store_id` +
+   * estados committed + ventana por `order_date`) para que la columna Total
+   * sume al card `total_spent`: por eso cada fila trae el NETO sin IVA
+   * (`subtotal_amount`).
    *
-   * Día y hora salen como TEXTO calculados en SQL con la TZ de la tienda
-   * (`localBucketSql`), igual que los labels de período: re-derivarlos en JS
-   * desde el `timestamp` caería en el día/hora UTC.
+   * El día sale como TEXTO calculado en SQL con la TZ de la tienda
+   * (`localBucketSql`), igual que los labels de período: re-derivarlo en JS
+   * desde el `timestamp` caería en el día UTC. El IVA se suma DE LAS LÍNEAS
+   * (misma razón que `aggregatePurchaseWindow`: el header sub-reporta en
+   * modo include-tax) y es 0 cuando la orden no lleva.
    */
   private async listWindowOrders(
     organizationId: number,
@@ -223,20 +228,25 @@ export class PurchasesAnalyticsService {
     const rawClient = this.prisma.withoutScope() as any;
     const committed = sqlStateList(PURCHASE_COMMITTED_STATES);
     const localDay = Prisma.sql`to_char(${localBucketSql('po.order_date', tz)}, 'YYYY-MM-DD')`;
-    const localTime = Prisma.sql`to_char(${localBucketSql('po.order_date', tz)}, 'HH24:MI')`;
     const [rows, counted] = await Promise.all([
       rawClient.$queryRaw<PurchaseOrderRow[]>`
         SELECT po.order_number,
                s.name AS supplier_name,
                NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS created_by_name,
                ${localDay} AS order_day,
-               ${localTime} AS order_time,
                po.status::text AS status,
-               po.subtotal_amount::float8 AS net_amount
+               po.subtotal_amount::float8 AS net_amount,
+               t.iva AS iva_amount,
+               (po.subtotal_amount + t.iva)::float8 AS total_with_iva
         FROM purchase_orders po
         JOIN inventory_locations l ON l.id = po.location_id
         JOIN suppliers s ON s.id = po.supplier_id
         LEFT JOIN users u ON u.id = po.created_by_user_id
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(sum(i.tax_amount), 0)::float8 AS iva
+          FROM purchase_order_items i
+          WHERE i.purchase_order_id = po.id
+        ) t ON true
         WHERE po.organization_id = ${organizationId}
           AND l.store_id = ${storeId}
           AND po.status::text IN (${committed})

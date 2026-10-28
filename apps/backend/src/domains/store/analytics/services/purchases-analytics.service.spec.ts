@@ -573,9 +573,10 @@ describe('PurchasesAnalyticsService - Summary detail (QUI-696)', () => {
     supplier_name: 'Test',
     created_by_name: 'Ana Ríos',
     order_day: '2026-09-18',
-    order_time: '10:30',
     status: 'received',
     net_amount: 20000,
+    iva_amount: 3800,
+    total_with_iva: 23800,
     ...overrides,
   });
   const zeroItems = {

@@ -1240,6 +1240,8 @@ export class PoDetailModalComponent {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      // h12 explícito (nunca hour12 a secas): "02:30 p. m.".
+      hourCycle: 'h12',
     }).format(date);
   }
 
