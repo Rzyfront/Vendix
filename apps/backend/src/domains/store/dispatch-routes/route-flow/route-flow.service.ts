@@ -9,6 +9,7 @@ import {
   dispatch_route_status_enum,
 } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { resolveCustomerSnapshotName } from '../../../../common/helpers/customer-display-name.helper';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -26,6 +27,7 @@ import {
   aggregateArticleExits,
   aggregateRouteTotals,
   deriveStopIsPrepaid,
+  derivePendingAmount,
 } from '../utils/route-stop-calc';
 import { computeCashCollected } from '../../analytics/analytics-metrics.contract';
 import {
@@ -58,6 +60,10 @@ const ROUTE_INCLUDE = {
           dispatch_number: true,
           customer_id: true,
           customer_name: true,
+          // Live name fallback for legacy notes whose snapshot is blank.
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           grand_total: true,
           status: true,
           sales_order_id: true,
@@ -77,6 +83,8 @@ const ROUTE_INCLUDE = {
             select: {
               id: true,
               remaining_balance: true,
+              payment_form: true,
+              credit_type: true,
               shipping_address_snapshot: true,
               // Live shipping-address relation: 3rd fallback for the per-stop
               // address (legacy remisiones created before the snapshot exist
@@ -125,6 +133,10 @@ const ROUTE_PDF_INCLUDE = {
           dispatch_number: true,
           customer_id: true,
           customer_name: true,
+          // Live name fallback for legacy notes whose snapshot is blank.
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           grand_total: true,
           status: true,
           sales_order_id: true,
@@ -137,6 +149,8 @@ const ROUTE_PDF_INCLUDE = {
             select: {
               id: true,
               remaining_balance: true,
+              payment_form: true,
+              credit_type: true,
               shipping_address_snapshot: true,
               addresses_orders_shipping_address_idToaddresses: {
                 select: {
@@ -259,6 +273,13 @@ export class RouteFlowService {
       stops: Array<{
         is_prepaid: boolean;
         dispatch_note?: {
+          grand_total?: unknown;
+          customer_name?: string | null;
+          customer?: {
+            legal_name?: string | null;
+            first_name?: string | null;
+            last_name?: string | null;
+          } | null;
           needs_collection?: boolean | null;
           invoice?: { payment_date: Date | null } | null;
           order?: { remaining_balance: Prisma.Decimal | null } | null;
@@ -271,6 +292,17 @@ export class RouteFlowService {
       stops: route.stops.map((stop) => ({
         ...stop,
         is_prepaid: deriveStopIsPrepaid(stop),
+        // Live amount still to collect (see `derivePendingAmount`).
+        pending_amount: derivePendingAmount(stop),
+        dispatch_note: stop.dispatch_note
+          ? {
+              ...stop.dispatch_note,
+              customer_name: resolveCustomerSnapshotName(
+                stop.dispatch_note.customer_name,
+                stop.dispatch_note.customer,
+              ),
+            }
+          : stop.dispatch_note,
       })),
     };
   }
@@ -637,7 +669,15 @@ export class RouteFlowService {
             needs_collection: true,
             sales_order: { select: { id: true, order_number: true, status: true } },
             invoice: { select: { payment_date: true } },
-            order: { select: { remaining_balance: true } },
+            order: {
+              select: {
+                remaining_balance: true,
+                // Credit rule at settle: only an installments plan may be
+                // delivered with less than the total (see `settleStop`).
+                payment_form: true,
+                credit_type: true,
+              },
+            },
             // For withholding-agent validation: a retenedor cliente must
             // arrive at 'delivered' or 'partial' WITH a populated
             // withholding_breakdown, otherwise the fiscal accounting will
@@ -655,8 +695,20 @@ export class RouteFlowService {
       );
     }
 
+    // Retry / double submit of an already delivered stop: idempotent answer
+    // with the persisted stop. No second payment, no events, no error.
+    if (stop.status === 'delivered' && dto.result === 'delivered') {
+      this.logger.log(
+        `Parada #${stopId} ya entregada: reintento ignorado (idempotente)`,
+      );
+      return stop;
+    }
+
     if (stop.status === 'released' || stop.status === 'delivered') {
-      throw new BadRequestException(`La parada ya está '${stop.status}'`);
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_SETTLED,
+        `La parada ya está '${stop.status}'`,
+      );
     }
 
     // No hay entregas parciales / crédito en ruta: el pago es TOTAL o no hay
@@ -719,22 +771,62 @@ export class RouteFlowService {
     const anticipo = Number(dto.anticipo_amount || 0);
     const change = Number(dto.change_amount || 0);
     const total_paid = collected + anticipo;
+    // What is REALLY still owed on this stop at settle time (live order
+    // balance capped by the remisión total; 0 when the order is already paid).
+    const pendingAmount = derivePendingAmount(stop);
+    const toCents = (value: number) => Math.round(value * 100);
 
     if (dto.result === 'delivered') {
-      // El cobro debe cubrir el neto completo — salvo que la parada esté
-      // prepagada, en cuyo caso el dinero ya entró antes del despacho y exigir
-      // recaudo aquí lo cobraría dos veces. `stopIsPrepaid` es DERIVADO del
-      // saldo vivo de la orden (ver `resolveIsPrepaid`), no de la bandera
-      // congelada de la remisión: una orden pagada después de armar la planilla
-      // entra por aquí con recaudo 0 y se entrega sin error.
-      if (!stopIsPrepaid && total_paid + withholding < net) {
-        throw new BadRequestException(
-          `Suma de collected + anticipo + withholding (${total_paid + withholding}) es menor que el total de la remisión (${net})`,
+      // Ya pagada: se entrega con recaudo 0. Un recaudo > 0 se rechaza (nada de
+      // pagos extra silenciosos).
+      if (stopIsPrepaid && toCents(total_paid) > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_PAID,
+          `Esta orden ya está pagada: no hay nada que recaudar (recibiste ${total_paid}). Entrégala con recaudo 0.`,
+        );
+      }
+      // El cobro debe cubrir lo que realmente se debe (saldo vivo de la orden)
+      // — salvo que la parada esté prepagada, en cuyo caso el dinero ya entró
+      // antes del despacho y exigir recaudo aquí lo cobraría dos veces.
+      // `stopIsPrepaid` es DERIVADO del saldo vivo de la orden (ver
+      // `resolveIsPrepaid`), no de la bandera congelada de la remisión.
+      //
+      // Excepción: una orden a crédito (payment_form '2') con plan de cuotas
+      // (credit_type 'installments') se entrega con cualquier recaudo (incluso
+      // 0): lo cobrado abona las cuotas/CxC y el saldo sigue en cartera.
+      // Contra entrega y crédito libre (credit_type 'free' o null) exigen el
+      // saldo completo. La comparación es en centavos enteros.
+      const orderRef = stop.dispatch_note.order as
+        | { payment_form?: string | null; credit_type?: string | null }
+        | null
+        | undefined;
+      const isInstallmentsCredit =
+        orderRef?.payment_form === '2' && orderRef?.credit_type === 'installments';
+      // `change_amount` (vuelto) es solo informativo: se guarda y suma en los
+      // totales de la ruta, pero NO se descuenta de `collected_amount` (lo
+      // recaudado es lo que se aplica a la orden). La exactitud se mide sobre
+      // recaudo + anticipo + retención.
+      const settledCents = toCents(total_paid + withholding);
+      const pendingCents = toCents(pendingAmount);
+      if (!stopIsPrepaid && !isInstallmentsCredit && settledCents !== pendingCents) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_ROUTE_COLLECTION_MISMATCH,
+          settledCents < pendingCents
+            ? `Para entregar una orden contra entrega o a crédito libre el recaudo debe cubrir el saldo pendiente: recaudo + anticipo + retención (${total_paid + withholding}) es menor que lo que se debe (${pendingAmount}). Solo el crédito por cuotas permite entregar con saldo.`
+            : `El recaudo + anticipo + retención (${total_paid + withholding}) supera el saldo pendiente (${pendingAmount}). Recauda exactamente el saldo pendiente.`,
+        );
+      }
+      if (!stopIsPrepaid && isInstallmentsCredit && settledCents > pendingCents) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_ROUTE_COLLECTION_MISMATCH,
+          `El recaudo + anticipo + retención (${total_paid + withholding}) supera el saldo pendiente (${pendingAmount}).`,
         );
       }
     }
 
-    // Sin crédito en ruta: el pago es total o no hay pago. La liquidación NO
+    // Contra entrega y crédito libre: el pago es total o no hay entrega. El
+    // crédito por cuotas puede entregarse con saldo, pero la entrega sigue
+    // siendo `delivered` (nunca `partial`). La liquidación NO
     // escribe `credit_amount` — la columna existe con `@default(0)` y toda fila
     // nueva queda en 0. `anticipo_amount` deja de funcionar como pago parcial.
     // Las columnas y los valores `partial` de los enums se conservan en el
@@ -755,7 +847,13 @@ export class RouteFlowService {
       order_id: number | null;
     } | null = null;
 
-    const paymentInput = !stopIsPrepaid && (collected > 0 || anticipo > 0)
+    // Credit orders also register a collection when only the customer's
+    // withholding settles part of the balance (collected 0, W > 0).
+    const isCreditOrderStop =
+      (stop.dispatch_note.order as { payment_form?: string | null } | null | undefined)
+        ?.payment_form === '2';
+    const paymentInput = !stopIsPrepaid &&
+      (collected > 0 || anticipo > 0 || (isCreditOrderStop && withholding > 0))
       ? {
           store_id,
           organization_id: undefined,
@@ -1076,6 +1174,7 @@ export class RouteFlowService {
     const stops = await prismaClient.dispatch_route_stops.findMany({
       where: { route_id },
       select: {
+        status: true,
         is_prepaid: true,
         collected_amount: true,
         anticipo_amount: true,

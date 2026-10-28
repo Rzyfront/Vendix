@@ -62,6 +62,8 @@ describe('InvoicingService.createFromOrder — descuento de orden e impuesto de 
     mockRequestContext({ store_id: 105, organization_id: 1, user_id: 7 });
     prisma = createPrismaMock({
       orders: ['findFirst'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
       invoices: ['findFirst', 'create', 'update'],
       invoice_items: ['findMany', 'deleteMany'],
       invoice_taxes: ['createMany', 'deleteMany'],

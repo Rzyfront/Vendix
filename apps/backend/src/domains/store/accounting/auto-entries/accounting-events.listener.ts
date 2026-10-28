@@ -288,8 +288,25 @@ export class AccountingEventsListener {
     user_id?: number;
     /** C4-followup: propagado desde payments.service.ts (order.customer_id). */
     customer?: { id: number; name?: string; tax_id?: string };
+    /**
+     * Set by the dispatch-route settlement when the stop's order is a credit
+     * sale (payment_form '2'). That collection is booked once by
+     * `installment_payment.received` (DR Caja / CR CxC); booking it here too
+     * would debit cash twice and recognise revenue again ("venta directa").
+     */
+    source_type?: string;
+    credit_order_collection?: boolean;
+    /**
+     * Real `orders.id` of a route collection (the route event keeps
+     * `order_id` null on purpose). Lets the entry resolve the invoice branch.
+     */
+    accounting_order_id?: number;
   }) {
     try {
+      if (event.source_type === 'dispatch_route' && event.credit_order_collection) {
+        return;
+      }
+      const is_route_collection = event.source_type === 'dispatch_route';
       if (
         !(await this.isFlowEnabled(
           event.store_id,
@@ -303,7 +320,9 @@ export class AccountingEventsListener {
         payment_id: event.payment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
-        order_id: event.order_id,
+        order_id: is_route_collection
+          ? (event.accounting_order_id ?? event.order_id)
+          : event.order_id,
         order_number: event.order_number,
         payment_method: event.payment_method,
         amount: Number(event.amount),
@@ -327,6 +346,7 @@ export class AccountingEventsListener {
           event.tip_amount != null ? Number(event.tip_amount) : undefined,
         user_id: event.user_id,
         customer: event.customer,
+        ...(is_route_collection ? { route_collection: true } : {}),
       });
       this.logger.log(
         `Auto-entry created for payment.received #${event.payment_id}`,
@@ -1605,6 +1625,12 @@ export class AccountingEventsListener {
     customer_id: number;
     order_id: number;
     organization_id?: number;
+    withholding_amount?: number;
+    withholding_breakdown?: {
+      retefuente?: number;
+      reteiva?: number;
+      reteica?: number;
+    };
   }) {
     try {
       if (
@@ -1617,19 +1643,37 @@ export class AccountingEventsListener {
         return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
-      await this.auto_entry_service.onInstallmentPaymentReceived({
-        credit_id: event.credit_id,
-        installment_id: event.installment_id,
-        payment_id: event.payment_id,
-        amount: Number(event.amount),
-        store_id: event.store_id,
-        organization_id,
-        store_payment_method_id: event.store_payment_method_id,
-        credit_number: event.credit_number,
-        installment_number: event.installment_number,
-        customer_id: event.customer_id,
-        order_id: event.order_id,
-      });
+      // A withholding-only collection (cash 0) has no cash entry to book.
+      if (Number(event.amount) > 0) {
+        await this.auto_entry_service.onInstallmentPaymentReceived({
+          credit_id: event.credit_id,
+          installment_id: event.installment_id,
+          payment_id: event.payment_id,
+          amount: Number(event.amount),
+          store_id: event.store_id,
+          organization_id,
+          store_payment_method_id: event.store_payment_method_id,
+          credit_number: event.credit_number,
+          installment_number: event.installment_number,
+          customer_id: event.customer_id,
+          order_id: event.order_id,
+        });
+      }
+      // Route collection with customer withholding on a credit order: the
+      // retention also settles the CxC (DR 1355xx / CR CxC).
+      if (
+        Number(event.withholding_amount || 0) > 0 &&
+        event.withholding_breakdown
+      ) {
+        await this.auto_entry_service.onInstallmentWithholdingApplied({
+          payment_id: event.payment_id,
+          order_id: event.order_id,
+          store_id: event.store_id,
+          organization_id,
+          credit_number: event.credit_number,
+          breakdown: event.withholding_breakdown,
+        });
+      }
       this.logger.log(
         `Auto-entry created for installment_payment.received - Credit ${event.credit_number} cuota #${event.installment_number}`,
       );

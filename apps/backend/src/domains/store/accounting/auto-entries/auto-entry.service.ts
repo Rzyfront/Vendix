@@ -3287,6 +3287,13 @@ export class AutoEntryService {
     tip_amount?: number;
     user_id?: number;
     /**
+     * Route (planilla) collection of an invoiced COD order: the customer's
+     * withholding settles part of the receivable, so the invoiced branch also
+     * books DR retención and credits CxC for cash + withholding. Other callers
+     * keep ignoring the withholding on invoiced orders.
+     */
+    route_collection?: boolean;
+    /**
      * Snapshot del cliente que paga. El emisor ya tiene `order.customer_id`
      * en scope (ver payments.service.ts) — PROHIBIDO resolverlo aquí.
      */
@@ -3339,6 +3346,22 @@ export class AutoEntryService {
             Number(data.amount || 0),
           )
         : 0;
+      const route_withholding_lines = data.route_collection
+        ? await this.resolveWithholdingLines({
+            organization_id: data.organization_id,
+            store_id: data.store_id,
+            breakdown: data.withholding_breakdown,
+            side: 'debit',
+          })
+        : [];
+      const route_withholding_total = data.route_collection
+        ? Math.round(
+            (data.withholding_breakdown ?? []).reduce(
+              (sum, w) => sum + Math.max(Number(w.amount || 0), 0),
+              0,
+            ) * 100,
+          ) / 100
+        : 0;
       lines = await Promise.all([
         this.resolveAccountLine(
           data.organization_id,
@@ -3348,12 +3371,16 @@ export class AutoEntryService {
           0,
           data.store_id,
         ),
+        ...route_withholding_lines,
         this.resolveAccountLine(
           data.organization_id,
           'payment.received.accounts_receivable',
           `Recaudo CxC${order_ref}`,
           0,
-          Math.round((Number(data.amount) - collection_tip) * 100) / 100,
+          Math.round(
+            (Number(data.amount) - collection_tip + route_withholding_total) *
+              100,
+          ) / 100,
           data.store_id,
           customer_third_party,
         ),
@@ -6208,6 +6235,65 @@ export class AutoEntryService {
       store_id: data.store_id,      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
       lines,
       user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Customer withholding (retención sufrida) settled together with a route
+   * collection on a CREDIT order: DR retention asset accounts (1355xx, via the
+   * shared `resolveWithholdingLines`, side 'debit') / CR Cuentas por Cobrar for
+   * the same total. The cash part is booked by `onInstallmentPaymentReceived`
+   * (DR Caja / CR CxC); together the CxC drops by cash + withholding, matching
+   * the AR ledger. `source_id` = the payment id (one entry per payment).
+   */
+  async onInstallmentWithholdingApplied(data: {
+    payment_id: number;
+    order_id: number;
+    store_id: number;
+    organization_id: number;
+    credit_number: string;
+    breakdown: { retefuente?: number; reteiva?: number; reteica?: number };
+  }) {
+    const types = ['retefuente', 'reteiva', 'reteica'] as const;
+    const lines: WithholdingLine[] = [];
+    for (const type of types) {
+      const amount = Number(data.breakdown?.[type] || 0);
+      if (!(amount > 0)) continue;
+      lines.push({
+        withholding_type: type,
+        concept_code: type,
+        rate: 0,
+        base: 0,
+        amount,
+        role: 'suffered',
+        account_role: `withholding.suffered.${type}_receivable`,
+      } as WithholdingLine);
+    }
+    if (lines.length === 0) return null;
+    const total = lines.reduce((acc, l) => acc + l.amount, 0);
+
+    const debit_lines = await this.resolveWithholdingLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      breakdown: lines,
+      side: 'debit',
+    });
+    const cr_line = await this.resolveAccountLine(
+      data.organization_id,
+      'installment_payment.received.accounts_receivable',
+      `Retención aplicada a CxC - Crédito ${data.credit_number}`,
+      0,
+      total,
+      data.store_id,
+    );
+
+    return this.createAutoEntry({
+      source_type: 'installment_withholding',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Retención en recaudo de ruta - Crédito ${data.credit_number}`,
+      lines: [...debit_lines, cr_line],
     });
   }
 

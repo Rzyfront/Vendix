@@ -12,6 +12,10 @@ import {
 } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
+  CustomerNameSource,
+  resolveCustomerSnapshotName,
+} from '../../../common/helpers/customer-display-name.helper';
+import {
   CreateDispatchRouteDto,
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
@@ -27,6 +31,7 @@ import {
   computeRouteTotals,
   buildRouteReconciliation,
   deriveStopIsPrepaid,
+  derivePendingAmount,
   resolveIsPrepaid,
   RouteReconciliation,
   ReconciliationStopInput,
@@ -75,12 +80,22 @@ const DISPATCH_ROUTE_INCLUDE = {
             select: {
               id: true,
               remaining_balance: true,
+              payment_form: true,
+              credit_type: true,
               shipping_address_snapshot: true,
             },
           },
           // Withholding-agent flag drives the UI banner + the backend
           // re-validation in route-flow.service.settleStop().
-          customer: { select: { is_withholding_agent: true } },
+          customer: {
+            select: {
+              is_withholding_agent: true,
+              // Live name fallback for legacy notes whose snapshot is blank.
+              legal_name: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
         },
       },
       settled_by_user: {
@@ -129,6 +144,9 @@ const MAP_STOPS_INCLUDE = {
           id: true,
           customer_id: true,
           customer_name: true,
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
           customer_address: true,
           order: {
             select: {
@@ -171,6 +189,7 @@ interface MapStopDispatchNote {
   id: number;
   customer_id: number | null;
   customer_name: string | null;
+  customer: CustomerNameSource | null;
   customer_address: Prisma.JsonValue | null;
   order: {
     shipping_address_id: number | null;
@@ -720,12 +739,20 @@ export class DispatchRoutesService {
     const stops_with_alias = (route.stops ?? []).map((stop: any) => {
       const dn = stop.dispatch_note ?? null;
       const is_prepaid = deriveStopIsPrepaid(stop);
-      if (!dn) return { ...stop, is_prepaid };
+      // Live amount still to collect on this stop (planilla UI reads this, not
+      // dispatch_note.grand_total): 0 when the order is already paid.
+      const pending_amount = derivePendingAmount(stop);
+      if (!dn) return { ...stop, is_prepaid, pending_amount };
       return {
         ...stop,
         is_prepaid,
+        pending_amount,
         dispatch_note: {
           ...dn,
+          customer_name: resolveCustomerSnapshotName(
+            dn.customer_name,
+            dn.customer,
+          ),
           customer_is_withholding_agent:
             dn.customer?.is_withholding_agent ?? false,
         },
@@ -1305,6 +1332,9 @@ export class DispatchRoutesService {
         id: true,
         dispatch_number: true,
         customer_name: true,
+        customer: {
+          select: { legal_name: true, first_name: true, last_name: true },
+        },
         grand_total: true,
         status: true,
         needs_collection: true,
@@ -1319,7 +1349,7 @@ export class DispatchRoutesService {
       .map((n) => ({
         id: n.id,
         dispatch_number: n.dispatch_number,
-        customer_name: n.customer_name,
+        customer_name: resolveCustomerSnapshotName(n.customer_name, n.customer),
         grand_total: n.grand_total,
         status: n.status,
         needs_collection: n.needs_collection,
@@ -1380,7 +1410,11 @@ export class DispatchRoutesService {
     // (results are Redis-cached anyway, so warm stops are effectively free).
     for (const stop of route.stops as unknown as MapStopSource[]) {
       const resolved = await this.resolveStopCoordinates(stop);
-      const customerName = stop.dispatch_note?.customer_name ?? null;
+      const customerName =
+        resolveCustomerSnapshotName(
+          stop.dispatch_note?.customer_name,
+          stop.dispatch_note?.customer,
+        ) || null;
       const isDelivered =
         stop.status === dispatch_route_stop_status_enum.delivered;
       const hasCoords = resolved.lat != null && resolved.lng != null;

@@ -54,6 +54,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { assertOrderNotInvoiceLocked } from '../utils/invoice-lock.util';
 import { Prisma, order_delivery_type_enum, order_state_enum, payment_methods_type_enum, payments_state_enum } from '@prisma/client';
 import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -1817,6 +1818,19 @@ export class OrderFlowService {
       `Order #${orderId} promoted from draft${alreadyClaimedForPayment ? ' under payment claim' : ' to created'}`,
     );
     return true;
+  }
+
+  /**
+   * Facturar a crédito una orden guardada sin cobrar (POS «Guardar»): la saca
+   * de `draft` a `created` con la MISMA reserva de stock que el cobro, para que
+   * una orden facturada nunca quede sin existencias apartadas. Idempotente: si
+   * ya no es `draft` devuelve `false` y no toca nada.
+   */
+  async promoteDraftForCreditInvoicing(
+    orderId: number,
+    storeId: number,
+  ): Promise<boolean> {
+    return this.promoteDraftToCreated(orderId, storeId);
   }
 
   /**
@@ -5496,6 +5510,8 @@ export class OrderFlowService {
     if (orderBlock) {
       throw new VendixHttpException(orderBlock.code, orderBlock.message);
     }
+    // Con factura electrónica vigente la línea queda congelada: nota crédito.
+    await assertOrderNotInvoiceLocked(this.prisma, orderId);
 
     // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
     //    filtrar nada de otra orden/tenant, igual que `deliverOrderItem`).
@@ -6134,6 +6150,7 @@ export class OrderFlowService {
         { state: order.state },
       );
     }
+    await assertOrderNotInvoiceLocked(this.prisma, orderId);
 
     // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
     //    filtrar nada de otra orden/tenant, igual que el seam).
@@ -6752,6 +6769,38 @@ export class OrderFlowService {
   }
 
   /**
+   * Scales a retefuente/reteiva/reteica breakdown so it sums exactly to
+   * `target` (cents). Identity when it already does; when `target` is smaller
+   * (withholding capped to the balance) each part is scaled proportionally and
+   * the rounding remainder goes to the largest part, so the accounting entry
+   * always matches the amount applied to the order and the AR.
+   */
+  private scaleWithholdingBreakdown(
+    breakdown: { retefuente?: number; reteiva?: number; reteica?: number } | undefined,
+    target: number,
+  ): { retefuente?: number; reteiva?: number; reteica?: number } {
+    const keys = ['retefuente', 'reteiva', 'reteica'] as const;
+    const parts = keys
+      .map((k) => ({ k, v: Math.round(Number(breakdown?.[k] || 0) * 100) }))
+      .filter((p) => p.v > 0);
+    const targetCents = Math.round(target * 100);
+    const sum = parts.reduce((a, p) => a + p.v, 0);
+    if (parts.length === 0) return { retefuente: targetCents / 100 };
+    const scaled = parts.map((p) => ({
+      k: p.k,
+      v: sum === targetCents ? p.v : Math.floor((p.v * targetCents) / sum),
+    }));
+    const diff = targetCents - scaled.reduce((a, p) => a + p.v, 0);
+    if (diff !== 0) {
+      scaled.sort((x, y) => y.v - x.v);
+      scaled[0].v += diff;
+    }
+    const out: { retefuente?: number; reteiva?: number; reteica?: number } = {};
+    for (const p of scaled) if (p.v > 0) out[p.k] = p.v / 100;
+    return out;
+  }
+
+  /**
    * Shared COD payment helper (dispatch route AND standalone dispatch note).
    *
    * Extracted from `PaymentFromDispatchRouteListener.applyCodPayment` so both
@@ -6778,6 +6827,18 @@ export class OrderFlowService {
     stopId?: number;
     currency?: string;
     paymentMethod?: string;
+    /**
+     * Customer withholding (retención sufrida) declared on the route stop.
+     * Only honored for credit-sale orders (payment_form '2'): it settles that
+     * much of the balance/installments/AR on top of the cash `amount`. COD
+     * ignores it (unchanged behavior).
+     */
+    withholdingAmount?: number;
+    withholdingBreakdown?: {
+      retefuente?: number;
+      reteiva?: number;
+      reteica?: number;
+    };
     /**
      * Origen del `order_events`. Los dos llamadores reales son listeners
      * (`DispatchNoteEventsListener` y `PaymentFromDispatchRouteListener`),
@@ -6822,6 +6883,9 @@ export class OrderFlowService {
         total_paid: true,
         remaining_balance: true,
         customer_id: true,
+        order_number: true,
+        payment_form: true,
+        credit_type: true,
         active_financial_split_id: true,
         stores: { select: { organization_id: true } },
       },
@@ -6836,8 +6900,39 @@ export class OrderFlowService {
     assertNoActiveFinancialSplit(order);
 
     const remaining = Number(order.remaining_balance);
-    const applied = Math.min(input.amount, Math.max(remaining, 0));
-    const newRemaining = Math.max(remaining - input.amount, 0);
+    const isCreditSale = order.payment_form === '2';
+    // A credit sale is only settled by a ROUTE collection (stopId present). Any
+    // other caller (e.g. `dispatch_note.invoiced`) must not fake a payment: the
+    // debt stays in cartera.
+    if (isCreditSale && input.stopId == null) {
+      this.logger.debug(
+        `[applyDispatchCodPayment] credit order #${order.id} outside a route collection — NO-OP (${input.correlationKey})`,
+      );
+      return;
+    }
+    let applied: number;
+    let withholdingApplied = 0;
+    let newRemaining: number;
+    if (isCreditSale) {
+      // Credit sale: the customer's withholding settles balance FIRST; the cash
+      // is then capped to what is left (any excess stays as route cash
+      // variance, like COD over-collection). Cash `applied` is the payment
+      // amount; the balance drops by cash + withholding.
+      withholdingApplied = Math.min(
+        Math.max(Number(input.withholdingAmount || 0), 0),
+        Math.max(remaining, 0),
+      );
+      applied = Math.min(
+        Math.max(input.amount, 0),
+        Math.max(remaining - withholdingApplied, 0),
+      );
+      newRemaining = Math.max(remaining - applied - withholdingApplied, 0);
+      if (!(applied > 0) && !(withholdingApplied > 0)) return;
+    } else {
+      if (!(input.amount > 0)) return;
+      applied = Math.min(input.amount, Math.max(remaining, 0));
+      newRemaining = Math.max(remaining - input.amount, 0);
+    }
     const newTotalPaid = Number(order.total_paid) + applied;
 
     // 4. Record the payment row + decrement the balance, mirroring
@@ -6850,6 +6945,11 @@ export class OrderFlowService {
     //    helper never transitions `orders.state` (the reconciler does), so
     //    no `state_changed` is recorded here.
     const paymentMethod = input.paymentMethod ?? 'cash';
+    // Credit sale (payment_form '2'): the collection also settles installments
+    // (installments plan) and the receivable (AR), like `registerCreditPayment`
+    // but WITHOUT the cash-session gate — route cash settles at planilla close.
+    const isCreditOrder = isCreditSale;
+    const createdPayment: { id: number | null } = { id: null };
     await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payments.create({
         data: {
@@ -6879,6 +6979,15 @@ export class OrderFlowService {
         },
       });
 
+      if (isCreditOrder && order.credit_type === 'installments') {
+        await this.allocateCreditPaymentToInstallments(
+          tx,
+          order.id,
+          applied + withholdingApplied,
+        );
+      }
+      createdPayment.id = payment.id;
+
       await this.orderHistoryService?.record(tx, {
         orderId: order.id,
         storeId: input.storeId,
@@ -6895,6 +7004,37 @@ export class OrderFlowService {
         },
       });
     });
+
+    // Post-commit: the AR listener applies the payment to the order's
+    // receivable (same event `registerCreditPayment` emits). Idempotent per
+    // correlation key because we returned early above on a retry.
+    if (isCreditOrder && createdPayment.id != null) {
+      this.eventEmitter.emit('installment_payment.received', {
+        credit_id: order.id,
+        installment_id: 0,
+        payment_id: createdPayment.id,
+        amount: applied,
+        store_id: input.storeId,
+        organization_id: order.stores?.organization_id ?? null,
+        credit_number: order.order_number,
+        installment_number: 0,
+        customer_id: order.customer_id,
+        order_id: order.id,
+        user_id: RequestContextService.getUserId(),
+        // Withholding settled with this collection (route stop). Consumed by
+        // the AR listener (AR drops by amount + W) and the accounting listener
+        // (extra DR retención / CR CxC entry). Omitted when W = 0.
+        ...(withholdingApplied > 0
+          ? {
+              withholding_amount: withholdingApplied,
+              withholding_breakdown: this.scaleWithholdingBreakdown(
+                input.withholdingBreakdown,
+                withholdingApplied,
+              ),
+            }
+          : {}),
+      });
+    }
 
     this.logger.log(
       `[applyDispatchCodPayment] COD order #${order.id} settled via ${input.correlationKey}: applied=${applied} remaining=${
@@ -8170,6 +8310,69 @@ export class OrderFlowService {
   }
 
   /**
+   * Distributes a credit payment over the order's installments: the explicitly
+   * requested installment first (if it belongs to the order), then the pending
+   * / partial / overdue ones by ascending installment number. Shared by
+   * `registerCreditPayment` (cashier, cash-session gated) and
+   * `applyDispatchCodPayment` (route collection, no cash-session gate).
+   * Runs inside the caller's transaction; never touches orders/payments/AR.
+   */
+  private async allocateCreditPaymentToInstallments(
+    tx: any,
+    orderId: number,
+    paymentAmount: number,
+    installmentId?: number,
+  ): Promise<void> {
+    let remainingPayment = paymentAmount;
+    if (installmentId) {
+      const installment = await tx.order_installments.findFirst({
+        where: { id: installmentId, order_id: orderId },
+      });
+      if (installment) {
+        const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+        const newPaid = Number(installment.amount_paid) + payable;
+        const newInstBalance = Number(installment.remaining_balance) - payable;
+        await tx.order_installments.update({
+          where: { id: installment.id },
+          data: {
+            amount_paid: Math.round(newPaid * 100) / 100,
+            remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+            state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+            paid_at: newInstBalance <= 0.01 ? new Date() : null,
+          },
+        });
+        remainingPayment -= payable;
+      }
+    }
+
+    if (remainingPayment > 0.01) {
+      const pendingInstallments = await tx.order_installments.findMany({
+        where: {
+          order_id: orderId,
+          state: { in: ['pending', 'partial', 'overdue'] },
+        },
+        orderBy: { installment_number: 'asc' },
+      });
+      for (const installment of pendingInstallments) {
+        if (remainingPayment <= 0.01) break;
+        const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+        const newPaid = Number(installment.amount_paid) + payable;
+        const newInstBalance = Number(installment.remaining_balance) - payable;
+        await tx.order_installments.update({
+          where: { id: installment.id },
+          data: {
+            amount_paid: Math.round(newPaid * 100) / 100,
+            remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+            state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+            paid_at: newInstBalance <= 0.01 ? new Date() : null,
+          },
+        });
+        remainingPayment -= payable;
+      }
+    }
+  }
+
+  /**
    * Register a credit payment for an order with payment_form = '2'
    * Supports partial payments and installment-based credit
    */
@@ -8309,53 +8512,12 @@ export class OrderFlowService {
       });
 
       if (order.credit_type === 'installments') {
-        let remainingPayment = paymentAmount;
-        if (dto.installment_id) {
-          const installment = await tx.order_installments.findFirst({
-            where: { id: dto.installment_id, order_id: orderId },
-          });
-          if (installment) {
-            const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
-            const newPaid = Number(installment.amount_paid) + payable;
-            const newInstBalance = Number(installment.remaining_balance) - payable;
-            await tx.order_installments.update({
-              where: { id: installment.id },
-              data: {
-                amount_paid: Math.round(newPaid * 100) / 100,
-                remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
-                state: newInstBalance <= 0.01 ? 'paid' : 'partial',
-                paid_at: newInstBalance <= 0.01 ? new Date() : null,
-              },
-            });
-            remainingPayment -= payable;
-          }
-        }
-
-        if (remainingPayment > 0.01) {
-          const pendingInstallments = await tx.order_installments.findMany({
-            where: {
-              order_id: orderId,
-              state: { in: ['pending', 'partial', 'overdue'] },
-            },
-            orderBy: { installment_number: 'asc' },
-          });
-          for (const installment of pendingInstallments) {
-            if (remainingPayment <= 0.01) break;
-            const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
-            const newPaid = Number(installment.amount_paid) + payable;
-            const newInstBalance = Number(installment.remaining_balance) - payable;
-            await tx.order_installments.update({
-              where: { id: installment.id },
-              data: {
-                amount_paid: Math.round(newPaid * 100) / 100,
-                remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
-                state: newInstBalance <= 0.01 ? 'paid' : 'partial',
-                paid_at: newInstBalance <= 0.01 ? new Date() : null,
-              },
-            });
-            remainingPayment -= payable;
-          }
-        }
+        await this.allocateCreditPaymentToInstallments(
+          tx,
+          orderId,
+          paymentAmount,
+          dto.installment_id,
+        );
       }
       return { payment, newTotalPaid, newRemainingBalance };
     });

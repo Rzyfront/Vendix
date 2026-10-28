@@ -28,6 +28,7 @@ import { OrdersService } from '../../../orders/services/orders.service';
 import { Order } from '../../../orders/interfaces/order.interface';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
 import { WizardStepSectionComponent } from './wizard-step-section.component';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 /**
  * Fila enriquecida para tabla/cards. Extiende Order con campos PLANOS
@@ -464,9 +465,7 @@ export class OrderStepComponent {
     return this.orders().map((o: any) => {
       const items = Array.isArray(o?.order_items) ? o.order_items : [];
       const u = o?.users;
-      const name = u
-        ? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim()
-        : '';
+      const name = u ? customerDisplayName(u, '') : '';
 
       return {
         ...o,

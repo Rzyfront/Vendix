@@ -1501,6 +1501,16 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'The selected customer does not belong to the current store',
   },
+  // Orden con factura electrónica vigente (validated/sent/accepted/rejected):
+  // sus líneas, precios, descuentos y envío quedan congelados; la corrección
+  // es la nota crédito. Abonos, despacho y notas siguen permitidos. 409 por
+  // el mismo motivo que `ORD_TITULAR_INVOICED_001`.
+  ORD_INVOICED_LOCKED_001: {
+    code: 'ORD_INVOICED_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden ya tiene factura electrónica. Para corregirla emite una nota crédito.',
+  },
   // Release-853 paso 10 — la orden ya tiene factura `sales_invoice` vigente
   // (cualquier estado fuera de draft/voided/cancelled) y su adquiriente es
   // inmutable; la vía de corrección es la nota crédito. 409 porque la
@@ -2332,6 +2342,63 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
+  },
+  // Facturar a crédito una orden sin cobrar: el `credit` del cuerpo del emit
+  // no se puede honrar. 409 (estado de la orden) salvo la fecha, que es 400.
+  INVOICING_CREDIT_CUSTOMER_REQUIRED_001: {
+    code: 'INVOICING_CREDIT_CUSTOMER_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Asigna un cliente identificado para facturar a crédito.',
+  },
+  INVOICING_CREDIT_PARTIAL_PAYMENT_001: {
+    code: 'INVOICING_CREDIT_PARTIAL_PAYMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene abonos; registra el saldo o anula los abonos para facturar a crédito.',
+  },
+  INVOICING_CREDIT_ORDER_STATE_001: {
+    code: 'INVOICING_CREDIT_ORDER_STATE_001',
+    httpStatus: 409,
+    devMessage: 'La orden está cancelada o reembolsada y no se puede facturar a crédito.',
+  },
+  INVOICING_CREDIT_DUE_DATE_001: {
+    code: 'INVOICING_CREDIT_DUE_DATE_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de vencimiento no puede ser anterior a hoy.',
+  },
+  // Facturación masiva de órdenes: el titular resuelto al ejecutar ya no es el
+  // que se mostró en la vista previa.
+  INVOICING_BULK_HOLDER_CHANGED_001: {
+    code: 'INVOICING_BULK_HOLDER_CHANGED_001',
+    httpStatus: 409,
+    devMessage: 'El titular cambió desde la vista previa; vuelve a revisar.',
+  },
+  // Lease por orden (Redis): otra operación (facturación, transición, ruta)
+  // ya la está procesando.
+  ORDERS_BULK_LOCKED_001: {
+    code: 'ORDERS_BULK_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden se está procesando en otra operación; inténtalo cuando termine.',
+  },
+  INVOICING_BULK_HOLDER_INCOMPLETE_001: {
+    code: 'INVOICING_BULK_HOLDER_INCOMPLETE_001',
+    httpStatus: 409,
+    devMessage:
+      'El cliente de la orden no tiene datos suficientes para una factura nominativa.',
+  },
+  INVOICING_BULK_EMISSION_FAILED_001: {
+    code: 'INVOICING_BULK_EMISSION_FAILED_001',
+    httpStatus: 422,
+    devMessage: 'La emisión de la factura no se completó.',
+  },
+  // Facturar una orden cuyo cliente (o datos de invitado) no alcanza para una
+  // factura nominativa: la factura saldría a Consumidor final en silencio.
+  INVOICING_HOLDER_INCOMPLETE_001: {
+    code: 'INVOICING_HOLDER_INCOMPLETE_001',
+    httpStatus: 409,
+    devMessage:
+      'El cliente no tiene los datos completos para facturar a su nombre; la factura saldría a Consumidor final.',
   },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',
@@ -4716,6 +4783,24 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
+  },
+  DISPATCH_ROUTE_STOP_ALREADY_PAID: {
+    code: 'DISPATCH_ROUTE_STOP_ALREADY_PAID',
+    httpStatus: 400,
+    devMessage:
+      'The stop order has no pending balance; it must be settled with collected 0',
+  },
+  DISPATCH_ROUTE_STOP_ALREADY_SETTLED: {
+    code: 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED',
+    httpStatus: 409,
+    devMessage:
+      'The stop is already settled (delivered/released) and cannot be settled again with a different result',
+  },
+  DISPATCH_ROUTE_COLLECTION_MISMATCH: {
+    code: 'DISPATCH_ROUTE_COLLECTION_MISMATCH',
+    httpStatus: 400,
+    devMessage:
+      'Collected + advance + withholding must equal the pending balance of the stop (COD / free credit), or not exceed it (installments credit)',
   },
   DISPATCH_ROUTE_NOT_RESPONSIBLE: {
     code: 'DISPATCH_ROUTE_NOT_RESPONSIBLE',
@@ -7437,3 +7522,21 @@ export type FiscalScopeBlockerCode =
   (typeof FiscalScopeBlockerCodes)[keyof typeof FiscalScopeBlockerCodes];
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;
+
+/**
+ * Every entry of {@link ErrorCodes} as a flat list. Use this (or
+ * {@link findErrorCodeEntry}) instead of `Object.values(ErrorCodes)`: the
+ * literal union of thousands of entries makes `tsc` fail with TS2590
+ * ("Expression produces a union type that is too complex to represent").
+ */
+export const ERROR_CODE_ENTRIES: readonly ErrorCodeEntry[] = Object.values(
+  ErrorCodes as Record<string, ErrorCodeEntry>,
+);
+
+/** Entry whose `code` matches, or `undefined`. */
+export function findErrorCodeEntry(
+  code: string | null | undefined,
+): ErrorCodeEntry | undefined {
+  if (!code) return undefined;
+  return ERROR_CODE_ENTRIES.find((entry) => entry.code === code);
+}

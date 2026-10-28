@@ -509,6 +509,66 @@ describe('OrdersService', () => {
       );
     });
 
+    describe('invoice_status y has_customer (facturación masiva)', () => {
+      const SALE = ['sales_invoice', 'export_invoice', 'pos_equivalent_document'];
+      const doc = (statuses: string[]) => ({
+        invoices: {
+          some: {
+            invoice_type: { in: SALE },
+            financial_account_id: null,
+            status: { in: statuses },
+          },
+        },
+      });
+
+      it('invoice_status=none: sin documento de venta vigente', async () => {
+        await service.findAll({ invoice_status: 'none' } as any);
+        expect(lastWhere().AND).toEqual([
+          { NOT: doc(['validated', 'sent', 'accepted', 'rejected']) },
+        ]);
+      });
+
+      it('invoice_status=invoiced: con documento validated|sent|accepted', async () => {
+        await service.findAll({ invoice_status: 'invoiced' } as any);
+        expect(lastWhere().AND).toEqual([doc(['validated', 'sent', 'accepted'])]);
+      });
+
+      it('invoice_status=rejected: rechazado y sin otro documento vigente posterior', async () => {
+        await service.findAll({ invoice_status: 'rejected' } as any);
+        expect(lastWhere().AND).toEqual([
+          doc(['rejected']),
+          { NOT: doc(['validated', 'sent', 'accepted']) },
+        ]);
+      });
+
+      it('has_customer=true exige customer_id; false exige NULL', async () => {
+        await service.findAll({ has_customer: true } as any);
+        expect(lastWhere().customer_id).toEqual({ not: null });
+        mockPrismaService.orders.findMany.mockClear();
+        await service.findAll({ has_customer: false } as any);
+        expect(lastWhere().customer_id).toBeNull();
+      });
+
+      it('sin los filtros nuevos el where no cambia (AND ausente)', async () => {
+        await service.findAll({} as any);
+        expect(lastWhere().AND).toBeUndefined();
+        expect(lastWhere().customer_id).toBeUndefined();
+      });
+
+      it('se combinan con el AND de payment_method_id sin pisarlo y el conteo usa el mismo where', async () => {
+        await service.findAll({ payment_method_id: 17, invoice_status: 'invoiced' } as any);
+        expect(lastWhere().AND).toHaveLength(2);
+        expect(lastWhere().AND[0].payments).toBeDefined();
+        expect(lastWhere().AND[1]).toEqual(doc(['validated', 'sent', 'accepted']));
+        expect(mockPrismaService.orders.count).toHaveBeenCalledWith({ where: lastWhere() });
+      });
+
+      it('customer_id explícito gana sobre has_customer', async () => {
+        await service.findAll({ customer_id: 9, has_customer: false } as any);
+        expect(lastWhere().customer_id).toBe(9);
+      });
+    });
+
     it('A-bis) NO agrega `payments` cuando payment_status viene undefined', async () => {
       await service.findAll({} as any);
 

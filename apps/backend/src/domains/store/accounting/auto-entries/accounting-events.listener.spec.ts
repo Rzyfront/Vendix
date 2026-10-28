@@ -647,3 +647,111 @@ describe('AccountingEventsListener — hotel folio (lodging)', () => {
     await expect(failing.listener.handleLodgingFolioSaleRecognized(saleEvent)).resolves.toBeUndefined();
   });
 });
+
+describe('AccountingEventsListener payment.received — route collection on a credit order', () => {
+  const build = () => {
+    const auto_entry_service = {
+      onPaymentReceived: jest.fn().mockResolvedValue({ id: 1 }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const fiscal_gate = { isSubflowEnabled: jest.fn().mockResolvedValue(true) };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      {} as any,
+      {} as any,
+    );
+    return { listener, auto_entry_service };
+  };
+  const routeEvent = {
+    payment_id: null as any,
+    source_type: 'dispatch_route',
+    store_id: 2,
+    organization_id: 1,
+    order_id: null as any,
+    amount: 150,
+    currency: 'COP',
+    payment_method: 'cash',
+  };
+
+  it('credit order: the route payment.received books NO entry (installment_payment.received books the single DR Caja / CR CxC)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, credit_order_collection: true } as any);
+    expect(auto_entry_service.onPaymentReceived).not.toHaveBeenCalled();
+  });
+
+  it('COD route collection with a resolved order: passes the real order id and the route flag to the entry', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, accounting_order_id: 55 } as any);
+    expect(auto_entry_service.onPaymentReceived).toHaveBeenCalledWith(
+      expect.objectContaining({ order_id: 55, route_collection: true }),
+    );
+  });
+
+  it('non-route payment: no route flag (unchanged)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent, source_type: undefined, order_id: 9, payment_id: 3 } as any);
+    const arg = auto_entry_service.onPaymentReceived.mock.calls[0][0];
+    expect(arg.order_id).toBe(9);
+    expect(arg.route_collection).toBeUndefined();
+  });
+
+  it('COD route collection: still books as before', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handlePaymentReceived({ ...routeEvent } as any);
+    expect(auto_entry_service.onPaymentReceived).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AccountingEventsListener installment_payment.received — withholding on route credit collections', () => {
+  const build = () => {
+    const auto_entry_service = {
+      onInstallmentPaymentReceived: jest.fn().mockResolvedValue({ id: 1 }),
+      onInstallmentWithholdingApplied: jest.fn().mockResolvedValue({ id: 2 }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      { isSubflowEnabled: jest.fn().mockResolvedValue(true) } as any,
+      {} as any,
+      {} as any,
+    );
+    return { listener, auto_entry_service };
+  };
+  const ev = {
+    credit_id: 5, installment_id: 0, payment_id: 77, amount: 100, store_id: 2,
+    credit_number: 'ORD-5', installment_number: 0, customer_id: 9, order_id: 5,
+    organization_id: 1,
+  };
+
+  it('W > 0: books the cash entry AND the withholding entry', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived({
+      ...ev, withholding_amount: 20, withholding_breakdown: { retefuente: 20 },
+    } as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(auto_entry_service.onInstallmentWithholdingApplied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_id: 77, order_id: 5, breakdown: { retefuente: 20 }, organization_id: 1, store_id: 2,
+      }),
+    );
+  });
+
+  it('C = 0, W > 0: only the withholding entry (no zero-amount cash entry)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived({
+      ...ev, amount: 0, withholding_amount: 20, withholding_breakdown: { retefuente: 20 },
+    } as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).not.toHaveBeenCalled();
+    expect(auto_entry_service.onInstallmentWithholdingApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it('W = 0: only the cash entry (unchanged)', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleInstallmentPaymentReceived(ev as any);
+    expect(auto_entry_service.onInstallmentPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(auto_entry_service.onInstallmentWithholdingApplied).not.toHaveBeenCalled();
+  });
+});

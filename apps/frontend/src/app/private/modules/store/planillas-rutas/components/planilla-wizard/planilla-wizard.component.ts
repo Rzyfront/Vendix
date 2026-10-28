@@ -51,6 +51,7 @@ import {
   CreateFromOrdersBatchDto,
   CreateFromOrdersBatchResultItem,
 } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 interface AvailableNote {
   id: number;
@@ -998,7 +999,7 @@ export class PlanillaWizardComponent {
   /** Nombre legible del cliente de una orden (fallback a "Cliente #id"). */
   orderCustomerName(order: Order): string {
     const u = order.users;
-    const name = u ? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() : '';
+    const name = u ? customerDisplayName(u, '') : '';
     return name || (order.customer_id ? `Cliente #${order.customer_id}` : 'Sin cliente');
   }
 

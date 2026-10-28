@@ -63,6 +63,7 @@ describe('OrderFlowService — sincronía cancelado/entregado orden↔cocina', (
       },
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findFirst: jest.fn().mockResolvedValue({
           id: ITEM_ID,

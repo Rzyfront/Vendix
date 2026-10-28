@@ -1947,6 +1947,20 @@
               >
                 Factura Electrónica
               </h2>
+              @if (invoiceLocked()) {
+                <div
+                  class="mb-2 flex items-start gap-2 rounded-lg border border-border bg-surface p-2.5 text-xs text-text-secondary"
+                  role="status"
+                >
+                  <app-icon name="lock" size="14" class="mt-0.5 shrink-0"></app-icon>
+                  <div class="min-w-0">
+                    @if (creditInvoiceLabel(); as creditLabel) {
+                      <p class="font-semibold text-text-primary">{{ creditLabel }}</p>
+                    }
+                    <p>{{ invoiceLockedMessage }}</p>
+                  </div>
+                </div>
+              }
               <!-- Orden dividida: resumen + una tarjeta por cuenta. Orden
                    simple: una tarjeta. Cada tarjeta es `app-invoice-status-card`
                    (número, estado, total, cliente, fecha y sólo íconos con
@@ -3202,6 +3216,24 @@
       (selected)="onDispatchMethodSelected($event)"
       (closed)="showDispatchSelector.set(false)"
     ></app-dispatch-method-selector-modal>
+
+    <!-- FACTURAR A CRÉDITO (orden sin pagos: pide el vencimiento) -->
+    <app-credit-invoice-modal
+      [(isOpen)]="showCreditModal"
+      [customerName]="customerDisplayName()"
+      [balance]="creditBalance()"
+      [busy]="isEmittingInvoice()"
+      (confirmed)="onCreditInvoiceConfirmed($event)"
+    ></app-credit-invoice-modal>
+
+    <!-- DATOS DEL CLIENTE INCOMPLETOS (409 de la emisión: completar o Consumidor final) -->
+    <app-customer-holder-completion-modal
+      [(isOpen)]="showHolderModal"
+      [issue]="holderIssue()"
+      [busy]="isEmittingInvoice()"
+      (saved)="onHolderCompleted()"
+      (useFinalConsumer)="onHolderUseFinalConsumer()"
+    ></app-customer-holder-completion-modal>
 
     <!-- COURIER NAME (despacho rápido: "Entrega completa" pide el domiciliario) -->
     <app-courier-name-modal

@@ -1,5 +1,7 @@
 export {
   ErrorCodes,
+  ERROR_CODE_ENTRIES,
+  findErrorCodeEntry,
   ErrorCodeEntry,
   ErrorCodeKey,
   FiscalScopeBlockerCode,

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException, ErrorCodeEntry, ErrorCodes } from '@common/errors';
+import { VendixHttpException, ErrorCodes, findErrorCodeEntry } from '@common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import {
@@ -2120,11 +2120,8 @@ export class OrderItemChangesService {
     const line = plan.preview.lines.find((l) => l.blocked);
     if (line) {
       const code = plan.blockedCodes.get(line.key);
-      const codes = Object.values(ErrorCodes) as ErrorCodeEntry[];
-      const def =
-        codes.find((c) => c.code === code) ??
-        ErrorCodes.ORD_ITEM_CHANGES_INVALID_001;
-      return new VendixHttpException(def as any, line.blocked_reason ?? undefined, {
+      const def = findErrorCodeEntry(code) ?? ErrorCodes.ORD_ITEM_CHANGES_INVALID_001;
+      return new VendixHttpException(def, line.blocked_reason ?? undefined, {
         key: line.key,
         order_item_id: line.order_item_id,
       });

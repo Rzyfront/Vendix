@@ -17,6 +17,15 @@
   />
 
   <div class="flex flex-col gap-3 p-2 md:gap-4 md:p-4">
+    @if (invoiceRunning()) {
+      <p
+        class="flex items-start gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[11px] leading-tight text-text-primary"
+        role="status"
+      >
+        <app-icon name="loader-2" [size]="13" class="mt-px shrink-0 text-primary" [spin]="true" />
+        {{ invoiceLockReason }}. Las demás operaciones se habilitan cuando termine.
+      </p>
+    }
     @if (blockedReason()) {
       <p
         class="flex items-start gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-tight text-text-secondary"
@@ -73,33 +82,16 @@
             [value]="searchTerm()"
             (input)="onSearchChange($any($event.target).value)"
           />
-          <select
-            class="rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
-            [value]="selectedStatus()"
-            (change)="onStatusChange($any($event.target).value)"
-          >
-            <option value="">Todos los estados</option>
-            <option value="draft">Borrador</option>
-            <option value="created">Creada</option>
-            <option value="pending_payment">Pago Pendiente</option>
-            <option value="processing">Procesando</option>
-            <option value="shipped">Enviada</option>
-            <option value="delivered">Entregada</option>
-            <option value="cancelled">Cancelada</option>
-            <option value="finished">Finalizada</option>
-          </select>
-          <select
-            class="rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
-            [value]="selectedChannel()"
-            (change)="onChannelChange($any($event.target).value)"
-          >
-            <option value="">Todos los canales</option>
-            <option value="pos">POS</option>
-            <option value="ecommerce">Online</option>
-            <option value="agent">IA</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="marketplace">Marketplace</option>
-          </select>
+          <app-options-dropdown
+            [filters]="filterConfigs"
+            [filterValues]="filterValues()"
+            [isLoading]="fetching()"
+            title="Filtros"
+            triggerLabel="Filtros"
+            triggerIcon="filter"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearFilters()"
+          />
         </div>
 
         @if (fetching()) {
@@ -372,7 +364,7 @@
                   <app-button
                     [variant]="action.variant === 'primary' ? 'primary' : 'outline'"
                     size="xsm"
-                    [disabled]="selectedCount() === 0 || running()"
+                    [disabled]="selectedCount() === 0 || actionsLocked()"
                     (clicked)="onActionClick(action)"
                   >
                     <app-icon slot="icon" [name]="action.icon" [size]="13" />
@@ -415,7 +407,7 @@
                   <app-button
                     variant="danger"
                     size="xsm"
-                    [disabled]="selectedCount() === 0 || running()"
+                    [disabled]="selectedCount() === 0 || actionsLocked()"
                     (clicked)="onActionClick(action)"
                   >
                     <app-icon slot="icon" [name]="action.icon" [size]="13" />
@@ -449,6 +441,13 @@
     cerrarse, así que reabrir nunca muestra el veredicto de una selección
     anterior.
   -->
+  <app-orders-bulk-invoice-modal
+    [(modalOpen)]="invoiceOpen"
+    [(invoiceRunning)]="invoiceRunning"
+    [ids]="selectedIdList()"
+    (completed)="onInvoiceCompleted($event)"
+  />
+
   <app-orders-bulk-confirm-modal
     [(modalOpen)]="confirmOpen"
     [ids]="selectedIdList()"

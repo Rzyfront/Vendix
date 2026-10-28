@@ -1104,14 +1104,7 @@ export class InvoiceFlowService {
       },
     });
     if (!order || order.payment_form === '2') return null;
-    const settled = (order.payments ?? []).reduce(
-      (sum, payment) =>
-        ['succeeded', 'captured'].includes(String(payment.state))
-          ? sum.plus(payment.amount)
-          : sum,
-      new Prisma.Decimal(0),
-    );
-    const remaining = new Prisma.Decimal(order.grand_total).minus(settled);
+    const { remaining } = computeOrderUnpaidBalance(order);
     return remaining.greaterThanOrEqualTo(0.01) ? remaining.toFixed(2) : null;
   }
 
@@ -5502,4 +5495,28 @@ export class InvoiceFlowService {
 
     return retryable.some((pattern) => message.includes(pattern));
   }
+}
+
+/**
+ * Saldo de una orden: `grand_total` menos los pagos cobrados (`succeeded` /
+ * `captured`). Una sola definición para la puerta de pago de `validate()`/
+ * `send()` y para la decisión de facturar a crédito en el emit de un paso:
+ * si divergieran, la orden pasaría una puerta y toparía con la otra.
+ */
+export function computeOrderUnpaidBalance(order: {
+  grand_total?: Prisma.Decimal | number | string | null;
+  payments?: ReadonlyArray<{
+    state: unknown;
+    amount: Prisma.Decimal | number | string;
+  }> | null;
+}): { settled: Prisma.Decimal; remaining: Prisma.Decimal } {
+  const settled = (order.payments ?? []).reduce(
+    (sum, payment) =>
+      ['succeeded', 'captured'].includes(String(payment.state))
+        ? sum.plus(payment.amount)
+        : sum,
+    new Prisma.Decimal(0),
+  );
+  const remaining = new Prisma.Decimal(order.grand_total ?? 0).minus(settled);
+  return { settled, remaining };
 }

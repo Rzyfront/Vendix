@@ -280,6 +280,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta orden tiene una factura electrónica aceptada por la DIAN. Emite primero la nota crédito correspondiente y luego cancela la orden.',
   ORD_CONFIRM_PAYMENT_NO_PAYMENT_001:
     'Esta orden no tiene un pago registrado. Usa Registrar pago con el monto y método recibidos.',
+  ORD_INVOICED_LOCKED_001:
+    'Esta orden ya tiene factura electrónica. Para corregirla emite una nota crédito.',
+  INVOICING_BULK_HOLDER_CHANGED_001:
+    'El titular cambió desde la vista previa; vuelve a revisar.',
+  INVOICING_HOLDER_INCOMPLETE_001:
+    'Al cliente le faltan datos para una factura electrónica nominativa. Complétalos o emite como Consumidor final.',
+  DISPATCH_ROUTE_STOP_ALREADY_PAID:
+    'Esta orden ya está pagada: no hay nada que recaudar. Entrégala con recaudo 0.',
+  DISPATCH_ROUTE_STOP_ALREADY_SETTLED:
+    'Esta parada ya fue liquidada con otro resultado.',
+  DISPATCH_ROUTE_COLLECTION_MISMATCH:
+    'El recaudo no cuadra con el saldo pendiente de la orden.',
+  ORDERS_BULK_LOCKED_001:
+    'Esta orden se está procesando en otra operación; inténtalo cuando termine.',
   INVOICING_ORDER_UNPAID_001:
     'La orden tiene saldo pendiente; registra el pago antes de emitir la factura, o márcala como venta a crédito.',
   ORD_ITEM_CANCEL_PAID_001:

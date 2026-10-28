@@ -412,6 +412,8 @@ const ROUTE_STATUS_LABEL: Record<string, string> = {
         [stop]="s"
         [grandTotal]="+(s.dispatch_note?.grand_total || 0)"
         [isPrepaid]="!!s.is_prepaid"
+        [pendingAmount]="s.pending_amount != null ? +s.pending_amount : null"
+        [busy]="actionLoading()"
         (close)="settleStop.set(null)"
         (submitted)="onSettle($event)"
       ></app-stop-settle-modal>
@@ -952,8 +954,18 @@ export class PlanillaRouteViewPageComponent {
           this.toast.success('Parada liquidada');
           this.reloadAll();
         },
-        error: (e: Error) => {
+        error: (e: Error & { errorCode?: string | null }) => {
           this.actionLoading.set(false);
+          if (
+            e?.errorCode === 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED' ||
+            /ya est[aá] '(delivered|rejected|released)'/.test(e?.message || '')
+          ) {
+            // Already settled elsewhere / double submit: refresh, not an error.
+            this.settleStop.set(null);
+            this.toast.info('La parada ya estaba liquidada');
+            this.reloadAll();
+            return;
+          }
           this.toast.error(e?.message || 'Error al liquidar la parada');
         },
       });

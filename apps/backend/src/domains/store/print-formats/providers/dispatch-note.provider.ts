@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { customerDisplayName } from '../../../../common/helpers/customer-display-name.helper';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
@@ -86,6 +87,7 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
             id: true,
             first_name: true,
             last_name: true,
+            legal_name: true,
             phone: true,
             document_number: true,
           },
@@ -152,7 +154,7 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         city: storeAddr.city,
       },
       customer: {
-        name: (note as any).customer_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Destinatario',
+        name: (note as any).customer_name?.trim() || customerDisplayName(customer, 'Destinatario'),
         tax_id: note.customer_tax_id || customer.document_number || undefined,
         phone: (note as any).customer_phone || customer.phone,
         address: customerAddress,
