@@ -34,6 +34,8 @@ describe('OrderFlowService — nota crédito total al cancelar (S5)', () => {
         ),
       },
     };
+    const lockTx = { $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]) };
+    prismaMock.$transaction = jest.fn(async (work: any) => work(lockTx));
     creditNotes = {
       createCreditNote: jest.fn().mockResolvedValue({ id: 950 }),
       issueNote: jest.fn().mockResolvedValue({ invoice: { id: 950, status: 'accepted' } }),
@@ -108,6 +110,33 @@ describe('OrderFlowService — nota crédito total al cancelar (S5)', () => {
     expect(creditNotes.createCreditNote).not.toHaveBeenCalled();
   });
 
+  describe('concurrent cancellations (release review #989, finding 3)', () => {
+    let tx: { $queryRaw: jest.Mock };
+
+    beforeEach(() => {
+      tx = { $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]) };
+      prismaMock.$transaction = jest.fn(async (work: any) => work(tx));
+    });
+
+    it('holds an order-scoped lock while it creates and issues the note', async () => {
+      await service.issueCancellationCreditNotes(ORDER, 'x');
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        creditNotes.createCreditNote.mock.invocationCallOrder[0],
+      );
+      expect(creditNotes.issueNote).toHaveBeenCalledWith(950);
+    });
+
+    it('a second cancellation while the first is emitting gets a typed 409 and creates no note', async () => {
+      tx.$queryRaw.mockResolvedValue([{ locked: false }]);
+      await expect(service.issueCancellationCreditNotes(ORDER, 'x')).rejects.toMatchObject({
+        errorCode: 'ORD_FISCAL_NOTE_IN_PROGRESS_001',
+      });
+      expect(creditNotes.createCreditNote).not.toHaveBeenCalled();
+      expect(creditNotes.issueNote).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cancelOrder wiring', () => {
     const SENTINEL = new Error('tx-reached');
 
@@ -148,6 +177,28 @@ describe('OrderFlowService — nota crédito total al cancelar (S5)', () => {
     it('keeps today\'s behaviour (no note) without the confirmation', async () => {
       arrange();
       await expect(service.cancelOrder(ORDER_ID, { reason: 'abc' })).rejects.toBe(SENTINEL);
+      expect(service.issueCancellationCreditNotes).not.toHaveBeenCalled();
+    });
+
+    it('never emits a note when a partially refunded payment will block the cancellation (finding 2)', async () => {
+      arrange();
+      service.getOrder.mockResolvedValue({
+        ...ORDER, state: 'created', internal_notes: null,
+        delivered_at: null, active_financial_split_id: null, order_items: [],
+        payments: [{ id: 71, state: 'partially_refunded', amount: 1000 }],
+      });
+      await expect(
+        service.cancelOrder(ORDER_ID, { reason: 'abc', issueCreditNote: true }),
+      ).rejects.toMatchObject({ errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' });
+      expect(service.issueCancellationCreditNotes).not.toHaveBeenCalled();
+    });
+
+    it('never emits a note when the order belongs to an open table (finding 2)', async () => {
+      arrange();
+      service.assertNoOpenTableForDraft.mockRejectedValueOnce(Object.assign(new Error('open table'), { errorCode: 'ORD_CANCEL_OPEN_TABLE_001' }));
+      await expect(
+        service.cancelOrder(ORDER_ID, { reason: 'abc', issueCreditNote: true }),
+      ).rejects.toMatchObject({ errorCode: 'ORD_CANCEL_OPEN_TABLE_001' });
       expect(service.issueCancellationCreditNotes).not.toHaveBeenCalled();
     });
 
