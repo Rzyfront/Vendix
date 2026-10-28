@@ -7883,7 +7883,10 @@ export class OrderDetailsPageComponent {
         const parsed = parseApiError(err);
         this.showCreditModal.set(false);
         // The holder check runs BEFORE the unpaid/credit check on the backend.
-        if (accountId == null && this.handleHolderIncomplete(key, parsed)) {
+        if (
+          accountId == null &&
+          this.handleHolderIncomplete(key, parsed, allowFinalConsumer)
+        ) {
           return;
         }
         if (accountId == null && this.handleUnpaidEmitRejection(key, parsed)) {
@@ -7926,18 +7929,27 @@ export class OrderDetailsPageComponent {
    * `INVOICING_HOLDER_INCOMPLETE_001`: el cliente de la orden no alcanza para una
    * factura nominativa. Nunca cae a Consumidor final en silencio: abre el modal
    * para completar los datos (o aceptar Consumidor final de forma explícita).
+   * Si el rechazo llega DESPUÉS de pedir Consumidor final (venta a crédito o
+   * saldo sin cobrar), el motivo se avisa siempre (toast + tarjeta) antes de
+   * reabrir el modal: el clic nunca queda mudo.
    * Devuelve `true` cuando atendió el rechazo.
    */
   private handleHolderIncomplete(
     key: string,
     parsed: ReturnType<typeof parseApiError>,
+    afterFinalConsumer = false,
   ): boolean {
     if (parsed.errorCode !== 'INVOICING_HOLDER_INCOMPLETE_001') return false;
     const issue = holderIssueFromDetails(parsed.details);
-    if (!issue) {
-      this.setEmitError(key, parsed.userMessage);
-      this.toastService.error(parsed.userMessage);
-      return true;
+    if (!issue || afterFinalConsumer) {
+      const message = issue?.message || parsed.userMessage;
+      this.setEmitError(key, message);
+      this.toastService.show({
+        description: message,
+        variant: 'error',
+        duration: 8000,
+      });
+      if (!issue) return true;
     }
     this.holderEmitKey = key;
     this.holderIssue.set(issue);
