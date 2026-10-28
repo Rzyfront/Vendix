@@ -1,6 +1,13 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
 import { formatPercentFromFraction } from './report-formatters';
 
+/** Etiquetas ES de los estados committed de una orden de compra. */
+const PURCHASE_ORDER_STATUS_LABELS: Record<string, string> = {
+  approved: 'Aprobada',
+  partial: 'Recepción parcial',
+  received: 'Recibida',
+};
+
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },
   { id: 'sales', label: 'Ventas', description: 'Reportes de ventas y facturacion', icon: 'shopping-cart', color: 'var(--color-primary)' },
@@ -83,10 +90,24 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       ],
     },
     columns: [
-      { key: 'total_spent', header: 'Total Compras', type: 'currency' },
-      { key: 'total_orders', header: 'Total Ordenes', type: 'number' },
-      { key: 'completed_orders', header: 'Completadas', type: 'number' },
-      { key: 'average_order_value', header: 'Ticket Promedio', type: 'currency' },
+      { key: 'order_number', header: 'N° Orden', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'created_by_name', header: 'Creada por', type: 'text' },
+      { key: 'order_day', header: 'Fecha', type: 'text' },
+      { key: 'order_time', header: 'Hora', type: 'text' },
+      {
+        key: 'status',
+        header: 'Estado',
+        type: 'text',
+        badge: true,
+        transform: (value: any) => PURCHASE_ORDER_STATUS_LABELS[value] ?? value,
+        badgeConfig: {
+          type: 'custom',
+          colorMap: { approved: '#2563eb', partial: '#d97706', received: '#16a34a' },
+          size: 'sm',
+        },
+      },
+      { key: 'net_amount', header: 'Total sin IVA', type: 'currency', footer: 'sum' },
     ],
     exportFilename: 'resumen-compras',
     stats: [

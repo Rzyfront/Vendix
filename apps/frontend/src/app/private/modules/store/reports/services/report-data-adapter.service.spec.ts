@@ -42,19 +42,34 @@ describe('ReportDataAdapterService summary adaptation', () => {
     },
   });
 
-  it('QUI-696: ignora committed_states (strings) y pinta 1 fila con los escalares', () => {
-    const result = adapter.adapt(purchasesPayload(), purchaseSummaryReport());
+  it('QUI-696: el detalle por orden alimenta la tabla y las cards leen los escalares', () => {
+    const orders = [
+      {
+        order_number: 'PO-20260919-172',
+        supplier_name: 'Test',
+        created_by_name: 'Ana Ríos',
+        order_day: '2026-09-18',
+        order_time: '10:30',
+        status: 'received',
+        net_amount: 20000,
+      },
+      {
+        order_number: 'PO-20260906-146',
+        supplier_name: 'Test',
+        created_by_name: 'Ana Ríos',
+        order_day: '2026-09-06',
+        order_time: '09:15',
+        status: 'received',
+        net_amount: 200000,
+      },
+    ];
+    const result = adapter.adapt(
+      purchasesPayload({ orders, orders_total: 2, orders_truncated: false }),
+      purchaseSummaryReport(),
+    );
 
     expect(result.isSummary).toBeTrue();
-    expect(result.data.length).toBe(1);
-    expect(result.data[0]).toEqual(
-      jasmine.objectContaining({
-        total_spent: 1750000,
-        total_orders: 3,
-        completed_orders: 3,
-        average_order_value: 583333.33,
-      }),
-    );
+    expect(result.data).toEqual(orders);
     expect(result.summaryData).toEqual(
       jasmine.objectContaining({
         total_spent: 1750000,
@@ -65,7 +80,7 @@ describe('ReportDataAdapterService summary adaptation', () => {
     );
   });
 
-  it('QUI-696: período sin compras pinta 1 fila con ceros comprensibles', () => {
+  it('QUI-696: período sin compras rinde tabla vacía y cards en cero', () => {
     const result = adapter.adapt(
       purchasesPayload({
         total_orders: 0,
@@ -76,17 +91,29 @@ describe('ReportDataAdapterService summary adaptation', () => {
         deductible_tax_amount: 0,
         total_spent_growth: null,
         orders_by_status: {},
+        orders: [],
+        orders_total: 0,
+        orders_truncated: false,
       }),
       purchaseSummaryReport(),
     );
 
+    expect(result.data).toEqual([]);
+    expect(result.summaryData).toEqual(
+      jasmine.objectContaining({ total_spent: 0, total_orders: 0 }),
+    );
+  });
+
+  it('QUI-696: sin orders ignora committed_states (strings) y pinta 1 fila resumen', () => {
+    const result = adapter.adapt(purchasesPayload(), purchaseSummaryReport());
+
     expect(result.data.length).toBe(1);
     expect(result.data[0]).toEqual(
       jasmine.objectContaining({
-        total_spent: 0,
-        total_orders: 0,
-        completed_orders: 0,
-        average_order_value: 0,
+        total_spent: 1750000,
+        total_orders: 3,
+        completed_orders: 3,
+        average_order_value: 583333.33,
       }),
     );
   });

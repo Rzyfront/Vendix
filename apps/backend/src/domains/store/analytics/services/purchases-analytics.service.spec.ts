@@ -563,3 +563,93 @@ describe('PurchasesAnalyticsService - Trends (QUI-547)', () => {
     });
   });
 });
+
+describe('PurchasesAnalyticsService - Summary detail (QUI-696)', () => {
+  let service: PurchasesAnalyticsService;
+  let queryRawMock: jest.Mock;
+
+  const orderRow = (overrides = {}) => ({
+    order_number: 'PO-20260919-172',
+    supplier_name: 'Test',
+    created_by_name: 'Ana Ríos',
+    order_day: '2026-09-18',
+    order_time: '10:30',
+    status: 'received',
+    net_amount: 20000,
+    ...overrides,
+  });
+  const zeroItems = {
+    tax_charged: 0,
+    tax_deductible: 0,
+    tax_capitalized: 0,
+    units_ordered: 0,
+    units_received: 0,
+    units_pending: 0,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    queryRawMock = jest.fn();
+    const prisma = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+      withoutScope: jest.fn().mockReturnValue({ $queryRaw: queryRawMock }),
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 10,
+      organization_id: 6,
+      is_super_admin: false,
+      is_owner: false,
+    } as any);
+    service = new PurchasesAnalyticsService(prisma as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // Las dos ventanas corren en Promise.all: se distingue cada query por su SQL.
+  // $queryRaw es template tag: el primer argumento es el array de literales.
+  const mockQueries = (detailRows: unknown[], detailTotal: bigint) => {
+    queryRawMock.mockImplementation((strings: any) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String((strings as any)?.sql ?? '');
+      if (text.includes('AS order_day')) return Promise.resolve(detailRows);
+      if (text.includes('AS status')) {
+        return Promise.resolve([{ status: 'received', orders: 2n, net_spend: 220000 }]);
+      }
+      if (text.includes('count(*)')) return Promise.resolve([{ total: detailTotal }]);
+      return Promise.resolve([zeroItems]);
+    });
+  };
+
+  it('incluye el detalle por orden del mismo universo que el agregado', async () => {
+    const orders = [orderRow(), orderRow({ order_number: 'PO-20260906-146', net_amount: 200000 })];
+    mockQueries(orders, 2n);
+
+    const result = await service.getPurchasesSummary({
+      date_from: '2026-09-01',
+      date_to: '2026-09-30',
+    } as any);
+
+    expect(result.orders).toEqual(orders);
+    expect(result.orders_total).toBe(2);
+    expect(result.orders_truncated).toBe(false);
+    expect(result.total_spent).toBe(220000);
+    expect(result.total_orders).toBe(2);
+  });
+
+  it('corta a 500 filas y transparenta el truncamiento', async () => {
+    mockQueries(
+      Array.from({ length: 501 }, (_, i) => orderRow({ order_number: `PO-${i}` })),
+      600n,
+    );
+
+    const result = await service.getPurchasesSummary({
+      date_from: '2026-01-01',
+      date_to: '2026-12-31',
+    } as any);
+
+    expect(result.orders).toHaveLength(500);
+    expect(result.orders_total).toBe(600);
+    expect(result.orders_truncated).toBe(true);
+  });
+});
