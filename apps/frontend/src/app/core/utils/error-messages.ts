@@ -11,6 +11,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+
+  // Tarifas: la regla de ajuste (precio fijo, monto o porcentaje) sin valor.
+  PRICE_TIER_ADJUSTMENT_001:
+    'Indica el valor de la regla de la tarifa: un monto o porcentaje mayor que 0 (el recargo porcentual llega hasta 1000 %).',
   // Red de seguridad del filtro global: la peticion llego mal formada y el
   // backend lo detecto en la capa de datos. Antes salian como 500, asi que el
   // usuario leia «error inesperado» ante algo que si puede corregir.

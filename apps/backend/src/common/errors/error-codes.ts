@@ -6205,6 +6205,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Datos inválidos para la tarifa de precios',
   },
+  PRICE_TIER_ADJUSTMENT_001: {
+    code: 'PRICE_TIER_ADJUSTMENT_001',
+    httpStatus: 400,
+    devMessage:
+      'La regla de la tarifa necesita un valor mayor que 0 (y un recargo porcentual de máximo 1000 %)',
+  },
   PRICE_TIER_NOT_ALLOWED: {
     code: 'PRICE_TIER_NOT_ALLOWED',
     httpStatus: 422,

@@ -75,6 +75,9 @@ const TIER_SELECT = {
   id: true,
   name: true,
   discount_percentage: true,
+  adjustment_type: true,
+  adjustment_value: true,
+  amount_scope: true,
   is_package_unit: true,
   units_per_package: true,
 } as const;
@@ -113,6 +116,9 @@ const toSaleUnit = (
     id: number;
     name: string;
     discount_percentage: unknown;
+    adjustment_type: string;
+    adjustment_value: unknown;
+    amount_scope: string;
     is_package_unit: boolean | null;
     units_per_package: number | null;
   },
@@ -122,6 +128,10 @@ const toSaleUnit = (
     id: tier.id,
     name: tier.name,
     discount_percentage: Number(tier.discount_percentage ?? 0),
+    adjustment_type: tier.adjustment_type,
+    adjustment_value:
+      tier.adjustment_value == null ? null : Number(tier.adjustment_value),
+    amount_scope: tier.amount_scope,
     is_package_unit: !!tier.is_package_unit,
     units_per_package: tier.units_per_package ?? null,
   },

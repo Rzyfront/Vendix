@@ -12,6 +12,10 @@ import {
 import { resolvePackSize } from '../products/services/packaging.util';
 import { resolveTierPricingCostAnchor } from '../products/services/tier-margin.util';
 import { assertTiersAllowed } from '../products/services/tiers-variants-exclusive.util';
+import {
+  TierAdjustmentRule,
+  validateTierAdjustment,
+} from '../products/services/tier-adjustment.util';
 
 /**
  * PriceTiersService
@@ -50,6 +54,8 @@ export class PriceTiersService {
         ? unitsPerPackage >= 2
         : (dto.is_package_unit ?? false);
 
+    const rule = this.resolveRuleWrite(dto, null);
+
     try {
       const created = await this.prisma.price_tiers.create({
         data: {
@@ -58,6 +64,9 @@ export class PriceTiersService {
           code: dto.code ?? null,
           description: dto.description ?? null,
           discount_percentage: dto.discount_percentage ?? 0,
+          adjustment_type: rule.adjustment_type,
+          adjustment_value: rule.adjustment_value,
+          amount_scope: rule.amount_scope,
           kind: dto.kind ?? 'customer_tier',
           is_active: dto.is_active ?? true,
           is_default: dto.is_default ?? false,
@@ -167,7 +176,14 @@ export class PriceTiersService {
       }
     }
 
+    const ruleTouched =
+      dto.adjustment_type !== undefined ||
+      dto.adjustment_value !== undefined ||
+      dto.amount_scope !== undefined;
+    const rule = ruleTouched ? this.resolveRuleWrite(dto, existing) : null;
+
     const data: Prisma.price_tiersUpdateInput = {
+      ...(rule ?? {}),
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.code !== undefined && { code: dto.code }),
       ...(dto.description !== undefined && { description: dto.description }),
@@ -201,6 +217,39 @@ export class PriceTiersService {
     }
 
     return updated;
+  }
+
+  /**
+   * Regla final que se escribe: lo que llega sobre lo guardado. Se valida la
+   * combinación (un PATCH solo con el tipo debe traer o tener un valor), y
+   * `percent_discount` deja `adjustment_value` en null porque su valor vive en
+   * `discount_percentage`.
+   */
+  private resolveRuleWrite(
+    dto: CreatePriceTierDto | UpdatePriceTierDto,
+    existing: TierAdjustmentRule | null,
+  ) {
+    const adjustment_type = (dto.adjustment_type ??
+      existing?.adjustment_type ??
+      'percent_discount') as NonNullable<CreatePriceTierDto['adjustment_type']>;
+    const amount_scope = (dto.amount_scope ??
+      existing?.amount_scope ??
+      'per_unit') as NonNullable<CreatePriceTierDto['amount_scope']>;
+    const rawValue =
+      dto.adjustment_value !== undefined
+        ? dto.adjustment_value
+        : (existing?.adjustment_value ?? null);
+    const adjustment_value =
+      adjustment_type === 'percent_discount' || rawValue == null
+        ? null
+        : Number(rawValue.toString());
+
+    if (
+      validateTierAdjustment({ adjustment_type, adjustment_value, amount_scope })
+    ) {
+      throw new VendixHttpException(ErrorCodes.PRICE_TIER_ADJUSTMENT_001);
+    }
+    return { adjustment_type, adjustment_value, amount_scope };
   }
 
   /** Soft delete: deactivate the tier so old snapshots stay consistent. */
