@@ -51,6 +51,7 @@ import {
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
 import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
+import { assertProductSaleValid } from './services/product-sale.util';
 import {
   assertVariantRemovalAllowed,
   VariantRemovalCandidate,
@@ -1062,6 +1063,8 @@ export class ProductsService {
         store_id,
       );
       sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
+
+      assertProductSaleValid(sanitizedDto, sanitizedDto);
 
       // Verify user context for audit
       const user_id = context?.user_id;
@@ -3971,6 +3974,15 @@ export class ProductsService {
       sanitizedDto = this.sanitizeIngredientPayload(
         sanitizedDto,
         existingProduct.is_ingredient,
+      );
+
+      assertProductSaleValid(
+        {
+          is_on_sale: sanitizedDto.is_on_sale ?? existingProduct.is_on_sale,
+          sale_price: sanitizedDto.sale_price ?? existingProduct.sale_price,
+          base_price: sanitizedDto.base_price ?? existingProduct.base_price,
+        },
+        sanitizedDto,
       );
 
       // BLOCK: Check for active stock reservations on the product itself
