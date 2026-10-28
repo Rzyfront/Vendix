@@ -56,7 +56,13 @@ interface BulkOrderRow {
   payment_form: string | null;
   grand_total: Prisma.Decimal | number | string | null;
   active_financial_split_id: number | null;
-  payments: Array<{ state: string | null; amount: Prisma.Decimal | number | string }>;
+  payments: Array<{
+    state: string | null;
+    amount: Prisma.Decimal | number | string;
+    store_payment_method?: {
+      system_payment_method?: { processing_mode?: string | null } | null;
+    } | null;
+  }>;
   users: Parameters<typeof evaluateOrderHolder>[0]['users'];
   invoice_data_requests: Parameters<typeof evaluateOrderHolder>[0]['invoice_data_requests'];
 }
@@ -248,7 +254,15 @@ export class OrdersBulkInvoicingService {
         payment_form: true,
         grand_total: true,
         active_financial_split_id: true,
-        payments: { select: { state: true, amount: true } },
+        payments: {
+          select: {
+            state: true,
+            amount: true,
+            store_payment_method: {
+              select: { system_payment_method: { select: { processing_mode: true } } },
+            },
+          },
+        },
         users: {
           select: {
             document_type: true,

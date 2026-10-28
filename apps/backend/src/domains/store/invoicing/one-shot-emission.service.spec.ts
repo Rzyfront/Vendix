@@ -385,6 +385,81 @@ describe('OneShotEmissionService', () => {
       expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
     });
 
+    describe('cod-auto-invoicing S6: promesa contra entrega', () => {
+      const codPromise = {
+        id: 90,
+        state: 'pending',
+        amount: '1000.00',
+        store_payment_method: {
+          system_payment_method: { processing_mode: 'ON_DELIVERY' },
+        },
+      };
+
+      it('no cuenta como abono: la orden es convertible a crédito', async () => {
+        const { service } = build({ order: unpaid({ payments: [codPromise] }) });
+        await expect(service.emitOrder(1)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            error_code: 'INVOICING_ORDER_UNPAID_001',
+            details: expect.objectContaining({
+              credit_eligible: true,
+              credit_blocker: null,
+            }),
+          }),
+        });
+      });
+
+      it('al facturar a crédito anula la promesa (no se confirma luego como contado) y crea la cartera', async () => {
+        const { service, prisma, receivables } = build({
+          order: unpaid({ payments: [codPromise] }),
+        });
+        prisma.payments = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+        const r = await service.emitOrder(1, { due_date: tomorrow() } as any);
+        expect(r.state).toBe('issued');
+        expect(prisma.payments.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: [90] }, order_id: 1, state: 'pending' },
+          data: expect.objectContaining({ state: 'cancelled' }),
+        });
+        expect(prisma.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ payment_form: '2', remaining_balance: 1000 }),
+          }),
+        );
+        expect(receivables.createCreditSaleFromEvent).toHaveBeenCalledTimes(1);
+      });
+
+      it('un cobro digital pendiente (no contra entrega) sigue bloqueando', async () => {
+        const { service } = build({
+          order: unpaid({
+            payments: [
+              {
+                ...codPromise,
+                store_payment_method: { system_payment_method: { processing_mode: 'ONLINE' } },
+              },
+            ],
+          }),
+        });
+        await expect(service.emitOrder(1)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            details: expect.objectContaining({ credit_blocker: 'partial_payment' }),
+          }),
+        });
+      });
+
+      it('vista previa masiva: la orden contra entrega sale to_credit', () => {
+        const { service } = build();
+        expect(
+          service.classifyOrderPayment({
+            state: 'processing',
+            customer_id: 12,
+            payment_form: '1',
+            grand_total: '1000.00',
+            active_financial_split_id: null,
+            payments: [codPromise],
+          }),
+        ).toEqual({ payment: 'to_credit', blocked_code: null });
+      });
+    });
+
     it('tienda sin facturación electrónica: con credit NO convierte ni crea cartera', async () => {
       const { service, prisma, invoicing, receivables, order_flow } = build({
         order: unpaid(),

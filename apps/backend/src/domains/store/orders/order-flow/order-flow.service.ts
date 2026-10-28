@@ -6896,8 +6896,20 @@ export class OrderFlowService {
     const isCreditSale = order.payment_form === '2';
     // A credit sale is only settled by a ROUTE collection (stopId present). Any
     // other caller (e.g. `dispatch_note.invoiced`) must not fake a payment: the
-    // debt stays in cartera.
-    if (isCreditSale && input.stopId == null) {
+    // debt stays in cartera. Exception (cod-auto-invoicing S6): a contra entrega
+    // sale invoiced on credit before delivery keeps its (cancelled) ON_DELIVERY
+    // promise, so the standalone remisión still collects it and settles the AR.
+    const isCodOriginCredit =
+      isCreditSale &&
+      input.stopId == null &&
+      (await this.prisma.payments.findFirst({
+        where: {
+          order_id: order.id,
+          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+        },
+        select: { id: true },
+      })) != null;
+    if (isCreditSale && input.stopId == null && !isCodOriginCredit) {
       this.logger.debug(
         `[applyDispatchCodPayment] credit order #${order.id} outside a route collection — NO-OP (${input.correlationKey})`,
       );

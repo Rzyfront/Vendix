@@ -43,6 +43,21 @@ export type CreditBlocker =
   | 'order_state'
   | null;
 
+/** Campos de un pago que delatan la promesa contra entrega. */
+type CodPromiseProbe = {
+  store_payment_method?: {
+    system_payment_method?: { processing_mode?: string | null } | null;
+  } | null;
+};
+
+/** Pago `pending` de contra entrega: promesa de cobro, no abono. */
+function isCodPromise(payment: { state: string | null } & CodPromiseProbe): boolean {
+  return (
+    payment.state === 'pending' &&
+    payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY'
+  );
+}
+
 export type OneShotEmissionState = 'issued' | 'pending' | 'failed';
 
 /** Respuesta de los endpoints de facturación en un solo paso. */
@@ -170,7 +185,16 @@ export class OneShotEmissionService {
         payment_form: true,
         grand_total: true,
         active_financial_split_id: true,
-        payments: { select: { state: true, amount: true } },
+        payments: {
+          select: {
+            id: true,
+            state: true,
+            amount: true,
+            store_payment_method: {
+              select: { system_payment_method: { select: { processing_mode: true } } },
+            },
+          },
+        },
         users: {
           select: {
             document_type: true,
@@ -429,7 +453,9 @@ export class OneShotEmissionService {
       payment_form: string | null;
       grand_total: Prisma.Decimal | number | string | null;
       active_financial_split_id: number | null;
-      payments?: ReadonlyArray<{ state: string | null; amount: Prisma.Decimal | number | string }> | null;
+      payments?: ReadonlyArray<
+        { state: string | null; amount: Prisma.Decimal | number | string } & CodPromiseProbe
+      > | null;
     },
     has_rejected_document = false,
   ): {
@@ -462,7 +488,7 @@ export class OneShotEmissionService {
     order: {
       state: string;
       customer_id: number | null;
-      payments?: ReadonlyArray<{ state: string | null }> | null;
+      payments?: ReadonlyArray<{ state: string | null } & CodPromiseProbe> | null;
     },
     settled: Prisma.Decimal,
   ): CreditBlocker {
@@ -470,8 +496,12 @@ export class OneShotEmissionService {
     if (order.customer_id == null) return 'customer_required';
     // Un cobro en vuelo (Wompi pendiente, tarjeta autorizada) cuenta como
     // abono: si se confirma después quedarían caja Y cartera por la misma venta.
-    const in_flight = (order.payments ?? []).some((payment) =>
-      ['pending', 'authorized'].includes(String(payment.state)),
+    // La promesa contra entrega (`ON_DELIVERY` pendiente) no es un cobro: la
+    // conversión la anula y el recaudo en ruta salda la cartera.
+    const in_flight = (order.payments ?? []).some(
+      (payment) =>
+        ['pending', 'authorized'].includes(String(payment.state)) &&
+        !isCodPromise(payment),
     );
     if (settled.greaterThan(0) || in_flight) return 'partial_payment';
     return null;
@@ -534,7 +564,12 @@ export class OneShotEmissionService {
    * asiento (DR clientes / CR ingresos) lo genera la aceptación de la factura.
    */
   private async convertToCredit(
-    order: { id: number; store_id: number; state: string },
+    order: {
+      id: number;
+      store_id: number;
+      state: string;
+      payments?: ReadonlyArray<{ id?: number; state: string | null } & CodPromiseProbe> | null;
+    },
     remaining: Prisma.Decimal,
     options: CreateFromOrderOptions,
   ): Promise<void> {
@@ -557,6 +592,18 @@ export class OneShotEmissionService {
         updated_at: new Date(),
       },
     });
+    // Promesa contra entrega → anulada (mismo trato que `payOrder` al cobrarla):
+    // el cobro posterior abona la cartera y nunca entra además como contado. La
+    // fila anulada conserva el origen contra entrega para el recaudo sin planilla.
+    const cod_promise_ids = (order.payments ?? [])
+      .filter((payment) => isCodPromise(payment) && payment.id != null)
+      .map((payment) => payment.id as number);
+    if (cod_promise_ids.length > 0) {
+      await this.prisma.payments.updateMany({
+        where: { id: { in: cod_promise_ids }, order_id: order.id, state: 'pending' },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+    }
     await this.moveToPendingPayment(order);
     // Idempotente por `source_id`: reintentos no duplican la cuenta por cobrar.
     await this.receivables.createCreditSaleFromEvent({
