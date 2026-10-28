@@ -22,6 +22,7 @@ function build(
     eInvoicing?: boolean;
     verifiedTotal?: number;
     repeatOrder?: { payment_form: string; remaining_balance: number };
+    frozenNights?: string[];
   } = {},
 ) {
   const total = options.total ?? 595000;
@@ -136,6 +137,13 @@ function build(
     lodging_folios: { updateMany: jest.fn(async () => ({ count: 1 })) },
     stores: { findFirst: jest.fn(async () => ({ timezone: 'America/Bogota' })) },
     store_settings: { findFirst: jest.fn(async () => null) },
+    // Nights still unposted after posting through today: only the frozen ones
+    // of a closed business day (H7.1) remain.
+    lodging_room_nights: {
+      findMany: jest.fn(async () =>
+        (options.frozenNights ?? []).map((d) => ({ night_date: new Date(`${d}T00:00:00.000Z`) })),
+      ),
+    },
     // Without e-invoicing no document is ever created for the order.
     invoices: { findFirst: jest.fn(async () => (options.eInvoicing === false ? null : { id: 120 })) },
     $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -241,6 +249,31 @@ describe('LodgingCheckOutService (H3.7)', () => {
     );
     expect(result.invoice).toMatchObject({ state: 'issued', invoice_number: 'FE-120' });
     expect(result.reservation).toMatchObject({ status: 'checked_out' });
+  });
+
+  it('con noches sin cobrar en un día cerrado no hace check-out ni mueve dinero', async () => {
+    const { service, tx, folios, fiscal, prisma } = build({ frozenNights: ['2026-10-25'] });
+
+    await expect(
+      service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK),
+    ).rejects.toMatchObject({
+      errorCode: 'LODGING_CHECKOUT_FROZEN_NIGHTS_001',
+      message: expect.stringContaining('2026-10-25'),
+    });
+    expect(prisma.lodging_room_nights.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          store_id: 3,
+          is_active: true,
+          posted_order_item_id: null,
+          reservation_room: { reservation_id: 7, cancelled_at: null },
+        }),
+      }),
+    );
+    expect(folios.registerPayment).not.toHaveBeenCalled();
+    expect(folios.applyDeposit).not.toHaveBeenCalled();
+    expect(tx.lodging_folios.updateMany).not.toHaveBeenCalled();
+    expect(fiscal.emitForOrder).not.toHaveBeenCalled();
   });
 
   it('con saldo y sin medio ni crédito no hace check-out', async () => {

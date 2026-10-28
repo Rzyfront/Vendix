@@ -5,6 +5,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OrderFlowService } from './order-flow/order-flow.service';
 import { OrdersService } from './orders.service';
+import { PRINTABLE_ORDER_INVOICE_WHERE } from '../print-formats/lib/printable-order-invoice';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import {
@@ -1106,7 +1107,7 @@ export class OrdersBulkService {
         // consulta— es lo que le permite exigirla en vez de tratar su ausencia
         // como "aceptada", que sería afirmar validación DIAN por defecto.
         invoices: {
-          where: { dian_status: 'accepted', financial_account_id: null },
+          where: PRINTABLE_ORDER_INVOICE_WHERE,
           select: { invoice_number: true, cufe: true, dian_status: true },
           orderBy: { id: 'desc' },
           take: 1,

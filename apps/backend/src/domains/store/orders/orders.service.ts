@@ -20,6 +20,11 @@ import {
   payments_state_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '@common/utils/store-timezone.util';
 import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -233,6 +238,8 @@ export const SORTABLE_COLUMNS = [
 ] as const;
 
 export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 @Injectable()
 export class OrdersService {
@@ -1066,6 +1073,38 @@ export class OrdersService {
     }
   }
 
+  /**
+   * `created_at` filter for the orders list. Each bound applies on its own
+   * (only `gte`, only `lte`, both or none). A date-only value (`YYYY-MM-DD`, the
+   * bulk-operations date filter) is a CALENDAR day in the store timezone: from
+   * local 00:00 to local 23:59:59.999, so «hoy a hoy» is the whole local day
+   * instead of the empty `[00:00Z, 00:00Z]`. A full ISO instant (the main list
+   * presets) is applied as is.
+   */
+  private async createdAtRange(
+    date_from?: string,
+    date_to?: string,
+  ): Promise<Prisma.DateTimeFilter | undefined> {
+    if (!date_from && !date_to) return undefined;
+    const isDateOnly = (v?: string) => !!v && DATE_ONLY_PATTERN.test(v);
+    let tz = DEFAULT_STORE_TIMEZONE;
+    if (isDateOnly(date_from) || isDateOnly(date_to)) {
+      const store_id = RequestContextService.getContext()?.store_id;
+      if (store_id) tz = await resolveStoreTimezone(this.prisma, store_id);
+    }
+    const bound = (v: string, endOfDay: boolean): Date => {
+      if (!isDateOnly(v)) return new Date(v);
+      const [y, m, d] = v.split('-').map(Number);
+      return endOfDay
+        ? zonedWallClockToUtc(y, m, d, 23, 59, 59, 999, tz)
+        : zonedWallClockToUtc(y, m, d, 0, 0, 0, 0, tz);
+    };
+    return {
+      ...(date_from && { gte: bound(date_from, false) }),
+      ...(date_to && { lte: bound(date_to, true) }),
+    };
+  }
+
   async findAll(query: OrderQueryDto) {
     const {
       page = 1,
@@ -1100,6 +1139,7 @@ export class OrdersService {
     const skip = (page - 1) * limit;
 
     // Context validation handled by StorePrismaService auto-scoping
+    const createdAt = await this.createdAtRange(date_from, date_to);
 
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
@@ -1213,14 +1253,7 @@ export class OrdersService {
       // fecha desaparecía silenciosamente. Ahora cada bound se aplica
       // independiente: sólo `gte` si hay `date_from`, sólo `lte` si hay
       // `date_to`, ambos si hay los dos, nada si no hay ninguno.
-      ...(date_from || date_to
-        ? {
-            created_at: {
-              ...(date_from && { gte: new Date(date_from) }),
-              ...(date_to && { lte: new Date(date_to) }),
-            },
-          }
-        : {}),
+      ...(createdAt && { created_at: createdAt }),
     };
 
     // Filtro «factura» (operaciones masivas). «Documento de venta» = mismo

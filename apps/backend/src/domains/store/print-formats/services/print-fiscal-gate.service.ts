@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
+import { PRINTABLE_ORDER_INVOICE_WHERE } from '../lib/printable-order-invoice';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import { FiscalProductionReadinessService } from '../../../store/invoicing/providers/fiscal-production-readiness.service';
@@ -31,6 +32,7 @@ import { FiscalProductionReadinessService } from '../../../store/invoicing/provi
  * del rango, etc.); aquí se reutiliza y se interpreta su excepción como
  * "esta tienda todavía no puede emitir FE en producción".
  */
+
 export interface PrintTarget {
   formatType: print_format_type_enum;
   documentId: number;
@@ -121,6 +123,7 @@ export class PrintFiscalGateService {
         select: {
           id: true,
           invoices: {
+            where: PRINTABLE_ORDER_INVOICE_WHERE,
             select: { id: true, invoice_number: true },
             take: 1,
             orderBy: { created_at: 'desc' },

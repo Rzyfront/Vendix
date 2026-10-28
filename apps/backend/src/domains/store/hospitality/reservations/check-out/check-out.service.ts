@@ -565,6 +565,27 @@ export class LodgingCheckOutService {
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
     await this.folios.postNightsThrough(folio, today, false);
+    // H7.1 freezes the nights of a closed business day; a night the night
+    // audit failed to post stays unposted. Closing the folio over it would
+    // never charge it, so the day must be reopened first.
+    const frozen = await this.prisma.lodging_room_nights.findMany({
+      where: {
+        store_id,
+        is_active: true,
+        posted_order_item_id: null,
+        night_date: { lt: new Date(`${today}T00:00:00.000Z`) },
+        reservation_room: { reservation_id: folio.reservation_id, cancelled_at: null },
+      },
+      select: { night_date: true },
+      orderBy: { night_date: 'asc' },
+    });
+    if (frozen.length > 0) {
+      const dates = [...new Set(frozen.map((n) => n.night_date.toISOString().slice(0, 10)))];
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CHECKOUT_FROZEN_NIGHTS_001,
+        `Hay noches sin cobrar en días cerrados (${dates.join(', ')}): reabre el día para cobrarlas`,
+      );
+    }
   }
 
   /**

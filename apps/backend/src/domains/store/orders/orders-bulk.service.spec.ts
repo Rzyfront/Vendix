@@ -720,10 +720,15 @@ describe('OrdersBulkService', () => {
 
       // El pie afirma "validada por la DIAN": solo `accepted` lo respalda, y
       // solo la factura de la orden (las de cuenta de una division financiera
-      // llevan `financial_account_id` y no son la de la orden).
+      // llevan `financial_account_id` y no son la de la orden). Las notas
+      // credito/debito llevan el `order_id` de la orden: tampoco cuentan.
       expect(args.include.invoices).toEqual(
         expect.objectContaining({
-          where: { dian_status: 'accepted', financial_account_id: null },
+          where: {
+            invoice_type: { in: ['sales_invoice', 'pos_equivalent_document'] },
+            dian_status: 'accepted',
+            financial_account_id: null,
+          },
           take: 1,
         }),
       );
