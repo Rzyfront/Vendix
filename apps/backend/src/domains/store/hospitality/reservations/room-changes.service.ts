@@ -60,7 +60,7 @@ export function diffStayNights(
   return { kept, added, removed, repriced, total };
 }
 
-interface StaySide {
+export interface StaySide {
   unit: { id: number; code: string } | null;
   unit_type: { id: number; name: string };
   arrival_date: string;
