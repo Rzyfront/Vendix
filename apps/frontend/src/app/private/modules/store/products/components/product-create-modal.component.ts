@@ -33,6 +33,7 @@ import {
   TaxInclusiveChipComponent,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   VexiFillFormResult,
@@ -107,6 +108,22 @@ export class ProductCreateModalComponent {
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private barcodeService = inject(PosBarcodeService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /**
+   * Default de tienda para el mínimo (QUI-861, misma fuente y fallback que
+   * la página avanzada y POP): se muestra como placeholder, no como valor.
+   */
+  readonly defaultLowStockThreshold = computed<number>(() => {
+    const threshold = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
+  });
+
+  readonly defaultLowStockThresholdPlaceholder = computed<string>(() => {
+    return `Por defecto de la tienda (${this.defaultLowStockThreshold()})`;
+  });
 
   readonly isOpen = model<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
@@ -268,6 +285,7 @@ export class ProductCreateModalComponent {
       brand_ids: [[]],
       tax_category_ids: [[] as number[]],
       allow_pos_price_override: [false],
+      min_stock_level: [null, [Validators.min(0)]],
       state: [ProductState.ACTIVE],
       // Subcuenta PUC de ingreso. Vacío = mapping contable por defecto, que es
       // lo que necesita el 99% de los productos: por eso vive plegada.
@@ -300,6 +318,7 @@ export class ProductCreateModalComponent {
       brand_ids: val.brand_ids || [],
       tax_category_ids: val.tax_category_ids || [],
       allow_pos_price_override: !!val.allow_pos_price_override,
+      min_stock_level: val.min_stock_level ?? null,
       state: val.state || 'active',
       // Viaja al formulario avanzado para que el salto no pierda la cuenta.
       account_code: val.account_code || null,
@@ -367,6 +386,7 @@ export class ProductCreateModalComponent {
         (ta: any) => ta.tax_category_id,
       ),
       allow_pos_price_override: prod.allow_pos_price_override === true,
+      min_stock_level: prod.min_stock_level ?? null,
       state: prod.state || ProductState.ACTIVE,
       account_code: prod.account_code ?? null,
     });
@@ -543,6 +563,16 @@ export class ProductCreateModalComponent {
         this.taxInclusiveMap(),
       ),
       allow_pos_price_override: !!val.allow_pos_price_override,
+      // QUI-861: el mínimo viaja aunque el modal cree sin tracking (el
+      // backend solo lo descarta en servicios); vacío = sin valor propio.
+      min_stock_level:
+        val.min_stock_level !== null &&
+        val.min_stock_level !== undefined &&
+        val.min_stock_level !== ''
+          ? Number(val.min_stock_level)
+          : this.isEditMode
+            ? null
+            : undefined,
       state: val.state,
       // Se envía siempre, incluso en null: omitirlo en una edición dejaría
       // pegada la cuenta anterior aunque el operador la haya limpiado.

@@ -55,6 +55,20 @@
         </div>
       </div>
 
+      <!-- Stock mínimo (QUI-861: también en creación rápida) -->
+      <div>
+        <app-input
+          label="Stock mínimo"
+          formControlName="min_stock_level"
+          type="number"
+          [min]="0"
+          step="1"
+          [placeholder]="defaultLowStockThresholdPlaceholder()"
+          helperText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
+          [error]="getErrorMessage('min_stock_level')"
+        ></app-input>
+      </div>
+
       @if (!isEditMode) {
         <div class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
           Se creará como definición comercial, sin stock ni costos. Regístralos luego en Inventario &gt; POP.
