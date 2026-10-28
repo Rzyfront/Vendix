@@ -219,6 +219,21 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
     });
   });
 
+  it('cargar una orden no cuenta como cliente elegido por el cajero; setCustomer sí (S6)', (done) => {
+    const order = buildOrder([buildItem(1, embeddedProduct(1))]);
+
+    service.loadFromOrder(order).subscribe(() => {
+      expect(service.customerSelectionCount()).toBe(0);
+      service
+        .setCustomer({ id: 7, name: 'Ana' } as any)
+        .subscribe((state) => {
+          expect(service.customerSelectionCount()).toBe(1);
+          expect(String(state.customer!.id)).toBe('7');
+          done();
+        });
+    });
+  });
+
   it('conserva el contexto de la orden incluso cuando la orden llega sin items', (done) => {
     service.loadFromOrder(buildOrder([])).subscribe((state) => {
       expect(state.items.length).toBe(0);
@@ -979,6 +994,106 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
           expect(item.finalPrice).toBe(17638.89);
           done();
         });
+    });
+  });
+});
+
+/**
+ * Tarifa preferencial del cliente aplicada a varias líneas a la vez desde el
+ * aviso del POS. Spec: odd/tasks/price-tier-adjustments-customers.md S6.
+ */
+describe('PosCartService — applyTierToCartItems (tarifa del cliente)', () => {
+  let service: PosCartService;
+  const getProductOverrides = jasmine.createSpy('getProductOverrides');
+
+  const product = (id: number, price: number) =>
+    ({
+      id,
+      name: `Producto ${id}`,
+      sku: `P-${id}`,
+      price,
+      final_price: price,
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      has_multiple_price_tiers: true,
+      enabled_price_tier_ids: [501],
+      product_variants: [],
+      tax_assignments: [],
+    }) as any;
+
+  const recargo500 = {
+    id: 501,
+    name: 'Mayorista',
+    discount_percentage: 0,
+    adjustment_type: 'fixed_amount_surcharge',
+    adjustment_value: 500,
+    amount_scope: 'per_unit',
+  } as any;
+
+  beforeEach(() => {
+    getProductOverrides.and.callFake((id: number) =>
+      of(
+        id === 7002
+          ? [{ product_id: 7002, variant_id: null, price_tier_id: 501, override_price: 15000, override_units_per_package: null }]
+          : [],
+      ),
+    );
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        PriceResolverService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            configFor: () => ({ priceUnitQuantity: 1, unitsPerCapture: 1, captureUnit: null }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: { getProductOverrides } },
+        {
+          provide: WithholdingTaxService,
+          useValue: { previewWithholding: () => of({ lines: [], total_withholding: 0 }) },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('aplica la regla a unas líneas y el precio propio de la tarifa a otras; las no elegidas no cambian', (done) => {
+    service.addToCart({ product: product(7001, 20000), quantity: 1 }).subscribe(() => {
+      service.addToCart({ product: product(7002, 20000), quantity: 1 }).subscribe(() => {
+        service.addToCart({ product: product(7003, 9000), quantity: 1 }).subscribe((state) => {
+          const [a, b] = state.items.filter((i) => Number(i.product.id) !== 7003);
+          service.applyTierToCartItems([a.id, b.id], recargo500).subscribe((next) => {
+            const byProduct = (id: number) => next.items.find((i) => Number(i.product.id) === id)!;
+            expect(byProduct(7001).unitPrice).toBe(20500);
+            expect(byProduct(7001).applied_price_tier_id).toBe(501);
+            expect(byProduct(7002).unitPrice).toBe(15000);
+            expect(byProduct(7003).unitPrice).toBe(9000);
+            expect(byProduct(7003).applied_price_tier_id ?? null).toBeNull();
+            done();
+          });
+        });
+      });
+    });
+  });
+
+  it('con null restaura el precio regular de las líneas elegidas', (done) => {
+    service.addToCart({ product: product(7001, 20000), quantity: 1 }).subscribe((state) => {
+      const id = state.items[0].id;
+      service.applyTierToCartItems([id], recargo500).subscribe(() => {
+        service.applyTierToCartItems([id], null).subscribe((next) => {
+          expect(next.items[0].unitPrice).toBe(20000);
+          expect(next.items[0].applied_price_tier_id ?? null).toBeNull();
+          done();
+        });
+      });
     });
   });
 });

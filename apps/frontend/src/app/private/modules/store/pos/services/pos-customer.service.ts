@@ -246,6 +246,22 @@ export class PosCustomerService {
   }
 
   /**
+   * Tarifa preferencial activa del cliente en esta tienda (`null` si no tiene
+   * o si la consulta falla: sin dato no se pregunta nada).
+   */
+  getCustomerPriceTier(
+    id: number,
+  ): Observable<{ id: number; name: string } | null> {
+    return this.http.get<any>(`${this.apiUrl}/${id}/price-tier`).pipe(
+      map((response) => {
+        const tier = (response?.data ?? response)?.price_tier;
+        return tier?.id ? { id: Number(tier.id), name: String(tier.name) } : null;
+      }),
+      catchError(() => of(null)),
+    );
+  }
+
+  /**
    * Update customer information
    */
   updateCustomer(

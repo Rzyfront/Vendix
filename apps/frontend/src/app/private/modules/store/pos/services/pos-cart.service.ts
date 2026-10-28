@@ -483,6 +483,61 @@ export class PosCartService {
     );
   }
 
+  /**
+   * Aplica (o quita, con `tier === null`) una tarifa en varias líneas a la vez:
+   * la tarifa preferencial del cliente. Carga una vez los overrides de cada
+   * producto y reutiliza `processApplyTierToCartItem`, el mismo cálculo del
+   * selector por línea. Las líneas que ya no están en el carrito se ignoran.
+   */
+  applyTierToCartItems(
+    itemIds: string[],
+    tier: PriceTier | null,
+  ): Observable<CartState> {
+    const items = this.cartState().items.filter((item) =>
+      itemIds.includes(item.id),
+    );
+    const productIds = [
+      ...new Set(
+        items
+          .map((item) => Number(item.product.id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    ];
+    const overrides$ =
+      tier && productIds.length > 0
+        ? forkJoin(
+            productIds.map((id) => this.priceTierCache.getProductOverrides(id)),
+          ).pipe(
+            map((rows) =>
+              rows
+                .flat()
+                .filter((override) => override.price_tier_id === tier.id),
+            ),
+          )
+        : of([] as ProductPriceTierOverride[]);
+
+    return overrides$.pipe(
+      map((overrides) => {
+        for (const item of items) {
+          if (!this.cartState().items.some((line) => line.id === item.id)) {
+            continue;
+          }
+          const productId = Number(item.product.id);
+          this.cartState.set(
+            this.processApplyTierToCartItem({
+              itemId: item.id,
+              tier,
+              tierOverrides: overrides.filter(
+                (override) => override.product_id === productId,
+              ),
+            }),
+          );
+        }
+        return this.cartState();
+      }),
+    );
+  }
+
   updateCartItemPrice(
     request: UpdateCartItemPriceRequest,
   ): Observable<CartState> {
@@ -553,6 +608,14 @@ export class PosCartService {
   }
 
   /**
+   * Cuenta los cambios de cliente hechos por el cajero (`setCustomer`). La
+   * hidratación desde localStorage y la carga de una orden fijan el cliente
+   * sin pasar por aquí, así el POS distingue "eligió otro cliente" de "se
+   * restauró el carrito" (aviso de tarifa preferencial, S6).
+   */
+  readonly customerSelectionCount = signal(0);
+
+  /**
    * Set customer for cart
    */
   setCustomer(customer: PosCustomer | null): Observable<CartState> {
@@ -579,7 +642,10 @@ export class PosCartService {
           updatedAt: new Date(),
         };
       }),
-      tap((newState) => this.cartState.set(newState)),
+      tap((newState) => {
+        this.customerSelectionCount.update((count) => count + 1);
+        this.cartState.set(newState);
+      }),
     );
   }
 
