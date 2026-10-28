@@ -50,6 +50,7 @@ import {
   assertTiersAllowed,
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
+import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
 import { resolvePackSize } from './services/packaging.util';
 import {
   buildSaleConfigExplanation,
@@ -4330,19 +4331,12 @@ export class ProductsService {
           }
 
           if (enabled_price_tier_ids !== undefined) {
-            await prisma.product_price_tier_assignments.deleteMany({
-              where: { product_id: id },
-            });
-
-            if (enabled_price_tier_ids.length > 0) {
-              await prisma.product_price_tier_assignments.createMany({
-                data: enabled_price_tier_ids.map((priceTierId) => ({
-                  product_id: id,
-                  price_tier_id: priceTierId,
-                })),
-                skipDuplicates: true,
-              });
-            }
+            await syncEnabledTierAssignments(
+              prisma,
+              id,
+              existingProduct.store_id,
+              enabled_price_tier_ids,
+            );
           }
 
           // Actualizar categorías de impuestos si se proporcionan.
