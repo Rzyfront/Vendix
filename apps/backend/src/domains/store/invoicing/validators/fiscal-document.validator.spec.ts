@@ -215,10 +215,10 @@ describe('FiscalDocumentValidator', () => {
       expect(codesOf(report)).not.toContain('TAX_SUBTOTAL_MISMATCH');
     });
 
-    it('tolera la holgura de ±2.00 del Anexo 1.9 §5.2.1.1 (truncado acumulado de varias líneas)', () => {
-      // Caso real: Σ del IVA truncado línea por línea = 1.484,82 y
-      // 7.815,12 × 19 % = 1.484,87. La DIAN lo acepta; bloquearlo frenaba
-      // toda factura con suficientes líneas gravadas.
+    it('tolera la holgura de ±2.00 del Anexo 1.9 §5.2.1.1 (residuo del IVA incluido)', () => {
+      // Caso real: 6 uds a 1.549,99 con IVA incluido. Base = 6 × 1.302,52 =
+      // 7.815,12 y el IVA absorbe el residuo (9.299,94 − 7.815,12 = 1.484,82),
+      // pero 7.815,12 × 19 % = 1.484,87. La DIAN lo acepta.
       const report = validator.validate(
         baseInput({
           tax_amount: '1484.82',
