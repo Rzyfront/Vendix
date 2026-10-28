@@ -6227,6 +6227,11 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
   },
+  PRICE_TIER_OVERRIDE_VARIANT_001: {
+    code: 'PRICE_TIER_OVERRIDE_VARIANT_001',
+    httpStatus: 404,
+    devMessage: 'La variante no pertenece a este producto',
+  },
   PROD_UOM_NOT_STOCK_ELIGIBLE: {
     code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',
     httpStatus: 400,

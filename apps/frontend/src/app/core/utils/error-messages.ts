@@ -253,6 +253,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Para eliminar variantes con stock, selecciona un modo de eliminación de stock.',
   PROD_HAS_RESERVATIONS_001:
     'Esta operación está bloqueada porque existen reservas de stock activas.',
+  PRICE_TIER_OVERRIDE_VARIANT_001:
+    'La variante no pertenece a este producto. Recarga la página e inténtalo de nuevo.',
   PROD_VARIANT_HAS_STOCK_001:
     'La variante tiene existencias. Ajusta su stock a 0 desde Inventario antes de quitarla.',
   PROD_SKU_COLLISION_001:

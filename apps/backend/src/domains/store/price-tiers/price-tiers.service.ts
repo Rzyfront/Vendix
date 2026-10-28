@@ -405,13 +405,20 @@ export class PriceTiersService {
 
     // El costo de referencia es el de la variante cuando la hay; si no, el del
     // producto. Sin costo el margen no es calculable y queda null.
+    // La variante tiene que ser de ESTE producto: sin fila, el override
+    // quedaba atado a la variante de otro producto.
     let unitCost = Number(product.cost_price ?? 0);
     if (variantId != null) {
       const variant = await this.prisma.product_variants.findFirst({
         where: { id: variantId, product_id: productId },
         select: { cost_price: true },
       });
-      if (variant?.cost_price != null) {
+      if (!variant) {
+        throw new VendixHttpException(
+          ErrorCodes.PRICE_TIER_OVERRIDE_VARIANT_001,
+        );
+      }
+      if (variant.cost_price != null) {
         unitCost = Number(variant.cost_price);
       }
     }

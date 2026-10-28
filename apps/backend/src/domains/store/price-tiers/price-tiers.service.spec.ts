@@ -119,3 +119,56 @@ describe('PriceTiersService — regla de ajuste', () => {
     expect(data).not.toHaveProperty('adjustment_value');
   });
 });
+
+/**
+ * Un override con `variant_id` de OTRO producto se guardaba igual: la
+ * búsqueda de la variante solo leía su costo y, sin fila, caía al costo del
+ * producto. El precio quedaba atado a una variante ajena. Spec S11.
+ */
+describe('PriceTiersService — override de variante ajena', () => {
+  it('rechaza una variante que no pertenece al producto sin escribir nada', async () => {
+    const prisma = {
+      price_tiers: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 4,
+          name: 'Mayorista',
+          kind: 'customer_tier',
+          units_per_package: null,
+        }),
+      },
+      products: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          store_id: 3,
+          cost_price: 1000,
+          price_unit_quantity: null,
+        }),
+      },
+      product_variants: { findFirst: jest.fn().mockResolvedValue(null) },
+      product_price_tier_overrides: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      $transaction: jest.fn(),
+    };
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 3 } as any);
+    const service = new PriceTiersService(prisma as any);
+
+    await expect(
+      service.upsertProductOverride(7, 4, {
+        variant_id: 999,
+        override_price: 5000,
+      } as any),
+    ).rejects.toMatchObject({ errorCode: 'PRICE_TIER_OVERRIDE_VARIANT_001' });
+    expect(prisma.product_variants.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 999, product_id: 7 },
+      }),
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    jest.restoreAllMocks();
+  });
+});
