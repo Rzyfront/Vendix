@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from '../../../common/errors';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
 import { DocumentReceptionEnvelope, DocumentReceptionEnvelopeDocument } from '../interfaces/document-reception-envelope.interface';
 import { ReceivedDocumentScanQueueService } from './received-document-scan-queue.service';
@@ -110,7 +110,7 @@ export class DocumentReceptionIngestService {
 
   private safeErrorCode(error: unknown): string {
     if (error instanceof VendixHttpException) {
-      const recognized = Object.values(ErrorCodes).find((entry) => entry.code === error.errorCode);
+      const recognized = findErrorCodeEntry(error.errorCode);
       if (recognized) return recognized.code;
     }
     if (error instanceof BadRequestException) return ErrorCodes.SYS_VALIDATION_001.code;

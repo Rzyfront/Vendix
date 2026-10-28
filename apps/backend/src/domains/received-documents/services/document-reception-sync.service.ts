@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from '../../../common/errors';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { SubscriptionAccessService } from '../../store/subscriptions/services/subscription-access.service';
 import { DocumentReceptionEnvelope } from '../interfaces/document-reception-envelope.interface';
@@ -168,7 +168,7 @@ export class DocumentReceptionSyncService {
       throw new ServiceUnavailableException('No fue posible validar el acceso a la recepción de documentos.');
     }
     if (!access.allowed || access.mode === 'block') {
-      const entry = Object.values(ErrorCodes).find((candidate) => candidate.code === access.reason) ?? ErrorCodes.SUBSCRIPTION_005;
+      const entry = findErrorCodeEntry(access.reason) ?? ErrorCodes.SUBSCRIPTION_005;
       throw new VendixHttpException(entry);
     }
   }
@@ -250,10 +250,10 @@ export class DocumentReceptionSyncService {
 
   private safeErrorCode(error: unknown): string {
     if (typeof error === 'string') {
-      return Object.values(ErrorCodes).find((entry) => entry.code === error)?.code ?? ErrorCodes.SYS_INTERNAL_001.code;
+      return findErrorCodeEntry(error)?.code ?? ErrorCodes.SYS_INTERNAL_001.code;
     }
     if (error instanceof VendixHttpException) {
-      return Object.values(ErrorCodes).find((entry) => entry.code === error.errorCode)?.code ?? ErrorCodes.SYS_INTERNAL_001.code;
+      return findErrorCodeEntry(error.errorCode)?.code ?? ErrorCodes.SYS_INTERNAL_001.code;
     }
     if (error instanceof BadRequestException) return ErrorCodes.SYS_VALIDATION_001.code;
     return ErrorCodes.SYS_INTERNAL_001.code;

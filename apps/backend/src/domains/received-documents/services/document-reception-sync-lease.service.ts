@@ -8,7 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
-import { ErrorCodes } from '../../../common/errors/error-codes';
+import { ERROR_CODE_ENTRIES, ErrorCodes } from '../../../common/errors/error-codes';
 import { FiscalScopeService } from '../../../common/services/fiscal-scope.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
@@ -27,7 +27,7 @@ const MAX_CURSOR_LENGTH = 1000;
 const MAX_SUMMARY_IDS = 100;
 const RUN_TRIGGERS = new Set(['manual', 'scheduler', 'webhook']);
 const REGISTERED_ERROR_CODES: Set<string> = new Set<string>(
-  Object.values(ErrorCodes).map((entry) => entry.code),
+  ERROR_CODE_ENTRIES.map((entry) => entry.code),
 );
 const DEFAULT_SAFE_ERROR = ErrorCodes.SYS_INTERNAL_001.code;
 

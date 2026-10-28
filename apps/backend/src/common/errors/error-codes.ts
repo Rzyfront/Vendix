@@ -7395,3 +7395,21 @@ export type FiscalScopeBlockerCode =
   (typeof FiscalScopeBlockerCodes)[keyof typeof FiscalScopeBlockerCodes];
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;
+
+/**
+ * Every entry of {@link ErrorCodes} as a flat list. Use this (or
+ * {@link findErrorCodeEntry}) instead of `Object.values(ErrorCodes)`: the
+ * literal union of thousands of entries makes `tsc` fail with TS2590
+ * ("Expression produces a union type that is too complex to represent").
+ */
+export const ERROR_CODE_ENTRIES: readonly ErrorCodeEntry[] = Object.values(
+  ErrorCodes as Record<string, ErrorCodeEntry>,
+);
+
+/** Entry whose `code` matches, or `undefined`. */
+export function findErrorCodeEntry(
+  code: string | null | undefined,
+): ErrorCodeEntry | undefined {
+  if (!code) return undefined;
+  return ERROR_CODE_ENTRIES.find((entry) => entry.code === code);
+}
