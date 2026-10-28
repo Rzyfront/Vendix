@@ -257,7 +257,6 @@ describe('OrdersBulkInvoicingService', () => {
 
     it.each([
       ['credit_existing', { payment_form: '2', payments: [] }],
-      ['to_credit', { payments: [], state: 'created' }],
     ])('A5: %s order with an incomplete holder is never CF: not overridable, reason says so, nothing emitted', async (_label, over) => {
       const { service, one_shot } = build({
         orders: [order(1, { users: customer({ last_name: '' }), ...over })],
@@ -270,6 +269,31 @@ describe('OrdersBulkInvoicingService', () => {
         credit: { due_date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) },
       } as any);
       expect(r.results[0]).toMatchObject({ status: 'error', message: CREDIT_FINAL_CONSUMER_MESSAGE });
+      expect(one_shot.emitOrder).not.toHaveBeenCalled();
+    });
+
+    it('A5: unpaid (to_credit) order with an incomplete holder can go out as CF cash: overridable, no credit passed', async () => {
+      const { service, one_shot } = build({
+        orders: [order(1, { users: customer({ last_name: '' }), payments: [], state: 'created' })],
+      });
+      const p = await service.preview({ ids: [1] });
+      expect(p.results[0]).toMatchObject({ payment: 'to_credit', cf_overridable: true, will_emit: false });
+      const r = await service.execute({
+        items: [item(1, '222222222222', { allow_final_consumer: true })],
+      });
+      expect(one_shot.emitOrder).toHaveBeenCalledWith(1, undefined, { force_final_consumer: true });
+      expect(r.results[0].status).toBe('ok');
+    });
+
+    it('A5: unpaid (to_credit) order with an incomplete holder and no CF opt-in still errors (credit needs the holder)', async () => {
+      const { service, one_shot } = build({
+        orders: [order(1, { users: customer({ last_name: '' }), payments: [], state: 'created' })],
+      });
+      const r = await service.execute({
+        items: [item(1, '1020304050')],
+        credit: { due_date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) },
+      } as any);
+      expect(r.results[0].status).toBe('error');
       expect(one_shot.emitOrder).not.toHaveBeenCalled();
     });
 

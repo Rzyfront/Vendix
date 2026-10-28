@@ -61,6 +61,8 @@ import {
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import {
+  isMutualAgreementCash,
+  MUTUAL_AGREEMENT_CASH_MEANS,
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderDianPaymentMeans,
 } from '../payments/order-payment-means.contract';
@@ -314,6 +316,13 @@ export interface CreateFromOrderOptions {
    * persona) no se copia a la factura.
    */
   force_final_consumer?: boolean;
+  /**
+   * Con `force_final_consumer` sobre una orden sin cobrar: la factura sale de
+   * CONTADO con medio de pago «Acuerdo mutuo» (ZZZ) aunque no haya pago
+   * registrado. La orden no cambia (su saldo sigue pendiente). Sin
+   * `force_final_consumer` se ignora: sólo Consumidor final sale así.
+   */
+  cash_by_mutual_agreement?: boolean;
   /**
    * Un documento `cancelled` (borrador descartado por un intento fallido de la
    * emisión en un paso) no cuenta como anulación deliberada: la emisión crea uno
@@ -3127,12 +3136,14 @@ export class InvoicingService {
   async refreshDraftAcquirer(
     invoice_id: number,
     order_id: number,
-    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
+    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer' | 'cash_by_mutual_agreement'>,
   ): Promise<boolean> {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id, order_id, status: 'draft' },
       select: {
         id: true,
+        payment_form: true,
+        payment_means_code: true,
         customer_name: true,
         customer_tax_id: true,
         customer_document_type: true,
@@ -3163,16 +3174,24 @@ export class InvoicingService {
     });
     if (!order) return false;
     const snapshot = this.buildOrderAcquirerSnapshot(order, opts);
+    // Un borrador viejo de una orden sin cobrar nació a crédito: si ahora sale a
+    // Consumidor final de contado, su forma y medio de pago también se alinean.
+    const mutual = isMutualAgreementCash(opts);
     const changed =
       invoice.customer_name !== snapshot.customer_name ||
       invoice.customer_tax_id !== snapshot.customer_tax_id ||
       invoice.customer_document_type !== snapshot.customer_document_type ||
       (invoice.customer_verification_digit ?? null) !==
-        snapshot.customer_verification_digit;
+        snapshot.customer_verification_digit ||
+      (mutual &&
+        (invoice.payment_form !== MUTUAL_AGREEMENT_CASH_MEANS.payment_form ||
+          invoice.payment_means_code !== MUTUAL_AGREEMENT_CASH_MEANS.payment_means_code));
     if (!changed) return false;
     await this.prisma.invoices.updateMany({
       where: { id: invoice_id, status: 'draft' },
-      data: snapshot,
+      data: mutual
+        ? { ...snapshot, ...MUTUAL_AGREEMENT_CASH_MEANS, due_date: null }
+        : snapshot,
     });
     this.logger.log(`Invoice #${invoice_id} draft holder refreshed from order #${order_id}`);
     return true;
@@ -3829,7 +3848,10 @@ export class InvoicingService {
      * «Método de pago» de los reportes. Si divergiera, una orden podría
      * imprimirse «Tarjeta» y declararse «Efectivo».
      */
-    const resolved_means = resolveOrderDianPaymentMeans(order, order.payments);
+    // Consumidor final sin cobrar: contado «Acuerdo mutuo» (ver la opción).
+    const resolved_means = isMutualAgreementCash(opts)
+      ? MUTUAL_AGREEMENT_CASH_MEANS
+      : resolveOrderDianPaymentMeans(order, order.payments);
     const payment_form = resolved_means.payment_form;
     // Crédito: el medio lo puede declarar quien factura (modal «Facturar a
     // crédito»); con contado se queda el que salió de los pagos cobrados.

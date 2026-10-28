@@ -26,21 +26,15 @@ import {
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 
+/** Options the holder gate can force on the emission. */
+type HolderForce = Pick<
+  CreateFromOrderOptions,
+  'force_final_consumer' | 'cash_by_mutual_agreement'
+>;
+
 /** A credit sale needs an identified holder: it is never issued as Consumidor final. */
 export const CREDIT_FINAL_CONSUMER_MESSAGE =
   'Una venta a crédito no puede facturarse a Consumidor Final: completa los datos del cliente.';
-
-/**
- * An order with an unpaid balance (not a credit sale yet) cannot be issued as
- * Consumidor final: a cash invoice needs the payment registered, and a credit
- * invoice needs an identified holder. Said plainly so the UI never goes mute.
- */
-export function unpaidFinalConsumerMessage(remaining_balance: string): string {
-  const amount = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 }).format(
-    Number(remaining_balance),
-  );
-  return `La orden tiene un saldo sin cobrar de $${amount}. Para emitir a Consumidor final registra primero el pago; si es una venta a crédito, completa los datos del cliente.`;
-}
 
 /** Por qué una orden con saldo no puede facturarse a crédito (`null` = sí puede). */
 export type CreditBlocker =
@@ -212,7 +206,12 @@ export class OneShotEmissionService {
     // Titular: misma regla que `createFromOrder` y la vista previa masiva. Se
     // evalúa ANTES del saldo/crédito para no convertir una orden a crédito y
     // luego descubrir que la factura saldría a Consumidor final.
-    const force = await this.resolveHolderGate(order, emit_options, !!credit);
+    const force = this.resolveFinalConsumerCash(
+      order,
+      await this.resolveHolderGate(order, emit_options, !!credit),
+      emit_options,
+      !!credit,
+    );
     // Borrador colgado de un intento anterior: su titular se re-sincroniza con
     // la evaluación actual (misma construcción que la creación) antes de numerar.
     await this.refreshHangingDraftHolder(order_id, force);
@@ -254,6 +253,16 @@ export class OneShotEmissionService {
       select: { id: true },
     });
     if (numbered) {
+      return this.toResult(
+        await this.emitFor(order_id, recreate, ...this.optsArg(undefined, force)),
+      );
+    }
+
+    // Consumidor final pedido sobre una orden sin cobrar (decisión del 28-oct):
+    // sale de contado con «Acuerdo mutuo» (ZZZ) sin exigir el pago. La orden
+    // no se convierte a crédito ni se le inventa un pago: su saldo sigue
+    // pendiente y se cobra después como cualquier orden.
+    if (force?.cash_by_mutual_agreement) {
       return this.toResult(
         await this.emitFor(order_id, recreate, ...this.optsArg(undefined, force)),
       );
@@ -314,7 +323,7 @@ export class OneShotEmissionService {
     },
     emit_options?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
     credit_requested = false,
-  ): Promise<Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined> {
+  ): Promise<HolderForce | undefined> {
     // El titular se evalúa mientras no exista un documento numerado, también
     // en órdenes que ya son crédito (`payment_form '2'`).
     const holder = evaluateOrderHolder(order);
@@ -354,23 +363,12 @@ export class OneShotEmissionService {
           },
         );
       }
-      // Saldo sin cobrar: una factura de contado a Consumidor final exige el
-      // pago registrado (misma regla que `INVOICING_ORDER_UNPAID_001`).
+      // Saldo sin cobrar: sale de contado a Consumidor final con medio de pago
+      // «Acuerdo mutuo» (ZZZ), sin pago registrado. Si el cajero quiere crédito,
+      // completa los datos del cliente (flujo de crédito con titular).
       const { remaining } = computeOrderUnpaidBalance(order as any);
       if (remaining.lessThan(0.01)) return { force_final_consumer: true };
-      const remaining_balance = remaining.toFixed(2);
-      const message = unpaidFinalConsumerMessage(remaining_balance);
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
-        message,
-        {
-          ...details,
-          message,
-          cf_overridable: false,
-          cf_blocker: 'unpaid_balance',
-          remaining_balance,
-        },
-      );
+      return { force_final_consumer: true, cash_by_mutual_agreement: true };
     }
     throw new VendixHttpException(
       ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
@@ -383,10 +381,36 @@ export class OneShotEmissionService {
     );
   }
 
+  /**
+   * Consumidor final pedido explícitamente sobre una orden SIN cobrar cuyo
+   * titular no necesita el bloqueo (cliente completo o sin cliente): el cajero
+   * rechazó el crédito, así que sale de contado «Acuerdo mutuo» (ZZZ). En una
+   * orden pagada con cliente completo la bandera sigue ignorándose (la factura
+   * nominativa es mejor), y una venta ya a crédito, una orden cancelada o una
+   * emisión pedida a crédito nunca salen así.
+   */
+  private resolveFinalConsumerCash(
+    order: Parameters<typeof computeOrderUnpaidBalance>[0] & {
+      state: string;
+      payment_form: string | null;
+    },
+    gate: HolderForce | undefined,
+    emit_options: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    credit_requested: boolean,
+  ): HolderForce | undefined {
+    if (gate || !emit_options?.force_final_consumer || credit_requested) return gate;
+    if (order.payment_form === '2' || ['cancelled', 'refunded'].includes(order.state)) {
+      return undefined;
+    }
+    const { remaining } = computeOrderUnpaidBalance(order);
+    if (remaining.lessThan(0.01)) return undefined;
+    return { force_final_consumer: true, cash_by_mutual_agreement: true };
+  }
+
   /** Extra `emitForOrder` argument only when there is something to pass. */
   private optsArg(
     base: CreateFromOrderOptions | undefined,
-    force: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    force: HolderForce | undefined,
   ): [CreateFromOrderOptions] | [] {
     if (!base && !force) return [];
     return [{ ...(base ?? {}), ...(force ?? {}) }];
@@ -583,7 +607,7 @@ export class OneShotEmissionService {
 
   private async refreshHangingDraftHolder(
     order_id: number,
-    force: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    force: HolderForce | undefined,
   ): Promise<void> {
     const draft = await this.prisma.invoices.findFirst({
       where: {
